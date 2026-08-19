@@ -1,0 +1,67 @@
+[
+  {
+    "name": "crs-base",
+    "mode": "monitor",
+    "comment": "OWASP CRS-style starter pack — wire-level rules. Load via waf.LoadPack().",
+    "rules": [
+      {
+        "id": 942100,
+        "msg": "SQL Injection Attempt (UNION SELECT)",
+        "severity": "critical",
+        "phase": 2,
+        "transformations": ["lowercase", "urlDecode"],
+        "operator": "rx",
+        "target": "ARGS",
+        "value": "\\bunion\\s+(?:all\\s+)?select\\b"
+      },
+      {
+        "id": 942130,
+        "msg": "SQL Injection Attempt (boolean tautology)",
+        "severity": "high",
+        "phase": 2,
+        "transformations": ["lowercase"],
+        "operator": "rx",
+        "target": "ARGS",
+        "value": "\\bor\\s+1\\s*=\\s*1\\b"
+      },
+      {
+        "id": 941100,
+        "msg": "XSS Attempt (script tag)",
+        "severity": "high",
+        "phase": 2,
+        "transformations": ["lowercase", "urlDecode"],
+        "operator": "rx",
+        "target": "ARGS",
+        "value": "<script[^>]*>"
+      },
+      {
+        "id": 930100,
+        "msg": "Path Traversal Attempt",
+        "severity": "high",
+        "phase": 1,
+        "operator": "rx",
+        "target": "REQUEST_URI",
+        "value": "\\.\\./"
+      },
+      {
+        "id": 932100,
+        "msg": "RCE Attempt (shell metacharacters)",
+        "severity": "critical",
+        "phase": 2,
+        "transformations": ["urlDecode"],
+        "operator": "rx",
+        "target": "ARGS",
+        "value": ";\\s*(?:cat|ls|wget|curl|bash|sh)\\b"
+      },
+      {
+        "id": 920270,
+        "msg": "Invalid character in HTTP method header",
+        "severity": "medium",
+        "phase": 1,
+        "operator": "rx",
+        "target": "HEADERS:Content-Type",
+        "value": "(?i)(?:\\bxxe\\b|<!entity)"
+      }
+    ]
+  }
+]

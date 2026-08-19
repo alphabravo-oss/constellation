@@ -1,0 +1,29 @@
+# AI workload tagging — uses huggingface/transformers-pytorch-gpu and ai-workload=true label.
+# Runs as init-only (no real GPU on k3d); the image pull + label is the signal source.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hf-inference
+  namespace: platform
+  labels:
+    app: hf-inference
+    ai-workload: "true"
+    constellation.alphabravo.io/exposure: internal
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: hf-inference }
+  template:
+    metadata:
+      labels:
+        app: hf-inference
+        ai-workload: "true"
+        constellation.alphabravo.io/exposure: internal
+    spec:
+      containers:
+        - name: transformer
+          image: huggingface/transformers-pytorch-gpu:latest
+          command: ["sleep", "infinity"]
+          resources:
+            requests: { cpu: 50m, memory: 256Mi }
+            limits:   { cpu: 500m, memory: 1Gi }

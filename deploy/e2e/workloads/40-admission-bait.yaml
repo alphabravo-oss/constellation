@@ -1,0 +1,35 @@
+# Designed to trip the admission webhook. Apply with --validate=true; we expect denial
+# once the ValidatingWebhookConfiguration is wired, otherwise the pod survives and
+# becomes a great runtime-event source (privileged + hostNetwork).
+apiVersion: v1
+kind: Pod
+metadata:
+  name: privileged-pwn
+  namespace: platform
+  labels: { app: privileged-pwn, admission-bait: "true" }
+spec:
+  containers:
+    - name: pwn
+      image: alpine:latest
+      command: ["sleep", "infinity"]
+      securityContext:
+        privileged: true
+      resources:
+        requests: { cpu: 25m, memory: 16Mi }
+        limits:   { cpu: 100m, memory: 64Mi }
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: hostnet-snooper
+  namespace: platform
+  labels: { app: hostnet-snooper, admission-bait: "true" }
+spec:
+  hostNetwork: true
+  containers:
+    - name: snoop
+      image: busybox:latest
+      command: ["sh", "-c", "sleep infinity"]
+      resources:
+        requests: { cpu: 25m, memory: 16Mi }
+        limits:   { cpu: 100m, memory: 64Mi }

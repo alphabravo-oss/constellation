@@ -1,0 +1,95 @@
+{{- if .Values.migrate.enabled -}}
+{{- /*
+Schema migration Job. Runs goose up against the configured DATABASE_URL as a
+pre-install / pre-upgrade Helm hook so the api pod boots into a populated
+schema. Idempotent: goose is no-op on already-applied versions.
+
+Image must bundle the migrations directory (deploy/docker/Dockerfile.migrate
+produces constellation/migrate:<tag> that does exactly that).
+*/ -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "constellation.fullname" . }}-migrate
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    # Runs AFTER the StatefulSet has been created (postgres normally ready
+    # within ~10s on fresh installs). Weight -5 ensures we precede the
+    # bootstrap-job (weight 0) which depends on the schema being present.
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+spec:
+  backoffLimit: 5
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "constellation.name" . }}
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: OnFailure
+      {{- include "constellation.pullSecrets" . | nindent 6 }}
+      {{- include "constellation.helperPodSecurityContext" . | nindent 6 }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      initContainers:
+        - name: wait-for-postgres
+          image: {{ .Values.migrate.psqlImage }}
+          {{- include "constellation.helperContainerSecurityContext" . | nindent 10 }}
+          command:
+            - /bin/sh
+            - -c
+            {{- /*
+            Fresh CloudNativePG clusters take longer to bootstrap (operator
+            provisions PVCs, initdb, primary election) than the embedded
+            single StatefulSet. Give CNPG up to ~5m; keep embedded at ~2m.
+            */ -}}
+            {{- $waitTries := 60 }}
+            {{- if eq (include "constellation.postgresMode" .) "cnpg" }}{{- $waitTries = 150 }}{{- end }}
+            - |
+              for i in $(seq 1 {{ $waitTries }}); do
+                if psql "$DATABASE_URL" -c 'select 1' >/dev/null 2>&1; then
+                  echo "postgres ready"
+                  exit 0
+                fi
+                sleep 2
+              done
+              echo "postgres did not become ready in {{ mul $waitTries 2 }}s" >&2
+              exit 1
+          env:
+            - name: HOME
+              value: /tmp
+            - name: TMPDIR
+              value: /tmp
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "constellation.dsnSecret" . }}
+                  key: {{ include "constellation.dsnSecretKey" . }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      containers:
+        - name: migrate
+          image: {{ include "constellation.roleImage" (dict "ctx" . "role" "migrate") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- include "constellation.containerSecurityContext" . | nindent 10 }}
+          env:
+            - name: TMPDIR
+              value: /tmp
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "constellation.dsnSecret" . }}
+                  key: {{ include "constellation.dsnSecretKey" . }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            limits:   { cpu: 500m, memory: 256Mi }
+            requests: { cpu: 50m,  memory: 64Mi }
+{{- end }}

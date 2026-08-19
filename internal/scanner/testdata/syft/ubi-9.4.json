@@ -1,0 +1,32 @@
+{
+  "schema": {
+    "version": "16.0.0"
+  },
+  "source": {
+    "type": "image",
+    "target": "registry.access.redhat.com/ubi9/ubi:9.4"
+  },
+  "distro": {
+    "id": "redhat",
+    "name": "Red Hat Enterprise Linux",
+    "versionID": "9.4"
+  },
+  "artifacts": [
+    {
+      "id": "pkg-rhel-openssl-libs",
+      "name": "openssl-libs",
+      "version": "1:3.0.7-27.el9",
+      "type": "rpm",
+      "purl": "pkg:rpm/redhat/openssl-libs@1:3.0.7-27.el9?arch=x86_64",
+      "metadata": {
+        "repositoryID": "ubi-9-baseos-rpms",
+        "modularityLabel": "nodejs:18"
+      },
+      "licenses": [
+        {
+          "value": "OpenSSL"
+        }
+      ]
+    }
+  ]
+}

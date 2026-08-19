@@ -1,0 +1,1 @@
+{"kind":"AdmissionReview","apiVersion":"admission.k8s.io/v1","response":{"uid":"h3-priv-1","allowed":false,"status":{"metadata":{},"message":"denied by constellation policy \"block-privileged\": container \"evil\" is privileged"}}}

@@ -1,0 +1,271 @@
+{
+    "items": [
+        {
+            "id": "default/api-service",
+            "cluster_id": "33333333-3333-3333-3333-333333333333",
+            "cluster_name": "dev-local",
+            "workload": "default/api-service",
+            "namespace": "default",
+            "current_mode": "discover",
+            "target_mode": "monitor",
+            "reason": "approved for monitor; awaiting apply",
+            "auto_applied": false,
+            "evaluated_at": "2026-05-12T16:00:00Z",
+            "generated_at": "2026-05-12T16:00:00Z",
+            "candidate_hash": "7767390faf3b1f9a",
+            "approved_candidate_hash": "7767390faf3b1f9a",
+            "candidate_stale": false,
+            "approval_status": "approved",
+            "rollback_available": true,
+            "applied_ref": "applied-16ab7681155ae96e",
+            "summary": {
+                "total_flows": 8,
+                "unique_peers": 4,
+                "unique_port_protocol": 5,
+                "out_of_policy_alerts": 0,
+                "new_tuples_last_24h": 0,
+                "first_observation": "2026-05-05T16:00:00Z",
+                "last_observation": "2026-05-12T15:59:00Z"
+            },
+            "tuple_preview": null,
+            "preview": {
+                "engine": "cilium",
+                "yaml": "apiVersion: cilium.io/v2\nkind: CiliumNetworkPolicy\nmetadata:\n    name: api-service-cilium\n    namespace: default\nspec:\n    egress:\n        - toEndpoints:\n            - matchLabels:\n                k8s:io.kubernetes.pod.namespace: kube-system\n                k8s:k8s-app: kube-dns\n          toPorts:\n            - ports:\n                - port: \"53\"\n                  protocol: UDP\n              rules:\n                dns:\n                    - matchPattern: '*'\n        - toEndpoints:\n            - matchLabels:\n                k8s:app: postgres\n                k8s:io.kubernetes.pod.namespace: data\n          toPorts:\n            - ports:\n                - port: \"5432\"\n                  protocol: TCP\n    endpointSelector:\n        matchLabels:\n            app: api-service\n    ingress:\n        - fromEndpoints:\n            - matchLabels:\n                k8s:app: frontend\n                k8s:io.kubernetes.pod.namespace: default\n          toPorts:\n            - ports:\n                - port: \"8443\"\n                  protocol: TCP\n",
+                "refs": {
+                    "calico": "api-service-calico",
+                    "cilium": "api-service-cilium",
+                    "kubernetes": "api-service-policy"
+                }
+            },
+            "diff": {
+                "summary": "Adds explicit ingress/egress allow rules from observed stable tuples and preserves DNS/cluster control-plane access.",
+                "added": [
+                    "egress tcp/5432 to data/postgres",
+                    "ingress tcp/8443 from default/frontend"
+                ],
+                "removed": [],
+                "changed": [
+                    "policy mode discover -> monitor"
+                ]
+            },
+            "audit_trail": [
+                {
+                    "at": "2026-05-05T16:00:00Z",
+                    "actor": "constellation-agent",
+                    "action": "learn_started",
+                    "message": "Started collecting baseline flows."
+                },
+                {
+                    "at": "2026-05-12T16:00:00Z",
+                    "actor": "constellation-policy",
+                    "action": "evaluated",
+                    "message": "stable for 24h + sufficient traffic observed"
+                },
+                {
+                    "at": "2026-05-12T15:19:42Z",
+                    "actor": "507d5ef6-507a-4c32-91af-f4e0116f5f7e",
+                    "action": "approve",
+                    "message": "approved for monitor; awaiting apply"
+                },
+                {
+                    "at": "2026-05-12T15:22:03Z",
+                    "actor": "507d5ef6-507a-4c32-91af-f4e0116f5f7e",
+                    "action": "approve",
+                    "message": "approved for monitor; awaiting apply"
+                }
+            ]
+        },
+        {
+            "id": "default/frontend",
+            "cluster_id": "33333333-3333-3333-3333-333333333333",
+            "cluster_name": "dev-local",
+            "workload": "default/frontend",
+            "namespace": "default",
+            "current_mode": "monitor",
+            "target_mode": "protect",
+            "reason": "ready for protect: no out-of-policy alerts in the last 24h",
+            "auto_applied": false,
+            "evaluated_at": "2026-05-12T16:00:00Z",
+            "generated_at": "2026-05-12T16:00:00Z",
+            "candidate_hash": "b2839615dda3b7a4",
+            "candidate_stale": false,
+            "approval_status": "approved",
+            "rollback_available": true,
+            "summary": {
+                "total_flows": 5,
+                "unique_peers": 3,
+                "unique_port_protocol": 3,
+                "out_of_policy_alerts": 0,
+                "new_tuples_last_24h": 0,
+                "first_observation": "2026-05-05T16:00:00Z",
+                "last_observation": "2026-05-12T15:59:00Z"
+            },
+            "tuple_preview": null,
+            "preview": {
+                "engine": "cilium",
+                "yaml": "apiVersion: cilium.io/v2\nkind: CiliumNetworkPolicy\nmetadata:\n    name: frontend-cilium\n    namespace: default\nspec:\n    egress:\n        - toEndpoints:\n            - matchLabels:\n                k8s:io.kubernetes.pod.namespace: kube-system\n                k8s:k8s-app: kube-dns\n          toPorts:\n            - ports:\n                - port: \"53\"\n                  protocol: UDP\n              rules:\n                dns:\n                    - matchPattern: '*'\n        - toEndpoints:\n            - matchLabels:\n                k8s:app: api-service\n                k8s:io.kubernetes.pod.namespace: default\n          toPorts:\n            - ports:\n                - port: \"8443\"\n                  protocol: TCP\n    endpointSelector:\n        matchLabels:\n            app: frontend\n    ingress: []\n",
+                "refs": {
+                    "calico": "frontend-calico",
+                    "cilium": "frontend-cilium",
+                    "kubernetes": "frontend-policy"
+                }
+            },
+            "diff": {
+                "summary": "Adds explicit ingress/egress allow rules from observed stable tuples and preserves DNS/cluster control-plane access.",
+                "added": [
+                    "egress tcp/5432 to data/postgres",
+                    "ingress tcp/8443 from default/frontend"
+                ],
+                "removed": [],
+                "changed": [
+                    "policy mode monitor -> protect"
+                ]
+            },
+            "audit_trail": [
+                {
+                    "at": "2026-05-05T16:00:00Z",
+                    "actor": "constellation-agent",
+                    "action": "learn_started",
+                    "message": "Started collecting baseline flows."
+                },
+                {
+                    "at": "2026-05-12T16:00:00Z",
+                    "actor": "constellation-policy",
+                    "action": "evaluated",
+                    "message": "ready for protect: no out-of-policy alerts in the last 24h"
+                }
+            ]
+        },
+        {
+            "id": "default/background-worker",
+            "cluster_id": "33333333-3333-3333-3333-333333333333",
+            "cluster_name": "dev-local",
+            "workload": "default/background-worker",
+            "namespace": "default",
+            "current_mode": "monitor",
+            "reason": "hold in monitor: 1 out-of-policy alert in the last 24h",
+            "auto_applied": false,
+            "evaluated_at": "2026-05-12T16:00:00Z",
+            "generated_at": "2026-05-12T16:00:00Z",
+            "candidate_hash": "004913837e403c3e",
+            "candidate_stale": false,
+            "approval_status": "blocked",
+            "rollback_available": false,
+            "summary": {
+                "total_flows": 3,
+                "unique_peers": 2,
+                "unique_port_protocol": 2,
+                "out_of_policy_alerts": 1,
+                "new_tuples_last_24h": 1,
+                "first_observation": "2026-05-05T16:00:00Z",
+                "last_observation": "2026-05-12T15:59:00Z"
+            },
+            "tuple_preview": null,
+            "preview": {
+                "engine": "cilium",
+                "yaml": "apiVersion: cilium.io/v2\nkind: CiliumNetworkPolicy\nmetadata:\n    name: background-worker-cilium\n    namespace: default\nspec:\n    egress:\n        - toEndpoints:\n            - matchLabels:\n                k8s:io.kubernetes.pod.namespace: kube-system\n                k8s:k8s-app: kube-dns\n          toPorts:\n            - ports:\n                - port: \"53\"\n                  protocol: UDP\n              rules:\n                dns:\n                    - matchPattern: '*'\n        - toEndpoints:\n            - matchLabels:\n                k8s:app: postgres\n                k8s:io.kubernetes.pod.namespace: data\n          toPorts:\n            - ports:\n                - port: \"5432\"\n                  protocol: TCP\n    endpointSelector:\n        matchLabels:\n            app: background-worker\n    ingress: []\n",
+                "refs": {
+                    "calico": "background-worker-calico",
+                    "cilium": "background-worker-cilium",
+                    "kubernetes": "background-worker-policy"
+                }
+            },
+            "diff": {
+                "summary": "Adds explicit ingress/egress allow rules from observed stable tuples and preserves DNS/cluster control-plane access.",
+                "added": [
+                    "egress tcp/5432 to data/postgres",
+                    "ingress tcp/8443 from default/frontend"
+                ],
+                "removed": [],
+                "changed": [
+                    "policy mode monitor -> monitor"
+                ]
+            },
+            "audit_trail": [
+                {
+                    "at": "2026-05-05T16:00:00Z",
+                    "actor": "constellation-agent",
+                    "action": "learn_started",
+                    "message": "Started collecting baseline flows."
+                },
+                {
+                    "at": "2026-05-12T16:00:00Z",
+                    "actor": "constellation-policy",
+                    "action": "evaluated",
+                    "message": "hold in monitor: 1 out-of-policy alert in the last 24h"
+                }
+            ]
+        },
+        {
+            "id": "data/postgres",
+            "cluster_id": "33333333-3333-3333-3333-333333333333",
+            "cluster_name": "dev-local",
+            "workload": "data/postgres",
+            "namespace": "data",
+            "current_mode": "protect",
+            "reason": "protected workload has rollback bundle available",
+            "auto_applied": false,
+            "evaluated_at": "2026-05-12T16:00:00Z",
+            "generated_at": "2026-05-12T16:00:00Z",
+            "candidate_hash": "ae7dc3a139aa440e",
+            "candidate_stale": false,
+            "approval_status": "applied",
+            "last_applied_at": "2026-05-10T18:30:00Z",
+            "rollback_available": true,
+            "summary": {
+                "total_flows": 4,
+                "unique_peers": 2,
+                "unique_port_protocol": 2,
+                "out_of_policy_alerts": 0,
+                "new_tuples_last_24h": 0,
+                "first_observation": "2026-05-05T16:00:00Z",
+                "last_observation": "2026-05-12T15:59:00Z"
+            },
+            "tuple_preview": null,
+            "preview": {
+                "engine": "cilium",
+                "yaml": "apiVersion: cilium.io/v2\nkind: CiliumNetworkPolicy\nmetadata:\n    name: postgres-cilium\n    namespace: data\nspec:\n    egress:\n        - toEndpoints:\n            - matchLabels:\n                k8s:io.kubernetes.pod.namespace: kube-system\n                k8s:k8s-app: kube-dns\n          toPorts:\n            - ports:\n                - port: \"53\"\n                  protocol: UDP\n              rules:\n                dns:\n                    - matchPattern: '*'\n    endpointSelector:\n        matchLabels:\n            app: postgres\n    ingress:\n        - fromEndpoints:\n            - matchLabels:\n                k8s:app: api-service\n                k8s:io.kubernetes.pod.namespace: default\n          toPorts:\n            - ports:\n                - port: \"5432\"\n                  protocol: TCP\n        - fromEndpoints:\n            - matchLabels:\n                k8s:app: background-worker\n                k8s:io.kubernetes.pod.namespace: default\n          toPorts:\n            - ports:\n                - port: \"5432\"\n                  protocol: TCP\n",
+                "refs": {
+                    "calico": "postgres-calico",
+                    "cilium": "postgres-cilium",
+                    "kubernetes": "postgres-policy"
+                }
+            },
+            "diff": {
+                "summary": "Adds explicit ingress/egress allow rules from observed stable tuples and preserves DNS/cluster control-plane access.",
+                "added": [
+                    "egress tcp/5432 to data/postgres",
+                    "ingress tcp/8443 from default/frontend"
+                ],
+                "removed": [],
+                "changed": [
+                    "policy mode protect -> protect"
+                ]
+            },
+            "audit_trail": [
+                {
+                    "at": "2026-05-05T16:00:00Z",
+                    "actor": "constellation-agent",
+                    "action": "learn_started",
+                    "message": "Started collecting baseline flows."
+                },
+                {
+                    "at": "2026-05-12T16:00:00Z",
+                    "actor": "constellation-policy",
+                    "action": "evaluated",
+                    "message": "protected workload has rollback bundle available"
+                }
+            ]
+        }
+    ],
+    "summary": {
+        "discover": 1,
+        "monitor": 2,
+        "pending_approval": 0,
+        "protect": 1,
+        "ready": 2,
+        "rollback_ready": 3,
+        "selected_cluster_id": "33333333-3333-3333-3333-333333333333",
+        "total": 4
+    }
+}

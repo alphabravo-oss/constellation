@@ -1,0 +1,40 @@
+[Unit]
+Description=Constellation Runtime Agent (eBPF host-level data plane)
+Documentation=https://github.com/alphabravocompany/constellation
+After=network-online.target
+Wants=network-online.target
+
+# The runtime agent loads eBPF programs (exec/network/file probes) and streams events to
+# the control plane. On Kubernetes this runs as a privileged DaemonSet; here it runs as a
+# host-level service on every node in the fleet that needs runtime visibility.
+
+[Service]
+Type=simple
+User=constellation
+Group=constellation
+EnvironmentFile=/etc/constellation/runtime-agent.env
+ExecStart=/usr/local/bin/constellation-runtime-agent
+WorkingDirectory=/var/lib/constellation
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=constellation-runtime-agent
+
+# eBPF + perf_event_open + bpf() require these caps. We grant them as ambient so the
+# unprivileged 'constellation' user inherits them.
+AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_BPF CAP_PERFMON CAP_SYS_PTRACE
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_BPF CAP_PERFMON CAP_SYS_PTRACE
+
+# Capabilities require NoNewPrivileges=false (kernel rule: NNP drops file caps + ambient).
+NoNewPrivileges=false
+
+# eBPF probes inspect host mount namespaces — keep mounts visible.
+PrivateMounts=false
+
+# The agent needs to read /proc and (on some kernels) /sys/kernel/btf/vmlinux.
+ProtectKernelTunables=false
+ProtectKernelModules=false
+
+[Install]
+WantedBy=multi-user.target

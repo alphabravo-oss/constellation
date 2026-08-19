@@ -1,0 +1,29 @@
+[Unit]
+Description=Constellation Discoverer (single-cluster — Kubernetes workload watcher)
+Documentation=https://github.com/alphabravocompany/constellation
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+# Single-cluster convenience unit. For multi-cluster fleets, prefer the templated unit
+# constellation-discoverer@.service (one instance per cluster, each with its own env file).
+
+[Service]
+Type=simple
+User=constellation
+Group=constellation
+EnvironmentFile=/etc/constellation/discoverer.env
+ExecStart=/usr/local/bin/constellation-discoverer
+WorkingDirectory=/var/lib/constellation
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=constellation-discoverer
+
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

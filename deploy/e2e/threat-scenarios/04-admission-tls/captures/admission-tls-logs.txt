@@ -1,0 +1,4 @@
+{"time":"2026-05-12T15:17:47.587628937Z","level":"INFO","msg":"observability: prometheus-only mode (OTLP exporters not wired)","service":"constellation-admission","endpoint":"","prom_only":false}
+{"time":"2026-05-12T15:17:47.58774223Z","level":"INFO","msg":"admission webhook listening","service":"constellation-admission","addr":":8443"}
+{"time":"2026-05-12T15:17:47.587628937Z","level":"INFO","msg":"observability: prometheus-only mode (OTLP exporters not wired)","service":"constellation-admission","endpoint":"","prom_only":false}
+{"time":"2026-05-12T15:17:47.58774223Z","level":"INFO","msg":"admission webhook listening","service":"constellation-admission","addr":":8443"}

@@ -1,0 +1,36 @@
+[Unit]
+Description=Constellation Scanner Worker (instance %i) — Syft+Trivy+Grype aggregator
+Documentation=https://github.com/alphabravocompany/constellation
+After=network-online.target constellation-api.service
+Wants=network-online.target
+
+# Templated unit. Enable per worker:
+#   systemctl enable --now constellation-scanner@1.service
+#   systemctl enable --now constellation-scanner@2.service
+# Each instance reads the SAME /etc/constellation/scanner.env (shared token),
+# but %i is exported as SCANNER_INSTANCE so logs disambiguate.
+
+[Service]
+Type=simple
+User=constellation
+Group=constellation
+Environment=SCANNER_INSTANCE=%i
+EnvironmentFile=/etc/constellation/scanner.env
+ExecStart=/usr/local/bin/constellation-scanner
+WorkingDirectory=/var/lib/constellation
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=constellation-scanner-%i
+
+# Scanners need to extract image layers + run trivy DB downloads.
+LimitNOFILE=32768
+
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

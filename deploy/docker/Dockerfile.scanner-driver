@@ -1,0 +1,102 @@
+# syntax=docker/dockerfile:1.7
+# Constellation scanner-driver image.
+#
+# Loops every SCAN_INTERVAL polling pending scan_jobs rows across all orgs that have one,
+# mints a per-run scanner token via handler.IssueScannerToken, runs the trivy / syft / grype
+# aggregator, and POSTs results back to the control-plane.
+#
+# Compared to the scanner image:
+#   - Bundles the same trivy + syft + grype CLIs (the aggregator shells out to them).
+#   - Talks to Postgres directly (needs DATABASE_URL) — this is by design; the driver mints
+#     its own scanner token instead of relying on a baked-in CONSTELLATION_SCANNER_TOKEN.
+#   - Mounts /var/run/docker.sock so it can scan images already pulled by the host Docker
+#     daemon (compose demo path: `docker pull nginx:1.14.2 && docker compose up`).
+#
+# Loop semantics live in deploy/docker/scanner-driver-loop.sh (wrapped ENTRYPOINT) so the
+# Go program itself stays a clean one-shot.
+
+ARG GO_VERSION=1.26
+ARG SYFT_VERSION=1.42.2
+ARG TRIVY_VERSION=0.69.3
+ARG GRYPE_VERSION=0.109.0
+ARG SYFT_SHA256_AMD64=1d3cc98b13ce3dfb6083ef42f64f1033e40d7dea292e8ea85ed1cf88efb2f542
+ARG SYFT_SHA256_ARM64=49aa164f953adcca6d80d6ce6d2a61d3226be72046a0b3ddd02d9c28c49c916d
+ARG TRIVY_SHA256_AMD64=1816b632dfe529869c740c0913e36bd1629cb7688bd5634f4a858c1d57c88b75
+ARG TRIVY_SHA256_ARM64=7e3924a974e912e57b4a99f65ece7931f8079584dae12eb7845024f97087bdfd
+ARG GRYPE_SHA256_AMD64=c06e79287aa4d7343d7937571cf33154b560cbe483c6897369c53e2970fae647
+ARG GRYPE_SHA256_ARM64=c6b58fc8eea0607af6374e88781bfeb5192b0db79d639693cc924925efe22253
+ARG WOLFI_IMAGE=cgr.dev/chainguard/wolfi-base@sha256:34977aa13765da89f60fee8fe5230e2bb1c55192df08e383c58221ee0d1277fb
+
+# -----------------------------------------------------------------------------
+# Build the Go binary from deploy/e2e/scanner-driver.
+# -----------------------------------------------------------------------------
+FROM golang:${GO_VERSION}-bookworm AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+ARG VERSION=dev
+ENV CGO_ENABLED=0 GOOS=linux
+RUN go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
+      -o /out/constellation-scanner-driver ./deploy/e2e/scanner-driver
+
+# -----------------------------------------------------------------------------
+# Fetch upstream scanner binaries (mirrors deploy/docker/Dockerfile.scanner).
+# -----------------------------------------------------------------------------
+FROM debian:bookworm-slim AS tools
+ARG TARGETARCH
+ARG SYFT_VERSION
+ARG TRIVY_VERSION
+ARG GRYPE_VERSION
+ARG SYFT_SHA256_AMD64
+ARG SYFT_SHA256_ARM64
+ARG TRIVY_SHA256_AMD64
+ARG TRIVY_SHA256_ARM64
+ARG GRYPE_SHA256_AMD64
+ARG GRYPE_SHA256_ARM64
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates tar \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /tools
+
+RUN set -eux; \
+    case "${TARGETARCH}" in \
+      amd64) \
+        SYFT_SHA256="${SYFT_SHA256_AMD64}"; \
+        GRYPE_SHA256="${GRYPE_SHA256_AMD64}"; \
+        TRIVY_SHA256="${TRIVY_SHA256_AMD64}"; \
+        TRIVY_ARCH=64bit ;; \
+      arm64) \
+        SYFT_SHA256="${SYFT_SHA256_ARM64}"; \
+        GRYPE_SHA256="${GRYPE_SHA256_ARM64}"; \
+        TRIVY_SHA256="${TRIVY_SHA256_ARM64}"; \
+        TRIVY_ARCH=ARM64 ;; \
+      *) echo "unsupported arch ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_linux_${TARGETARCH}.tar.gz" -o syft.tar.gz; \
+    echo "${SYFT_SHA256}  syft.tar.gz" | sha256sum -c -; \
+    tar -xzf syft.tar.gz syft; \
+    curl -fsSL "https://github.com/anchore/grype/releases/download/v${GRYPE_VERSION}/grype_${GRYPE_VERSION}_linux_${TARGETARCH}.tar.gz" -o grype.tar.gz; \
+    echo "${GRYPE_SHA256}  grype.tar.gz" | sha256sum -c -; \
+    tar -xzf grype.tar.gz grype; \
+    curl -fsSL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-${TRIVY_ARCH}.tar.gz" -o trivy.tar.gz; \
+    echo "${TRIVY_SHA256}  trivy.tar.gz" | sha256sum -c -; \
+    tar -xzf trivy.tar.gz trivy; \
+    rm -f syft.tar.gz grype.tar.gz trivy.tar.gz
+
+# -----------------------------------------------------------------------------
+# Runtime.
+# -----------------------------------------------------------------------------
+FROM ${WOLFI_IMAGE} AS runtime
+RUN apk add --no-cache ca-certificates tzdata bash docker-cli
+COPY --from=tools /tools/syft   /usr/local/bin/syft
+COPY --from=tools /tools/trivy  /usr/local/bin/trivy
+COPY --from=tools /tools/grype  /usr/local/bin/grype
+COPY --from=build /out/constellation-scanner-driver /usr/local/bin/constellation-scanner-driver
+COPY deploy/docker/scanner-driver-loop.sh /usr/local/bin/scanner-driver-loop.sh
+RUN chmod +x /usr/local/bin/scanner-driver-loop.sh
+
+# Runs as root because the host /var/run/docker.sock is normally root:docker, and using
+# a fixed non-root uid breaks on macOS / Linux distros that have different docker GIDs.
+ENV SCAN_INTERVAL=30s
+ENTRYPOINT ["/usr/local/bin/scanner-driver-loop.sh"]

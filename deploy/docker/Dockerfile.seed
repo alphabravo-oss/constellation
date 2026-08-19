@@ -1,0 +1,25 @@
+# syntax=docker/dockerfile:1.7
+# Constellation seed image.
+#
+# One-shot job that loads demo data into a fresh Postgres so the frontend / Playwright
+# tests have findings + a demo admin user to play with. Pinned tiny: no scanner CLIs,
+# no nginx, just the seed Go binary.
+
+ARG GO_VERSION=1.26
+ARG WOLFI_IMAGE=cgr.dev/chainguard/wolfi-base@sha256:34977aa13765da89f60fee8fe5230e2bb1c55192df08e383c58221ee0d1277fb
+
+FROM golang:${GO_VERSION}-bookworm AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+ARG VERSION=dev
+ENV CGO_ENABLED=0 GOOS=linux
+RUN go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
+      -o /out/constellation-seed ./cmd/constellation-seed
+
+FROM ${WOLFI_IMAGE} AS runtime
+RUN apk add --no-cache ca-certificates tzdata
+COPY --from=build /out/constellation-seed /usr/local/bin/constellation-seed
+USER nobody
+ENTRYPOINT ["/usr/local/bin/constellation-seed"]

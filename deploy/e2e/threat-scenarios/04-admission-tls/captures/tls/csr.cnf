@@ -1,0 +1,16 @@
+[req]
+distinguished_name = req_dn
+req_extensions = v3_req
+prompt = no
+
+[req_dn]
+CN = e2e-admission.constellation-system.svc
+
+[v3_req]
+subjectAltName = @alt
+
+[alt]
+DNS.1 = e2e-admission
+DNS.2 = e2e-admission.constellation-system
+DNS.3 = e2e-admission.constellation-system.svc
+DNS.4 = e2e-admission.constellation-system.svc.cluster.local

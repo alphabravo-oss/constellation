@@ -1,0 +1,181 @@
+# syntax=docker/dockerfile:1.7
+# Constellation runtime-agent image — DaemonSet binary that runs on every node.
+#
+# The agent observes exec / file events with the in-tree eBPF probes and
+# observes network flows + L7 + threats with the vendored NeuVector C
+# data-plane (third_party/neuvector/dp). The final image ships:
+#
+#   /usr/local/bin/constellation-runtime-agent  — Go process (supervisor + ingest)
+#   /usr/local/bin/dp                           — NeuVector C data-plane
+#   /opt/constellation/runtime.bpf.o            — CO-RE BPF object
+#
+# Runtime requirements (set on the DaemonSet):
+#   privileged: true, hostPID: true, hostNetwork: true
+#   capabilities: { NET_ADMIN, SYS_ADMIN, BPF, PERFMON, SYS_PTRACE }
+#   hostPath mounts: /sys/fs/bpf, /sys/kernel/btf, /proc → /host/proc
+#
+# The C dp daemon additionally requires `iptables`, `tc` (iproute2), and
+# kernel TC modules (act_mirred, act_pedit) to install the per-pod
+# NFQUEUE redirects. AF_PACKET TAP mode is used as a fallback when TC is
+# unavailable.
+
+ARG GO_VERSION=1.26
+ARG DEBIAN_TAG=bookworm-slim
+ARG CRICTL_VERSION=v1.32.0
+ARG CRICTL_SHA256_AMD64=f050b71d3a73a91a4e0990b90143ed04dcd100cc66f953736fcb6a2730e283c4
+ARG CRICTL_SHA256_ARM64=f2f4e20658b72d00897f41e4b57093c8080e2d800ee894a5f4351f31d1833e30
+
+# -----------------------------------------------------------------------------
+# Stage 1 — Build the BPF CO-RE object (clang + libbpf + bpftool).
+# Uses the host-generated vmlinux.h that's already in the source tree (committed
+# alongside runtime.bpf.c). We do NOT regenerate it inside docker because BTF
+# from a docker build environment doesn't match the host kernel.
+# -----------------------------------------------------------------------------
+FROM debian:${DEBIAN_TAG} AS bpf-build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      clang llvm libbpf-dev make ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY internal/runtime/ebpf/bpf/ /src/bpf/
+WORKDIR /src/bpf
+# If vmlinux.h is missing, fail loudly — the caller must `make` it on the host first.
+RUN test -s vmlinux.h || (echo "vmlinux.h missing — run 'make vmlinux.h' on host" >&2 && exit 1)
+RUN make runtime.bpf.o
+
+# -----------------------------------------------------------------------------
+# Stage 2 — Build the vendored NeuVector C data-plane (third_party/neuvector/dp).
+#
+# Build deps mirror NeuVector's package/Dockerfile.enforcer (SUSE BCI), mapped
+# to Debian package names:
+#   libnetfilter-queue-dev → -lnetfilter_queue (NFQUEUE inline capture)
+#   libnfnetlink-dev       → libnfnetlink (transitive)
+#   libpcap-dev            → -lpcap          (AF_PACKET TAP fallback)
+#   libpcre2-dev           → -lpcre2-8       (DPI parsers regex)
+#   libvectorscan-dev      → -lhs            (cross-arch hyperscan; matches NeuVector)
+#   libjansson-dev         → -ljansson       (control-plane JSON IPC framing)
+#   libjemalloc-dev        → -ljemalloc      (allocator: required by dp linkage)
+#   liburcu-dev            → -lurcu -lurcu-cds (RCU hash maps used everywhere)
+#   libmnl-dev             → libmnl          (netlink, used by libnetfilter_queue)
+#
+# `make -C third_party/neuvector/dp` recursively builds utils/, dpi/, dpi/sig/,
+# dpi/parsers/ and links the final `dp` binary. The Makefile auto-includes
+# ../base.h and ../defs.h — see third_party/neuvector/NOTICE for layout.
+# -----------------------------------------------------------------------------
+FROM debian:${DEBIAN_TAG} AS dp-build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential pkg-config ca-certificates \
+      libpcap-dev libpcre2-dev \
+      libnetfilter-queue-dev libnfnetlink-dev libmnl-dev \
+      libvectorscan-dev libjansson-dev libjemalloc-dev \
+      liburcu-dev \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY third_party/neuvector/ /src/third_party/neuvector/
+RUN make -C /src/third_party/neuvector/dp
+# Sanity check — fail loudly if the binary isn't produced.
+RUN test -x /src/third_party/neuvector/dp/dp || (echo "dp build produced no binary" >&2 && exit 1)
+
+# -----------------------------------------------------------------------------
+# Stage 3 — Build the Go agent.
+#
+# FIPS=1 toggles Go 1.26's bundled FIPS 140-3 module:
+#   - GOFIPS140=v1.0.0 selects the validated crypto module
+#   - -tags fips switches pkg/observability + pkg/audit to FIPS-approved hashes
+#   - GODEBUG=fips140=on is set on the final stage to enforce at runtime
+#
+# IMPORTANT scope: this affects the *Go agent's* crypto only. The vendored
+# C data-plane (third_party/neuvector/dp) links against hyperscan + PCRE2 +
+# jemalloc + urcu — none of which carry a FIPS 140-3 certificate. The agent
+# refuses to load policy rules tagged `fips_only=false` when FIPS=1, and
+# docs/fips.md publishes the precise scoping statement we ship.
+# -----------------------------------------------------------------------------
+FROM golang:${GO_VERSION}-bookworm AS go-build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+ARG VERSION=dev
+ARG FIPS=0
+ENV CGO_ENABLED=0 GOOS=linux
+RUN if [ "${FIPS}" = "1" ] || [ "${FIPS}" = "true" ]; then \
+        echo ">> building Go agent in FIPS 140-3 mode (GOFIPS140=v1.0.0 -tags fips)" >&2 ; \
+        GOFIPS140=v1.0.0 go build -trimpath -tags fips \
+          -ldflags="-s -w -X main.version=${VERSION}-fips" \
+          -o /out/constellation-runtime-agent ./cmd/constellation-runtime-agent ; \
+    else \
+        go build -trimpath \
+          -ldflags="-s -w -X main.version=${VERSION}" \
+          -o /out/constellation-runtime-agent ./cmd/constellation-runtime-agent ; \
+    fi
+
+# -----------------------------------------------------------------------------
+# Stage 4 — Runtime image.
+#
+# Switched from wolfi-base to debian-slim because the C dp drags in a
+# substantial native-lib surface (hyperscan, urcu-cds, jemalloc, libnetfilter_queue)
+# and we now need iptables/iproute2/ethtool/tcpdump for the per-pod TC qdisc
+# plumbing the agent will install in Wave 3 (CNI integration). Image size
+# trades up from ~80MB to ~250MB; that's the cost of running an inline
+# data-plane.
+# -----------------------------------------------------------------------------
+FROM debian:${DEBIAN_TAG} AS runtime
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates tzdata curl \
+      bpftool \
+      iproute2 iptables ethtool tcpdump kmod procps \
+      libpcap0.8 libpcre2-8-0 \
+      libnetfilter-queue1 libnfnetlink0 libmnl0 \
+      libvectorscan5 libjansson4 libjemalloc2 \
+      liburcu8 \
+ && rm -rf /var/lib/apt/lists/*
+
+# crictl — the upstream Kubernetes CRI debug CLI. Used by Slice C
+# host-container inventory collector (internal/runtime/hostscan/containers.go).
+# Works against both containerd and cri-o sockets without runtime-specific
+# code on our side. Pin to a known release for reproducible builds.
+ARG CRICTL_VERSION
+ARG CRICTL_SHA256_AMD64
+ARG CRICTL_SHA256_ARM64
+RUN ARCH="$(uname -m)" && case "$ARCH" in \
+      x86_64)  CRICTL_ARCH=amd64; CRICTL_SHA256="${CRICTL_SHA256_AMD64}" ;; \
+      aarch64) CRICTL_ARCH=arm64; CRICTL_SHA256="${CRICTL_SHA256_ARM64}" ;; \
+      *) echo "unsupported arch for crictl: $ARCH" >&2 && exit 1 ;; \
+    esac \
+ && curl -fsSL "https://github.com/kubernetes-sigs/cri-tools/releases/download/${CRICTL_VERSION}/crictl-${CRICTL_VERSION}-linux-${CRICTL_ARCH}.tar.gz" -o /tmp/crictl.tar.gz \
+ && echo "${CRICTL_SHA256}  /tmp/crictl.tar.gz" | sha256sum -c - \
+ && tar -C /usr/local/bin -xzf /tmp/crictl.tar.gz crictl \
+ && rm -f /tmp/crictl.tar.gz \
+ && chmod +x /usr/local/bin/crictl
+
+COPY --from=go-build  /out/constellation-runtime-agent              /usr/local/bin/constellation-runtime-agent
+COPY --from=bpf-build /src/bpf/runtime.bpf.o                        /opt/constellation/runtime.bpf.o
+COPY --from=dp-build  /src/third_party/neuvector/dp/dp              /usr/local/bin/dp
+
+ENV CONSTELLATION_BPF_OBJ=/opt/constellation/runtime.bpf.o
+ENV CONSTELLATION_DP_BIN=/usr/local/bin/dp
+
+# FIPS posture is carried into the runtime stage as an OCI label so that
+# `docker inspect` (and the agent's own /metrics exposition) can report it.
+# When FIPS=1 we additionally set GODEBUG=fips140=on so the Go runtime
+# refuses to boot if the binary wasn't FIPS-built — defense-in-depth
+# against an image-mismatch deploy. The dp side keeps its own scope; see
+# docs/fips.md.
+ARG FIPS=0
+ENV CONSTELLATION_FIPS_GO=${FIPS}
+LABEL org.alphabravo.constellation.fips.go="${FIPS}" \
+      org.alphabravo.constellation.fips.dp="false" \
+      org.alphabravo.constellation.fips.scope="see docs/fips.md#runtime-agent"
+# The Go 1.26 FIPS module is selected at *build time* by -tags fips +
+# GOFIPS140=v1.0.0 (stage 3 above); the binary then enters FIPS mode on
+# startup without needing GODEBUG. We write a marker file for operators
+# who want to confirm via the filesystem instead of `go version -m`.
+RUN mkdir -p /etc/constellation \
+ && if [ "${FIPS}" = "1" ] || [ "${FIPS}" = "true" ]; then \
+        printf 'fips140=on\nbuilt_with=-tags fips GOFIPS140=v1.0.0\n' > /etc/constellation/fips ; \
+    fi
+
+# Runs as root (uid 0) because BPF program loads + LSM attach require CAP_BPF +
+# CAP_PERFMON + CAP_SYS_ADMIN, AND the C dp needs CAP_NET_ADMIN for NFQUEUE +
+# TC qdisc installation. On most kernels this still requires uid 0 even with
+# an explicit capabilities.add list.
+ENTRYPOINT ["/usr/local/bin/constellation-runtime-agent"]

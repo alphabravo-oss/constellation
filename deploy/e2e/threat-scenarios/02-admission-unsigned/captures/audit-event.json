@@ -1,0 +1,6 @@
+{
+  "action": "admission.deny",
+  "chain_hash": "acc01c83bdf0cc57f7357e8af54942e395cebd3b55adb7c606d4b35b90421d3b",
+  "id": 9,
+  "policy_decision_id": "6c23afb5-8424-4061-bbc5-368462a6cfaa"
+}

@@ -1,0 +1,14 @@
+spec:
+  template:
+    spec:
+      containers:
+        - name: admission
+          args: []
+          volumeMounts:
+            - name: tls
+              mountPath: /etc/webhook/certs
+              readOnly: true
+      volumes:
+        - name: tls
+          secret:
+            secretName: e2e-admission-tls

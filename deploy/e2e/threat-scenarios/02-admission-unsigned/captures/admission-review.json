@@ -1,0 +1,47 @@
+{
+  "reason": "denied by constellation policy \"require-image-signature\": missing constellation image-signed annotation",
+  "request": {
+    "uid": "demo-uid",
+    "kind": {
+      "group": "",
+      "version": "",
+      "kind": "Pod"
+    },
+    "resource": {
+      "group": "",
+      "version": "",
+      "resource": ""
+    },
+    "name": "evil-unsigned",
+    "namespace": "default",
+    "operation": "CREATE",
+    "userInfo": {},
+    "object": {
+      "metadata": {
+        "name": "evil-unsigned",
+        "namespace": "default"
+      },
+      "spec": {
+        "containers": [
+          {
+            "name": "evil",
+            "image": "attacker/evil:latest",
+            "resources": {}
+          }
+        ]
+      },
+      "status": {}
+    },
+    "oldObject": null,
+    "options": null
+  },
+  "response": {
+    "uid": "demo-uid",
+    "allowed": false,
+    "status": {
+      "metadata": {},
+      "message": "denied by constellation policy \"require-image-signature\": missing constellation image-signed annotation"
+    }
+  },
+  "verdict": "deny"
+}

@@ -1,0 +1,255 @@
+{{- if .Values.initBundle.secretName }}
+{{- /*
+Wave N1: init-bundle consumer.
+
+Reads the user-supplied bundle YAML (key `bundle.yaml` in
+Secret `{{ .Values.initBundle.secretName }}`) and projects its components into
+the chart-managed Secrets BEFORE the API / admission / agent Pods start:
+
+  spec.admission_ca_cert      ->  <admissionTLSSecret>/ca.crt
+  spec.admission_server_cert  ->  <admissionTLSSecret>/tls.crt
+  spec.admission_server_key   ->  <admissionTLSSecret>/tls.key
+  spec.scanner_token          ->  <scannerTokenSecret>/token
+  spec.runtime_agent_token    ->  <runtimeAgentTokenSecret>/token
+
+Runs as a pre-install + pre-upgrade hook with a hook-weight earlier than the
+chart's main resources, so by the time Pods boot every Secret they reference
+already holds the control-plane-issued material.
+
+Hook is idempotent: if a target Secret already has the right key populated it's
+overwritten (we trust the bundle on every install / upgrade so a rotated bundle
+applied via `helm upgrade` re-projects its new contents).
+*/ -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "constellation.fullname" . }}-initbundle
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-20"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "constellation.fullname" . }}-initbundle
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-20"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "create", "update", "patch", "apply"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "constellation.fullname" . }}-initbundle
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-20"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "constellation.fullname" . }}-initbundle
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "constellation.fullname" . }}-initbundle
+    namespace: {{ .Release.Namespace }}
+---
+# Cluster-scoped role for patching the validatingwebhookconfiguration caBundle.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "constellation.fullname" . }}-initbundle
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade,post-install,post-upgrade
+    "helm.sh/hook-weight": "-20"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: ["admissionregistration.k8s.io"]
+    resources: ["validatingwebhookconfigurations", "mutatingwebhookconfigurations"]
+    verbs: ["get", "list", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "constellation.fullname" . }}-initbundle
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade,post-install,post-upgrade
+    "helm.sh/hook-weight": "-20"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "constellation.fullname" . }}-initbundle
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "constellation.fullname" . }}-initbundle
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "constellation.fullname" . }}-initbundle-scripts
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-20"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+data:
+  consume.sh: |
+    #!/bin/sh
+    # Parse the bundle YAML keyed at /bundle/bundle.yaml and project each spec.* field
+    # into the chart-managed Secrets. Uses a small awk pipeline instead of yq so this
+    # script runs on a vanilla bitnami/kubectl image.
+    set -eu
+
+    BUNDLE=/bundle/bundle.yaml
+    NS="{{ .Release.Namespace }}"
+    TLS_SECRET="{{ include "constellation.admissionTLSSecret" . }}"
+    SCAN_SECRET="{{ include "constellation.scannerTokenSecret" . }}"
+    AGENT_SECRET="{{ include "constellation.runtimeAgentTokenSecret" . }}"
+    WH="{{ include "constellation.fullname" . }}-admission"
+
+    if [ ! -f "$BUNDLE" ]; then
+      echo "init-bundle: $BUNDLE not found; ensure secret/{{ .Values.initBundle.secretName }} has key bundle.yaml"
+      exit 1
+    fi
+
+    # Extract a scalar value under spec.<key>. Captures inline values
+    # ("key: value") only — used for token + audit-hmac.
+    scalar() {
+      awk -v k="$1" '
+        $0 ~ "^[[:space:]]+" k "[[:space:]]*:" {
+          sub("^[[:space:]]+" k "[[:space:]]*:[[:space:]]*", "", $0)
+          gsub(/^["'"'"']|["'"'"']$/, "", $0)
+          print
+          exit
+        }' "$BUNDLE"
+    }
+
+    # Extract a YAML block-literal value (key: |\n  ...indented...) under spec.<key>.
+    block() {
+      awk -v k="$1" '
+        BEGIN { capture=0; indent=-1 }
+        $0 ~ "^[[:space:]]+" k "[[:space:]]*:[[:space:]]*\\|" { capture=1; next }
+        capture == 1 {
+          # Determine indent on first capture line.
+          if (indent < 0) {
+            match($0, /^[[:space:]]+/)
+            indent = RLENGTH
+            if (indent == 0) { exit }
+          }
+          # Stop when a line de-indents below our capture indent or is non-empty + de-indented.
+          if (length($0) > 0) {
+            match($0, /^[[:space:]]+/)
+            if (RLENGTH < indent) { exit }
+          }
+          sub("^[[:space:]]{" indent "}", "", $0)
+          print
+        }' "$BUNDLE"
+    }
+
+    SCANNER_TOKEN=$(scalar scanner_token)
+    AGENT_TOKEN=$(scalar runtime_agent_token)
+    CA_CERT=$(block admission_ca_cert)
+    SRV_CERT=$(block admission_server_cert)
+    SRV_KEY=$(block admission_server_key)
+
+    [ -n "$SCANNER_TOKEN" ] || { echo "missing spec.scanner_token"; exit 1; }
+    [ -n "$AGENT_TOKEN" ]   || { echo "missing spec.runtime_agent_token"; exit 1; }
+    [ -n "$CA_CERT" ]       || { echo "missing spec.admission_ca_cert"; exit 1; }
+    [ -n "$SRV_CERT" ]      || { echo "missing spec.admission_server_cert"; exit 1; }
+    [ -n "$SRV_KEY" ]       || { echo "missing spec.admission_server_key"; exit 1; }
+
+    workdir=$(mktemp -d)
+    trap 'rm -rf "$workdir"' EXIT
+    printf '%s\n' "$CA_CERT" > "$workdir/ca.crt"
+    printf '%s\n' "$SRV_CERT" > "$workdir/tls.crt"
+    printf '%s\n' "$SRV_KEY" > "$workdir/tls.key"
+
+    kubectl -n "$NS" create secret generic "$TLS_SECRET" \
+      --from-file=tls.crt="$workdir/tls.crt" \
+      --from-file=tls.key="$workdir/tls.key" \
+      --from-file=ca.crt="$workdir/ca.crt" \
+      --dry-run=client -o yaml | kubectl apply -f -
+    echo "Projected admission TLS into $TLS_SECRET"
+
+    kubectl -n "$NS" create secret generic "$SCAN_SECRET" \
+      --from-literal=token="$SCANNER_TOKEN" \
+      --dry-run=client -o yaml | kubectl apply -f -
+    echo "Projected scanner token into $SCAN_SECRET"
+
+    kubectl -n "$NS" create secret generic "$AGENT_SECRET" \
+      --from-literal=token="$AGENT_TOKEN" \
+      --dry-run=client -o yaml | kubectl apply -f -
+    echo "Projected runtime-agent token into $AGENT_SECRET"
+
+    # Patch validatingwebhookconfiguration caBundle if the chart has installed it.
+    if kubectl get validatingwebhookconfiguration "$WH" >/dev/null 2>&1; then
+      CA_B64=$(base64 -w0 < "$workdir/ca.crt" 2>/dev/null || base64 < "$workdir/ca.crt" | tr -d '\n')
+      kubectl patch validatingwebhookconfiguration "$WH" --type=json \
+        -p="[{\"op\":\"replace\",\"path\":\"/webhooks/0/clientConfig/caBundle\",\"value\":\"$CA_B64\"}]"
+      echo "Patched validatingwebhookconfiguration/$WH caBundle"
+    fi
+
+    echo "init-bundle consumer complete."
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "constellation.fullname" . }}-initbundle
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-15"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "constellation.name" . }}
+        app.kubernetes.io/component: initbundle-consumer
+    spec:
+      {{- include "constellation.pullSecrets" . | nindent 6 }}
+      {{- include "constellation.helperPodSecurityContext" . | nindent 6 }}
+      serviceAccountName: {{ include "constellation.fullname" . }}-initbundle
+      restartPolicy: Never
+      volumes:
+        - name: bundle
+          secret:
+            secretName: {{ .Values.initBundle.secretName }}
+        - name: tmp
+          emptyDir: {}
+        - name: scripts
+          configMap:
+            name: {{ include "constellation.fullname" . }}-initbundle-scripts
+            defaultMode: 0755
+      containers:
+        - name: consume
+          image: {{ .Values.initBundle.image }}
+          {{- include "constellation.helperContainerSecurityContext" . | nindent 10 }}
+          command: ["/bin/sh", "/scripts/consume.sh"]
+          env:
+            - name: HOME
+              value: /tmp
+            - name: TMPDIR
+              value: /tmp
+          volumeMounts:
+            - name: bundle
+              mountPath: /bundle
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            - name: scripts
+              mountPath: /scripts
+{{- end }}

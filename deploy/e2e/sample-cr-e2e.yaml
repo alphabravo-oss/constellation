@@ -1,0 +1,21 @@
+# Wave-E sample CR. Points every role at the e2e image we imported into k3d so the
+# operator's reconcile produces Pods that can actually start without internet access.
+apiVersion: constellation.alphabravo.io/v1alpha1
+kind: ConstellationCluster
+metadata:
+  name: e2e
+spec:
+  controlPlaneURL: http://constellation-api.constellation-system.svc:8080
+  orgID: 00000000-0000-0000-0000-000000000000
+  scannerEnabled: true
+  admissionEnabled: true
+  runtimeEnabled: true
+  scannerImage: constellation/scanner:e2e
+  admissionImage: constellation/admission:e2e
+  runtimeAgentImage: constellation/scanner:e2e   # placeholder; runtime-agent image isn't built locally
+  agentImage: constellation/scanner:e2e
+  scannerReplicas: 1
+  admissionReplicas: 1
+  agentResources:
+    cpuLimit: "500m"
+    memoryLimit: "512Mi"

@@ -1,0 +1,33 @@
+[Unit]
+Description=Constellation Operator (Kubernetes CR reconciler — k8s-only)
+Documentation=https://github.com/alphabravocompany/constellation
+After=network-online.target
+Wants=network-online.target
+
+# NOTE: constellation-operator reconciles ConstellationCluster CustomResources inside a
+# Kubernetes cluster. On a pure-systemd / non-k8s deployment this unit is a no-op: it will
+# fail to start because controller-runtime cannot reach a kube-apiserver. We ship the
+# unit so that mixed deployments (k8s control-plane + non-k8s scan-edge) have a uniform
+# install story. To use it, point KUBECONFIG at a valid kubeconfig in operator.env and
+# enable the unit. Otherwise leave it disabled.
+
+[Service]
+Type=simple
+User=constellation
+Group=constellation
+EnvironmentFile=/etc/constellation/operator.env
+ExecStart=/usr/local/bin/constellation-operator
+WorkingDirectory=/var/lib/constellation
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=constellation-operator
+
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

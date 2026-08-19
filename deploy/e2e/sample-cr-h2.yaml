@@ -1,0 +1,23 @@
+# Wave-H2 sample CR for the native-k3s install. Points every role at the :h2 image
+# already imported into k3s containerd, and uses a real runtime-agent image (not the
+# scanner placeholder Wave E used).
+apiVersion: constellation.alphabravo.io/v1alpha1
+kind: ConstellationCluster
+metadata:
+  name: h2
+  namespace: constellation-system
+spec:
+  controlPlaneURL: http://constellation-api.constellation-system.svc:8080
+  orgID: 00000000-0000-0000-0000-000000000000
+  scannerEnabled: true
+  admissionEnabled: true
+  runtimeEnabled: true
+  scannerImage: constellation/scanner:h2
+  admissionImage: constellation/admission:h2
+  runtimeAgentImage: constellation/runtime-agent:h2
+  agentImage: constellation/api:h2
+  scannerReplicas: 1
+  admissionReplicas: 1
+  agentResources:
+    cpuLimit: "500m"
+    memoryLimit: "512Mi"

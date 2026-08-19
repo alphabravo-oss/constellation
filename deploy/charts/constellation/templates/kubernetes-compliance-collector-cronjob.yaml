@@ -1,0 +1,123 @@
+{{- if .Values.kubernetesComplianceCollector.enabled }}
+{{- $clusterName := default (default .Release.Namespace .Values.clusterRegistration.name) .Values.kubernetesComplianceCollector.clusterName -}}
+{{- $image := include "constellation.roleImage" (dict "ctx" . "role" "operator") -}}
+{{- if .Values.kubernetesComplianceCollector.image.repository -}}
+  {{- $tag := default (include "constellation.imageTag" .) .Values.kubernetesComplianceCollector.image.tag -}}
+  {{- $image = printf "%s:%s" .Values.kubernetesComplianceCollector.image.repository $tag -}}
+{{- end }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "constellation.fullname" . }}-k8s-compliance
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: k8s-compliance-collector
+spec:
+  schedule: {{ .Values.kubernetesComplianceCollector.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: {{ include "constellation.name" . }}
+            app.kubernetes.io/component: k8s-compliance-collector
+        spec:
+          {{- include "constellation.pullSecrets" . | nindent 10 }}
+          {{- include "constellation.podSecurityContext" . | nindent 10 }}
+          serviceAccountName: {{ include "constellation.fullname" . }}-k8s-compliance
+          restartPolicy: OnFailure
+          containers:
+            - name: collector
+              image: {{ $image }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: ["/usr/local/bin/constellation-k8s-compliance-collector"]
+              {{- include "constellation.containerSecurityContext" . | nindent 14 }}
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "constellation.dsnSecret" . }}
+                      key: {{ include "constellation.dsnSecretKey" . }}
+                - name: CONSTELLATION_API_URL
+                  value: {{ include "constellation.apiURL" . | quote }}
+                - name: CONSTELLATION_CLUSTER_NAME
+                  value: {{ $clusterName | quote }}
+                {{- if .Values.kubernetesComplianceCollector.clusterId }}
+                - name: CLUSTER_ID
+                  value: {{ .Values.kubernetesComplianceCollector.clusterId | quote }}
+                - name: CONSTELLATION_CLUSTER_ID
+                  value: {{ .Values.kubernetesComplianceCollector.clusterId | quote }}
+                {{- else }}
+                - name: CLUSTER_NAME
+                  value: {{ $clusterName | quote }}
+                {{- if .Values.clusterRegistration.clusterId }}
+                - name: CONSTELLATION_CLUSTER_ID
+                  value: {{ .Values.clusterRegistration.clusterId | quote }}
+                {{- end }}
+                {{- end }}
+                - name: CONSTELLATION_K8S_COMPLIANCE_COLLECTOR_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "constellation.runtimeAgentTokenSecret" . }}
+                      key: token
+                      optional: true
+                - name: RUNTIME_AGENT_TOKEN_FILE
+                  value: /var/run/constellation/runtime-agent-token/token
+                - name: NAMESPACE_FILTER
+                  value: {{ .Values.kubernetesComplianceCollector.namespaceFilter | quote }}
+                - name: INCLUDE_SYSTEM_NAMESPACES
+                  value: {{ ternary "true" "false" .Values.kubernetesComplianceCollector.includeSystemNamespaces | quote }}
+                - name: ONE_SHOT
+                  value: "true"
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+                - name: runtime-agent-token
+                  mountPath: /var/run/constellation/runtime-agent-token
+                  readOnly: true
+              resources: {{- toYaml .Values.kubernetesComplianceCollector.resources | nindent 16 }}
+          volumes:
+            - name: tmp
+              emptyDir: {}
+            - name: runtime-agent-token
+              secret:
+                secretName: {{ include "constellation.runtimeAgentTokenSecret" . }}
+                optional: true
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "constellation.fullname" . }}-k8s-compliance
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: k8s-compliance-collector
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "constellation.fullname" . }}-k8s-compliance
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["get", "list"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "constellation.fullname" . }}-k8s-compliance
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "constellation.fullname" . }}-k8s-compliance
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "constellation.fullname" . }}-k8s-compliance
+    namespace: {{ .Release.Namespace }}
+{{- end }}

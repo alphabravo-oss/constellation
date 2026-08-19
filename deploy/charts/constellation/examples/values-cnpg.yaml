@@ -1,0 +1,51 @@
+# Opt-in turnkey profile for HA Postgres via CloudNativePG (cnpg mode).
+#
+# ---------------------------------------------------------------------------
+# STEP 0 (once per cluster) — install the CloudNativePG operator. The chart
+# does NOT bundle it (no vendored operator fork; this is a documented
+# prerequisite, mirroring how NeuVector expects an external DB operator).
+#
+#   kubectl apply --server-side -f \
+#     https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.24/releases/cnpg-1.24.1.yaml
+#
+#   # or via Helm:
+#   helm repo add cnpg https://cloudnative-pg.github.io/charts
+#   helm install cnpg cnpg/cloudnative-pg -n cnpg-system --create-namespace
+#
+# ---------------------------------------------------------------------------
+# STEP 1 — install Constellation with this profile:
+#
+#   helm upgrade --install constellation deploy/charts/constellation \
+#     -n constellation-system --create-namespace \
+#     -f deploy/charts/constellation/examples/values-cnpg.yaml \
+#     --set postgres.cloudnativepg.imageName=<your-registry>/cnpg-pgvector:16
+#
+# ---------------------------------------------------------------------------
+postgres:
+  # Explicit canonical mode wins over the legacy toggles.
+  mode: cnpg
+  embedded: false
+
+  cloudnativepg:
+    enabled: true
+    instances: 3            # 1 primary + 2 replicas (HA). Use 1 for dev.
+    storage: 50Gi
+    # storageClass: fast-ssd
+
+    # REQUIRED: a pgvector-enabled, CNPG-compatible operand image. The default
+    # ghcr.io/cloudnative-pg/postgresql:16 does NOT ship pgvector and migrations
+    # WILL FAIL. Build one (few lines) and pin it here or via --set:
+    #
+    #   FROM ghcr.io/cloudnative-pg/postgresql:16
+    #   USER 0
+    #   RUN apt-get update && apt-get install -y --no-install-recommends \
+    #         postgresql-16-pgvector && rm -rf /var/lib/apt/lists/*
+    #   USER 26
+    #
+    # Keeping "pgvector" in the tag also silences the NOTES.txt heuristic warning.
+    imageName: REPLACE-ME/cnpg-pgvector:16
+
+    resources:
+      limits:   { cpu: 2,   memory: 4Gi }
+      requests: { cpu: 500m, memory: 1Gi }
+    primaryUpdateStrategy: unsupervised

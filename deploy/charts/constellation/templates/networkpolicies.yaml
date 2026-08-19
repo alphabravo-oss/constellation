@@ -1,0 +1,746 @@
+{{- if .Values.networkPolicies.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "constellation.fullname" . }}-default-deny
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+{{ if .Values.frontend.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "constellation.fullname" . }}-frontend
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: frontend
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+{{ range .Values.networkPolicies.frontendIngressCIDRs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+{{ end }}
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+{{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
+{{ if .Values.api.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: api
+      ports:
+        - protocol: TCP
+          port: 8080
+{{ end }}
+{{ end }}
+{{ if and .Values.api.enabled (or .Values.frontend.enabled .Values.scanner.enabled .Values.runtimeAgent.enabled .Values.discoverer.enabled .Values.operator.enabled .Values.admission.enabled .Values.networkPolicyApplier.enabled .Values.kubernetesComplianceCollector.enabled .Values.vulndbImporter.enabled .Values.auditArchiver.enabled (gt (len .Values.networkPolicies.apiIngressCIDRs) 0)) }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "constellation.fullname" . }}-api-ingress
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: api
+  policyTypes:
+    - Ingress
+  ingress:
+{{ if .Values.frontend.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: frontend
+      ports:
+        - protocol: TCP
+          port: 8080
+{{ end }}
+{{ if .Values.scanner.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: scanner
+      ports:
+        - protocol: TCP
+          port: 8080
+{{ end }}
+{{ if .Values.runtimeAgent.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: runtime-agent
+      ports:
+        - protocol: TCP
+          port: 8080
+{{ end }}
+{{ if .Values.discoverer.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: discoverer
+      ports:
+        - protocol: TCP
+          port: 8080
+{{ end }}
+{{ if .Values.operator.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: operator
+      ports:
+        - protocol: TCP
+          port: 8080
+{{ end }}
+{{ if .Values.admission.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: admission
+      ports:
+        - protocol: TCP
+          port: 8080
+{{ end }}
+{{ if .Values.networkPolicyApplier.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: network-policy-applier
+      ports:
+        - protocol: TCP
+          port: 8080
+{{ end }}
+{{ if .Values.kubernetesComplianceCollector.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: k8s-compliance-collector
+      ports:
+        - protocol: TCP
+          port: 8080
+{{ end }}
+{{ if .Values.vulndbImporter.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: vulndb-importer
+      ports:
+        - protocol: TCP
+          port: 8080
+{{ end }}
+{{ if .Values.auditArchiver.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: audit-archiver
+      ports:
+        - protocol: TCP
+          port: 8080
+{{ end }}
+{{ range .Values.networkPolicies.apiIngressCIDRs }}
+    - from:
+        - ipBlock:
+            cidr: {{ . | quote }}
+      ports:
+        - protocol: TCP
+          port: 8080
+{{ end }}
+{{ end }}
+{{ if .Values.api.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "constellation.fullname" . }}-api-egress
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: api
+  policyTypes:
+    - Egress
+  egress:
+{{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
+{{ include "constellation.networkPolicyPostgresEgress" . | nindent 4 }}
+{{ include "constellation.networkPolicyExternalHTTPEgress" . | nindent 4 }}
+{{ end }}
+{{ if .Values.scanner.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "constellation.fullname" . }}-scanner-egress
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: scanner
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: scanner
+  policyTypes:
+    - Egress
+  egress:
+{{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
+{{ if .Values.api.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: api
+      ports:
+        - protocol: TCP
+          port: 8080
+{{ end }}
+{{ include "constellation.networkPolicyExternalHTTPEgress" . | nindent 4 }}
+{{ end }}
+{{ if .Values.admission.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "constellation.fullname" . }}-admission-ingress
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: admission
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: admission
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+{{ range .Values.networkPolicies.admissionIngressCIDRs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+{{ end }}
+      ports:
+        - protocol: TCP
+          port: 8443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "constellation.fullname" . }}-admission-egress
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: admission
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: admission
+  policyTypes:
+    - Egress
+  egress:
+{{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
+{{ if .Values.api.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: api
+      ports:
+        - protocol: TCP
+          port: 8080
+{{ end }}
+{{ if or (and .Values.admission.quarantine.enabled .Values.admission.quarantine.clusterId) .Values.admission.policies.enabled .Values.admission.audit.enabled }}
+{{ include "constellation.networkPolicyPostgresEgress" . | nindent 4 }}
+{{ end }}
+{{ end }}
+{{ if .Values.operator.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "constellation.fullname" . }}-operator-egress
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: operator
+  policyTypes:
+    - Egress
+  egress:
+{{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
+{{ include "constellation.networkPolicyKubeAPIEgress" . | nindent 4 }}
+{{ if .Values.api.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: api
+      ports:
+        - protocol: TCP
+          port: 8080
+{{ end }}
+{{ end }}
+{{ if .Values.runtimeAgent.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "constellation.fullname" . }}-runtime-agent-egress
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: runtime-agent
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: runtime-agent
+  policyTypes:
+    - Egress
+  egress:
+{{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
+{{ if .Values.api.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: api
+      ports:
+        - protocol: TCP
+          port: 8080
+{{ end }}
+{{ end }}
+{{ if .Values.discoverer.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "constellation.fullname" . }}-discoverer-egress
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: discoverer
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: discoverer
+  policyTypes:
+    - Egress
+  egress:
+{{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
+{{ include "constellation.networkPolicyPostgresEgress" . | nindent 4 }}
+{{ include "constellation.networkPolicyKubeAPIEgress" . | nindent 4 }}
+{{ if .Values.api.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: api
+      ports:
+        - protocol: TCP
+          port: 8080
+{{ end }}
+{{ end }}
+{{ if ne (include "constellation.postgresMode" .) "external" }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "constellation.fullname" . }}-postgres-ingress
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: postgres
+  policyTypes:
+    - Ingress
+  ingress:
+{{ if eq (include "constellation.postgresMode" .) "cnpg" }}
+    # CNPG streaming replication + instance-to-instance traffic between the
+    # cluster's own pods (all share component=postgres via inheritedMetadata).
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+{{ end }}
+{{ if .Values.api.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: api
+      ports:
+        - protocol: TCP
+          port: 5432
+{{ end }}
+{{ if .Values.migrate.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: migrate
+      ports:
+        - protocol: TCP
+          port: 5432
+{{ end }}
+{{ if and .Values.bootstrap.enabled (not .Values.initBundle.secretName) }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: bootstrap
+      ports:
+        - protocol: TCP
+          port: 5432
+{{ end }}
+{{ if .Values.bootstrap.admin.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: bootstrap-admin
+      ports:
+        - protocol: TCP
+          port: 5432
+{{ end }}
+{{ if and .Values.admission.enabled (or (and .Values.admission.quarantine.enabled .Values.admission.quarantine.clusterId) .Values.admission.policies.enabled .Values.admission.audit.enabled) }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: admission
+      ports:
+        - protocol: TCP
+          port: 5432
+{{ end }}
+{{ if .Values.auditArchiver.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: audit-archiver
+      ports:
+        - protocol: TCP
+          port: 5432
+{{ end }}
+{{ if .Values.kubernetesComplianceCollector.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: k8s-compliance-collector
+      ports:
+        - protocol: TCP
+          port: 5432
+{{ end }}
+{{ if .Values.discoverer.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: discoverer
+      ports:
+        - protocol: TCP
+          port: 5432
+{{ end }}
+{{ end }}
+{{ if eq (include "constellation.postgresMode" .) "cnpg" }}
+---
+# CNPG instance pods must initiate egress (replicas → primary on 5432, and the
+# instance manager → kube API). The legacy StatefulSet was a passive server and
+# needed no egress policy, so default-deny would otherwise break CNPG HA.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "constellation.fullname" . }}-postgres-egress
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: postgres
+  policyTypes:
+    - Egress
+  egress:
+{{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
+{{ include "constellation.networkPolicyKubeAPIEgress" . | nindent 4 }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+{{ end }}
+{{ if .Values.migrate.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "constellation.fullname" . }}-migrate-egress
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: migrate
+  policyTypes:
+    - Egress
+  egress:
+{{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
+{{ include "constellation.networkPolicyPostgresEgress" . | nindent 4 }}
+{{ end }}
+{{ if and .Values.bootstrap.enabled (not .Values.initBundle.secretName) }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "constellation.fullname" . }}-bootstrap-egress
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: bootstrap
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: bootstrap
+  policyTypes:
+    - Egress
+  egress:
+{{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
+{{ include "constellation.networkPolicyPostgresEgress" . | nindent 4 }}
+{{ include "constellation.networkPolicyKubeAPIEgress" . | nindent 4 }}
+{{ if .Values.api.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: api
+      ports:
+        - protocol: TCP
+          port: 8080
+{{ end }}
+{{ end }}
+{{ if .Values.bootstrap.admin.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "constellation.fullname" . }}-bootstrap-admin-egress
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: bootstrap-admin
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: bootstrap-admin
+  policyTypes:
+    - Egress
+  egress:
+{{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
+{{ include "constellation.networkPolicyPostgresEgress" . | nindent 4 }}
+{{ end }}
+{{ if and .Values.admission.enabled (not .Values.tls.certManager.enabled) .Values.tls.bootstrap.enabled (not .Values.initBundle.secretName) }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "constellation.fullname" . }}-tls-bootstrap-egress
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tls-bootstrap
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: tls-bootstrap
+  policyTypes:
+    - Egress
+  egress:
+{{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
+{{ include "constellation.networkPolicyKubeAPIEgress" . | nindent 4 }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "constellation.fullname" . }}-tls-bootstrap-patch-egress
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tls-bootstrap-patch
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: tls-bootstrap-patch
+  policyTypes:
+    - Egress
+  egress:
+{{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
+{{ include "constellation.networkPolicyKubeAPIEgress" . | nindent 4 }}
+{{ end }}
+{{ if .Values.initBundle.secretName }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "constellation.fullname" . }}-initbundle-egress
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: initbundle-consumer
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: initbundle-consumer
+  policyTypes:
+    - Egress
+  egress:
+{{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
+{{ include "constellation.networkPolicyKubeAPIEgress" . | nindent 4 }}
+{{ end }}
+{{ if .Values.vulndbImporter.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "constellation.fullname" . }}-vulndb-importer-egress
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: vulndb-importer
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: vulndb-importer
+  policyTypes:
+    - Egress
+  egress:
+{{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
+{{ include "constellation.networkPolicyExternalHTTPEgress" . | nindent 4 }}
+{{ if .Values.api.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: api
+      ports:
+        - protocol: TCP
+          port: 8080
+{{ end }}
+{{ end }}
+{{ if .Values.auditArchiver.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "constellation.fullname" . }}-audit-archiver-egress
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: audit-archiver
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: audit-archiver
+  policyTypes:
+    - Egress
+  egress:
+{{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
+{{ include "constellation.networkPolicyPostgresEgress" . | nindent 4 }}
+{{ include "constellation.networkPolicyExternalHTTPEgress" . | nindent 4 }}
+{{ if .Values.api.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: api
+      ports:
+        - protocol: TCP
+          port: 8080
+{{ end }}
+{{ end }}
+{{ if .Values.networkPolicyApplier.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "constellation.fullname" . }}-network-policy-applier-egress
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: network-policy-applier
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: network-policy-applier
+  policyTypes:
+    - Egress
+  egress:
+{{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
+{{ include "constellation.networkPolicyPostgresEgress" . | nindent 4 }}
+{{ include "constellation.networkPolicyKubeAPIEgress" . | nindent 4 }}
+{{ if .Values.api.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: api
+      ports:
+        - protocol: TCP
+          port: 8080
+{{ end }}
+{{ end }}
+{{ if .Values.kubernetesComplianceCollector.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "constellation.fullname" . }}-k8s-compliance-egress
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: k8s-compliance-collector
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: k8s-compliance-collector
+  policyTypes:
+    - Egress
+  egress:
+{{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
+{{ include "constellation.networkPolicyPostgresEgress" . | nindent 4 }}
+{{ include "constellation.networkPolicyKubeAPIEgress" . | nindent 4 }}
+{{ if .Values.api.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: api
+      ports:
+        - protocol: TCP
+          port: 8080
+{{ end }}
+{{ end }}
+{{- end }}

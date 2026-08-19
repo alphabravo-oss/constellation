@@ -1,0 +1,23 @@
+{
+  "schema": {
+    "version": "16.0.0"
+  },
+  "source": {
+    "type": "image",
+    "target": "cgr.dev/chainguard/wolfi-base:latest"
+  },
+  "distro": {
+    "id": "wolfi",
+    "name": "Wolfi",
+    "versionID": "rolling"
+  },
+  "artifacts": [
+    {
+      "id": "pkg-wolfi-baselayout",
+      "name": "wolfi-baselayout",
+      "version": "20230201-r18",
+      "type": "apk",
+      "purl": "pkg:apk/wolfi/wolfi-baselayout@20230201-r18?arch=aarch64"
+    }
+  ]
+}

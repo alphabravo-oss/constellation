@@ -1,0 +1,237 @@
+{{- if .Values.scanner.enabled }}
+{{- $signaturePublicKeyPath := .Values.scanner.signatures.publicKeyPath -}}
+{{- if and .Values.scanner.signatures.publicKeySecret (not $signaturePublicKeyPath) -}}
+{{- $signaturePublicKeyPath = printf "/var/run/constellation/signature-trust/%s" .Values.scanner.signatures.publicKeySecretKey -}}
+{{- end -}}
+{{- if and .Values.scanner.signatures.enabled (eq .Values.scanner.signatures.mode "public-key") (not $signaturePublicKeyPath) -}}
+{{- fail "scanner.signatures.mode=public-key requires scanner.signatures.publicKeySecret or scanner.signatures.publicKeyPath" -}}
+{{- end -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "constellation.fullname" . }}-scanner
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: scanner
+spec:
+  {{- if not .Values.scanner.autoscaling.enabled }}
+  replicas: {{ .Values.scanner.replicas }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: scanner
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "constellation.name" . }}
+        app.kubernetes.io/component: scanner
+    spec:
+      {{- include "constellation.pullSecrets" . | nindent 6 }}
+      {{- include "constellation.podSecurityContext" . | nindent 6 }}
+      automountServiceAccountToken: false
+      containers:
+        - name: scanner
+          image: {{ include "constellation.roleImage" (dict "ctx" . "role" "scanner") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- include "constellation.containerSecurityContext" . | nindent 10 }}
+          args:
+            - "--listen=:8090"
+            - "--control-plane=http://{{ include "constellation.fullname" . }}-api:{{ .Values.api.service.port }}"
+            - "--lease-renew-interval={{ .Values.scanner.leaseRenewInterval }}"
+            {{- if gt (int .Values.scanner.maxConcurrent) 0 }}
+            - "--max-concurrent={{ .Values.scanner.maxConcurrent }}"
+            {{- end }}
+            {{- if .Values.scanner.targetCapacity }}
+            - "--target-capacity={{ .Values.scanner.targetCapacity }}"
+            {{- end }}
+            {{- if .Values.scanner.readiness.requireVulnDB }}
+            - "--require-vulndb=true"
+            {{- end }}
+            {{- with .Values.scanner.args }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - containerPort: 8090
+              name: http
+          env:
+            - name: CONSTELLATION_CONTROL_PLANE_URL
+              value: {{ include "constellation.apiURL" . | quote }}
+            - name: CONSTELLATION_API_URL
+              value: {{ include "constellation.apiURL" . | quote }}
+            - name: CONSTELLATION_CLUSTER_NAME
+              value: {{ include "constellation.clusterName" . | quote }}
+            {{- if .Values.clusterRegistration.clusterId }}
+            - name: CONSTELLATION_CLUSTER_ID
+              value: {{ .Values.clusterRegistration.clusterId | quote }}
+            {{- end }}
+            - name: CONSTELLATION_SCANNER_INSTANCE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: CONSTELLATION_SCANNER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "constellation.scannerTokenSecret" . }}
+                  key: token
+                  optional: true
+            - name: SCANNER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "constellation.scannerTokenSecret" . }}
+                  key: token
+                  optional: true
+            - name: CONSTELLATION_SCANNER_TOKEN_FILE
+              value: /var/run/constellation/scanner-token/token
+            - name: CONSTELLATION_VULNDB_PATH
+              value: {{ include "constellation.vulndbPath" . | quote }}
+            - name: CONSTELLATION_SCANNER_SYFT_ENABLED
+              value: {{ .Values.scanner.engines.syft | quote }}
+            - name: CONSTELLATION_SCANNER_VULNDB_ENABLED
+              value: {{ .Values.scanner.engines.vulndb | quote }}
+            - name: CONSTELLATION_SCANNER_TRIVY_ENABLED
+              value: {{ .Values.scanner.engines.trivy | quote }}
+            - name: CONSTELLATION_SCANNER_GRYPE_ENABLED
+              value: {{ .Values.scanner.engines.grype | quote }}
+            # Vuln-DB auto-refresh cadence (Trivy/Grype). Env default; overridable
+            # at runtime from the UI (system_config scanner_db_refresh_minutes).
+            - name: CONSTELLATION_SCANNER_DB_REFRESH_INTERVAL
+              value: {{ .Values.scanner.vulnDB.refreshInterval | quote }}
+            # Air-gapped: never pull Trivy/Grype DBs from the internet.
+            - name: CONSTELLATION_SCANNER_OFFLINE_DB
+              value: {{ .Values.scanner.vulnDB.offline | quote }}
+            {{- if .Values.scanner.vulnDB.trivyDBRepository }}
+            - name: TRIVY_DB_REPOSITORY
+              value: {{ .Values.scanner.vulnDB.trivyDBRepository | quote }}
+            {{- end }}
+            {{- if .Values.scanner.vulnDB.trivyJavaDBRepository }}
+            - name: TRIVY_JAVA_DB_REPOSITORY
+              value: {{ .Values.scanner.vulnDB.trivyJavaDBRepository | quote }}
+            {{- end }}
+            - name: CONSTELLATION_SCANNER_SIGNATURE_ENABLED
+              value: {{ .Values.scanner.signatures.enabled | quote }}
+            - name: CONSTELLATION_SCANNER_SIGNATURE_MODE
+              value: {{ .Values.scanner.signatures.mode | quote }}
+            - name: CONSTELLATION_SCANNER_SIGNATURE_REKOR_REQUIRED
+              value: {{ .Values.scanner.signatures.requireRekor | quote }}
+            - name: CONSTELLATION_SCANNER_SIGNATURE_IDENTITIES
+              value: {{ join "," .Values.scanner.signatures.identities | quote }}
+            - name: CONSTELLATION_SCANNER_SIGNATURE_ISSUERS
+              value: {{ join "," .Values.scanner.signatures.issuers | quote }}
+            - name: CONSTELLATION_SCANNER_SIGNATURE_PUBLIC_KEY_PATH
+              value: {{ $signaturePublicKeyPath | quote }}
+            - name: CONSTELLATION_COSIGN_BIN
+              value: {{ .Values.scanner.signatures.cosignBin | quote }}
+            - name: CONSTELLATION_SCANNER_FILE_RISK_ENABLED
+              value: {{ .Values.scanner.fileRisks.enabled | quote }}
+            - name: CONSTELLATION_SCANNER_FILE_RISK_MAX_FINDINGS
+              value: {{ .Values.scanner.fileRisks.maxFindings | quote }}
+            - name: CONSTELLATION_SCANNER_TARGET_CAPACITY
+              value: {{ .Values.scanner.targetCapacity | quote }}
+            - name: CONSTELLATION_SCANNER_REQUIRE_VULNDB
+              value: {{ .Values.scanner.readiness.requireVulnDB | quote }}
+            - name: TMPDIR
+              value: /tmp
+            - name: XDG_CACHE_HOME
+              value: /tmp/.cache
+            - name: SYFT_CACHE_DIR
+              value: /tmp/syft
+            - name: GRYPE_DB_CACHE_DIR
+              value: /tmp/grype/db
+            - name: TRIVY_CACHE_DIR
+              value: /tmp/trivy
+          volumeMounts:
+            - name: vulndb
+              mountPath: {{ .Values.vulndb.mountPath | quote }}
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            - name: scanner-token
+              mountPath: /var/run/constellation/scanner-token
+              readOnly: true
+            {{- if .Values.scanner.signatures.publicKeySecret }}
+            - name: signature-trust
+              mountPath: /var/run/constellation/signature-trust
+              readOnly: true
+            {{- end }}
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources: {{- toYaml .Values.scanner.resources | nindent 12 }}
+      volumes:
+        {{- include "constellation.vulndbVolume" . | nindent 8 }}
+        - name: tmp
+          emptyDir: {}
+        - name: scanner-token
+          secret:
+            secretName: {{ include "constellation.scannerTokenSecret" . }}
+            optional: true
+        {{- if .Values.scanner.signatures.publicKeySecret }}
+        - name: signature-trust
+          secret:
+            secretName: {{ .Values.scanner.signatures.publicKeySecret | quote }}
+            items:
+              - key: {{ .Values.scanner.signatures.publicKeySecretKey | quote }}
+                path: {{ .Values.scanner.signatures.publicKeySecretKey | quote }}
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "constellation.fullname" . }}-scanner
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: scanner
+  {{- with .Values.scanner.service.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ include "constellation.name" . }}
+    app.kubernetes.io/component: scanner
+  ports:
+    - name: http
+      port: 8090
+      targetPort: http
+      protocol: TCP
+{{- if .Values.scanner.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "constellation.fullname" . }}-scanner
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: scanner
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "constellation.fullname" . }}-scanner
+  minReplicas: {{ .Values.scanner.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.scanner.autoscaling.maxReplicas }}
+  metrics:
+    {{- with .Values.scanner.autoscaling.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ . }}
+    {{- end }}
+    {{- with .Values.scanner.autoscaling.targetMemoryUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ . }}
+    {{- end }}
+    {{- with .Values.scanner.autoscaling.externalMetrics }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}
+{{- end }}

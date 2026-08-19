@@ -1,0 +1,16 @@
+{{- if and (eq .Values.vulndb.storage.type "pvc") (not .Values.vulndb.storage.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "constellation.vulndbPVCName" . }}
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: vulndb
+spec:
+  accessModes: {{- toYaml .Values.vulndb.storage.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.vulndb.storage.size | quote }}
+  {{- with .Values.vulndb.storage.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- end }}

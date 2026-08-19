@@ -1,0 +1,38 @@
+{
+  "kind": "AdmissionReview",
+  "apiVersion": "admission.k8s.io/v1",
+  "request": {
+    "uid": "fixture-monitor",
+    "kind": {
+      "group": "",
+      "version": "v1",
+      "kind": "Pod"
+    },
+    "resource": {
+      "group": "",
+      "version": "v1",
+      "resource": "pods"
+    },
+    "namespace": "default",
+    "operation": "CREATE",
+    "userInfo": {
+      "username": "system:serviceaccount:default:builder"
+    },
+    "object": {
+      "apiVersion": "v1",
+      "kind": "Pod",
+      "metadata": {
+        "name": "monitor-only",
+        "namespace": "default"
+      },
+      "spec": {
+        "containers": [
+          {
+            "name": "app",
+            "image": "busybox:latest"
+          }
+        ]
+      }
+    }
+  }
+}

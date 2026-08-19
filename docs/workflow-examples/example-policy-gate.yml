@@ -1,0 +1,111 @@
+# Example: admission policy gate for new/changed Kubernetes manifests.
+#
+# For every K8s manifest added or modified in the PR, POSTs it to
+# `${CONSTELLATION_SERVER}/admission/simulate` and fails if any object is denied.
+#
+# Required secrets:
+#   CONSTELLATION_SERVER, CONSTELLATION_TOKEN
+name: constellation-policy-gate
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    container:
+      image: constellation/cli:latest
+    env:
+      CONSTELLATION_SERVER: ${{ secrets.CONSTELLATION_SERVER }}
+      CONSTELLATION_TOKEN:  ${{ secrets.CONSTELLATION_TOKEN }}
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+
+      - name: Collect changed K8s manifests
+        id: collect
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -e
+          git diff --name-only --diff-filter=AM "$PR_BASE_SHA...$PR_HEAD_SHA" \
+            | grep -E '\.ya?ml$' \
+            | sort -u > candidate.txt || true
+          : > k8s.txt
+          while IFS= read -r f; do
+            [ -f "$f" ] || continue
+            if head -40 "$f" | grep -q '^apiVersion:' && head -40 "$f" | grep -q '^kind:'; then
+              echo "$f" >> k8s.txt
+            fi
+          done < candidate.txt
+          echo "count=$(wc -l < k8s.txt)" >> "$GITHUB_OUTPUT"
+          cat k8s.txt || true
+
+      - name: Simulate admission for each manifest
+        id: simulate
+        if: steps.collect.outputs.count != '0'
+        run: |
+          set -e
+          mkdir -p admission-results
+          denied=0
+          server="${CONSTELLATION_SERVER%/}"
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            safe=$(echo "$f" | tr '/' '_')
+            out="admission-results/${safe}.json"
+            http=$(curl -sS -o "$out" -w '%{http_code}' \
+              -H "Authorization: Bearer ${CONSTELLATION_TOKEN}" \
+              -H "Content-Type: application/yaml" \
+              --data-binary @"$f" \
+              "${server}/admission/simulate" || echo "000")
+            verdict=$(jq -r '.allowed // .verdict // "unknown"' "$out" 2>/dev/null || echo "unknown")
+            echo "${f}  http=${http}  verdict=${verdict}"
+            if [ "$verdict" = "false" ] || [ "$verdict" = "denied" ] || [ "$verdict" = "deny" ]; then
+              denied=$((denied + 1))
+              echo "$f" >> admission-results/denied.txt
+            fi
+          done < k8s.txt
+          echo "denied=$denied" >> "$GITHUB_OUTPUT"
+
+      - name: Comment denied manifests
+        if: steps.simulate.outputs.denied != '0'
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const path = 'admission-results/denied.txt';
+            const list = fs.existsSync(path)
+              ? fs.readFileSync(path, 'utf8').trim().split('\n')
+              : [];
+            const body = [
+              '### Constellation admission gate: DENIED',
+              '',
+              'The following manifests would be rejected by the cluster admission policy:',
+              '',
+              ...list.map(f => '- `' + f + '`'),
+              '',
+              'Run `constellationctl policy check <file>` locally to debug.',
+            ].join('\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+
+      - name: Fail if any manifest denied
+        if: steps.simulate.outputs.denied != '0'
+        env:
+          DENIED_COUNT: ${{ steps.simulate.outputs.denied }}
+        run: |
+          echo "::error::${DENIED_COUNT} manifest(s) denied by admission policy."
+          exit 1

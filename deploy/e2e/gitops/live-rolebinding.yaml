@@ -1,0 +1,18 @@
+# Live state after an SRE accidentally added an extra subject (cluster-admin escalation).
+# This is the divergence the GitOps drift detector should catch.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: platform-readers
+  namespace: platform
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole          # <-- escalated from Role to ClusterRole
+  name: cluster-admin        # <-- and to cluster-admin
+subjects:
+  - kind: Group
+    name: platform-eng
+    apiGroup: rbac.authorization.k8s.io
+  - kind: User                # <-- extra subject snuck in
+    name: contractor@example.com
+    apiGroup: rbac.authorization.k8s.io

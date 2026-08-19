@@ -1,0 +1,32 @@
+{
+  "schema": {
+    "version": "16.0.0"
+  },
+  "source": {
+    "type": "image",
+    "target": "ubuntu:24.04"
+  },
+  "distro": {
+    "id": "ubuntu",
+    "name": "Ubuntu",
+    "version": "24.04 LTS",
+    "versionID": "24.04"
+  },
+  "artifacts": [
+    {
+      "id": "pkg-ubuntu-openssl",
+      "name": "openssl",
+      "version": "3.0.13-0ubuntu3.5",
+      "type": "deb",
+      "purl": "pkg:deb/ubuntu/openssl@3.0.13-0ubuntu3.5?arch=amd64",
+      "cpes": [
+        "cpe:2.3:a:openssl:openssl:3.0.13:*:*:*:*:*:*:*"
+      ],
+      "licenses": [
+        {
+          "spdxExpression": "Apache-2.0"
+        }
+      ]
+    }
+  ]
+}

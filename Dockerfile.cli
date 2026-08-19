@@ -1,0 +1,31 @@
+# Minimal image used by every Constellation CI template
+# (GitHub Actions, GitLab CI, Jenkins).
+#
+# Built by goreleaser on tagged releases; consumed as `constellation/cli:<tag>`.
+# Includes:
+#   - constellationctl   the multi-tool CLI
+#   - trivy              (vulnerability + IaC scanner; called by image-check / iac-check)
+#   - jq, curl, git      used by the example workflows for diff/comment plumbing
+#   - ca-certificates    for HTTPS calls to the API
+FROM alpine:3.20
+
+ARG TARGETARCH
+
+RUN apk add --no-cache \
+      ca-certificates \
+      curl \
+      jq \
+      git \
+      bash \
+      tzdata
+
+# Trivy provides the underlying scanners; constellationctl shells out to it.
+COPY --from=aquasec/trivy:0.55.2 /usr/local/bin/trivy /usr/local/bin/trivy
+
+# constellationctl binary placed by goreleaser via `dockers.extra_files`.
+COPY constellationctl /usr/local/bin/constellationctl
+
+RUN constellationctl version || true
+
+ENTRYPOINT ["/usr/local/bin/constellationctl"]
+CMD ["--help"]

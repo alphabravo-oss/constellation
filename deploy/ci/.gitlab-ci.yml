@@ -1,0 +1,47 @@
+# Constellation image-check GitLab CI template.
+#
+# Include this template in your project's .gitlab-ci.yml:
+#
+#   include:
+#     - remote: https://raw.githubusercontent.com/alphabravocompany/constellation/main/deploy/ci/.gitlab-ci.yml
+#
+# Required project variables (Settings → CI/CD → Variables):
+#   CONSTELLATION_VERSION    — pinned release (default: latest)
+#   REGISTRY_USERNAME        — for private registry auth (optional)
+#   REGISTRY_PASSWORD        — masked
+
+stages:
+  - test
+  - scan
+
+constellation:image-check:
+  stage: scan
+  image: ghcr.io/alphabravocompany/constellation-scanner:${CONSTELLATION_VERSION:-latest}
+  variables:
+    # Override per-job: CONSTELLATION_IMAGE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
+    CONSTELLATION_IMAGE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
+    FAIL_ON: critical
+  before_script:
+    - |
+      if [ -n "$REGISTRY_USERNAME" ]; then
+        echo "$REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$REGISTRY_USERNAME" --password-stdin
+      fi
+  script:
+    - constellationctl image-check "$CONSTELLATION_IMAGE"
+        --sarif scan.sarif
+        --spdx scan.spdx.json
+        --cyclonedx scan.cdx.json
+        --fail-on "$FAIL_ON"
+  artifacts:
+    paths:
+      - scan.sarif
+      - scan.spdx.json
+      - scan.cdx.json
+    expire_in: 30 days
+    reports:
+      # GitLab v17.4+ ingests SARIF natively into the Security tab.
+      sast: scan.sarif
+  allow_failure: false
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'

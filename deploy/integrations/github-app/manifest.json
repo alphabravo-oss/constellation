@@ -1,0 +1,21 @@
+{
+  "name": "Constellation Security",
+  "url": "https://constellation.alphabravo.io",
+  "description": "Posts container + IaC security findings to PR reviews. Comments inline with severity, CVSS, and a 'suppress' shortcut.",
+  "public": false,
+  "default_events": ["pull_request", "push", "check_run"],
+  "default_permissions": {
+    "contents":         "read",
+    "metadata":         "read",
+    "pull_requests":    "write",
+    "checks":           "write",
+    "security_events":  "write"
+  },
+  "callback_urls": [
+    "https://constellation.example.com/api/v1/integrations/github/callback"
+  ],
+  "setup_url":     "https://constellation.example.com/integrations/github/setup",
+  "webhook_url":   "https://constellation.example.com/api/v1/integrations/github/webhook",
+  "redirect_url":  "https://constellation.example.com/integrations/github/installed",
+  "request_oauth_on_install": true
+}

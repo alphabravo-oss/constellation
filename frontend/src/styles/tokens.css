@@ -1,0 +1,28 @@
+/*
+ * Constellation design tokens (separate from index.css for clarity).
+ *
+ * The bulk of token wiring lives in index.css under @theme so that Tailwind v4
+ * auto-generates classes like `bg-background`, `text-muted-foreground`, etc.
+ * This file is reserved for non-Tailwind tokens — animation timings, elevation
+ * shadows, and reusable inline color expressions exported as CSS variables.
+ */
+
+:root {
+  /* Elevation */
+  --elev-0: none;
+  --elev-1: 0 1px 0 color-mix(in oklab, var(--color-foreground) 6%, transparent);
+  --elev-2: 0 2px 8px color-mix(in oklab, var(--color-foreground) 8%, transparent);
+  --elev-3: 0 8px 24px color-mix(in oklab, var(--color-foreground) 12%, transparent);
+  --elev-popover: 0 16px 40px color-mix(in oklab, oklch(0% 0 0) 32%, transparent);
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --t-fast: 100ms;
+  --t-base: 160ms;
+  --t-slow: 240ms;
+
+  /* Sidebar widths */
+  --sidebar-w: 240px;
+  --sidebar-w-collapsed: 56px;
+  --topbar-h: 52px;
+}

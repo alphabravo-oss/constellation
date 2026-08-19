@@ -1,0 +1,51 @@
+Constellation {{ .Chart.AppVersion }} installed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+Postgres mode: {{ include "constellation.postgresMode" . }}
+
+Retrieve the auto-generated admin password:
+  kubectl -n {{ .Release.Namespace }} get secret {{ include "constellation.fullname" . }}-admin-credentials \
+    -o jsonpath='{.data.password}' | base64 -d ; echo
+
+{{- if include "constellation.postgresIsCNPG" . | eq "true" }}
+
+============================================================================
+CloudNativePG (cnpg) mode
+============================================================================
+This release expects the CloudNativePG operator to be running cluster-wide.
+The chart does NOT bundle the operator or its CRDs (postgresql.cnpg.io). If the
+Postgres Cluster is stuck Pending, the operator is almost certainly not
+installed — install it once, then `helm upgrade` this release:
+
+  kubectl apply --server-side -f \
+    https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.24/releases/cnpg-1.24.1.yaml
+
+The operator reconciles Cluster "{{ include "constellation.fullname" . }}-postgres"
+and auto-creates the services -postgres-rw / -ro / -r. The app DSN targets
+the -rw (primary) service. Watch bootstrap with:
+
+  kubectl -n {{ .Release.Namespace }} get cluster {{ include "constellation.fullname" . }}-postgres -w
+
+{{- if not (contains "pgvector" (lower .Values.postgres.cloudnativepg.imageName)) }}
+
+****************************************************************************
+* WARNING: postgres.cloudnativepg.imageName does not look pgvector-enabled *
+****************************************************************************
+  imageName = {{ .Values.postgres.cloudnativepg.imageName }}
+
+The findings schema declares `embedding vector(1536)`, so the operand image
+MUST ship the pgvector extension. The default CNPG image does NOT. Migrations
+that create the vector column WILL FAIL against a non-pgvector image.
+
+Supply a pgvector build, e.g. build FROM ghcr.io/cloudnative-pg/postgresql:16
+plus `postgresql-16-pgvector`, then set:
+
+  --set postgres.cloudnativepg.imageName=<your-registry>/cnpg-pgvector:16
+
+See examples/values-cnpg.yaml for a ready-made profile. (This is a heuristic
+check on the image ref — if your pgvector image simply lacks "pgvector" in its
+name, you can ignore this warning.)
+{{- else }}
+
+pgvector check: imageName contains "pgvector" — OK.
+{{- end }}
+{{- end }}

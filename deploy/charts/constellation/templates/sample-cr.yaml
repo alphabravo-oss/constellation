@@ -1,0 +1,2 @@
+{{- /* Reference CR shape only. The chart registers its managed ConstellationCluster through
+       the bootstrap Job when clusterRegistration.enabled=true. */ -}}

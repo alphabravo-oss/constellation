@@ -1,0 +1,27 @@
+{
+  "application": "platform-rbac",
+  "declared": {
+    "hash": "404eb2766e735bb79cc95bb3d0fe9bb8e2a0413405a333a75254999ce9143170",
+    "kind": "RoleBinding",
+    "name": "platform-readers"
+  },
+  "findings": [
+    {
+      "Source": "argocd",
+      "Application": "platform-rbac",
+      "Kind": "RoleBinding",
+      "Name": "platform-readers",
+      "Namespace": "platform",
+      "DeclaredHash": "404eb2766e735bb79cc95bb3d0fe9bb8e2a0413405a333a75254999ce9143170",
+      "ObservedHash": "ee4e566bc2ad33e08342db450eb9d78bc38f689161f9de787466dd22d425eefe",
+      "DiffSummary": "declared sha=404eb2766e73 observed sha=ee4e566bc2ad",
+      "Detected": "2026-05-12T14:22:36.241489151Z"
+    }
+  ],
+  "live": {
+    "hash": "ee4e566bc2ad33e08342db450eb9d78bc38f689161f9de787466dd22d425eefe",
+    "kind": "RoleBinding",
+    "name": "platform-readers"
+  },
+  "source": "argocd"
+}

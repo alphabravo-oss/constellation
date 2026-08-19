@@ -1,0 +1,24 @@
+{{- if and .Values.admission.enabled .Values.tls.certManager.enabled }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "constellation.fullname" . }}-admission
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: admission
+spec:
+  secretName: {{ include "constellation.admissionTLSSecret" . }}
+  duration: 8760h     # 1y
+  renewBefore: 720h   # 30d
+  subject:
+    organizations: ["constellation"]
+  commonName: {{ include "constellation.fullname" . }}-admission.{{ .Release.Namespace }}.svc
+  dnsNames:
+    - {{ include "constellation.fullname" . }}-admission
+    - {{ include "constellation.fullname" . }}-admission.{{ .Release.Namespace }}
+    - {{ include "constellation.fullname" . }}-admission.{{ .Release.Namespace }}.svc
+    - {{ include "constellation.fullname" . }}-admission.{{ .Release.Namespace }}.svc.cluster.local
+  issuerRef:
+    kind: {{ .Values.tls.certManager.issuerKind }}
+    name: {{ .Values.tls.certManager.issuer }}
+{{- end }}

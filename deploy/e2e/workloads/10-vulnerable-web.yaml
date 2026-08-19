@@ -1,0 +1,52 @@
+# DVWA + Juice Shop on the edge namespace — classic OWASP vulnerable web apps.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dvwa
+  namespace: edge
+  labels:
+    app: dvwa
+    constellation.alphabravo.io/exposure: internet
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: dvwa }
+  template:
+    metadata:
+      labels:
+        app: dvwa
+        constellation.alphabravo.io/exposure: internet
+    spec:
+      containers:
+        - name: dvwa
+          image: vulnerables/web-dvwa:latest
+          ports: [{ containerPort: 80 }]
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits:   { cpu: 200m, memory: 256Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: juice-shop
+  namespace: edge
+  labels:
+    app: juice-shop
+    constellation.alphabravo.io/exposure: internet
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: juice-shop }
+  template:
+    metadata:
+      labels:
+        app: juice-shop
+        constellation.alphabravo.io/exposure: internet
+    spec:
+      containers:
+        - name: juice-shop
+          image: bkimminich/juice-shop:latest
+          ports: [{ containerPort: 3000 }]
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits:   { cpu: 300m, memory: 512Mi }

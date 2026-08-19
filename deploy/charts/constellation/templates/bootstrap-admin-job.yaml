@@ -1,0 +1,150 @@
+{{- /*
+Wave E (testnode fix): bootstrap admin job + secret.
+
+The existing bootstrap-job.yaml provisions the default org and the
+machine-identity tokens (scanner / runtime-agent) but does NOT create an
+admin user. A fresh install therefore has no human login path until
+someone seeds a user out of band.
+
+This template adds:
+
+  - Secret <release>-admin-credentials: holds an auto-generated 24-char
+    password (regenerated only on first install — `lookup` preserves it
+    across `helm upgrade`). Override with .Values.bootstrap.admin.password.
+
+  - Job <release>-bootstrap-admin: runs constellation-bootstrap to mint
+    the admin user, idempotent (skips if org already has any local-login
+    users). Hook weight 10 puts it AFTER the existing bootstrap-job
+    (weight 5) so the org row is guaranteed to exist.
+
+Operator retrieves the credential with:
+
+  kubectl -n <ns> get secret <release>-admin-credentials \
+    -o jsonpath='{.data.password}' | base64 -d
+*/ -}}
+{{- if .Values.bootstrap.admin.enabled -}}
+{{- $secretName := printf "%s-admin-credentials" (include "constellation.fullname" .) -}}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace $secretName -}}
+{{- $password := .Values.bootstrap.admin.password | default "" -}}
+{{- if eq $password "" -}}
+  {{- if and $existing $existing.data $existing.data.password -}}
+    {{- $password = $existing.data.password | b64dec -}}
+  {{- else -}}
+    {{- $password = randAlphaNum 24 -}}
+  {{- end -}}
+{{- end -}}
+{{- $authProviders := .Values.bootstrap.authProviders | default list -}}
+{{- $apSecret := printf "%s-auth-providers" $secretName -}}
+{{- if $authProviders }}
+---
+# B4: declarative identity providers (LDAP/SAML/OIDC) seeded at install by
+# constellation-bootstrap into auth_servers — Constellation's equivalent of NeuVector's
+# LoadInitCfg ConfigMaps. Carries secrets (client_secret / bind_password), so a Secret, not a
+# ConfigMap. resource-policy keep so a helm upgrade doesn't churn it.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $apSecret }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: bootstrap-admin
+  annotations:
+    "helm.sh/resource-policy": keep
+type: Opaque
+stringData:
+  auth-providers.yaml: |
+{{ toYaml $authProviders | indent 4 }}
+{{- end }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secretName }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: bootstrap-admin
+  annotations:
+    # Not a hook — the Secret persists. Helm tracks it in the release;
+    # subsequent upgrades preserve via the lookup() above.
+    "helm.sh/resource-policy": keep
+type: Opaque
+stringData:
+  org:      {{ .Values.bootstrap.org.name | quote }}
+  email:    {{ .Values.bootstrap.admin.email | quote }}
+  password: {{ $password | quote }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "constellation.fullname" . }}-bootstrap-admin
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    # Weight 10 puts us after the existing bootstrap-job (weight 5) which
+    # provisions the org row our binary expects to find / upsert.
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: bootstrap-admin
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "constellation.name" . }}
+        app.kubernetes.io/component: bootstrap-admin
+    spec:
+      restartPolicy: OnFailure
+      {{- include "constellation.pullSecrets" . | nindent 6 }}
+      {{- include "constellation.podSecurityContext" . | nindent 6 }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if $authProviders }}
+        - name: auth-providers
+          secret:
+            secretName: {{ $apSecret }}
+        {{- end }}
+      containers:
+        - name: bootstrap-admin
+          image: {{ include "constellation.roleImage" (dict "ctx" . "role" "bootstrap") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- include "constellation.containerSecurityContext" . | nindent 10 }}
+          env:
+            - name: TMPDIR
+              value: /tmp
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "constellation.dsnSecret" . }}
+                  key: {{ include "constellation.dsnSecretKey" . }}
+            - name: BOOTSTRAP_ORG
+              valueFrom:
+                secretKeyRef: { name: {{ $secretName }}, key: org }
+            - name: BOOTSTRAP_ORG_DISPLAY
+              value: {{ .Values.bootstrap.org.displayName | quote }}
+            - name: BOOTSTRAP_EMAIL
+              valueFrom:
+                secretKeyRef: { name: {{ $secretName }}, key: email }
+            - name: BOOTSTRAP_DISPLAY
+              value: {{ .Values.bootstrap.admin.displayName | quote }}
+            - name: BOOTSTRAP_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ $secretName }}, key: password }
+            {{- if $authProviders }}
+            - name: BOOTSTRAP_AUTH_PROVIDERS_FILE
+              value: /etc/constellation/auth-providers.yaml
+            {{- end }}
+          resources:
+            limits:   { cpu: 200m, memory: 128Mi }
+            requests: { cpu: 50m,  memory: 32Mi }
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if $authProviders }}
+            - name: auth-providers
+              mountPath: /etc/constellation
+              readOnly: true
+            {{- end }}
+{{- end }}

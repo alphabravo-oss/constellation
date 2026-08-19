@@ -1,0 +1,24 @@
+# pre-commit hook that runs constellationctl image-check + iac-check before allowing commit.
+# Drop this into the consumer's .pre-commit-config.yaml.
+#
+# Usage:
+#   pip install pre-commit
+#   pre-commit install
+#   pre-commit run --all-files
+
+repos:
+  - repo: local
+    hooks:
+      - id: constellationctl-iac
+        name: Constellation IaC scan
+        entry: constellationctl iac-check
+        language: system
+        files: '\.(tf|tfvars|ya?ml|json|Dockerfile)$'
+        pass_filenames: true
+
+      - id: constellationctl-model
+        name: Constellation ML model scan
+        entry: constellationctl model-check
+        language: system
+        files: '\.(pt|pth|onnx|safetensors)$'
+        pass_filenames: true

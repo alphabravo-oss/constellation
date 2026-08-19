@@ -1,0 +1,25 @@
+wrote SARIF: /home/mj/code/constellation-all/constellation/deploy/e2e/threat-scenarios/01-image-scan/captures/nginx-1.14.2.sarif
+wrote JSON:  /home/mj/code/constellation-all/constellation/deploy/e2e/threat-scenarios/01-image-scan/captures/nginx-1.14.2.json
+
+Image:        nginx:1.14.2
+Engines:      syft, trivy, grype
+Packages:     109
+Findings:     217
+
+  critical  31
+  high      82
+  medium    54
+  low       43
+
+Top findings:
+  SEVERITY   CVE             PACKAGE@VERSION                       FIXED
+  CRITICAL   CVE-2017-12424  login@1:4.4-4.1                       1:4.4-4.1+deb9u1
+  CRITICAL   CVE-2017-12424  passwd@1:4.4-4.1                      1:4.4-4.1+deb9u1
+  CRITICAL   CVE-2017-12652  libpng16-16@1.6.28-1                  -
+  CRITICAL   CVE-2018-25011  libwebp6@0.5.2-1                      0.5.2-1+deb9u1
+  CRITICAL   CVE-2018-25014  libwebp6@0.5.2-1                      0.5.2-1+deb9u1
+  CRITICAL   CVE-2019-11068  libxslt1.1@1.1.29-2.1                 1.1.29-2.1+deb9u1
+  CRITICAL   CVE-2019-12900  libbz2-1.0@1.0.6-8.1                  -
+  CRITICAL   CVE-2019-8457   libdb5.3@5.3.28-12+deb9u1             -
+  CRITICAL   CVE-2020-36328  libwebp6@0.5.2-1                      0.5.2-1+deb9u1
+  CRITICAL   CVE-2020-36329  libwebp6@0.5.2-1                      0.5.2-1+deb9u1

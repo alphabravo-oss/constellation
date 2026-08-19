@@ -1,0 +1,30 @@
+[Unit]
+Description=Constellation Control-Plane API (HTTP, scan jobs, audit, scoring)
+Documentation=https://github.com/alphabravocompany/constellation
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=constellation
+Group=constellation
+EnvironmentFile=/etc/constellation/api.env
+ExecStart=/usr/local/bin/constellation-api
+WorkingDirectory=/var/lib/constellation
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=constellation-api
+
+# API serves HTTP + opens many DB connections; raise descriptor cap.
+LimitNOFILE=65536
+
+# Modest hardening (relaxed for portability across RHEL/SLES/Ubuntu).
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

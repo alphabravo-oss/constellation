@@ -1,0 +1,214 @@
+{{- if .Values.operator.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "constellation.fullname" . }}-operator
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+spec:
+  replicas: {{ .Values.operator.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: operator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "constellation.name" . }}
+        app.kubernetes.io/component: operator
+    spec:
+      {{- include "constellation.pullSecrets" . | nindent 6 }}
+      {{- include "constellation.podSecurityContext" . | nindent 6 }}
+      serviceAccountName: {{ include "constellation.fullname" . }}-operator
+      containers:
+        - name: operator
+          image: {{ include "constellation.roleImage" (dict "ctx" . "role" "operator") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- include "constellation.containerSecurityContext" . | nindent 10 }}
+          {{- with .Values.operator.args }}
+          args: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          env:
+            - name: OPERATOR_NAMESPACE
+              value: {{ .Release.Namespace | quote }}
+            - name: WATCH_NAMESPACE
+              value: {{ if .Values.namespaced }}{{ .Release.Namespace | quote }}{{ else }}""{{ end }}
+            - name: CONSTELLATION_API_URL
+              value: {{ include "constellation.apiURL" . | quote }}
+            - name: CONSTELLATION_CLUSTER_NAME
+              value: {{ include "constellation.clusterName" . | quote }}
+            {{- if .Values.clusterRegistration.clusterId }}
+            - name: CONSTELLATION_CLUSTER_ID
+              value: {{ .Values.clusterRegistration.clusterId | quote }}
+            {{- end }}
+            - name: CONSTELLATION_OPERATOR_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "constellation.runtimeAgentTokenSecret" . }}
+                  key: token
+                  optional: true
+            - name: RUNTIME_AGENT_TOKEN_FILE
+              value: /var/run/constellation/runtime-agent-token/token
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: runtime-agent-token
+              mountPath: /var/run/constellation/runtime-agent-token
+              readOnly: true
+          resources: {{- toYaml .Values.operator.resources | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: runtime-agent-token
+          secret:
+            secretName: {{ include "constellation.runtimeAgentTokenSecret" . }}
+            optional: true
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "constellation.fullname" . }}-operator
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "constellation.fullname" . }}-operator
+rules:
+  - apiGroups: ["constellation.alphabravo.io"]
+    resources: ["constellationclusters"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["constellation.alphabravo.io"]
+    resources: ["constellationclusters/status"]
+    verbs: ["get", "update", "patch"]
+  # GitOps policy CRs reconciled by the AdmissionRule/ResponseRule controllers
+  # when --database-url is set. Their informers List/Watch the CRs and the
+  # controllers Update status + manage finalizers; without these rules the
+  # cache never syncs and policy reconcile is broken.
+  - apiGroups: ["constellation.alphabravo.io"]
+    resources: ["constellationadmissionrules", "constellationresponserules"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["constellation.alphabravo.io"]
+    resources: ["constellationadmissionrules/status", "constellationresponserules/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["constellation.alphabravo.io"]
+    resources: ["constellationadmissionrules/finalizers", "constellationresponserules/finalizers"]
+    verbs: ["update"]
+  # B7 — broader CRD coverage: DPI/WAF signatures, vuln exception profiles.
+  # Reconciled by the SignatureRule/VulnProfile controllers (SetupMatrixControllers)
+  # when --database-url is set. (constellationcomplianceexemptions ships as a scaffold CRD;
+  # its reconciler is TODO(matrix), but the RBAC is included so it activates without an RBAC
+  # change once wired.) (ConstellationDLPSensor was removed in P0-01 — orphan surface.)
+  - apiGroups: ["constellation.alphabravo.io"]
+    resources: ["constellationsignaturerules", "constellationvulnprofiles", "constellationcomplianceexemptions"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["constellation.alphabravo.io"]
+    resources: ["constellationsignaturerules/status", "constellationvulnprofiles/status", "constellationcomplianceexemptions/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["constellation.alphabravo.io"]
+    resources: ["constellationsignaturerules/finalizers", "constellationvulnprofiles/finalizers", "constellationcomplianceexemptions/finalizers"]
+    verbs: ["update"]
+  # P0-08 — policy-groups: NeuVector-style workload groups + group->group network segmentation
+  # edges. Reconciled by the Group/NetworkRule controllers (SetupGroupControllers) when
+  # --database-url is set.
+  - apiGroups: ["constellation.alphabravo.io"]
+    resources: ["constellationgroups", "constellationnetworkrules"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["constellation.alphabravo.io"]
+    resources: ["constellationgroups/status", "constellationnetworkrules/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["constellation.alphabravo.io"]
+    resources: ["constellationgroups/finalizers", "constellationnetworkrules/finalizers"]
+    verbs: ["update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "constellation.fullname" . }}-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "constellation.fullname" . }}-operator
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "constellation.fullname" . }}-operator
+    namespace: {{ .Release.Namespace }}
+---
+{{- if .Values.namespaced }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "constellation.fullname" . }}-operator-workloads
+  namespace: {{ .Release.Namespace }}
+rules:
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "daemonsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "constellation.fullname" . }}-operator-workloads
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "constellation.fullname" . }}-operator-workloads
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "constellation.fullname" . }}-operator
+    namespace: {{ .Release.Namespace }}
+{{- else }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "constellation.fullname" . }}-operator-workloads
+rules:
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "daemonsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "constellation.fullname" . }}-operator-workloads
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "constellation.fullname" . }}-operator-workloads
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "constellation.fullname" . }}-operator
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- end }}

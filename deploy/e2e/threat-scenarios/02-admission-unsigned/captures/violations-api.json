@@ -1,0 +1,74 @@
+{
+    "violations": [
+        {
+            "at": "2026-05-12T15:27:04Z",
+            "deployment": {
+                "kind": "Deployment",
+                "name": "payments-api",
+                "namespace": "payments"
+            },
+            "deployment_id": "3ee224f6-56a4-4371-bb45-58e3c53da26e",
+            "id": "81f6fbb9-1e1a-4e5e-a413-49c869b7fa78",
+            "kind": "admission",
+            "message": "denied by constellation policy \"require-image-signature\": missing constellation image-signed annotation",
+            "policy_name": "require-image-signature",
+            "severity": "critical"
+        },
+        {
+            "at": "2026-05-12T15:22:02Z",
+            "deployment": {
+                "kind": "Deployment",
+                "name": "payments-api",
+                "namespace": "payments"
+            },
+            "deployment_id": "3ee224f6-56a4-4371-bb45-58e3c53da26e",
+            "id": "470bcc24-4958-47d5-885f-93dd4279d197",
+            "kind": "admission",
+            "message": "denied by constellation policy \"require-image-signature\": missing constellation image-signed annotation",
+            "policy_name": "require-image-signature",
+            "severity": "critical"
+        },
+        {
+            "at": "2026-05-12T15:16:06Z",
+            "deployment": {
+                "kind": "Deployment",
+                "name": "payments-api",
+                "namespace": "payments"
+            },
+            "deployment_id": "3ee224f6-56a4-4371-bb45-58e3c53da26e",
+            "id": "bf8a5387-9f95-496d-85d2-cf822e55beed",
+            "kind": "admission",
+            "message": "denied by constellation policy \"require-image-signature\": missing constellation image-signed annotation",
+            "policy_name": "require-image-signature",
+            "severity": "critical"
+        },
+        {
+            "at": "2026-05-12T14:17:58Z",
+            "deployment": {
+                "kind": "Deployment",
+                "name": "dvwa",
+                "namespace": "edge"
+            },
+            "deployment_id": "752ed838-a7a8-42fa-aedf-374664e4a693",
+            "id": "74db3680-72ac-4de0-ab31-319ffb5c2010",
+            "kind": "admission",
+            "message": "image lacks signature annotation",
+            "policy_name": "require-image-signature",
+            "severity": "medium"
+        },
+        {
+            "at": "2026-05-12T14:13:37Z",
+            "deployment": {
+                "kind": "Deployment",
+                "name": "nginx-legacy",
+                "namespace": "checkout"
+            },
+            "deployment_id": "c1e5456e-a0eb-42b6-89ac-69dd7de7a418",
+            "id": "30426d27-cd36-4727-8e6f-07adf91ddf07",
+            "kind": "admission",
+            "message": "container has writable rootfs",
+            "policy_name": "require-read-only-rootfs",
+            "severity": "low"
+        }
+    ]
+}

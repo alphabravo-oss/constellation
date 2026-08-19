@@ -1,0 +1,371 @@
+# docker-compose.yaml — single-VM Constellation demo.
+#
+# Goal: `make compose-images && docker compose up` boots the full platform on one host.
+# Production still uses the Helm chart in deploy/charts/constellation/ — this file is for
+# laptop demos, sales POCs, and developer inner loops.
+#
+# Image references default to `constellation/<role>:dev` so a fresh checkout boots without
+# internet pulls AFTER running `make compose-images`. Set REGISTRY=... to point at a private
+# registry instead.
+#
+# Topology:
+#
+#   postgres            pgvector-enabled Postgres 16
+#   migrate             one-shot goose migrations
+#   bootstrap-tokens    one-shot — mints scanner + runtime-agent tokens, writes to a shared
+#                        volume that other services mount. See deploy/docker/bootstrap-tokens.sh.
+#   seed                one-shot demo data load              (profile: seed)
+#   api                 control-plane
+#   scanner             in-cluster scanner worker (kept for parity; in compose it's idle until
+#                        a token is provisioned for it — see deploy/docker/bootstrap-tokens.sh)
+#   scanner-driver      NEW — polls scan_jobs every SCAN_INTERVAL, runs trivy/syft/grype,
+#                        scans LOCAL Docker images via /var/run/docker.sock
+#   operator            singleton; idle in compose (needs a real K8s API to reconcile)
+#   discoverer          NEW — watches one or more K8s clusters and projects workloads into
+#                        the `deployments` table. Mounts kubeconfig(s) RO.
+#   runtime-agent       NEW — eBPF kernel data-plane. LINUX HOST ONLY.   (profile: runtime)
+#   vulndb-aggregator   NEW — pulls fresh CVE / KEV / EPSS / OSV data    (profile: cvedb)
+#   frontend            Vite SPA served by nginx; proxies /api → api
+#
+# Profiles:
+#
+#   (default)                       postgres+migrate+bootstrap-tokens+api+scanner+scanner-driver
+#                                   +operator+discoverer+frontend
+#   --profile seed                  + seed
+#   --profile runtime               + runtime-agent (Linux host only)
+#   --profile cvedb                 + vulndb-aggregator one-shot
+#
+# Quickstart:
+#
+#   make compose-images
+#   docker compose --profile seed up -d
+#   curl http://localhost:18080/healthz                            # 200
+#   open http://localhost:3000                                     # SPA
+#
+# Hot-reload (Go + Vite) overlay:
+#
+#   docker compose -f docker-compose.yaml -f compose.dev.yaml up
+#
+# Scan a local image (no registry round-trip):
+#
+#   docker pull nginx:1.14.2
+#   docker compose up -d
+#   # enqueue a scan via the API (see docs/deployment-compose.md), the driver picks it up
+#
+# Tear down:
+#
+#   docker compose down -v
+
+x-image-tag: &image-tag dev
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: constellation
+      POSTGRES_PASSWORD: constellation
+      POSTGRES_DB: constellation
+    ports: ["15433:5432"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "constellation"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - constellation-pg:/var/lib/postgresql/data
+
+  migrate:
+    image: ghcr.io/pressly/goose:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      GOOSE_DRIVER: postgres
+      GOOSE_DBSTRING: "postgres://constellation:constellation@postgres:5432/constellation?sslmode=disable"
+    volumes:
+      - ./db/migrations:/migrations:ro
+    command: ["-dir", "/migrations", "up"]
+    restart: "no"
+
+  # bootstrap-tokens runs once after migrations. It generates a random scanner token and a
+  # random runtime-agent token, inserts the sha256 hashes into scanner_tokens /
+  # runtime_agent_tokens, and writes the raw tokens to /run/constellation-tokens/{scanner,
+  # runtime-agent}.token in a SHARED VOLUME. Downstream services mount that volume RO and
+  # `cat` the token at startup. Idempotent on restart — see deploy/docker/bootstrap-tokens.sh.
+  bootstrap-tokens:
+    image: pgvector/pgvector:pg16
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: "postgres://constellation:constellation@postgres:5432/constellation?sslmode=disable"
+      TOKEN_DIR: /run/constellation-tokens
+      ORG_NAME: demo
+    entrypoint: ["/bin/bash", "/opt/constellation/bootstrap-tokens.sh"]
+    volumes:
+      - ./deploy/docker/bootstrap-tokens.sh:/opt/constellation/bootstrap-tokens.sh:ro
+      - constellation-tokens:/run/constellation-tokens
+    restart: "no"
+
+  # Optional one-shot demo data load. Off by default — opt in with `--profile seed`. We do
+  # NOT depend on the seed service from any long-running service: a real demo against a
+  # populated DB should not wipe state on every restart.
+  seed:
+    image: constellation/seed:dev
+    profiles: ["seed"]
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.seed
+    depends_on:
+      bootstrap-tokens:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: "postgres://constellation:constellation@postgres:5432/constellation?sslmode=disable"
+    restart: "no"
+
+  api:
+    image: constellation/api:dev
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.api
+    depends_on:
+      bootstrap-tokens:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: "postgres://constellation:constellation@postgres:5432/constellation?sslmode=disable"
+      JWT_KEYS: "constellation-dev-key-32-bytes-long"
+      CORS_ORIGINS: "http://localhost:3000,http://localhost:5173,http://localhost:8081"
+      OTEL_EXPORTER_OTLP_ENDPOINT: ""
+    # Host port 18080 → container 8080 (per the deployment-compose docs URL convention).
+    ports: ["18080:8080"]
+    # Network alias so the frontend's nginx.conf (which hardcodes `constellation-api` to
+    # match the Helm Service name) resolves the same way under compose.
+    networks:
+      default:
+        aliases:
+          - constellation-api
+    # Wolfi-base ships busybox netstat but NOT curl/wget. We probe the listening socket
+    # rather than a /readyz call; the API hasn't drifted from "process up == app up".
+    healthcheck:
+      test: ["CMD-SHELL", "netstat -ln 2>/dev/null | grep -q ':8080 ' || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  # The in-cluster scanner worker shape. Kept here for parity with the Helm topology so the
+  # ops loop (logs / restarts / scaling) feels the same in compose. Reads the scanner token
+  # bootstrap-tokens wrote to the shared volume.
+  scanner:
+    image: constellation/scanner:dev
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.scanner
+    depends_on:
+      api:
+        condition: service_healthy
+      bootstrap-tokens:
+        condition: service_completed_successfully
+    environment:
+      CONSTELLATION_CONTROL_PLANE_URL: "http://api:8080"
+      CONSTELLATION_SCANNER_MAX_CONCURRENT: "2"
+      CONSTELLATION_TOKEN_FILE: /run/constellation-tokens/scanner.token
+    # Wolfi-base ships /bin/sh — slurp the token from the shared volume, then exec the
+    # scanner binary so PID 1 stays the worker (signals flow correctly).
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        export CONSTELLATION_SCANNER_TOKEN="$(cat $${CONSTELLATION_TOKEN_FILE})"
+        exec /usr/local/bin/constellation-scanner
+    volumes:
+      - constellation-tokens:/run/constellation-tokens:ro
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 2G
+          cpus: "2"
+
+  # scanner-driver is the compose-native scanner: it talks directly to Postgres + the API,
+  # mints its own short-TTL scanner token per org, processes pending scan_jobs, and most
+  # importantly can scan images already present in the host Docker daemon via the mounted
+  # /var/run/docker.sock. This is what makes `docker pull nginx:X && enqueue scan` work
+  # without a registry round-trip.
+  scanner-driver:
+    image: constellation/scanner-driver:dev
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.scanner-driver
+    depends_on:
+      api:
+        condition: service_healthy
+      bootstrap-tokens:
+        condition: service_completed_successfully
+    environment:
+      API_URL: "http://api:8080"
+      DATABASE_URL: "postgres://constellation:constellation@postgres:5432/constellation?sslmode=disable"
+      SCAN_INTERVAL: "30s"
+      # Tell trivy/syft/grype to try the docker daemon first. The aggregator's CLI engines
+      # use these defaults via the upstream tools' resolver order.
+      DOCKER_HOST: "unix:///var/run/docker.sock"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - constellation-tokens:/run/constellation-tokens:ro
+    restart: unless-stopped
+
+  operator:
+    image: constellation/operator:dev
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.operator
+    depends_on:
+      api:
+        condition: service_healthy
+    # Operator only does anything against a real K8s API. In compose it stays running so we
+    # can verify the binary boots — the reconciler loop is a no-op without a kubeconfig.
+    command: ["--leader-elect=false"]
+
+  # discoverer watches a single Kubernetes cluster's API server and projects workloads into
+  # the `deployments` table. Compose currently runs ONE replica. Two ways to configure it:
+  #
+  #   (a) CLUSTERS_JSON='[{"name":"prod-us-east-1","kubeconfig":"/kube/prod.yaml"},
+  #                       {"name":"edge-eu-west-1","kubeconfig":"/kube/edge.yaml"}]'
+  #       — JSON array. For multi-cluster setups, scale the service: each replica reads
+  #         CLUSTER_INDEX from the compose replica id (see discoverer-entrypoint.sh).
+  #
+  #   (b) CLUSTER_NAME + KUBECONFIG_PATH for a single-cluster demo (the common case).
+  #
+  # If neither variable is set the service exits 0 with "no clusters configured" so the rest
+  # of the stack still boots clean.
+  discoverer:
+    image: constellation/discoverer:dev
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.discoverer
+    depends_on:
+      api:
+        condition: service_healthy
+      bootstrap-tokens:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: "postgres://constellation:constellation@postgres:5432/constellation?sslmode=disable"
+      # Single-cluster path:
+      CLUSTER_NAME: "${CLUSTER_NAME:-dev-local}"
+      KUBECONFIG: "${KUBECONFIG_PATH:-/kube/config}"
+      # Multi-cluster path (overrides the above when set):
+      CLUSTERS_JSON: "${CLUSTERS_JSON:-}"
+      ORG_ID_FILE: /run/constellation-tokens/org.id
+      NAMESPACE_FILTER: "${NAMESPACE_FILTER:-*}"
+      RECONCILE_INTERVAL: "${RECONCILE_INTERVAL:-30s}"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        # Pull ORG_ID from the file bootstrap-tokens wrote. constellation-discoverer requires
+        # ORG_ID as env. If the kubeconfig isn't mounted we exit clean so the stack stays up.
+        if [ ! -s "$${ORG_ID_FILE}" ]; then
+          echo "discoverer: org.id not found — bootstrap-tokens probably failed" >&2
+          exit 1
+        fi
+        export ORG_ID="$(cat $${ORG_ID_FILE})"
+        if [ -n "$${CLUSTERS_JSON}" ]; then
+          echo "discoverer: CLUSTERS_JSON multi-cluster mode is not yet wired in compose."
+          echo "discoverer: scale the service to N replicas + pass per-replica env, or"
+          echo "discoverer: switch to the Helm chart for production fan-out."
+          sleep infinity
+        fi
+        if [ ! -f "$${KUBECONFIG}" ]; then
+          echo "discoverer: no kubeconfig at $${KUBECONFIG} — sleeping."
+          echo "discoverer: bind-mount a kubeconfig at /kube/config (or set KUBECONFIG_PATH) to enable."
+          sleep infinity
+        fi
+        # Detect the empty placeholder kubeconfig (clusters: []) — sleep instead of crash-looping.
+        if grep -qE '^clusters:[[:space:]]*\[\][[:space:]]*$$' "$${KUBECONFIG}"; then
+          echo "discoverer: empty placeholder kubeconfig detected — sleeping."
+          echo "discoverer: set KUBECONFIG_HOST_PATH=/path/to/kubeconfig and re-up to enable."
+          sleep infinity
+        fi
+        exec /usr/local/bin/constellation-discoverer
+    volumes:
+      - constellation-tokens:/run/constellation-tokens:ro
+      # The host kubeconfig file is mounted RO. Override with KUBECONFIG_PATH (host path) at
+      # the file level — Docker will refuse to mount a non-existent host path otherwise, so
+      # the default points to an empty placeholder file that ships with the repo.
+      - ${KUBECONFIG_HOST_PATH:-./deploy/docker/empty-kubeconfig.yaml}:/kube/config:ro
+    restart: unless-stopped
+
+  # runtime-agent — Linux-host ONLY. Loads the in-tree eBPF program and posts the resulting
+  # event stream to the control-plane. Opt in with `--profile runtime`. The agent needs the
+  # full host kernel surface: pid + network namespace, BPF / PERFMON / SYS_PTRACE caps, and
+  # access to /sys/fs/bpf + /sys/kernel/btf so the loader can resolve CO-RE BTF.
+  #
+  # On macOS / Windows hosts the Docker VM kernel does not expose BTF in the standard layout,
+  # so the agent will fail fast at startup — this is expected.
+  runtime-agent:
+    image: constellation/runtime-agent:dev
+    profiles: ["runtime"]
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.runtime-agent
+    depends_on:
+      api:
+        condition: service_healthy
+      bootstrap-tokens:
+        condition: service_completed_successfully
+    privileged: true
+    pid: host
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+      - BPF
+      - PERFMON
+      - SYS_PTRACE
+    environment:
+      CONSTELLATION_API_URL: "http://localhost:18080"
+      CONSTELLATION_NODE_NAME: "compose-host"
+      CONSTELLATION_BPF_OBJ: /opt/constellation/runtime.bpf.o
+      CONSTELLATION_TOKEN_FILE: /run/constellation-tokens/runtime-agent.token
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        export RUNTIME_AGENT_TOKEN="$(cat $${CONSTELLATION_TOKEN_FILE})"
+        exec /usr/local/bin/constellation-runtime-agent
+    volumes:
+      - constellation-tokens:/run/constellation-tokens:ro
+      - /sys:/sys:ro
+      - /sys/fs/bpf:/sys/fs/bpf
+      - /sys/kernel/btf:/sys/kernel/btf:ro
+      - /proc:/host/proc:ro
+    restart: unless-stopped
+
+  # vulndb-aggregator — one-shot data refresh from NVD + KEV + EPSS + OSV. Sibling repo
+  # (constellation-vulndb) publishes the image. Run on-demand with `--profile cvedb`.
+  vulndb-aggregator:
+    image: ghcr.io/alphabravocompany/constellation-vulndb:latest
+    profiles: ["cvedb"]
+    depends_on:
+      bootstrap-tokens:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: "postgres://constellation:constellation@postgres:5432/constellation?sslmode=disable"
+      # Override with a token if you hit NVD rate limits (50 req/30s anonymous, 5k with key).
+      NVD_API_KEY: "${NVD_API_KEY:-}"
+    restart: "no"
+
+  frontend:
+    image: constellation/frontend:dev
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.frontend
+      args:
+        VITE_API_URL: "/api"
+    depends_on:
+      api:
+        condition: service_healthy
+    # Host port 3000 → container 8080 (per the deployment-compose docs URL convention).
+    ports: ["3000:8080"]
+
+volumes:
+  constellation-pg: {}
+  # Shared volume so bootstrap-tokens can hand the raw tokens to scanner / runtime-agent /
+  # discoverer without committing secrets to the repo or to compose env values.
+  constellation-tokens: {}

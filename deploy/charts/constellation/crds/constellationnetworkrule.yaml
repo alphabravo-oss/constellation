@@ -1,0 +1,104 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: constellationnetworkrules.constellation.alphabravo.io
+spec:
+  group: constellation.alphabravo.io
+  scope: Cluster
+  names:
+    kind: ConstellationNetworkRule
+    listKind: ConstellationNetworkRuleList
+    plural: constellationnetworkrules
+    singular: constellationnetworkrule
+    shortNames: [cnr]
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Cluster
+          type: string
+          jsonPath: .spec.clusterID
+        - name: From
+          type: string
+          jsonPath: .spec.fromGroup
+        - name: To
+          type: string
+          jsonPath: .spec.toGroup
+        - name: Mode
+          type: string
+          jsonPath: .spec.mode
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+      schema:
+        openAPIV3Schema:
+          # Spec mirrors a `group_rule_edges` row (migration 121) — a directed group→group network
+          # segmentation edge (NeuVector NvSecurityRule ingress/egress parity). The backing row's
+          # identity is (org_id, cluster_id, from_group, to_group); metadata.name is a handle only.
+          type: object
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [orgID, clusterID, fromGroup, toGroup]
+              properties:
+                orgID:
+                  type: string
+                  x-kubernetes-validations:
+                    - rule: "self == oldSelf"
+                      message: "orgID is immutable"
+                clusterID:
+                  type: string
+                  x-kubernetes-validations:
+                    - rule: "self == oldSelf"
+                      message: "clusterID is immutable"
+                fromGroup:
+                  type: string
+                  x-kubernetes-validations:
+                    - rule: "self == oldSelf"
+                      message: "fromGroup is immutable"
+                toGroup:
+                  type: string
+                  x-kubernetes-validations:
+                    - rule: "self == oldSelf"
+                      message: "toGroup is immutable"
+                ports:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      protocol:
+                        type: string
+                        enum: ["", TCP, UDP, SCTP, ICMP]
+                      port:
+                        type: integer
+                        minimum: 0
+                        maximum: 65535
+                # SAFETY: mode defaults to "monitor" (observe). "protect" (enforcing default-deny) is
+                # opt-in — a freshly authored edge never blocks live traffic until promoted.
+                mode:
+                  type: string
+                  enum: [discover, monitor, protect]
+                comment:
+                  type: string
+            status:
+              type: object
+              properties:
+                phase: { type: string }
+                observedGeneration: { type: integer, format: int64 }
+                lastAppliedOrgID: { type: string }
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required: [type, status, lastTransitionTime, reason, message]
+                    properties:
+                      type:               { type: string }
+                      status:             { type: string }
+                      observedGeneration: { type: integer, format: int64 }
+                      lastTransitionTime: { type: string, format: date-time }
+                      reason:             { type: string }
+                      message:            { type: string }

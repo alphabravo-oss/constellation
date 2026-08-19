@@ -1,0 +1,23 @@
+{
+  "schema": {
+    "version": "16.0.0"
+  },
+  "source": {
+    "type": "image",
+    "target": "registry.suse.com/suse/sle15:15.5"
+  },
+  "distro": {
+    "id": "sles",
+    "name": "SUSE Linux Enterprise Server",
+    "versionID": "15.5"
+  },
+  "artifacts": [
+    {
+      "id": "pkg-sles-openssl",
+      "name": "openssl",
+      "version": "3.1.4-150500.5.27.1",
+      "type": "rpm",
+      "purl": "pkg:rpm/sles/openssl@3.1.4-150500.5.27.1?arch=x86_64"
+    }
+  ]
+}

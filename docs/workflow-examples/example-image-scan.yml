@@ -1,0 +1,107 @@
+# Example: scan a container image with constellationctl on every PR + push.
+#
+# Copy this file into the customer repo at `.github/workflows/constellation-image.yml`
+# and adjust `IMAGE_REF` to point at the artifact your CI produces.
+#
+# Required repository secrets:
+#   CONSTELLATION_SERVER  https://constellation.yourco.com
+#   CONSTELLATION_TOKEN   value of `constellationctl tokens create --scope ci-runner`
+name: constellation-image-scan
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    container:
+      image: constellation/cli:latest
+    env:
+      CONSTELLATION_SERVER: ${{ secrets.CONSTELLATION_SERVER }}
+      CONSTELLATION_TOKEN:  ${{ secrets.CONSTELLATION_TOKEN }}
+      REPO_NAME: ${{ github.event.repository.name }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      RUN_NUMBER: ${{ github.run_number }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Resolve image ref
+        run: |
+          if [ -n "${PR_NUMBER}" ]; then
+            echo "IMAGE_REF=${REPO_NAME}:pr-${PR_NUMBER}" >> "$GITHUB_ENV"
+          else
+            echo "IMAGE_REF=${REPO_NAME}:run-${RUN_NUMBER}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Run constellationctl image-check
+        id: scan
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          constellationctl image-check "$IMAGE_REF" \
+            --fail-on critical \
+            --sarif  constellation.sarif \
+            --json   constellation.json \
+            --quiet  | tee scan-summary.txt
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Upload SARIF to GitHub Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@dd903d2e4f5405488e5ef1422510ee31c8b32357
+        with:
+          sarif_file: constellation.sarif
+          category: constellation-image
+
+      - name: Upload scan artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: constellation-image-scan
+          path: |
+            constellation.sarif
+            constellation.json
+            scan-summary.txt
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+        env:
+          IMAGE_REF: ${{ env.IMAGE_REF }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const summary = fs.existsSync('scan-summary.txt')
+              ? fs.readFileSync('scan-summary.txt', 'utf8')
+              : '_(no summary produced)_';
+            const imageRef = process.env.IMAGE_REF || 'unknown';
+            const body = [
+              '### Constellation image scan',
+              '',
+              '`' + imageRef + '`',
+              '',
+              '```',
+              summary.slice(0, 60000),
+              '```',
+            ].join('\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+
+      - name: Fail on critical findings
+        if: steps.scan.outputs.exit_code != '0'
+        run: |
+          echo "::error::constellationctl image-check exited non-zero (critical findings present)."
+          exit 1

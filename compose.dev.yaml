@@ -1,0 +1,127 @@
+# compose.dev.yaml — hot-reload overlay.
+#
+# Use:
+#   docker compose -f docker-compose.yaml -f compose.dev.yaml up
+#
+# Changes vs the base file:
+#   - api / scanner / operator / scanner-driver: switch the image from the production
+#     wolfi-base build to a golang:1.26 dev image. Source is bind-mounted RW into /src and
+#     `go run` is the entrypoint, so editing a .go file triggers a recompile on the next
+#     restart. The Go module cache is preserved in a named volume so subsequent builds are
+#     ~2-3s instead of ~45s.
+#   - frontend: replaces the nginx-served build with `npm run dev` (vite) bound to
+#     0.0.0.0:5173. Source is bind-mounted; HMR works end-to-end with the host browser.
+#   - discoverer: same dev-image swap (bind-mount + `go run`).
+#   - migrations are bind-mounted RO so `goose up` picks up changes without rebuilding.
+#
+# Why an overlay file rather than a profile?
+#   Profiles can ADD services but not OVERRIDE images / entrypoints / volumes; the dev loop
+#   needs all three. Overlay is the idiomatic Compose answer.
+
+services:
+  # Shared Go dev image — built once, reused by every Go service below.
+  # It's an anonymous one-shot service that exists purely so `docker compose build` can
+  # surface failures up front. Long-running services that depend on it `image:` it directly.
+  go-dev-image:
+    image: constellation/go-dev:dev
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.go-dev
+    profiles: ["never"]   # never actually runs; only used for image build orchestration
+    command: ["true"]
+
+  api:
+    image: constellation/go-dev:dev
+    environment:
+      DATABASE_URL: "postgres://constellation:constellation@postgres:5432/constellation?sslmode=disable"
+      JWT_KEYS: "constellation-dev-key-32-bytes-long"
+      CORS_ORIGINS: "http://localhost:3000,http://localhost:5173,http://localhost:8081"
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        cd /src && go run ./cmd/constellation-api
+    volumes:
+      - ./:/src
+      - go-mod-cache:/go/pkg/mod
+      - go-build-cache:/root/.cache/go-build
+    working_dir: /src
+
+  scanner:
+    image: constellation/scanner:dev   # keep the trivy/syft/grype-bundled base
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        # Dev-mode scanner: install Go on the fly is too slow, so we still use the baked
+        # binary but bind-mount source. To rebuild the scanner image after a code change:
+        #   docker compose -f docker-compose.yaml -f compose.dev.yaml build scanner
+        export CONSTELLATION_SCANNER_TOKEN="$(cat /run/constellation-tokens/scanner.token)"
+        exec /usr/local/bin/constellation-scanner
+    volumes:
+      - ./:/src:ro
+      - constellation-tokens:/run/constellation-tokens:ro
+
+  scanner-driver:
+    image: constellation/scanner-driver:dev   # keep the trivy/syft/grype-bundled base
+    entrypoint: ["/bin/bash", "/usr/local/bin/scanner-driver-loop.sh"]
+    volumes:
+      - ./:/src:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - constellation-tokens:/run/constellation-tokens:ro
+
+  operator:
+    image: constellation/go-dev:dev
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        cd /src && go run ./cmd/constellation-operator --leader-elect=false
+    volumes:
+      - ./:/src
+      - go-mod-cache:/go/pkg/mod
+      - go-build-cache:/root/.cache/go-build
+    working_dir: /src
+
+  discoverer:
+    image: constellation/go-dev:dev
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        if [ ! -s /run/constellation-tokens/org.id ]; then
+          echo "discoverer(dev): org.id not found" >&2; exit 1
+        fi
+        export ORG_ID="$(cat /run/constellation-tokens/org.id)"
+        if [ ! -f "$${KUBECONFIG}" ] || grep -qE '^clusters:[[:space:]]*\[\][[:space:]]*$$' "$${KUBECONFIG}"; then
+          echo "discoverer(dev): no real kubeconfig — sleeping"; sleep infinity
+        fi
+        cd /src && go run ./cmd/constellation-discoverer
+    environment:
+      DATABASE_URL: "postgres://constellation:constellation@postgres:5432/constellation?sslmode=disable"
+      KUBECONFIG: /kube/config
+      ORG_ID_FILE: /run/constellation-tokens/org.id
+    volumes:
+      - ./:/src
+      - go-mod-cache:/go/pkg/mod
+      - go-build-cache:/root/.cache/go-build
+      - constellation-tokens:/run/constellation-tokens:ro
+      - ${KUBECONFIG_HOST_PATH:-./deploy/docker/empty-kubeconfig.yaml}:/kube/config:ro
+    working_dir: /src
+
+  frontend:
+    image: node:22-bookworm
+    working_dir: /src/frontend
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        cd /src/frontend
+        if [ ! -d node_modules ]; then npm ci; fi
+        exec npm run dev -- --host 0.0.0.0 --port 8080
+    environment:
+      VITE_API_URL: "http://localhost:18080/api"
+    volumes:
+      - ./:/src
+      - frontend-node-modules:/src/frontend/node_modules
+    ports: ["3000:8080", "24678:24678"]   # 24678 = vite HMR websocket
+
+volumes:
+  go-mod-cache: {}
+  go-build-cache: {}
+  frontend-node-modules: {}

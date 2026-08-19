@@ -1,0 +1,119 @@
+{{- if .Values.networkPolicyApplier.enabled }}
+{{- $clusterName := default (default .Release.Namespace .Values.clusterRegistration.name) .Values.networkPolicyApplier.clusterName -}}
+{{- $image := include "constellation.roleImage" (dict "ctx" . "role" "operator") -}}
+{{- if .Values.networkPolicyApplier.image.repository -}}
+  {{- $tag := default (include "constellation.imageTag" .) .Values.networkPolicyApplier.image.tag -}}
+  {{- $image = printf "%s:%s" .Values.networkPolicyApplier.image.repository $tag -}}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "constellation.fullname" . }}-network-policy-applier
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: network-policy-applier
+spec:
+  replicas: {{ .Values.networkPolicyApplier.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: network-policy-applier
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "constellation.name" . }}
+        app.kubernetes.io/component: network-policy-applier
+    spec:
+      {{- include "constellation.pullSecrets" . | nindent 6 }}
+      {{- include "constellation.podSecurityContext" . | nindent 6 }}
+      serviceAccountName: {{ include "constellation.fullname" . }}-network-policy-applier
+      containers:
+        - name: applier
+          image: {{ $image }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/usr/local/bin/constellation-netpolicy-applier"]
+          {{- include "constellation.containerSecurityContext" . | nindent 10 }}
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "constellation.dsnSecret" . }}
+                  key: {{ include "constellation.dsnSecretKey" . }}
+            - name: CONSTELLATION_API_URL
+              value: {{ include "constellation.apiURL" . | quote }}
+            - name: CONSTELLATION_CLUSTER_NAME
+              value: {{ $clusterName | quote }}
+            {{- if .Values.networkPolicyApplier.clusterId }}
+            - name: CLUSTER_ID
+              value: {{ .Values.networkPolicyApplier.clusterId | quote }}
+            - name: CONSTELLATION_CLUSTER_ID
+              value: {{ .Values.networkPolicyApplier.clusterId | quote }}
+            {{- else }}
+            - name: CLUSTER_NAME
+              value: {{ $clusterName | quote }}
+            {{- if .Values.clusterRegistration.clusterId }}
+            - name: CONSTELLATION_CLUSTER_ID
+              value: {{ .Values.clusterRegistration.clusterId | quote }}
+            {{- end }}
+            {{- end }}
+            - name: CONSTELLATION_NETWORK_POLICY_APPLIER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "constellation.runtimeAgentTokenSecret" . }}
+                  key: token
+                  optional: true
+            - name: RUNTIME_AGENT_TOKEN_FILE
+              value: /var/run/constellation/runtime-agent-token/token
+            - name: CONSTELLATION_NETWORK_POLICY_APPLIER_FLAVOR
+              value: {{ .Values.networkPolicyApplier.flavor | quote }}
+            - name: NETWORK_POLICY_APPLIER_INTERVAL
+              value: {{ .Values.networkPolicyApplier.interval | quote }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: runtime-agent-token
+              mountPath: /var/run/constellation/runtime-agent-token
+              readOnly: true
+          resources: {{- toYaml .Values.networkPolicyApplier.resources | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: runtime-agent-token
+          secret:
+            secretName: {{ include "constellation.runtimeAgentTokenSecret" . }}
+            optional: true
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "constellation.fullname" . }}-network-policy-applier
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: network-policy-applier
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "constellation.fullname" . }}-network-policy-applier
+rules:
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["cilium.io"]
+    resources: ["ciliumnetworkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["projectcalico.org"]
+    resources: ["globalnetworkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "constellation.fullname" . }}-network-policy-applier
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "constellation.fullname" . }}-network-policy-applier
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "constellation.fullname" . }}-network-policy-applier
+    namespace: {{ .Release.Namespace }}
+{{- end }}

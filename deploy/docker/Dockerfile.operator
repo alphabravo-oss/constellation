@@ -1,0 +1,32 @@
+# syntax=docker/dockerfile:1.7
+# Constellation Kubernetes operator image.
+#
+# Singleton (leader-elected). Reconciles ConstellationCluster CRs into Deployments,
+# DaemonSets, Services, CronJobs. No scanner CLIs, no API code — pure controller-runtime.
+
+ARG GO_VERSION=1.26
+ARG WOLFI_IMAGE=cgr.dev/chainguard/wolfi-base@sha256:34977aa13765da89f60fee8fe5230e2bb1c55192df08e383c58221ee0d1277fb
+
+FROM golang:${GO_VERSION}-bookworm AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+ARG VERSION=dev
+ENV CGO_ENABLED=0 GOOS=linux
+RUN go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
+      -o /out/constellation-operator ./cmd/constellation-operator && \
+    go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
+      -o /out/constellation-netpolicy-applier ./cmd/constellation-netpolicy-applier && \
+    go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
+      -o /out/constellation-k8s-compliance-collector ./cmd/constellation-k8s-compliance-collector
+
+FROM ${WOLFI_IMAGE} AS runtime
+RUN apk add --no-cache ca-certificates tzdata
+COPY --from=build /out/constellation-operator /usr/local/bin/constellation-operator
+COPY --from=build /out/constellation-netpolicy-applier /usr/local/bin/constellation-netpolicy-applier
+COPY --from=build /out/constellation-k8s-compliance-collector /usr/local/bin/constellation-k8s-compliance-collector
+RUN addgroup -S -g 10001 constellation && adduser -S -u 10001 -G constellation constellation
+USER 10001:10001
+EXPOSE 8081 8082
+ENTRYPOINT ["/usr/local/bin/constellation-operator"]

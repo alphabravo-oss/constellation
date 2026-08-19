@@ -1,0 +1,29 @@
+[Unit]
+Description=Constellation Audit Archiver (freeze + sign rolling audit window to S3)
+Documentation=https://github.com/alphabravocompany/constellation
+After=network-online.target postgresql.service
+
+# One-shot unit triggered by constellation-audit-archiver.timer.
+
+[Service]
+Type=oneshot
+User=constellation
+Group=constellation
+EnvironmentFile=/etc/constellation/audit-archiver.env
+ExecStart=/usr/local/bin/audit-archiver
+WorkingDirectory=/var/lib/constellation
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=constellation-audit-archiver
+
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+# Do not auto-restart a oneshot job; the timer schedules re-runs.
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

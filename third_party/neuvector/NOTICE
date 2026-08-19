@@ -1,0 +1,57 @@
+Constellation runtime-agent — vendored NeuVector data-plane
+============================================================
+
+This directory contains code copied verbatim from the NeuVector project,
+which is licensed under the Apache License, Version 2.0. The full text of
+that license is in ./LICENSE.
+
+Upstream:     https://github.com/neuvector/neuvector
+Source rev:   4247e24561a9cd225db73a7cfaf5c7b2c99ba0a5
+Source tag:   v5.5.1-rc4-33-g4247e245
+Vendored at:  2026-05-14
+
+Contents vendored
+-----------------
+  dp/        The C data-plane daemon (~30k LOC). Performs in-line packet
+             inspection via NFQUEUE or AF_PACKET, runs DPI parsers for
+             HTTP/DNS/MySQL/Postgres/Redis/Kafka/gRPC/SSL/SSH/etc., maintains
+             per-session byte/packet counters, and emits DPMsgConnect /
+             DPMsgThreatLog records back to the agent over a Unix socket.
+
+  base.h     Shared C macros (FLAGS_TEST, FLAGS_SET, byte order, …).
+             Referenced by dp/Makefile.rule via `-include ../base.h`.
+
+  defs.h     Wire-format definitions for the agent ↔ dp IPC protocol:
+             DPMsgHdr, DPMsgConnect, DPMsgSession, DPMsgThreatLog, etc.
+             Referenced via `-include ../defs.h`.
+
+  LICENSE    Apache License 2.0 (NeuVector upstream).
+
+Why a verbatim copy
+-------------------
+A clean fork keeps `git diff` against neuvector/main legible and lets us
+absorb upstream CVE / performance patches with a low-friction rebase.
+No code in this tree should be modified except via the sync procedure in
+./README.md; downstream behavior changes belong in
+constellation/internal/runtime/dp/ (the Go supervisor and IPC consumer
+that consumes the wire formats defined here).
+
+Modifications
+-------------
+None — files are byte-for-byte identical to the upstream revision listed
+above. Build artifacts (.objs/, .deps/, *.o, *.d, compile_commands.json)
+are excluded from the vendor.
+
+License
+-------
+Licensed under the Apache License, Version 2.0 (the "License"); you may
+not use these files except in compliance with the License. You may obtain
+a copy of the License at:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+License for the specific language governing permissions and limitations
+under the License.

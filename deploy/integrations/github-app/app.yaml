@@ -1,0 +1,50 @@
+# Constellation GitHub App manifest.
+#
+# Paste this into the "Create from manifest" flow at:
+#   https://github.com/organizations/<your-org>/settings/apps/new?state=
+#
+# GitHub will redirect to <hq_url>/integrations/github/installed with a
+# `code` parameter once submitted; exchange it for the credentials at
+# POST https://api.github.com/app-manifests/{code}/conversions.
+#
+# After creation, download the .pem private key from the App settings page
+# and feed everything into the env vars listed in INSTALL.md.
+name: Constellation Security
+url: https://constellation.example.com
+description: |
+  Constellation scans every pull request for container CVEs and
+  Infrastructure-as-Code misconfigurations, posts findings as PR comments,
+  and writes a commit status that blocks merge on critical issues.
+public: false
+
+# Webhook URL the App should POST events to. The webhook binary listens on
+# /webhook by default.
+hook_attributes:
+  url: https://constellation.example.com/api/v1/integrations/github/webhook
+  active: true
+
+# Where GitHub redirects after install. The setup_url is shown after the
+# Install button so you can complete server-side wiring.
+setup_url:    https://constellation.example.com/integrations/github/setup
+redirect_url: https://constellation.example.com/integrations/github/installed
+callback_urls:
+  - https://constellation.example.com/api/v1/integrations/github/callback
+
+# Permissions: keep these minimal. `pull_requests:write` is required to
+# comment, `statuses:write` to set the commit status, `contents:read` to
+# fetch the diff, and `security_events:write` so SARIF can upload.
+default_permissions:
+  contents:         read
+  metadata:         read
+  pull_requests:    write
+  statuses:         write
+  checks:           write
+  security_events:  write
+
+# Subscribed webhook events.
+default_events:
+  - pull_request
+  - push
+  - check_run
+
+request_oauth_on_install: false

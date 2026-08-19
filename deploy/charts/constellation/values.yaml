@@ -1,0 +1,932 @@
+# Default values for Constellation.
+#
+# This file is documented top-to-bottom; every knob below is referenced in
+# docs/deployment-helm.md (Values reference) with the default and when to change.
+
+# ---------------------------------------------------------------------------
+# Image defaults
+# ---------------------------------------------------------------------------
+# Each scaling-unit role (api / scanner / operator / discoverer / admission /
+# runtime-agent / archiver / frontend) is published as its OWN image at
+# `ghcr.io/alphabravo-oss/constellation/<role>:<tag>`.
+#
+# To pin every role to a specific build, set `image.tag` here. To override a
+# single role (e.g. canary a new scanner) set `<role>.image.repository` and/or
+# `<role>.image.tag`.
+image:
+  registry: ghcr.io/alphabravo-oss/constellation
+  pullPolicy: IfNotPresent
+  # Empty -> falls back to .Chart.appVersion (currently "0.1.0"). Use immutable
+  # release tags or digest-qualified role overrides in production.
+  tag: ""
+  # Optional list of imagePullSecrets applied to every Deployment / DaemonSet /
+  # CronJob / Job rendered by this chart.
+  pullSecrets: []
+  # - name: ghcr-pull-secret
+
+# ---------------------------------------------------------------------------
+# Default pod/container security posture
+# ---------------------------------------------------------------------------
+# Applied to non-privileged Constellation application workloads. Hook helper
+# containers and embedded Postgres render their own non-root restricted
+# contexts, while the runtime agent keeps an explicit privileged context because
+# BPF/TC/NFQUEUE need host privileges.
+security:
+  podSecurityContext:
+    enabled: true
+    fsGroup: 10001
+    fsGroupChangePolicy: OnRootMismatch
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    enabled: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+    readOnlyRootFilesystem: true
+    runAsGroup: 10001
+    runAsNonRoot: true
+    runAsUser: 10001
+
+# ---------------------------------------------------------------------------
+# Namespace network policy
+# ---------------------------------------------------------------------------
+# Disabled in the default/dev profile because not every local CNI enforces
+# NetworkPolicy the same way. Enable in production values to render default-deny
+# plus explicit flows between Constellation components, DNS, Kubernetes API,
+# artifact registries, and external Postgres.
+networkPolicies:
+  enabled: false
+  dns:
+    enabled: true
+    cidrs: ["0.0.0.0/0"]
+  externalHTTP:
+    enabled: true
+    cidrs: ["0.0.0.0/0"]
+    ports: [80, 443]
+  kubeAPI:
+    cidrs: ["0.0.0.0/0"]
+    ports: [443, 6443]
+  externalPostgres:
+    cidrs: ["0.0.0.0/0"]
+    ports: [5432]
+  frontendIngressCIDRs: ["0.0.0.0/0"]
+  admissionIngressCIDRs: ["0.0.0.0/0"]
+  apiIngressCIDRs: []
+
+# ---------------------------------------------------------------------------
+# Cluster registration
+# ---------------------------------------------------------------------------
+# At install time the bootstrap hook always creates the installed cluster row
+# so GlobalAdmins immediately see the local cluster in the UI. When enabled,
+# it also creates a ConstellationCluster CR for the operator path.
+clusterRegistration:
+  enabled: true
+  name: ""        # defaults to .Release.Namespace
+  clusterId: ""   # optional explicit UUID; otherwise components send cluster_name and the API resolves it
+  orgID: ""       # defaults to the bootstrap org created by the token Job
+  # Wave E (testnode fix): the bootstrap-job inserts a row into the
+  # `clusters` DB table at install time. Previously this was the discoverer
+  # binary's job, but the discoverer isn't in the default install profile,
+  # so a fresh install used to leave the table empty — anything that needs
+  # a cluster_id (quarantine, scoped lists, multi-cluster fan-in) had no
+  # row to talk to. These values populate that row. The agent's heartbeat
+  # later updates state/last_heartbeat_at; anything below can be overwritten.
+  distro: "kubernetes"        # kubernetes | k3s | k3d | kind | eks | gke | aks | openshift | rke2 | microk8s
+  cloudProvider: ""           # aws | gcp | azure | onprem | "" (unknown)
+  region: ""                  # eg. us-east-1, leave empty for on-prem
+
+controlPlane:
+  # Optional external API base URL used by in-cluster components for heartbeats
+  # and component-to-API calls. Empty defaults to the in-cluster API Service.
+  apiURL: ""
+
+# ---------------------------------------------------------------------------
+# Kubernetes discoverer
+# ---------------------------------------------------------------------------
+# Watches the installed Kubernetes cluster and populates deployments,
+# deployment assets, pod IPs, Service IPs, and workload risk rollups. This is
+# enabled by default so the local/in-cluster install immediately has data behind
+# /clusters/<id> views instead of only an empty registered cluster row.
+discoverer:
+  enabled: true
+  replicas: 1
+  image: {}
+  args: []
+  # Empty defaults to clusterRegistration.name, then the release namespace.
+  clusterName: ""
+  # Optional explicit org UUID. When empty, the discoverer resolves the existing
+  # cluster row by name; set this if multiple orgs can register same-named clusters.
+  orgID: ""
+  namespaceFilter: "*"
+  reconcileInterval: 30s
+  resources:
+    limits:   { cpu: 300m, memory: 256Mi }
+    requests: { cpu: 50m,  memory: 64Mi }
+
+# ---------------------------------------------------------------------------
+# Schema migrations
+# ---------------------------------------------------------------------------
+# One-shot pre-install / pre-upgrade Job that runs `goose up` against the
+# configured DATABASE_URL. The image bundles every db/migrations/*.sql file.
+migrate:
+  enabled: true
+  # Postgres client image used by the wait-for-postgres init container.
+  psqlImage: postgres:16.10-alpine3.22@sha256:029660641a0cfc575b14f336ba448fb8a75fd595d42e1fa316b9fb4378742297
+  image: {}
+    # repository: ghcr.io/alphabravo-oss/constellation/migrate
+    # tag: v0.1.0
+
+# ---------------------------------------------------------------------------
+# Control plane API
+# ---------------------------------------------------------------------------
+api:
+  enabled: true
+  replicas: 2
+  image: {}
+    # repository: ghcr.io/alphabravo-oss/constellation/api
+    # tag: v0.2.0
+  args: []
+  service:
+    type: ClusterIP
+    port: 8080
+  resources:
+    limits:   { cpu: 1,    memory: 1Gi }
+    requests: { cpu: 200m, memory: 256Mi }
+  env:
+    OTEL_EXPORTER_OTLP_ENDPOINT: ""
+    JWT_ISSUER: constellation
+    JWT_AUDIENCE: constellation-api
+    JWT_TTL: 1h
+  # A5: by default (jwtKeysSecret unset) the api signs sessions RS256 with a
+  # shared keypair it generates + persists in the session_signing_keys table on
+  # first boot, so JWT_KEYS is NOT injected and no symmetric secret is created.
+  # Set jwtKeysSecret to a pre-existing Secret (key `keys`) to override with your
+  # own key: a PEM RSA/EC private key (RS256/ES256), or — only with
+  # CONSTELLATION_ALLOW_HS256_JWT=true on the api — a 32+ byte HS256 secret.
+  jwtKeysSecret: ""
+  # Refuse API startup if JWT_KEYS is absent. Now false by default: the absent
+  # JWT_KEYS is the intended RS256 DB-backed path. Set true only when you supply
+  # jwtKeysSecret and want startup to hard-fail if it goes missing.
+  requireJWTKeys: false
+  # D5: leader election for the singleton background loops (CVE reconcilers,
+  # fed-sync, rescan/retention monitors). OFF by default — the loops run on
+  # every replica exactly as before. Turn ON to run api with >1 replica safely:
+  # the loops then run on only the lease holder. Enabling it grants the api a
+  # ServiceAccount + a Lease Role and mounts the SA token (off-by-default keeps
+  # automountServiceAccountToken=false).
+  leaderElection:
+    enabled: false
+    # Lease name + namespace are derived from the release; override if needed.
+    leaseName: ""
+
+# ---------------------------------------------------------------------------
+# Kubernetes operator (reconciles ConstellationCluster CRs)
+# ---------------------------------------------------------------------------
+operator:
+  enabled: true
+  replicas: 1
+  image: {}
+  args: []
+  resources:
+    limits:   { cpu: 500m, memory: 512Mi }
+    requests: { cpu: 100m, memory: 128Mi }
+
+# ---------------------------------------------------------------------------
+# Network policy lifecycle applier
+# ---------------------------------------------------------------------------
+# Consumes approved Network Map lifecycle manifest bundles from Postgres and
+# applies/deletes the selected Kubernetes policy flavor in this cluster.
+networkPolicyApplier:
+  enabled: true
+  # native | cilium | calico. Native works on any CNI that enforces Kubernetes
+  # NetworkPolicy; Cilium and Calico require their CRDs to be installed.
+  flavor: native
+  interval: 15s
+  replicas: 1
+  # Prefer clusterId for multi-org/multi-cluster installs. When empty, the
+  # applier resolves clusterName against the `clusters` table.
+  clusterId: ""
+  # Empty defaults to clusterRegistration.name, then the release namespace.
+  clusterName: ""
+  image: {}
+  resources:
+    limits:   { cpu: 200m, memory: 256Mi }
+    requests: { cpu: 50m,  memory: 64Mi }
+
+# ---------------------------------------------------------------------------
+# Kubernetes object compliance collector
+# ---------------------------------------------------------------------------
+# Reads live Kubernetes objects and persists direct object evidence into
+# compliance_checks for scheduled reports and /api/v1/compliance/evidence.
+kubernetesComplianceCollector:
+  enabled: true
+  schedule: "17 */6 * * *"
+  # Prefer clusterId for multi-org/multi-cluster installs. When empty, the
+  # collector resolves clusterName against the `clusters` table.
+  clusterId: ""
+  # Empty defaults to clusterRegistration.name, then the release namespace.
+  clusterName: ""
+  namespaceFilter: "*"
+  includeSystemNamespaces: false
+  image: {}
+  resources:
+    limits:   { cpu: 200m, memory: 256Mi }
+    requests: { cpu: 50m,  memory: 64Mi }
+
+# ---------------------------------------------------------------------------
+# kube-bench / docker-bench runner (opt-in)
+# ---------------------------------------------------------------------------
+# Runs the upstream kube-bench (or docker-bench) binary on a schedule, reads its
+# --json report, and POSTs it to /api/v1/compliance/ingest. Disabled by default
+# because the image must bundle the upstream benchmark binary — set
+# image.repository to such an image (no default chart image ships kube-bench).
+kubeBenchRunner:
+  enabled: false
+  schedule: "37 */6 * * *"
+  # "kube-bench" or "docker-bench"; selects the server-side ingest parser.
+  profile: kube-bench
+  # Upstream binary to exec; must be present in the image.
+  binary: kube-bench
+  # Extra args passed to the binary (whitespace-split). "--json" is appended
+  # automatically when absent.
+  args: ""
+  clusterId: ""
+  clusterName: ""
+  image:
+    repository: ""
+    tag: ""
+  # Host paths kube-bench needs to audit (config files, kubelet, etc.). Empty by
+  # default; supply for your distro, e.g. mount /etc and /var read-only.
+  hostVolumes: []
+  hostVolumeMounts: []
+  resources:
+    limits:   { cpu: 200m, memory: 256Mi }
+    requests: { cpu: 50m,  memory: 64Mi }
+
+# ---------------------------------------------------------------------------
+# Admission webhook
+# ---------------------------------------------------------------------------
+# The admission Deployment serves /validate over HTTPS. TLS material is
+# bootstrapped by a pre-install Job (see `tls.bootstrap`) unless cert-manager
+# is present and `tls.certManager.enabled=true`.
+admission:
+  enabled: true
+  replicas: 2
+  image: {}
+  args: []
+  resources:
+    limits:   { cpu: 500m, memory: 512Mi }
+    requests: { cpu: 100m, memory: 128Mi }
+  service:
+    type: ClusterIP
+    port: 443        # ValidatingWebhookConfiguration always calls 443
+    targetPort: 8443 # The pod listens on 8443 TLS
+  # ValidatingWebhookConfiguration tuning. failurePolicy=Ignore is the safe
+  # default so a degraded webhook never blocks pod admission cluster-wide.
+  webhook:
+    enabled: true
+    failurePolicy: Ignore
+    timeoutSeconds: 5
+    sideEffects: None
+    # Restrict the webhook to specific namespaces by setting a namespaceSelector.
+    # Default is empty (cluster-wide). Set e.g.:
+    #   namespaceSelector:
+    #     matchLabels: { constellation.alphabravo.io/enforce: "true" }
+    namespaceSelector: {}
+    # C2: the engine evaluates Pods, the 7 controller kinds that embed a pod
+    # template, and PVCs (storageClassName gate). The API server only sends an
+    # object to the webhook when a rule matches it, so all of those resources must
+    # be registered here — otherwise a privileged pod spec embedded in a
+    # Deployment/Job/CronJob template is never intercepted.
+    rules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods", "replicationcontrollers", "persistentvolumeclaims"]
+        scope: "Namespaced"
+      - apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+        scope: "Namespaced"
+      - apiGroups: ["batch"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["jobs", "cronjobs"]
+        scope: "Namespaced"
+  # E4: runtime quarantine deny-list. When enabled, the admission webhook
+  # polls the constellation-api database for active quarantine entries and
+  # rejects any pod matching one. Entries are added via the
+  # /api/v1/quarantine API (manual flow). The auto-trigger from runtime
+  # alerts is wired through the same table once the workload resolver
+  # lands (C2 follow-up). Independent of admission.webhook so a cluster
+  # can run quarantine-only or policy-rules-only.
+  quarantine:
+    enabled: false
+    # dsn defaults to the in-cluster postgres Service. Override when using
+    # an external Postgres; the credential SHOULD be a read-only role
+    # scoped to quarantine_entries (the webhook never writes).
+    dsn: ""
+    refresh: "5s"
+    # readyz starts failing once the snapshot is older than this — at which
+    # point kubelet will stop sending it requests until it recovers.
+    maxStale: "60s"
+    # cluster_id MUST be the UUID of the cluster this admission webhook
+    # runs in. Helm renders it from .Values.cluster.id if set, otherwise
+    # the webhook starts with quarantine disabled even when enabled=true.
+    clusterId: ""
+  # DB-backed admission policies. When enabled, the webhook loads enabled
+  # `constellation-admission` policy rows for the configured cluster's org and
+  # refreshes them in-process. Finding-backed rules remain imported as policy
+  # rows but are skipped by the local pod-spec evaluator until the evidence
+  # lookup path is enabled.
+  policies:
+    enabled: false
+    dsn: ""
+    refresh: "10s"
+    # Defaults to admission.quarantine.clusterId when empty.
+    clusterId: ""
+  # Hash-chained audit persistence for live webhook deny decisions. When
+  # enabled, the webhook writes `admission.deny` rows to audit_events with the
+  # org_id resolved from the configured cluster row.
+  audit:
+    enabled: false
+    dsn: ""
+    # Defaults to admission.policies.clusterId, then admission.quarantine.clusterId.
+    clusterId: ""
+
+# ---------------------------------------------------------------------------
+# Scanner (image / SBOM scanning worker)
+# ---------------------------------------------------------------------------
+scanner:
+  enabled: true
+  replicas: 2
+  image: {}
+  args: []
+  maxConcurrent: 0 # 0 lets the scanner default to runtime.NumCPU().
+  targetCapacity: "" # e.g. "image=2,host=8,platform=4"; empty uses global concurrency for all target types.
+  leaseRenewInterval: 5m
+  readiness:
+    # requireVulnDB=false: don't fail scans closed (or block /readyz) when the vulndb
+    # bundle is missing or stale — image scans fall back to Trivy/Grype. Set true only
+    # if you want to hard-require a fresh bundle for every scan.
+    requireVulnDB: false
+  service:
+    annotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/path: /metrics
+      prometheus.io/port: "8090"
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: null
+    externalMetrics: []
+  engines:
+    # Syft should normally stay enabled because it provides the package
+    # inventory that VulnDB consumes. Trivy/Grype can be turned off for a
+    # VulnDB-canonical deployment and later re-enabled as reconciliation
+    # evidence engines.
+    syft: true
+    # Keep vulndb enabled: it is the ONLY PackageMatcher, and the host/platform scan
+    # path (ScanPackages) hard-fails with "no package matchers configured" without it —
+    # Trivy/Grype are image-only engines and cannot cover that path. When a bundle is
+    # present it is canonical; when absent it errors non-fatally (requireVulnDB: false),
+    # so image scans still return Trivy/Grype results.
+    vulndb: true
+    trivy: true
+    grype: true
+  # Trivy/Grype vulnerability-DB freshness. refreshInterval is the env default
+  # cadence; admins can override it live from the UI (Settings → scanner DB
+  # refresh, stored in system_config). offline=true = air-gapped: scanners never
+  # pull DBs from the internet (pre-load them — see docs/offline-scanning.md),
+  # optionally pointing Trivy at an internal OCI mirror via trivyDBRepository.
+  vulnDB:
+    refreshInterval: 6h
+    offline: false
+    trivyDBRepository: ""
+    trivyJavaDBRepository: ""
+  signatures:
+    enabled: true
+    mode: keyless
+    requireRekor: false
+    identities: []
+    issuers: []
+    publicKeySecret: ""
+    publicKeySecretKey: cosign.pub
+    publicKeyPath: ""
+    cosignBin: cosign
+  fileRisks:
+    enabled: true
+    maxFindings: 500
+  resources:
+    limits:   { cpu: 2,    memory: 2Gi }
+    requests: { cpu: 250m, memory: 256Mi }
+  # SCANNER_TOKEN env wiring. The bootstrap Job creates this Secret unless an
+  # existing one is referenced here.
+  tokenSecret: ""        # defaults to <release>-scanner-token
+
+# ---------------------------------------------------------------------------
+# Runtime agent (eBPF + NeuVector dp DaemonSet)
+# ---------------------------------------------------------------------------
+# The agent runs two data planes on every node:
+#   - eBPF programs for sched_process_exec + LSM file_open  (process + file events)
+#   - vendored NeuVector C dp for AF_PACKET DPI on per-pod veths
+#     (network flows, L7 from DPI parsers, threat signatures with packet capture)
+#
+# Resource notes:
+#   - Memory floor is dominated by dp's hyperscan databases (~120 MiB) plus
+#     the per-pod TCP/UDP session table (proportional to concurrent flows).
+#     1 Gi limit accommodates ~500 active pod taps × ~2k sessions each.
+#   - CPU is mostly dp's per-packet DPI inspection. 500m sustains ~50 Mbps
+#     of inspected traffic in TAP mode; bump for higher-throughput nodes.
+runtimeAgent:
+  enabled: true
+  image: {}
+  args: []
+  resources:
+    limits:   { cpu: "1",    memory: 1Gi }
+    requests: { cpu: 200m,   memory: 256Mi }
+  tokenSecret: ""        # defaults to <release>-runtime-agent-token
+  # Runtime enforcement — whether the agent BLOCKS policy violations (out-of-baseline
+  # process exec, protected-file access, exec of a drifted binary) or only alerts.
+  #   disabled = never enforce (detect-only, hard off)
+  #   monitor  = detect + alert only (safe default; no blocking)
+  #   protect  = enforce per-workload baseline: a workload whose baseline is set to
+  #              "enforce" (in the UI) blocks; "monitor"/"learn" workloads only alert.
+  # This mirrors NeuVector's Protect mode: flip to `protect` and per-workload enforce
+  # bites with NO manual DaemonSet edit. Per-enforcer toggles narrow what protect arms.
+  enforcement:
+    mode: monitor        # disabled | monitor | protect
+    process: true        # kill out-of-baseline execs (when mode=protect)
+    file: true           # deny protected-file access (when mode=protect)
+    exec: true           # block exec of drifted binaries (when mode=protect)
+    # ADDITIVE ONLY: extra namespaces enforcement must never touch. The core
+    # protected set — this release's own namespace, kube-system/kube-public/
+    # kube-node-lease, and the host itself — is baked into the agent and cannot be
+    # removed. Use this to shield additional infra namespaces (e.g. your CNI,
+    # monitoring) from ever being blocked/killed by a rule.
+    protectedNamespaces: []
+  # Tolerations let the DaemonSet land on tainted control-plane / GPU nodes.
+  tolerations:
+    - operator: Exists
+      effect: NoSchedule
+    - operator: Exists
+      effect: NoExecute
+  # Liveness / readiness probes — the agent listens on healthPort and answers
+  # /healthz (alive: process started) + /readyz (ready: dp keepalive replied
+  # at least once + tap reconciler ran at least once). Probe failure forces
+  # a restart so a wedged dp doesn't silently stop reporting.
+  healthPort: 9404
+  livenessProbe:
+    httpGet: { path: /healthz, port: 9404 }
+    initialDelaySeconds: 10
+    periodSeconds: 30
+    timeoutSeconds: 3
+    failureThreshold: 3
+  readinessProbe:
+    httpGet: { path: /readyz, port: 9404 }
+    initialDelaySeconds: 15
+    periodSeconds: 15
+    timeoutSeconds: 3
+    failureThreshold: 4
+  # NeuVector dp (vendored in third_party/neuvector). Set false to skip the
+  # C data-plane entirely — the agent will still ship exec + file events
+  # from BPF, but no network metrics will be observed.
+  dp:
+    enabled: true
+    # Worker thread count passed as `-n N` to dp. NeuVector hardcodes 1 in
+    # their monitor; bumping helps on nodes with high pod density (≥100 pods).
+    threads: 1
+    # Veth name prefixes the auto-discovery sysfs scan considers as "pod"
+    # interfaces. Default covers Flannel/k3s (veth*), Calico (cali*),
+    # Cilium LXC (lxc*). Add custom CNI prefixes here.
+    vethPrefixes: "veth,cali,lxc"
+    # Override the env-var bootstrap provider (env|podveth|none). Leave empty
+    # for the default priority: env if CONSTELLATION_DP_TAP_PORTS set, else podveth.
+    provider: ""
+    # Wave D1: Cilium clusters bypass iptables in their default eBPF mode,
+    # so dp's NFQUEUE-based enforcement silently no-ops. The agent
+    # auto-detects Cilium and skips installing enforce iptables rules
+    # unless this flag is set. Operators with Cilium iptables-only mode
+    # can override and let dp run enforcement normally.
+    enforceOnCilium: false
+    # Override the CNI config dir auto-discovery with an explicit path.
+    # Leave empty (default) to let the agent probe every known location
+    # (kubeadm, k3s, RKE2, OpenShift OVN, microk8s — see
+    # internal/runtime/dp/cnidetect.CandidateCNIDirs). Set this only when
+    # the host has a non-standard CNI install location.
+    cniDir: ""
+  # Host-facts collector. Snapshots host OS / kernel / modules / CNI /
+  # CRI every `interval` and POSTs to /api/v1/host-facts:report.
+  # Mirrors what NeuVector's enforcer ships in its host inventory.
+  hostScan:
+    # Leave empty for the agent's default (5m).
+    interval: ""
+  # PodDisruptionBudget keeps at least one runtime-agent up during voluntary
+  # disruptions (node drain, upgrade). DaemonSet PDBs cap on minAvailable,
+  # not maxUnavailable — minAvailable=1 means a per-node drain is allowed.
+  pdb:
+    enabled: true
+    minAvailable: 1
+
+# ---------------------------------------------------------------------------
+# Frontend (Vite SPA served by nginx, /api proxied to the API Service)
+# ---------------------------------------------------------------------------
+frontend:
+  enabled: true
+  replicas: 2
+  image: {}
+    # repository: ghcr.io/alphabravo-oss/constellation/frontend
+  args: []
+  service:
+    type: ClusterIP
+    port: 80
+    targetPort: 8080
+  resources:
+    limits:   { cpu: 200m, memory: 128Mi }
+    requests: { cpu: 50m,  memory: 32Mi }
+
+# ---------------------------------------------------------------------------
+# Optional Ingress (frontend only — API is proxied through nginx)
+# ---------------------------------------------------------------------------
+ingress:
+  enabled: false
+  className: ""           # e.g. "nginx", "traefik", "alb"
+  host: constellation.example.com
+  annotations: {}
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+  tls:
+    enabled: false
+    secretName: constellation-frontend-tls
+
+# ---------------------------------------------------------------------------
+# Postgres (embedded pgvector or external DSN)
+# ---------------------------------------------------------------------------
+postgres:
+  # Canonical Postgres mode (D5). One of:
+  #   statefulset — single-replica pgvector StatefulSet + PVC (default; dev).
+  #   cnpg        — HA Postgres managed by the CloudNativePG operator (prod).
+  #   external    — point the app DSN at an external Postgres (RDS, Cloud SQL…).
+  # When empty, the mode is derived from the legacy toggles below
+  # (cloudnativepg.enabled → cnpg, else embedded → statefulset, else external)
+  # so existing values files keep working unchanged. Set `mode` explicitly in
+  # new installs; an explicit mode wins over the legacy toggles.
+  # MUST default empty: a non-empty default here would override the legacy
+  # toggles and silently flip existing cnpg/external users to a StatefulSet.
+  mode: ""
+  # --- Legacy toggles (kept for back-compat; prefer `mode` above) ----------
+  # When true, the chart deploys a single-replica pgvector StatefulSet with a
+  # PVC. Use external in production (RDS, Cloud SQL, Crunchy, etc.).
+  embedded: true
+  # Set for external mode. Either supply a DSN string here OR reference an
+  # existing Secret with key `url`.
+  dsn: ""
+  existingSecret: ""        # if set, takes precedence over `dsn`
+  existingSecretKey: url
+  embeddedConfig:
+    image: pgvector/pgvector:pg16@sha256:00ba258a66dac104fd5171074a0084462a64a1369d8513f3d0a634e2f24d15bc
+    storage: 20Gi
+    storageClass: ""        # empty = cluster default
+    podSecurityContext:
+      fsGroup: 999
+      fsGroupChangePolicy: OnRootMismatch
+      seccompProfile:
+        type: RuntimeDefault
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+      runAsGroup: 999
+      runAsNonRoot: true
+      runAsUser: 999
+    resources:
+      limits:   { cpu: 2,   memory: 2Gi }
+      requests: { cpu: 200m, memory: 256Mi }
+    database: constellation
+    username: constellation
+    # Password generated at install time if blank.
+    password: ""
+
+  # -------------------------------------------------------------------------
+  # CloudNativePG (CNPG) mode — production HA Postgres managed by the CNPG
+  # operator. This is a THIRD, mutually-exclusive alternative to `embedded`
+  # and the external `dsn`/`existingSecret` paths.
+  #
+  # PREREQUISITE: the CloudNativePG operator MUST already be installed in the
+  # cluster (it is NOT bundled by this chart). Install it once, cluster-wide,
+  # before `helm install`:
+  #   kubectl apply --server-side -f \
+  #     https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.24/releases/cnpg-1.24.1.yaml
+  # (or `helm install cnpg cnpg/cloudnative-pg -n cnpg-system --create-namespace`).
+  # Docs: https://cloudnative-pg.io/documentation/current/installation_upgrade/
+  # A ready-made opt-in profile lives at examples/values-cnpg.yaml.
+  #
+  # To use: set `postgres.embedded=false` and `postgres.cloudnativepg.enabled=true`.
+  # CNPG auto-creates the services <fullname>-postgres-rw (primary/read-write),
+  # -ro (replicas) and -r (any); the chart points DATABASE_URL at the -rw one.
+  # -------------------------------------------------------------------------
+  cloudnativepg:
+    enabled: false
+    # 1 = dev/single instance, 3 = HA (1 primary + 2 replicas). Use 3 in prod.
+    instances: 3
+    # CRITICAL: this image MUST include the pgvector extension — the schema uses
+    # `embedding vector(1536)` in the findings table. The default CNPG image
+    # (ghcr.io/cloudnative-pg/postgresql) does NOT include pgvector. Supply a
+    # pgvector-enabled, CNPG-compatible image. The placeholder default below
+    # MUST be overridden in real installs — otherwise migrations that create the
+    # vector column will fail.
+    #
+    # Two ways to get a pgvector-enabled operand image:
+    #   1. Build one FROM the CNPG base + pgvector (few lines; keeps CNPG
+    #      compatibility): FROM ghcr.io/cloudnative-pg/postgresql:16 then
+    #      `apt-get install -y postgresql-16-pgvector`.
+    #   2. Use a community image that bundles pgvector and follows the CNPG
+    #      operand contract (verify `CREATE EXTENSION vector;` works).
+    #
+    # NOTES.txt emits an install-time WARNING when mode=cnpg and this value does
+    # not look pgvector-enabled (no "pgvector" in the ref) — a heuristic guard,
+    # not a hard gate. See examples/values-cnpg.yaml for a worked profile.
+    imageName: ghcr.io/cloudnative-pg/postgresql:16   # OVERRIDE with a pgvector build
+    storage: 20Gi
+    storageClass: ""        # empty = cluster default
+    resources:
+      limits:   { cpu: 2,   memory: 2Gi }
+      requests: { cpu: 200m, memory: 256Mi }
+    primaryUpdateStrategy: unsupervised
+    database: constellation
+    username: constellation
+    # Password generated at install time if blank (same idempotent logic as embedded).
+    password: ""
+
+# ---------------------------------------------------------------------------
+# TLS bootstrap for the admission webhook
+# ---------------------------------------------------------------------------
+# Two paths:
+#   1. certManager.enabled=true       — render Issuer + Certificate, no Job
+#   2. bootstrap.enabled=true (default)— pre-install Job mints a self-signed
+#                                       CA + server cert and patches the
+#                                       ValidatingWebhookConfiguration caBundle
+tls:
+  certManager:
+    enabled: false
+    issuer: ""              # name of an existing Issuer/ClusterIssuer
+    issuerKind: ClusterIssuer
+  bootstrap:
+    enabled: true
+    # An image that has both /bin/sh AND kubectl in $PATH. bitnami/kubectl bundles
+    # both; the chainguard kubectl image is distroless (no shell) so don't use it.
+    image: bitnami/kubectl@sha256:323998cf83a2332f6761706df910870a3fa24dd8d4b999db977aa322de553399
+    opensslImage: alpine/openssl:3.3.2@sha256:5008e829163320a6e8166883c03e68189e8925ade68cde36584dc2a41cfa5248
+
+# ---------------------------------------------------------------------------
+# Bootstrap (Job that mints scanner + runtime-agent tokens + default org)
+# ---------------------------------------------------------------------------
+bootstrap:
+  enabled: true
+  # Image used by the init container to copy a kubectl binary into a shared
+  # volume so the psql container can call kubectl. Must have /bin/sh.
+  image: bitnami/kubectl@sha256:323998cf83a2332f6761706df910870a3fa24dd8d4b999db977aa322de553399
+  # Postgres client image used to seed the org + tokens.
+  psqlImage: postgres:16.10-alpine3.22@sha256:029660641a0cfc575b14f336ba448fb8a75fd595d42e1fa316b9fb4378742297
+  org:
+    name: default
+    displayName: Default
+  # Wave E (testnode fix): post-install admin-credentials Job.
+  # Mints the initial human admin user so `helm install` yields a
+  # cluster you can immediately log into. Idempotent: re-runs on
+  # `helm upgrade` are no-ops if the org already has local-login users.
+  #
+  # Retrieve the generated password after install with:
+  #   kubectl -n <ns> get secret <release>-admin-credentials \
+  #     -o jsonpath='{.data.password}' | base64 -d
+  admin:
+    enabled: true
+    email: admin@constellation.local
+    displayName: Constellation Admin
+    # password: ""   # leave empty to auto-generate (recommended)
+
+  # B4: declarative identity providers (LDAP/SAML/OIDC) seeded at install into auth_servers —
+  # Constellation's equivalent of NeuVector's LoadInitCfg *initcfg.yaml ConfigMaps. Leave empty
+  # to manage providers only through the API/UI. Each entry mirrors the /api/v1/auth-servers
+  # body. Rendered into a Secret (carries client_secret / bind_password) the bootstrap-admin Job
+  # mounts. Seeding is idempotent: a provider is inserted only if none of its type exists for the
+  # org yet, so it never clobbers one later edited through the API. Example:
+  #   authProviders:
+  #     - type: oidc
+  #       name: corp-okta
+  #       enabled: true
+  #       auth_order: 100
+  #       config:
+  #         issuer_url: https://corp.okta.com
+  #         client_id: 0oa...
+  #         client_secret: "<secret>"
+  #         redirect_url: https://constellation.example.com/auth/oidc/callback
+  #         scopes: [openid, email, profile]
+  #       role_mapping:
+  #         rules: { "group:platform-admins": GlobalAdmin }
+  #         default: Viewer
+  authProviders: []
+
+# ---------------------------------------------------------------------------
+# Init-bundle consumer (Wave N1)
+# ---------------------------------------------------------------------------
+# When initBundle.secretName is set, the chart switches into "remote cluster"
+# mode: the pre-install consumer Job below reads the named Secret (containing
+# a `bundle.yaml` key produced by `constellationctl cluster create`) and
+# projects its parts into the chart-managed Secrets (constellation-admission-tls,
+# constellation-scanner-token, constellation-runtime-agent-token). The
+# bootstrap-job + tls-bootstrap-job are short-circuited so no tokens or TLS
+# material are re-minted in the new cluster — the control plane is the single
+# source of truth.
+#
+# Operators install with:
+#   constellationctl --server https://constellation.example.com cluster create prod-east \
+#       --output cluster-init.yaml
+#   kubectl create ns constellation-system
+#   kubectl -n constellation-system create secret generic constellation-init-bundle \
+#       --from-file=bundle.yaml=cluster-init.yaml
+#   helm install constellation deploy/charts/constellation \
+#       -n constellation-system \
+#       --set initBundle.secretName=constellation-init-bundle
+initBundle:
+  # Empty disables consumer mode (default: chart self-mints via bootstrap-job).
+  secretName: ""
+  # Image used by the consumer Job — must have /bin/sh + kubectl + yq (or python).
+  # bitnami/kubectl ships with sh but not yq; we shell out to a pure-sed pipeline
+  # in the consumer script so a vanilla kubectl image suffices.
+  image: bitnami/kubectl@sha256:323998cf83a2332f6761706df910870a3fa24dd8d4b999db977aa322de553399
+
+# ---------------------------------------------------------------------------
+# CVE bundle importer (CronJob)
+# ---------------------------------------------------------------------------
+vulndb:
+  mountPath: /var/lib/constellation
+  dbFile: vulndb.bbolt
+  statusFile: vulndb-import-status.json
+  manualUpload:
+    # Dev/emergency path for POST /api/v1/vulndb:import. In production,
+    # prefer disabling this and using vulndbImporter to install signed
+    # artifacts generated by constellation-vulndb.
+    enabled: true
+  readiness:
+    # When true, /readyz fails until the API can open a valid local VulnDB store.
+    # Leave false for dev clusters that may not install a bundle immediately.
+    requireBundle: false
+    # Optional max age for the loaded bundle's exported_at metadata. Empty disables.
+    maxAge: ""
+  rescan:
+    # API-side poll interval for detecting VulnDB store/status-file updates
+    # installed by the importer and queueing stale evidence-backed target scans.
+    # Set to 0 to disable automatic bundle-change rescans.
+    interval: 2m
+  trust:
+    requireSignatures: false
+    # For static-key verification, either mount an existing Secret containing
+    # cosign public key material or pass a path through extra volumes.
+    publicKeySecret: ""
+    publicKeySecretKey: cosign.pub
+    publicKeyPath: ""
+    # For keyless verification, require both identity and OIDC issuer regexes.
+    certificateIdentity: ""
+    certificateOIDCIssuer: ""
+  freshness:
+    # Duration accepted by Go time.ParseDuration, for example 168h. Empty disables.
+    maxAge: ""
+  storage:
+    # pvc is the production default so the API and importer share the same
+    # durable store. With api.replicas > 1, use RWX-capable storage. hostPath
+    # and emptyDir are available for local test clusters.
+    type: pvc
+    existingClaim: ""
+    size: 20Gi
+    storageClassName: ""
+    accessModes: [ReadWriteMany]
+    hostPath: /var/lib/constellation
+
+repositoryScans:
+  retention:
+    # Repository/CI package evidence can grow quickly in active CI systems.
+    # This API-side worker prunes old repository scan targets that have no
+    # active jobs and no immutable attestation verification history.
+    enabled: true
+    maxAge: 2160h
+    interval: 24h
+    batchSize: 500
+    dryRun: false
+
+vulndbImporter:
+  # Optional scheduled install path. VulnDB remains the producer of bundle/store
+  # artifacts; this job only installs a delivered artifact for Constellation to
+  # consume. Manual UI/CLI upload to POST /api/v1/vulndb:import is controlled by
+  # vulndb.manualUpload.enabled.
+  enabled: false
+  schedule: "0 */6 * * *"
+  # Optional one-shot import on Helm install/upgrade. This lets production
+  # installs load a bundle immediately instead of waiting for the cron schedule.
+  installJob:
+    enabled: false
+    annotations:
+      "helm.sh/hook": post-install,post-upgrade
+      # Bootstrap writes the default service-token Secrets at hook weight 5.
+      # Import after that so install-time heartbeats can authenticate.
+      "helm.sh/hook-weight": "10"
+      "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    ttlSecondsAfterFinished: 3600
+  # Empty defaults to `<vulndb.mountPath>/.vulndb-work`, keeping large bundle or
+  # prebuilt-store downloads on the VulnDB PVC instead of pod ephemeral storage.
+  workDir: ""
+  image:
+    repository: ghcr.io/alphabravo-oss/constellation-vulndb
+    tag: ""
+  source:
+    # kind: oci | bundleDir | files | urls | s3 | store | storeUrl | storeS3
+    kind: oci
+    # This is a signed/freshness-checked VulnDB artifact update channel, not a
+    # Constellation application image. Pin to an artifact digest when change
+    # control requires exact bundle replay.
+    ref: "ghcr.io/alphabravo-oss/constellation-vulndb-bundle:latest"
+    bundleDir: ""
+    manifestPath: ""
+    payloadPath: ""
+    storePath: ""
+    manifestURL: ""
+    payloadURL: ""
+    storeURL: ""
+    manifestS3: ""
+    payloadS3: ""
+    storeS3: ""
+  ociCredentialsSecret: ""
+  resources:
+    limits:
+      memory: 4Gi
+      ephemeral-storage: 1Gi
+    requests:
+      cpu: 250m
+      memory: 512Mi
+      ephemeral-storage: 128Mi
+  extraVolumes: []
+  extraVolumeMounts: []
+
+# ---------------------------------------------------------------------------
+# Audit archiver (CronJob)
+# ---------------------------------------------------------------------------
+auditArchiver:
+  # Optional scheduled export of the hash-chained audit log to S3. The job uses
+  # AWS SDK default credentials, so prefer IRSA/workload identity in production.
+  enabled: false
+  schedule: "30 2 * * *"
+  bucket: ""
+  prefix: "constellation/audit"
+  window: 24h
+  awsRegion: ""
+  sign:
+    # none | static-key | keyless. static-key uses an ed25519 PEM private key
+    # compatible with `constellationctl backup gen-key`; keyless shells out to
+    # cosign and requires an ambient OIDC token.
+    mode: none
+    keySecretName: ""
+    keySecretKey: cosign.key
+    keyPath: ""
+    cosignBin: cosign
+  env: []
+  # - name: AWS_ENDPOINT_URL_S3
+  #   value: https://s3.us-gov-west-1.amazonaws.com
+
+# ---------------------------------------------------------------------------
+# Astronomer integration (off by default)
+# ---------------------------------------------------------------------------
+astronomer:
+  # Enables /api/v1/security/* routes authenticated with Astronomer-issued
+  # JWTs. jwksURL is required when enabled; jwtIssuer/jwtAudience are optional
+  # hardening constraints for iss/aud validation.
+  enabled: false
+  jwksURL: ""
+  jwtIssuer: ""
+  jwtAudience: ""
+
+# ---------------------------------------------------------------------------
+# Abbot GenAI integration (off by default)
+# ---------------------------------------------------------------------------
+ai:
+  enabled: false
+  serviceURL: ""
+
+# ---------------------------------------------------------------------------
+# FIPS mode (use FIPS-validated base image for all role binaries)
+# ---------------------------------------------------------------------------
+fips:
+  enabled: false
+  registry: ghcr.io/alphabravo-oss/constellation-fips
+
+# ---------------------------------------------------------------------------
+# Namespacing
+# ---------------------------------------------------------------------------
+# Single-namespace install. When true, the operator watches and reconciles
+# namespaced workloads only in the release namespace and gets a namespaced Role
+# for those resources. ConstellationCluster CR access stays cluster-scoped
+# because the CRD itself is cluster-scoped. Set false for cluster-wide workload
+# reconciliation.
+namespaced: true

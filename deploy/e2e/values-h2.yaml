@@ -1,0 +1,51 @@
+# values-h2.yaml — Helm overrides for the Wave H2 native-k3s install.
+#
+# The host already has the constellation binaries running locally (the API on :18080,
+# vite on :5173). We do NOT want the helm chart's frontend running, and we do not
+# need the helm-deployed API to take over from the host binary — we install it here
+# so the operator's CR has a `controlPlaneURL` to point at, but the host API
+# remains the source of truth for the UI.
+#
+# Apply with:
+#   KUBECONFIG=/etc/rancher/k3s/k3s.yaml helm install constellation \
+#     deploy/charts/constellation -n constellation-system --create-namespace \
+#     -f deploy/e2e/values-h2.yaml
+
+image:
+  repository: constellation/api
+  tag: h2
+  pullPolicy: IfNotPresent
+
+api:
+  replicas: 1
+  image:
+    repository: constellation/api
+    tag: h2
+  env:
+    JWT_ISSUER: constellation
+    JWT_AUDIENCE: constellation-api
+    JWT_TTL: 1h
+    CORS_ORIGINS: "*"
+
+operator:
+  replicas: 1
+  image:
+    repository: constellation/operator
+    tag: h2
+  resources:
+    limits: { cpu: 500m, memory: 512Mi }
+    requests: { cpu: 50m, memory: 64Mi }
+
+frontend:
+  enabled: false   # we use the host vite dev server on :5173
+
+auditArchiver:
+  enabled: false   # CronJob would never fire in this short-lived run
+
+vulndbImporter:
+  enabled: false   # uses an external bundle not built locally
+
+postgres:
+  external: true
+  existingSecret: constellation-database-url
+  existingSecretKey: url

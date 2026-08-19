@@ -1,0 +1,6 @@
+ id |         action         |  target_kind   |      target_id      
+----+------------------------+----------------+---------------------
+ 13 | network_policy.approve | network-policy | default/api-service
+  7 | network_policy.approve | network-policy | default/api-service
+(2 rows)
+

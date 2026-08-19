@@ -1,0 +1,146 @@
+{{- if and .Values.vulndbImporter.enabled .Values.vulndbImporter.installJob.enabled }}
+{{- $source := .Values.vulndbImporter.source -}}
+{{- $trust := .Values.vulndb.trust -}}
+{{- $publicKeyPath := default "" $trust.publicKeyPath -}}
+{{- $workDir := default (printf "%s/.vulndb-work" (trimSuffix "/" .Values.vulndb.mountPath)) .Values.vulndbImporter.workDir -}}
+{{- if and $trust.requireSignatures (not $publicKeyPath) $trust.publicKeySecret }}
+{{- $publicKeyPath = printf "/etc/constellation/vulndb-trust/%s" $trust.publicKeySecretKey }}
+{{- end }}
+{{- if and $trust.requireSignatures (not (or $publicKeyPath (and $trust.certificateIdentity $trust.certificateOIDCIssuer))) }}
+{{- fail "vulndb.trust.requireSignatures requires vulndb.trust.publicKeySecret/publicKeyPath or both certificateIdentity and certificateOIDCIssuer" }}
+{{- end }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "constellation.fullname" . }}-vulndb-importer-install
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: vulndb-importer
+  {{- with .Values.vulndbImporter.installJob.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  backoffLimit: 1
+  {{- with .Values.vulndbImporter.installJob.ttlSecondsAfterFinished }}
+  ttlSecondsAfterFinished: {{ . }}
+  {{- end }}
+  template:
+    spec:
+      {{- include "constellation.pullSecrets" . | nindent 6 }}
+      {{- include "constellation.podSecurityContext" . | nindent 6 }}
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      containers:
+        - name: vulndb-importer
+          image: {{ .Values.vulndbImporter.image.repository }}:{{ default .Chart.AppVersion .Values.vulndbImporter.image.tag }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- include "constellation.containerSecurityContext" . | nindent 10 }}
+          command: ["/usr/local/bin/vulndb-bundle-install"]
+          args:
+            - "-out={{ include "constellation.vulndbPath" . }}"
+            - "-status-file={{ printf "%s/%s" .Values.vulndb.mountPath .Values.vulndb.statusFile }}"
+            - "-work-dir={{ $workDir }}"
+{{- if eq $source.kind "oci" }}
+            - "-ref={{ required "vulndbImporter.source.ref is required when source.kind=oci" $source.ref }}"
+{{- else if eq $source.kind "bundleDir" }}
+            - "-bundle-dir={{ required "vulndbImporter.source.bundleDir is required when source.kind=bundleDir" $source.bundleDir }}"
+{{- else if eq $source.kind "files" }}
+            - "-manifest={{ required "vulndbImporter.source.manifestPath is required when source.kind=files" $source.manifestPath }}"
+            - "-payload={{ required "vulndbImporter.source.payloadPath is required when source.kind=files" $source.payloadPath }}"
+{{- else if eq $source.kind "urls" }}
+            - "-manifest-url={{ required "vulndbImporter.source.manifestURL is required when source.kind=urls" $source.manifestURL }}"
+            - "-payload-url={{ required "vulndbImporter.source.payloadURL is required when source.kind=urls" $source.payloadURL }}"
+{{- else if eq $source.kind "s3" }}
+            - "-manifest-s3={{ required "vulndbImporter.source.manifestS3 is required when source.kind=s3" $source.manifestS3 }}"
+            - "-payload-s3={{ required "vulndbImporter.source.payloadS3 is required when source.kind=s3" $source.payloadS3 }}"
+{{- else if eq $source.kind "store" }}
+            - "-store={{ required "vulndbImporter.source.storePath is required when source.kind=store" $source.storePath }}"
+{{- else if eq $source.kind "storeUrl" }}
+            - "-store-url={{ required "vulndbImporter.source.storeURL is required when source.kind=storeUrl" $source.storeURL }}"
+{{- else if eq $source.kind "storeS3" }}
+            - "-store-s3={{ required "vulndbImporter.source.storeS3 is required when source.kind=storeS3" $source.storeS3 }}"
+{{- else }}
+            {{- fail "vulndbImporter.source.kind must be oci, bundleDir, files, urls, s3, store, storeUrl, or storeS3" }}
+{{- end }}
+{{- if $trust.requireSignatures }}
+            - "-require-signatures=true"
+{{- if $publicKeyPath }}
+            - "-cosign-public-key={{ $publicKeyPath }}"
+{{- end }}
+{{- if $trust.certificateIdentity }}
+            - "-certificate-identity={{ $trust.certificateIdentity }}"
+{{- end }}
+{{- if $trust.certificateOIDCIssuer }}
+            - "-certificate-oidc-issuer={{ $trust.certificateOIDCIssuer }}"
+{{- end }}
+{{- end }}
+{{- if .Values.vulndb.freshness.maxAge }}
+            - "-max-age={{ .Values.vulndb.freshness.maxAge }}"
+{{- end }}
+          env:
+            - name: CONSTELLATION_API_URL
+              value: {{ include "constellation.apiURL" . | quote }}
+            - name: CONSTELLATION_CLUSTER_NAME
+              value: {{ include "constellation.clusterName" . | quote }}
+{{- if .Values.clusterRegistration.clusterId }}
+            - name: CONSTELLATION_CLUSTER_ID
+              value: {{ .Values.clusterRegistration.clusterId | quote }}
+{{- end }}
+            - name: CONSTELLATION_VULNDB_IMPORTER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "constellation.runtimeAgentTokenSecret" . }}
+                  key: token
+                  optional: true
+            - name: RUNTIME_AGENT_TOKEN_FILE
+              value: /var/run/constellation/runtime-agent-token/token
+{{- if .Values.vulndbImporter.ociCredentialsSecret }}
+            - name: OCI_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.vulndbImporter.ociCredentialsSecret }}
+                  key: username
+            - name: OCI_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.vulndbImporter.ociCredentialsSecret }}
+                  key: password
+{{- end }}
+          {{- with .Values.vulndbImporter.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: vulndb
+              mountPath: {{ .Values.vulndb.mountPath | quote }}
+              readOnly: false
+            - name: tmp
+              mountPath: /tmp
+            - name: runtime-agent-token
+              mountPath: /var/run/constellation/runtime-agent-token
+              readOnly: true
+{{- if and $trust.requireSignatures $trust.publicKeySecret }}
+            - name: vulndb-trust
+              mountPath: /etc/constellation/vulndb-trust
+              readOnly: true
+{{- end }}
+{{- with .Values.vulndbImporter.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+{{- end }}
+      volumes:
+        {{- include "constellation.vulndbVolume" . | nindent 8 }}
+        - name: tmp
+          emptyDir: {}
+        - name: runtime-agent-token
+          secret:
+            secretName: {{ include "constellation.runtimeAgentTokenSecret" . }}
+            optional: true
+{{- if and $trust.requireSignatures $trust.publicKeySecret }}
+        - name: vulndb-trust
+          secret:
+            secretName: {{ $trust.publicKeySecret }}
+{{- end }}
+{{- with .Values.vulndbImporter.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+{{- end }}
+{{- end }}

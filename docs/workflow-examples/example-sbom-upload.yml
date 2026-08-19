@@ -1,0 +1,64 @@
+# Example: generate an SPDX SBOM on every release and attach it as a Release asset.
+#
+# Required secrets:
+#   CONSTELLATION_SERVER, CONSTELLATION_TOKEN
+name: constellation-sbom-upload
+
+on:
+  release:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      image_ref:
+        description: "Image ref to SBOM (e.g. ghcr.io/org/app:1.2.3)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  sbom:
+    runs-on: ubuntu-latest
+    container:
+      image: constellation/cli:latest
+    env:
+      CONSTELLATION_SERVER: ${{ secrets.CONSTELLATION_SERVER }}
+      CONSTELLATION_TOKEN:  ${{ secrets.CONSTELLATION_TOKEN }}
+      RELEASE_TAG:  ${{ github.event.release.tag_name }}
+      DISPATCH_REF: ${{ github.event.inputs.image_ref }}
+      REPO_NAME:    ${{ github.event.repository.name }}
+    steps:
+      - name: Resolve image ref
+        run: |
+          if [ -n "$DISPATCH_REF" ]; then
+            echo "IMAGE_REF=$DISPATCH_REF" >> "$GITHUB_ENV"
+          else
+            echo "IMAGE_REF=${REPO_NAME}:${RELEASE_TAG}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Generate SPDX + CycloneDX SBOM
+        run: |
+          constellationctl image-check "$IMAGE_REF" \
+            --quiet \
+            --spdx       constellation.spdx.json \
+            --cyclonedx  constellation.cyclonedx.json
+          ls -lh constellation.*.json
+
+      - name: Upload SBOM as workflow artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: sbom-${{ github.run_id }}
+          path: |
+            constellation.spdx.json
+            constellation.cyclonedx.json
+
+      - name: Attach SBOM to Release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          gh release upload "$TAG" \
+            constellation.spdx.json \
+            constellation.cyclonedx.json \
+            --clobber

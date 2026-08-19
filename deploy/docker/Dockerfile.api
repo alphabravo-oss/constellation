@@ -1,0 +1,35 @@
+# syntax=docker/dockerfile:1.7
+# Constellation control-plane API image.
+#
+# Scales 2-3 replicas behind a Service for HA. Does NOT bundle syft/trivy/grype — those
+# live in the scanner image, which receives jobs over HTTP from this API.
+
+ARG GO_VERSION=1.26
+ARG WOLFI_IMAGE=cgr.dev/chainguard/wolfi-base@sha256:34977aa13765da89f60fee8fe5230e2bb1c55192df08e383c58221ee0d1277fb
+
+# -----------------------------------------------------------------------------
+# Build
+# -----------------------------------------------------------------------------
+FROM golang:${GO_VERSION}-bookworm AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+ARG VERSION=dev
+ENV CGO_ENABLED=0 GOOS=linux
+RUN go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
+      -o /out/constellation-api ./cmd/constellation-api \
+ && go build -trimpath -ldflags="-s -w" -o /out/constellationctl ./cmd/constellationctl
+
+# -----------------------------------------------------------------------------
+# Runtime — minimal wolfi-base, no scanner CLIs.
+# -----------------------------------------------------------------------------
+FROM ${WOLFI_IMAGE} AS runtime
+RUN apk add --no-cache ca-certificates tzdata
+COPY --from=build /out/constellation-api /usr/local/bin/constellation-api
+COPY --from=build /out/constellationctl  /usr/local/bin/constellationctl
+RUN addgroup -S -g 10001 constellation && adduser -S -u 10001 -G constellation -h /home/constellation -s /sbin/nologin constellation
+USER 10001:10001
+WORKDIR /home/constellation
+EXPOSE 8080
+ENTRYPOINT ["/usr/local/bin/constellation-api"]

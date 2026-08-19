@@ -1,0 +1,30 @@
+time=2026-05-12T15:18:23.278Z level=INFO msg="smoke: starting workload" window=8s
+curl: (7) Failed to connect to 127.0.0.1 port 9 after 0 ms: Couldn't connect to server
+curl: (7) Failed to connect to 127.0.0.1 port 9 after 0 ms: Couldn't connect to server
+curl: (7) Failed to connect to 127.0.0.1 port 9 after 0 ms: Couldn't connect to server
+curl: (7) Failed to connect to 127.0.0.1 port 9 after 0 ms: Couldn't connect to server
+curl: (7) Failed to connect to 127.0.0.1 port 9 after 0 ms: Couldn't connect to server
+curl: (7) Failed to connect to 127.0.0.1 port 9 after 0 ms: Couldn't connect to server
+curl: (7) Failed to connect to 127.0.0.1 port 9 after 0 ms: Couldn't connect to server
+curl: (7) Failed to connect to 127.0.0.1 port 9 after 0 ms: Couldn't connect to server
+curl: (7) Failed to connect to 127.0.0.1 port 9 after 0 ms: Couldn't connect to server
+curl: (7) Failed to connect to 127.0.0.1 port 9 after 0 ms: Couldn't connect to server
+curl: (7) Failed to connect to 127.0.0.1 port 9 after 0 ms: Couldn't connect to server
+curl: (7) Failed to connect to 127.0.0.1 port 9 after 0 ms: Couldn't connect to server
+curl: (7) Failed to connect to 127.0.0.1 port 9 after 0 ms: Couldn't connect to server
+curl: (7) Failed to connect to 127.0.0.1 port 9 after 0 ms: Couldn't connect to server
+curl: (7) Failed to connect to 127.0.0.1 port 9 after 0 ms: Couldn't connect to server
+curl: (7) Failed to connect to 127.0.0.1 port 9 after 0 ms: Couldn't connect to server
+curl: (7) Failed to connect to 127.0.0.1 port 9 after 0 ms: Couldn't connect to server
+curl: (7) Failed to connect to 127.0.0.1 port 9 after 0 ms: Couldn't connect to server
+curl: (7) Failed to connect to 127.0.0.1 port 9 after 0 ms: Couldn't connect to server
+curl: (7) Failed to connect to 127.0.0.1 port 9 after 0 ms: Couldn't connect to server
+== Constellation runtime-smoke ==
+duration            : 8s
+exec events (total) : 127
+exec /bin/true      : 20
+tcp_connect events  : 100
+tcp_accept events   : 39
+file_open events    : 0
+dropped (chan full) : 0
+OK

@@ -1,0 +1,266 @@
+Constellation — Implementation Progress
+Spec: docs/specs/i-want-to-build-a-cybersecurity-scanning-tool-for-docker-and.md
+Compiled: 2026-05-11
+Last updated: 2026-05-12
+
+=== Phase 1 — Foundations ===
+[DONE]    P1-US-1   Shared protobuf contracts repo                       proto/constellation/v1/*.proto + buf
+[DONE]    P1-US-2   Postgres schema + sqlc + migrations                  7 goose migrations + 8 sqlc query files
+[DONE]    P1-US-3   Control-plane API skeleton (Chi + OpenAPI)           constellation-api with /healthz, /readyz, /metrics, /openapi.json
+[DONE]    P1-US-4   Auth: local Argon2id + OIDC SP + JWKS verify         Real RS256/ES256 signature verification (pkg/jwks)
+[DONE]    P1-US-5   RBAC engine + Astronomer-mirror tiers                Viewer/Triager/SecOps/Admin/SuperAdmin × security verbs
+[DONE]    P1-US-6   Audit log w/ hash chain + S3 archival                pkg/audit + cmd/audit-archiver (cosign-signed manifests)
+[DONE]    P1-US-7   OpenTelemetry SDK + Prometheus metrics               Real OTLP HTTP exporters (traces+metrics+logs) + /metrics
+[DONE]    P1-US-8   Frontend shell (Vite + Tailwind v4 + 9-item nav)     [frontend stack overrides spec's Next.js — see memory]
+[DONE]    P1-US-9   Frontend auth pages + session                        Login → dashboard, OIDC redirect path, logout
+[DONE]    P1-US-10  CVE DB v0 pipeline (trivy-db bootstrap)              Real BoltDB walker (vulnerability + ecosystem buckets)
+[DONE]    P1-US-11  CVE DB OCI publisher (cosign-signed bundle)          oras-go v2 push/pull + cosign 2.x bundle format
+[DONE]    P1-US-12  K8s operator + ConstellationCluster CRD + Helm chart controller-runtime reconciler (5 children, status, owner refs)
+[DONE]    P1-US-13  Astronomer adapter v0 (JWKS + tunnel mount)          Shares pkg/jwks with OIDC; cross-ref Mapper
+[DONE]    P1-US-14  constellationctl CLI scaffold                        cobra + goreleaser; login / image-check / audit verify / version
+
+Verification (run 2026-05-12 against this tree):
+- go test ./...                                    PASS  (constellation + constellation-vulndb)
+- go vet ./...                                     PASS
+- helm lint deploy/charts/constellation             PASS
+- npm run lint  (frontend)                          PASS  (5 warnings, 0 errors)
+- npm run type-check  (frontend)                    PASS
+- npm run build  (frontend)                         PASS
+- npm run test  (vitest)                            PASS  (3/3)
+- npx playwright test                               PASS  (27/27 e2e against live API)
+
+Key "external tool wiring" — now first-party integrations, VERIFIED E2E against real services:
+- OTel SDK + OTLP/HTTP exporter — proved with real otel-collector-contrib v0.151:
+    18 spans + 4 metric data points + 21 log records flowing live (traces+metrics+logs pipelines)
+- oras-go v2 push/pull — proved with real zot v2.1.7 OCI registry:
+    PUSH OK, PULL OK, repository discoverable via OCI Distribution API
+- cosign sign-blob / verify-blob (2.x new-bundle-format) — proved with real keypair:
+    3.7KB sigstore bundle, clean verify OK, tamper-detect failed verify as expected
+- JWKS RSA + ECDSA reconstruction — pkg/jwks shared by OIDC + Astronomer
+    (TestOIDC_Exchange_VerifiesSignature uses fake IdP signing real RS256 id_tokens)
+- trivy-db BoltDB walker → go.etcd.io/bbolt (fixture BoltDB tested via ConvertBoltDB)
+- NVD + KEV + EPSS aggregator E2E against real upstream feeds:
+    331,985 rows in cve_records; KEV 1,590 entries; Log4Shell/Heartbleed/EternalBlue all present
+- controller-runtime ConstellationCluster reconciler with HPA (envtest-style tested)
+- AWS cloud-CSPM: IAM AdministratorAccess + wildcard-grant + S3 public ACL + PAB-incomplete
+
+=== Phase 2 — Scan === (in progress, 2026-05-12)
+[DONE]     Image scanner aggregator (Syft + Trivy + Grype, normalized + deduped) — internal/scanner; ClairCore still pending
+[DONE]     Findings UI (list / detail / filter / suppress / accept-risk / comments) — full flow live, Playwright covered
+[DONE]     Composite Constellation Risk Score pipeline — pkg/risk (already live since P1)
+[DONE]     SBOM (SPDX 2.3 + CycloneDX 1.6) — pkg/sbom; emitted by constellationctl image-check
+[DONE]     SBOM endpoints — /api/v1/sbom/{spdx,cyclonedx,mbom}/{asset_id} live (Content-Disposition attachments)
+[PARTIAL]  Static reachability — pkg/reachability/golang via govulncheck source mode; live E2E run found 10 verdicts, 4 reachable in this codebase. Java + Python deferred.
+[DONE]     Registry connectors (9/9) — internal/registry: Docker Hub, GHCR, ECR, GCR/AR, ACR, Quay, Harbor, GitLab, JFrog; live E2E resolves ghcr.io + docker.io to sha256 digests
+[DONE]     Exports: SARIF 2.1.0 — pkg/sarif
+[DONE]     Exports: JSON + CSV (/api/v1/findings.csv streams; SARIF written by image-check)
+[DONE]     CI/CD: constellationctl image-check + GitHub Action + GitLab CI templates — deploy/ci/
+[DONE]     Scan-job queue (API + scanner-token auth + workers) — internal/handler/scanjobs + cmd/constellation-scanner
+[DONE]     Role-split containers (api / scanner / admission / operator / archiver / frontend) — deploy/docker/Dockerfile.*
+[DONE]     Operator: scanner Deployment + HPA + role-specific images — deploy/operator/controllers
+[DONE]     CVE DB v1: own aggregator — NVD+KEV+EPSS E2E verified, 331,985 rows in cve_records (GHSA needs GITHUB_TOKEN to enable, OSV ecosystem ZIPs are gigabyte-scale so off-by-default)
+
+=== Phase 3 — Admit & Posture === (in progress, 2026-05-12)
+[DONE]     Admission webhook engine — pkg/admission (privileged / hostNet / hostPID / readOnlyRoot / image-signature rules, enforce + monitor modes)
+[DONE]     Admission webhook service — cmd/constellation-admission (HTTPS, /validate + /healthz + /metrics, Dockerfile.admission)
+[DONE]     Curated policy catalog UI — pages/PoliciesPage with toggle/mode/YAML Monaco editor (Playwright covered)
+[DONE]     kube-bench parser + CIS Kubernetes mapping — pkg/compliance (parses kube-bench JSON output)
+[DONE]     Compliance framework registry — pkg/compliance.AllFrameworks() + cross-framework mapping (16 frameworks: CIS K8s/Docker, NIST 800-53/190, NSA-CISA, PCI-DSS 4.0, HIPAA, SOC 2, STIG, FedRAMP, NIS2, DORA, ISO 27001/17/18, CSA CCM)
+[DONE]     Compliance ingest — kube-bench → cross-framework expansion via ExpandInternal; /api/v1/compliance/{frameworks,checks,summary,ingest} live
+[DONE]     Compliance dashboard UI — pages/CompliancePage with framework rail + per-control table drill-down (Playwright covered)
+[DONE]     Custom-framework editor — internal/handler/custom_frameworks.go (primitives + create/list/delete) + db migration 012
+[DONE]     PDF report templates + executive PDFs — pkg/report (Compliance + Executive HTML templates + HTMLToPDF via wkhtmltopdf)
+[DONE]     Risk-prioritized deployment dashboard + violation timeline — db migration 011, /api/v1/{deployments,violations}, pages/DeploymentsPage + ViolationsPage, Playwright covered (StackRox parity)
+[DONE]     Cloud-CSPM (AWS + GCP + Azure) — internal/cspm/{aws,gcp,azure}: IAM over-privilege + public storage detection in all three clouds; tested with httptest fakes
+[DONE]     GitOps drift detection (Argo CD) — pkg/gitops: sensitive-resource set + hash-based compare + 3-state drift (modified, out-of-band, declared-only); Argo CD /managed-resources API client
+
+=== Phase 4 — Runtime === (complete on Linux build matrix, 2026-05-12)
+[DONE]     eBPF agent subsystem — internal/runtime/ebpf: cilium/ebpf CO-RE loader; exec/execveat tracepoints, tcp_connect/inet_csk_accept k(ret)probes, LSM file_open; bpf2go pipeline; degraded-mode fallback when object missing. Integration: `sudo go test -tags=linux,integration ./internal/runtime/ebpf/... -run TestLoad`.
+[DONE]     L7 DPI engine subsystem — internal/runtime/dpi: HTTP/1+2 (HPACK) + gRPC detect, DNS (hand-rolled), MySQL, Postgres, Redis, Kafka parsers; NFQUEUE source via florianl/go-nfqueue behind `linux,cgo` tag. Integration: `sudo go test -tags=linux,cgo,integration ./internal/runtime/dpi/...`.
+[DONE]     WAF + DLP rule engines — internal/runtime/waf (CRS-flavored rules: SQLi 942100/110/120, XSS 941100/110/120, LFI 930100/110, RCE 932100/110, scanner-UA 913100; learn/monitor/enforce). internal/runtime/dlp (CC w/Luhn, US SSN, AWS access/secret keys, GitHub PATs, Slack, Stripe, EU IBAN w/mod-97). Rule store + CRD-ish wire format in internal/runtime/{waf,dlp}/store.go.
+[DONE]     Falco rules ingestion subsystem — pkg/runtime/falco (YAML parser + macro/list/condition evaluator, evaluator tested)
+[DONE]     MITRE ATT&CK mapping table + EventKind→Technique mapper — pkg/attack (~30 techniques, tactic ordering, sub-technique fallback)
+[DONE]     Resource & Traffic Map UI — pages/NetworkMapPage with react-flow (NeuVector-parity); pkg/graph backs /api/v1/network/conversations
+[DONE]     Process + endpoint baselining lifecycle (Learn→Monitor→Enforce) — pkg/runtime/baseline; userspace simulator can drive it without kernel events
+[DONE]     Container quarantine + forensics capture — internal/runtime/quarantine: cordon (deny-all NetworkPolicy w/ kube-dns pinhole) → pcap on veth (gopacket) → /proc snapshot → K8s logs → sha256-manifested tarball; pkg/forensics/runtime.go bridges to existing Envelope.
+[DONE]     Runtime reachability confirmation — pkg/reachability/runtime: Confirmer consumes ebpf.Event stream and fires process|libload marks (uprobe attach deferred pending agent-wide eBPF collection); POST /api/v1/findings/{id}/reachability merges into risk_inputs.
+[DONE]     Auto network-policy generation (Cilium + Calico + native K8s NetworkPolicy) — pkg/netpolicy, three flavors, dedupe, DNS pinhole
+[DONE]     Discover→Monitor→Protect policy-elevation lifecycle (NeuVector parity) — pkg/netpolicy/elevation, stability gates, AutoElevate, demote path
+[DONE]     AI/ML workload runtime policies — pkg/aiworkload heuristic detector wired; profile policies enforceable via response rules (Wave D).
+
+=== Phase 5 — Polish & Enterprise === (in progress)
+[DONE]     VEX (OpenVEX 0.2.0 + CycloneDX 1.6 VEX) outputs — pkg/vex; lifecycle→status mapping
+[DONE]     SLSA Provenance v1.0 + in-toto Statement — pkg/attest; ready for cosign attest --predicate
+[PARTIAL]  Airgap CVE bundle GA — publisher/importer wired; pulled E2E from real zot v2.1.7; still needs scheduled-publish cadence + offline-importer hardening for GA
+[DONE]     ITSM integrations: Jira, ServiceNow, Slack, PagerDuty, generic webhook — pkg/notify (5 connectors, tests, Slack + PagerDuty + Webhook covered by httptest)
+[DONE]     Alertmanager-style routing tree — pkg/notify.Router (match tree, inhibit rules, group key); UI surface for raw YAML still pending
+[DONE]     Additional admission engines: OPA/Rego + K8s CEL — pkg/admission/{rego,cel} (both with monitor+enforce modes, compile-errors isolated per policy/rule)
+[DONE]     Backup / DR via operator — cmd/constellation-backup (pg_dump --format=custom + S3 upload + sha256 manifest); db migration 010 adds backups table
+[DONE]     FIPS 140-3 cryptographic compliance mode — `fips` build tag, GOFIPS140=v1.0.0, Dockerfile.fips, docs/fips.md
+[DONE]     Plugin SDK GA — pkg/plugin (Scanner/Enricher/Exporter interfaces + HTTP client+server + Manifest); cmd/sample-scanner-plugin reference implementation
+[DONE]     Reference Checkov IaC plugin — cmd/checkov-plugin (gRPC plugin SDK, JSON parsing of `checkov --output json`)
+[DONE]     Trend analytics — db/migrations/010 metrics_daily MV + /api/v1/analytics/{trend,mttr,backups} endpoints
+[DONE]     Migration tools — internal/migration/{stackrox,neuvector,aqua,prisma}: each parses vendor policy export → Kyverno + builtin policies; all four tested
+[DONE]     PII redaction at write-time — pkg/redact (DefaultPatterns: CC + US_SSN + EU_NATIONAL_ID + EMAIL + IP_V4; Compose() with custom patterns; JSON walk preserves non-string values)
+[DONE]     GenAI Assistant integration surface — pkg/abbot library (tool registry + RBAC + audit envelope + Client.Query) + /api/v1/ai/query endpoint returns ErrServiceUnreachable when off
+[DONE]     Image signature verification — pkg/sigverify (cosign 2.x shell-out + trust policy: identity regex + issuer regex + Rekor + attestations)
+[DONE]     SBOM diff — pkg/sbom.Compare (added/removed/changed across SPDX or CycloneDX docs)
+[DONE]     Multi-cluster federation + search — /api/v1/clusters + /api/v1/search (fuzzy across findings + cve_records + assets)
+[DONE]     Dev-experience layer scaffolds — deploy/integrations/{github-app,gitlab-app}/ + tools/vscode-extension/
+[DONE]     Scale hardening + ops doc — docs/scale-hardening.md
+[PENDING]  Standalone-mode UI polish
+
+=== StackRox + NeuVector mining waves (2026-05-12) ===
+[DONE]     Boolean policy DSL + scope/exclusions — pkg/policy/{dsl,eval,fields}: AND/OR/NOT PolicyGroup, lifecycle stages, source enum, criteria-locked/mitre-vectors-locked flags, 22-criterion fields registry, evaluator with EQ/NEQ/IN/NOTIN/CONTAINS/REGEX/EXISTS/GT/GTE/LT/LTE per-criterion negation. (StackRox parity.) Migration 027.
+[DONE]     Search query DSL — pkg/search/dsl: StackRox-style `r/`, `c/`, `"phrase"`, `!negate`, `tr/[start,end]`, `g/glob`, parens, OR. Wired into /api/v1/findings, /api/v1/cves, /api/v1/assets via `q=`. Backwards-compatible.
+[DONE]     Risk subfactor decomposition — pkg/risk.Decompose: cve_risk + policy_violation_risk + network_exposure_risk + asset_criticality_risk. Surfaced in GET /api/v1/findings/{id}.
+[DONE]     Policy Wizard UI — 6-step (Identity → Scope → Criteria → Exclusions → Actions → Review YAML). Risk drill-down tabbed page (Overview/Findings/Network/Process/Compliance, lazy-loaded). CVE breadcrumbs page (CVE → Image → Deployment → Cluster tile lists). Dashboard ScopeBar (cluster/namespace multi-select, URL+localStorage).
+[DONE]     Response Rules condition catalog — pkg/response: EventCond by name/level/cve-critical/proc/event-type + workload selector. Engine dispatches to pkg/notify receivers OR a Runtime bridge interface (quarantine/isolate). (NeuVector parity.) Migration 021.
+[DONE]     Vulnerability Profile rule engine — pkg/vulnprofile: name regex + image glob + days-to-fix threshold + `_recent` reserved + per-domain scope; emits suppress_accept/suppress_defer/escalate/none. Migration 022.
+[DONE]     Group taxonomy — pkg/group: Learned / Ground / Federated kinds + criteria entries (eq/contains/regex) + LearnFromObservations. Migration 023.
+[DONE]     Federation primitives — pkg/federation: Standalone/Master/Joint state machine + Member + RuleRevision since-version sync. Migration 024.
+[DONE]     Service Conversation Graph backend — pkg/graph: directed multigraph w/ bytes/packets/proto/last_seen; GET /api/v1/network/conversations.
+[DONE]     Compliance bench V2 tags — pkg/compliance/tags_v2: per-test tag metadata + per-profile filter (?profile=); 16 frameworks already in pkg/compliance. Migration 025.
+[DONE]     Admission image-name parser + 8-min log aggregation — pkg/admission/image_name.go: NeuVector-parity parse (protocol/registry/digest/library/) + AggregationCache sliding-window dedup by owner UID + image digest.
+[DONE]     WAF + DLP rule stores — internal/runtime/{waf,dlp}/store.go + OWASP CRS starter pack at deploy/rules/waf/crs-base.json + DLP federal/predefined/user catalog (federal-pii, modern-secrets, custom). Migration 026. (Coordinates with Phase 4 Wave A data plane.)
+[DONE]     UI: ResponseRulesPage (guided builder), VulnProfilePage, GroupsPage, WafRulesPage, DlpSensorsPage, FederationPage (with state-machine UI). Shared CrudPage component.
+
+=== Stub backends replaced with real implementations (2026-05-12) ===
+[DONE]     access_control handler — DB-backed users/role_assignments/role_bindings/service_accounts/api_tokens with CreateRoleBinding/DeleteRoleBinding/CreateServiceAccount + audit. Migration 020 adds role_bindings + service_accounts + scopes/status on api_tokens.
+[DONE]     system_health handler — live overlays: DB ping + pool stats, scan-job backlog with severity thresholds, audit-chain row count.
+[DONE]     enterprise (Integrations/MigrationSources/Onboarding) — overlays real receivers + routing yaml + org_settings JSON on the static catalog.
+[DONE]     AI / Abbot — /api/v1/ai/query full flow: org ai_enabled gate, pgvector-style RAG (pg_trgm fallback) over findings, per-request RBAC-scoped tool registry (list_findings, list_assets), per-tool audit envelopes, graceful 503+degrade body when Abbot service URL empty.
+[DONE]     Dashboard summary — /api/v1/dashboard/summary aggregates severity rollup, open/accepted counts, max risk, scan queue depth, recent audit activity.
+[DONE]     Settings — GET/PATCH /api/v1/settings/{org,user} with merge-or-delete semantics; audited before/after JSON. Migration 020 adds org_settings + user_settings.
+[DONE]     Receivers (Integrations page real backend) — /api/v1/integrations/receivers CRUD + delivery_history; /api/v1/routing.yaml export/import with revision counter. Migration 020 adds receivers + receiver_deliveries + routing_configs.
+[DONE]     Forensics retrieval — GET /api/v1/forensics/{snapshot_id} metadata reader.
+[DONE]     Scan-job lifecycle — POST /api/v1/scan-jobs/{id}/{pause,resume,cancel} state transitions guarded by status whitelist + audit. Migration 028 widens scan_jobs.status CHECK.
+[DONE]     Policies admin — DELETE /api/v1/policies/{id} + POST /api/v1/policies:bulk (create/update/delete/enable/disable, all-or-nothing transactional, max 200 ops).
+[DONE]     Clusters cross-scan — POST /api/v1/clusters/{id}/cross-scan org-scoped image fan-out enqueueing scan_jobs with dedupe.
+
+=== Verification (2026-05-12, post-waves) ===
+- go build ./...                                   PASS  (incl. -tags=linux)
+- go vet ./...                                     PASS
+- go test ./...                                    PASS  (50+ packages green, incl. all new runtime/ebpf/dpi/waf/dlp/quarantine/reachability + policy/search/response/vulnprofile/group/federation/graph)
+- npm run type-check (frontend)                    PASS
+- npm run build (frontend)                         PASS  (2669 modules, lazy-loaded Risk drill-down tabs)
+- goose migrations                                 PASS  (applied 001 → 028 on pgvector:pg16)
+- Live API smoke (auth'd)                          PASS  (15/15 new endpoints returning real data with audit chain)
+
+=== Verification (run after each story) ===
+- go test ./...
+- golangci-lint run  (not installed locally; CI gates this)
+- buf lint && buf breaking --against main
+- (frontend changes) npm run lint && npm run type-check && npm run build && npm run test
+- (E2E) npx playwright test  (requires Postgres + constellation-api + vite dev server)
+
+=== Wave E — k3d end-to-end (2026-05-12) ===
+[DONE]     6 split-role docker images built + imported into k3d (api / scanner / admission / operator / archiver / frontend).
+[DONE]     helm chart reworked to support per-role images — constellation.roleImage helper, scannerImage/admissionImage/runtimeAgentImage values, operator CRD schema fields scannerReplicas/admissionReplicas/scannerAutoscale.
+[DONE]     Operator RBAC widened for autoscaling, leases, events.
+[DONE]     ConstellationCluster CR reconciled into 5 child resources + DaemonSet on all 3 k3d nodes; pods stayed 1/1 Running.
+[DONE]     constellation-api control plane: /healthz, /readyz, /api/v1/auth/login, dashboard/summary, findings, audit/events all PASS over service port-forward.
+[DONE]     Scanner E2E: nginx:1.14.2 enqueued via POST /scan-jobs, picked up, completed in ~97s, produced 109 packages / 217 findings.
+[DONE]     Admission engine: privileged pod DENIED (block-privileged), benign pod ALLOWED via direct /validate POST.
+[DONE]     Network policy lifecycle: /api/v1/network/policies/lifecycle + /preview return candidate netpolicy.
+[DONE]     `constellationctl audit verify` PASS over 33 events (after fixing an audit-chain canonicalization bug — pkg/audit/audit.go truncates `at` to microseconds before hashing so chains survive a fresh seed).
+[PARTIAL]  Runtime baselining: in-memory engine unit-tested but no HTTP endpoint yet.
+[SKIPPED]  Frontend deployed into the cluster (not needed for control-plane verification).
+[SKIPPED]  ValidatingWebhookConfiguration with TLS plumbing — admission pod runs --insecure for now.
+           Artifacts: docs/e2e-results.md, deploy/e2e/values-e2e.yaml, deploy/e2e/sample-cr-e2e.yaml.
+
+=== Wave F1 — Runtime agent on real Linux kernel (2026-05-12) ===
+[DONE]     eBPF programs built end-to-end: `make -C internal/runtime/ebpf/bpf` produces runtime.bpf.o (~897 KB ELF, 4 programs). Source fixes to bpf/runtime.bpf.c: renamed proc_event/net_event/file_event -> cstl_* (BTF symbol collisions with kernel types), corrected __data_loc_filename access via BPF_CORE_READ, added <bpf/bpf_endian.h>.
+[DONE]     TestLoad real-attach (sudo, Linux 6.8 + BTF) PASS — 55 events captured.
+[DONE]     Live 8s smoke driver (deploy/e2e/runtime-smoke/main.go) captured 272 exec / 20 /bin/true / 110 tcp_connect / 40 accept events from real workload activity.
+[DONE]     TestNFQUEUEAttach (DPI sink, sudo + cgo) PASS — open/close clean on this kernel.
+[DONE]     Unit tests on real-kernel host: WAF (11), DLP (13), DPI (9), pipeline simulator (4 subtests) all PASS.
+[DEFERRED] BPF LSM file_open hook attached but never fires — kernel was not booted with `lsm=...,bpf,...` in cmdline. Loader-side port endianness mismatch (sport host-order vs decodeRecord BigEndian) flagged in RESULTS.md, not yet fixed; downstream contract concern.
+           Artifacts: deploy/e2e/runtime-smoke/RESULTS.md.
+
+=== Wave F2 — 2-cluster integration + workload-driven verification (2026-05-12) ===
+[DONE]     Second k3d cluster "constellation-edge" stood up alongside "constellation" (3+2 nodes total).
+[DONE]     Vulnerable workload fleet deployed on both clusters: DVWA, Juice-Shop, vulhub/log4j:2.14.1, nginx:1.14.2, alpine:3.6, redis:6.0.0, python:3.7-alpine, privileged/hostNetwork bait pods, huggingface/transformers-pytorch-gpu w/ ai-workload=true.
+[DONE]     Cross-cluster scan fan-out — 3 calls to /clusters/:id/cross-scan enqueued 5 scan_jobs.
+[DONE]     `constellationctl image-check nginx:1.14.2` -> 303 KB SARIF, ~100 CVEs.
+[DONE]     Admission engine /validate: privileged DENY, hostNetwork DENY, :latest ALLOW + 2 monitor warnings.
+[DONE]     Compliance handler bug fixed — internal/handler/compliance.go was scanning timestamptz into *string (cannot scan OID 1184); switched to time.Time + RFC3339.
+[DONE]     Search DSL aliases added — internal/handler/searchq.go now accepts cve: (alias for external_id) and reachable: (JSONB-derived bool over risk_inputs.reachable_runtime|reachable_static).
+[DONE]     /findings?q=external_id:CVE-2021-44228 returned 5 Log4Shell rows w/ reachable_runtime=true.
+[DONE]     Federation sync chain proven — since=0 returned 5 revs, since=2 returned 3, since=4 returned 1 after a new group insert.
+[DONE]     GitOps drift detection — declared vs live RoleBinding diff produced a DriftFinding with SHA deltas.
+           Artifacts: deploy/e2e/workloads/, deploy/e2e/gitops/, deploy/e2e/cluster-integration/RESULTS.md.
+
+=== Wave F3 — UI Playwright deep-dive (2026-05-12) ===
+[DONE]     deep-ui.spec.ts + deep-ui.config.ts: 33 tests across every nav page + every detail page + Wave C surfaces (PolicyWizard 6 steps, RiskDetail 5 tabs, CVEDetail, ScopeBar persistence) + Wave D (ResponseRules guided create).
+[DONE]     All 33 tests PASS. Zero console errors. Zero failed /api calls. 42 screenshots captured under frontend/e2e/screens/.
+           Deferred UI bugs catalogued in frontend/e2e/deferred-bugs.md (handled by Elite UX wave below where applicable).
+
+=== Wave G — Elite UX overhaul (2026-05-12) ===
+[DONE]     Design system shipped at frontend/src/components/ui/: severity-badge, risk-score + RiskGauge, kev/epss/reachable badges, stat-card + sparkline, data-table (sortable / selectable / density-toggleable), query-input (DSL-aware), filter-chip, tabs (Radix + badge counts), drawer (Radix Sheet), action-bar (sticky bulk), status-pill + mode-pill + lifecycle-badge, empty-state, button (5x4 variants), kbd.
+[DONE]     Aesthetic: OKLCH deep-space dark (252° hue, L 15→24%) + luminous teal accent (oklch 80% 0.15 195). Space Grotesk display + Geist body + JetBrains Mono tabular. Subtle dot-grid + star-field textures. 6px corners, hairline borders. Motion 100-160ms. prefers-reduced-motion respected.
+[DONE]     Pages redesigned: DashboardPage (hero risk gauge + 4 severity stat cards w/ 14d sparklines + Action Items + Recent Activity + cluster×kind heatmap + severity donut + CVE-DB freshness), FindingsPage (DSL QueryInput w/ chip rail + group-by + DataTable + bulk ActionBar + per-row Drawer + Saved Views), CVEDetailPage (EntityHeader + KEV banner + EPSS bar + Fix Advisor + tile rails), RiskDetailPage (EntityHeader w/ gauge + subfactor tooltip + Tabs w/ badge counts + Top Contributing + Recommended Actions rails), NetworkMapPage (ScopeBar + live indicator + 5 stat cards + policy-mode legend), AppShell (regrouped IA Posture/Runtime/Supply Chain/Ops + pinnable favorites + badged counts + sticky top header + Cmd+K + NotificationBell + theme toggle).
+[DONE]     CommandPalette (⌘K via Radix Dialog + cmdk): typeahead pages + findings + assets + policies + quick actions; recent items localStorage; CVE-id heuristic shortcut. HotkeysHelp (?): g d/f/a/c/n/p/r/v nav, Mod+k palette, / focus search, Esc close.
+[DONE]     Session hardening — frontend/src/api/client.ts 401 interceptor tightened: only clears token when the request actually carried Authorization AND was not /auth/login. Stable JWT_KEYS startup script provided at /tmp/start-constellation-api.sh.
+[DONE]     type-check clean · build clean (~1.4 MB JS / 397 KB gzip) · lint 0 errors (same 6 warnings baseline as before).
+           Artifacts: frontend/e2e/screens-elite/ (6 PNGs), frontend/e2e/elite-screens.spec.ts.
+
+=== Wave H1 — Real CVE DB ingest (2026-05-12, in constellation-vulndb commit 52d5655) ===
+[DONE]     cve_records: 9 -> 332,641 rows from real upstream feeds.
+           Coverage: 1,591 KEV-listed · 7,168 with EPSS > 0.5 · 2,009 with CVSS · 332,399 with EPSS.
+           Sources active: NVD 2.0 (30d slice, 2k cap, no API key), CISA KEV (full), FIRST EPSS (full), OSV (go/npm/pypi/maven, 500/eco).
+           Targets verified live: CVE-2021-44228 Log4Shell (cvss=10, kev=t, epss=0.9436), CVE-2017-0144 EternalBlue (kev=t, epss=0.9432), CVE-2022-22965 Spring4Shell (cvss=9.8, kev=t, epss=0.9443), CVE-2024-3094 XZ backdoor (cvss=10, epss=0.8481).
+           All 9 originally-seeded CVEs still present and enriched with real EPSS/KEV.
+[DONE]     Aggregator bugs fixed (constellation-vulndb): NVD 200-record cap (now MaxRecords param + 2000/page + 5min HTTP timeout), GHSA pagination cap (now MaxPages param), GHSA convertGHSA used GHSA-id as canonical key (now uses CVE alias when present so rows merge with NVD/EPSS/KEV).
+[DONE]     CLI flags added: -sources, -nvd-max, -nvd-since, -ghsa-pages, plus upsert progress logging + final row-count summary.
+[DEFERRED] GHSA disabled — `gh auth status` reports local token invalid. Re-enable: `gh auth login && GITHUB_TOKEN=$(gh auth token) vulndb-aggregator -sources ghsa -ghsa-pages 200`.
+[DEFERRED] Full NVD backfill (~125k CVEs/30d). Without NVD_API_KEY rate limit is 5 req/30s — proof-of-life slice only at this commit.
+[DEFERRED] Distro feeds (alpine/debian/rhel/ubuntu/wolfi) — placeholder packages only; not wired into aggregator.
+           Production guardrails noted in docs/cve-db-state.md: switch upsert from per-row Exec to COPY FROM STDIN (cuts EPSS run from ~5 min to seconds), persist per-source lastModStartDate watermark for incremental resume, stream-upsert from each source goroutine.
+           Suggested cron cadence: EPSS daily 02:00 UTC, KEV every 4h, NVD hourly w/ API key (2h sliding), OSV daily 04:00 UTC, GHSA hourly.
+
+=== Wave H2 — Native k3s + real-kernel runtime DaemonSet (2026-05-12) ===
+[DONE]     k3s v1.35.4+k3s1 (containerd v2.2.3-k3s1) installed natively on host (single-node, flannel host-gw, pod CIDR 10.42.0.0/24). Required bumping fs.inotify.max_user_instances 128 -> 8192 (docker + 3 k3d clusters had exhausted).
+[DONE]     10/10 pods Ready: constellation-api, constellation-operator, h2-admission, h2-runtime-agent (DaemonSet, hostPID/hostNetwork), h2-scanner, vuln-nginx, vuln-alpine, coredns, local-path-provisioner, metrics-server.
+[DONE]     Runtime DaemonSet attached to HOST kernel: 3 BPF programs loaded (trace_sched_exec, kprobe_tcp_connect, kretprobe_inet_csk_accept). LSM file_open silently skipped (matches Wave F1 kernel-cmdline note — needs `lsm=...,bpf,...`). 7,722 events captured in ~2.5 min, 0 dropped. Sample exec captures a real host process under /home/mj/.local/; sample net captures k3s-server inet_csk_accept.
+[DONE]     New binary: cmd/constellation-runtime-agent/main.go.
+[DONE]     New Dockerfile: deploy/docker/Dockerfile.runtime-agent (three-stage; bundles compiled runtime.bpf.o at /opt/constellation/runtime.bpf.o; sets CONSTELLATION_BPF_OBJ).
+[DONE]     Operator bug fixed: deploy/operator/controllers/constellationcluster_controller.go ensureAgentDaemonSet was missing hostPath mounts for /sys, /sys/fs/bpf, /sys/kernel/btf, /proc AND the SYS_PTRACE capability — runtime would have silently failed on every helm-managed deploy. Operator unit tests still pass.
+[DONE]     New chart values + CR: deploy/e2e/values-h2.yaml + deploy/e2e/sample-cr-h2.yaml.
+[DONE]     Scanner enqueued nginx:1.14.2 against k3s API; admission /validate DENY on privileged + hostNetwork; same audit chain on shared Postgres.
+[DEFERRED] ValidatingWebhookConfiguration with TLS still pending in k3s (matches Wave E caveat); the H3 scenario 04 actually does wire it on k3d.
+           Artifacts: docs/e2e-k3s-results.md.
+
+=== Wave H3 — Threat scenario suite (2026-05-12) ===
+[DONE]     10/10 scenarios PASS. Full runbook + per-scenario run.sh + EVIDENCE.md + captures/ in deploy/e2e/threat-scenarios/INDEX.md.
+           01 image vuln scan — nginx:1.14.2 -> 217 SARIF rows.
+           02 admission deny unsigned — policy_decisions row + /violations entry.
+           03 admission deny privileged + hostNetwork.
+           04 admission TLS plumbing — self-signed CA + Secret + ValidatingWebhookConfiguration; kubectl apply receives "admission webhook denied" from the apiserver (no more --insecure).
+           05 WAF blocks SQLi — rule 942110 fires + verdict=block + runtime.alert.waf audit row.
+           06 DLP catches Luhn CC — pattern 1001 fires + runtime.alert.dlp audit row.
+           07 runtime exec via eBPF + MITRE — 127 exec events + runtime.alert.exec tagged T1059.004/T1018/T1083.
+           08 GitOps drift — DriftFinding with declared/observed SHA + gitops.drift.detected audit row.
+           09 NetworkPolicy auto-gen — Cilium/Calico/native YAML candidates returned + network_policy.approve audit row.
+           10 audit chain end-to-end — verify clean, tamper row 4 -> broken, restore -> clean.
+[DONE]     WAF rule 942110 bug fixed: rules_crs.go `removeWhitespace` transformation collapsed `1 OR 1=1--` -> `1or1=1--`, after which `\bor\b` couldn't match. Now uses `lowercase, urlDecode` only. Unit tests still pass.
+[DONE]     pkg/audit/audit.go VerifyChain bug fixed: SELECT used `actor_ip::text` which Postgres renders as `<addr>/<bits>`. `net.ParseIP("::1/128")` returns nil so verifier hashed `<nil>` for actor_ip while the writer hashed `::1` — silently broke any chain with non-NULL actor_ip. Now uses `host(actor_ip)`.
+[DEFERRED] WAF/DLP via live NFQUEUE (vs the harness shipped) — needs privileged DaemonSet, queued for a live-traffic wave.
+[DEFERRED] Operator scaled to 0 during scenario 04 (operator hard-codes --insecure and would reconcile the TLS patch back). Promoting TLS to ConstellationCluster CR is a follow-up. Restore command at end of 04-admission-tls/EVIDENCE.md.
+           Side-effect noted: the pkg/audit integration test truncates audit_events at setup — running it against the live DB wiped F2's audit history. H3 scenarios were re-run afterward to repopulate (chain verifies clean at 19 rows).
+
+=== Dashboard polish (2026-05-12, commit 56cb4db) ===
+[DONE]     RiskGauge ("80 POSTURE" circle on /dashboard) was off-center due to a -ml-[110px] hack; replaced with absolute-positioned overlay so score/label/sub stack centered in the ring at any size. Same fix benefits EntityHeader on Risk Detail page.
+[DONE]     Critical Exposure Matrix was visually empty — synthetic row key `asset_id.split(":")[0].slice(0,12)` collapsed every UUID to one row. Switched to `slice(-6)` of the trailing UUID segment (distinct per asset) and canonical severity columns + TOTAL column. Removed broken `writing-mode: vertical-rl` column headers (the "ALERT-NICK-X" garbage).
+
+=== Definition of Done (per phase) ===
+- All story acceptance criteria pass
+- go test ./... green across affected packages
+- golangci-lint clean
+- buf lint && buf breaking clean
+- Frontend lint + type-check + build + test clean
+- e2e suite green on kind (where applicable)
+- helm install --dry-run succeeds; sample CR applies
+- Manual browser smoke test of new top-level views (P1-P3)
+- OTel traces visible end-to-end for new request paths
+- Audit log entries for new privileged actions

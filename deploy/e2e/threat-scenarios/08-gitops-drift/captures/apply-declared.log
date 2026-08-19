@@ -1,0 +1,2 @@
+The RoleBinding "platform-readers" is invalid: roleRef: Invalid value: rbac.RoleRef{APIGroup:"rbac.authorization.k8s.io", Kind:"Role", Name:"configmap-reader"}: cannot change roleRef
+Error from server (NotFound): rolebindings.rbac.authorization.k8s.io "compliance-readers" not found

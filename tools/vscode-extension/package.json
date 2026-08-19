@@ -1,0 +1,75 @@
+{
+  "name": "constellation-security",
+  "displayName": "Constellation Security",
+  "description": "Inline container + IaC security findings from your Constellation server, with hover-to-explain CVEs, quick-fix suggestions, and a findings sidebar.",
+  "version": "0.2.0",
+  "publisher": "alphabravo",
+  "engines": { "vscode": "^1.92.0" },
+  "categories": ["Linters", "Other"],
+  "activationEvents": [
+    "onStartupFinished",
+    "onLanguage:dockerfile",
+    "onLanguage:yaml",
+    "onLanguage:terraform"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Constellation",
+      "properties": {
+        "constellation.serverUrl": {
+          "type": "string",
+          "default": "http://localhost:8080",
+          "description": "Constellation API base URL."
+        },
+        "constellation.token": {
+          "type": "string",
+          "default": "",
+          "description": "Constellation API token. Either run 'Constellation: Sign in' (device-code) or paste a constellationctl token here."
+        },
+        "constellation.repoScope": {
+          "type": "string",
+          "default": "",
+          "description": "Filter findings to this repo (matches against finding.target.repo)."
+        }
+      }
+    },
+    "commands": [
+      { "command": "constellation.scanCurrentFile", "title": "Constellation: Scan current file" },
+      { "command": "constellation.openFinding",     "title": "Constellation: Open finding in browser" },
+      { "command": "constellation.refreshFindings", "title": "Constellation: Refresh findings",        "icon": "$(refresh)" },
+      { "command": "constellation.signIn",          "title": "Constellation: Sign in (device code)" },
+      { "command": "constellation.upgradeToFixed",  "title": "Constellation: Upgrade to fixed version" }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "constellationFindings",
+          "name": "Constellation Findings"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "constellation.refreshFindings",
+          "when": "view == constellationFindings",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build":   "esbuild src/extension.ts --bundle --platform=node --target=node18 --external:vscode --outfile=out/extension.js --format=cjs",
+    "watch":   "esbuild src/extension.ts --bundle --platform=node --target=node18 --external:vscode --outfile=out/extension.js --format=cjs --watch",
+    "compile": "tsc -p ./ --noEmit",
+    "vscode:prepublish": "npm run build",
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node":   "^20.11.0",
+    "@types/vscode": "^1.92.0",
+    "esbuild":       "^0.24.0",
+    "typescript":    "^5.6.0"
+  }
+}

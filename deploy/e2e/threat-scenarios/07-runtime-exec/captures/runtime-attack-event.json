@@ -1,0 +1,1 @@
+{"action":"runtime.alert.exec","target":"edge/juice-shop","mitre":["T1059.004"],"comm":"sh","argv":"id && whoami && cat /etc/passwd"}

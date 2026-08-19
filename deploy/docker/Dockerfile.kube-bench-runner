@@ -1,0 +1,33 @@
+# syntax=docker/dockerfile:1.7
+# constellation-kube-bench-runner — one-shot CronJob image that execs the
+# upstream kube-bench binary, reads its --json report, and POSTs it to
+# /api/v1/compliance/ingest.
+#
+# ponytail: this image MUST bundle the upstream kube-bench binary (and its
+# cfg/ tree). We copy it straight from the official aquasec/kube-bench image
+# rather than reimplementing the benchmark. Pin KUBE_BENCH_IMAGE for a known
+# kube-bench version.
+
+ARG GO_VERSION=1.26
+ARG WOLFI_IMAGE=cgr.dev/chainguard/wolfi-base@sha256:34977aa13765da89f60fee8fe5230e2bb1c55192df08e383c58221ee0d1277fb
+ARG KUBE_BENCH_IMAGE=docker.io/aquasec/kube-bench:v0.10.7
+
+FROM golang:${GO_VERSION}-bookworm AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+ARG VERSION=dev
+ENV CGO_ENABLED=0 GOOS=linux
+RUN go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
+      -o /out/constellation-kube-bench-runner ./cmd/constellation-kube-bench-runner
+
+FROM ${KUBE_BENCH_IMAGE} AS kubebench
+
+FROM ${WOLFI_IMAGE} AS runtime
+RUN apk add --no-cache ca-certificates tzdata
+COPY --from=build /out/constellation-kube-bench-runner /usr/local/bin/constellation-kube-bench-runner
+# kube-bench binary + its config tree (the cfg/ dir is required at runtime).
+COPY --from=kubebench /usr/local/bin/kube-bench /usr/local/bin/kube-bench
+COPY --from=kubebench /opt/kube-bench/cfg /opt/kube-bench/cfg
+ENTRYPOINT ["/usr/local/bin/constellation-kube-bench-runner"]

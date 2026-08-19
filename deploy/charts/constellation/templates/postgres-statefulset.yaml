@@ -1,0 +1,107 @@
+{{- $mode := include "constellation.postgresMode" . -}}
+{{- if eq $mode "statefulset" -}}
+{{- /*
+The two Secrets (postgres credentials + composed DSN) used to live in this
+file. They were moved to postgres-secrets.yaml as pre-install hooks so the
+migrate Job (weight -5) can find them before any normal-resource templates
+have rendered. See that file for password lookup + idempotency logic.
+*/ -}}
+{{- $cfg := .Values.postgres.embeddedConfig -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "constellation.fullname" . }}-postgres
+  labels:
+    {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: {{ include "constellation.name" . }}
+    app.kubernetes.io/component: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "constellation.fullname" . }}-postgres
+  labels:
+    {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  serviceName: {{ include "constellation.fullname" . }}-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "constellation.name" . }}
+        app.kubernetes.io/component: postgres
+    spec:
+      {{- include "constellation.pullSecrets" . | nindent 6 }}
+      {{- with $cfg.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: postgres
+          image: {{ $cfg.image }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with $cfg.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              valueFrom: { secretKeyRef: { name: {{ include "constellation.fullname" . }}-postgres, key: username } }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ include "constellation.fullname" . }}-postgres, key: password } }
+            - name: POSTGRES_DB
+              valueFrom: { secretKeyRef: { name: {{ include "constellation.fullname" . }}-postgres, key: database } }
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "{{ $cfg.username }}"] }
+            periodSeconds: 5
+          livenessProbe:
+            exec: { command: ["pg_isready", "-U", "{{ $cfg.username }}"] }
+            periodSeconds: 10
+            initialDelaySeconds: 30
+          resources:
+            {{- toYaml $cfg.resources | nindent 12 }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if $cfg.storageClass }}
+        storageClassName: {{ $cfg.storageClass }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $cfg.storage }}
+{{- else if and (eq $mode "external") .Values.postgres.dsn (not .Values.postgres.existingSecret) -}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "constellation.fullname" . }}-database-url
+  labels:
+    {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+type: Opaque
+stringData:
+  url: {{ .Values.postgres.dsn | quote }}
+{{- end -}}

@@ -1,0 +1,13 @@
+{
+    "findings": [],
+    "lifecycle_counts": {
+        "accepted": 0,
+        "in_progress": 0,
+        "open": 0,
+        "resolved": 0,
+        "suppressed": 0,
+        "triaged": 0
+    },
+    "limit": 5,
+    "offset": 0
+}

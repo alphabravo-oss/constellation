@@ -1,0 +1,37 @@
+# Constellation frontend image.
+#
+# Two stages:
+#   1. Build the Vite SPA.
+#   2. Serve it with nginx in a tiny wolfi-nginx base.
+#
+# In production the Helm chart wires nginx with the API as an upstream so /api and
+# /openapi.json proxy correctly (see deploy/charts/constellation/templates/frontend-deployment.yaml).
+
+ARG NODE_VERSION=22
+ARG WOLFI_NGINX_IMAGE=cgr.dev/chainguard/nginx@sha256:fdd65ea225da60875e24a8b45d1e65501f9e4991b3b097ae65ed8a4c8f3782a3
+
+# -----------------------------------------------------------------------------
+# Stage 1 — build the SPA.
+# -----------------------------------------------------------------------------
+FROM node:${NODE_VERSION}-bookworm AS build
+WORKDIR /src
+
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+COPY frontend/. .
+
+ARG VITE_API_URL=/api
+ENV VITE_API_URL=${VITE_API_URL}
+RUN npm run build
+
+# -----------------------------------------------------------------------------
+# Stage 2 — serve with nginx.
+# -----------------------------------------------------------------------------
+FROM ${WOLFI_NGINX_IMAGE} AS runtime
+
+COPY --from=build /src/dist /usr/share/nginx/html
+COPY deploy/docker/nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 8080
+USER 65532

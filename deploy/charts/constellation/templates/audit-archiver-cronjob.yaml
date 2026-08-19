@@ -1,0 +1,93 @@
+{{- if .Values.auditArchiver.enabled }}
+{{- $signMode := default "none" .Values.auditArchiver.sign.mode }}
+{{- $signKeyPath := default "" .Values.auditArchiver.sign.keyPath }}
+{{- if and (eq $signMode "static-key") (not $signKeyPath) .Values.auditArchiver.sign.keySecretName }}
+{{- $signKeyPath = printf "/etc/constellation/audit-signing/%s" .Values.auditArchiver.sign.keySecretKey }}
+{{- end }}
+{{- if not .Values.auditArchiver.bucket }}
+{{- fail "auditArchiver.bucket is required when auditArchiver.enabled=true" }}
+{{- end }}
+{{- if and (eq $signMode "static-key") (not $signKeyPath) }}
+{{- fail "auditArchiver.sign.keySecretName or auditArchiver.sign.keyPath is required when auditArchiver.sign.mode=static-key" }}
+{{- end }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "constellation.fullname" . }}-audit-archiver
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: audit-archiver
+spec:
+  schedule: "{{ .Values.auditArchiver.schedule }}"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          {{- include "constellation.pullSecrets" . | nindent 10 }}
+          {{- include "constellation.podSecurityContext" . | nindent 10 }}
+          automountServiceAccountToken: false
+          restartPolicy: Never
+          containers:
+            - name: audit-archiver
+              image: {{ include "constellation.roleImage" (dict "ctx" . "role" "auditArchiver") }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              {{- include "constellation.containerSecurityContext" . | nindent 14 }}
+              args:
+                - "--bucket={{ .Values.auditArchiver.bucket }}"
+                - "--prefix={{ .Values.auditArchiver.prefix }}"
+                - "--window={{ .Values.auditArchiver.window }}"
+                - "--sign-mode={{ $signMode }}"
+                {{- if $signKeyPath }}
+                - "--sign-key={{ $signKeyPath }}"
+                {{- end }}
+                {{- if .Values.auditArchiver.sign.cosignBin }}
+                - "--cosign-bin={{ .Values.auditArchiver.sign.cosignBin }}"
+                {{- end }}
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "constellation.dsnSecret" . }}
+                      key: {{ include "constellation.dsnSecretKey" . }}
+                {{- if .Values.auditArchiver.awsRegion }}
+                - name: AWS_REGION
+                  value: {{ .Values.auditArchiver.awsRegion | quote }}
+                {{- end }}
+                - name: CONSTELLATION_API_URL
+                  value: {{ include "constellation.apiURL" . | quote }}
+                - name: CONSTELLATION_AUDIT_ARCHIVER_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "constellation.runtimeAgentTokenSecret" . }}
+                      key: token
+                      optional: true
+                - name: RUNTIME_AGENT_TOKEN_FILE
+                  value: /var/run/constellation/runtime-agent-token/token
+                {{- with .Values.auditArchiver.env }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+                - name: runtime-agent-token
+                  mountPath: /var/run/constellation/runtime-agent-token
+                  readOnly: true
+              {{- if .Values.auditArchiver.sign.keySecretName }}
+                - name: audit-signing-key
+                  mountPath: /etc/constellation/audit-signing
+                  readOnly: true
+              {{- end }}
+          volumes:
+            - name: tmp
+              emptyDir: {}
+            - name: runtime-agent-token
+              secret:
+                secretName: {{ include "constellation.runtimeAgentTokenSecret" . }}
+                optional: true
+          {{- if .Values.auditArchiver.sign.keySecretName }}
+            - name: audit-signing-key
+              secret:
+                secretName: {{ .Values.auditArchiver.sign.keySecretName }}
+          {{- end }}
+{{- end }}

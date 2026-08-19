@@ -1,0 +1,15 @@
+# Declared state for the "platform-rbac" Argo CD Application.
+# What the platform team committed to Git.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: platform-readers
+  namespace: platform
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: configmap-reader
+subjects:
+  - kind: Group
+    name: platform-eng
+    apiGroup: rbac.authorization.k8s.io

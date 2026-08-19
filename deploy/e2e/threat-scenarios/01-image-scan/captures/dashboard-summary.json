@@ -1,0 +1,156 @@
+{
+    "generated_at": "2026-05-12T15:11:18Z",
+    "findings_by_severity": {
+        "critical": 15,
+        "high": 15,
+        "medium": 5
+    },
+    "findings_total": 35,
+    "open_findings": 5,
+    "accepted_risks": 6,
+    "highest_risk": 95,
+    "assets_total": 9,
+    "scan_queue_depth": 5,
+    "recent_activity": [
+        {
+            "at": "2026-05-12T15:10:51Z",
+            "action": "auth.login.local",
+            "target_kind": "user",
+            "target_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e",
+            "actor_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e"
+        },
+        {
+            "at": "2026-05-12T15:08:50Z",
+            "action": "auth.login.local",
+            "target_kind": "user",
+            "target_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e",
+            "actor_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e"
+        },
+        {
+            "at": "2026-05-12T14:46:14Z",
+            "action": "auth.login.local",
+            "target_kind": "user",
+            "target_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e",
+            "actor_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e"
+        },
+        {
+            "at": "2026-05-12T14:45:38Z",
+            "action": "auth.login.local",
+            "target_kind": "user",
+            "target_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e",
+            "actor_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e"
+        },
+        {
+            "at": "2026-05-12T14:45:35Z",
+            "action": "auth.login.local",
+            "target_kind": "user",
+            "target_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e",
+            "actor_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e"
+        },
+        {
+            "at": "2026-05-12T14:45:32Z",
+            "action": "auth.login.local",
+            "target_kind": "user",
+            "target_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e",
+            "actor_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e"
+        },
+        {
+            "at": "2026-05-12T14:45:30Z",
+            "action": "auth.login.local",
+            "target_kind": "user",
+            "target_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e",
+            "actor_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e"
+        },
+        {
+            "at": "2026-05-12T14:45:27Z",
+            "action": "auth.login.local",
+            "target_kind": "user",
+            "target_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e",
+            "actor_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e"
+        },
+        {
+            "at": "2026-05-12T14:45:24Z",
+            "action": "auth.login.local",
+            "target_kind": "user",
+            "target_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e",
+            "actor_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e"
+        },
+        {
+            "at": "2026-05-12T14:44:18Z",
+            "action": "auth.login.local",
+            "target_kind": "user",
+            "target_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e",
+            "actor_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e"
+        },
+        {
+            "at": "2026-05-12T14:43:34Z",
+            "action": "auth.login.local",
+            "target_kind": "user",
+            "target_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e",
+            "actor_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e"
+        },
+        {
+            "at": "2026-05-12T14:43:01Z",
+            "action": "auth.login.local",
+            "target_kind": "user",
+            "target_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e",
+            "actor_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e"
+        },
+        {
+            "at": "2026-05-12T14:35:33Z",
+            "action": "auth.login.local",
+            "target_kind": "user",
+            "target_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e",
+            "actor_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e"
+        },
+        {
+            "at": "2026-05-12T14:34:28Z",
+            "action": "auth.login.local",
+            "target_kind": "user",
+            "target_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e",
+            "actor_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e"
+        },
+        {
+            "at": "2026-05-12T14:34:25Z",
+            "action": "auth.login.local",
+            "target_kind": "user",
+            "target_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e",
+            "actor_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e"
+        },
+        {
+            "at": "2026-05-12T14:34:23Z",
+            "action": "auth.login.local",
+            "target_kind": "user",
+            "target_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e",
+            "actor_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e"
+        },
+        {
+            "at": "2026-05-12T14:34:20Z",
+            "action": "auth.login.local",
+            "target_kind": "user",
+            "target_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e",
+            "actor_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e"
+        },
+        {
+            "at": "2026-05-12T14:34:18Z",
+            "action": "auth.login.local",
+            "target_kind": "user",
+            "target_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e",
+            "actor_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e"
+        },
+        {
+            "at": "2026-05-12T14:34:02Z",
+            "action": "auth.login.local",
+            "target_kind": "user",
+            "target_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e",
+            "actor_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e"
+        },
+        {
+            "at": "2026-05-12T14:25:11Z",
+            "action": "auth.login.local",
+            "target_kind": "user",
+            "target_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e",
+            "actor_id": "507d5ef6-507a-4c32-91af-f4e0116f5f7e"
+        }
+    ]
+}

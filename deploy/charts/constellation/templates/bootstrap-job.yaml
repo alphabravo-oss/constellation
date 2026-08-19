@@ -1,0 +1,332 @@
+{{- /*
+Wave N1: when initBundle.secretName is set the chart is in "remote cluster" mode
+and the init-bundle consumer Job (templates/initbundle-consumer-job.yaml) projects
+the pre-minted tokens + TLS into Secrets. We short-circuit this self-mint path so
+two competing token rows don't end up in the control-plane DB.
+*/ -}}
+{{- if and .Values.bootstrap.enabled (not .Values.initBundle.secretName) }}
+{{- /*
+Token + org bootstrap. Runs as a post-install + post-upgrade hook so that:
+  - the database is reachable (api Deployment + Postgres StatefulSet already up)
+  - the schema migrations have run on the api Pods' first boot
+The Job is idempotent:
+  - INSERT ... ON CONFLICT DO NOTHING for the default org
+  - skips token regeneration when the target Secret already has a 'token' key
+
+The Job projects two Secrets:
+  - <release>-scanner-token        key=token (raw)
+  - <release>-runtime-agent-token  key=token (raw)
+*/ -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "constellation.fullname" . }}-bootstrap
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+---
+# Namespaced Role for Secret writes (constellation-scanner-token + constellation-runtime-agent-token).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "constellation.fullname" . }}-bootstrap
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "constellation.fullname" . }}-bootstrap
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "constellation.fullname" . }}-bootstrap
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "constellation.fullname" . }}-bootstrap
+    namespace: {{ .Release.Namespace }}
+---
+# Cluster-scoped role for ConstellationCluster CR (cluster-scoped CRD).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "constellation.fullname" . }}-bootstrap-cluster
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: ["constellation.alphabravo.io"]
+    resources: ["constellationclusters"]
+    verbs: ["get", "list", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "constellation.fullname" . }}-bootstrap-cluster
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "constellation.fullname" . }}-bootstrap-cluster
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "constellation.fullname" . }}-bootstrap
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "constellation.fullname" . }}-bootstrap-scripts
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+data:
+  run.sh: |
+    #!/bin/sh
+    # Bootstrap the default org + service tokens. Idempotent across upgrades.
+    set -eu
+
+    SCANNER_SECRET="{{ include "constellation.scannerTokenSecret" . }}"
+    AGENT_SECRET="{{ include "constellation.runtimeAgentTokenSecret" . }}"
+    NS="{{ .Release.Namespace }}"
+    ORG_NAME="{{ .Values.bootstrap.org.name }}"
+    ORG_DISPLAY="{{ .Values.bootstrap.org.displayName }}"
+
+    # The password is encoded in DATABASE_URL; libpq picks it up. Don't reference
+    # PGPASSWORD because `set -u` would abort on unset.
+    echo "Waiting for Postgres..."
+    for i in $(seq 1 60); do
+      if psql "$DATABASE_URL" -c 'select 1' >/dev/null 2>&1; then
+        echo "Postgres reachable"
+        break
+      fi
+      sleep 2
+    done
+
+    # Wait for the API Pod's migrations to have created orgs / scanner_tokens / runtime_agent_tokens.
+    echo "Waiting for schema..."
+    for i in $(seq 1 90); do
+      have_orgs=$(psql "$DATABASE_URL" -tAc "select to_regclass('public.orgs')" 2>/dev/null || true)
+      have_st=$(psql "$DATABASE_URL" -tAc "select to_regclass('public.scanner_tokens')" 2>/dev/null || true)
+      have_rt=$(psql "$DATABASE_URL" -tAc "select to_regclass('public.runtime_agent_tokens')" 2>/dev/null || true)
+      if [ -n "$have_orgs" ] && [ -n "$have_st" ] && [ -n "$have_rt" ]; then
+        echo "Schema ready"
+        break
+      fi
+      sleep 2
+    done
+
+    # Ensure default org row exists. Some psql builds print both the RETURNING
+    # row AND a trailing "INSERT 0 1" status line; strip everything but the
+    # UUID with grep so $ORG_ID stays well-formed.
+    ORG_ID=$(psql "$DATABASE_URL" -tAc "
+      INSERT INTO orgs (name, display_name)
+      VALUES ('$ORG_NAME', '$ORG_DISPLAY')
+      ON CONFLICT (name) DO UPDATE SET display_name = EXCLUDED.display_name
+      RETURNING id;
+    " | grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
+    echo "Default org: $ORG_NAME ($ORG_ID)"
+
+    issue_token() {
+      role_name="$1"
+      secret_name="$2"
+      # Reuse existing token if Secret already populated.
+      raw=$(kubectl -n "$NS" get secret "$secret_name" -o jsonpath='{.data.token}' 2>/dev/null | base64 -d 2>/dev/null || true)
+      if [ -n "$raw" ]; then
+        echo "$role_name token already exists; reusing"
+        return
+      fi
+      case "$role_name" in
+        scanner) prefix="cst_" ;;
+        runtime-agent) prefix="cra_" ;;
+        *) echo "unknown token role: $role_name" >&2; exit 1 ;;
+      esac
+      raw="${prefix}$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+      hash=$(printf '%s' "$raw" | sha256sum | cut -d' ' -f1)
+      table="$3"
+      psql "$DATABASE_URL" -c "
+        INSERT INTO $table (org_id, name, token_hash)
+        VALUES ('$ORG_ID', '$role_name-bootstrap', '$hash')
+        ON CONFLICT (token_hash) DO NOTHING;
+      "
+      kubectl -n "$NS" create secret generic "$secret_name" \
+        --from-literal=token="$raw" \
+        --dry-run=client -o yaml | kubectl apply -f -
+      echo "$role_name token issued; stored in $secret_name"
+    }
+
+    issue_token "scanner" "$SCANNER_SECRET" "scanner_tokens"
+    issue_token "runtime-agent" "$AGENT_SECRET" "runtime_agent_tokens"
+
+    CLUSTER_NAME="{{ include "constellation.clusterName" . }}"
+    CLUSTER_ID="{{ .Values.clusterRegistration.clusterId }}"
+    CR_ORG_ID="{{ .Values.clusterRegistration.orgID }}"
+    [ -z "$CR_ORG_ID" ] && CR_ORG_ID="$ORG_ID"
+
+    # Always write the installed cluster row directly so GlobalAdmins see
+    # the local cluster immediately, even when scanner/runtime/operator are
+    # disabled for a control-plane-only install. Pre-Wave-E this was the
+    # discoverer binary's job, but the discoverer isn't in the default
+    # install — leaving the table empty broke quarantine, scoped flow
+    # queries, and any multi-cluster surface that scopes by cluster_id.
+    # The agent's heartbeat later overwrites state/last_heartbeat_at; the
+    # row's UUID stays stable because of ON CONFLICT (id) when an explicit
+    # clusterRegistration.clusterId is provided, otherwise ON CONFLICT
+    # (org_id, name) preserves generated-id installs.
+    if [ -n "$CLUSTER_ID" ]; then
+      psql "$DATABASE_URL" -c "
+        INSERT INTO clusters (id, org_id, name, distro, cloud_provider, region,
+                              state, agent_version, last_heartbeat_at)
+        VALUES ('$CLUSTER_ID', '$CR_ORG_ID', '$CLUSTER_NAME',
+                '{{ .Values.clusterRegistration.distro }}',
+                '{{ .Values.clusterRegistration.cloudProvider }}',
+                '{{ .Values.clusterRegistration.region }}',
+                'connected',
+                '{{ .Chart.AppVersion }}',
+                NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          org_id = EXCLUDED.org_id,
+          name = EXCLUDED.name,
+          distro = EXCLUDED.distro,
+          cloud_provider = EXCLUDED.cloud_provider,
+          region = EXCLUDED.region,
+          state = 'connected',
+          agent_version = EXCLUDED.agent_version,
+          last_heartbeat_at = NOW();
+      "
+    else
+      psql "$DATABASE_URL" -c "
+        INSERT INTO clusters (org_id, name, distro, cloud_provider, region,
+                              state, agent_version, last_heartbeat_at)
+        VALUES ('$CR_ORG_ID', '$CLUSTER_NAME',
+                '{{ .Values.clusterRegistration.distro }}',
+                '{{ .Values.clusterRegistration.cloudProvider }}',
+                '{{ .Values.clusterRegistration.region }}',
+                'connected',
+                '{{ .Chart.AppVersion }}',
+                NOW())
+        ON CONFLICT (org_id, name) DO UPDATE SET
+          distro = EXCLUDED.distro,
+          cloud_provider = EXCLUDED.cloud_provider,
+          region = EXCLUDED.region,
+          state = 'connected',
+          agent_version = EXCLUDED.agent_version,
+          last_heartbeat_at = NOW();
+      "
+    fi
+    echo "Cluster row ensured: $CLUSTER_NAME (org=$CR_ORG_ID)"
+
+    {{- if .Values.clusterRegistration.enabled }}
+    # 2) Register the ConstellationCluster CR so the operator can reconcile
+    # the per-role workloads (audit-archiver CronJob, vulndb-importer, etc.).
+    cat <<EOF | kubectl apply -f -
+    apiVersion: constellation.alphabravo.io/v1alpha1
+    kind: ConstellationCluster
+    metadata:
+      name: $CLUSTER_NAME
+      namespace: $NS
+    spec:
+      controlPlaneURL: http://{{ include "constellation.fullname" . }}-api.$NS.svc:{{ .Values.api.service.port }}
+      orgID: "$CR_ORG_ID"
+      scannerEnabled: false
+      admissionEnabled: false
+      runtimeEnabled: false
+    EOF
+    {{- end }}
+
+    echo "Bootstrap complete."
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "constellation.fullname" . }}-bootstrap
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+spec:
+  backoffLimit: 5
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "constellation.name" . }}
+        app.kubernetes.io/component: bootstrap
+    spec:
+      {{- include "constellation.pullSecrets" . | nindent 6 }}
+      {{- include "constellation.helperPodSecurityContext" . | nindent 6 }}
+      serviceAccountName: {{ include "constellation.fullname" . }}-bootstrap
+      restartPolicy: Never
+      volumes:
+        - name: scripts
+          configMap:
+            name: {{ include "constellation.fullname" . }}-bootstrap-scripts
+            defaultMode: 0755
+        - name: work
+          emptyDir: {}
+        - name: tools
+          emptyDir: {}
+      initContainers:
+        - name: install-kubectl
+          image: {{ .Values.bootstrap.image }}
+          {{- include "constellation.helperContainerSecurityContext" . | nindent 10 }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - "cp /usr/bin/kubectl /tools/kubectl 2>/dev/null || cp $(which kubectl) /tools/kubectl"
+          env:
+            - name: HOME
+              value: /tmp
+            - name: TMPDIR
+              value: /tmp
+          volumeMounts:
+            - name: work
+              mountPath: /tmp
+            - name: tools
+              mountPath: /tools
+      containers:
+        - name: bootstrap
+          image: {{ .Values.bootstrap.psqlImage }}
+          {{- include "constellation.helperContainerSecurityContext" . | nindent 10 }}
+          command: ["/bin/sh", "/scripts/run.sh"]
+          env:
+            - name: HOME
+              value: /tmp
+            - name: TMPDIR
+              value: /tmp
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "constellation.dsnSecret" . }}
+                  key: {{ include "constellation.dsnSecretKey" . }}
+            - name: PATH
+              value: "/tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+          volumeMounts:
+            - name: work
+              mountPath: /tmp
+            - name: scripts
+              mountPath: /scripts
+            - name: tools
+              mountPath: /tools
+{{- end }}

@@ -1,0 +1,124 @@
+# Sample production values for Constellation on AWS EKS.
+#
+# Copy to ops/values-prod.yaml and `helm upgrade --install constellation
+#   deploy/charts/constellation -n constellation-system --create-namespace
+#   -f ops/values-prod.yaml`.
+
+image:
+  tag: v0.2.0          # pin to a released tag in prod
+  pullPolicy: IfNotPresent
+  pullSecrets:
+    - name: ghcr-pull-secret
+
+api:
+  replicas: 3
+  requireJWTKeys: true
+  resources:
+    limits:   { cpu: 2, memory: 2Gi }
+    requests: { cpu: 500m, memory: 512Mi }
+
+operator:
+  replicas: 1
+
+admission:
+  replicas: 3
+  webhook:
+    failurePolicy: Fail
+    namespaceSelector:
+      matchLabels:
+        constellation.alphabravo.io/enforce: "true"
+
+scanner:
+  replicas: 4
+  maxConcurrent: 4
+  targetCapacity: "image=3,host=8,workload=8,platform=4,serverless=4"
+  readiness:
+    # false: image scans fall back to Trivy/Grype when the vulndb bundle is missing or
+    # stale instead of failing closed. Set true to hard-require a fresh bundle per scan.
+    requireVulnDB: false
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 70
+
+frontend:
+  replicas: 2
+
+# Render namespace default-deny plus explicit Constellation flows. Tighten the
+# CIDRs to your VPC/node/control-plane/RDS ranges before applying.
+networkPolicies:
+  enabled: true
+  kubeAPI:
+    cidrs: ["10.0.0.0/8"]
+    ports: [443, 6443]
+  externalPostgres:
+    cidrs: ["10.0.0.0/8"]
+    ports: [5432]
+  frontendIngressCIDRs: ["10.0.0.0/8"]
+  admissionIngressCIDRs: ["10.0.0.0/8"]
+
+# Use cert-manager for the admission webhook in prod.
+tls:
+  certManager:
+    enabled: true
+    issuer: letsencrypt-prod
+    issuerKind: ClusterIssuer
+  bootstrap:
+    enabled: false
+
+# External Postgres (RDS).
+postgres:
+  embedded: false
+  existingSecret: constellation-db-credentials
+  existingSecretKey: url
+
+# Scheduled VulnDB consumption. Enable after publishing signed bundles and
+# mounting/creating the public-key Secret. Constellation consumes the artifact;
+# constellation-vulndb remains the producer.
+vulndb:
+  manualUpload:
+    enabled: false
+  readiness:
+    requireBundle: true
+    maxAge: 168h
+  trust:
+    requireSignatures: true
+    publicKeySecret: constellation-vulndb-cosign-public-key
+    publicKeySecretKey: cosign.pub
+  freshness:
+    maxAge: 168h
+vulndbImporter:
+  enabled: true
+  installJob:
+    enabled: true
+  source:
+    kind: oci
+    # Signed VulnDB artifact channel. Pin to a digest for exact replay/change-control.
+    ref: ghcr.io/alphabravo-oss/constellation-vulndb-bundle:latest
+
+# Ingress with cert-manager TLS.
+ingress:
+  enabled: true
+  className: alb
+  host: constellation.example.com
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: '443'
+  tls:
+    enabled: true
+    secretName: constellation-frontend-tls
+
+# Optional S3 audit archive. Enable after creating the signing key Secret and
+# granting the CronJob AWS S3 write access through IRSA/workload identity.
+auditArchiver:
+  enabled: false
+  bucket: constellation-audit-prod
+  prefix: constellation/audit
+  sign:
+    mode: static-key
+    keySecretName: constellation-audit-signing
+    keySecretKey: cosign.key

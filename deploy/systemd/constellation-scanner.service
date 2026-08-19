@@ -1,0 +1,30 @@
+[Unit]
+Description=Constellation Scanner Worker (single-instance) — Syft+Trivy+Grype aggregator
+Documentation=https://github.com/alphabravocompany/constellation
+After=network-online.target constellation-api.service
+Wants=network-online.target
+
+# Single-instance convenience unit. For a worker pool of N hosts, prefer the templated
+# unit constellation-scanner@.service (see that file) and start N instances.
+
+[Service]
+Type=simple
+User=constellation
+Group=constellation
+EnvironmentFile=/etc/constellation/scanner.env
+ExecStart=/usr/local/bin/constellation-scanner
+WorkingDirectory=/var/lib/constellation
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=constellation-scanner
+
+LimitNOFILE=32768
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

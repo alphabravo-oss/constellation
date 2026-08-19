@@ -1,0 +1,18 @@
+# syntax=docker/dockerfile:1.7
+# constellation-bootstrap — one-shot post-install image that mints the
+# initial admin org + user. See cmd/constellation-bootstrap/main.go for
+# behaviour (idempotent: re-running on an already-bootstrapped org is a
+# no-op).
+FROM golang:1.26-bookworm AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+ARG VERSION=dev
+ENV CGO_ENABLED=0 GOOS=linux
+RUN go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
+      -o /out/constellation-bootstrap ./cmd/constellation-bootstrap
+
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=build /out/constellation-bootstrap /usr/local/bin/constellation-bootstrap
+ENTRYPOINT ["/usr/local/bin/constellation-bootstrap"]

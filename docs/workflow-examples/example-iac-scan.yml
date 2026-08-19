@@ -1,0 +1,106 @@
+# Example: scan IaC changes (Terraform / Helm / K8s YAML / Dockerfile) in a PR diff.
+#
+# Required secrets:
+#   CONSTELLATION_SERVER, CONSTELLATION_TOKEN
+name: constellation-iac-scan
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+
+jobs:
+  iac:
+    runs-on: ubuntu-latest
+    container:
+      image: constellation/cli:latest
+    env:
+      CONSTELLATION_SERVER: ${{ secrets.CONSTELLATION_SERVER }}
+      CONSTELLATION_TOKEN:  ${{ secrets.CONSTELLATION_TOKEN }}
+    steps:
+      - name: Checkout (full history for diff)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+
+      - name: Compute changed IaC paths
+        id: diff
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER:  ${{ github.sha }}
+        run: |
+          set -e
+          base="$PR_BASE_SHA"
+          head="$PR_HEAD_SHA"
+          if [ -z "$base" ] || [ -z "$head" ]; then
+            base="$PUSH_BEFORE"
+            head="$PUSH_AFTER"
+          fi
+          git diff --name-only "$base...$head" \
+            | grep -E '\.(tf|tfvars|ya?ml|json)$|Dockerfile' \
+            | sort -u > changed-iac.txt || true
+          echo "count=$(wc -l < changed-iac.txt)" >> "$GITHUB_OUTPUT"
+          cat changed-iac.txt || true
+
+      - name: Run constellationctl iac-check
+        id: scan
+        if: steps.diff.outputs.count != '0'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          constellationctl iac-check . \
+            --fail-on high \
+            --sarif constellation-iac.sarif \
+            | tee iac-summary.txt
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Upload SARIF
+        if: always() && steps.diff.outputs.count != '0'
+        uses: github/codeql-action/upload-sarif@dd903d2e4f5405488e5ef1422510ee31c8b32357
+        with:
+          sarif_file: constellation-iac.sarif
+          category: constellation-iac
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request' && steps.diff.outputs.count != '0'
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const summary = fs.existsSync('iac-summary.txt')
+              ? fs.readFileSync('iac-summary.txt', 'utf8')
+              : '_(no summary produced)_';
+            const changed = fs.existsSync('changed-iac.txt')
+              ? fs.readFileSync('changed-iac.txt', 'utf8').trim().split('\n').filter(Boolean)
+              : [];
+            const body = [
+              '### Constellation IaC scan',
+              '',
+              'Changed files (' + changed.length + '):',
+              changed.map(f => '- `' + f + '`').join('\n'),
+              '',
+              '```',
+              summary.slice(0, 60000),
+              '```',
+            ].join('\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+
+      - name: Fail on high+ findings
+        if: steps.scan.outputs.exit_code != '0'
+        run: |
+          echo "::error::constellationctl iac-check exited non-zero (high+ findings present)."
+          exit 1

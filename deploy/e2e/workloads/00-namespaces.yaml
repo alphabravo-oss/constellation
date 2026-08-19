@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: payments
+  labels:
+    constellation.alphabravo.io/zone: pci
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: checkout
+  labels:
+    constellation.alphabravo.io/zone: pci
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: edge
+  labels:
+    constellation.alphabravo.io/zone: public
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: platform
+  labels:
+    constellation.alphabravo.io/zone: internal

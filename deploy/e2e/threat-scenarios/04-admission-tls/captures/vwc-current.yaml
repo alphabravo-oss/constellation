@@ -1,0 +1,79 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"admissionregistration.k8s.io/v1","kind":"ValidatingWebhookConfiguration","metadata":{"annotations":{},"labels":{"constellation.alphabravo.io/cluster":"e2e"},"name":"constellation-admission"},"webhooks":[{"admissionReviewVersions":["v1"],"clientConfig":{"caBundle":"LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURLekNDQWhPZ0F3SUJBZ0lVVFZkNlU2dUVGbjJFWEpJQWpCT3NIZFJZVXNvd0RRWUpLb1pJaHZjTkFRRUwKQlFBd0pURWpNQ0VHQTFVRUF3d2FZMjl1YzNSbGJHeGhkR2x2YmkxaFpHMXBjM05wYjI0dFkyRXdIaGNOTWpZdwpOVEV5TVRVeE5qTTNXaGNOTXpZd05UQTVNVFV4TmpNM1dqQWxNU013SVFZRFZRUUREQnBqYjI1emRHVnNiR0YwCmFXOXVMV0ZrYldsemMybHZiaTFqWVRDQ0FTSXdEUVlKS29aSWh2Y05BUUVCQlFBRGdnRVBBRENDQVFvQ2dnRUIKQU1Edm14dk1icXdDdy9xbDVScEdJU0dKTEdOTEdGOGJDbGkwY2g3ck9IVXF4b3pNbFFqRDFuRm5leW81VUNpNwplRkFLL0ZIVlAzSWFIcXNaR1BVQUY5SWhzZzlFeXFUQ2dzL3g0aEd4YUprdE81Ymt5RUNXWVdWZjYvMG1uaE41CnB6bHVtaGNxZHZoYmhOK3dsVVBLdWwyZnFGblRQa29oVDVBZ1FnMS9Rd3QyVHkyZ3BpQXcyUUNMSjFHenBKcnUKZUJ6OGVNQ1NTSjdDMXhaTlcyVUxlMnFHKzZzcmdNY25zK00zK2xveDFRRThGVE40OHB3aUFqSlpDM2c3OVZKUApCbHRwMXZ6Vk0wTXhJNGVncGRROHVDVjlLTUV5d2kxNENDVzc5bHBiT2kzd2FiUkxxblZlWlY5UTlycmt0ejNRClRrWlU0YTRYbUd5Q3k1amlCaEJjTWdrQ0F3RUFBYU5UTUZFd0hRWURWUjBPQkJZRUZCUzNtY3VxUExaQVNBd0QKeGMzeVpJcGJlakxiTUI4R0ExVWRJd1FZTUJhQUZCUzNtY3VxUExaQVNBd0R4YzN5WklwYmVqTGJNQThHQTFVZApFd0VCL3dRRk1BTUJBZjh3RFFZSktvWklodmNOQVFFTEJRQURnZ0VCQUl2UmRoQzN1V2VOZklvRkpLNkRrNkpqClZnWXFRRVh1aThlNXNOSXhnZ0dJclIyc3BtWWRWMHRJUUFWcWRMRlFVeThDcmhpaFNsN1U1MjJ3TTE5akVBSSsKTERrUndNMi9kT1lqZVpEYWt1SHRXTVJxcXF4aHlhUjN1VklqUExVdFZSUzBWWG1aYVNEMnNieUFpZkxuZHB6bQpzVWZ5YmVPeXNsbUQ3SzFtMGZjSUZuREVNc2tBYjJHK3V4YlJnaGl0Sm51R1pUL1ZRSi9lNFF4UDFiM3RyVEJaCnVKa3B3THN1ZGhrU0tQWTRXb2thM2JaZmdCU0RxWHpiNGo0TWdaV1RsTW15VTdsbmVhWlBtV2lvUzNwdjRwcGcKOHFGVG0vY3hNL0tnUEhZNlkxREpQS29UdEZEU2FraWlCcFE4cWZtZVZXenlpVDFyY3RBRElNQ3JaTWh2eUswPQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==","service":{"name":"e2e-admission","namespace":"constellation-system","path":"/validate","port":443}},"failurePolicy":"Ignore","name":"validate.constellation.alphabravo.io","namespaceSelector":{"matchExpressions":[{"key":"kubernetes.io/metadata.name","operator":"NotIn","values":["kube-system","constellation-system","kube-public","kube-node-lease"]},{"key":"constellation.alphabravo.io/admission","operator":"NotIn","values":["skip"]}]},"rules":[{"apiGroups":[""],"apiVersions":["v1"],"operations":["CREATE","UPDATE"],"resources":["pods","replicationcontrollers","persistentvolumeclaims"],"scope":"Namespaced"},{"apiGroups":["apps"],"apiVersions":["v1"],"operations":["CREATE","UPDATE"],"resources":["deployments","statefulsets","daemonsets","replicasets"],"scope":"Namespaced"},{"apiGroups":["batch"],"apiVersions":["v1"],"operations":["CREATE","UPDATE"],"resources":["jobs","cronjobs"],"scope":"Namespaced"}],"sideEffects":"None","timeoutSeconds":5}]}
+  creationTimestamp: "2026-05-12T15:17:05Z"
+  generation: 1
+  labels:
+    constellation.alphabravo.io/cluster: e2e
+  name: constellation-admission
+  resourceVersion: "5808"
+  uid: 8da6646d-1180-4ae9-852c-1f78b01d82bc
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    caBundle: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURLekNDQWhPZ0F3SUJBZ0lVVFZkNlU2dUVGbjJFWEpJQWpCT3NIZFJZVXNvd0RRWUpLb1pJaHZjTkFRRUwKQlFBd0pURWpNQ0VHQTFVRUF3d2FZMjl1YzNSbGJHeGhkR2x2YmkxaFpHMXBjM05wYjI0dFkyRXdIaGNOTWpZdwpOVEV5TVRVeE5qTTNXaGNOTXpZd05UQTVNVFV4TmpNM1dqQWxNU013SVFZRFZRUUREQnBqYjI1emRHVnNiR0YwCmFXOXVMV0ZrYldsemMybHZiaTFqWVRDQ0FTSXdEUVlKS29aSWh2Y05BUUVCQlFBRGdnRVBBRENDQVFvQ2dnRUIKQU1Edm14dk1icXdDdy9xbDVScEdJU0dKTEdOTEdGOGJDbGkwY2g3ck9IVXF4b3pNbFFqRDFuRm5leW81VUNpNwplRkFLL0ZIVlAzSWFIcXNaR1BVQUY5SWhzZzlFeXFUQ2dzL3g0aEd4YUprdE81Ymt5RUNXWVdWZjYvMG1uaE41CnB6bHVtaGNxZHZoYmhOK3dsVVBLdWwyZnFGblRQa29oVDVBZ1FnMS9Rd3QyVHkyZ3BpQXcyUUNMSjFHenBKcnUKZUJ6OGVNQ1NTSjdDMXhaTlcyVUxlMnFHKzZzcmdNY25zK00zK2xveDFRRThGVE40OHB3aUFqSlpDM2c3OVZKUApCbHRwMXZ6Vk0wTXhJNGVncGRROHVDVjlLTUV5d2kxNENDVzc5bHBiT2kzd2FiUkxxblZlWlY5UTlycmt0ejNRClRrWlU0YTRYbUd5Q3k1amlCaEJjTWdrQ0F3RUFBYU5UTUZFd0hRWURWUjBPQkJZRUZCUzNtY3VxUExaQVNBd0QKeGMzeVpJcGJlakxiTUI4R0ExVWRJd1FZTUJhQUZCUzNtY3VxUExaQVNBd0R4YzN5WklwYmVqTGJNQThHQTFVZApFd0VCL3dRRk1BTUJBZjh3RFFZSktvWklodmNOQVFFTEJRQURnZ0VCQUl2UmRoQzN1V2VOZklvRkpLNkRrNkpqClZnWXFRRVh1aThlNXNOSXhnZ0dJclIyc3BtWWRWMHRJUUFWcWRMRlFVeThDcmhpaFNsN1U1MjJ3TTE5akVBSSsKTERrUndNMi9kT1lqZVpEYWt1SHRXTVJxcXF4aHlhUjN1VklqUExVdFZSUzBWWG1aYVNEMnNieUFpZkxuZHB6bQpzVWZ5YmVPeXNsbUQ3SzFtMGZjSUZuREVNc2tBYjJHK3V4YlJnaGl0Sm51R1pUL1ZRSi9lNFF4UDFiM3RyVEJaCnVKa3B3THN1ZGhrU0tQWTRXb2thM2JaZmdCU0RxWHpiNGo0TWdaV1RsTW15VTdsbmVhWlBtV2lvUzNwdjRwcGcKOHFGVG0vY3hNL0tnUEhZNlkxREpQS29UdEZEU2FraWlCcFE4cWZtZVZXenlpVDFyY3RBRElNQ3JaTWh2eUswPQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==
+    service:
+      name: e2e-admission
+      namespace: constellation-system
+      path: /validate
+      port: 443
+  failurePolicy: Ignore
+  matchPolicy: Equivalent
+  name: validate.constellation.alphabravo.io
+  namespaceSelector:
+    matchExpressions:
+    - key: kubernetes.io/metadata.name
+      operator: NotIn
+      values:
+      - kube-system
+      - constellation-system
+      - kube-public
+      - kube-node-lease
+    - key: constellation.alphabravo.io/admission
+      operator: NotIn
+      values:
+      - skip
+  objectSelector: {}
+  rules:
+  - apiGroups:
+    - ""
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - pods
+    - replicationcontrollers
+    - persistentvolumeclaims
+    scope: Namespaced
+  - apiGroups:
+    - apps
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - deployments
+    - statefulsets
+    - daemonsets
+    - replicasets
+    scope: Namespaced
+  - apiGroups:
+    - batch
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - jobs
+    - cronjobs
+    scope: Namespaced
+  sideEffects: None
+  timeoutSeconds: 5

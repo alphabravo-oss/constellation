@@ -1,0 +1,336 @@
+{{- /*
+Wave N1: when initBundle.secretName is set the chart consumes a pre-minted bundle
+from the control plane (templates/initbundle-consumer-job.yaml) instead of minting
+a fresh self-signed CA here. Suppress the TLS bootstrap job so we don't overwrite
+the control-plane-issued cert chain.
+*/ -}}
+{{- if and .Values.admission.enabled (not .Values.tls.certManager.enabled) .Values.tls.bootstrap.enabled (not .Values.initBundle.secretName) -}}
+{{- /*
+TLS bootstrap. Runs as a pre-install + pre-upgrade hook so the admission Service
++ Deployment have valid TLS material before the webhook starts taking traffic.
+
+Steps:
+  1. If `<release>-admission-tls` already exists with non-empty data, no-op (idempotent on upgrade).
+  2. Otherwise mint a self-signed CA + server cert for
+       constellation-admission.<release-namespace>.svc
+     and write the result back to the Secret.
+  3. Patch the ValidatingWebhookConfiguration with the freshly minted caBundle.
+
+Implementation: a single Pod with an init container (openssl image) that
+produces the cert files into an emptyDir, then a main container (kubectl)
+that pushes them into a Secret and patches the webhook.
+*/ -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "constellation.fullname" . }}-tls-bootstrap
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    # Runs at both pre-install (mint the cert + Secret before the admission Pod
+    # starts) and post-install (patch the ValidatingWebhookConfiguration's
+    # caBundle once the chart has created it). The script is idempotent.
+    "helm.sh/hook": pre-install,pre-upgrade,post-install,post-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "constellation.fullname" . }}-tls-bootstrap
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    # Runs at both pre-install (mint the cert + Secret before the admission Pod
+    # starts) and post-install (patch the ValidatingWebhookConfiguration's
+    # caBundle once the chart has created it). The script is idempotent.
+    "helm.sh/hook": pre-install,pre-upgrade,post-install,post-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "constellation.fullname" . }}-tls-bootstrap
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    # Runs at both pre-install (mint the cert + Secret before the admission Pod
+    # starts) and post-install (patch the ValidatingWebhookConfiguration's
+    # caBundle once the chart has created it). The script is idempotent.
+    "helm.sh/hook": pre-install,pre-upgrade,post-install,post-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "constellation.fullname" . }}-tls-bootstrap
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "constellation.fullname" . }}-tls-bootstrap
+    namespace: {{ .Release.Namespace }}
+---
+# The Job needs cluster-scoped permissions to patch the
+# ValidatingWebhookConfiguration (which lives outside any namespace).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "constellation.fullname" . }}-tls-bootstrap
+  annotations:
+    # Runs at both pre-install (mint the cert + Secret before the admission Pod
+    # starts) and post-install (patch the ValidatingWebhookConfiguration's
+    # caBundle once the chart has created it). The script is idempotent.
+    "helm.sh/hook": pre-install,pre-upgrade,post-install,post-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: ["admissionregistration.k8s.io"]
+    resources: ["validatingwebhookconfigurations", "mutatingwebhookconfigurations"]
+    verbs: ["get", "list", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "constellation.fullname" . }}-tls-bootstrap
+  annotations:
+    # Runs at both pre-install (mint the cert + Secret before the admission Pod
+    # starts) and post-install (patch the ValidatingWebhookConfiguration's
+    # caBundle once the chart has created it). The script is idempotent.
+    "helm.sh/hook": pre-install,pre-upgrade,post-install,post-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "constellation.fullname" . }}-tls-bootstrap
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "constellation.fullname" . }}-tls-bootstrap
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "constellation.fullname" . }}-tls-bootstrap-scripts
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    # Runs at both pre-install (mint the cert + Secret before the admission Pod
+    # starts) and post-install (patch the ValidatingWebhookConfiguration's
+    # caBundle once the chart has created it). The script is idempotent.
+    "helm.sh/hook": pre-install,pre-upgrade,post-install,post-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+data:
+  gen-certs.sh: |
+    #!/bin/sh
+    set -eu
+    cd /work
+    SVC="{{ include "constellation.fullname" . }}-admission"
+    NS="{{ .Release.Namespace }}"
+    CN="$SVC.$NS.svc"
+
+    # CA
+    openssl genrsa -out ca.key 4096 >/dev/null 2>&1
+    openssl req -x509 -new -nodes -key ca.key -sha256 -days 3650 \
+      -subj "/CN=constellation-admission-ca" -out ca.crt
+
+    # Server key + CSR with SAN
+    openssl genrsa -out tls.key 4096 >/dev/null 2>&1
+    cat > server.cnf <<EOF
+    [req]
+    distinguished_name = req_distinguished_name
+    req_extensions = v3_req
+    prompt = no
+    [req_distinguished_name]
+    CN = $CN
+    [v3_req]
+    subjectAltName = @alt_names
+    keyUsage = digitalSignature, keyEncipherment
+    extendedKeyUsage = serverAuth
+    [alt_names]
+    DNS.1 = $SVC
+    DNS.2 = $SVC.$NS
+    DNS.3 = $SVC.$NS.svc
+    DNS.4 = $SVC.$NS.svc.cluster.local
+    EOF
+    openssl req -new -key tls.key -out tls.csr -config server.cnf
+
+    openssl x509 -req -in tls.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+      -out tls.crt -days 825 -sha256 -extensions v3_req -extfile server.cnf
+
+    # Make the cert + key world-readable so the non-root patch container can mount them.
+    chmod 0644 /work/tls.crt /work/tls.key /work/ca.crt
+
+    echo "Generated cert chain:"
+    openssl x509 -in tls.crt -noout -subject -issuer -dates
+  patch.sh: |
+    #!/bin/sh
+    set -eu
+    SECRET="{{ include "constellation.admissionTLSSecret" . }}"
+    NS="{{ .Release.Namespace }}"
+    WH="{{ include "constellation.fullname" . }}-admission"
+
+    # Re-use an existing Secret if the chart is upgrading and the cert hasn't expired.
+    # The CA cert is read from kubectl stdout (not written back into /work) so this
+    # script doesn't need write access — important when the patch container runs as
+    # a non-root user and the work volume was populated by the (root) init container.
+    if kubectl -n "$NS" get secret "$SECRET" -o jsonpath='{.data.tls\.crt}' 2>/dev/null | grep -q .; then
+      echo "TLS secret $SECRET already exists; reusing"
+      CA_B64=$(kubectl -n "$NS" get secret "$SECRET" -o jsonpath='{.data.ca\.crt}')
+    else
+      kubectl -n "$NS" create secret generic "$SECRET" \
+        --from-file=tls.crt=/work/tls.crt \
+        --from-file=tls.key=/work/tls.key \
+        --from-file=ca.crt=/work/ca.crt \
+        --dry-run=client -o yaml | kubectl apply -f -
+      echo "Created TLS secret $SECRET"
+      CA_B64=$(base64 -w0 < /work/ca.crt 2>/dev/null || base64 < /work/ca.crt | tr -d '\n')
+    fi
+
+    # Patch ValidatingWebhookConfiguration caBundle. The configuration is created by
+    # the chart (templates/admission-webhook.yaml) with an empty caBundle.
+    if kubectl get validatingwebhookconfiguration "$WH" >/dev/null 2>&1; then
+      kubectl get validatingwebhookconfiguration "$WH" -o json |
+        kubectl patch validatingwebhookconfiguration "$WH" --type=json \
+          -p="[{\"op\":\"replace\",\"path\":\"/webhooks/0/clientConfig/caBundle\",\"value\":\"$CA_B64\"}]"
+      echo "Patched validatingwebhookconfiguration/$WH caBundle"
+    else
+      echo "validatingwebhookconfiguration/$WH not present yet; chart will install it after this Job and the cert is already in the Secret"
+    fi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "constellation.fullname" . }}-tls-bootstrap
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+spec:
+  backoffLimit: 4
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "constellation.name" . }}
+        app.kubernetes.io/component: tls-bootstrap
+    spec:
+      {{- include "constellation.pullSecrets" . | nindent 6 }}
+      {{- include "constellation.helperPodSecurityContext" . | nindent 6 }}
+      serviceAccountName: {{ include "constellation.fullname" . }}-tls-bootstrap
+      restartPolicy: Never
+      volumes:
+        - name: work
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        - name: scripts
+          configMap:
+            name: {{ include "constellation.fullname" . }}-tls-bootstrap-scripts
+            defaultMode: 0755
+      initContainers:
+        - name: gen-certs
+          image: {{ .Values.tls.bootstrap.opensslImage }}
+          {{- include "constellation.helperContainerSecurityContext" . | nindent 10 }}
+          command: ["/bin/sh", "/scripts/gen-certs.sh"]
+          env:
+            - name: HOME
+              value: /tmp
+            - name: TMPDIR
+              value: /tmp
+          volumeMounts:
+            - name: work
+              mountPath: /work
+            - name: tmp
+              mountPath: /tmp
+            - name: scripts
+              mountPath: /scripts
+      containers:
+        - name: patch
+          image: {{ .Values.tls.bootstrap.image }}
+          {{- include "constellation.helperContainerSecurityContext" . | nindent 10 }}
+          command: ["/bin/sh", "/scripts/patch.sh"]
+          env:
+            - name: HOME
+              value: /tmp
+            - name: TMPDIR
+              value: /tmp
+          volumeMounts:
+            - name: work
+              mountPath: /work
+            - name: tmp
+              mountPath: /tmp
+            - name: scripts
+              mountPath: /scripts
+---
+# Wave E (testnode fix): post-install caBundle patch job.
+#
+# The pre-install tls-bootstrap-job creates the TLS Secret and TRIES to
+# patch the ValidatingWebhookConfiguration's caBundle — but at pre-install
+# time the VWC doesn't exist yet (chart hasn't applied it), so the script
+# falls into its else branch and just logs "VWC not present yet". Result:
+# every kube-apiserver → webhook handshake fails with `tls: bad certificate`,
+# and because failurePolicy=Ignore is the safe default, every pod is
+# admitted. Effectively the entire admission engine becomes a no-op.
+#
+# This post-install Job re-runs ONLY the patch step after the chart has
+# applied the VWC, closing the loop. Idempotent.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "constellation.fullname" . }}-tls-bootstrap-patch
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    # Weight -9 puts us BEFORE the migrate-job (-5) and the bootstrap
+    # jobs (5/10) since admission denials matter from the first pod
+    # create — but AFTER the patch-script ConfigMap (also a post-install
+    # hook at weight -10), so the kubelet finds the ConfigMap mount when
+    # this Job's pod starts. Same-weight hooks race, breaking the mount.
+    "helm.sh/hook-weight": "-9"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tls-bootstrap-patch
+spec:
+  backoffLimit: 4
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "constellation.name" . }}
+        app.kubernetes.io/component: tls-bootstrap-patch
+    spec:
+      {{- include "constellation.pullSecrets" . | nindent 6 }}
+      {{- include "constellation.helperPodSecurityContext" . | nindent 6 }}
+      serviceAccountName: {{ include "constellation.fullname" . }}-tls-bootstrap
+      restartPolicy: OnFailure
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: scripts
+          configMap:
+            name: {{ include "constellation.fullname" . }}-tls-bootstrap-scripts
+            defaultMode: 0755
+      containers:
+        - name: patch
+          image: {{ .Values.tls.bootstrap.image }}
+          {{- include "constellation.helperContainerSecurityContext" . | nindent 10 }}
+          # Re-run the same patch.sh that the pre-install Job ran. By now
+          # the VWC exists; the script's `if kubectl get validatingwebhook…`
+          # branch hits and the caBundle gets populated from the existing
+          # Secret (the Secret-reuse path on line ~179).
+          command: ["/bin/sh", "/scripts/patch.sh"]
+          env:
+            - name: HOME
+              value: /tmp
+            - name: TMPDIR
+              value: /tmp
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: scripts
+              mountPath: /scripts
+{{- end }}

@@ -1,0 +1,164 @@
+# Constellation GitLab CI template.
+#
+# Copy into the project root as `.gitlab-ci.yml`, or `include:` it from a
+# central project:
+#
+#   include:
+#     - project: 'security/constellation-ci'
+#       file:    '/.gitlab-ci.yml.template'
+#       ref:     main
+#
+# Required CI/CD variables (Settings → CI/CD → Variables):
+#   CONSTELLATION_SERVER   https://constellation.yourco.com
+#   CONSTELLATION_TOKEN    constellationctl tokens create --scope ci-runner
+#   IMAGE_REF              (optional) image to scan; defaults to $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+
+stages:
+  - scan-image
+  - scan-iac
+  - gate-policy
+  - sbom-upload
+
+default:
+  image:
+    name: constellation/cli:latest
+    entrypoint: [""]
+  tags: [docker]
+
+# --- shared snippets -------------------------------------------------------
+
+.constellation_env: &constellation_env
+  variables:
+    GIT_DEPTH: 50
+  before_script:
+    - export IMAGE_REF="${IMAGE_REF:-$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA}"
+    - echo "Constellation server $CONSTELLATION_SERVER"
+    - echo "Image ref $IMAGE_REF"
+
+# --- jobs -----------------------------------------------------------------
+
+scan-image:
+  stage: scan-image
+  <<: *constellation_env
+  script:
+    - |
+      set -o pipefail
+      constellationctl image-check "$IMAGE_REF" \
+        --fail-on critical \
+        --sarif  constellation.sarif \
+        --json   constellation.json \
+        --quiet  | tee scan-summary.txt
+    - |
+      if [ -n "$CI_MERGE_REQUEST_IID" ]; then
+        scripts/post-mr-note.sh "scan-image" scan-summary.txt || true
+      fi
+  artifacts:
+    when: always
+    paths:
+      - constellation.sarif
+      - constellation.json
+      - scan-summary.txt
+    reports:
+      sast: constellation.sarif
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+scan-iac:
+  stage: scan-iac
+  <<: *constellation_env
+  script:
+    - |
+      set -o pipefail
+      constellationctl iac-check . \
+        --fail-on high \
+        --sarif constellation-iac.sarif \
+        | tee iac-summary.txt
+    - |
+      if [ -n "$CI_MERGE_REQUEST_IID" ]; then
+        scripts/post-mr-note.sh "scan-iac" iac-summary.txt || true
+      fi
+  artifacts:
+    when: always
+    paths:
+      - constellation-iac.sarif
+      - iac-summary.txt
+    reports:
+      sast: constellation-iac.sarif
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+gate-policy:
+  stage: gate-policy
+  <<: *constellation_env
+  script:
+    - |
+      set -e
+      mkdir -p admission-results
+      denied=0
+      server="${CONSTELLATION_SERVER%/}"
+      # All YAML manifests changed in this MR.
+      git diff --name-only --diff-filter=AM "$CI_MERGE_REQUEST_DIFF_BASE_SHA"..HEAD \
+        | grep -E '\.ya?ml$' \
+        | sort -u > candidate.txt || true
+      while IFS= read -r f; do
+        [ -f "$f" ] || continue
+        if head -40 "$f" | grep -q '^apiVersion:' && head -40 "$f" | grep -q '^kind:'; then
+          out="admission-results/$(echo "$f" | tr '/' '_').json"
+          http=$(curl -sS -o "$out" -w '%{http_code}' \
+            -H "Authorization: Bearer ${CONSTELLATION_TOKEN}" \
+            -H "Content-Type: application/yaml" \
+            --data-binary @"$f" \
+            "$server/admission/simulate" || echo "000")
+          verdict=$(jq -r '.allowed // .verdict // "unknown"' "$out" 2>/dev/null || echo "unknown")
+          echo "$f http=$http verdict=$verdict"
+          if [ "$verdict" = "false" ] || [ "$verdict" = "denied" ] || [ "$verdict" = "deny" ]; then
+            denied=$((denied + 1))
+            echo "$f" >> admission-results/denied.txt
+          fi
+        fi
+      done < candidate.txt
+      if [ "$denied" -gt 0 ]; then
+        echo "Admission gate: $denied manifest(s) denied"
+        cat admission-results/denied.txt
+        exit 1
+      fi
+  artifacts:
+    when: on_failure
+    paths: [admission-results]
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+sbom-upload:
+  stage: sbom-upload
+  <<: *constellation_env
+  script:
+    - |
+      set -e
+      constellationctl image-check "$IMAGE_REF" \
+        --quiet \
+        --spdx       constellation.spdx.json \
+        --cyclonedx  constellation.cyclonedx.json
+    - |
+      # Upload SBOM as a generic package on tagged builds.
+      if [ -n "$CI_COMMIT_TAG" ]; then
+        for f in constellation.spdx.json constellation.cyclonedx.json; do
+          curl --header "JOB-TOKEN: $CI_JOB_TOKEN" \
+               --upload-file "$f" \
+               "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/sbom/$CI_COMMIT_TAG/$f"
+        done
+      fi
+  artifacts:
+    when: always
+    paths:
+      - constellation.spdx.json
+      - constellation.cyclonedx.json
+    expire_in: 1 month
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual

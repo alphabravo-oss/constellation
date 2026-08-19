@@ -1,0 +1,97 @@
+{
+    "action": "approve",
+    "action_id": "a7967e49-92fc-4d22-8374-71b0a6ff7755",
+    "applies_live": false,
+    "idempotency_key": "",
+    "idempotent": false,
+    "message": "Lifecycle action persisted for audit and staged policy promotion; cluster apply remains gated.",
+    "next_mode": "monitor",
+    "persists": true,
+    "policy": {
+        "id": "default/api-service",
+        "cluster_id": "33333333-3333-3333-3333-333333333333",
+        "cluster_name": "dev-local",
+        "workload": "default/api-service",
+        "namespace": "default",
+        "current_mode": "discover",
+        "target_mode": "monitor",
+        "reason": "approved for monitor; awaiting apply",
+        "auto_applied": false,
+        "evaluated_at": "2026-05-12T16:00:00Z",
+        "generated_at": "2026-05-12T16:00:00Z",
+        "candidate_hash": "7767390faf3b1f9a",
+        "approved_candidate_hash": "7767390faf3b1f9a",
+        "candidate_stale": false,
+        "approval_status": "approved",
+        "rollback_available": true,
+        "applied_ref": "applied-16ab7681155ae96e",
+        "summary": {
+            "total_flows": 8,
+            "unique_peers": 4,
+            "unique_port_protocol": 5,
+            "out_of_policy_alerts": 0,
+            "new_tuples_last_24h": 0,
+            "first_observation": "2026-05-05T16:00:00Z",
+            "last_observation": "2026-05-12T15:59:00Z"
+        },
+        "tuple_preview": null,
+        "preview": {
+            "engine": "cilium",
+            "yaml": "apiVersion: cilium.io/v2\nkind: CiliumNetworkPolicy\nmetadata:\n    name: api-service-cilium\n    namespace: default\nspec:\n    egress:\n        - toEndpoints:\n            - matchLabels:\n                k8s:io.kubernetes.pod.namespace: kube-system\n                k8s:k8s-app: kube-dns\n          toPorts:\n            - ports:\n                - port: \"53\"\n                  protocol: UDP\n              rules:\n                dns:\n                    - matchPattern: '*'\n        - toEndpoints:\n            - matchLabels:\n                k8s:app: postgres\n                k8s:io.kubernetes.pod.namespace: data\n          toPorts:\n            - ports:\n                - port: \"5432\"\n                  protocol: TCP\n    endpointSelector:\n        matchLabels:\n            app: api-service\n    ingress:\n        - fromEndpoints:\n            - matchLabels:\n                k8s:app: frontend\n                k8s:io.kubernetes.pod.namespace: default\n          toPorts:\n            - ports:\n                - port: \"8443\"\n                  protocol: TCP\n",
+            "refs": {
+                "calico": "api-service-calico",
+                "cilium": "api-service-cilium",
+                "kubernetes": "api-service-policy"
+            }
+        },
+        "diff": {
+            "summary": "Adds explicit ingress/egress allow rules from observed stable tuples and preserves DNS/cluster control-plane access.",
+            "added": [
+                "egress tcp/5432 to data/postgres",
+                "ingress tcp/8443 from default/frontend"
+            ],
+            "removed": [],
+            "changed": [
+                "policy mode discover -> monitor"
+            ]
+        },
+        "audit_trail": [
+            {
+                "at": "2026-05-05T16:00:00Z",
+                "actor": "constellation-agent",
+                "action": "learn_started",
+                "message": "Started collecting baseline flows."
+            },
+            {
+                "at": "2026-05-12T16:00:00Z",
+                "actor": "constellation-policy",
+                "action": "evaluated",
+                "message": "stable for 24h + sufficient traffic observed"
+            },
+            {
+                "at": "2026-05-12T15:19:42Z",
+                "actor": "507d5ef6-507a-4c32-91af-f4e0116f5f7e",
+                "action": "approve",
+                "message": "approved for monitor; awaiting apply"
+            },
+            {
+                "at": "2026-05-12T15:22:03Z",
+                "actor": "507d5ef6-507a-4c32-91af-f4e0116f5f7e",
+                "action": "approve",
+                "message": "approved for monitor; awaiting apply"
+            },
+            {
+                "at": "2026-05-12T15:27:58Z",
+                "actor": "507d5ef6-507a-4c32-91af-f4e0116f5f7e",
+                "action": "approve",
+                "message": "approved for monitor; awaiting apply"
+            }
+        ]
+    },
+    "rollback_ref": "",
+    "rollback_refs": {
+        "calico": "api-service-calico",
+        "cilium": "api-service-cilium",
+        "kubernetes": "api-service-policy"
+    }
+}

@@ -1,0 +1,14 @@
+[Unit]
+Description=Daily trigger for Constellation Audit Archiver
+Documentation=https://github.com/alphabravocompany/constellation
+
+[Timer]
+# Fire daily at 02:30 local time, with a 30-minute randomised delay to avoid thundering
+# herd across a fleet, plus catch-up if the host was off (Persistent=true).
+OnCalendar=*-*-* 02:30:00
+RandomizedDelaySec=30m
+Persistent=true
+Unit=constellation-audit-archiver.service
+
+[Install]
+WantedBy=timers.target

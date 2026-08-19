@@ -1,0 +1,30 @@
+bin/
+dist/
+*.test
+*.out
+.env
+.env.local
+frontend/node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+test-results/
+/checkov-plugin
+/constellation-api
+/constellation-bootstrap
+/constellation-runtime-agent
+/constellationctl
+.idea/
+.vscode/
+
+# eBPF build artifacts (built locally via `make -C internal/runtime/ebpf/bpf`)
+internal/runtime/ebpf/bpf/*.o
+internal/runtime/ebpf/bpf/vmlinux.h
+tools/vscode-extension/node_modules/
+tools/vscode-extension/out/
+
+# Python bytecode + pytest caches in the integration test harness.
+tools/constellation-test-suite/**/__pycache__/
+tools/constellation-test-suite/.pytest_cache/
+.claude/
+/rancher/

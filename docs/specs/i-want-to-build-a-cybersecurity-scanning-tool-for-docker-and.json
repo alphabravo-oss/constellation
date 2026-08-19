@@ -1,0 +1,199 @@
+{
+  "name": "Constellation",
+  "codename": "golden-dome",
+  "slug": "i-want-to-build-a-cybersecurity-scanning-tool-for-docker-and",
+  "spec_path": "docs/specs/i-want-to-build-a-cybersecurity-scanning-tool-for-docker-and.md",
+  "compiled_at": "2026-05-11",
+  "summary": "Comprehensive container & Kubernetes security platform: image scanning, CVE DB, admission, runtime (eBPF + L7 DPI), posture, compliance, network-policy generation. Integrates with Astronomer-Go (analogous to NeuVector + Rancher) and runs standalone. Greenfield Go monorepo + separate constellation-vulndb pipeline.",
+  "reference_repos": {
+    "neuvector": "./neuvector/",
+    "stackrox": "./stackrox/",
+    "astronomer": "./astronomer/"
+  },
+  "stack": {
+    "language": "Go (all-Go monorepo; C/C++ reserved for DPI hot path only)",
+    "db": "PostgreSQL 16 + pgvector + pg_trgm; sqlc for type-safe queries; goose migrations; partitioning for findings + events",
+    "rpc": "gRPC + protobuf (buf for lint/breaking)",
+    "frontend": "Next.js 16 + React 19 + Radix UI + Tailwind + TanStack Query + Zustand + Monaco + xterm (mirror astronomer/frontend)",
+    "observability": "OpenTelemetry SDK (OTLP traces+metrics+logs); Prometheus /metrics",
+    "deployment": "K8s operator + ConstellationCluster CRD + Helm chart"
+  },
+  "integrated_engines": [
+    {"name": "ClairCore", "owner": "Quay/Red Hat", "license": "MIT", "role": "primary vuln matching"},
+    {"name": "Syft", "owner": "Anchore", "license": "Apache-2.0", "role": "SBOM generation"},
+    {"name": "Trivy", "owner": "Aqua", "license": "Apache-2.0", "role": "secondary vuln + IaC + secrets + misconfig"},
+    {"name": "Grype", "owner": "Anchore", "license": "Apache-2.0", "role": "alternative matcher (reconciliation)"},
+    {"name": "Falco", "owner": "CNCF", "license": "Apache-2.0", "role": "syscall rules"},
+    {"name": "Tetragon (or custom eBPF)", "owner": "Cilium/CNCF", "license": "Apache-2.0", "role": "kernel telemetry"},
+    {"name": "Kyverno", "owner": "CNCF", "license": "Apache-2.0", "role": "admission policy engine"}
+  ],
+  "cve_db": {
+    "repo": "constellation-vulndb (separate)",
+    "sources": ["NVD 2.0", "OSV.dev", "GHSA", "RHEL feeds", "Debian feeds", "Ubuntu feeds", "Alpine feeds", "Wolfi", "Chainguard", "KEV (CISA)", "EPSS"],
+    "strategy": "aggregator + enrichment service (own); trivy-db wrapper used only as Phase 1 bootstrap",
+    "delivery": "signed OCI artifact (cosign-signed) updated 4x/day; oras pull into airgap; importer service writes to local Postgres"
+  },
+  "scanner_architecture": "multi-engine aggregator + dedupe/glue layer; all engines feed one normalized findings schema with provenance + confidence per source",
+  "runtime_architecture": "single DaemonSet pod per node combining eBPF programs (syscalls/process/network) + userspace L7 DPI (HTTP, gRPC, DNS, SQL, Kafka) + Falco rules engine",
+  "reachability": "both static (call-graph for Go, Java, Python initially) AND runtime (eBPF symbol-execution observation confirms findings)",
+  "admission": {
+    "v1": "Kyverno (YAML-native) + pluggable engine interface",
+    "v2": "add OPA/Rego",
+    "v3": "add Kubernetes CEL ValidatingAdmissionPolicy",
+    "catalog": "curated named policies as one-click toggles, layered over engines"
+  },
+  "tenancy": "mirror Astronomer: Org > Cluster > Project (both standalone and integrated)",
+  "auth": "local users (Argon2id) + OIDC/SAML SP, with or without Astronomer; Astronomer JWKS validation when bundled",
+  "rbac": {
+    "tiers": ["Global", "Cluster", "Project"],
+    "built_in_roles": ["Viewer", "Triager", "SecOps", "Admin", "SuperAdmin"],
+    "security_verbs": ["read-findings", "triage-findings", "suppress-findings", "accept-risk", "manage-policies", "manage-cve-db", "manage-runtime-rules"]
+  },
+  "audit_log": "immutable append-only Postgres + S3 archival + hash chain + cosign-signed frozen manifests",
+  "findings": {
+    "risk_score": "composite 0-100: CVSS base + KEV multiplier + EPSS probability + reachability boost + asset criticality (override-able)",
+    "lifecycle": ["Open", "Triaged", "In-Progress", "Resolved", "Suppressed", "Accepted"],
+    "provenance": "every finding records contributing engines + confidence + raw payload"
+  },
+  "network_policy": "learn observed flows in 14-day window, then auto-generate Cilium NetworkPolicy + Calico GlobalNetworkPolicy + native K8s NetworkPolicy for review and apply",
+  "key_features_from_references": [
+    "Resource & Traffic Map (live force-directed UI; NeuVector parity)",
+    "Process baselining + container quarantine + forensics capture (NeuVector parity)",
+    "Risk-prioritized deployment dashboard + violation timeline (StackRox parity)",
+    "CI/CD integration: constellationctl image-check + GitHub Action + GitLab CI templates"
+  ],
+  "compliance_frameworks_v1": [
+    "CIS Kubernetes",
+    "CIS Docker",
+    "NIST 800-53",
+    "NIST 800-190",
+    "NSA-CISA Kubernetes Hardening",
+    "PCI-DSS 4.0",
+    "HIPAA",
+    "SOC 2",
+    "STIG (DISA)",
+    "FedRAMP",
+    "Custom (customer-defined via UI editor)"
+  ],
+  "sbom_formats": ["SPDX 2.3", "CycloneDX 1.6"],
+  "exports": ["SARIF", "JSON", "CSV", "PDF compliance reports", "Executive PDF summaries", "OpenVEX / CycloneDX VEX", "SLSA provenance"],
+  "integrations": ["Jira", "ServiceNow", "Slack", "PagerDuty", "Generic webhook"],
+  "notification_routing": "Alertmanager-style routing tree per org (match severity/cluster/labels -> channels; inhibition + grouping + throttling); simple UI + YAML escape hatch",
+  "plugin_system": "gRPC-pluggable scanners, enrichers, exporters (out-of-process binaries); Go interfaces internally",
+  "backup": "Postgres logical backup to S3-compatible store (MinIO compatible) + operator-orchestrated blue/green upgrades",
+  "scale_targets": {
+    "saas_small": "10 clusters / 500 nodes / 5K images / 5M findings",
+    "self_hosted_mid_market": "100 clusters / 10K nodes / 100K images / 100M findings",
+    "large_enterprise": "1K clusters / 100K nodes / 1M images / 1B findings (v2 roadmap; requires ClickHouse + sharded Postgres)"
+  },
+  "registries_v1": ["Docker Hub", "Amazon ECR", "Google GCR / Artifact Registry", "Azure ACR", "Quay", "Harbor", "GHCR", "GitLab Container Registry", "JFrog Artifactory"],
+  "container_runtimes_v1": ["containerd", "CRI-O", "Docker"],
+  "k8s_distros_v1": ["vanilla", "EKS", "GKE", "AKS", "OpenShift", "Rancher RKE", "K3s", "MicroK8s", "Talos"],
+  "frontend_information_architecture": ["Dashboard", "Findings", "Assets", "Policies", "Compliance", "Runtime", "Network (Traffic Map)", "CVE DB", "Settings"],
+  "phases": [
+    {
+      "id": "P1",
+      "name": "Foundations",
+      "user_stories": [
+        {"id": "P1-US-1", "title": "Shared protobuf contracts repo", "verify": "buf lint && buf breaking --against main"},
+        {"id": "P1-US-2", "title": "Postgres schema + sqlc + migrations", "verify": "goose status && go test ./db/..."},
+        {"id": "P1-US-3", "title": "Control-plane API skeleton (Chi + OpenAPI)", "verify": "go test ./cmd/constellation-api/... && curl /healthz"},
+        {"id": "P1-US-4", "title": "Auth: local users (Argon2id) + OIDC SP", "verify": "go test ./internal/auth/..."},
+        {"id": "P1-US-5", "title": "RBAC engine + Astronomer-mirror tiers", "verify": "go test ./pkg/rbac/..."},
+        {"id": "P1-US-6", "title": "Audit log w/ hash chain + S3 archival", "verify": "go test ./pkg/audit/... && constellationctl audit verify"},
+        {"id": "P1-US-7", "title": "OTel SDK + Prometheus metrics plumbing", "verify": "go test ./pkg/observability/..."},
+        {"id": "P1-US-8", "title": "Frontend shell (Next.js 16 + sidebar nav)", "verify": "cd frontend && npm run build && npm run test"},
+        {"id": "P1-US-9", "title": "Frontend auth pages + session", "verify": "cd frontend && npm run test -- src/views/auth"},
+        {"id": "P1-US-10", "title": "CVE DB v0 pipeline scaffold (trivy-db bootstrap)", "verify": "go test ./cmd/vulndb-bootstrap/..."},
+        {"id": "P1-US-11", "title": "CVE DB OCI publisher (cosign-signed bundle)", "verify": "go test ./cmd/vulndb-publisher/... && cosign verify"},
+        {"id": "P1-US-12", "title": "K8s operator + ConstellationCluster CRD + Helm chart", "verify": "helm lint && operator e2e on kind"},
+        {"id": "P1-US-13", "title": "Astronomer adapter v0 (JWKS + tunnel mount)", "verify": "go test ./pkg/astronomer/... && integration test"},
+        {"id": "P1-US-14", "title": "constellationctl CLI scaffold", "verify": "go test ./cmd/constellationctl/... && goreleaser check"}
+      ],
+      "parallelism_note": "After US-1 (contracts) and US-2 (schema) merge, dispatch remaining 12 stories in parallel worktrees via sub-agents",
+      "status": "PENDING"
+    },
+    {
+      "id": "P2",
+      "name": "Scan",
+      "feature_buckets": [
+        "Image scanner aggregator (ClairCore + Syft + Trivy + Grype, normalized + deduped)",
+        "Findings UI (list/detail/filter/suppress/accept-risk/comments)",
+        "Composite Constellation Risk Score pipeline",
+        "SBOM endpoints (SPDX 2.3 + CycloneDX 1.6)",
+        "Static reachability for Go, Java, Python",
+        "Registry connectors (9 registries)",
+        "Exports: SARIF, JSON, CSV",
+        "CI/CD: constellationctl image-check + GitHub Action + GitLab CI templates",
+        "CVE DB v1: own aggregator replaces trivy-db wrapper (NVD + OSV + GHSA + distros + KEV + EPSS)"
+      ],
+      "status": "PENDING"
+    },
+    {
+      "id": "P3",
+      "name": "Admit & Posture",
+      "feature_buckets": [
+        "Kyverno admission webhook + pluggable engine interface",
+        "Curated policy catalog UI (one-click toggles + custom YAML)",
+        "kube-bench wrapper + CIS Kubernetes + CIS Docker",
+        "Mappings: NIST 800-53/190, NSA-CISA, PCI-DSS 4.0, HIPAA, SOC 2, STIG, FedRAMP",
+        "Custom-framework editor (UI)",
+        "Compliance dashboard + PDF report templates + executive PDFs",
+        "Risk-prioritized deployment dashboard + violation timeline (StackRox parity)"
+      ],
+      "status": "PENDING"
+    },
+    {
+      "id": "P4",
+      "name": "Runtime",
+      "feature_buckets": [
+        "eBPF agent subsystem (syscalls + process tree + network 5-tuples + file events)",
+        "L7 DPI engine subsystem (HTTP/1+2, gRPC, DNS, SQL, Kafka, Redis)",
+        "Falco rules ingestion subsystem",
+        "Resource & Traffic Map UI (react-flow; live workload + edge graph)",
+        "Process baselining + container quarantine + forensics capture",
+        "Runtime reachability confirmation",
+        "Auto network-policy generation (Cilium / Calico / native K8s NetworkPolicy)"
+      ],
+      "status": "PENDING"
+    },
+    {
+      "id": "P5",
+      "name": "Polish & Enterprise",
+      "feature_buckets": [
+        "VEX + SLSA outputs",
+        "Airgap CVE bundle GA",
+        "ITSM integrations (Jira, ServiceNow, Slack, PagerDuty, webhook)",
+        "Alertmanager-style routing tree UI + raw YAML",
+        "Additional admission engines (OPA/Rego, K8s CEL)",
+        "Backup / DR (operator-managed Postgres logical to S3 + blue/green upgrades)",
+        "FIPS 140-3 cryptographic compliance mode",
+        "Plugin SDK GA (gRPC scanner/enricher/exporter contracts)",
+        "Standalone-mode UI polish (full parity outside Astronomer)",
+        "Scale hardening for tiered SaaS + mid-market self-hosted"
+      ],
+      "status": "PENDING"
+    }
+  ],
+  "non_functional_requirements": {
+    "NFR-1": "Scale (mid-market): 100 clusters / 10K nodes / 100K images / 100M findings on single Postgres 16 with partitioning",
+    "NFR-2": "Scale (SaaS small): 10 clusters / 500 nodes / 5K images / 5M findings",
+    "NFR-3": "Latency: admission p99 < 200ms; findings list p95 < 800ms; risk-score recompute < 5s on 1M-finding org",
+    "NFR-4": "CVE freshness: signed bundle published within 6h of NVD/OSV/GHSA upstream",
+    "NFR-5": "Availability: management plane 99.9%; in-cluster agents continue local enforcement during MP outage",
+    "NFR-6": "Security: mTLS internal; envelope-encrypted secrets; FIPS mode; cosign-signed releases; SBOM for own build",
+    "NFR-7": "Compliance: SOC 2 Type II posture; hash-chained audit; designed-for-FedRAMP-Moderate",
+    "NFR-8": "Observability: OTel traces/metrics/logs (OTLP); Prom /metrics",
+    "NFR-9": "Backup: RPO <= 15 min, RTO <= 1 h via operator-managed logical backups to S3",
+    "NFR-10": "Airgap: every component deployable with zero outbound internet"
+  },
+  "ralph_loop_command": "See spec section 'Ralph Loop Command'.",
+  "open_questions": [
+    "Postgres partitioning cadence (monthly default; reassess Phase 2)",
+    "SaaS at v1 vs v2 (tiered SaaS planned for v1; revisit before P5)",
+    "Frontend monorepo layout (standalone vs Nx-style if embedded views diverge)",
+    "License model (AGPL like Astronomer, Apache-2.0, or dual-licensed) -- legal review",
+    "Cosign key custody (HSM vs Sigstore Fulcio keyless) -- decide before P1-US-11",
+    "Java + Python static reachability engine choice (WALA / Jedi / Pyre vs custom)"
+  ]
+}

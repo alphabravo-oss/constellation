@@ -1,0 +1,77 @@
+# Constellation image-check GitHub Action.
+#
+# Copy this file into .github/workflows/ in your repo. The action runs constellationctl
+# image-check against the image you build, uploads SARIF to GitHub Code Scanning, and
+# fails the job when findings meet --fail-on severity.
+#
+# Required repository secrets (when scanning private registries):
+#   REGISTRY_USERNAME, REGISTRY_PASSWORD
+#
+# Required repository variable:
+#   CONSTELLATION_VERSION  (e.g., v0.1.0) — pin to a specific constellationctl release.
+
+name: Constellation Image Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image:
+        description: "Image ref to scan (e.g., ghcr.io/org/app:sha)"
+        required: true
+
+permissions:
+  contents: read
+  security-events: write    # required to upload SARIF to GitHub Code Scanning
+  packages: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install constellationctl
+        run: |
+          version="${{ vars.CONSTELLATION_VERSION || 'latest' }}"
+          curl -fsSL "https://github.com/alphabravocompany/constellation/releases/${version}/download/constellationctl_linux_amd64" \
+            -o /usr/local/bin/constellationctl
+          chmod +x /usr/local/bin/constellationctl
+          constellationctl version
+
+      - name: Authenticate to registry (if needed)
+        if: ${{ secrets.REGISTRY_USERNAME != '' }}
+        env:
+          DOCKER_USER: ${{ secrets.REGISTRY_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+        run: echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USER" --password-stdin
+
+      - name: Scan
+        env:
+          IMAGE: ${{ github.event.inputs.image || format('ghcr.io/{0}:{1}', github.repository, github.sha) }}
+        run: |
+          constellationctl image-check "$IMAGE" \
+            --sarif scan.sarif \
+            --spdx scan.spdx.json \
+            --cyclonedx scan.cdx.json \
+            --fail-on critical
+
+      - name: Upload SARIF to Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: scan.sarif
+
+      - name: Upload SBOM artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: constellation-sboms
+          path: |
+            scan.spdx.json
+            scan.cdx.json
+          retention-days: 30

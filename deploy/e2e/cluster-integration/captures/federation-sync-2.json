@@ -1,0 +1,1 @@
+{"revisions":[{"kind":"vuln-profile","rule_id":"pci-zero-critical","revision":3,"payload":"eyJwcm9maWxlIjogInBjaSIsICJtYXhfc2V2ZXJpdHkiOiAiaGlnaCJ9","updated_at":"2026-05-12T14:21:00.683545Z"},{"kind":"group","rule_id":"sec-ops","revision":4,"payload":"eyJtZW1iZXJzIjogWyJhbGljZSIsICJib2IiXX0=","updated_at":"2026-05-12T14:21:00.683545Z"}],"since":2}

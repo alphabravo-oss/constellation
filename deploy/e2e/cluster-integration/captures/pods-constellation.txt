@@ -1,0 +1,30 @@
+NAMESPACE              NAME                                      READY   STATUS             RESTARTS      AGE     IP           NODE                         NOMINATED NODE   READINESS GATES
+app                    chat-target-7db99f6b69-w7ds4              1/1     Running            0             11m     10.42.2.13   k3d-constellation-server-0   <none>           <none>
+app                    dvwa-target-5f6f6fc944-bx7gj              1/1     Running            0             11m     10.42.2.12   k3d-constellation-server-0   <none>           <none>
+checkout               alpine-legacy                             0/1     CrashLoopBackOff   6 (73s ago)   7m      10.42.0.10   k3d-constellation-agent-0    <none>           <none>
+checkout               nginx-legacy-5c9c88b69-5nb7n              1/1     Running            0             7m      10.42.1.16   k3d-constellation-agent-1    <none>           <none>
+constellation-system   constellation-api-5cfd679dc4-hxmhj        1/1     Running            0             12m     10.42.0.7    k3d-constellation-agent-0    <none>           <none>
+constellation-system   constellation-operator-5d55dd5d58-274m6   1/1     Running            0             7m33s   10.42.0.8    k3d-constellation-agent-0    <none>           <none>
+constellation-system   e2e-admission-7968c69f85-kf9g5            1/1     Running            0             14m     10.42.1.11   k3d-constellation-agent-1    <none>           <none>
+constellation-system   e2e-runtime-agent-5fjq7                   1/1     Running            0             16m     172.20.0.3   k3d-constellation-agent-1    <none>           <none>
+constellation-system   e2e-runtime-agent-bc2rl                   1/1     Running            0             16m     172.20.0.4   k3d-constellation-agent-0    <none>           <none>
+constellation-system   e2e-runtime-agent-pjfbg                   1/1     Running            0             16m     172.20.0.2   k3d-constellation-server-0   <none>           <none>
+constellation-system   e2e-scanner-79c644dbb-5hhdb               1/1     Running            0             7m32s   10.42.0.9    k3d-constellation-agent-0    <none>           <none>
+default                privileged-latest                         1/1     Running            0             5m58s   10.42.1.20   k3d-constellation-agent-1    <none>           <none>
+edge                   dvwa-774bd5694-wz9pl                      1/1     Running            0             7m      10.42.1.13   k3d-constellation-agent-1    <none>           <none>
+edge                   juice-shop-6f74dfbfdd-jnrpx               1/1     Running            0             7m      10.42.1.14   k3d-constellation-agent-1    <none>           <none>
+kube-system            coredns-576bfc4dc7-r2fzc                  1/1     Running            0             52m     10.42.0.3    k3d-constellation-agent-0    <none>           <none>
+kube-system            helm-install-traefik-crd-t79q6            0/1     Completed          0             52m     10.42.1.2    k3d-constellation-agent-1    <none>           <none>
+kube-system            helm-install-traefik-vpzrb                0/1     Completed          1             52m     10.42.0.2    k3d-constellation-agent-0    <none>           <none>
+kube-system            local-path-provisioner-6795b5f9d8-fgwrz   1/1     Running            0             52m     10.42.2.2    k3d-constellation-server-0   <none>           <none>
+kube-system            metrics-server-557ff575fb-8spq5           1/1     Running            0             52m     10.42.2.3    k3d-constellation-server-0   <none>           <none>
+kube-system            svclb-traefik-f6b7c8a5-bffrz              2/2     Running            0             52m     10.42.2.4    k3d-constellation-server-0   <none>           <none>
+kube-system            svclb-traefik-f6b7c8a5-k8nkb              2/2     Running            0             52m     10.42.1.3    k3d-constellation-agent-1    <none>           <none>
+kube-system            svclb-traefik-f6b7c8a5-wnmzk              2/2     Running            0             52m     10.42.0.4    k3d-constellation-agent-0    <none>           <none>
+kube-system            traefik-5fb479b77-67zjl                   1/1     Running            0             52m     10.42.1.4    k3d-constellation-agent-1    <none>           <none>
+payments               log4shell-api-5dc94c478d-j66qc            0/1     ImagePullBackOff   0             7m      10.42.1.15   k3d-constellation-agent-1    <none>           <none>
+platform               hf-inference-b58f678bf-qjbrj              1/1     Running            0             7m      10.42.1.19   k3d-constellation-agent-1    <none>           <none>
+platform               hostnet-snooper                           1/1     Running            0             7m      172.20.0.2   k3d-constellation-server-0   <none>           <none>
+platform               privileged-pwn                            1/1     Running            0             7m      10.42.2.14   k3d-constellation-server-0   <none>           <none>
+platform               python-legacy                             1/1     Running            0             7m      10.42.1.17   k3d-constellation-agent-1    <none>           <none>
+platform               redis-vuln-68f7d57fbf-x2nwm               1/1     Running            0             7m      10.42.1.18   k3d-constellation-agent-1    <none>           <none>

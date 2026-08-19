@@ -1,0 +1,22 @@
+time=2026-05-12T15:52:03.516Z level=INFO msg="orgs with pending jobs" count=2
+time=2026-05-12T15:52:03.518Z level=INFO msg="scanner token issued" org=2ebae049-35c7-464c-b4b0-50cf185e5975
+time=2026-05-12T15:52:03.523Z level=INFO msg="claimed job" job_id=08d8fcfd-4c8e-4877-a206-fa2087db1674 image=docker.io/library/nginx:1.14.2
+time=2026-05-12T15:52:07.970Z level=INFO msg=completed job_id=08d8fcfd-4c8e-4877-a206-fa2087db1674 image=docker.io/library/nginx:1.14.2 packages=109 findings=217
+time=2026-05-12T15:52:07.973Z level=INFO msg="claimed job" job_id=a4919497-59d4-443e-a046-84ee5cf7f2fe image=ghcr.io/edge/api:2.0.0
+time=2026-05-12T15:52:10.094Z level=ERROR msg="scan failed" job_id=a4919497-59d4-443e-a046-84ee5cf7f2fe image=ghcr.io/edge/api:2.0.0 err="scanner: all engines failed; first error: syft: exit status 1 (stderr=)"
+time=2026-05-12T15:52:10.102Z level=INFO msg="claimed job" job_id=dbdaaa0d-7d99-4f4c-94a9-a5290740bdd8 image=ghcr.io/payments/api:1.4.2
+time=2026-05-12T15:52:11.973Z level=ERROR msg="scan failed" job_id=dbdaaa0d-7d99-4f4c-94a9-a5290740bdd8 image=ghcr.io/payments/api:1.4.2 err="scanner: all engines failed; first error: syft: exit status 1 (stderr=)"
+time=2026-05-12T15:52:11.982Z level=INFO msg="claimed job" job_id=ada86d82-ba4b-416c-9193-9c91e13651c6 image=huggingface/transformers-pytorch-gpu:4.41
+time=2026-05-12T15:52:12.847Z level=ERROR msg="scan failed" job_id=ada86d82-ba4b-416c-9193-9c91e13651c6 image=huggingface/transformers-pytorch-gpu:4.41 err="scanner: all engines failed; first error: syft: exit status 1 (stderr=)"
+time=2026-05-12T15:52:12.854Z level=INFO msg="claimed job" job_id=50e52c91-c684-4391-b550-549a24885977 image=redis:6.2.6-alpine
+time=2026-05-12T15:52:18.014Z level=INFO msg=completed job_id=50e52c91-c684-4391-b550-549a24885977 image=redis:6.2.6-alpine packages=18 findings=23
+time=2026-05-12T15:52:18.017Z level=INFO msg="claimed job" job_id=5a26c76c-5403-4ede-b4d9-fdabfc2b2d42 image=nginx:1.14.2
+time=2026-05-12T15:52:22.440Z level=INFO msg=completed job_id=5a26c76c-5403-4ede-b4d9-fdabfc2b2d42 image=nginx:1.14.2 packages=109 findings=217
+time=2026-05-12T15:52:22.444Z level=INFO msg="claimed job" job_id=9374cce4-b0f7-44f2-bdb5-e3146d556b4a image=nginx:1.14.2
+time=2026-05-12T15:52:26.754Z level=INFO msg=completed job_id=9374cce4-b0f7-44f2-bdb5-e3146d556b4a image=nginx:1.14.2 packages=109 findings=217
+time=2026-05-12T15:52:26.757Z level=INFO msg="no more pending jobs" org=2ebae049-35c7-464c-b4b0-50cf185e5975
+time=2026-05-12T15:52:26.758Z level=INFO msg="scanner token issued" org=f54fe2c1-3868-4069-98f2-74487c12be83
+time=2026-05-12T15:52:26.760Z level=INFO msg="claimed job" job_id=dfaca855-beb1-4d48-b028-03e5704bc837 image=nginx:1.14.2
+time=2026-05-12T15:52:31.131Z level=INFO msg=completed job_id=dfaca855-beb1-4d48-b028-03e5704bc837 image=nginx:1.14.2 packages=109 findings=217
+
+DONE: processed=5 failed=3

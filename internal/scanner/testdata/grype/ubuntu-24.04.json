@@ -1,0 +1,75 @@
+{
+  "matches": [
+    {
+      "vulnerability": {
+        "id": "CVE-2026-2000",
+        "dataSource": "https://nvd.nist.gov/vuln/detail/CVE-2026-2000",
+        "severity": "High",
+        "description": "Representative Grype vulnerability fixture for parser validation.",
+        "urls": [
+          "https://ubuntu.com/security/CVE-2026-2000",
+          "https://security-tracker.debian.org/tracker/CVE-2026-2000"
+        ],
+        "cvss": [
+          {
+            "version": "3.1",
+            "vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H",
+            "metrics": {
+              "baseScore": 7.8
+            }
+          },
+          {
+            "version": "3.1",
+            "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+            "metrics": {
+              "baseScore": 9.8
+            }
+          }
+        ],
+        "fix": {
+          "versions": [
+            "3.0.13-0ubuntu3.2"
+          ],
+          "state": "fixed"
+        }
+      },
+      "artifact": {
+        "name": "openssl",
+        "version": "3.0.13-0ubuntu3.1",
+        "type": "deb",
+        "purl": "pkg:deb/ubuntu/openssl@3.0.13-0ubuntu3.1?arch=amd64"
+      }
+    },
+    {
+      "vulnerability": {
+        "id": "GHSA-test-left-pad",
+        "severity": "Medium",
+        "description": "Representative language package vulnerability fixture.",
+        "urls": [
+          "https://github.com/advisories/GHSA-test-left-pad"
+        ],
+        "cvss": [
+          {
+            "version": "3.0",
+            "vector": "CVSS:3.0/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:N/A:N",
+            "metrics": {
+              "baseScore": 4.3
+            }
+          }
+        ],
+        "fix": {
+          "versions": [
+            "1.0.1"
+          ],
+          "state": "fixed"
+        }
+      },
+      "artifact": {
+        "name": "left-pad",
+        "version": "1.0.0",
+        "type": "npm",
+        "purl": "pkg:npm/left-pad@1.0.0"
+      }
+    }
+  ]
+}

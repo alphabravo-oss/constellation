@@ -1,0 +1,23 @@
+# syntax=docker/dockerfile:1.7
+# Constellation Go dev image — used ONLY by compose.dev.yaml.
+#
+# Long-running golang:1.26-bookworm with the Constellation module pre-downloaded so
+# `go run ./cmd/<role>` inside a bind-mount feels snappy. Not for production.
+
+ARG GO_VERSION=1.26
+
+FROM golang:${GO_VERSION}-bookworm
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl git bash \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Source gets bind-mounted at run time; we ship the cache pre-warmed.
+ENV CGO_ENABLED=0 \
+    GOWORK=/opt/go.work \
+    GOOS=linux \
+    GOFLAGS="-buildvcs=false"

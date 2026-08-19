@@ -1,0 +1,23 @@
+# Sample values for a single-node bare-metal k3s cluster.
+# All defaults are sane; this file only shows the knobs you typically tweak.
+
+api:
+  replicas: 1
+admission:
+  replicas: 1
+scanner:
+  replicas: 1
+frontend:
+  replicas: 1
+
+# k3s ships with a "local-path" storage class.
+postgres:
+  embedded: true
+  embeddedConfig:
+    storageClass: local-path
+    storage: 10Gi
+
+ingress:
+  enabled: true
+  className: traefik     # k3s default ingress controller
+  host: constellation.local

@@ -1,0 +1,55 @@
+# Constellation C1 — Kubernetes API-server audit policy.
+#
+# Feeds POST /api/v1/k8s-audit:bulk (see deploy/k8s-audit/README.md). Captures the
+# high-signal control-plane events Constellation classifies and alerts on
+# (internal/handler/k8saudit/classify), and drops everything else to keep audit
+# volume sane.
+#
+# Rules are first-match-wins, top to bottom. Levels used:
+#   Metadata — request metadata only (who/verb/resource/decision). Used for exec,
+#              secret reads (NEVER log secret bodies), and RBAC mutations.
+#   Request  — metadata + the request body (requestObject). Required for pod
+#              create/update so classify can read the pod spec and confirm a
+#              privileged / host-namespace pod (SignalPrivilegedCreate).
+apiVersion: audit.k8s.io/v1
+kind: Policy
+# Drop the noisy per-stage RequestReceived/ResponseStarted duplicates; the ingest
+# handler only keeps the terminal ResponseComplete/Panic stage anyway.
+omitStages:
+  - RequestReceived
+  - ResponseStarted
+rules:
+  # --- pod_exec: kubectl exec / attach into a running pod (remote code exec) ---
+  - level: Metadata
+    verbs: ["create"]
+    resources:
+      - group: ""
+        resources: ["pods/exec", "pods/attach"]
+
+  # --- secret_access: reads of Secret material (credential harvesting) ---------
+  # Metadata level ONLY — Request/RequestResponse would persist the secret bytes.
+  - level: Metadata
+    verbs: ["get", "list", "watch"]
+    resources:
+      - group: ""
+        resources: ["secrets"]
+
+  # --- rbac_change: privilege-grant / persistence via RBAC mutation ------------
+  - level: Metadata
+    verbs: ["create", "update", "patch", "delete", "deletecollection"]
+    resources:
+      - group: "rbac.authorization.k8s.io"
+        resources: ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]
+
+  # --- privileged_create: privileged / host-namespace pod (breakout vector) ----
+  # Request level so the pod spec (requestObject) is captured; podRequestIsPrivileged
+  # inspects it for privileged containers or hostNetwork/hostPID/hostIPC. A plain
+  # pod create without the spec is persisted but never paged.
+  - level: Request
+    verbs: ["create", "update", "patch"]
+    resources:
+      - group: ""
+        resources: ["pods"]
+
+  # --- drop the rest -----------------------------------------------------------
+  - level: None

@@ -1,0 +1,49 @@
+{
+  "action": "block",
+  "event": {
+    "Flow": {
+      "WorkloadID": "",
+      "ContainerID": "",
+      "Src": "",
+      "Dst": "",
+      "Protocol": "",
+      "PID": 0
+    },
+    "At": "2026-05-12T15:27:58.640672471Z",
+    "Protocol": "http",
+    "Dir": 0,
+    "HTTP": {
+      "Method": "POST",
+      "Path": "/api/v1/checkout",
+      "Host": "payments.svc.cluster.local",
+      "Query": "",
+      "Version": "HTTP/1.1",
+      "Headers": {
+        "content-type": [
+          "application/json"
+        ]
+      },
+      "Body": "PHJlZGFjdGVkLXBpaT4=",
+      "Truncated": false,
+      "StatusCode": 200,
+      "Service": "",
+      "RPC": ""
+    },
+    "DNS": null,
+    "MySQL": null,
+    "Postgres": null,
+    "Redis": null,
+    "Kafka": null
+  },
+  "matches": [
+    {
+      "PatternID": 1001,
+      "Msg": "Credit card number (Luhn-valid)",
+      "Severity": "critical",
+      "Target": "REQUEST_BODY",
+      "Sample": "4111…1111"
+    }
+  ],
+  "mode": "enforce",
+  "workload": "payments/api"
+}

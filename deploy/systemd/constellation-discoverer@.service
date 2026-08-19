@@ -1,0 +1,32 @@
+[Unit]
+Description=Constellation Discoverer (cluster %i — Kubernetes workload watcher)
+Documentation=https://github.com/alphabravocompany/constellation
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+# Templated unit: one instance per Kubernetes cluster watched.
+#   /etc/constellation/discoverer-<cluster>.env   ← CLUSTER_NAME / KUBECONFIG / ORG_ID
+#   systemctl enable --now constellation-discoverer@<cluster>.service
+# %i is propagated as CLUSTER_INSTANCE for log clarity.
+
+[Service]
+Type=simple
+User=constellation
+Group=constellation
+Environment=CLUSTER_INSTANCE=%i
+EnvironmentFile=/etc/constellation/discoverer-%i.env
+ExecStart=/usr/local/bin/constellation-discoverer
+WorkingDirectory=/var/lib/constellation
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=constellation-discoverer-%i
+
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,12 @@
+         action         | count 
+------------------------+-------
+ admission.deny         |     2
+ auth.login.local       |     3
+ gitops.drift.detected  |     1
+ network_policy.approve |     1
+ runtime.alert.dlp      |     1
+ runtime.alert.exec     |     1
+ runtime.alert.waf      |     1
+ scan-job.enqueue       |     2
+(8 rows)
+

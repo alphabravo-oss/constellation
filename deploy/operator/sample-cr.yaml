@@ -1,0 +1,10 @@
+apiVersion: constellation.alphabravo.io/v1alpha1
+kind: ConstellationCluster
+metadata:
+  name: example
+spec:
+  controlPlaneURL: https://constellation.example.com
+  orgID: 00000000-0000-0000-0000-000000000000
+  scannerEnabled: true
+  admissionEnabled: true
+  runtimeEnabled: false

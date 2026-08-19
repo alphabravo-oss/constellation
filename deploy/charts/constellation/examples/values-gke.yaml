@@ -1,0 +1,32 @@
+# Sample values for Google Kubernetes Engine.
+
+image:
+  tag: v0.2.0
+
+postgres:
+  embedded: false
+  existingSecret: constellation-cloudsql-credentials
+  existingSecretKey: url
+
+tls:
+  certManager:
+    enabled: true
+    issuer: letsencrypt-prod
+    issuerKind: ClusterIssuer
+  bootstrap:
+    enabled: false
+
+ingress:
+  enabled: true
+  className: gce
+  host: constellation.example.com
+  annotations:
+    networking.gke.io/managed-certificates: constellation-cert
+    kubernetes.io/ingress.global-static-ip-name: constellation-ip
+
+api:
+  replicas: 3
+scanner:
+  replicas: 4
+admission:
+  replicas: 3

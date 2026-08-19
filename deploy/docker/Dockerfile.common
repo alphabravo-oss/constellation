@@ -1,0 +1,33 @@
+# syntax=docker/dockerfile:1.7
+# Shared build stage for all Constellation Go binaries.
+#
+# Every role-specific Dockerfile copies binaries out of this builder. Keeping the build
+# stage shared means one `go mod download` + one cache layer per architecture, not five.
+#
+# This file is NOT used directly as a Dockerfile target — it's `docker buildx build -f`'d
+# as a base by the role images via the buildkit `# syntax = ` heredoc.
+
+ARG GO_VERSION=1.26
+
+FROM golang:${GO_VERSION}-bookworm AS go-builder
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+ARG VERSION=dev
+ARG COMMIT=unknown
+ENV CGO_ENABLED=0 \
+    GOOS=linux
+
+# Build every binary in one go so the cache layer is reused across role images.
+RUN set -eux; \
+    for cmd in constellation-api constellation-operator constellation-netpolicy-applier constellation-scanner \
+               constellation-discoverer constellation-k8s-compliance-collector \
+               constellation-seed audit-archiver constellationctl; do \
+      go build -trimpath \
+        -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
+        -o "/out/${cmd}" "./cmd/${cmd}"; \
+    done

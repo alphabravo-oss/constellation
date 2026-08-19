@@ -1,0 +1,33 @@
+# syntax=docker/dockerfile:1.7
+# Constellation discoverer image.
+#
+# Long-running per-cluster process that watches a Kubernetes API server, projects
+# Deployments/StatefulSets/DaemonSets into the `deployments` table, and rolls up
+# finding counts back into each row.
+#
+# Configuration is fully env-driven (see cmd/constellation-discoverer/main.go):
+#   DATABASE_URL, KUBECONFIG, CLUSTER_NAME, ORG_ID, NAMESPACE_FILTER, RECONCILE_INTERVAL.
+#
+# Compose runs ONE replica per cluster; in K8s the chart fans this out via a Deployment-
+# per-managed-cluster pattern.
+
+ARG GO_VERSION=1.26
+ARG WOLFI_IMAGE=cgr.dev/chainguard/wolfi-base@sha256:34977aa13765da89f60fee8fe5230e2bb1c55192df08e383c58221ee0d1277fb
+
+FROM golang:${GO_VERSION}-bookworm AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+ARG VERSION=dev
+ENV CGO_ENABLED=0 GOOS=linux
+RUN go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
+      -o /out/constellation-discoverer ./cmd/constellation-discoverer
+
+FROM ${WOLFI_IMAGE} AS runtime
+RUN apk add --no-cache ca-certificates tzdata
+COPY --from=build /out/constellation-discoverer /usr/local/bin/constellation-discoverer
+RUN addgroup -S constellation && adduser -S -G constellation -h /home/constellation -s /sbin/nologin constellation
+USER constellation
+WORKDIR /home/constellation
+ENTRYPOINT ["/usr/local/bin/constellation-discoverer"]

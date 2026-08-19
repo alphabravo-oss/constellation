@@ -1,0 +1,53 @@
+{{- if eq (include "constellation.postgresMode" .) "cnpg" -}}
+{{- /*
+CloudNativePG-managed Postgres Cluster. This is a normal chart resource (not a
+hook), so helm creates it AFTER the pre-install credential Secrets
+(postgres-secrets.yaml, weight -8) but BEFORE the post-install migrate (weight
+-5) and bootstrap (weight 0/5) hooks. The migrate Job's `until psql select 1`
+wait loop tolerates the longer CNPG bootstrap latency on a fresh cluster.
+
+PREREQUISITE: the CloudNativePG operator must already be installed in the
+cluster (the postgresql.cnpg.io CRDs are NOT bundled by this chart).
+
+CNPG auto-creates the services <fullname>-postgres-rw / -ro / -r — do NOT
+hand-create them. The chart's DATABASE_URL points at <fullname>-postgres-rw.
+
+NOTE: imageName MUST include the pgvector extension (the schema declares
+`embedding vector(1536)`). The default CNPG image does not. Override
+postgres.cloudnativepg.imageName with a pgvector-enabled build.
+*/ -}}
+{{- $cfg := .Values.postgres.cloudnativepg -}}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ include "constellation.fullname" . }}-postgres
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  # Propagate the standard app labels onto every CNPG-managed pod (and PVC/svc)
+  # so NetworkPolicy podSelectors that target `app.kubernetes.io/component:
+  # postgres` match the instance pods. Without this, CNPG pods only carry
+  # `cnpg.io/cluster=...` and the DB egress/ingress policies select no pod.
+  inheritedMetadata:
+    labels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: postgres
+  instances: {{ $cfg.instances }}
+  imageName: {{ $cfg.imageName }}
+  primaryUpdateStrategy: {{ $cfg.primaryUpdateStrategy }}
+  storage:
+    size: {{ $cfg.storage }}
+    {{- if $cfg.storageClass }}
+    storageClass: {{ $cfg.storageClass }}
+    {{- end }}
+  resources:
+    {{- toYaml $cfg.resources | nindent 4 }}
+  bootstrap:
+    initdb:
+      database: {{ $cfg.database }}
+      owner: {{ $cfg.username }}
+      secret:
+        name: {{ include "constellation.fullname" . }}-postgres
+{{- end }}

@@ -1,0 +1,26 @@
+# Log4Shell-vulnerable workload in payments namespace.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: log4shell-api
+  namespace: payments
+  labels:
+    app: log4shell-api
+    cve-bait: CVE-2021-44228
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: log4shell-api }
+  template:
+    metadata:
+      labels:
+        app: log4shell-api
+        cve-bait: CVE-2021-44228
+    spec:
+      containers:
+        - name: app
+          image: vulhub/log4j:2.14.1
+          command: ["sleep", "infinity"]
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits:   { cpu: 200m, memory: 256Mi }

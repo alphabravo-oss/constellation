@@ -1,0 +1,49 @@
+{{- if and .Values.admission.enabled .Values.admission.webhook.enabled }}
+{{- /*
+ValidatingWebhookConfiguration. The caBundle is populated by:
+  - the cert-manager Certificate's `cert-manager.io/inject-ca-from` annotation, OR
+  - the tls-bootstrap Job (default).
+We render it with an empty caBundle and let the bootstrap Job patch it in-flight.
+*/ -}}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{ include "constellation.fullname" . }}-admission
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: admission
+  {{- if .Values.tls.certManager.enabled }}
+  annotations:
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include "constellation.fullname" . }}-admission
+  {{- end }}
+webhooks:
+  - name: pods.constellation.alphabravo.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: {{ .Values.admission.webhook.sideEffects }}
+    failurePolicy: {{ .Values.admission.webhook.failurePolicy }}
+    timeoutSeconds: {{ .Values.admission.webhook.timeoutSeconds }}
+    # namespaceSelector: ALWAYS exclude our own release namespace from
+    # admission validation. Without this the runtime-agent DaemonSet
+    # (privileged: true for BPF + NFQUEUE) gets denied by the chart's
+    # default block-privileged rule, deadlocking the install. Operators
+    # who provide their own namespaceSelector get it merged AFTER the
+    # self-exclusion clause so they can't accidentally turn it off.
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: [{{ .Release.Namespace | quote }}]
+        {{- with .Values.admission.webhook.namespaceSelector.matchExpressions }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.admission.webhook.namespaceSelector.matchLabels }}
+      matchLabels: {{- toYaml . | nindent 8 }}
+      {{- end }}
+    clientConfig:
+      service:
+        name: {{ include "constellation.fullname" . }}-admission
+        namespace: {{ .Release.Namespace }}
+        path: /validate
+        port: {{ .Values.admission.service.port }}
+      caBundle: ""
+    rules: {{- toYaml .Values.admission.webhook.rules | nindent 6 }}
+{{- end }}

@@ -1,0 +1,1 @@
+{"kind":"AdmissionReview","apiVersion":"admission.k8s.io/v1","response":{"uid":"h3-hostnet","allowed":false,"status":{"metadata":{},"message":"denied by constellation policy \"block-host-network\": hostNetwork=true"}}}

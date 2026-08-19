@@ -1,0 +1,313 @@
+@import "tailwindcss";
+@import "./styles/tokens.css";
+
+/*
+ * Constellation — design system (Astronomer-aligned).
+ *
+ * Aesthetic direction:
+ *   - Near-monochrome cool-gray surfaces (OKLCH, hue ~264 ≈ zinc/neutral-240).
+ *   - Neutral shadcn primary; chromatic color reserved for MEANING (status) and
+ *     one blue→violet brand accent (brand mark, gradients, active nav, focus).
+ *   - Type: Inter (body + display) · JetBrains Mono (tabular numerics).
+ *   - One radius (8px), hairline 1px borders, shadows only on floating layers.
+ *   - Restrained motion: transition-colors, 0.3s page fade-in, no springs.
+ */
+
+@theme {
+  /* ───────────────────────────── Surface (LIGHT defaults) ───────────────────────────── */
+  /* Astronomer-EXACT values (shadcn zinc/neutral, hue 240). These are the light
+     palette; dark overrides live in @layer base under :root.dark ONLY, so
+     removing the .dark class actually yields light mode. */
+  --color-background:        hsl(0 0% 100%);
+  --color-foreground:        hsl(240 10% 3.9%);
+  --color-card:              hsl(0 0% 100%);
+  --color-card-foreground:   hsl(240 10% 3.9%);
+  --color-popover:           hsl(0 0% 100%);
+  --color-popover-foreground: hsl(240 10% 3.9%);
+
+  /* ───────────────────────────── Brand ───────────────────────────── */
+  /* Primary is neutral (shadcn): near-black on light, near-white on dark. */
+  --color-primary:           hsl(240 5.9% 10%);
+  --color-primary-foreground: hsl(0 0% 98%);
+  --color-secondary:         hsl(240 4.8% 95.9%);
+  --color-secondary-foreground: hsl(240 5.9% 10%);
+  --color-accent:            hsl(240 4.8% 95.9%);
+  --color-accent-foreground: hsl(240 5.9% 10%);
+  --color-muted:             hsl(240 4.8% 95.9%);
+  --color-muted-foreground:  hsl(240 3.8% 46.1%);
+  --color-destructive:       hsl(0 84.2% 60.2%);
+  --color-destructive-foreground: hsl(0 0% 98%);
+
+  /* Brand accent — blue → violet. Brand mark, gradients, active nav. */
+  --color-brand:             oklch(62% 0.19 258);
+  --color-brand-2:           oklch(53% 0.23 293);
+
+  /* ───────────────────────────── Form / shape ───────────────────────────── */
+  --color-border:            hsl(240 5.9% 90%);
+  --color-input:             hsl(240 5.9% 90%);
+  --color-ring:              hsl(240 5.9% 10%);
+  --radius:                  0.5rem;
+
+  /* ───────────────────────────── Sidebar ───────────────────────────── */
+  --color-sidebar:           hsl(0 0% 98%);
+  --color-sidebar-foreground: hsl(240 5.9% 10%);
+  --color-sidebar-border:    hsl(240 5.9% 90%);
+  --color-sidebar-accent:    hsl(240 4.8% 95.9%);
+  --color-sidebar-accent-foreground: hsl(240 5.9% 10%);
+
+  /* ───────────────────────────── Status (Astronomer hex) ───────────────────────────── */
+  --color-status-success:    #10b981;
+  --color-status-warning:    #f59e0b;
+  --color-status-error:      #ef4444;
+  --color-status-info:       #3b82f6;
+  --color-status-pending:    #6366f1;
+  --color-status-neutral:    #6b7280;
+
+  /* ─────────────────────────── Severity (CVE domain) ─────────────────────────── */
+  --color-severity-info:     #6b7280;
+  --color-severity-low:      #3b82f6;
+  --color-severity-medium:   #f59e0b;
+  --color-severity-high:     #f97316;
+  --color-severity-critical: #ef4444;
+
+  /* ─────────────────────────── Legacy accent aliases ─────────────────────────── */
+  /* Kept (repointed teal→brand) so existing `accent-teal` references stay valid. */
+  --color-accent-teal:       oklch(62% 0.19 258);
+  --color-accent-teal-soft:  oklch(62% 0.19 258 / 0.15);
+
+  /* ───────────────────────────── Type ───────────────────────────── */
+  --font-sans:    "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono:    "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+
+  /* Density step controls row heights; toggled via data-density on <body>. */
+  --row-h: 32px;
+}
+
+@layer base {
+  /* Light is the default (@theme values on :root). Dark overrides apply ONLY
+     when <html> carries the .dark class (toggled by ThemeContext). Astronomer-
+     EXACT dark palette. */
+  :root { color-scheme: light; }
+  :root.dark {
+    color-scheme: dark;
+    --color-background:        hsl(240 10% 3.9%);
+    --color-foreground:        hsl(0 0% 98%);
+    --color-card:              hsl(240 10% 5.5%);
+    --color-card-foreground:   hsl(0 0% 98%);
+    --color-popover:           hsl(240 10% 5.5%);
+    --color-popover-foreground: hsl(0 0% 98%);
+
+    --color-primary:           hsl(0 0% 98%);
+    --color-primary-foreground: hsl(240 5.9% 10%);
+    --color-secondary:         hsl(240 3.7% 15.9%);
+    --color-secondary-foreground: hsl(0 0% 98%);
+    --color-accent:            hsl(240 3.7% 15.9%);
+    --color-accent-foreground: hsl(0 0% 98%);
+    --color-muted:             hsl(240 3.7% 15.9%);
+    --color-muted-foreground:  hsl(240 5% 64.9%);
+    --color-destructive:       hsl(0 62.8% 30.6%);
+    --color-destructive-foreground: hsl(0 0% 98%);
+
+    --color-border:            hsl(240 3.7% 15.9%);
+    --color-input:             hsl(240 3.7% 15.9%);
+    --color-ring:              hsl(240 4.9% 83.9%);
+
+    --color-sidebar:           hsl(240 10% 4.5%);
+    --color-sidebar-foreground: hsl(240 4.8% 75%);
+    --color-sidebar-border:    hsl(240 3.7% 12%);
+    --color-sidebar-accent:    hsl(240 3.7% 10%);
+    --color-sidebar-accent-foreground: hsl(0 0% 98%);
+  }
+
+  * { @apply border-border; }
+  *:focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+    border-radius: var(--radius);
+  }
+
+  html, body, #root { height: 100%; }
+  html { font-feature-settings: "cv11" 1, "rlig" 1, "calt" 1; }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: var(--font-sans);
+    font-feature-settings: "rlig" 1, "calt" 1;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  body[data-density="compact"] { --row-h: 24px; }
+  body[data-density="cozy"]    { --row-h: 32px; }
+  body[data-density="comfy"]   { --row-h: 40px; }
+
+  h1, h2, h3, h4, h5 { font-family: var(--font-display); letter-spacing: -0.015em; }
+
+  /* Tabular numerics on any element via .num */
+  .num, [class*="font-mono"] { font-variant-numeric: tabular-nums; }
+
+  /* Scrollbar — thin and unobtrusive */
+  ::-webkit-scrollbar       { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: color-mix(in oklab, var(--color-muted-foreground) 22%, transparent); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: color-mix(in oklab, var(--color-muted-foreground) 40%, transparent); }
+
+  ::selection { background-color: color-mix(in oklab, var(--color-brand) 30%, transparent); color: var(--color-foreground); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
+}
+
+@layer components {
+  /* Sidebar nav row (Astronomer parity — bg-accent active, no accent bar) */
+  .nav-item {
+    @apply flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium
+           text-muted-foreground hover:text-foreground hover:bg-accent
+           transition-all duration-150;
+  }
+  .nav-item.active {
+    @apply text-foreground bg-accent;
+  }
+
+  /* Glass card surface used on dashboard tiles */
+  .glass-card {
+    @apply bg-card border border-border rounded-lg;
+    background-image:
+      radial-gradient(color-mix(in oklab, var(--color-foreground) 4%, transparent) 1px, transparent 1px);
+    background-size: 22px 22px;
+    background-position: 0 0;
+  }
+
+  /* Subtle dot-grid background, used on hero panels */
+  .dot-grid {
+    background-image:
+      radial-gradient(color-mix(in oklab, var(--color-foreground) 6%, transparent) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+
+  /* Constellation star-field used on hero band — extremely subtle */
+  .star-field {
+    background-image:
+      radial-gradient(color-mix(in oklab, var(--color-brand) 28%, transparent) 1px, transparent 1px),
+      radial-gradient(color-mix(in oklab, var(--color-foreground) 5%, transparent) 1px, transparent 1px);
+    background-size: 96px 96px, 28px 28px;
+    background-position: 12px 12px, 0 0;
+  }
+
+  /* Table row hover */
+  .table-row-hover {
+    @apply hover:bg-accent/50 transition-colors cursor-pointer;
+  }
+
+  /* Hairline divider used in panels */
+  .hairline { @apply border-t border-border; }
+
+  /* Brand gradient text */
+  .text-gradient {
+    background: linear-gradient(135deg, var(--color-brand), var(--color-brand-2));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* Glows kept minimal */
+  .glow-primary { box-shadow: 0 0 24px color-mix(in oklab, var(--color-brand) 22%, transparent); }
+  .glow-critical { box-shadow: 0 0 16px color-mix(in oklab, var(--color-severity-critical) 22%, transparent); }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .text-display { font-family: var(--font-display); letter-spacing: -0.015em; }
+  .text-mono    { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+  /* 150ms slide-in accent bar — used by table row hover */
+  .accent-slide {
+    position: relative;
+    isolation: isolate;
+  }
+  .accent-slide::before {
+    content: "";
+    position: absolute;
+    inset-block: 4px;
+    left: 0;
+    width: 2px;
+    background: var(--color-brand);
+    transform: scaleY(0);
+    transform-origin: top;
+    transition: transform 150ms ease-out;
+  }
+  .accent-slide:hover::before { transform: scaleY(1); }
+
+  /* Page mount fade-in (Astronomer parity) */
+  @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+  .animate-fade-in { animation: fade-in 0.3s var(--ease-out, ease-out) both; }
+
+  /* Live status dot */
+  @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+  .animate-pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
+
+  /* Staggered reveal — used on dashboard load */
+  @keyframes c-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+  .c-rise { animation: c-rise 280ms ease-out both; }
+  .c-rise-1 { animation-delay: 0ms; }
+  .c-rise-2 { animation-delay: 40ms; }
+  .c-rise-3 { animation-delay: 80ms; }
+  .c-rise-4 { animation-delay: 120ms; }
+  .c-rise-5 { animation-delay: 160ms; }
+  .c-rise-6 { animation-delay: 200ms; }
+}
+
+/* React-Flow themed controls — repositioned to the right edge UNDER the
+   Legend so they don't collide. Override colors so zoom/in/out/fit read
+   clearly in our OKLCH dark palette. */
+.constellation-rf-controls.react-flow__controls,
+.constellation-rf-controls {
+  position: absolute !important;
+  top: 150px !important;     /* below the ~120px Legend at top:12 */
+  right: 12px !important;
+  left: auto !important;
+  bottom: auto !important;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: var(--elev-2);
+  background: color-mix(in oklab, var(--color-card) 95%, transparent);
+  border: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  z-index: 20;
+}
+.constellation-rf-controls .react-flow__controls-button {
+  background: transparent;
+  border-bottom: 1px solid color-mix(in oklab, var(--color-border) 60%, transparent);
+  color: var(--color-foreground);
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  transition: background 120ms var(--ease-out);
+}
+.constellation-rf-controls .react-flow__controls-button:last-child {
+  border-bottom: none;
+}
+.constellation-rf-controls .react-flow__controls-button:hover {
+  background: color-mix(in oklab, var(--color-foreground) 8%, transparent);
+  color: var(--color-foreground);
+}
+.constellation-rf-controls .react-flow__controls-button svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}

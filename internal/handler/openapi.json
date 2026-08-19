@@ -1,0 +1,4059 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Constellation Control Plane API",
+    "version": "0.1.0",
+    "description": "Phase 1 control-plane endpoints. Astronomer integration surfaces /api/v1/security/* alongside the standalone /api/v1/* routes."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:18080"
+    },
+    {
+      "url": "https://constellation.example.com"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "ResponseRuleDef": {
+        "type": "object",
+        "description": "E1 declarative response rule: binds a runtime event_type + condition set to an ordered set of actions. Evaluated server-side and pulled by the runtime-agent via the :sync bundle.",
+        "required": [
+          "name",
+          "event_type",
+          "actions"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "readOnly": true
+          },
+          "name": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "priority": {
+            "type": "integer",
+            "description": "Lower number is evaluated first (higher precedence)."
+          },
+          "event_type": {
+            "type": "string",
+            "enum": [
+              "process",
+              "file",
+              "network",
+              "admission",
+              "scan"
+            ]
+          },
+          "conditions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "field",
+                "op",
+                "value"
+              ],
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "eq",
+                    "ne",
+                    "contains",
+                    "regex",
+                    "gt",
+                    "lt"
+                  ]
+                },
+                "value": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "type"
+              ],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "quarantine",
+                    "suppress_log",
+                    "webhook",
+                    "tag"
+                  ]
+                },
+                "params": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "AuthServer": {
+        "type": "object",
+        "description": "B4 DB-backed auth provider (IdP). One of LDAP/SAML/OIDC. The config object's meaningful fields depend on type. Provider secrets (config.bind_password, config.sp_key_pem, config.client_secret) are returned redacted on read, and a redaction-marker echo on update preserves the stored secret.",
+        "required": [
+          "type",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "readOnly": true
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "ldap",
+              "saml",
+              "oidc"
+            ],
+            "description": "Provider kind. Immutable after create."
+          },
+          "name": {
+            "type": "string",
+            "description": "Unique provider name within the org."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "auth_order": {
+            "type": "integer",
+            "description": "Lower value is preferred when multiple providers of the same type are enabled."
+          },
+          "config": {
+            "type": "object",
+            "description": "Provider-specific configuration. LDAP: url, bind_dn, bind_password, base_dn, user_filter, group_attribute, email_attribute. SAML: idp_metadata_xml, entity_id, acs_url, sp_cert_pem, sp_key_pem, group_attribute, email_attribute. OIDC: issuer_url, client_id, client_secret, redirect_url, scopes.",
+            "properties": {
+              "url": {
+                "type": "string"
+              },
+              "bind_dn": {
+                "type": "string"
+              },
+              "bind_password": {
+                "type": "string",
+                "description": "SECRET. Redacted on read."
+              },
+              "base_dn": {
+                "type": "string"
+              },
+              "user_filter": {
+                "type": "string"
+              },
+              "group_attribute": {
+                "type": "string"
+              },
+              "email_attribute": {
+                "type": "string"
+              },
+              "idp_metadata_xml": {
+                "type": "string"
+              },
+              "entity_id": {
+                "type": "string"
+              },
+              "acs_url": {
+                "type": "string"
+              },
+              "sp_cert_pem": {
+                "type": "string"
+              },
+              "sp_key_pem": {
+                "type": "string",
+                "description": "SECRET. Redacted on read."
+              },
+              "issuer_url": {
+                "type": "string"
+              },
+              "client_id": {
+                "type": "string"
+              },
+              "client_secret": {
+                "type": "string",
+                "description": "SECRET. Redacted on read."
+              },
+              "redirect_url": {
+                "type": "string"
+              },
+              "scopes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "role_mapping": {
+            "type": "object",
+            "description": "Maps IdP-supplied group/attribute values (lower-cased) to Constellation role names, with an optional default role.",
+            "properties": {
+              "rules": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "default": {
+                "type": "string"
+              }
+            }
+          },
+          "revision": {
+            "type": "integer",
+            "readOnly": true
+          }
+        }
+      },
+      "SystemConfig": {
+        "type": "object",
+        "description": "Runtime-mutable system configuration. Secret-bearing fields (ca_bundle_pem, and any credentials embedded in egress_proxy.https_proxy) are returned redacted on GET.",
+        "properties": {
+          "egress_proxy": {
+            "type": "object",
+            "properties": {
+              "https_proxy": {
+                "type": "string",
+                "description": "Outbound HTTP(S) proxy URL. Embedded credentials are redacted on read."
+              },
+              "no_proxy": {
+                "type": "string",
+                "description": "Comma-separated NO_PROXY host/suffix list."
+              }
+            }
+          },
+          "tls_verify": {
+            "type": "boolean",
+            "description": "Whether shared outbound clients verify upstream TLS certificates (default true)."
+          },
+          "ca_bundle_pem": {
+            "type": "string",
+            "description": "Additional trusted CA bundle (PEM). Returned redacted when set."
+          },
+          "syslog_siem_target": {
+            "type": "object",
+            "properties": {
+              "host": {
+                "type": "string"
+              },
+              "port": {
+                "type": "integer"
+              },
+              "protocol": {
+                "type": "string",
+                "enum": [
+                  "udp",
+                  "tcp"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "bearer": []
+    }
+  ],
+  "paths": {
+    "/api/v1/access-control": {
+      "get": {
+        "summary": "Access control users, roles, bindings, providers, tokens, permissions, and guardrails"
+      }
+    },
+    "/api/v1/access-control/role-bindings": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create role-bindings"
+      }
+    },
+    "/api/v1/access-control/role-bindings/{id}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Delete role-bindings"
+      }
+    },
+    "/api/v1/access-control/service-accounts": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create service-accounts"
+      }
+    },
+    "/api/v1/ai/query": {
+      "post": {
+        "summary": "Abbot NL query (off unless org.ai_enabled)"
+      }
+    },
+    "/api/v1/analytics/backups": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get backups"
+      }
+    },
+    "/api/v1/analytics/mttr": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get mttr"
+      }
+    },
+    "/api/v1/analytics/trend": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get trend"
+      }
+    },
+    "/api/v1/api-tokens": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get api-tokens"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create api-tokens"
+      }
+    },
+    "/api/v1/api-tokens/{id}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Delete api-tokens"
+      },
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get api-tokens"
+      }
+    },
+    "/api/v1/api-tokens/{id}/rotate": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create rotate"
+      }
+    },
+    "/api/v1/assets": {
+      "get": {
+        "summary": "List assets"
+      }
+    },
+    "/api/v1/assets/{id}": {
+      "get": {
+        "summary": "Get one asset with image, findings, SBOM context, and image accept-risk history"
+      }
+    },
+    "/api/v1/assets/{id}/image-acceptances": {
+      "get": {
+        "summary": "List digest-scoped image risk acceptances for an asset"
+      },
+      "post": {
+        "summary": "Create a digest-scoped image risk acceptance for an asset"
+      }
+    },
+    "/api/v1/assets/{id}/image-acceptances/{acceptanceID}/revoke": {
+      "post": {
+        "summary": "Revoke a digest-scoped image risk acceptance"
+      }
+    },
+    "/api/v1/assets/{id}/vulnerabilities": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get vulnerabilities"
+      }
+    },
+    "/api/v1/audit/events": {
+      "get": {
+        "summary": "List audit events (descending)"
+      }
+    },
+    "/api/v1/audit/verify": {
+      "post": {
+        "summary": "Verify the hash-chained audit log and return the first integrity break, if any"
+      }
+    },
+    "/api/v1/auth-servers": {
+      "get": {
+        "summary": "List configured auth providers (IdPs)",
+        "description": "Lists the calling org's configured LDAP/SAML/OIDC identity providers. Each entry carries its type, name, enabled flag, auth_order, provider config, and group->role mapping. Provider secrets (LDAP bind password, SAML SP private key, OIDC client secret) are redacted. Requires the manage_auth_servers verb.",
+        "responses": {
+          "200": {
+            "description": "The org's auth providers (secrets redacted).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "auth_servers": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AuthServer"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer token."
+          },
+          "403": {
+            "description": "Caller lacks the manage_auth_servers verb."
+          }
+        }
+      },
+      "post": {
+        "summary": "Create an auth provider (IdP)",
+        "description": "Creates a new LDAP/SAML/OIDC identity provider for the calling org. The provider-specific config (including secrets) is validated by type. On success the live verifier set is hot-reloaded so the new provider takes effect without a restart. Requires the manage_auth_servers verb.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthServer"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created provider (secrets redacted).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthServer"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body or provider config (unknown type, missing required fields)."
+          },
+          "401": {
+            "description": "Missing or invalid bearer token."
+          },
+          "403": {
+            "description": "Caller lacks the manage_auth_servers verb."
+          },
+          "409": {
+            "description": "A provider with that name already exists in the org."
+          }
+        }
+      }
+    },
+    "/api/v1/auth-servers/{id}": {
+      "delete": {
+        "summary": "Delete an auth provider (IdP)",
+        "description": "Deletes the provider and hot-reloads the live verifier set so it stops authenticating without a restart. Requires the manage_auth_servers verb.",
+        "responses": {
+          "200": {
+            "description": "The provider was deleted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer token."
+          },
+          "403": {
+            "description": "Caller lacks the manage_auth_servers verb."
+          },
+          "404": {
+            "description": "No provider with that id in the org."
+          }
+        }
+      },
+      "get": {
+        "summary": "Get an auth provider (IdP)",
+        "description": "Returns one configured provider (secrets redacted). Requires the manage_auth_servers verb.",
+        "responses": {
+          "200": {
+            "description": "The provider (secrets redacted).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthServer"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer token."
+          },
+          "403": {
+            "description": "Caller lacks the manage_auth_servers verb."
+          },
+          "404": {
+            "description": "No provider with that id in the org."
+          }
+        }
+      },
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Auth provider id.",
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "put": {
+        "summary": "Update an auth provider (IdP)",
+        "description": "Replaces the provider's mutable fields (name, enabled, auth_order, config, role mapping). The type is immutable. A secret echoed back as the redaction marker (or left empty) preserves the stored secret rather than wiping it. On success the live verifier set is hot-reloaded without a restart. Requires the manage_auth_servers verb.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthServer"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated provider (secrets redacted).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthServer"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body or provider config."
+          },
+          "401": {
+            "description": "Missing or invalid bearer token."
+          },
+          "403": {
+            "description": "Caller lacks the manage_auth_servers verb."
+          },
+          "404": {
+            "description": "No provider with that id in the org."
+          },
+          "409": {
+            "description": "A provider with that name already exists in the org."
+          }
+        }
+      }
+    },
+    "/api/v1/auth/change-password": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create change-password"
+      }
+    },
+    "/api/v1/auth/ldap/login": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "security": [],
+        "summary": "Create login"
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "summary": "Local login (Argon2id)",
+        "security": []
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "summary": "Logout (audited)"
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "summary": "Current user + roles"
+      }
+    },
+    "/api/v1/auth/oidc/callback": {
+      "get": {
+        "summary": "OIDC callback",
+        "security": []
+      }
+    },
+    "/api/v1/auth/oidc/start": {
+      "get": {
+        "summary": "Start OIDC SP flow",
+        "security": []
+      }
+    },
+    "/api/v1/auth/saml/acs": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "security": [],
+        "summary": "Create acs"
+      }
+    },
+    "/api/v1/backups": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get backups"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create backups"
+      }
+    },
+    "/api/v1/backups/restore": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create restore"
+      }
+    },
+    "/api/v1/backups/schedule": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get schedule"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create schedule"
+      }
+    },
+    "/api/v1/backups/verify": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create verify"
+      }
+    },
+    "/api/v1/backups/{id}": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get backups"
+      }
+    },
+    "/api/v1/backups/{id}/download": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get download"
+      }
+    },
+    "/api/v1/cluster-init-bundles": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get cluster-init-bundles"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create cluster-init-bundles"
+      }
+    },
+    "/api/v1/cluster-init-bundles/{id}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Delete cluster-init-bundles"
+      },
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get cluster-init-bundles"
+      }
+    },
+    "/api/v1/cluster-init-bundles/{id}/rotate": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create rotate"
+      }
+    },
+    "/api/v1/clusters": {
+      "get": {
+        "summary": "List registered clusters with risk and sensor rollups"
+      }
+    },
+    "/api/v1/clusters/{id}": {
+      "get": {
+        "summary": "Get one registered cluster"
+      }
+    },
+    "/api/v1/clusters/{id}/cross-scan": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create cross-scan"
+      }
+    },
+    "/api/v1/clusters/{id}/health": {
+      "get": {
+        "summary": "Cluster sensor health, registration commands, and health gates"
+      }
+    },
+    "/api/v1/clusters/{id}/nodes": {
+      "get": {
+        "summary": "List node posture with host facts, packages, containers, CIS, scan status, and host CVEs"
+      }
+    },
+    "/api/v1/clusters/{id}/nodes/{node}": {
+      "get": {
+        "summary": "Get node posture detail with raw host evidence and scanner-backed host CVEs"
+      }
+    },
+    "/api/v1/clusters/{id}/platform-facts": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get platform-facts"
+      }
+    },
+    "/api/v1/clusters/{id}/platform-scan": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create platform-scan"
+      }
+    },
+    "/api/v1/compliance/checks": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get checks"
+      }
+    },
+    "/api/v1/compliance/cloud": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get cloud"
+      }
+    },
+    "/api/v1/compliance/control-mappings": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get control-mappings"
+      }
+    },
+    "/api/v1/compliance/custom-frameworks": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get custom-frameworks"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create custom-frameworks"
+      }
+    },
+    "/api/v1/compliance/custom-frameworks/{id}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Delete custom-frameworks"
+      }
+    },
+    "/api/v1/compliance/evidence": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get evidence"
+      }
+    },
+    "/api/v1/compliance/exemptions": {
+      "get": {
+        "summary": "List audited compliance control exemptions"
+      },
+      "post": {
+        "summary": "Create an expiring compliance control exemption"
+      }
+    },
+    "/api/v1/compliance/exemptions/{id}/revoke": {
+      "post": {
+        "summary": "Revoke an active compliance control exemption"
+      }
+    },
+    "/api/v1/compliance/frameworks": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get frameworks"
+      }
+    },
+    "/api/v1/compliance/ingest": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create ingest"
+      }
+    },
+    "/api/v1/compliance/kubernetes": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get kubernetes"
+      }
+    },
+    "/api/v1/compliance/nodes": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get nodes"
+      }
+    },
+    "/api/v1/compliance/primitives": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get primitives"
+      }
+    },
+    "/api/v1/compliance/runs/{id}/artifact": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get artifact"
+      }
+    },
+    "/api/v1/compliance/schedules": {
+      "get": {
+        "summary": "Compliance/report schedules with run history"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create schedules"
+      }
+    },
+    "/api/v1/compliance/schedules/{id}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Delete schedules"
+      },
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get schedules"
+      },
+      "patch": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Update schedules"
+      }
+    },
+    "/api/v1/compliance/schedules/{id}/run-now": {
+      "post": {
+        "summary": "Enqueue an immediate compliance schedule run"
+      }
+    },
+    "/api/v1/compliance/schedules/{id}/runs": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get runs"
+      }
+    },
+    "/api/v1/compliance/summary": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get summary"
+      }
+    },
+    "/api/v1/compliance/workloads": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get workloads"
+      }
+    },
+    "/api/v1/components": {
+      "get": {
+        "summary": "Heartbeat-backed component inventory with sanitized metadata, rollups, drift, stale, and missing status"
+      }
+    },
+    "/api/v1/components/{id}": {
+      "get": {
+        "summary": "Get one component instance with sanitized heartbeat metadata"
+      }
+    },
+    "/api/v1/components/{id}/diagnostics": {
+      "get": {
+        "summary": "Admin-gated component diagnostics, counters, safe config, and debug gate state"
+      }
+    },
+    "/api/v1/config/export": {
+      "get": {
+        "summary": "Export org configuration as code",
+        "description": "Streams the calling org's configuration as a YAML document suitable for storing in git and re-applying via the import endpoint. Includes users, custom roles, role bindings, org settings, policies, groups, vuln profiles, response rules, receivers, registries, WAF/DLP rules, custom frameworks, and an API-token inventory. Secrets never leave in cleartext: user password hashes and API-token hashes are blanked, registry credentials are emitted still AES-GCM-sealed, and the registry KEK is stripped. Requires the manage_org verb.",
+        "responses": {
+          "200": {
+            "description": "The org configuration document rendered as YAML.",
+            "content": {
+              "application/yaml": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer token."
+          },
+          "403": {
+            "description": "Caller lacks the manage_org verb."
+          },
+          "500": {
+            "description": "The configuration could not be assembled or serialized."
+          }
+        }
+      }
+    },
+    "/api/v1/config/import": {
+      "post": {
+        "summary": "Import org configuration as code",
+        "description": "Applies an uploaded YAML configuration document to the calling org. The merge-vs-replace selector is REQUIRED via the mode query parameter: mode=merge upserts rows by natural key and leaves not-present rows untouched; mode=replace additionally deletes the org's rows whose natural key is absent from the document (scoped to the org, so it can never affect another tenant). API tokens are metadata-only and never written. Requires the manage_org verb.",
+        "parameters": [
+          {
+            "name": "mode",
+            "in": "query",
+            "required": true,
+            "description": "Apply semantics: 'merge' (upsert by natural key) or 'replace' (upsert and delete-not-present, scoped to the org).",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "merge",
+                "replace"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/yaml": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Per-table apply statistics (new / updated / skipped row counts).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "mode": {
+                      "type": "string"
+                    },
+                    "org_id": {
+                      "type": "string"
+                    },
+                    "tables": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing/invalid mode parameter, unparseable YAML, or an apply error."
+          },
+          "401": {
+            "description": "Missing or invalid bearer token."
+          },
+          "403": {
+            "description": "Caller lacks the manage_org verb."
+          }
+        }
+      }
+    },
+    "/api/v1/connector-coverage": {
+      "get": {
+        "summary": "Registry and cloud connector coverage, scan gaps, scanner capacity, credential rotation, and guardrails"
+      }
+    },
+    "/api/v1/connector-coverage/configs": {
+      "post": {
+        "summary": "Persist connector configuration metadata without storing raw secrets"
+      }
+    },
+    "/api/v1/connector-coverage/configs/{id}/test": {
+      "post": {
+        "summary": "Persist a saved connector health check without storing raw secrets or starting scans"
+      }
+    },
+    "/api/v1/connector-coverage/test": {
+      "post": {
+        "summary": "Preview a read-only registry or cloud connector connectivity check"
+      }
+    },
+    "/api/v1/coverage": {
+      "get": {
+        "summary": "Reference feature coverage decisions"
+      }
+    },
+    "/api/v1/custom-roles": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get custom-roles"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create custom-roles"
+      }
+    },
+    "/api/v1/custom-roles/{id}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Delete custom-roles"
+      },
+      "put": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Replace custom-roles"
+      }
+    },
+    "/api/v1/cve/bundle/status": {
+      "get": {
+        "summary": "Latest imported CVE bundle metadata"
+      }
+    },
+    "/api/v1/cve/search": {
+      "get": {
+        "summary": "pg_trgm fuzzy CVE search"
+      }
+    },
+    "/api/v1/cve/stats": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get stats"
+      }
+    },
+    "/api/v1/cve/{id}": {
+      "get": {
+        "summary": "Get one CVE record"
+      }
+    },
+    "/api/v1/cve/{id}/affected": {
+      "get": {
+        "summary": "List canonical image scan and workload exposure for one CVE"
+      }
+    },
+    "/api/v1/dashboard/summary": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get summary"
+      }
+    },
+    "/api/v1/deployments": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get deployments"
+      }
+    },
+    "/api/v1/deployments/{id}": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get deployments"
+      }
+    },
+    "/api/v1/dlp/sensors": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get sensors"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create sensors"
+      }
+    },
+    "/api/v1/dlp/sensors/{id}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Delete sensors"
+      },
+      "put": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Replace sensors"
+      }
+    },
+    "/api/v1/events": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get events"
+      }
+    },
+    "/api/v1/events:bulk": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create events:bulk"
+      }
+    },
+    "/api/v1/events:export": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get events:export"
+      }
+    },
+    "/api/v1/federation/clusters/{id}": {
+      "delete": {
+        "summary": "Proxy a delete request to a federated joint (admin)",
+        "description": "Cross-cluster admin reverse-proxy (D3). Forwards the request to the joint resolved from its federation membership endpoint, stripping the inbound Authorization/Cookie and hop-by-hop headers and attaching the master's own federation credential (a short-lived D1 sync ticket, plus a CA-issued client certificate when D2 mTLS is enabled). The target host is taken ONLY from the registered endpoint, so it can never be pointed at an arbitrary URL. RBAC: GET is open to any reader but a non-admin is limited to a read-only path allowlist; POST/PUT/PATCH/DELETE require the manage_org verb (federation admin).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard \u2014 the target host is never caller-supplied).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "description": "The joint API sub-path to forward, captured by the route wildcard and prefixed with /api/v1 on the joint (e.g. 'findings', 'scan-results/{digest}'). Scheme and host always come from the registered endpoint, never from this value.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The joint's response, streamed back verbatim (status, headers minus hop-by-hop, and body)."
+          },
+          "401": {
+            "description": "Missing or invalid bearer token."
+          },
+          "403": {
+            "description": "Caller lacks the required verb (non-admins may only GET allowlisted read paths; mutating verbs require manage_org), or the target cluster is revoked."
+          },
+          "404": {
+            "description": "No federation membership row for {id} in the caller's org, or the member has no registered endpoint."
+          },
+          "502": {
+            "description": "The joint endpoint is unreachable or returned an invalid response."
+          }
+        }
+      },
+      "get": {
+        "summary": "Proxy a read request to a federated joint",
+        "description": "Cross-cluster admin reverse-proxy (D3). Forwards the request to the joint resolved from its federation membership endpoint, stripping the inbound Authorization/Cookie and hop-by-hop headers and attaching the master's own federation credential (a short-lived D1 sync ticket, plus a CA-issued client certificate when D2 mTLS is enabled). The target host is taken ONLY from the registered endpoint, so it can never be pointed at an arbitrary URL. RBAC: GET is open to any reader but a non-admin is limited to a read-only path allowlist; POST/PUT/PATCH/DELETE require the manage_org verb (federation admin).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard \u2014 the target host is never caller-supplied).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "description": "The joint API sub-path to forward, captured by the route wildcard and prefixed with /api/v1 on the joint (e.g. 'findings', 'scan-results/{digest}'). Scheme and host always come from the registered endpoint, never from this value.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The joint's response, streamed back verbatim (status, headers minus hop-by-hop, and body)."
+          },
+          "401": {
+            "description": "Missing or invalid bearer token."
+          },
+          "403": {
+            "description": "Caller lacks the required verb (non-admins may only GET allowlisted read paths; mutating verbs require manage_org), or the target cluster is revoked."
+          },
+          "404": {
+            "description": "No federation membership row for {id} in the caller's org, or the member has no registered endpoint."
+          },
+          "502": {
+            "description": "The joint endpoint is unreachable or returned an invalid response."
+          }
+        }
+      },
+      "patch": {
+        "summary": "Proxy an update request to a federated joint (admin)",
+        "description": "Cross-cluster admin reverse-proxy (D3). Forwards the request to the joint resolved from its federation membership endpoint, stripping the inbound Authorization/Cookie and hop-by-hop headers and attaching the master's own federation credential (a short-lived D1 sync ticket, plus a CA-issued client certificate when D2 mTLS is enabled). The target host is taken ONLY from the registered endpoint, so it can never be pointed at an arbitrary URL. RBAC: GET is open to any reader but a non-admin is limited to a read-only path allowlist; POST/PUT/PATCH/DELETE require the manage_org verb (federation admin).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard \u2014 the target host is never caller-supplied).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "description": "The joint API sub-path to forward, captured by the route wildcard and prefixed with /api/v1 on the joint (e.g. 'findings', 'scan-results/{digest}'). Scheme and host always come from the registered endpoint, never from this value.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "description": "Request body, forwarded to the joint unchanged.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The joint's response, streamed back verbatim (status, headers minus hop-by-hop, and body)."
+          },
+          "401": {
+            "description": "Missing or invalid bearer token."
+          },
+          "403": {
+            "description": "Caller lacks the required verb (non-admins may only GET allowlisted read paths; mutating verbs require manage_org), or the target cluster is revoked."
+          },
+          "404": {
+            "description": "No federation membership row for {id} in the caller's org, or the member has no registered endpoint."
+          },
+          "502": {
+            "description": "The joint endpoint is unreachable or returned an invalid response."
+          }
+        }
+      },
+      "post": {
+        "summary": "Proxy a write request to a federated joint (admin)",
+        "description": "Cross-cluster admin reverse-proxy (D3). Forwards the request to the joint resolved from its federation membership endpoint, stripping the inbound Authorization/Cookie and hop-by-hop headers and attaching the master's own federation credential (a short-lived D1 sync ticket, plus a CA-issued client certificate when D2 mTLS is enabled). The target host is taken ONLY from the registered endpoint, so it can never be pointed at an arbitrary URL. RBAC: GET is open to any reader but a non-admin is limited to a read-only path allowlist; POST/PUT/PATCH/DELETE require the manage_org verb (federation admin).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard \u2014 the target host is never caller-supplied).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "description": "The joint API sub-path to forward, captured by the route wildcard and prefixed with /api/v1 on the joint (e.g. 'findings', 'scan-results/{digest}'). Scheme and host always come from the registered endpoint, never from this value.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "description": "Request body, forwarded to the joint unchanged.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The joint's response, streamed back verbatim (status, headers minus hop-by-hop, and body)."
+          },
+          "401": {
+            "description": "Missing or invalid bearer token."
+          },
+          "403": {
+            "description": "Caller lacks the required verb (non-admins may only GET allowlisted read paths; mutating verbs require manage_org), or the target cluster is revoked."
+          },
+          "404": {
+            "description": "No federation membership row for {id} in the caller's org, or the member has no registered endpoint."
+          },
+          "502": {
+            "description": "The joint endpoint is unreachable or returned an invalid response."
+          }
+        }
+      },
+      "put": {
+        "summary": "Proxy a replace request to a federated joint (admin)",
+        "description": "Cross-cluster admin reverse-proxy (D3). Forwards the request to the joint resolved from its federation membership endpoint, stripping the inbound Authorization/Cookie and hop-by-hop headers and attaching the master's own federation credential (a short-lived D1 sync ticket, plus a CA-issued client certificate when D2 mTLS is enabled). The target host is taken ONLY from the registered endpoint, so it can never be pointed at an arbitrary URL. RBAC: GET is open to any reader but a non-admin is limited to a read-only path allowlist; POST/PUT/PATCH/DELETE require the manage_org verb (federation admin).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard \u2014 the target host is never caller-supplied).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "description": "The joint API sub-path to forward, captured by the route wildcard and prefixed with /api/v1 on the joint (e.g. 'findings', 'scan-results/{digest}'). Scheme and host always come from the registered endpoint, never from this value.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "description": "Request body, forwarded to the joint unchanged.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The joint's response, streamed back verbatim (status, headers minus hop-by-hop, and body)."
+          },
+          "401": {
+            "description": "Missing or invalid bearer token."
+          },
+          "403": {
+            "description": "Caller lacks the required verb (non-admins may only GET allowlisted read paths; mutating verbs require manage_org), or the target cluster is revoked."
+          },
+          "404": {
+            "description": "No federation membership row for {id} in the caller's org, or the member has no registered endpoint."
+          },
+          "502": {
+            "description": "The joint endpoint is unreachable or returned an invalid response."
+          }
+        }
+      }
+    },
+    "/api/v1/federation/join": {
+      "post": {
+        "summary": "Exchange a federation join token for a per-cluster sync secret",
+        "description": "Anonymous exchange endpoint (D1/D2). A joining cluster presents a join token (a signed, master-minted token or the pre-shared fixed GitOps token) plus its cluster id/name and receives a per-cluster signed sync ticket it then presents on every /federation/sync poll. Only the sha256 of the ticket is persisted by the master (like api_tokens). Authenticated by the join token itself, so it carries no bearer security. When per-joint mTLS (D2) is enabled the response also includes a per-joint client certificate, its private key (shown once), and the master CA: the joint presents the client cert on every /sync poll and the master verifies it against the CA, so a leaked bearer ticket alone \u2014 without the matching client key \u2014 is rejected.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "join_token",
+                  "cluster_id",
+                  "cluster_name"
+                ],
+                "properties": {
+                  "join_token": {
+                    "type": "string",
+                    "description": "Signed master-minted join token, or the pre-shared fixed token"
+                  },
+                  "cluster_id": {
+                    "type": "string"
+                  },
+                  "cluster_name": {
+                    "type": "string"
+                  },
+                  "endpoint": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Per-cluster sync secret issued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "cluster_id": {
+                      "type": "string"
+                    },
+                    "secret": {
+                      "type": "string",
+                      "description": "Per-cluster signed sync ticket (shown once)"
+                    },
+                    "expires_at": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true
+                    },
+                    "client_cert": {
+                      "type": "string",
+                      "description": "D2: PEM per-joint client certificate (CN = cluster_id), present only when mTLS is enabled"
+                    },
+                    "client_key": {
+                      "type": "string",
+                      "description": "D2: PEM private key for the client certificate (shown once), present only when mTLS is enabled"
+                    },
+                    "ca_cert": {
+                      "type": "string",
+                      "description": "D2: PEM master federation CA the joint pins on its /sync connection, present only when mTLS is enabled"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing cluster_id/cluster_name or malformed body"
+          },
+          "401": {
+            "description": "Invalid or expired join token"
+          },
+          "500": {
+            "description": "Credential persistence or certificate issuance failed"
+          },
+          "501": {
+            "description": "Federation signing not configured"
+          }
+        }
+      }
+    },
+    "/api/v1/federation/join-tokens": {
+      "post": {
+        "summary": "Mint a short-lived signed federation join token",
+        "description": "Master-only (D1). Mints an RS256-signed, short-lived join token an operator hands to a joining cluster to bootstrap trust. Requires the org to be in the federation master state and the manage-org verb. The optional ttl_seconds shortens (never extends) the configured ceiling.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ttl_seconds": {
+                    "type": "integer",
+                    "description": "Optional shorter lifetime; capped at the configured ceiling"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Join token minted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "join_token": {
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Org is not a federation master"
+          },
+          "501": {
+            "description": "Federation signing not configured"
+          }
+        }
+      }
+    },
+    "/api/v1/federation/members": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get members"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create members"
+      }
+    },
+    "/api/v1/federation/members/{id}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Delete members"
+      }
+    },
+    "/api/v1/federation/state": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get state"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create state"
+      }
+    },
+    "/api/v1/federation/sync": {
+      "get": {
+        "summary": "Pull the master's federated rule revisions (joint poll)",
+        "description": "Per-cluster federation credential auth (D1), NOT a user JWT. The joint presents its signed per-cluster sync ticket as the bearer; the master validates the signature and the fed_credentials row (live, not revoked, epoch current) before returning rule revisions strictly greater than ?since=. A generic read-findings principal can no longer reach this endpoint.",
+        "parameters": [
+          {
+            "name": "since",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Return revisions strictly greater than this revision number"
+          },
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Legacy joint identity; ignored when the credential supplies it"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rule revisions since the requested revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "revisions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "since": {
+                      "type": "integer",
+                      "format": "int64"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid federation sync ticket"
+          },
+          "403": {
+            "description": "Federation credential revoked (kicked / epoch bumped)"
+          }
+        }
+      }
+    },
+    "/api/v1/findings": {
+      "get": {
+        "summary": "List findings (kind, lifecycle filter)"
+      }
+    },
+    "/api/v1/findings.csv": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get findings.csv"
+      }
+    },
+    "/api/v1/findings/{id}": {
+      "get": {
+        "summary": "Get one finding"
+      }
+    },
+    "/api/v1/findings/{id}/accept-risk": {
+      "post": {
+        "summary": "Accept-risk a finding with rationale + expiry"
+      }
+    },
+    "/api/v1/findings/{id}/comments": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get comments"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create comments"
+      }
+    },
+    "/api/v1/findings/{id}/reachability": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create reachability"
+      }
+    },
+    "/api/v1/findings/{id}/suppress": {
+      "post": {
+        "summary": "Suppress a finding"
+      }
+    },
+    "/api/v1/findings/{id}/triage": {
+      "post": {
+        "summary": "Triage a finding"
+      }
+    },
+    "/api/v1/forensics/{snapshot_id}": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get forensics"
+      }
+    },
+    "/api/v1/groups": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get groups"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create groups"
+      }
+    },
+    "/api/v1/groups/{id}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Delete groups"
+      },
+      "put": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Replace groups"
+      }
+    },
+    "/api/v1/heartbeats": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create heartbeats"
+      }
+    },
+    "/api/v1/host-cis": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get host-cis"
+      }
+    },
+    "/api/v1/host-cis/{node}": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get host-cis"
+      }
+    },
+    "/api/v1/host-cis:report": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create host-cis:report"
+      }
+    },
+    "/api/v1/host-containers": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get host-containers"
+      }
+    },
+    "/api/v1/host-containers/{node}": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get host-containers"
+      }
+    },
+    "/api/v1/host-containers:report": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create host-containers:report"
+      }
+    },
+    "/api/v1/host-facts": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get host-facts"
+      }
+    },
+    "/api/v1/host-facts/{node}": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get host-facts"
+      }
+    },
+    "/api/v1/host-facts:report": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create host-facts:report"
+      }
+    },
+    "/api/v1/host-packages": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get host-packages"
+      }
+    },
+    "/api/v1/host-packages/{node}": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get host-packages"
+      }
+    },
+    "/api/v1/host-packages:report": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create host-packages:report"
+      }
+    },
+    "/api/v1/host-processes": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get host-processes"
+      }
+    },
+    "/api/v1/host-processes/{node}": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get host-processes"
+      }
+    },
+    "/api/v1/host-processes:report": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create host-processes:report"
+      }
+    },
+    "/api/v1/host-vulnerabilities": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get host-vulnerabilities"
+      }
+    },
+    "/api/v1/host-vulnerabilities/{node}": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get host-vulnerabilities"
+      }
+    },
+    "/api/v1/image-scan-results": {
+      "get": {
+        "summary": "List canonical image scan results by digest, platform, scanner profile, and VulnDB bundle"
+      }
+    },
+    "/api/v1/image-scan-results/{id}": {
+      "get": {
+        "summary": "Get one canonical image scan result with findings and affected workloads"
+      }
+    },
+    "/api/v1/image-scan-results/{id}/affected-workloads": {
+      "get": {
+        "summary": "List workloads affected by a canonical image scan result"
+      }
+    },
+    "/api/v1/image-scan-results/{id}/attestations": {
+      "get": {
+        "summary": "List provenance attestations linked to one canonical image scan result"
+      }
+    },
+    "/api/v1/image-scan-results/{id}/file-risks": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get file-risks"
+      }
+    },
+    "/api/v1/image-scan-results/{id}/layers": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get layers"
+      }
+    },
+    "/api/v1/image-scan-results/{id}/packages": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get packages"
+      }
+    },
+    "/api/v1/image-scan-results/{id}/sbom/cyclonedx": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get cyclonedx"
+      }
+    },
+    "/api/v1/image-scan-results/{id}/sbom/spdx": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get spdx"
+      }
+    },
+    "/api/v1/image-scan-results/{id}/secrets": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get secrets"
+      }
+    },
+    "/api/v1/image-scan-results/{id}/signature": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get signature"
+      }
+    },
+    "/api/v1/integration-deliveries": {
+      "get": {
+        "summary": "Integration delivery operations: connector health, routing, history, retries, dead letters, test actions, and guardrails"
+      }
+    },
+    "/api/v1/integration-deliveries/test": {
+      "post": {
+        "summary": "Preview a read-only integration test delivery without sending receiver traffic or persisting attempts"
+      }
+    },
+    "/api/v1/integrations": {
+      "get": {
+        "summary": "Notification integrations and report job readiness"
+      }
+    },
+    "/api/v1/integrations/receivers": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get receivers"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create receivers"
+      }
+    },
+    "/api/v1/integrations/receivers/{id}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Delete receivers"
+      },
+      "patch": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Update receivers"
+      }
+    },
+    "/api/v1/integrations/receivers/{id}/deliveries": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get deliveries"
+      }
+    },
+    "/api/v1/integrations/receivers/{id}/pause": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create pause"
+      }
+    },
+    "/api/v1/integrations/receivers/{id}/rotate-secret": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create rotate-secret"
+      }
+    },
+    "/api/v1/integrations/receivers/{id}/test-fire": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create test-fire"
+      }
+    },
+    "/api/v1/integrations/receivers/{id}/unpause": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create unpause"
+      }
+    },
+    "/api/v1/migration/preview": {
+      "post": {
+        "summary": "Read-only migration dry-run conversion with policy diff and rollback preview"
+      }
+    },
+    "/api/v1/migration/sources": {
+      "get": {
+        "summary": "Competitive migration source readiness"
+      }
+    },
+    "/api/v1/network-flows:bulk": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create network-flows:bulk"
+      }
+    },
+    "/api/v1/network/conversations": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get conversations"
+      }
+    },
+    "/api/v1/network/map": {
+      "get": {
+        "summary": "Cluster-scoped Network Traffic Map workloads and observed flow edges"
+      }
+    },
+    "/api/v1/network/policies/lifecycle": {
+      "get": {
+        "summary": "Cluster-scoped network policy lifecycle preview, diff, approval, and rollback state"
+      }
+    },
+    "/api/v1/network/policies/{workload}/rollback": {
+      "post": {
+        "summary": "Persist an idempotent, audited rollback of staged network policy lifecycle state with the approved manifest bundle; live cluster apply remains gated"
+      }
+    },
+    "/api/v1/network/policies/{workload}/{action}": {
+      "post": {
+        "summary": "Persist idempotent approve/apply/demote network policy lifecycle state with hash-chained audit evidence and deterministic native/Cilium/Calico manifest artifacts; live cluster apply remains gated"
+      }
+    },
+    "/api/v1/onboarding": {
+      "get": {
+        "summary": "Cluster onboarding methods and health gates"
+      }
+    },
+    "/api/v1/platform-facts:report": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create platform-facts:report"
+      }
+    },
+    "/api/v1/policies": {
+      "get": {
+        "summary": "List policies"
+      },
+      "post": {
+        "summary": "Create policy"
+      }
+    },
+    "/api/v1/policies/admission-profiles": {
+      "get": {
+        "summary": "List built-in admission profiles and rule templates"
+      }
+    },
+    "/api/v1/policies/admission-profiles/{profile}/export": {
+      "get": {
+        "summary": "Export a built-in admission profile as an importable bundle"
+      }
+    },
+    "/api/v1/policies/admission-profiles:import": {
+      "post": {
+        "summary": "Import or dry-run an admission profile bundle into policy rows"
+      }
+    },
+    "/api/v1/policies/simulate": {
+      "post": {
+        "summary": "Dry-run admission policy simulation against a pasted manifest and persisted policy catalog"
+      }
+    },
+    "/api/v1/policies/{id}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Delete policies"
+      },
+      "patch": {
+        "summary": "Toggle / re-mode a policy"
+      }
+    },
+    "/api/v1/policies:bulk": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create policies:bulk"
+      }
+    },
+    "/api/v1/policy/fields": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get fields"
+      }
+    },
+    "/api/v1/quarantine": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get quarantine"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create quarantine"
+      }
+    },
+    "/api/v1/quarantine/{id}": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get quarantine"
+      }
+    },
+    "/api/v1/quarantine/{id}/lift": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create lift"
+      }
+    },
+    "/api/v1/rbac/verbs": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get verbs"
+      }
+    },
+    "/api/v1/registries": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get registries"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create registries"
+      }
+    },
+    "/api/v1/registries/{id}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Delete registries"
+      },
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get registries"
+      },
+      "patch": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Update registries"
+      }
+    },
+    "/api/v1/registries/{id}/images": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get images"
+      }
+    },
+    "/api/v1/registries/{id}/sync-now": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create sync-now"
+      }
+    },
+    "/api/v1/registries/{id}/test": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create test"
+      }
+    },
+    "/api/v1/reports/compliance.html": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get compliance.html"
+      }
+    },
+    "/api/v1/reports/compliance.pdf": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get compliance.pdf"
+      }
+    },
+    "/api/v1/reports/executive.html": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get executive.html"
+      }
+    },
+    "/api/v1/reports/executive.pdf": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get executive.pdf"
+      }
+    },
+    "/api/v1/repository-packages:report": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create repository-packages:report"
+      }
+    },
+    "/api/v1/repository-scan-attestation-trust-policies": {
+      "get": {
+        "summary": "List persisted repository or CI attestation trust policies"
+      },
+      "post": {
+        "summary": "Create a persisted repository or CI attestation trust policy"
+      }
+    },
+    "/api/v1/repository-scan-attestation-trust-policies/{id}": {
+      "delete": {
+        "summary": "Delete a persisted repository or CI attestation trust policy"
+      },
+      "patch": {
+        "summary": "Update a persisted repository or CI attestation trust policy"
+      }
+    },
+    "/api/v1/repository-scan-attestation-trust-policies/{id}:verify-pending": {
+      "post": {
+        "summary": "Verify pending matching attestations with one persisted trust policy"
+      }
+    },
+    "/api/v1/repository-scan-attestations/{id}": {
+      "get": {
+        "summary": "Get one repository or CI provenance attestation with stored payload material"
+      }
+    },
+    "/api/v1/repository-scan-attestations/{id}/export": {
+      "get": {
+        "summary": "Export one repository or CI attestation with payload material and verification history"
+      }
+    },
+    "/api/v1/repository-scan-attestations/{id}/verifications": {
+      "get": {
+        "summary": "List immutable server-side verification attempts for one repository or CI attestation"
+      }
+    },
+    "/api/v1/repository-scan-attestations/{id}:verify": {
+      "post": {
+        "summary": "Server-verify a stored repository or CI attestation against a persisted trust policy"
+      }
+    },
+    "/api/v1/repository-scan-attestations:report": {
+      "post": {
+        "summary": "Report repository or CI provenance attestation material for server-side verification and scan correlation"
+      }
+    },
+    "/api/v1/repository-scans": {
+      "get": {
+        "summary": "List repository package evidence scans with findings, jobs, and attestation summaries"
+      }
+    },
+    "/api/v1/repository-scans/{id}": {
+      "get": {
+        "summary": "Get one repository package evidence scan with latest evidence, jobs, findings, and attestation summary"
+      }
+    },
+    "/api/v1/repository-scans/{id}/attestations": {
+      "get": {
+        "summary": "List provenance attestations linked to one repository scan target"
+      }
+    },
+    "/api/v1/response-rule-defs": {
+      "get": {
+        "summary": "List declarative response rules",
+        "description": "Returns the org's E1 declarative response rules ordered by priority then name. Requires the manage_response_rules verb.",
+        "responses": {
+          "200": {
+            "description": "The org's response rules.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "rules": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ResponseRuleDef"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks the manage_response_rules verb."
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a declarative response rule",
+        "description": "Validates and persists a new E1 response rule. Requires the manage_response_rules verb.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResponseRuleDef"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created rule's id."
+          },
+          "400": {
+            "description": "Invalid rule (bad event_type, op, regex, or missing action)."
+          },
+          "403": {
+            "description": "Caller lacks the manage_response_rules verb."
+          }
+        }
+      }
+    },
+    "/api/v1/response-rule-defs/{id}": {
+      "delete": {
+        "summary": "Delete a declarative response rule",
+        "description": "Removes a response rule by id (org-scoped). Requires the manage_response_rules verb.",
+        "responses": {
+          "204": {
+            "description": "Deleted."
+          },
+          "403": {
+            "description": "Caller lacks the manage_response_rules verb."
+          },
+          "404": {
+            "description": "No such rule in the caller's org."
+          }
+        }
+      },
+      "get": {
+        "summary": "Get a declarative response rule",
+        "description": "Returns a single E1 response rule by id (org-scoped). Requires the manage_response_rules verb.",
+        "responses": {
+          "200": {
+            "description": "The requested rule.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseRuleDef"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks the manage_response_rules verb."
+          },
+          "404": {
+            "description": "No such rule in the caller's org."
+          }
+        }
+      },
+      "put": {
+        "summary": "Replace a declarative response rule",
+        "description": "Validates and replaces an E1 response rule by id (org-scoped). Requires the manage_response_rules verb.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResponseRuleDef"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated rule's id."
+          },
+          "400": {
+            "description": "Invalid rule body."
+          },
+          "403": {
+            "description": "Caller lacks the manage_response_rules verb."
+          },
+          "404": {
+            "description": "No such rule in the caller's org."
+          }
+        }
+      }
+    },
+    "/api/v1/response-rules": {
+      "get": {
+        "summary": "Response rule catalog with persisted org overrides, modes, matches, and actions"
+      }
+    },
+    "/api/v1/response-rules-v2": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get response-rules-v2"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create response-rules-v2"
+      }
+    },
+    "/api/v1/response-rules-v2/{id}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Delete response-rules-v2"
+      },
+      "put": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Replace response-rules-v2"
+      }
+    },
+    "/api/v1/response-rules/{id}": {
+      "patch": {
+        "summary": "Persist an audited response rule mode or enablement override"
+      }
+    },
+    "/api/v1/response-rules/{id}/preview": {
+      "post": {
+        "summary": "Preview response rule mode/enablement changes without persisting or executing runtime actions"
+      }
+    },
+    "/api/v1/routing.yaml": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get routing.yaml"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create routing.yaml"
+      }
+    },
+    "/api/v1/runtime-dlp-rules": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get runtime-dlp-rules"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create runtime-dlp-rules"
+      }
+    },
+    "/api/v1/runtime-dlp-rules/{id}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Delete runtime-dlp-rules"
+      },
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get runtime-dlp-rules"
+      },
+      "put": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Replace runtime-dlp-rules"
+      }
+    },
+    "/api/v1/runtime-dlp-rules/{id}/demote": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create demote"
+      }
+    },
+    "/api/v1/runtime-dlp-rules/{id}/disable": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create disable"
+      }
+    },
+    "/api/v1/runtime-dlp-rules/{id}/promote": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create promote"
+      }
+    },
+    "/api/v1/runtime-pcap": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get runtime-pcap"
+      }
+    },
+    "/api/v1/runtime-pcap/claim": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get claim"
+      }
+    },
+    "/api/v1/runtime-pcap/start": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create start"
+      }
+    },
+    "/api/v1/runtime-pcap/{id}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Delete runtime-pcap"
+      },
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get runtime-pcap"
+      }
+    },
+    "/api/v1/runtime-pcap/{id}/download": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get download"
+      }
+    },
+    "/api/v1/runtime-pcap/{id}/status": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create status"
+      }
+    },
+    "/api/v1/runtime-pcap/{id}/upload": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create upload"
+      }
+    },
+    "/api/v1/runtime-policies": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get runtime-policies"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create runtime-policies"
+      }
+    },
+    "/api/v1/runtime-policies/{id}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Delete runtime-policies"
+      },
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get runtime-policies"
+      },
+      "put": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Replace runtime-policies"
+      }
+    },
+    "/api/v1/runtime-policies/{id}/demote": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create demote"
+      }
+    },
+    "/api/v1/runtime-policies/{id}/disable": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create disable"
+      }
+    },
+    "/api/v1/runtime-policies/{id}/export": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get export"
+      }
+    },
+    "/api/v1/runtime-policies/{id}/match-stats": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get match-stats"
+      }
+    },
+    "/api/v1/runtime-policies/{id}/promote": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create promote"
+      }
+    },
+    "/api/v1/runtime-policies/{id}/simulate": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create simulate"
+      }
+    },
+    "/api/v1/runtime-policies:apply-generated": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create runtime-policies:apply-generated"
+      }
+    },
+    "/api/v1/runtime-policies:generate": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create runtime-policies:generate"
+      }
+    },
+    "/api/v1/runtime-signatures": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get runtime-signatures"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create runtime-signatures"
+      }
+    },
+    "/api/v1/runtime-signatures/{id}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Delete runtime-signatures"
+      },
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get runtime-signatures"
+      },
+      "put": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Replace runtime-signatures"
+      }
+    },
+    "/api/v1/runtime-signatures/{id}/demote": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create demote"
+      }
+    },
+    "/api/v1/runtime-signatures/{id}/disable": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create disable"
+      }
+    },
+    "/api/v1/runtime-signatures/{id}/promote": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create promote"
+      }
+    },
+    "/api/v1/runtime-threats": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get runtime-threats"
+      }
+    },
+    "/api/v1/runtime-threats/{id}": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get runtime-threats"
+      }
+    },
+    "/api/v1/runtime-threats:bulk": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create runtime-threats:bulk"
+      }
+    },
+    "/api/v1/runtime/baselines": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get baselines"
+      }
+    },
+    "/api/v1/runtime/baselines/{workload_id}": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get baselines"
+      }
+    },
+    "/api/v1/runtime/baselines/{workload_id}/mode": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create mode"
+      }
+    },
+    "/api/v1/runtime/dlp-rules:bundle": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get dlp-rules:bundle"
+      }
+    },
+    "/api/v1/runtime/file-profile-rules:bundle": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get file-profile-rules:bundle"
+      }
+    },
+    "/api/v1/runtime/file-profile-watches:report": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create file-profile-watches:report"
+      }
+    },
+    "/api/v1/runtime/file-profiles": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get file-profiles"
+      }
+    },
+    "/api/v1/runtime/file-profiles/{workload_id}": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get file-profiles"
+      }
+    },
+    "/api/v1/runtime/file-profiles/{workload_id}/exceptions": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create exceptions"
+      }
+    },
+    "/api/v1/runtime/file-profiles/{workload_id}/exceptions/{exception_id}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Delete exceptions"
+      },
+      "put": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Replace exceptions"
+      }
+    },
+    "/api/v1/runtime/file-profiles/{workload_id}/export": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get export"
+      }
+    },
+    "/api/v1/runtime/file-profiles/{workload_id}/mode": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create mode"
+      }
+    },
+    "/api/v1/runtime/file-profiles/{workload_id}/rules": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create rules"
+      }
+    },
+    "/api/v1/runtime/file-profiles/{workload_id}/rules/{rule_id}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Delete rules"
+      },
+      "put": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Replace rules"
+      }
+    },
+    "/api/v1/runtime/file-profiles/{workload_id}:import": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create file-profiles"
+      }
+    },
+    "/api/v1/runtime/overview": {
+      "get": {
+        "summary": "Runtime subsystem readiness, rule overview, recent event evidence, and affected workload rollups"
+      }
+    },
+    "/api/v1/runtime/policies:bundle": {
+      "get": {
+        "summary": "Get the runtime micro-segmentation policy bundle for a cluster (runtime-agent token)",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Runtime policy bundle the agent programs into the dp engine",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "policies": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "dp_policy_id": {
+                            "type": "integer"
+                          },
+                          "workload": {
+                            "type": "string"
+                          },
+                          "mode": {
+                            "type": "string"
+                          },
+                          "def_action": {
+                            "type": "integer"
+                          },
+                          "apply_dir": {
+                            "type": "integer"
+                          },
+                          "rules": {
+                            "type": "array",
+                            "items": {
+                              "type": "object"
+                            }
+                          },
+                          "version": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "missing or invalid runtime-agent token"
+          },
+          "404": {
+            "description": "cluster not found for the token's org"
+          }
+        }
+      }
+    },
+    "/api/v1/runtime/process-baselines:bundle": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get process-baselines:bundle"
+      }
+    },
+    "/api/v1/runtime/response-rules:sync": {
+      "get": {
+        "summary": "Sync enabled response rules to the runtime-agent",
+        "description": "Serves the org's ENABLED declarative response rules, priority-ordered, for the runtime-agent's stream evaluator. Authenticated with a runtime-agent token (not a user JWT); mirrors the other agent :bundle pull endpoints.",
+        "responses": {
+          "200": {
+            "description": "The enabled rules and a generation timestamp.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "generated_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "rules": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ResponseRuleDef"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid runtime-agent token."
+          }
+        }
+      }
+    },
+    "/api/v1/sbom/cyclonedx/{asset_id}": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get cyclonedx"
+      }
+    },
+    "/api/v1/sbom/mbom/{asset_id}": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get mbom"
+      }
+    },
+    "/api/v1/sbom/spdx/{asset_id}": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get spdx"
+      }
+    },
+    "/api/v1/scan-evidence/{id}": {
+      "get": {
+        "summary": "Scanner worker fetches package evidence for a claimed target"
+      }
+    },
+    "/api/v1/scan-jobs": {
+      "get": {
+        "summary": "List recent target-backed scan jobs"
+      },
+      "post": {
+        "summary": "Queue a target-backed scan job"
+      }
+    },
+    "/api/v1/scan-jobs/claim": {
+      "post": {
+        "summary": "Scanner worker claims the next pending scan job"
+      }
+    },
+    "/api/v1/scan-jobs/{id}/cancel": {
+      "post": {
+        "summary": "Cancel a pending, paused, or running scan job"
+      }
+    },
+    "/api/v1/scan-jobs/{id}/complete": {
+      "post": {
+        "summary": "Scanner worker records completed target scan results"
+      }
+    },
+    "/api/v1/scan-jobs/{id}/fail": {
+      "post": {
+        "summary": "Scanner worker records failed target scan"
+      }
+    },
+    "/api/v1/scan-jobs/{id}/pause": {
+      "post": {
+        "summary": "Pause a pending scan job"
+      }
+    },
+    "/api/v1/scan-jobs/{id}/renew": {
+      "post": {
+        "summary": "Scanner-worker lease renewal for a running scan job"
+      }
+    },
+    "/api/v1/scan-jobs/{id}/resume": {
+      "post": {
+        "summary": "Resume a paused scan job"
+      }
+    },
+    "/api/v1/scan-jobs/{id}/retry": {
+      "post": {
+        "summary": "Requeue a failed or canceled scan job"
+      }
+    },
+    "/api/v1/scan-targets/{id}/impacted-workloads": {
+      "get": {
+        "summary": "List workloads currently using an image scan target"
+      }
+    },
+    "/api/v1/scan/cache_data/{scanner_id}": {
+      "get": {
+        "summary": "NeuVector-compatible scanner cache record data"
+      }
+    },
+    "/api/v1/scan/cache_stat/{scanner_id}": {
+      "get": {
+        "summary": "NeuVector-compatible scanner cache statistics"
+      }
+    },
+    "/api/v1/scan/host/{id}": {
+      "get": {
+        "summary": "NeuVector-compatible host scan report"
+      },
+      "post": {
+        "summary": "Queue an evidence-backed host scan"
+      }
+    },
+    "/api/v1/scan/platform": {
+      "get": {
+        "summary": "NeuVector-compatible platform scan summary"
+      }
+    },
+    "/api/v1/scan/platform/platform": {
+      "get": {
+        "summary": "NeuVector-compatible platform scan report"
+      },
+      "post": {
+        "summary": "Queue an evidence-backed platform scan"
+      }
+    },
+    "/api/v1/scan/scanner": {
+      "get": {
+        "summary": "List scanner workers with VulnDB version and scan counters"
+      }
+    },
+    "/api/v1/scan/status": {
+      "get": {
+        "summary": "NeuVector-compatible aggregate scan lifecycle status"
+      }
+    },
+    "/api/v1/scan/workload/{id}": {
+      "get": {
+        "summary": "NeuVector-compatible workload scan report"
+      },
+      "post": {
+        "summary": "Queue an evidence-backed workload scan"
+      }
+    },
+    "/api/v1/scanner-cache/{scanner_id}/data": {
+      "get": {
+        "summary": "Scanner cache record samples with cluster and scanner identity"
+      }
+    },
+    "/api/v1/scanner-cache/{scanner_id}/stat": {
+      "get": {
+        "summary": "Scanner cache statistics with cluster and per-cache status"
+      }
+    },
+    "/api/v1/search": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get search"
+      }
+    },
+    "/api/v1/security/findings": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get findings"
+      }
+    },
+    "/api/v1/serverless-functions": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get serverless-functions"
+      }
+    },
+    "/api/v1/serverless-functions/{id}": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get serverless-functions"
+      }
+    },
+    "/api/v1/serverless-packages:report": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create serverless-packages:report"
+      }
+    },
+    "/api/v1/settings/org": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get org"
+      },
+      "patch": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Update org"
+      }
+    },
+    "/api/v1/settings/user": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get user"
+      },
+      "patch": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Update user"
+      }
+    },
+    "/api/v1/system-health": {
+      "get": {
+        "summary": "Operations health console for platform components, incidents, and remediation"
+      }
+    },
+    "/api/v1/system-health/clusters/{cluster_id}": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get clusters"
+      }
+    },
+    "/api/v1/system-health/overview": {
+      "get": {
+        "summary": "System health overview alias"
+      }
+    },
+    "/api/v1/system/config": {
+      "get": {
+        "summary": "Get system configuration",
+        "description": "Returns the org's live runtime system configuration (egress proxy, TLS verify + CA bundle, syslog/SIEM target, scanner autoscale bounds) with secrets redacted. Requires the manage_system_config verb.",
+        "responses": {
+          "200": {
+            "description": "The current configuration (secrets redacted) and its revision.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "config": {
+                      "$ref": "#/components/schemas/SystemConfig"
+                    },
+                    "revision": {
+                      "type": "integer",
+                      "format": "int64"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer token."
+          },
+          "403": {
+            "description": "Caller lacks the manage_system_config verb."
+          }
+        }
+      },
+      "patch": {
+        "summary": "Update system configuration",
+        "description": "Applies a partial, validated update to the org's system configuration and bumps the revision so in-process consumers hot-reload without a restart. Only the keys present in the body are changed; unknown keys are rejected. A ca_bundle_pem or credentialed egress proxy echoed back as the redaction marker is left unchanged. Requires the manage_system_config verb.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SystemConfig"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The merged configuration (secrets redacted) and its new revision.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "config": {
+                      "$ref": "#/components/schemas/SystemConfig"
+                    },
+                    "revision": {
+                      "type": "integer",
+                      "format": "int64"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid patch body or a field that failed validation."
+          },
+          "401": {
+            "description": "Missing or invalid bearer token."
+          },
+          "403": {
+            "description": "Caller lacks the manage_system_config verb."
+          },
+          "409": {
+            "description": "The configuration was changed concurrently; retry with the latest revision."
+          }
+        }
+      }
+    },
+    "/api/v1/users/{id}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Delete users"
+      }
+    },
+    "/api/v1/users/{id}/disable": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create disable"
+      }
+    },
+    "/api/v1/users/{id}/force-password-reset": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create force-password-reset"
+      }
+    },
+    "/api/v1/version": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get version"
+      }
+    },
+    "/api/v1/violations": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get violations"
+      }
+    },
+    "/api/v1/vuln-profiles": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get vuln-profiles"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create vuln-profiles"
+      }
+    },
+    "/api/v1/vuln-profiles/{id}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Delete vuln-profiles"
+      },
+      "put": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Replace vuln-profiles"
+      }
+    },
+    "/api/v1/vulndb/status": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Get status"
+      }
+    },
+    "/api/v1/vulndb:import": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Create vulndb:import"
+      }
+    },
+    "/api/v1/vulndb:rescan": {
+      "post": {
+        "summary": "Queue evidence-backed target rescans for the current VulnDB bundle"
+      }
+    },
+    "/api/v1/vulnerability-exceptions": {
+      "get": {
+        "summary": "List DB-backed vulnerability exceptions with workflow guardrails and audit events"
+      }
+    },
+    "/api/v1/workload-packages:report": {
+      "post": {
+        "summary": "Runtime-agent reports running workload package evidence and queues a workload scan target"
+      }
+    },
+    "/healthz": {
+      "get": {
+        "summary": "Liveness",
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "security": []
+      }
+    },
+    "/metrics": {
+      "get": {
+        "summary": "Prometheus metrics",
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "security": []
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "security": [],
+        "summary": "Get openapi.json"
+      }
+    },
+    "/readyz": {
+      "get": {
+        "summary": "Readiness",
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "503": {
+            "description": "dependency unavailable"
+          }
+        },
+        "security": []
+      }
+    },
+    "/version": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "security": [],
+        "summary": "Get version"
+      }
+    }
+  }
+}

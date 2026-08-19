@@ -1,0 +1,56 @@
+{
+  "action": "block",
+  "event": {
+    "Flow": {
+      "WorkloadID": "",
+      "ContainerID": "",
+      "Src": "",
+      "Dst": "",
+      "Protocol": "",
+      "PID": 0
+    },
+    "At": "2026-05-12T15:27:58.613138176Z",
+    "Protocol": "http",
+    "Dir": 0,
+    "HTTP": {
+      "Method": "GET",
+      "Path": "/api/v1/orders",
+      "Host": "checkout.svc.cluster.local",
+      "Query": "id=1 OR 1=1--",
+      "Version": "HTTP/1.1",
+      "Headers": {
+        "user-agent": [
+          "sqlmap/1.7.5#stable (https://sqlmap.org)"
+        ]
+      },
+      "Body": null,
+      "Truncated": false,
+      "StatusCode": 0,
+      "Service": "",
+      "RPC": ""
+    },
+    "DNS": null,
+    "MySQL": null,
+    "Postgres": null,
+    "Redis": null,
+    "Kafka": null
+  },
+  "matches": [
+    {
+      "RuleID": 942110,
+      "Msg": "SQL Injection Attempt (OR/AND tautology)",
+      "Severity": "critical",
+      "Target": "ARGS",
+      "Captured": "1 OR 1=1--"
+    },
+    {
+      "RuleID": 913100,
+      "Msg": "Suspicious scanner User-Agent",
+      "Severity": "warning",
+      "Target": "REQUEST_HEADERS:User-Agent",
+      "Captured": "sqlmap/1.7.5#stable (https://sqlmap.org)"
+    }
+  ],
+  "mode": "enforce",
+  "workload": "checkout/api"
+}

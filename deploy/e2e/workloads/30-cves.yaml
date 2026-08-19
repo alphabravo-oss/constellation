@@ -1,0 +1,70 @@
+# Known-CVE images for the scanner to chew on.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-legacy
+  namespace: checkout
+  labels: { app: nginx-legacy }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: nginx-legacy } }
+  template:
+    metadata: { labels: { app: nginx-legacy } }
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.14.2
+          ports: [{ containerPort: 80 }]
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits:   { cpu: 100m, memory: 128Mi }
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: alpine-legacy
+  namespace: checkout
+  labels: { app: alpine-legacy }
+spec:
+  containers:
+    - name: alpine
+      image: alpine:3.6
+      command: ["sleep", "infinity"]
+      resources:
+        requests: { cpu: 25m, memory: 16Mi }
+        limits:   { cpu: 100m, memory: 64Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-vuln
+  namespace: platform
+  labels: { app: redis-vuln }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: redis-vuln } }
+  template:
+    metadata: { labels: { app: redis-vuln } }
+    spec:
+      containers:
+        - name: redis
+          image: redis:6.0.0
+          ports: [{ containerPort: 6379 }]
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits:   { cpu: 100m, memory: 128Mi }
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: python-legacy
+  namespace: platform
+  labels: { app: python-legacy }
+spec:
+  containers:
+    - name: python
+      image: python:3.7-alpine
+      command: ["sleep", "infinity"]
+      resources:
+        requests: { cpu: 25m, memory: 32Mi }
+        limits:   { cpu: 100m, memory: 128Mi }

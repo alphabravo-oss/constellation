@@ -1,0 +1,45 @@
+# values-e2e.yaml — Helm overrides used by the Wave E end-to-end run on the local
+# k3d cluster. Points every role at its per-role image (built locally and imported
+# into the k3d image cache) and disables the vulndb importer (its image bundle is
+# only published in ghcr, not built locally).
+#
+# Apply with:
+#   helm install constellation deploy/charts/constellation \
+#     -n constellation-system --create-namespace \
+#     -f deploy/e2e/values-e2e.yaml
+
+image:
+  repository: constellation/api
+  tag: e2e
+  pullPolicy: IfNotPresent
+
+api:
+  replicas: 1
+  image:
+    repository: constellation/api
+    tag: e2e
+  env:
+    JWT_ISSUER: constellation
+    JWT_AUDIENCE: constellation-api
+    JWT_TTL: 1h
+    CORS_ORIGINS: "*"
+
+operator:
+  replicas: 1
+  image:
+    repository: constellation/operator
+    tag: e2e
+  resources:
+    limits: { cpu: 500m, memory: 512Mi }
+    requests: { cpu: 50m, memory: 64Mi }
+
+frontend:
+  enabled: false   # not strictly required for golden-path API verification.
+
+auditArchiver:
+  enabled: false   # CronJob image present, but the schedule wouldn't fire during the run.
+
+# vulndb importer references an external bundle (ghcr.io/...constellation-vulndb)
+# we haven't built locally. Disabled for e2e.
+vulndbImporter:
+  enabled: false

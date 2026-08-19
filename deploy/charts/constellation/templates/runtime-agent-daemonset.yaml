@@ -1,0 +1,251 @@
+{{- if .Values.runtimeAgent.enabled }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "constellation.fullname" . }}-runtime-agent
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: runtime-agent
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: runtime-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "constellation.name" . }}
+        app.kubernetes.io/component: runtime-agent
+    spec:
+      {{- include "constellation.pullSecrets" . | nindent 6 }}
+      hostPID: true
+      hostNetwork: true
+      # hostNetwork inherits the host's resolv.conf by default, which
+      # can't resolve cluster Services like "constellation-api". Force
+      # ClusterFirstWithHostNet so coreDNS is used while the pod still
+      # shares the host's net namespace (needed for dp + BPF probes).
+      dnsPolicy: ClusterFirstWithHostNet
+      tolerations: {{- toYaml .Values.runtimeAgent.tolerations | nindent 8 }}
+      volumes:
+        - name: sys
+          hostPath: { path: /sys, type: Directory }
+        - name: bpf-fs
+          hostPath: { path: /sys/fs/bpf, type: DirectoryOrCreate }
+        - name: btf
+          hostPath: { path: /sys/kernel/btf, type: DirectoryOrCreate }
+        - name: proc
+          hostPath: { path: /proc, type: Directory }
+        # Wave A4 / E (testnode fix): mount the host's CNI config dirs so
+        # the agent's CNI detector can identify the platform's CNI plugin
+        # and decide whether NFQUEUE enforcement is safe. NeuVector-style
+        # multi-distro detection — we mount every well-known path and the
+        # agent (pkg/runtime/dp/cnidetect.CandidateCNIDirs) walks them in
+        # priority order, picking the first one that contains configs.
+        # Each mount uses DirectoryOrCreate so the missing-on-this-distro
+        # paths don't fail pod scheduling.
+        - name: cni-conf-default
+          hostPath: { path: /etc/cni/net.d, type: DirectoryOrCreate }
+        - name: cni-conf-k3s
+          hostPath: { path: /var/lib/rancher/k3s/agent/etc/cni/net.d, type: DirectoryOrCreate }
+        - name: cni-conf-rke2
+          hostPath: { path: /var/lib/rancher/rke2/agent/etc/cni/net.d, type: DirectoryOrCreate }
+        - name: cni-conf-multus
+          hostPath: { path: /etc/cni/multus/net.d, type: DirectoryOrCreate }
+        - name: cni-conf-microk8s
+          hostPath: { path: /var/snap/microk8s/current/args/cni-network, type: DirectoryOrCreate }
+        # Host bind-mounts used by internal/runtime/hostscan (Slice A
+        # of the NeuVector-style host inventory work). The collector
+        # reads these via the HostRoot prefix (default /host); /proc
+        # and /sys are NOT included here because the agent's hostPID
+        # + the existing /sys mount already give natural-path access.
+        - name: host-etc
+          hostPath: { path: /etc, type: Directory }
+        - name: host-lib-modules
+          hostPath: { path: /lib/modules, type: DirectoryOrCreate }
+        - name: host-run
+          hostPath: { path: /run, type: DirectoryOrCreate }
+        - name: host-var-run
+          hostPath: { path: /var/run, type: DirectoryOrCreate }
+        # CRI socket discovery surfaces (Slice C). host-run already
+        # covers /run/containerd/containerd.sock and /run/crio/crio.sock;
+        # adding /var/run as well so legacy docker sockets are also
+        # visible to crictl. Both are mounted under /host so the
+        # hostscan.resolveCRISocket walker finds them.
+        # File-mounted runtime-agent-token. The same Secret is exposed
+        # as an env var on the container (for fast-path startup), but
+        # env-from-secret is resolved once at container start — if the
+        # Secret doesn't exist at that moment, the env value stays empty
+        # for the container's lifetime. File-mounted secrets, in
+        # contrast, are auto-updated by the kubelet, so the agent can
+        # poll the file at startup until bootstrap-job has created the
+        # Secret (post-install hook ordering means the Secret may not
+        # exist until after the DaemonSet pod is Ready).
+        - name: runtime-agent-token-file
+          secret:
+            secretName: {{ include "constellation.runtimeAgentTokenSecret" . }}
+            optional: true
+            items:
+              - key: token
+                path: runtime-agent-token
+      containers:
+        - name: agent
+          image: {{ include "constellation.roleImage" (dict "ctx" . "role" "runtimeAgent") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.runtimeAgent.args }}
+          args: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            privileged: true
+            capabilities:
+              add: ["SYS_ADMIN", "BPF", "NET_ADMIN", "SYS_RESOURCE"]
+          env:
+            - name: CONSTELLATION_CONTROL_PLANE_URL
+              value: {{ include "constellation.apiURL" . | quote }}
+            - name: CONSTELLATION_API_URL
+              value: {{ include "constellation.apiURL" . | quote }}
+            - name: CONSTELLATION_CLUSTER_NAME
+              value: {{ include "constellation.clusterName" . | quote }}
+            {{- if .Values.clusterRegistration.clusterId }}
+            - name: CONSTELLATION_CLUSTER_ID
+              value: {{ .Values.clusterRegistration.clusterId | quote }}
+            {{- end }}
+            - name: CONSTELLATION_NODE_NAME
+              valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
+            - name: NODE_NAME
+              valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
+            # Self-protection: the agent's own namespace, so enforcement can never
+            # act on Constellation's own components (part of the non-overridable
+            # protected set). Sourced from the live pod, not hardcoded.
+            - name: CONSTELLATION_POD_NAMESPACE
+              valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+            - name: RUNTIME_AGENT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "constellation.runtimeAgentTokenSecret" . }}
+                  key: token
+                  # Optional because bootstrap-job is a post-install hook —
+                  # Helm waits for the DaemonSet to be Ready BEFORE running
+                  # post-install hooks, so the secret can't exist at first
+                  # pod start. The agent handles this in main.go: if API
+                  # URL is set but token is empty, the agent waits on the
+                  # file-mounted Secret path so kubelet can project the token
+                  # after the bootstrap hook creates it. See cmd/.../main.go
+                  # for the waitForToken logic.
+                  optional: true
+            # Wave 9: liveness + readiness HTTP server.
+            - name: CONSTELLATION_HEALTH_ADDR
+              value: ":{{ .Values.runtimeAgent.healthPort | default 9404 }}"
+            {{- if .Values.runtimeAgent.dp.enabled }}
+            - name: CONSTELLATION_DP_ENABLED
+              value: "true"
+            {{- if .Values.runtimeAgent.dp.threads }}
+            - name: CONSTELLATION_DP_THREADS
+              value: "{{ .Values.runtimeAgent.dp.threads }}"
+            {{- end }}
+            {{- if .Values.runtimeAgent.dp.vethPrefixes }}
+            - name: CONSTELLATION_DP_VETH_PREFIXES
+              value: "{{ .Values.runtimeAgent.dp.vethPrefixes }}"
+            {{- end }}
+            {{- if .Values.runtimeAgent.dp.provider }}
+            - name: CONSTELLATION_DP_TAP_PROVIDER
+              value: "{{ .Values.runtimeAgent.dp.provider }}"
+            {{- end }}
+            {{- if .Values.runtimeAgent.dp.enforceOnCilium }}
+            - name: CONSTELLATION_DP_ENFORCE_ON_CILIUM
+              value: "true"
+            {{- end }}
+            {{- if .Values.runtimeAgent.dp.cniDir }}
+            - name: CONSTELLATION_CNI_DIR
+              value: "{{ .Values.runtimeAgent.dp.cniDir }}"
+            {{- end }}
+            {{- end }}
+            # Slice A host-facts reporter: tell the collector where the
+            # host bind-mounts land (see the host-etc / host-lib-modules
+            # volumes above) and how often to snapshot.
+            - name: CONSTELLATION_HOSTSCAN_ROOT
+              value: "/host"
+            {{- if .Values.runtimeAgent.hostScan.interval }}
+            - name: CONSTELLATION_HOSTSCAN_INTERVAL
+              value: "{{ .Values.runtimeAgent.hostScan.interval }}"
+            {{- end }}
+            # Runtime enforcement (RT-ENFORCE-01). Blocking arms ONLY when mode=protect;
+            # per-workload baseline mode then decides enforce-vs-alert. monitor/disabled
+            # keep the agent detect-only (current default behavior).
+            - name: CONSTELLATION_ENFORCE_MODE
+              value: "{{ .Values.runtimeAgent.enforcement.mode }}"
+            - name: CONSTELLATION_PROCESS_ENFORCER
+              value: "{{ if and (eq .Values.runtimeAgent.enforcement.mode "protect") .Values.runtimeAgent.enforcement.process }}true{{ else }}false{{ end }}"
+            - name: CONSTELLATION_FILE_PROFILE_ENFORCER
+              value: "{{ if and (eq .Values.runtimeAgent.enforcement.mode "protect") .Values.runtimeAgent.enforcement.file }}true{{ else }}false{{ end }}"
+            - name: CONSTELLATION_EXEC_ENFORCER
+              value: "{{ if and (eq .Values.runtimeAgent.enforcement.mode "protect") .Values.runtimeAgent.enforcement.exec }}true{{ else }}false{{ end }}"
+            - name: CONSTELLATION_EXEC_ENFORCER_MODE
+              value: "{{ if and (eq .Values.runtimeAgent.enforcement.mode "protect") .Values.runtimeAgent.enforcement.exec }}enforce{{ else }}monitor{{ end }}"
+            # Additive-only: extra namespaces that enforcement must never touch. The
+            # core protected set (constellation-system + kube-system family + host)
+            # is baked into the agent and cannot be removed here.
+            {{- with .Values.runtimeAgent.enforcement.protectedNamespaces }}
+            - name: CONSTELLATION_ENFORCEMENT_PROTECTED_NAMESPACES
+              value: {{ join "," . | quote }}
+            {{- end }}
+          ports:
+            - name: health
+              containerPort: {{ .Values.runtimeAgent.healthPort | default 9404 }}
+              protocol: TCP
+          {{- with .Values.runtimeAgent.livenessProbe }}
+          livenessProbe: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.runtimeAgent.readinessProbe }}
+          readinessProbe: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: sys
+              mountPath: /sys
+              readOnly: true
+            - name: bpf-fs
+              mountPath: /sys/fs/bpf
+            - name: btf
+              mountPath: /sys/kernel/btf
+              readOnly: true
+            - name: proc
+              mountPath: /host/proc
+              readOnly: true
+            # CNI config dirs — every well-known location mounted so the
+            # detector's CandidateCNIDirs walk works on any distro without
+            # values overrides. Mount paths match the host paths exactly
+            # so the detector code doesn't need to know about a remap.
+            - { name: cni-conf-default,  mountPath: /etc/cni/net.d, readOnly: true }
+            - { name: cni-conf-k3s,      mountPath: /var/lib/rancher/k3s/agent/etc/cni/net.d, readOnly: true }
+            - { name: cni-conf-rke2,     mountPath: /var/lib/rancher/rke2/agent/etc/cni/net.d, readOnly: true }
+            - { name: cni-conf-multus,   mountPath: /etc/cni/multus/net.d, readOnly: true }
+            - { name: cni-conf-microk8s, mountPath: /var/snap/microk8s/current/args/cni-network, readOnly: true }
+            # Host-facts mounts (Slice A): /host/{etc,lib/modules,run,var/run}.
+            - { name: host-etc,          mountPath: /host/etc,         readOnly: true }
+            - { name: host-lib-modules,  mountPath: /host/lib/modules, readOnly: true }
+            - { name: host-run,          mountPath: /host/run,         readOnly: true }
+            - { name: host-var-run,      mountPath: /host/var/run,     readOnly: true }
+            # File-mounted token; auto-updated by the kubelet if the
+            # Secret is created after pod start. Agent polls this path
+            # at startup when the env-var token is empty.
+            - name: runtime-agent-token-file
+              mountPath: /var/run/secrets/constellation
+              readOnly: true
+          resources: {{- toYaml .Values.runtimeAgent.resources | nindent 12 }}
+{{- if .Values.runtimeAgent.pdb.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "constellation.fullname" . }}-runtime-agent
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: runtime-agent
+spec:
+  # DaemonSet PDBs use minAvailable rather than maxUnavailable. minAvailable=1
+  # means a single node drain is allowed at a time; concurrent drains across
+  # all nodes are blocked.
+  minAvailable: {{ .Values.runtimeAgent.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: runtime-agent
+{{- end }}
+{{- end }}

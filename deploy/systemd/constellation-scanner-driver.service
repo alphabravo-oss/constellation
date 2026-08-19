@@ -1,0 +1,31 @@
+[Unit]
+Description=Constellation Scanner Driver (out-of-cluster scan harness)
+Documentation=https://github.com/alphabravocompany/constellation
+After=network-online.target postgresql.service constellation-api.service
+Wants=network-online.target
+
+# Scanner-driver is the Wave-I-style out-of-cluster harness: it talks to Postgres + the
+# control-plane API directly, claims pending scan_jobs rows, runs the aggregator, and POSTs
+# results. Useful for non-k8s scan paths and developer / e2e setups.
+
+[Service]
+Type=simple
+User=constellation
+Group=constellation
+EnvironmentFile=/etc/constellation/scanner-driver.env
+ExecStart=/usr/local/bin/constellation-scanner-driver
+WorkingDirectory=/var/lib/constellation
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=constellation-scanner-driver
+
+LimitNOFILE=32768
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,14 @@
+# constellation-migrate — one-shot init image that bundles goose + every
+# db/migrations/*.sql file. Used as a pre-install Helm hook so the api
+# pod boots into a populated schema. Tiny (~30 MB).
+FROM golang:1.26-alpine AS goose
+RUN apk add --no-cache git
+RUN go install github.com/pressly/goose/v3/cmd/goose@v3.27.1
+
+FROM alpine:3.20
+RUN apk add --no-cache postgresql-client ca-certificates
+COPY --from=goose /go/bin/goose /usr/local/bin/goose
+COPY db/migrations /migrations
+# Drive goose entirely via env (avoids the positional-arg parser quirk where
+# `goose postgres "$URL" up` reports "no such command").
+ENTRYPOINT ["/bin/sh","-c","GOOSE_DRIVER=postgres GOOSE_DBSTRING=\"$DATABASE_URL\" GOOSE_MIGRATION_DIR=/migrations goose up"]
