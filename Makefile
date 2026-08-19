@@ -130,8 +130,14 @@ images: image-api image-scanner image-operator image-discoverer image-audit-arch
 image-api:
 	$(DOCKER_BUILD) -f deploy/docker/Dockerfile.api      -t $(REGISTRY)/api:$(VERSION)      --load .
 
+# image-scanner: SLIM by default (~780MB) — vuln DBs fetched at runtime.
 image-scanner:
 	$(DOCKER_BUILD) -f deploy/docker/Dockerfile.scanner  -t $(REGISTRY)/scanner:$(VERSION)  --load .
+
+# image-scanner-airgap: fat variant (~4.6GB) with Trivy+Grype DBs baked in, for
+# air-gapped clusters that must scan on first boot with no network. Tagged -airgap.
+image-scanner-airgap:
+	$(DOCKER_BUILD) --build-arg BAKE_VULN_DB=1 -f deploy/docker/Dockerfile.scanner -t $(REGISTRY)/scanner:$(VERSION)-airgap --load .
 
 image-operator:
 	$(DOCKER_BUILD) -f deploy/docker/Dockerfile.operator -t $(REGISTRY)/operator:$(VERSION) --load .

@@ -118,14 +118,24 @@ COPY --from=build /out/constellation-scanner /usr/local/bin/constellation-scanne
 
 RUN addgroup -S -g 10001 constellation && adduser -S -u 10001 -G constellation -h /home/constellation -s /sbin/nologin constellation
 
-# Pre-warm Trivy's DB for image builds and non-read-only deployments. The Helm
-# deployment points scanner caches at /tmp so read-only-root pods refresh there.
 USER 10001:10001
 WORKDIR /home/constellation
-RUN trivy image --download-db-only --quiet || true
-# Grype is a primary matcher now, so pre-warm its DB too (mirrors the Trivy line
-# above) — avoids a network DB pull on the first scan in air-gapped clusters.
-RUN grype db update -q || true
+
+# BAKE_VULN_DB controls whether the Trivy + Grype vuln DBs are pre-warmed INTO the
+# image (~+3.4 GB). Default 0 = SLIM: the DBs are ~stale the moment they're baked,
+# and the scanner refreshes them at runtime on startup (dbRefreshLoop), so baking
+# them just bloats the image (~4.6 GB) with immediately-outdated data. Set to 1 for
+# an AIR-GAPPED image that can scan on first boot with no network (build the
+# `-airgap` variant). Air-gapped without a fat image: pre-load DBs + set
+# CONSTELLATION_SCANNER_OFFLINE_DB.
+ARG BAKE_VULN_DB=0
+RUN if [ "$BAKE_VULN_DB" = "1" ]; then \
+      echo ">> baking Trivy + Grype vuln DBs into the image (air-gap variant)"; \
+      trivy image --download-db-only --quiet || true; \
+      grype db update -q || true; \
+    else \
+      echo ">> slim scanner: vuln DBs fetched at runtime (or pre-loaded for air-gap)"; \
+    fi
 
 EXPOSE 8090
 ENTRYPOINT ["/usr/local/bin/constellation-scanner"]
