@@ -659,6 +659,8 @@ func (s *Server) buildRouter() chi.Router {
 			networkMap := network.NewNetwork(s.db)
 			r.Get("/network/map", s.requireVerb(rbac.VerbReadFindings, networkMap.Map))
 			r.Get("/network/exposure", s.requireVerb(rbac.VerbReadFindings, networkMap.Exposure))
+			r.Get("/network/sessions", s.requireVerb(rbac.VerbReadFindings, networkMap.Sessions))
+			r.Get("/network/sessions/summary", s.requireVerb(rbac.VerbReadFindings, networkMap.SessionsSummary))
 			r.Get("/clusters/{id}/network-rules", s.requireVerb(rbac.VerbReadFindings, networkMap.NetworkRules))
 			r.Post("/clusters/{id}/network-rules", s.requireVerb(rbac.VerbManagePolicies, networkMap.UpsertNetworkRule))
 			r.Put("/clusters/{id}/network-rules", s.requireVerb(rbac.VerbManagePolicies, networkMap.UpsertNetworkRule))
@@ -1387,6 +1389,10 @@ func (s *Server) buildRouter() chi.Router {
 				WithAlerting(s.auditLog, s.dispatcher,
 					runtime.NewResponseDispatch(s.db, s.dispatcher), e1RuleDefs.Evaluate)
 			r.Post("/runtime-threats:bulk", threatsIngest.Bulk)
+
+			// Live-session snapshot ingest (NV RESTSession). The agent uploads its dp
+			// ctrl_list_session table; the ingest replaces the node's rows.
+			r.Post("/network-sessions:bulk", network.NewNetwork(s.db).IngestSessions)
 
 			// C1: Kubernetes API audit-webhook receiver. The apiserver POSTs
 			// batches of audit.k8s.io/v1 Events here (same cluster/runtime-agent

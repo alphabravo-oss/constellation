@@ -253,6 +253,9 @@ func main() {
 		nThreatsUploaded atomic.Uint64
 		nThreatsDropped  atomic.Uint64
 
+		nSessionsUploaded atomic.Uint64
+		nSessionsDropped  atomic.Uint64
+
 		nDNSSnoopUp atomic.Uint64
 	)
 	metrics := &metricsSource{
@@ -408,6 +411,13 @@ func main() {
 			threatOut = make(chan threatIngestRow, 256)
 			go threatUploadLoop(ctx, logger, apiURL+"/api/v1/runtime-threats:bulk", apiToken,
 				50, 5*time.Second, threatOut, &nThreatsUploaded, &nThreatsDropped)
+
+			// Live-session lane (NV RESTSession): periodically snapshot dp's
+			// ctrl_list_session cache and upload the whole table so the console
+			// shows current connections. Snapshot, not stream — dp already keeps
+			// the authoritative cache.
+			go sessionUploadLoop(ctx, logger, apiURL+"/api/v1/network-sessions:bulk", apiToken,
+				node, 15*time.Second, dpSup.Sessions(), &nSessionsUploaded, &nSessionsDropped)
 		}
 
 		// NET-3: Hubble lane. On Cilium clusters the dp/iptables datapath is

@@ -129,6 +129,18 @@ func (c *SessionCache) Size() int {
 	return len(c.current)
 }
 
+// List returns a snapshot slice of the current live sessions — for the periodic
+// upload of the live-session table to the control plane (NV RESTSession parity).
+func (c *SessionCache) List() []*Session {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	out := make([]*Session, 0, len(c.current))
+	for _, s := range c.current {
+		out = append(out, s)
+	}
+	return out
+}
+
 // SessionCacheStats — for the heartbeat / metrics endpoint.
 type SessionCacheStats struct {
 	Size       int

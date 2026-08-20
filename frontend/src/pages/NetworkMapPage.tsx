@@ -217,6 +217,13 @@ function NetworkMapInner() {
     enabled: !!clusterID,
     refetchInterval: live ? 15_000 : false,
   });
+  // NV RESTSession: live per-connection table from the runtime-agent's dp session snapshot.
+  const sessionsQ = useQuery({
+    queryKey: ["network-sessions", clusterID],
+    queryFn: () => network.sessions({ cluster_id: clusterID || undefined }),
+    enabled: !!clusterID,
+    refetchInterval: live ? 15_000 : false,
+  });
   const action = useMutation({
     mutationFn: ({ workload, kind, reason, candidateHash }: { workload: string; kind: "approve" | "apply" | "demote"; reason?: string; candidateHash?: string }) =>
       network.policyAction(workload, kind, { reason, candidate_hash: candidateHash, idempotency_key: lifecycleIdempotencyKey(workload, kind) }, { cluster_id: clusterID || undefined }),
@@ -759,6 +766,11 @@ function NetworkMapInner() {
             setPopoverOpen(true);
           }}
         />
+        </div>
+        {/* Live sessions (NV RESTSession) — bottom-left collapsible card fed by the
+            runtime-agent's dp ctrl_list_session snapshot. Sits above the netpol status bar. */}
+        <div className="absolute bottom-14 left-3 z-10">
+          <LiveSessionsCard sessions={sessionsQ.data ?? []} loading={sessionsQ.isPending} />
         </div>
         {/* Selected-workload mini panel — bottom-right floating, only when a
             workload (not an edge) is selected. Edge selection opens the
@@ -2260,6 +2272,68 @@ function StatPill({
 // 5-tuple, but our flow rows are GROUP'd by (src_workload, dst_workload,
 // protocol, l7, dst_port, verdict) — so we map threat→flow by ep_mac +
 // dst_port + protocol, taking the most recent match.
+// LiveSessionsCard renders the live per-connection table (NV RESTSession) as a bottom-left
+// collapsible pill. Starts collapsed so it never obscures the canvas; expands to a table of
+// current connections with directional bytes + TCP state.
+function LiveSessionsCard({ sessions, loading }: { sessions: import("@/api/client").NetworkSession[]; loading: boolean }) {
+  const [collapsed, setCollapsed] = useState(true);
+  const count = sessions.length;
+  return (
+    <div className={cn("rounded-md border border-border bg-card/95 p-2 text-[11px] shadow-[var(--elev-2)] backdrop-blur", collapsed ? "w-auto" : "w-[440px] max-w-[80vw]")}
+      data-testid="network-sessions-card">
+      <div className="flex items-center justify-between gap-2 px-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+        <span className="flex items-center gap-1"><Activity className="h-3 w-3" aria-hidden />Live sessions · {loading ? "…" : count}</span>
+        <button type="button" onClick={() => setCollapsed((v) => !v)}
+          className="rounded p-0.5 hover:text-foreground" title={collapsed ? "Expand live sessions" : "Collapse live sessions"}
+          data-testid="network-sessions-toggle">
+          {collapsed ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+        </button>
+      </div>
+      {!collapsed && (
+        <div className="mt-1">
+          {loading ? (
+            <p className="px-1 py-2 text-muted-foreground">Loading…</p>
+          ) : count === 0 ? (
+            <p className="px-1 py-2 leading-tight text-muted-foreground/80">
+              No live sessions reported. The runtime-agent's data-plane uploads its
+              ctrl_list_session table every 15s; connections that dp is actively tracking appear here.
+            </p>
+          ) : (
+            <div className="max-h-[300px] overflow-auto">
+              <table className="w-full text-[10px]">
+                <thead className="sticky top-0 bg-card">
+                  <tr className="text-left uppercase tracking-wider text-muted-foreground">
+                    <th className="py-1 pr-2 font-medium">Client</th>
+                    <th className="py-1 pr-2 font-medium">Server</th>
+                    <th className="py-1 pr-2 font-medium">App</th>
+                    <th className="py-1 pr-2 font-medium">State</th>
+                    <th className="py-1 pr-2 text-right font-medium">In</th>
+                    <th className="py-1 pr-2 text-right font-medium">Out</th>
+                    <th className="py-1 text-right font-medium">Age</th>
+                  </tr>
+                </thead>
+                <tbody className="text-mono">
+                  {sessions.slice(0, 200).map((s) => (
+                    <tr key={s.node + s.id} className="border-t border-border/40">
+                      <td className="py-1 pr-2">{s.client_ip}:{s.client_port}</td>
+                      <td className="py-1 pr-2">{s.server_ip}:{s.server_port}</td>
+                      <td className="py-1 pr-2 text-muted-foreground">{s.application}</td>
+                      <td className="py-1 pr-2 text-muted-foreground">{s.client_state || s.ip_proto}{s.threat_id ? <span className="ml-1 text-[color:var(--color-status-error)]" title={`threat ${s.threat_id}`}>⚠</span> : null}</td>
+                      <td className="py-1 pr-2 text-right">{formatBytes(s.client_bytes)}</td>
+                      <td className="py-1 pr-2 text-right">{formatBytes(s.server_bytes)}</td>
+                      <td className="py-1 text-right text-muted-foreground">{s.age}s</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ThreatsCard({
   threats,
   flows,

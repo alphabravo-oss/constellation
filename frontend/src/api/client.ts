@@ -1848,6 +1848,30 @@ export interface ConversationEntries {
   totals: { bytes: number; client_bytes: number; server_bytes: number; packets: number; sessions: number };
 }
 
+// NV RESTSession — one live connection from the runtime-agent's dp session table.
+export interface NetworkSession {
+  id: number;
+  node: string;
+  workload_id?: string;
+  application: string;
+  ip_proto: string;
+  client_ip: string;
+  client_port: number;
+  server_ip: string;
+  server_port: number;
+  client_state: string;
+  server_state: string;
+  client_bytes: number;
+  server_bytes: number;
+  client_pkts: number;
+  server_pkts: number;
+  age: number;
+  idle: number;
+  ingress: boolean;
+  severity: number;
+  threat_id?: number;
+}
+
 export interface NetworkFlow {
   id: string;
   cluster_id?: string;
@@ -2135,6 +2159,11 @@ export const network = {
   // with directional (in/out) bytes + session counts.
   conversationEntries: (params: { from: string; to: string; hours?: number; cluster_id?: string }) =>
     api.get<ConversationEntries>("/network/conversations/entries", { params }).then((r) => r.data),
+  // NV RESTSession: the live per-connection table (dp ctrl_list_session snapshot).
+  sessions: (params: { cluster_id?: string; limit?: number } = {}) =>
+    api.get<{ sessions: NetworkSession[] }>("/network/sessions", { params }).then((r) => r.data.sessions),
+  sessionsSummary: (params: { cluster_id?: string } = {}) =>
+    api.get<Record<string, number>>("/network/sessions/summary", { params }).then((r) => r.data),
   /** Subscribes to the GET /network/flows:stream SSE channel and invokes
    *  onFlow for each live flow. Returns an unsubscribe fn.
    *
