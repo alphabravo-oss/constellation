@@ -100,6 +100,7 @@ const FileMonitorFormPage   = lazy(() => import("./pages/FileMonitorFormPage").t
 const RegistriesPage        = lazy(() => import("./pages/RegistriesPage").then((m) => ({ default: m.RegistriesPage })));
 const RegistryImagesPage    = lazy(() => import("./pages/RegistryImagesPage").then((m) => ({ default: m.RegistryImagesPage })));
 const ContainersPage        = lazy(() => import("./pages/ContainersPage").then((m) => ({ default: m.ContainersPage })));
+const NetworkRulesPage      = lazy(() => import("./pages/NetworkRulesPage").then((m) => ({ default: m.NetworkRulesPage })));
 const ComponentsPage        = lazy(() => import("./pages/ComponentsPage").then((m) => ({ default: m.ComponentsPage })));
 
 function SuspenseRoute({ children }: { children: React.ReactNode }) {
@@ -172,6 +173,7 @@ export function App() {
           <Route path="file-monitor/:ruleId" element={<SuspenseRoute><FileMonitorFormPage /></SuspenseRoute>} />
           <Route path="timeline"      element={<SuspenseRoute><TimelinePage /></SuspenseRoute>} />
           <Route path="network"       element={<SuspenseRoute><NetworkMapPage /></SuspenseRoute>} />
+          <Route path="network-rules" element={<SuspenseRoute><NetworkRulesPage /></SuspenseRoute>} />
           {/* Wave B1: runtime_policies CRUD UI. cluster_id from :id param. */}
           <Route path="runtime-policies" element={<SuspenseRoute><RuntimePoliciesPage /></SuspenseRoute>} />
           <Route path="runtime-policies/new"       element={<SuspenseRoute><RuntimePolicyFormPage /></SuspenseRoute>} />

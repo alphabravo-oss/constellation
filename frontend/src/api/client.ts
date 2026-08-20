@@ -385,6 +385,26 @@ export const containers = {
     api.get<ContainerListResponse>(`/clusters/${encodeURIComponent(clusterID)}/containers`).then((r) => r.data),
 };
 
+export interface NetworkRule {
+  id: number;
+  comment: string;
+  from: string;
+  to: string;
+  ports: string;
+  action: "allow" | "deny";
+  applications: string[];
+  learned: boolean;
+  disable: boolean;
+  cfg_type: string;
+  priority: number;
+  match_counter: number;
+  last_match_timestamp: number;
+}
+export const networkRules = {
+  list: (clusterID: string) =>
+    api.get<{ cluster_id: string; rules: NetworkRule[]; summary: { total: number; allow: number; deny: number; learned: number } }>(`/clusters/${encodeURIComponent(clusterID)}/network-rules`).then((r) => r.data),
+};
+
 export const nodes = {
   list: (clusterID: string) =>
     api.get<NodeListResponse>(`/clusters/${encodeURIComponent(clusterID)}/nodes`).then((r) => r.data),

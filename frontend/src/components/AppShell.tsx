@@ -50,6 +50,7 @@ import {
   User,
   Search,
   WifiOff,
+  Waypoints,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -84,6 +85,7 @@ export const CLUSTER_NAV: NavGroup[] = [
     label: "Network Activity",
     items: [
       { path: "network",         icon: Network,    label: "Network Map" },
+      { path: "network-rules",   icon: Waypoints,  label: "Network Rules" },
       { path: "timeline",        icon: Activity,   label: "Incident Timeline" },
     ],
   },
