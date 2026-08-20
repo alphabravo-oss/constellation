@@ -33,6 +33,7 @@ type responseRuleV2DTO struct {
 	Name          string                    `json:"name"`
 	Description   string                    `json:"description"`
 	Enabled       bool                      `json:"enabled"`
+	Priority      int                       `json:"priority"`
 	EventType     string                    `json:"event_type"`
 	Conditions    []response.Condition      `json:"conditions"`
 	Actions       []response.Action         `json:"actions"`
@@ -59,11 +60,11 @@ func (h *ResponseRulesV2) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := h.db.Pool().Query(r.Context(), `
-SELECT id, name, description, enabled, event_type, conditions, actions, workload_match, created_at, updated_at
+SELECT id, name, description, enabled, priority, event_type, conditions, actions, workload_match, created_at, updated_at
   FROM response_rules_v2
  WHERE org_id=$1
    AND ($2::uuid IS NULL OR cluster_id IS NULL OR cluster_id = $2)
- ORDER BY name`, subj.OrgID, clusterArg)
+ ORDER BY priority, name`, subj.OrgID, clusterArg)
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -73,7 +74,7 @@ SELECT id, name, description, enabled, event_type, conditions, actions, workload
 	for rows.Next() {
 		var d responseRuleV2DTO
 		var conditions, actions, sel []byte
-		if err := rows.Scan(&d.ID, &d.Name, &d.Description, &d.Enabled, &d.EventType,
+		if err := rows.Scan(&d.ID, &d.Name, &d.Description, &d.Enabled, &d.Priority, &d.EventType,
 			&conditions, &actions, &sel, &d.CreatedAt, &d.UpdatedAt); err != nil {
 			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -114,9 +115,13 @@ func (h *ResponseRulesV2) Create(w http.ResponseWriter, r *http.Request) {
 	acts, _ := json.Marshal(body.Actions)
 	sel, _ := json.Marshal(body.WorkloadMatch)
 	var id uuid.UUID
+	// New rules append to the end of the evaluation order (lowest precedence) so adding
+	// a rule never silently reshuffles existing precedence.
 	if err := h.db.Pool().QueryRow(r.Context(), `
-INSERT INTO response_rules_v2 (org_id, cluster_id, name, description, enabled, event_type, conditions, actions, workload_match, created_by)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+INSERT INTO response_rules_v2 (org_id, cluster_id, name, description, enabled, priority, event_type, conditions, actions, workload_match, created_by)
+VALUES ($1,$2,$3,$4,$5,
+        (SELECT COALESCE(MAX(priority),0)+10 FROM response_rules_v2 WHERE org_id=$1),
+        $6,$7,$8,$9,$10) RETURNING id`,
 		subj.OrgID, clusterArg, rule.Name, body.Description, body.Enabled, body.EventType, conds, acts, sel, subj.UserID).Scan(&id); err != nil {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -186,4 +191,55 @@ func (h *ResponseRulesV2) Delete(w http.ResponseWriter, r *http.Request) {
 	_, _, _ = h.auditLog.Log(r.Context(), audit.Event{OrgID: &oid, ActorID: &uid,
 		Action: "response_rule_v2.delete", TargetKind: "response-rule-v2", TargetID: id.String()})
 	httpx.WriteJSON(w, http.StatusNoContent, nil)
+}
+
+type reorderBody struct {
+	OrderedIDs []string `json:"ordered_ids"`
+}
+
+// Reorder sets the evaluation precedence of the org's response rules from a client-supplied
+// ordered id list (top = evaluated first). NeuVector's insert-before/after/first/last, done
+// as a whole-list reorder: the UI moves a row up/down and sends the new order. Priorities are
+// reassigned 10,20,30… so later single-position inserts have room. PATCH /response-rules-v2:reorder
+func (h *ResponseRulesV2) Reorder(w http.ResponseWriter, r *http.Request) {
+	subj, _ := authctx.SubjectFrom(r.Context())
+	var body reorderBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.OrderedIDs) == 0 {
+		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "ordered_ids required"})
+		return
+	}
+	ids := make([]uuid.UUID, 0, len(body.OrderedIDs))
+	for _, s := range body.OrderedIDs {
+		id, err := uuid.Parse(strings.TrimSpace(s))
+		if err != nil {
+			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id in ordered_ids"})
+			return
+		}
+		ids = append(ids, id)
+	}
+	tx, err := h.db.Pool().Begin(r.Context())
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	for i, id := range ids {
+		// org-scoped so a caller can only reorder their own rules; unknown ids no-op.
+		if _, err := tx.Exec(r.Context(),
+			`UPDATE response_rules_v2 SET priority=$1, updated_at=NOW() WHERE id=$2 AND org_id=$3`,
+			(i+1)*10, id, subj.OrgID); err != nil {
+			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	oid := subj.OrgID
+	uid := subj.UserID
+	_, _, _ = h.auditLog.Log(r.Context(), audit.Event{OrgID: &oid, ActorID: &uid,
+		Action: "response_rule_v2.reorder", TargetKind: "response-rule-v2", TargetID: "",
+		After: map[string]any{"count": len(ids)}})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(ids)})
 }

@@ -4435,6 +4435,7 @@ export interface ResponseRuleV2 {
   name: string;
   description: string;
   enabled: boolean;
+  priority: number;
   event_type: RRV2EventType;
   conditions: RRV2Condition[];
   actions: RRV2Action[];
@@ -4446,11 +4447,13 @@ export interface ResponseRuleV2 {
 export const responseRulesV2 = {
   list:   (params: { cluster_id?: string } = {}) =>
     api.get<{ rules: ResponseRuleV2[] }>("/response-rules-v2", { params }).then((r) => r.data),
-  create: (body: Omit<ResponseRuleV2, "id"|"created_at"|"updated_at">, params: { cluster_id?: string } = {}) =>
+  create: (body: Omit<ResponseRuleV2, "id"|"priority"|"created_at"|"updated_at">, params: { cluster_id?: string } = {}) =>
     api.post<{ id: string }>("/response-rules-v2", body, { params }).then((r) => r.data),
-  update: (id: string, body: Omit<ResponseRuleV2, "id"|"created_at"|"updated_at">) =>
+  update: (id: string, body: Omit<ResponseRuleV2, "id"|"priority"|"created_at"|"updated_at">) =>
     api.put<{ id: string }>(`/response-rules-v2/${id}`, body).then((r) => r.data),
   delete: (id: string) => api.delete(`/response-rules-v2/${id}`).then((r) => r.data),
+  reorder: (orderedIds: string[]) =>
+    api.patch<{ ok: boolean; count: number }>("/response-rules-v2:reorder", { ordered_ids: orderedIds }).then((r) => r.data),
 };
 
 // ----- Wave D: Vulnerability Profiles ------

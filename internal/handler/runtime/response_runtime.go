@@ -282,7 +282,8 @@ SELECT id, name, enabled, event_type, conditions, actions, workload_match
   FROM response_rules_v2
  WHERE org_id = $1
    AND enabled
-   AND (cluster_id IS NULL OR cluster_id = $2)`, orgID, clusterID)
+   AND (cluster_id IS NULL OR cluster_id = $2)
+ ORDER BY priority, name`, orgID, clusterID)
 	if err != nil {
 		return nil, err
 	}

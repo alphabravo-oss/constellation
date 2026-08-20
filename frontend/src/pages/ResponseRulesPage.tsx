@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, ChevronUp, ChevronDown } from "lucide-react";
 
 import { responseRulesV2, type ResponseRuleV2 } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
@@ -27,8 +27,36 @@ export function ResponseRulesPage() {
     mutationFn: async (id: string) => responseRulesV2.delete(id),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["response-rules-v2", clusterId] }),
   });
+  const reorderMut = useMutation({
+    mutationFn: (orderedIds: string[]) => responseRulesV2.reorder(orderedIds),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["response-rules-v2", clusterId] }),
+  });
+  // Move a rule one slot up/down in the evaluation order and persist the new order.
+  const move = (index: number, dir: -1 | 1) => {
+    const target = index + dir;
+    if (target < 0 || target >= rules.length) return;
+    const ids = rules.map((r) => r.id);
+    [ids[index], ids[target]] = [ids[target], ids[index]];
+    reorderMut.mutate(ids);
+  };
 
   const columns: Column<ResponseRuleV2>[] = [
+    {
+      id: "order",
+      header: "Order",
+      cell: (r) => {
+        const i = rules.findIndex((x) => x.id === r.id);
+        return (
+          <div className="flex items-center gap-1">
+            <span className="w-5 text-right tabular-nums text-xs text-muted-foreground">{i + 1}</span>
+            <div className="flex flex-col">
+              <button type="button" title="Move up" disabled={i <= 0 || reorderMut.isPending} onClick={() => move(i, -1)} className="rounded p-0.5 hover:bg-accent disabled:opacity-30"><ChevronUp className="h-3 w-3" /></button>
+              <button type="button" title="Move down" disabled={i >= rules.length - 1 || reorderMut.isPending} onClick={() => move(i, 1)} className="rounded p-0.5 hover:bg-accent disabled:opacity-30"><ChevronDown className="h-3 w-3" /></button>
+            </div>
+          </div>
+        );
+      },
+    },
     { id: "name", header: "Name", cell: (r) => <span className="font-medium">{r.name}</span> },
     { id: "event_type", header: "Event type", cell: (r) => <span className="text-xs">{r.event_type}</span> },
     { id: "conditions", header: "Conditions", cell: (r) => <span className="text-xs text-muted-foreground">{r.conditions.length} clause(s)</span> },
@@ -69,7 +97,7 @@ export function ResponseRulesPage() {
     <div className="space-y-4" data-testid="response-rules-page" data-cluster-id={clusterId ?? ""}>
       <PageHeader
         title="Response Rules"
-        description="Match incoming events to automatic actions — notify a channel, open a ticket, or quarantine/isolate a workload — when the conditions you define all hold."
+        description="Match incoming events to automatic actions — notify a channel, open a ticket, or quarantine/isolate a workload — when the conditions you define all hold. Rules evaluate top-to-bottom; use the order arrows to set precedence."
         actions={
           <button
             type="button"

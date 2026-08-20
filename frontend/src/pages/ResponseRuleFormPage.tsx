@@ -39,7 +39,7 @@ const ACTION_KINDS: { id: RRV2ActionKind; label: string; help: string }[] = [
 
 const EVENT_TYPES: RRV2EventType[] = ["admission", "runtime", "scan", "compliance", "*"];
 
-type RuleDraft = Omit<ResponseRuleV2, "id" | "created_at" | "updated_at"> & { id?: string };
+type RuleDraft = Omit<ResponseRuleV2, "id" | "priority" | "created_at" | "updated_at"> & { id?: string };
 
 function emptyRule(): RuleDraft {
   return {
