@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, KeyRound, Pencil, Plus, ShieldCheck, Trash2, UserRoundCog, UsersRound } from "lucide-react";
+import { ArrowRight, KeyRound, Pencil, Plus, ShieldCheck, Trash2, UserRoundCog, UsersRound, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -107,11 +107,22 @@ export function AccessControlPage() {
       label: "Users",
       count: data?.users?.length,
       content: (
-        <Card padded={false}>
-          <div className="overflow-x-auto" data-testid="access-users">
-            <DataTable rows={data?.users ?? []} columns={userColumns} rowKey={(u) => u.id} />
+        <div className="space-y-3">
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => navigate("/settings/access/users/new")}
+              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
+            >
+              <UserPlus className="h-3.5 w-3.5" /> New user
+            </button>
           </div>
-        </Card>
+          <Card padded={false}>
+            <div className="overflow-x-auto" data-testid="access-users">
+              <DataTable rows={data?.users ?? []} columns={userColumns} rowKey={(u) => u.id} />
+            </div>
+          </Card>
+        </div>
       ),
     },
     {

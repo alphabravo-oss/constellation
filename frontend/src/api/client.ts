@@ -2775,7 +2775,12 @@ export interface AccessControlOverview {
 
 export const accessControl = {
   overview: () => api.get<AccessControlOverview>("/access-control").then((r) => r.data),
+  createLocalUser: (body: { email: string; display_name: string; password: string; role: string }) =>
+    api.post<{ id: string; email: string; role: string }>("/access-control/local-users", body).then((r) => r.data),
 };
+
+// Canonical user-facing roles (mirror pkg/rbac). Highest privilege first.
+export const RBAC_ROLES = ["GlobalAdmin", "SecurityAdmin", "ClusterAdmin", "Analyst", "Auditor"] as const;
 
 export interface IntegrationInstance {
   id: string;

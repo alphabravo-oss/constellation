@@ -915,6 +915,7 @@ func (s *Server) buildRouter() chi.Router {
 			r.Post("/access-control/role-bindings", s.requireVerb(rbac.VerbManageUsers, accessControl.CreateRoleBinding))
 			r.Delete("/access-control/role-bindings/{id}", s.requireVerb(rbac.VerbManageUsers, accessControl.DeleteRoleBinding))
 			r.Post("/access-control/service-accounts", s.requireVerb(rbac.VerbManageUsers, accessControl.CreateServiceAccount))
+			r.Post("/access-control/local-users", s.requireVerb(rbac.VerbManageUsers, accessControl.CreateLocalUser))
 
 			// A1/A4: user-management mutations that drive the credential-revocation cascade.
 			// Disable/Delete bump session_epoch + revoke PATs + tear down role_assignments
