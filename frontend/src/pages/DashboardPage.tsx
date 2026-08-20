@@ -291,6 +291,24 @@ export function DashboardPage() {
                     onPromote={(from) => promoteMut.mutate({ dimension: "policy", from })} pending={promoteMut.isPending} />
                   <ModeMaturity label="Process / File mode" groups={groups} discover={e.profile_discover ?? 0} monitor={e.profile_monitor ?? 0} protect={e.profile_protect ?? 0}
                     onPromote={(from) => promoteMut.mutate({ dimension: "profile", from })} pending={promoteMut.isPending} />
+                  {(() => {
+                    const cm = posture?.cves_by_mode ?? {};
+                    const em = posture?.exposed_by_mode ?? {};
+                    const cell = (v: number, warn?: boolean) => <span className={warn && v > 0 ? "font-medium text-[color:var(--color-severity-high)]" : "text-foreground"}>{v}</span>;
+                    return (
+                      <div className="border-t border-border pt-2 space-y-1 text-xs">
+                        <div className="text-muted-foreground">Risk by mode <span className="text-muted-foreground/70">(CVEs · exposed workloads)</span></div>
+                        <table className="w-full">
+                          <tbody>
+                            <tr className="text-muted-foreground"><td>Discover <span className="text-muted-foreground/70">(unprotected)</span></td><td className="text-right">{cell(cm.discover ?? 0, true)} CVEs</td><td className="text-right">{cell(em.discover ?? 0, true)} exp.</td></tr>
+                            <tr className="text-muted-foreground"><td>Monitor</td><td className="text-right">{cell(cm.monitor ?? 0)} CVEs</td><td className="text-right">{cell(em.monitor ?? 0)} exp.</td></tr>
+                            <tr className="text-muted-foreground"><td>Protect</td><td className="text-right">{cell(cm.protect ?? 0)} CVEs</td><td className="text-right">{cell(em.protect ?? 0)} exp.</td></tr>
+                            <tr className="text-muted-foreground/80"><td>Platform / Host</td><td className="text-right" colSpan={2}>{cell(cm.platform ?? 0)} / {cell(cm.host ?? 0)} CVEs</td></tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })()}
                   <div className="border-t border-border pt-2 space-y-1.5">
                     <div className="text-xs text-muted-foreground">New services start in <span className="text-muted-foreground/70">(NV new-service mode)</span></div>
                     <div className="flex items-center gap-2">

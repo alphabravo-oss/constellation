@@ -4115,6 +4115,8 @@ export interface DashboardSummary {
     vuln_signals: Record<string, number>;       // kev / fixable / high_epss / corroborated
     hardening: Record<string, number>;          // workloads / privileged / host_network / run_as_root / exposed
     enforcement: Record<string, number>;        // groups / discover / monitor / protect / profile_*
+    cves_by_mode: Record<string, number>;       // distinct workload CVEs by group mode (discover/monitor/protect) + platform / host
+    exposed_by_mode: Record<string, number>;    // net-exposed workloads by group mode (discover/monitor/protect)
     new_service_policy_mode: string;            // NV NewServiceMode: mode new service groups start in (network)
     new_service_profile_mode: string;           // NV NewServiceProfileMode: process/file mode for new groups
     top_vulnerable: Array<{ namespace: string; name: string; critical: number; high: number }>;

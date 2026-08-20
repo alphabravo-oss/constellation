@@ -46,6 +46,8 @@ type dashboardPostureDTO struct {
 	VulnSignals     map[string]int `json:"vuln_signals"`     // kev / fixable / high_epss / corroborated
 	Hardening       map[string]int `json:"hardening"`        // workloads + privileged / host_network / run_as_root / exposed
 	Enforcement     map[string]int `json:"enforcement"`      // groups + discover / monitor / protect (NV service-mode coverage)
+	CvesByMode      map[string]int `json:"cves_by_mode"`     // NV RESTRiskScoreMetricsCVE: distinct CVEs on workloads by group mode + platform/host
+	ExposedByMode   map[string]int `json:"exposed_by_mode"`  // NV exposed-endpoint policy_mode: net-exposed workloads by group mode
 	NewServicePolicyMode  string   `json:"new_service_policy_mode"`  // NV NewServiceMode: default network mode for new groups
 	NewServiceProfileMode string   `json:"new_service_profile_mode"` // NV NewServiceProfileMode
 	TopVulnerable   []topVulnerableWorkloadDTO `json:"top_vulnerable"` // NV "Top Vulnerable Assets"
@@ -199,6 +201,8 @@ func (h *Dashboard) computePosture(ctx context.Context, orgID uuid.UUID, cluster
 		VulnSignals:     map[string]int{"kev": 0, "fixable": 0, "high_epss": 0, "corroborated": 0},
 		Hardening:       map[string]int{"workloads": 0, "privileged": 0, "host_network": 0, "run_as_root": 0, "exposed": 0},
 		Enforcement:     map[string]int{"groups": 0, "discover": 0, "monitor": 0, "protect": 0},
+		CvesByMode:      map[string]int{"discover": 0, "monitor": 0, "protect": 0, "platform": 0, "host": 0},
+		ExposedByMode:   map[string]int{"discover": 0, "monitor": 0, "protect": 0},
 	}
 
 	// Vuln location + signals in one pass over OPEN vulnerability findings (canonical set).
@@ -265,6 +269,68 @@ SELECT COUNT(*)::int,
 	p.Enforcement["groups"], p.Enforcement["discover"], p.Enforcement["monitor"], p.Enforcement["protect"] = grps, gDiscover, gMonitor, gProtect
 	// Process/file profile-mode maturity (NV shows network AND profile mode distributions).
 	p.Enforcement["profile_discover"], p.Enforcement["profile_monitor"], p.Enforcement["profile_protect"] = pDiscover, pMonitor, pProtect
+
+	// CVEs by mode (NV RESTRiskScoreMetricsCVE): distinct workload CVEs bucketed by the
+	// strongest policy_mode of any group the workload belongs to, resolved via
+	// image_workload_links (finding image digest → workload id → group.members). Plus
+	// platform/host CVEs straight from finding target_type. Answers "how many CVEs still
+	// sit on workloads we aren't protecting".
+	var cDiscover, cMonitor, cProtect, cPlatform, cHost int
+	if err := h.db.Pool().QueryRow(ctx, `
+WITH wl_mode AS (
+  SELECT jsonb_array_elements_text(g.members) AS wl,
+         MAX(CASE g.policy_mode WHEN 'protect' THEN 3 WHEN 'monitor' THEN 2 ELSE 1 END) AS r
+    FROM groups g
+   WHERE g.org_id = $1 AND ($2::uuid IS NULL OR g.cluster_id = $2)
+   GROUP BY 1)
+SELECT
+  COUNT(DISTINCT f.external_id) FILTER (WHERE m.r = 1)::int,
+  COUNT(DISTINCT f.external_id) FILTER (WHERE m.r = 2)::int,
+  COUNT(DISTINCT f.external_id) FILTER (WHERE m.r = 3)::int
+  FROM findings f
+  JOIN image_workload_links l
+    ON l.image_digest = f.target_ref AND l.org_id = f.org_id AND l.cluster_id = f.cluster_id
+  LEFT JOIN wl_mode m ON m.wl = l.workload_id
+ WHERE f.org_id = $1 AND f.kind = 'vulnerability' AND f.lifecycle = 'open'
+   AND f.target_type = 'image-workload' AND ($2::uuid IS NULL OR f.cluster_id = $2)`,
+		orgID, clusterArg).Scan(&cDiscover, &cMonitor, &cProtect); err != nil {
+		return fmt.Errorf("cve-by-mode rollup: %w", err)
+	}
+	if err := h.db.Pool().QueryRow(ctx, `
+SELECT COUNT(DISTINCT external_id) FILTER (WHERE target_type = 'platform')::int,
+       COUNT(DISTINCT external_id) FILTER (WHERE target_type = 'host')::int
+  FROM findings
+ WHERE org_id = $1 AND kind = 'vulnerability' AND lifecycle = 'open'
+   AND target_type IN ('platform','host') AND ($2::uuid IS NULL OR cluster_id = $2)`,
+		orgID, clusterArg).Scan(&cPlatform, &cHost); err != nil {
+		return fmt.Errorf("cve platform/host rollup: %w", err)
+	}
+	p.CvesByMode["discover"], p.CvesByMode["monitor"], p.CvesByMode["protect"] = cDiscover, cMonitor, cProtect
+	p.CvesByMode["platform"], p.CvesByMode["host"] = cPlatform, cHost
+
+	// Exposed workloads by mode (NV exposed-endpoint policy_mode): net-exposed deployments
+	// bucketed by the strongest group mode covering them. An exposed workload still in
+	// discover is unprotected attack surface.
+	var eDiscover, eMonitor, eProtect int
+	if err := h.db.Pool().QueryRow(ctx, `
+WITH wl_mode AS (
+  SELECT jsonb_array_elements_text(g.members) AS wl,
+         MAX(CASE g.policy_mode WHEN 'protect' THEN 3 WHEN 'monitor' THEN 2 ELSE 1 END) AS r
+    FROM groups g
+   WHERE g.org_id = $1 AND ($2::uuid IS NULL OR g.cluster_id = $2)
+   GROUP BY 1)
+SELECT
+  COUNT(*) FILTER (WHERE m.r = 1)::int,
+  COUNT(*) FILTER (WHERE m.r = 2)::int,
+  COUNT(*) FILTER (WHERE m.r = 3)::int
+  FROM deployments d
+  LEFT JOIN wl_mode m ON m.wl = d.namespace || '/' || d.name
+ WHERE d.org_id = $1 AND d.risk_factors ? 'net_exposure'
+   AND ($2::uuid IS NULL OR d.cluster_id = $2)`,
+		orgID, clusterArg).Scan(&eDiscover, &eMonitor, &eProtect); err != nil {
+		return fmt.Errorf("exposed-by-mode rollup: %w", err)
+	}
+	p.ExposedByMode["discover"], p.ExposedByMode["monitor"], p.ExposedByMode["protect"] = eDiscover, eMonitor, eProtect
 
 	// New-service default modes (NV NewServiceMode / NewServiceProfileMode). Default monitor.
 	p.NewServicePolicyMode, p.NewServiceProfileMode = "monitor", "monitor"
