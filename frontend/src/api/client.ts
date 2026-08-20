@@ -4595,6 +4595,9 @@ export const groupsApi = {
     api.post<{ created: number; updated: number; results: Array<{ name: string; status: string; error?: string }> }>(
       "/groups:import", yaml, { params, headers: { "Content-Type": "application/x-yaml" } },
     ).then((r) => r.data),
+  // Bulk mode promotion (NV Discover→Monitor→Protect). dimension: policy (network) | profile (process/file).
+  promote: (body: { dimension: "policy" | "profile"; from: "discover" | "monitor" }, params: { cluster_id?: string } = {}) =>
+    api.post<{ dimension: string; from: string; to: string; promoted: number }>("/groups:promote", body, { params }).then((r) => r.data),
 };
 
 // ----- Wave D: Federation ------

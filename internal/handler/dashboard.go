@@ -245,18 +245,24 @@ SELECT COUNT(*)::int,
 	// only (no protection), monitor = alert, protect = block. A cluster left in discover is
 	// unenforced — that is structural risk NV's service-mode score captures.
 	var grps, gDiscover, gMonitor, gProtect int
+	var pDiscover, pMonitor, pProtect int
 	if err := h.db.Pool().QueryRow(ctx, `
 SELECT COUNT(*)::int,
        COUNT(*) FILTER (WHERE policy_mode = 'discover')::int,
        COUNT(*) FILTER (WHERE policy_mode = 'monitor')::int,
-       COUNT(*) FILTER (WHERE policy_mode = 'protect')::int
+       COUNT(*) FILTER (WHERE policy_mode = 'protect')::int,
+       COUNT(*) FILTER (WHERE profile_mode = 'discover')::int,
+       COUNT(*) FILTER (WHERE profile_mode = 'monitor')::int,
+       COUNT(*) FILTER (WHERE profile_mode = 'protect')::int
   FROM groups
  WHERE org_id = $1
    AND ($2::uuid IS NULL OR cluster_id = $2)`, orgID, clusterArg).
-		Scan(&grps, &gDiscover, &gMonitor, &gProtect); err != nil {
+		Scan(&grps, &gDiscover, &gMonitor, &gProtect, &pDiscover, &pMonitor, &pProtect); err != nil {
 		return fmt.Errorf("enforcement rollup: %w", err)
 	}
 	p.Enforcement["groups"], p.Enforcement["discover"], p.Enforcement["monitor"], p.Enforcement["protect"] = grps, gDiscover, gMonitor, gProtect
+	// Process/file profile-mode maturity (NV shows network AND profile mode distributions).
+	p.Enforcement["profile_discover"], p.Enforcement["profile_monitor"], p.Enforcement["profile_protect"] = pDiscover, pMonitor, pProtect
 
 	// Admission control coverage (NV: adm_mode + deny_adm_ctrl_rules). Constellation drives
 	// admission via `policies` with engine='constellation-admission'; an enabled policy in

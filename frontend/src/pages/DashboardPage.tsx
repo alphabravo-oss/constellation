@@ -27,10 +27,10 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import {
   AlertOctagon, AlertTriangle, ShieldAlert, ShieldCheck, Activity,
   TrendingUp, ArrowUpRight, ExternalLink, Database, FileWarning,
-  ServerCog, PackageCheck, RefreshCw,
+  ServerCog, PackageCheck, RefreshCw, ArrowUp,
 } from "lucide-react";
 
-import { findings, cve, dashboard, clusters, compliance, enterprise, network, downloadAPIFile, type Finding, type PlatformFactsResponse, type Severity } from "@/api/client";
+import { findings, cve, dashboard, clusters, compliance, enterprise, network, downloadAPIFile, groupsApi, type Finding, type PlatformFactsResponse, type Severity } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { StatCard } from "@/components/ui/stat-card";
 import { SeverityBadge } from "@/components/ui/severity-badge";
@@ -42,6 +42,7 @@ import { PageHeader } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/cn";
+import { toast } from "sonner";
 
 const SEVERITY_COLORS: Record<Severity, string> = {
   info:     "var(--color-severity-info)",
@@ -103,6 +104,16 @@ export function DashboardPage() {
   const scanPlatform = useMutation({
     mutationFn: () => clusters.scanPlatform(clusterId!),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["cluster-platform", clusterId] }),
+  });
+  // Bulk mode promotion (NV Discover→Monitor→Protect) — advances all eligible groups one step.
+  const promoteMut = useMutation({
+    mutationFn: (body: { dimension: "policy" | "profile"; from: "discover" | "monitor" }) =>
+      groupsApi.promote(body, { cluster_id: clusterId }),
+    onSuccess: (res) => {
+      toast.success(res.promoted > 0 ? `Promoted ${res.promoted} group${res.promoted === 1 ? "" : "s"}: ${res.from} → ${res.to}` : `No groups in ${res.from} mode to promote`);
+      void qc.invalidateQueries({ queryKey: ["dashboard", clusterId] });
+    },
+    onError: () => toast.error("Failed to promote groups"),
   });
 
   const openItems = useMemo(() => open.data?.findings ?? [], [open.data]);
@@ -259,31 +270,18 @@ export function DashboardPage() {
           )}
         </Panel>
         <div className="space-y-4">
-        <Panel title="Enforcement Coverage" subtitle="Runtime policy mode per group" icon={<ShieldCheck className="h-3.5 w-3.5" />}>
-          <div className="p-3 space-y-3">
+        <Panel title="Policy Mode Maturity" subtitle="Advance groups Discover → Monitor → Protect" icon={<ShieldCheck className="h-3.5 w-3.5" />}>
+          <div className="p-3 space-y-4">
             {(() => {
-              const e = posture?.enforcement ?? { groups: 0, discover: 0, monitor: 0, protect: 0 };
-              const total = e.groups || 1;
-              const modes = [
-                { k: "protect", label: "Protect", color: "var(--color-severity-low)", v: e.protect ?? 0 },
-                { k: "monitor", label: "Monitor", color: "var(--color-severity-medium)", v: e.monitor ?? 0 },
-                { k: "discover", label: "Discover", color: "var(--color-severity-high)", v: e.discover ?? 0 },
-              ];
+              const e = posture?.enforcement ?? {};
+              const groups = e.groups ?? 0;
               return (
                 <>
-                  <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-muted">
-                    {modes.map((m) => m.v > 0 && <div key={m.k} style={{ width: `${(m.v / total) * 100}%`, background: m.color }} title={`${m.label}: ${m.v}`} />)}
-                  </div>
-                  {modes.map((m) => (
-                    <div key={m.k} className="flex items-center justify-between text-xs">
-                      <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full" style={{ background: m.color }} />{m.label}</span>
-                      <span className="text-mono text-muted-foreground">{m.v} / {e.groups}</span>
-                    </div>
-                  ))}
-                  {(e.protect ?? 0) === 0 && (e.groups ?? 0) > 0 && (
-                    <p className="text-[10px] text-[color:var(--color-severity-high)] leading-snug">No groups in protect mode — runtime is observe-only.</p>
-                  )}
-                  <div className="mt-1 flex items-center justify-between border-t border-border pt-2 text-xs">
+                  <ModeMaturity label="Network mode" groups={groups} discover={e.discover ?? 0} monitor={e.monitor ?? 0} protect={e.protect ?? 0}
+                    onPromote={(from) => promoteMut.mutate({ dimension: "policy", from })} pending={promoteMut.isPending} />
+                  <ModeMaturity label="Process / File mode" groups={groups} discover={e.profile_discover ?? 0} monitor={e.profile_monitor ?? 0} protect={e.profile_protect ?? 0}
+                    onPromote={(from) => promoteMut.mutate({ dimension: "profile", from })} pending={promoteMut.isPending} />
+                  <div className="flex items-center justify-between border-t border-border pt-2 text-xs">
                     <span className="text-muted-foreground">Admission control</span>
                     {(e.admission_enforcing ?? 0) > 0 ? (
                       <span className="flex items-center gap-1.5 text-[color:var(--color-severity-low)]"><span className="inline-block h-2 w-2 rounded-full" style={{ background: "var(--color-severity-low)" }} />enforcing · {e.admission_enforcing} rule{(e.admission_enforcing ?? 0) === 1 ? "" : "s"}</span>
@@ -539,6 +537,47 @@ function ExposedRow({ s, dir, clusterPath }: { s: import("@/api/client").Exposed
         {s.critical === 0 && s.high === 0 && <span className="text-[10px] text-muted-foreground">no crit/high</span>}
       </div>
     </Link>
+  );
+}
+
+// ModeMaturity renders one dimension's Discover/Monitor/Protect distribution as a stacked bar
+// with a "Promote" control to advance every eligible group one step up (NeuVector's workflow).
+function ModeMaturity({ label, groups, discover, monitor, protect, onPromote, pending }: {
+  label: string; groups: number; discover: number; monitor: number; protect: number;
+  onPromote: (from: "discover" | "monitor") => void; pending: boolean;
+}) {
+  const total = groups || 1;
+  const modes = [
+    { label: "Protect", color: "var(--color-severity-low)", v: protect },
+    { label: "Monitor", color: "var(--color-severity-medium)", v: monitor },
+    { label: "Discover", color: "var(--color-severity-high)", v: discover },
+  ];
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] font-medium text-foreground">{label}</span>
+        <div className="flex items-center gap-1">
+          {discover > 0 && (
+            <button type="button" disabled={pending} onClick={() => onPromote("discover")} title="Promote all Discover groups to Monitor"
+              className="inline-flex items-center gap-0.5 rounded border border-border bg-card px-1.5 py-0.5 text-[10px] hover:bg-accent disabled:opacity-40">
+              <ArrowUp className="h-3 w-3" />Discover→Monitor
+            </button>
+          )}
+          {monitor > 0 && (
+            <button type="button" disabled={pending} onClick={() => onPromote("monitor")} title="Promote all Monitor groups to Protect"
+              className="inline-flex items-center gap-0.5 rounded border border-border bg-card px-1.5 py-0.5 text-[10px] hover:bg-accent disabled:opacity-40">
+              <ArrowUp className="h-3 w-3" />Monitor→Protect
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-muted">
+        {modes.map((m) => m.v > 0 && <div key={m.label} style={{ width: `${(m.v / total) * 100}%`, background: m.color }} title={`${m.label}: ${m.v}`} />)}
+      </div>
+      <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+        {modes.map((m) => <span key={m.label} className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full" style={{ background: m.color }} />{m.label} {m.v}</span>)}
+      </div>
+    </div>
   );
 }
 
