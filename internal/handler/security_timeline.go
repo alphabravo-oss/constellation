@@ -116,6 +116,9 @@ func (t *SecurityTimeline) List(w http.ResponseWriter, r *http.Request) {
 	if offset < 0 {
 		offset = 0
 	}
+	// The timeline UNIONs four event tables, so an exact COUNT would be expensive.
+	// Fetch one extra row to learn whether a next page exists (cursor has_more paging).
+	fetch := limit + 1
 
 	// $1 org, $2 cluster (nullable uuid), $3 from, $4 to, $5 severity text[]
 	// (nullable), $6 limit, $7 offset, $8..$11 per-source include flags.
@@ -168,7 +171,7 @@ SELECT source, id, severity, at, title, workload_id, namespace, cluster_id, ref
  LIMIT $6 OFFSET $7`
 
 	rows, err := t.db.Pool().Query(r.Context(), q,
-		subj.OrgID, clusterArg, from, to, sevArr, limit, offset,
+		subj.OrgID, clusterArg, from, to, sevArr, fetch, offset,
 		inclThreat, inclEvent, inclViolation, inclAudit)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
@@ -191,12 +194,18 @@ SELECT source, id, severity, at, title, workload_id, namespace, cluster_id, ref
 		return
 	}
 
+	hasMore := false
+	if len(out) > limit {
+		hasMore = true
+		out = out[:limit]
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"items":  out,
-		"limit":  limit,
-		"offset": offset,
-		"from":   from.UTC().Format(time.RFC3339),
-		"to":     to.UTC().Format(time.RFC3339),
+		"items":    out,
+		"limit":    limit,
+		"offset":   offset,
+		"has_more": hasMore,
+		"from":     from.UTC().Format(time.RFC3339),
+		"to":       to.UTC().Format(time.RFC3339),
 	})
 }
 

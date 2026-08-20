@@ -4,13 +4,14 @@
 // consoles (DPI threats · runtime events · network violations · audit) into a
 // single time-ordered stream with type + severity filters. Backed by
 // GET /api/v1/security/timeline.
-import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
 
 import { securityTimeline, type TimelineItem, type TimelineSource } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { ScopeBar } from "@/components/ScopeBar";
 import { PageHeader } from "@/components/ui/page";
+import { Pager } from "@/components/ui/pager";
 import { SeverityBadge } from "@/components/ui/severity-badge";
 import { StatusPill } from "@/components/ui/status-pill";
 import { LoadingState, ErrorState, EmptyState } from "@/components/ui/states";
@@ -25,21 +26,25 @@ const SOURCE_META: Record<TimelineSource, { label: string; tone: "error" | "warn
 
 const ALL_SOURCES = Object.keys(SOURCE_META) as TimelineSource[];
 const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const;
+const TIMELINE_PAGE = 100;
 
 export function TimelinePage() {
   const { clusterId, isLoading: clusterLoading } = useCluster();
   const [sources, setSources] = useState<Set<TimelineSource>>(new Set(ALL_SOURCES));
   const [severities, setSeverities] = useState<Set<string>>(new Set());
+  const [page, setPage] = useState(0);
 
   const typeParam = sources.size === ALL_SOURCES.length ? undefined : [...sources].join(",");
   const sevParam = severities.size === 0 ? undefined : [...severities].join(",");
 
+  useEffect(() => { setPage(0); }, [typeParam, sevParam, clusterId]);
   const q = useQuery({
-    queryKey: ["security-timeline", clusterId, typeParam, sevParam],
+    queryKey: ["security-timeline", clusterId, typeParam, sevParam, page],
     queryFn: () =>
-      securityTimeline.list({ cluster_id: clusterId, type: typeParam, severity: sevParam, limit: 200 }),
+      securityTimeline.list({ cluster_id: clusterId, type: typeParam, severity: sevParam, limit: TIMELINE_PAGE, offset: page * TIMELINE_PAGE }),
     // No source selected ⇒ nothing to fetch.
     enabled: sources.size > 0,
+    placeholderData: keepPreviousData,
   });
 
   const items = useMemo<TimelineItem[]>(() => q.data?.items ?? [], [q.data]);
@@ -84,8 +89,9 @@ export function TimelinePage() {
       ) : q.isError ? (
         <ErrorState title="Failed to load the incident timeline." error={q.error} />
       ) : items.length === 0 ? (
-        <EmptyState title="No events" hint="No events match the current filters in the selected window." />
+        <EmptyState title={page > 0 ? "No more events" : "No events"} hint="No events match the current filters in the selected window." />
       ) : (
+        <>
         <ol className="relative space-y-1 border-l border-border pl-4" data-testid="timeline-list">
           {items.map((it) => (
             <li key={`${it.source}:${it.id}`} className="relative">
@@ -108,6 +114,8 @@ export function TimelinePage() {
             </li>
           ))}
         </ol>
+        <Pager page={page} pageSize={TIMELINE_PAGE} hasMore={q.data?.has_more} rowsOnPage={items.length} onPage={setPage} />
+        </>
       )}
     </div>
   );

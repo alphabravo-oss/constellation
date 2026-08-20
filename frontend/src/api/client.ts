@@ -2457,6 +2457,7 @@ export interface TimelineResponse {
   items: TimelineItem[];
   limit: number;
   offset: number;
+  has_more: boolean;
   from: string;
   to: string;
 }
