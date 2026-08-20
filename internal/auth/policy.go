@@ -150,6 +150,12 @@ func (p SecurityPolicy) Validate() error {
 			return fmt.Errorf("%w: %s must be between 0 and min_length (%d)", ErrInvalidPolicy, c.label, p.MinLength)
 		}
 	}
+	// The per-class minimums must be jointly satisfiable: their sum can't exceed min_length,
+	// otherwise ValidatePassword would reject every possible password and lock out all
+	// password changes/creation.
+	if sum := p.MinUppercase + p.MinLowercase + p.MinDigit + p.MinSpecial; sum > p.MinLength {
+		return fmt.Errorf("%w: per-class minimums sum to %d, which exceeds min_length (%d)", ErrInvalidPolicy, sum, p.MinLength)
+	}
 	if p.MaxAgeDays < 0 {
 		return fmt.Errorf("%w: max_age_days must be >= 0", ErrInvalidPolicy)
 	}

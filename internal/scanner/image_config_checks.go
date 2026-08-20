@@ -80,9 +80,14 @@ func imageConfigChecksFrom(ref, platform string, parsed name.Reference, cfg *v1.
 		rep.Checks = append(rep.Checks, ImageConfigCheck{ID: id, Title: title, Status: status, Severity: sev, Detail: detail, Remediation: rem})
 	}
 
-	// 1) Runs as root (CIS-Docker 4.1). USER unset / 0 / root.
+	// 1) Runs as root (CIS-Docker 4.1). USER unset / 0 / root, in either "uid" or
+	// "user:group" form (e.g. "0", "root", "0:0", "root:root", "root:0").
 	user := strings.TrimSpace(c.User)
-	userRoot := user == "" || user == "0" || strings.EqualFold(user, "root") || strings.HasPrefix(user, "0:")
+	userPart := user
+	if i := strings.IndexByte(user, ':'); i >= 0 {
+		userPart = user[:i]
+	}
+	userRoot := userPart == "" || userPart == "0" || strings.EqualFold(userPart, "root")
 	if userRoot {
 		add("image-runs-as-root", "Image runs as root", "fail", "high",
 			fmt.Sprintf("USER is %q", firstNonEmptyStr(user, "unset")),

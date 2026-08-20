@@ -289,6 +289,8 @@ func RuleFromYAML(id, title, description, mode, specYAML string) (rule Rule, sup
 		doc.Spec.Vulnerability.MaxCriticalCount != nil ||
 		doc.Spec.Vulnerability.MaxHighCount != nil ||
 		doc.Spec.Vulnerability.MaxCveScoreCount != nil ||
+		doc.Spec.Vulnerability.RequireFixAvailable ||
+		doc.Spec.Vulnerability.RequireKnownScanResult ||
 		len(deniedCVEs) > 0 {
 		gate := EvidenceGate{
 			Type:                   "vulnerability",

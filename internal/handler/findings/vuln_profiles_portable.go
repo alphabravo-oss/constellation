@@ -112,14 +112,30 @@ func (h *VulnProfiles) Import(w http.ResponseWriter, r *http.Request) {
 		domainJSON, _ := json.Marshal(pp.DomainScope)
 		var entries []vulnprofile.Entry
 		var domain vulnprofile.DomainScope
-		_ = json.Unmarshal(entriesJSON, &entries)
-		_ = json.Unmarshal(domainJSON, &domain)
+		// Surface type-mismatch errors instead of swallowing them — otherwise a structurally
+		// valid but type-wrong bundle would pass validation as "empty" and overwrite a good
+		// profile with the raw, unvalidated blob.
+		if err := json.Unmarshal(entriesJSON, &entries); err != nil {
+			res.Status, res.Error = "error", "invalid entries: "+err.Error()
+			results = append(results, res)
+			continue
+		}
+		if len(domainJSON) > 0 && string(domainJSON) != "null" {
+			if err := json.Unmarshal(domainJSON, &domain); err != nil {
+				res.Status, res.Error = "error", "invalid domain_scope: "+err.Error()
+				results = append(results, res)
+				continue
+			}
+		}
 		p := &vulnprofile.Profile{Name: strings.TrimSpace(pp.Name), Description: pp.Description, Active: pp.Active, Entries: entries, DomainScope: domain}
 		if err := p.Validate(); err != nil {
 			res.Status, res.Error = "error", err.Error()
 			results = append(results, res)
 			continue
 		}
+		// Persist exactly what was validated (the typed structs), not the raw YAML blob.
+		storedEntries, _ := json.Marshal(p.Entries)
+		storedDomain, _ := json.Marshal(p.DomainScope)
 		var wasInsert bool
 		if err := h.db.Pool().QueryRow(r.Context(), `
 INSERT INTO vuln_profiles (org_id, cluster_id, name, description, active, entries, domain_scope, created_by)
@@ -128,7 +144,7 @@ ON CONFLICT (org_id, name) DO UPDATE SET
   description=EXCLUDED.description, active=EXCLUDED.active, entries=EXCLUDED.entries,
   domain_scope=EXCLUDED.domain_scope, updated_at=NOW()
 RETURNING (xmax = 0)`,
-			subj.OrgID, clusterArg, p.Name, p.Description, p.Active, entriesJSON, domainJSON, subj.UserID).Scan(&wasInsert); err != nil {
+			subj.OrgID, clusterArg, p.Name, p.Description, p.Active, storedEntries, storedDomain, subj.UserID).Scan(&wasInsert); err != nil {
 			res.Status, res.Error = "error", err.Error()
 			results = append(results, res)
 			continue

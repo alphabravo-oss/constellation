@@ -1,16 +1,47 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/auth"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/rbac"
 )
+
+// loadCustomRoleVerbs returns the org's custom role name→verbs map for AuthorizeWithCustom.
+// Best-effort: on any error it returns an empty map (canonical-role authorization still
+// applies), which is fail-safe for the privilege check (it can only deny, never over-grant).
+func (h *AccessControl) loadCustomRoleVerbs(ctx context.Context, orgID uuid.UUID) map[string][]rbac.Verb {
+	out := map[string][]rbac.Verb{}
+	if h.db == nil {
+		return out
+	}
+	rows, err := h.db.Pool().Query(ctx, `SELECT name, verbs FROM custom_roles WHERE org_id = $1`, orgID)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		var verbs []string
+		if err := rows.Scan(&name, &verbs); err != nil {
+			return out
+		}
+		vs := make([]rbac.Verb, 0, len(verbs))
+		for _, v := range verbs {
+			vs = append(vs, rbac.Verb(v))
+		}
+		out[name] = vs
+	}
+	return out
+}
 
 // CreateLocalUser provisions a password-authenticated local user with a single org-scoped
 // role — the "create user outside SSO JIT" capability NeuVector ships and Constellation
@@ -50,6 +81,19 @@ func (h *AccessControl) CreateLocalUser(w http.ResponseWriter, r *http.Request) 
 		jsonError(w, http.StatusBadRequest, "invalid role")
 		return
 	}
+	// Privilege-escalation guard: a caller may only mint a user with a role no more
+	// privileged than their own. Without this, anyone holding VerbManageUsers (e.g. via a
+	// delegated custom role) could create a GlobalAdmin and set its password. Require the
+	// caller to already hold every verb the requested role grants — honoring the caller's
+	// own custom roles when computing their effective privilege.
+	custom := h.loadCustomRoleVerbs(r.Context(), subj.OrgID)
+	res := rbac.Resource{OrgID: subj.OrgID}
+	for _, v := range rbac.VerbsForRole(body.Role) {
+		if rbac.AuthorizeWithCustom(subj.Assignments, v, res, custom) != nil {
+			jsonError(w, http.StatusForbidden, "cannot grant a role more privileged than your own")
+			return
+		}
+	}
 	// Enforce the org's password policy (length / character classes) at creation, the same
 	// profile the change-password path uses.
 	profile := auth.LoadPasswordProfile(r.Context(), h.db.Pool(), subj.OrgID)
@@ -76,9 +120,13 @@ INSERT INTO users (org_id, email, display_name, password_hash)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (org_id, email) DO NOTHING
 RETURNING id`, subj.OrgID, body.Email, body.DisplayName, hash).Scan(&id)
-	if err != nil {
-		// No row returned ⇒ the email already exists in this org.
+	if errors.Is(err, pgx.ErrNoRows) {
+		// No row returned ⇒ the email already exists in this org (ON CONFLICT DO NOTHING).
 		jsonError(w, http.StatusConflict, "a user with that email already exists")
+		return
+	}
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "create user: "+err.Error())
 		return
 	}
 	if _, err := tx.Exec(r.Context(), `

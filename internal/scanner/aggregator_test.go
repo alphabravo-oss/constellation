@@ -39,15 +39,22 @@ func TestNewDefaultWithConfigSelectsEngines(t *testing.T) {
 		t.Fatalf("default engines = %v, want %v", got, want)
 	}
 	// The vulndb bundle matcher was removed; Grype's package matcher now fills the
-	// canonical package-match slot.
-	if got, want := matcherNames(defaultAgg.PackageMatchers), []string{"grype"}; !reflect.DeepEqual(got, want) {
+	// canonical package-match slot; the Trivy package matcher corroborates it (cross-scanner
+	// merge). The vulndb bundle matcher was removed.
+	if got, want := matcherNames(defaultAgg.PackageMatchers), []string{"grype", "trivy"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("default matchers = %v, want %v", got, want)
 	}
 
-	// With Grype disabled there is no package matcher at all.
+	// With Grype disabled the Trivy package matcher still fills the slot.
 	withoutGrype := NewDefaultWithConfig(AggregatorConfig{DisableGrype: true})
-	if got := matcherNames(withoutGrype.PackageMatchers); len(got) != 0 {
-		t.Fatalf("matchers with grype disabled = %v, want none", got)
+	if got, want := matcherNames(withoutGrype.PackageMatchers), []string{"trivy"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("matchers with grype disabled = %v, want %v", got, want)
+	}
+
+	// With both disabled there is no package matcher at all.
+	withoutBoth := NewDefaultWithConfig(AggregatorConfig{DisableGrype: true, DisableTrivy: true})
+	if got := matcherNames(withoutBoth.PackageMatchers); len(got) != 0 {
+		t.Fatalf("matchers with grype+trivy disabled = %v, want none", got)
 	}
 }
 
