@@ -28,3 +28,9 @@ tools/constellation-test-suite/**/__pycache__/
 tools/constellation-test-suite/.pytest_cache/
 .claude/
 /rancher/
+
+# Built Go binaries at repo root (never commit)
+/constellation-scanner
+/constellation-discoverer
+/constellation-api
+/constellation-runtime-agent

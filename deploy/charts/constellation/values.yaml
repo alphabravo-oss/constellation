@@ -372,6 +372,14 @@ scanner:
     # bundle is missing or stale — image scans fall back to Trivy/Grype. Set true only
     # if you want to hard-require a fresh bundle for every scan.
     requireVulnDB: false
+  cache:
+    # Persist the vuln-DB caches (grype/trivy/syft, ~3.3GB) on a PVC so redeploys don't
+    # re-download them and the DB survives pod restarts, decoupled from the image. RWO,
+    # so it activates ONLY with a single, non-autoscaled replica (otherwise emptyDir).
+    # To use it, set scanner.replicas=1 and scanner.autoscaling.enabled=false.
+    persistent: true
+    size: 8Gi
+    storageClass: "" # "" = cluster default StorageClass
   service:
     annotations:
       prometheus.io/scrape: "true"

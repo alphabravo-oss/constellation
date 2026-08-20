@@ -16,6 +16,12 @@ spec:
   {{- if not .Values.scanner.autoscaling.enabled }}
   replicas: {{ .Values.scanner.replicas }}
   {{- end }}
+  {{- if and .Values.scanner.cache.persistent (le (int .Values.scanner.replicas) 1) (not .Values.scanner.autoscaling.enabled) }}
+  # The persistent (RWO) cache PVC can be held by only one pod at a time, so the old
+  # pod must fully release it before the new one mounts — rolling update would deadlock.
+  strategy:
+    type: Recreate
+  {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "constellation.name" . }}
@@ -131,20 +137,26 @@ spec:
               value: {{ .Values.scanner.readiness.requireVulnDB | quote }}
             - name: TMPDIR
               value: /tmp
+            # Vuln-DB caches (grype/trivy/syft) live on a PERSISTENT volume so they
+            # survive pod restarts + redeploys — a code deploy reuses the DB instead of
+            # re-downloading ~3.3GB and running "DB invalid" until it lands. The refresh
+            # loop keeps them current on its own schedule, decoupled from the image.
             - name: XDG_CACHE_HOME
-              value: /tmp/.cache
+              value: /var/lib/scanner-cache/.cache
             - name: SYFT_CACHE_DIR
-              value: /tmp/syft
+              value: /var/lib/scanner-cache/syft
             - name: GRYPE_DB_CACHE_DIR
-              value: /tmp/grype/db
+              value: /var/lib/scanner-cache/grype/db
             - name: TRIVY_CACHE_DIR
-              value: /tmp/trivy
+              value: /var/lib/scanner-cache/trivy
           volumeMounts:
             - name: vulndb
               mountPath: {{ .Values.vulndb.mountPath | quote }}
               readOnly: true
             - name: tmp
               mountPath: /tmp
+            - name: scanner-cache
+              mountPath: /var/lib/scanner-cache
             - name: scanner-token
               mountPath: /var/run/constellation/scanner-token
               readOnly: true
@@ -166,6 +178,14 @@ spec:
         {{- include "constellation.vulndbVolume" . | nindent 8 }}
         - name: tmp
           emptyDir: {}
+        - name: scanner-cache
+          {{- if and .Values.scanner.cache.persistent (le (int .Values.scanner.replicas) 1) (not .Values.scanner.autoscaling.enabled) }}
+          persistentVolumeClaim:
+            claimName: constellation-scanner-cache
+          {{- else }}
+          # Autoscaled scanners (>1 replica) can't share a RWO PVC; fall back to ephemeral.
+          emptyDir: {}
+          {{- end }}
         - name: scanner-token
           secret:
             secretName: {{ include "constellation.scannerTokenSecret" . }}

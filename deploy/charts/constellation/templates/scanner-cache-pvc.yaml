@@ -1,0 +1,21 @@
+{{- if and .Values.scanner.cache.persistent (le (int .Values.scanner.replicas) 1) (not .Values.scanner.autoscaling.enabled) }}
+# Persistent cache for the scanner's vuln databases (grype/trivy/syft). Decouples the
+# ~3.3GB DB from the pod/image lifecycle so redeploys don't re-download it. RWO — usable
+# only with a single scanner replica (autoscaling flips the volume back to emptyDir).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: constellation-scanner-cache
+  labels:
+    {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: scanner
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- with .Values.scanner.cache.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.scanner.cache.size | quote }}
+{{- end }}

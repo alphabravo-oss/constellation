@@ -32,10 +32,19 @@ data:
         }
         location /api/ {
             proxy_pass http://{{ include "constellation.fullname" . }}-api:{{ .Values.api.service.port }};
+            proxy_http_version 1.1;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
+            # Stream API responses — do NOT buffer. Buffering large JSON (e.g. the
+            # /findings list, ~450KB) to the proxy temp dir truncated the body and
+            # blanked the page. Streaming needs no temp file. Generous timeouts for
+            # big/slow reports.
+            proxy_buffering off;
+            proxy_request_buffering off;
+            proxy_read_timeout 300s;
+            proxy_send_timeout 300s;
         }
         location /openapi.json {
             proxy_pass http://{{ include "constellation.fullname" . }}-api:{{ .Values.api.service.port }};
