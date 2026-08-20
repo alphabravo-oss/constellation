@@ -2783,6 +2783,19 @@ export const accessControl = {
 // Canonical user-facing roles (mirror pkg/rbac). Highest privilege first.
 export const RBAC_ROLES = ["GlobalAdmin", "SecurityAdmin", "ClusterAdmin", "Analyst", "Auditor"] as const;
 
+export interface CustomRole {
+  id: string;
+  name: string;
+  description: string;
+  verbs: string[];
+}
+export const customRoles = {
+  list: () => api.get<{ roles: CustomRole[]; grantable_verbs: string[] }>("/custom-roles").then((r) => r.data),
+  create: (body: { name: string; description: string; verbs: string[] }) =>
+    api.post<CustomRole>("/custom-roles", body).then((r) => r.data),
+  delete: (id: string) => api.delete(`/custom-roles/${id}`).then((r) => r.data),
+};
+
 export interface IntegrationInstance {
   id: string;
   name: string;

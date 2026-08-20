@@ -42,6 +42,7 @@ import { RegisterClusterPage } from "./pages/RegisterClusterPage";
 import { RoleBindingFormPage } from "./pages/access/RoleBindingFormPage";
 import { ServiceAccountFormPage } from "./pages/access/ServiceAccountFormPage";
 import { LocalUserFormPage } from "./pages/access/LocalUserFormPage";
+import { CustomRoleFormPage } from "./pages/access/CustomRoleFormPage";
 import { AuthProviderFormPage } from "./pages/access/AuthProviderFormPage";
 import { ApiTokenCreatePage } from "./pages/ApiTokenCreatePage";
 import { NvdConfigPage } from "./pages/NvdConfigPage";
@@ -225,6 +226,7 @@ export function App() {
           <Route path="access/bindings/new"          element={<RoleBindingFormPage />} />
           <Route path="access/service-accounts/new"  element={<ServiceAccountFormPage />} />
           <Route path="access/users/new"             element={<LocalUserFormPage />} />
+          <Route path="access/roles/new"             element={<CustomRoleFormPage />} />
           <Route path="access/sso/new"               element={<AuthProviderFormPage />} />
           <Route path="access/sso/:id"               element={<AuthProviderFormPage />} />
           <Route path="api-tokens"        element={<ApiTokensPage />} />

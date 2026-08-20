@@ -16,6 +16,7 @@ import { SeverityBadge } from "@/components/ui/severity-badge";
 import { StatusPill } from "@/components/ui/status-pill";
 import { LoadingState, ErrorState, EmptyState } from "@/components/ui/states";
 import { fmtRelative } from "@/lib/format";
+import { downloadCsv } from "@/lib/csv";
 
 const SOURCE_META: Record<TimelineSource, { label: string; tone: "error" | "warning" | "accent" | "info" }> = {
   dpi_threat: { label: "DPI Threat", tone: "error" },
@@ -63,6 +64,15 @@ export function TimelinePage() {
       <PageHeader
         title="Incident Timeline"
         description="Unified, time-ordered stream across DPI threats, runtime events, network violations, and audit — NeuVector's four event consoles in one investigation view."
+        actions={
+          <button
+            type="button"
+            disabled={items.length === 0}
+            onClick={() => downloadCsv("constellation-security-events", ["Time", "Source", "Severity", "Title", "Namespace", "Workload", "Reference"],
+              items.map((it) => [it.at, it.source, it.severity, it.title, it.namespace ?? "", it.workload_id ?? "", it.ref ?? ""]))}
+            className="rounded-md border border-border bg-card px-3 py-2 text-sm hover:bg-accent disabled:opacity-40"
+          >Export CSV</button>
+        }
       />
 
       <div className="flex flex-wrap items-center gap-4 rounded-md border border-border bg-card px-3 py-2">

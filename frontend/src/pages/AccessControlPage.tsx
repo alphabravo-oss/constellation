@@ -172,6 +172,11 @@ export function AccessControlPage() {
             title="Roles"
             description="The named permission sets you can bind. Built-in roles are fixed; custom roles are defined by your org."
             padded={false}
+            action={
+              <Button variant="primary" size="sm" onClick={() => navigate("/settings/access/roles/new")}>
+                <Plus className="h-3.5 w-3.5" /> New role
+              </Button>
+            }
           >
             <div className="overflow-x-auto" data-testid="access-roles">
               <DataTable rows={roles} columns={roleColumns} rowKey={(r) => r.name} />
