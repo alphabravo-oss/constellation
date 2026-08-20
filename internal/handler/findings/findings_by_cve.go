@@ -3,6 +3,7 @@ package findings
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -45,6 +46,30 @@ func (f *Findings) ByCVE(w http.ResponseWriter, r *http.Request) {
 	}
 	// fixable=true keeps only CVEs that have at least one fixed version available.
 	fixable := r.URL.Query().Get("fixable") == "true" || r.URL.Query().Get("fixable") == "1"
+	// q is a server-side search over CVE id + package name so the client never has to
+	// fetch-all-then-filter (which silently truncated at the row cap).
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+
+	// Total distinct CVEs matching the same filters, so the client can render a real pager
+	// instead of guessing from a truncated page.
+	var total int
+	if err := f.db.Pool().QueryRow(r.Context(), `
+SELECT count(*) FROM (
+  SELECT external_id
+    FROM findings
+   WHERE org_id = $1
+     AND kind = 'vulnerability'
+     AND external_id LIKE 'CVE-%'
+     AND ($2::text = '' OR lifecycle = $2)
+     AND ($3::uuid IS NULL OR cluster_id = $3)
+     AND target_type <> 'workload'
+     AND ($4::text = '' OR external_id ILIKE '%'||$4||'%' OR detail_json->>'package_name' ILIKE '%'||$4||'%')
+   GROUP BY external_id
+  HAVING ($5::bool IS NOT TRUE OR bool_or(COALESCE(detail_json->>'fixed', detail_json->>'fixed_version','') NOT IN ('','false')))
+) t`, subj.OrgID, lifecycle, clusterArg, q, fixable).Scan(&total); err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
 
 	rows, err := f.db.Pool().Query(r.Context(), `
 SELECT external_id,
@@ -69,10 +94,11 @@ SELECT external_id,
    -- Canonical: count image-workload instances only, not the redundant runtime-agent
    -- 'workload' pod-scan copies (see findings.go) which would inflate instance/image counts.
    AND target_type <> 'workload'
+   AND ($7::text = '' OR external_id ILIKE '%'||$7||'%' OR detail_json->>'package_name' ILIKE '%'||$7||'%')
  GROUP BY external_id
  HAVING ($6::bool IS NOT TRUE OR bool_or(COALESCE(detail_json->>'fixed', detail_json->>'fixed_version','') NOT IN ('','false')))
  ORDER BY max(risk_score) DESC, external_id
- LIMIT $4 OFFSET $5`, subj.OrgID, lifecycle, clusterArg, limit, offset, fixable)
+ LIMIT $4 OFFSET $5`, subj.OrgID, lifecycle, clusterArg, limit, offset, fixable, q)
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -128,5 +154,5 @@ SELECT external_id,
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"cves": out, "limit": limit, "offset": offset})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"cves": out, "limit": limit, "offset": offset, "total": total})
 }
