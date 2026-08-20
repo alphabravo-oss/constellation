@@ -3978,7 +3978,19 @@ export const policies = {
     api.patch<AdmissionState>("/policies/admission/state", body, { params }).then((r) => r.data),
   assess: (body: { image: string; namespace?: string; labels?: Record<string, string> }, params: { cluster_id?: string } = {}) =>
     api.post<AdmissionAssessResult>("/policies/assess", body, { params }).then((r) => r.data),
+  admissionRules: (params: { cluster_id?: string } = {}) =>
+    api.get<{ rules: AdmissionRuleRow[]; total: number }>("/policies/admission/rules", { params }).then((r) => r.data),
 };
+
+export interface AdmissionRuleRow {
+  id: string;
+  name: string;
+  enabled: boolean;
+  mode: string;
+  action: string;
+  category: string;
+  criteria: string[];
+}
 
 export interface AdmissionState {
   cluster_id: string;

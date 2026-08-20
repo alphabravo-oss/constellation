@@ -7,13 +7,15 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ShieldCheck } from "lucide-react";
 
-import { policies as policiesApi, type AdmissionStateInput } from "@/api/client";
+import { Link } from "react-router-dom";
+import { policies as policiesApi, type AdmissionStateInput, type AdmissionRuleRow } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { PageHeader } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch, Field, Select, TextInput } from "@/components/ui/form";
 import { VerdictBanner, type VerdictStatus } from "@/components/ui/verdict-banner";
+import { Power, PowerOff, Trash2 } from "lucide-react";
 
 export function AdmissionPage() {
   const { clusterId } = useCluster();
@@ -37,6 +39,22 @@ export function AdmissionPage() {
       : s.mode === "protect"
         ? { status: "ok", title: "Protecting — admission is enforcing", detail: `Violating workloads are blocked at admission. Default action: ${s.default_action}, on webhook failure: ${s.failure_policy}.` }
         : { status: "info", title: "Monitoring — admission is observing", detail: `Violations are logged but not blocked. Switch to Protect to enforce. On webhook failure: ${s.failure_policy}.` };
+
+  // admission rules table
+  const rulesQ = useQuery({
+    queryKey: ["admission-rules", clusterId],
+    queryFn: () => policiesApi.admissionRules(params),
+    enabled: !!clusterId,
+  });
+  const invalidateRules = () => qc.invalidateQueries({ queryKey: ["admission-rules", clusterId] });
+  const toggleRule = useMutation({
+    mutationFn: (r: AdmissionRuleRow) => policiesApi.update(r.id, { enabled: !r.enabled }),
+    onSuccess: invalidateRules,
+  });
+  const deleteRule = useMutation({
+    mutationFn: (id: string) => policiesApi.delete(id),
+    onSuccess: invalidateRules,
+  });
 
   // dry-run assessor
   const [image, setImage] = useState("");
@@ -90,6 +108,70 @@ export function AdmissionPage() {
               <p className="text-xs text-[color:var(--color-severity-medium)]">Protect mode blocks deployments that match a deny rule — validate with the dry-run below before rollout.</p>
             )}
           </div>
+        )}
+      </Card>
+
+      <Card
+        title="Admission rules"
+        description="The deny/monitor rules evaluated at admission time, with their criteria. Authored on the Policies page; build a rule there, then enable/disable it here."
+      >
+        {rulesQ.isPending ? (
+          <p className="text-sm text-muted-foreground">Loading rules…</p>
+        ) : (rulesQ.data?.rules.length ?? 0) === 0 ? (
+          <div className="px-2 py-4 text-center text-xs text-muted-foreground">
+            No admission rules yet. Create one on the <Link to={clusterId ? `/clusters/${clusterId}/policies` : "/policies"} className="text-[color:var(--color-primary)] hover:underline">Policies</Link> page.
+          </div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="text-[10px] uppercase tracking-wide text-muted-foreground">
+              <tr className="border-b border-border">
+                <th className="px-2 py-1.5 text-left">Rule</th>
+                <th className="px-2 py-1.5 text-left">Action</th>
+                <th className="px-2 py-1.5 text-left">Criteria</th>
+                <th className="px-2 py-1.5 text-left">Mode</th>
+                <th className="px-2 py-1.5 text-right"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rulesQ.data!.rules.map((rule) => {
+                const busy = toggleRule.isPending || deleteRule.isPending;
+                return (
+                  <tr key={rule.id} className={`border-b border-border/60 ${rule.enabled ? "" : "opacity-50"}`}>
+                    <td className="px-2 py-1.5 font-medium">{rule.name}</td>
+                    <td className="px-2 py-1.5">
+                      <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold" style={
+                        rule.action === "deny"
+                          ? { background: "color-mix(in oklab, var(--color-severity-critical) 16%, transparent)", color: "var(--color-severity-critical)" }
+                          : { background: "color-mix(in oklab, var(--color-severity-medium) 16%, transparent)", color: "var(--color-severity-medium)" }
+                      }>{rule.action}</span>
+                    </td>
+                    <td className="px-2 py-1.5">
+                      {rule.criteria.length === 0 ? <span className="text-xs text-muted-foreground">—</span> : (
+                        <span className="flex flex-wrap gap-1">
+                          {rule.criteria.map((c, i) => <span key={i} className="rounded bg-muted px-1.5 py-px text-[10px] text-muted-foreground">{c}</span>)}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-2 py-1.5 text-xs capitalize text-muted-foreground">{rule.mode}</td>
+                    <td className="px-2 py-1.5">
+                      <div className="flex items-center justify-end gap-1">
+                        <button type="button" title={rule.enabled ? "Disable" : "Enable"} disabled={busy}
+                          onClick={() => toggleRule.mutate(rule)}
+                          className="rounded p-1 hover:bg-accent disabled:opacity-40">
+                          {rule.enabled ? <PowerOff className="h-3.5 w-3.5" /> : <Power className="h-3.5 w-3.5" />}
+                        </button>
+                        <button type="button" title="Delete" disabled={busy}
+                          onClick={() => deleteRule.mutate(rule.id)}
+                          className="rounded p-1 text-status-error hover:bg-accent disabled:opacity-40">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         )}
       </Card>
 
