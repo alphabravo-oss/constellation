@@ -351,6 +351,34 @@ func (h *ImageScanResults) FileRisks(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ConfigChecks returns the image's CIS-Docker config-check report (NeuVector's per-image
+// checks tab). GET /image-scan-results/{id}/config-checks
+func (h *ImageScanResults) ConfigChecks(w http.ResponseWriter, r *http.Request) {
+	subj, _ := SubjectFrom(r.Context())
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	artifact, err := h.getArtifact(r, subj.OrgID, id, "config-checks", "constellation-image-config-checks-v1")
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "config-check report not found"})
+		return
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"image_scan_result_id": id,
+		"format":               "constellation-image-config-checks-v1",
+		"sha256":               artifact.SHA256,
+		"check_count":          artifact.PackageCount,
+		"created_at":           artifact.CreatedAt,
+		"config_checks":        json.RawMessage(artifact.Payload),
+	})
+}
+
 func (h *ImageScanResults) Signature(w http.ResponseWriter, r *http.Request) {
 	subj, _ := SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))

@@ -144,6 +144,7 @@ type completeScanRequest struct {
 	Signature      *scanner.SignatureResult     `json:"signature,omitempty"`
 	Layers         *scanner.ImageLayerMetadata  `json:"layers,omitempty"`
 	FileRisks      *scanner.ImageFileRiskReport `json:"file_risks,omitempty"`
+	ConfigChecks   *scanner.ImageConfigCheckReport `json:"config_checks,omitempty"`
 	Findings       []scanner.Finding            `json:"findings"`
 	Engines        []completeScanEngine         `json:"engines,omitempty"`
 	BundleMetadata *scanner.BundleMetadata      `json:"bundle_metadata,omitempty"`
@@ -784,7 +785,7 @@ UPDATE scan_targets
 			return
 		}
 		engines := completeScanEnginesToResults(body.Engines)
-		if len(body.Packages) > 0 || len(body.Secrets) > 0 || body.Signature != nil || body.Layers != nil || body.FileRisks != nil || successfulEngineRan(engines, "trivy") {
+		if len(body.Packages) > 0 || len(body.Secrets) > 0 || body.Signature != nil || body.Layers != nil || body.FileRisks != nil || body.ConfigChecks != nil || successfulEngineRan(engines, "trivy") {
 			if err := upsertImageScanArtifacts(r.Context(), tx, orgID, imageScanResultID, identity, scanner.ScanResult{
 				ImageRef:       identity.Ref,
 				Packages:       body.Packages,
@@ -792,6 +793,7 @@ UPDATE scan_targets
 				Signature:      body.Signature,
 				Layers:         body.Layers,
 				FileRisks:      body.FileRisks,
+				ConfigChecks:   body.ConfigChecks,
 				Findings:       body.Findings,
 				Engines:        engines,
 				BundleMetadata: body.BundleMetadata,
@@ -1372,6 +1374,23 @@ func upsertImageScanArtifacts(ctx context.Context, tx pgx.Tx, orgID, resultID uu
 			fileRiskPayload["vulndb_bundle"] = res.BundleMetadata
 		}
 		artifacts = append(artifacts, artifactRecord{artifactType: "file-risk", format: "constellation-image-file-risk-v1", payload: fileRiskPayload, rowCount: len(res.FileRisks.Findings)})
+	}
+
+	if res.ConfigChecks != nil {
+		configChecksPayload := map[string]interface{}{
+			"schema_version": "constellation.image-config-checks.v1",
+			"image_ref":      identity.Ref,
+			"image_digest":   identity.Digest,
+			"platform":       identity.Platform,
+			"checks":         res.ConfigChecks.Checks,
+			"pass_count":     res.ConfigChecks.PassCount,
+			"fail_count":     res.ConfigChecks.FailCount,
+			"warn_count":     res.ConfigChecks.WarnCount,
+			"status":         res.ConfigChecks.Status,
+			"reason":         res.ConfigChecks.Reason,
+			"error":          res.ConfigChecks.Error,
+		}
+		artifacts = append(artifacts, artifactRecord{artifactType: "config-checks", format: "constellation-image-config-checks-v1", payload: configChecksPayload, rowCount: len(res.ConfigChecks.Checks)})
 	}
 	for _, artifact := range artifacts {
 		raw, err := json.Marshal(artifact.payload)

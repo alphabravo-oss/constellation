@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import {
   imageScanResults,
   type ImageFileRiskFinding,
+  type ImageConfigCheck,
   type ImageLayerDescriptor,
   type ImagePackageLayer,
   type ImageScanFinding,
@@ -112,12 +113,19 @@ function ArtifactEvidenceSection({ result }: { result: ImageScanResult }) {
     queryFn: () => imageScanResults.signature(result.id),
     enabled: !!result.signature_status,
   });
+  // Config checks are computed for every image (no count gate); 404s on older scans.
+  const configChecksQ = useQuery({
+    queryKey: ["image-scan-config-checks", result.id],
+    queryFn: () => imageScanResults.configChecks(result.id),
+    retry: false,
+  });
 
   const layers = layersQ.data?.layer_metadata.layers ?? [];
   const packageLayers = packagesQ.data?.package_layers ?? [];
   const secrets = secretsQ.data?.secret_scan.secrets ?? [];
   const fileRisks = fileRisksQ.data?.file_risk.findings ?? [];
   const signature = signatureQ.data?.signature_scan.signature;
+  const configChecks = configChecksQ.data?.config_checks.checks ?? [];
 
   return (
     <section className="grid gap-4 2xl:grid-cols-2" data-testid="image-scan-artifact-evidence">
@@ -137,6 +145,7 @@ function ArtifactEvidenceSection({ result }: { result: ImageScanResult }) {
       <LayersEvidenceCard loading={layersQ.isPending && result.layer_count > 0} layers={layers} totalSize={layersQ.data?.layer_metadata.total_size_bytes} result={result} />
       <SecretsEvidenceCard loading={secretsQ.isPending && result.secret_count > 0} secrets={secrets} count={result.secret_count} />
       <FileRisksEvidenceCard loading={fileRisksQ.isPending && result.file_risk_count > 0} findings={fileRisks} count={result.file_risk_count} />
+      <ConfigChecksEvidenceCard loading={configChecksQ.isPending} checks={configChecks} />
     </section>
   );
 }
@@ -322,6 +331,50 @@ function SecretsEvidenceCard({ loading, secrets, count }: { loading: boolean; se
               </tr>
             ))}
             {secrets.length === 0 ? <tr><td colSpan={4} className="px-3 py-6 text-center text-xs text-muted-foreground">No secret evidence recorded.</td></tr> : null}
+          </tbody>
+        </table>
+      )}
+    </section>
+  );
+}
+
+function ConfigChecksEvidenceCard({ loading, checks }: { loading: boolean; checks: ImageConfigCheck[] }) {
+  const fails = checks.filter((c) => c.status === "fail").length;
+  const warns = checks.filter((c) => c.status === "warn").length;
+  const tone = (s: string): "danger" | "warn" | "accent" => (s === "fail" ? "danger" : s === "warn" ? "warn" : "accent");
+  return (
+    <section className="overflow-hidden rounded-lg border border-border bg-card">
+      <header className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
+        <div>
+          <h2 className="text-sm font-semibold">Image config checks</h2>
+          <p className="text-[10px] text-muted-foreground">CIS-Docker best-practice controls on the image config</p>
+        </div>
+        <div className="flex items-center gap-1">
+          {fails > 0 && <Pill tone="danger">{fails} fail</Pill>}
+          {warns > 0 && <Pill tone="warn">{warns} warn</Pill>}
+          {fails === 0 && warns === 0 && checks.length > 0 && <Pill tone="accent">pass</Pill>}
+        </div>
+      </header>
+      {loading ? (
+        <p className="p-3 text-xs text-muted-foreground">Loading config checks…</p>
+      ) : checks.length === 0 ? (
+        <p className="px-3 py-6 text-center text-xs text-muted-foreground">No config checks (image predates this scan feature — rescan to populate).</p>
+      ) : (
+        <table className="w-full text-sm">
+          <thead className="bg-muted text-xs uppercase text-muted-foreground">
+            <tr><th className="px-3 py-2 text-left">Check</th><th className="px-3 py-2 text-left">Status</th><th className="px-3 py-2 text-left">Detail</th></tr>
+          </thead>
+          <tbody>
+            {checks.map((c) => (
+              <tr key={c.id} className="border-t border-border">
+                <td className="px-3 py-2">
+                  <div className="text-xs font-medium">{c.title}</div>
+                  {c.status !== "pass" && c.remediation && <div className="mt-0.5 max-w-[320px] text-[11px] text-muted-foreground">{c.remediation}</div>}
+                </td>
+                <td className="px-3 py-2"><Pill tone={tone(c.status)}>{c.status}</Pill></td>
+                <td className="max-w-[220px] truncate px-3 py-2 font-mono text-[11px] text-muted-foreground" title={c.detail}>{c.detail || "-"}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
       )}

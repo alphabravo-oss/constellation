@@ -3453,6 +3453,30 @@ export interface ImageFileRisksResponse {
   file_risk: ImageFileRiskReport;
 }
 
+export interface ImageConfigCheck {
+  id: string;
+  title: string;
+  status: "pass" | "fail" | "warn";
+  severity: string;
+  detail?: string;
+  remediation?: string;
+}
+export interface ImageConfigChecksResponse {
+  image_scan_result_id: string;
+  format: "constellation-image-config-checks-v1";
+  sha256: string;
+  check_count: number;
+  created_at: string;
+  config_checks: {
+    checks?: ImageConfigCheck[];
+    pass_count?: number;
+    fail_count?: number;
+    warn_count?: number;
+    status?: string;
+    error?: string;
+  };
+}
+
 export interface ImageSignatureResult {
   image_ref?: string;
   status?: string;
@@ -3761,6 +3785,8 @@ export const imageScanResults = {
     api.get<ImageSecretsResponse>(`/image-scan-results/${encodeURIComponent(id)}/secrets`).then((r) => r.data),
   fileRisks: (id: string) =>
     api.get<ImageFileRisksResponse>(`/image-scan-results/${encodeURIComponent(id)}/file-risks`).then((r) => r.data),
+  configChecks: (id: string) =>
+    api.get<ImageConfigChecksResponse>(`/image-scan-results/${encodeURIComponent(id)}/config-checks`).then((r) => r.data),
   signature: (id: string) =>
     api.get<ImageSignatureResponse>(`/image-scan-results/${encodeURIComponent(id)}/signature`).then((r) => r.data),
   affectedWorkloads: (id: string) =>

@@ -489,6 +489,7 @@ type ScanResult struct {
 	Signature      *SignatureResult
 	Layers         *ImageLayerMetadata
 	FileRisks      *ImageFileRiskReport
+	ConfigChecks   *ImageConfigCheckReport
 	Findings       []Finding
 	Engines        []EngineResult
 	BundleMetadata *BundleMetadata `json:"bundle_metadata,omitempty"`

@@ -1238,6 +1238,7 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/image-scan-results/{id}/layers", s.requireVerb(rbac.VerbReadFindings, imageScanResults.Layers))
 			r.Get("/image-scan-results/{id}/secrets", s.requireVerb(rbac.VerbReadFindings, imageScanResults.Secrets))
 			r.Get("/image-scan-results/{id}/file-risks", s.requireVerb(rbac.VerbReadFindings, imageScanResults.FileRisks))
+			r.Get("/image-scan-results/{id}/config-checks", s.requireVerb(rbac.VerbReadFindings, imageScanResults.ConfigChecks))
 			r.Get("/image-scan-results/{id}/signature", s.requireVerb(rbac.VerbReadFindings, imageScanResults.Signature))
 			r.Get("/image-scan-results/{id}/sbom/spdx", s.requireVerb(rbac.VerbReadFindings, imageScanResults.SPDX))
 			r.Get("/image-scan-results/{id}/sbom/cyclonedx", s.requireVerb(rbac.VerbReadFindings, imageScanResults.CycloneDX))

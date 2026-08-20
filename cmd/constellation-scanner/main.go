@@ -131,6 +131,7 @@ func main() {
 		scanner.AttributeLayers(res.Layers, res.Packages, res.Findings)
 		if *fileRiskEnabled {
 			res.FileRisks = inspectImageFileRisks(ctx, *oneShotRef, "", *fileRiskMaxFindings)
+			res.ConfigChecks = inspectImageConfigChecks(ctx, *oneShotRef, "")
 		}
 		if *oneShotJSON != "" {
 			b, _ := json.MarshalIndent(res, "", "  ")
@@ -372,6 +373,7 @@ type scanResultPayload struct {
 	Signature      *scanner.SignatureResult     `json:"signature,omitempty"`
 	Layers         *scanner.ImageLayerMetadata  `json:"layers,omitempty"`
 	FileRisks      *scanner.ImageFileRiskReport `json:"file_risks,omitempty"`
+	ConfigChecks   *scanner.ImageConfigCheckReport `json:"config_checks,omitempty"`
 	Findings       []scanner.Finding            `json:"findings"`
 	Engines        []engineSummary              `json:"engines"`
 	BundleMetadata *scanner.BundleMetadata      `json:"bundle_metadata,omitempty"`
@@ -645,6 +647,7 @@ func (w *worker) executeJob(ctx context.Context, j *scanJob) {
 		scanner.AttributeLayers(res.Layers, res.Packages, res.Findings)
 		if w.fileRiskEnabled {
 			res.FileRisks = inspectImageFileRisks(ctx, imageRef, j.Platform, w.fileRiskMaxFindings)
+			res.ConfigChecks = inspectImageConfigChecks(ctx, imageRef, j.Platform)
 		}
 	}
 	payload := scanResultPayload{
@@ -660,6 +663,7 @@ func (w *worker) executeJob(ctx context.Context, j *scanJob) {
 		Signature:      res.Signature,
 		Layers:         res.Layers,
 		FileRisks:      res.FileRisks,
+		ConfigChecks:   res.ConfigChecks,
 		Findings:       res.Findings,
 		BundleMetadata: res.BundleMetadata,
 		StartedAt:      res.StartedAt,
@@ -926,6 +930,24 @@ func inspectImageLayers(ctx context.Context, imageRef, platform string) *scanner
 		out.Reason = "config history unavailable"
 	}
 	return out
+}
+
+// inspectImageConfigChecks evaluates the CIS-Docker image-config controls. Cheap (config
+// only, no layer walk) so it always runs alongside the file-risk pass.
+func inspectImageConfigChecks(ctx context.Context, imageRef, platform string) *scanner.ImageConfigCheckReport {
+	ref := strings.TrimSpace(imageRef)
+	identity := imageid.Parse(ref)
+	if identity.Repository == "" {
+		return nil
+	}
+	if identity.Normalized != "" {
+		ref = identity.Normalized
+	}
+	report, err := scanner.ScanImageConfigChecks(ctx, ref, platform, false)
+	if err != nil {
+		return &scanner.ImageConfigCheckReport{ImageRef: ref, Platform: strings.TrimSpace(platform), Status: "error", Reason: "image config unavailable", Error: err.Error()}
+	}
+	return report
 }
 
 func inspectImageFileRisks(ctx context.Context, imageRef, platform string, maxFindings int) *scanner.ImageFileRiskReport {
