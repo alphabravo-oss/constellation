@@ -1,24 +1,38 @@
 // RegistryImagesPage — drill-in from the registry list to its scanned image inventory,
 // correlated with vulnerability scan results. Closes the "registries are a dead-end list"
 // gap (the /registries/{id}/images endpoint existed but nothing navigated to it).
+import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { ChevronLeft, Boxes } from "lucide-react";
 
 import { registries, type RegistryImageRow } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
+import { useDebounced } from "@/hooks/useDebounced";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { StatCard } from "@/components/ui/stat-card";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Pager } from "@/components/ui/pager";
 import { fmtRelative } from "@/lib/format";
+
+const PAGE = 100;
 
 export function RegistryImagesPage() {
   const { regId } = useParams<{ regId: string }>();
   const { clusterId } = useCluster();
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(0);
+  const q = useDebounced(search.trim(), 300);
   const reg = useQuery({ queryKey: ["registry", regId], queryFn: () => registries.get(regId!), enabled: !!regId });
-  const imgs = useQuery({ queryKey: ["registry-images", regId], queryFn: () => registries.images(regId!), enabled: !!regId });
-  const rows = imgs.data ?? [];
+  const imgs = useQuery({
+    queryKey: ["registry-images", regId, q, page],
+    queryFn: () => registries.images(regId!, { q: q || undefined, limit: PAGE, offset: page * PAGE }),
+    enabled: !!regId,
+    placeholderData: keepPreviousData,
+  });
+  const rows = imgs.data?.images ?? [];
+  const total = imgs.data?.total ?? 0;
   const scanned = rows.filter((r) => r.scanned).length;
   const totalCrit = rows.reduce((s, r) => s + (r.critical ?? 0), 0);
   const totalHigh = rows.reduce((s, r) => s + (r.high ?? 0), 0);
@@ -51,17 +65,26 @@ export function RegistryImagesPage() {
         description="Image inventory discovered in this registry, correlated with vulnerability scan results."
       />
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard label="Images" value={rows.length} icon={<Boxes className="h-3.5 w-3.5" />} />
-        <StatCard label="Scanned" value={scanned} tone={scanned < rows.length ? "medium" : "low"} hint={`${rows.length - scanned} unscanned`} />
-        <StatCard label="Critical" value={totalCrit} tone={totalCrit > 0 ? "critical" : "neutral"} />
-        <StatCard label="High" value={totalHigh} tone={totalHigh > 0 ? "high" : "neutral"} />
+        <StatCard label="Images" value={total} icon={<Boxes className="h-3.5 w-3.5" />} />
+        <StatCard label="Scanned (page)" value={scanned} tone={scanned < rows.length ? "medium" : "low"} hint={`${rows.length - scanned} unscanned on page`} />
+        <StatCard label="Critical (page)" value={totalCrit} tone={totalCrit > 0 ? "critical" : "neutral"} />
+        <StatCard label="High (page)" value={totalHigh} tone={totalHigh > 0 ? "high" : "neutral"} />
       </section>
+      <input
+        value={search}
+        onChange={(e) => { setSearch(e.target.value); setPage(0); }}
+        placeholder="Search repository…"
+        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+      />
       {imgs.isPending ? (
         <p className="text-sm text-muted-foreground">Loading images…</p>
       ) : rows.length === 0 ? (
-        <EmptyState title="No images discovered" hint="Run a registry sync to populate the image inventory." />
+        <EmptyState title={q ? "No matching images" : "No images discovered"} hint={q ? "Try a different search." : "Run a registry sync to populate the image inventory."} />
       ) : (
-        <DataTable rows={rows} columns={columns} rowKey={(r) => r.id} defaultSort={{ id: "vulns", dir: "desc" }} />
+        <>
+          <DataTable rows={rows} columns={columns} rowKey={(r) => r.id} defaultSort={{ id: "vulns", dir: "desc" }} />
+          <Pager page={page} pageSize={PAGE} total={total} rowsOnPage={rows.length} onPage={setPage} />
+        </>
       )}
     </div>
   );

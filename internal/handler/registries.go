@@ -29,6 +29,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -662,6 +663,26 @@ func (h *Registries) Images(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
+	limit := 100
+	if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 && l <= 500 {
+		limit = l
+	}
+	offset := 0
+	if o, err := strconv.Atoi(r.URL.Query().Get("offset")); err == nil && o > 0 {
+		offset = o
+	}
+	q := strings.TrimSpace(r.URL.Query().Get("q")) // server-side repository search
+
+	// Total matching repositories so the client can page instead of fetch-all-then-truncate.
+	var total int
+	if err := h.db.Pool().QueryRow(r.Context(), `
+SELECT count(*) FROM registry_images ri
+ WHERE ri.registry_id = $1 AND ri.org_id = $2
+   AND ($3::text = '' OR ri.repository ILIKE '%'||$3||'%')`, id, subj.OrgID, q).Scan(&total); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
 	rows, err := h.db.Pool().Query(r.Context(), `
 SELECT ri.id, ri.repository, ri.tags, COALESCE(ri.digests, '{}'::jsonb), COALESCE(ri.last_pushed_at, ''),
        ri.first_seen_at, ri.last_seen_at,
@@ -681,8 +702,9 @@ SELECT ri.id, ri.repository, ri.tags, COALESCE(ri.digests, '{}'::jsonb), COALESC
        LIMIT 1
   ) sr ON true
  WHERE ri.registry_id = $1 AND ri.org_id = $2
+   AND ($5::text = '' OR ri.repository ILIKE '%'||$5||'%')
  ORDER BY sr.finding_count DESC NULLS LAST, ri.last_seen_at DESC
- LIMIT 500`, id, subj.OrgID)
+ LIMIT $3 OFFSET $4`, id, subj.OrgID, limit, offset, q)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -720,7 +742,7 @@ SELECT ri.id, ri.repository, ri.tags, COALESCE(ri.digests, '{}'::jsonb), COALESC
 		_ = json.Unmarshal(digestsRaw, &ir.Digests)
 		out = append(out, ir)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"images": out})
+	writeJSON(w, http.StatusOK, map[string]any{"images": out, "total": total, "limit": limit, "offset": offset})
 }
 
 // -----------------------------------------------------------------------------

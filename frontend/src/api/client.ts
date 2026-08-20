@@ -4741,8 +4741,8 @@ export const registries = {
   remove: (id: string) => api.delete<void>(`/registries/${id}`).then((r) => r.data),
   test:   (id: string) => api.post<RegistryTestResult>(`/registries/${id}/test`).then((r) => r.data),
   syncNow:(id: string) => api.post<RegistrySyncResult>(`/registries/${id}/sync-now`).then((r) => r.data),
-  images: (id: string) =>
-    api.get<{ images: RegistryImageRow[] }>(`/registries/${id}/images`).then((r) => r.data.images),
+  images: (id: string, params: { q?: string; limit?: number; offset?: number } = {}) =>
+    api.get<{ images: RegistryImageRow[]; total: number; limit: number; offset: number }>(`/registries/${id}/images`, { params: { ...params, q: params.q || undefined } }).then((r) => r.data),
 };
 
 // Wave N5 — Backup / Restore.
