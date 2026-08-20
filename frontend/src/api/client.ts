@@ -3972,7 +3972,35 @@ export const policies = {
     ).then((r) => r.data),
   simulate: (body: { manifest?: string; cluster_resource_id?: string }, params: { cluster_id?: string } = {}) =>
     api.post<PolicySimulation>("/policies/simulate", body, { params }).then((r) => r.data),
+  admissionState: (params: { cluster_id?: string } = {}) =>
+    api.get<AdmissionState>("/policies/admission/state", { params }).then((r) => r.data),
+  updateAdmissionState: (body: Partial<AdmissionStateInput>, params: { cluster_id?: string } = {}) =>
+    api.patch<AdmissionState>("/policies/admission/state", body, { params }).then((r) => r.data),
+  assess: (body: { image: string; namespace?: string; labels?: Record<string, string> }, params: { cluster_id?: string } = {}) =>
+    api.post<AdmissionAssessResult>("/policies/assess", body, { params }).then((r) => r.data),
 };
+
+export interface AdmissionState {
+  cluster_id: string;
+  enabled: boolean;
+  mode: "monitor" | "protect";
+  default_action: "allow" | "deny";
+  failure_policy: "ignore" | "fail";
+  updated_at?: string;
+}
+export interface AdmissionStateInput {
+  enabled: boolean;
+  mode: "monitor" | "protect";
+  default_action: "allow" | "deny";
+  failure_policy: "ignore" | "fail";
+}
+export interface AdmissionAssessResult {
+  image: string;
+  namespace: string;
+  decision: string;
+  enforcement_mode: string;
+  matches: Array<{ rule_id?: string; policy_name?: string; action?: string; reason?: string; [k: string]: unknown }>;
+}
 
 // ---------- New endpoints (Wave B) ----------
 export interface DashboardSummary {

@@ -128,6 +128,7 @@ export const CLUSTER_NAV: NavGroup[] = [
     id: "policy",
     label: "Policy",
     items: [
+      { path: "admission",     icon: ShieldCheck,     label: "Admission Control" },
       { path: "policies",      icon: FileText,        label: "Policies" },
       { path: "runtime-policies", icon: ScrollText,   label: "Runtime Policies" },
       { path: "groups",        icon: UsersRound,      label: "Groups" },
