@@ -8,6 +8,7 @@ import { cn } from "@/lib/cn";
 import { useCluster } from "@/hooks/useCluster";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
+import { downloadCsv } from "@/lib/csv";
 import { StatCard } from "@/components/ui/stat-card";
 
 const kinds = ["all", "image", "workload", "iac-resource", "ml-model", "cloud-resource"];
@@ -82,6 +83,13 @@ export function AssetsPage() {
         title="Assets"
         description="Risk-ranked inventory across images, workloads, IaC, ML, and cloud resources."
         actions={
+          <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => downloadCsv("constellation-assets", ["Name", "Kind", "Criticality", "OpenFindings", "Critical", "High", "Signed", "SBOMs", "Registry", "Tag", "LastSeen"],
+              filtered.map((a) => [a.name, a.kind, a.criticality, a.open_findings, a.critical_findings, a.high_findings, a.image_signed ? "yes" : "", a.sbom_count, a.registry ?? "", a.tag ?? "", a.last_seen_at]))}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-2 text-sm hover:bg-accent"
+          >Export CSV</button>
           <Link
             to={selected ? `/clusters/${clusterId}/assets/${selected.id}` : `/clusters/${clusterId}/assets`}
             className={cn(
@@ -92,6 +100,7 @@ export function AssetsPage() {
             <Boxes className="h-4 w-4" aria-hidden />
             Open Full Asset
           </Link>
+          </div>
         }
       />
 
