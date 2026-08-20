@@ -438,6 +438,7 @@ export interface ComplianceCheck {
   effective_status: "pass" | "fail" | "manual" | "not_applicable" | "exempted";
   severity: string;
   evidence: string;
+  remediation?: string;
   evaluated_at: string;
   // Regulation cross-mapping: standard-id -> { profile, references[], description }.
   // e.g. { "pci-dss-4.0": { references: ["2.2.1"] }, "nist-800-190": {...} }.
@@ -4497,6 +4498,12 @@ export const vulnProfiles = {
   update: (id: string, body: Omit<VulnProfile, "id"|"created_at"|"updated_at">) =>
     api.put<{ id: string }>(`/vuln-profiles/${id}`, body).then((r) => r.data),
   delete: (id: string) => api.delete(`/vuln-profiles/${id}`).then((r) => r.data),
+  exportYaml: (params: { cluster_id?: string } = {}) =>
+    api.get<string>("/vuln-profiles:export", { params, responseType: "text", headers: { Accept: "application/x-yaml" } }).then((r) => r.data),
+  importYaml: (yaml: string, params: { cluster_id?: string } = {}) =>
+    api.post<{ created: number; updated: number; results: Array<{ name: string; status: string; error?: string }> }>(
+      "/vuln-profiles:import", yaml, { params, headers: { "Content-Type": "application/x-yaml" } },
+    ).then((r) => r.data),
 };
 
 // ----- Wave D: Groups ------

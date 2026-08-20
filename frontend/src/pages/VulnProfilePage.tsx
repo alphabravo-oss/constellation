@@ -1,11 +1,25 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { CrudPage } from "@/components/CrudPage";
+import { ImportExportButtons } from "@/components/ImportExportButtons";
 import { vulnProfiles, type VulnProfile } from "@/api/client";
+import { useCluster } from "@/hooks/useCluster";
 
 export function VulnProfilePage() {
+  const { clusterId } = useCluster();
+  const qc = useQueryClient();
   return (
     <CrudPage<VulnProfile, Omit<VulnProfile, "id" | "created_at" | "updated_at">>
       title="Vulnerability Profiles"
       description="Per-domain and per-image suppression / escalation rules applied on scan completion. Reserved entry _recent matches CVEs published within N days."
+      headerActions={
+        <ImportExportButtons
+          filename="constellation-vuln-profiles.yaml"
+          label="profiles"
+          exportYaml={() => vulnProfiles.exportYaml({ cluster_id: clusterId })}
+          importYaml={(text) => vulnProfiles.importYaml(text, { cluster_id: clusterId })}
+          onImported={() => void qc.invalidateQueries({ queryKey: ["vuln-profiles", clusterId] })}
+        />
+      }
       queryKey="vuln-profiles"
       api={{
         list: (p) => vulnProfiles.list(p).then((d) => ({ items: d.profiles })),

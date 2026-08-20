@@ -839,6 +839,8 @@ func (s *Server) buildRouter() chi.Router {
 
 			vp := findings.NewVulnProfiles(s.db, s.auditLog)
 			r.Get("/vuln-profiles", s.requireVerb(rbac.VerbReadFindings, vp.List))
+			r.Get("/vuln-profiles:export", s.requireVerb(rbac.VerbReadFindings, vp.Export))
+			r.Post("/vuln-profiles:import", s.requireVerb(rbac.VerbManagePolicies, vp.Import))
 			r.Post("/vuln-profiles", s.requireVerb(rbac.VerbManagePolicies, vp.Create))
 			r.Put("/vuln-profiles/{id}", s.requireVerb(rbac.VerbManagePolicies, vp.Update))
 			r.Delete("/vuln-profiles/{id}", s.requireVerb(rbac.VerbManagePolicies, vp.Delete))
