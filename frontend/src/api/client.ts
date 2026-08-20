@@ -956,9 +956,31 @@ export interface BaselineTransition {
   reason: string;
 }
 
+export interface ProcessRule {
+  rule_id: string;
+  name: string;
+  path: string;
+  action: "allow" | "deny";
+  user: string;
+  allow_update: boolean;
+  enabled: boolean;
+  description: string;
+  updated_at: string;
+}
+export interface ProcessRuleInput {
+  name: string;
+  path?: string;
+  action?: "allow" | "deny";
+  user?: string;
+  allow_update?: boolean;
+  enabled?: boolean;
+  description?: string;
+}
+
 export interface BaselineDetail extends BaselineSummary {
   processes: BaselineProcess[];
   transitions: BaselineTransition[];
+  rules: ProcessRule[];
 }
 
 export const baselines = {
@@ -977,6 +999,12 @@ export const baselines = {
     api
       .post<BaselineSummary>(`/runtime/baselines/${encodeURIComponent(workloadID)}/mode`, body, { params })
       .then((r) => r.data),
+  createRule: (workloadID: string, body: ProcessRuleInput) =>
+    api.post<ProcessRule>(`/runtime/baselines/${encodeURIComponent(workloadID)}/rules`, body).then((r) => r.data),
+  updateRule: (workloadID: string, ruleID: string, body: ProcessRuleInput) =>
+    api.put<ProcessRule>(`/runtime/baselines/${encodeURIComponent(workloadID)}/rules/${encodeURIComponent(ruleID)}`, body).then((r) => r.data),
+  deleteRule: (workloadID: string, ruleID: string) =>
+    api.delete(`/runtime/baselines/${encodeURIComponent(workloadID)}/rules/${encodeURIComponent(ruleID)}`).then((r) => r.data),
 };
 
 export interface FileProfileSummary {

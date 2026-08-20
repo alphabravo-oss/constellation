@@ -135,6 +135,7 @@ type baselineDetailDTO struct {
 	baselineSummaryDTO
 	Processes   []baselineProcessDTO    `json:"processes"`
 	Transitions []baselineTransitionDTO `json:"transitions"`
+	Rules       []processRuleDTO        `json:"rules"`
 }
 
 // ----- HTTP handlers --------------------------------------------------------
@@ -228,6 +229,7 @@ func (h *Baselines) Get(w http.ResponseWriter, r *http.Request) {
 		baselineSummaryDTO: h.summary(state),
 		Processes:          processesDTO(state.Processes),
 		Transitions:        transitionsDTO(state.Transitions),
+		Rules:              h.loadProcessRules(r.Context(), subj.OrgID, wl.ClusterID, wl.WorkloadID),
 	}
 	httpx.WriteJSON(w, http.StatusOK, detail)
 }

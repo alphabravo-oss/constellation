@@ -4,15 +4,16 @@
 // Astronomer detail-as-a-page pattern). This is not an add/edit form — it is the
 // process-baseline detail view (learned exec list + lifecycle audit trail) with
 // inline promote/rollback mode-transition actions. Deep-linkable per workload.
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowRight, ArrowLeft, GitMerge } from "lucide-react";
+import { ArrowRight, ArrowLeft, GitMerge, Plus, Check, Ban, Power, PowerOff, Trash2 } from "lucide-react";
 
 import {
   baselines as baselinesApi,
   type BaselineMode,
   type BaselineDetail,
+  type ProcessRule,
 } from "@/api/client";
 import { EntityHeader } from "@/components/EntityHeader";
 import { useCluster } from "@/hooks/useCluster";
@@ -20,6 +21,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ModePill } from "@/components/ui/status-pill";
 import { DataTable, type Column } from "@/components/ui/data-table";
+import { TextInput, Select } from "@/components/ui/form";
 
 export function BaselineDetailPage() {
   const { clusterId, cluster } = useCluster();
@@ -43,6 +45,25 @@ export function BaselineDetailPage() {
       queryClient.invalidateQueries({ queryKey: ["baseline", workloadID, clusterId] });
       queryClient.invalidateQueries({ queryKey: ["baselines", clusterId] });
     },
+  });
+
+  const invalidateDetail = () => queryClient.invalidateQueries({ queryKey: ["baseline", workloadID, clusterId] });
+  const [newRule, setNewRule] = useState({ name: "", path: "", action: "allow" as "allow" | "deny", user: "" });
+  const createRule = useMutation({
+    mutationFn: () => baselinesApi.createRule(workloadID, { ...newRule }),
+    onSuccess: () => { setNewRule({ name: "", path: "", action: "allow", user: "" }); invalidateDetail(); },
+  });
+  const updateRule = useMutation({
+    mutationFn: (v: { r: ProcessRule; patch: Partial<ProcessRule> }) =>
+      baselinesApi.updateRule(workloadID, v.r.rule_id, {
+        name: v.r.name, path: v.r.path, action: v.r.action, user: v.r.user,
+        allow_update: v.r.allow_update, enabled: v.r.enabled, description: v.r.description, ...v.patch,
+      }),
+    onSuccess: invalidateDetail,
+  });
+  const deleteRule = useMutation({
+    mutationFn: (ruleID: string) => baselinesApi.deleteRule(workloadID, ruleID),
+    onSuccess: invalidateDetail,
   });
 
   const profile = detailQ.data;
@@ -127,6 +148,94 @@ export function BaselineDetailPage() {
             emptyState={<div className="px-2 py-4 text-center text-xs text-muted-foreground">No processes observed yet.</div>}
           />
         </div>
+      </Card>
+
+      <Card
+        title="Process rules"
+        description="Author allow/deny rules for specific processes (NeuVector-style). Deny blocks a process even if it was learned; allow whitelists one the baseline hasn't seen."
+      >
+        <form
+          className="mb-3 flex flex-wrap items-end gap-2"
+          onSubmit={(e) => { e.preventDefault(); if (newRule.name.trim() || newRule.path.trim()) createRule.mutate(); }}
+        >
+          <div className="min-w-[140px] flex-1">
+            <label className="mb-1 block text-[10px] uppercase tracking-wide text-muted-foreground">Process name</label>
+            <TextInput placeholder="nginx" value={newRule.name} onChange={(e) => setNewRule((s) => ({ ...s, name: e.target.value }))} />
+          </div>
+          <div className="min-w-[160px] flex-1">
+            <label className="mb-1 block text-[10px] uppercase tracking-wide text-muted-foreground">Path</label>
+            <TextInput placeholder="/usr/sbin/nginx" value={newRule.path} onChange={(e) => setNewRule((s) => ({ ...s, path: e.target.value }))} />
+          </div>
+          <div className="w-[110px]">
+            <label className="mb-1 block text-[10px] uppercase tracking-wide text-muted-foreground">User</label>
+            <TextInput placeholder="any" value={newRule.user} onChange={(e) => setNewRule((s) => ({ ...s, user: e.target.value }))} />
+          </div>
+          <div className="w-[100px]">
+            <label className="mb-1 block text-[10px] uppercase tracking-wide text-muted-foreground">Action</label>
+            <Select value={newRule.action} onChange={(e) => setNewRule((s) => ({ ...s, action: e.target.value as "allow" | "deny" }))}>
+              <option value="allow">Allow</option>
+              <option value="deny">Deny</option>
+            </Select>
+          </div>
+          <Button type="submit" variant="primary" size="sm" disabled={(!newRule.name.trim() && !newRule.path.trim()) || createRule.isPending}>
+            <Plus className="h-3.5 w-3.5" /> Add rule
+          </Button>
+        </form>
+        {profile.rules.length === 0 ? (
+          <div className="px-2 py-4 text-center text-xs text-muted-foreground">No process rules yet. Add one above to allow or deny a specific process.</div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="text-[10px] uppercase tracking-wide text-muted-foreground">
+              <tr className="border-b border-border">
+                <th className="px-2 py-1.5 text-left">Process</th>
+                <th className="px-2 py-1.5 text-left">Path</th>
+                <th className="px-2 py-1.5 text-left">User</th>
+                <th className="px-2 py-1.5 text-left">Action</th>
+                <th className="px-2 py-1.5 text-right"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {profile.rules.map((rule) => {
+                const busy = updateRule.isPending || deleteRule.isPending;
+                return (
+                  <tr key={rule.rule_id} className={`border-b border-border/60 ${rule.enabled ? "" : "opacity-50"}`}>
+                    <td className="px-2 py-1.5 font-mono text-xs">{rule.name || "—"}</td>
+                    <td className="px-2 py-1.5 font-mono text-xs text-muted-foreground">{rule.path || "any"}</td>
+                    <td className="px-2 py-1.5 text-xs text-muted-foreground">{rule.user || "any"}</td>
+                    <td className="px-2 py-1.5">
+                      <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold" style={
+                        rule.action === "deny"
+                          ? { background: "color-mix(in oklab, var(--color-severity-critical) 16%, transparent)", color: "var(--color-severity-critical)" }
+                          : { background: "color-mix(in oklab, var(--color-severity-low) 16%, transparent)", color: "var(--color-severity-low)" }
+                      }>
+                        {rule.action === "deny" ? <Ban className="h-3 w-3" /> : <Check className="h-3 w-3" />}{rule.action}
+                      </span>
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <div className="flex items-center justify-end gap-1">
+                        <button type="button" title={rule.action === "deny" ? "Set to allow" : "Set to deny"} disabled={busy}
+                          onClick={() => updateRule.mutate({ r: rule, patch: { action: rule.action === "deny" ? "allow" : "deny" } })}
+                          className="rounded p-1 hover:bg-accent disabled:opacity-40">
+                          {rule.action === "deny" ? <Check className="h-3.5 w-3.5" /> : <Ban className="h-3.5 w-3.5" />}
+                        </button>
+                        <button type="button" title={rule.enabled ? "Disable" : "Enable"} disabled={busy}
+                          onClick={() => updateRule.mutate({ r: rule, patch: { enabled: !rule.enabled } })}
+                          className="rounded p-1 hover:bg-accent disabled:opacity-40">
+                          {rule.enabled ? <PowerOff className="h-3.5 w-3.5" /> : <Power className="h-3.5 w-3.5" />}
+                        </button>
+                        <button type="button" title="Delete" disabled={busy}
+                          onClick={() => deleteRule.mutate(rule.rule_id)}
+                          className="rounded p-1 text-status-error hover:bg-accent disabled:opacity-40">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
       </Card>
 
       <Card title="Mode transitions" description="Audit trail of learn → monitor → enforce lifecycle changes.">
