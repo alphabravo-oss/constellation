@@ -360,6 +360,31 @@ export interface NodeDetail {
   vulnerabilities: HostVulnerability[];
 }
 
+export interface ContainerRow {
+  node: string;
+  id: string;
+  name: string;
+  namespace: string;
+  pod_name: string;
+  image: string;
+  state: string;
+  workload?: string;
+  privileged: boolean;
+  run_as_root: boolean;
+  risk_score: number;
+  critical: number;
+  high: number;
+}
+export interface ContainerListResponse {
+  cluster_id: string;
+  items: ContainerRow[];
+  summary: { total: number; running: number; privileged: number; run_as_root: number };
+}
+export const containers = {
+  list: (clusterID: string) =>
+    api.get<ContainerListResponse>(`/clusters/${encodeURIComponent(clusterID)}/containers`).then((r) => r.data),
+};
+
 export const nodes = {
   list: (clusterID: string) =>
     api.get<NodeListResponse>(`/clusters/${encodeURIComponent(clusterID)}/nodes`).then((r) => r.data),

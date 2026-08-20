@@ -99,6 +99,7 @@ const RuntimeSignatureFormPage = lazy(() => import("./pages/RuntimeSignatureForm
 const FileMonitorFormPage   = lazy(() => import("./pages/FileMonitorFormPage").then((m) => ({ default: m.FileMonitorFormPage })));
 const RegistriesPage        = lazy(() => import("./pages/RegistriesPage").then((m) => ({ default: m.RegistriesPage })));
 const RegistryImagesPage    = lazy(() => import("./pages/RegistryImagesPage").then((m) => ({ default: m.RegistryImagesPage })));
+const ContainersPage        = lazy(() => import("./pages/ContainersPage").then((m) => ({ default: m.ContainersPage })));
 const ComponentsPage        = lazy(() => import("./pages/ComponentsPage").then((m) => ({ default: m.ComponentsPage })));
 
 function SuspenseRoute({ children }: { children: React.ReactNode }) {
@@ -142,6 +143,7 @@ export function App() {
           <Route path="findings/:fid" element={<SuspenseRoute><FindingDetailPage /></SuspenseRoute>} />
           <Route path="cve/:cveId"    element={<CVEDetailPage />} />
           <Route path="nodes"         element={<SuspenseRoute><NodesPage /></SuspenseRoute>} />
+          <Route path="containers"    element={<SuspenseRoute><ContainersPage /></SuspenseRoute>} />
           <Route path="nodes/:nodeName" element={<SuspenseRoute><NodeDetailPage /></SuspenseRoute>} />
           <Route path="images"        element={<SuspenseRoute><ImageScansPage /></SuspenseRoute>} />
           <Route path="images/:resultId" element={<SuspenseRoute><ImageScanDetailPage /></SuspenseRoute>} />

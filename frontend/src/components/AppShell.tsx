@@ -92,6 +92,7 @@ export const CLUSTER_NAV: NavGroup[] = [
     label: "Assets",
     items: [
       { path: "nodes",         icon: Server,          label: "Nodes" },
+      { path: "containers",    icon: Boxes,           label: "Containers" },
       { path: "images",        icon: PackageSearch,   label: "Images" },
       { path: "deployments",   icon: Layers,          label: "Workloads" },
       { path: "assets",        icon: Boxes,           label: "Assets" },
