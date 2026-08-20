@@ -893,6 +893,7 @@ func (s *Server) buildRouter() chi.Router {
 
 			netConv := network.NewNetworkConversations(s.db).WithLiveGraph(s.live)
 			r.Get("/network/conversations", s.requireVerb(rbac.VerbReadFindings, netConv.List))
+			r.Get("/network/conversations/entries", s.requireVerb(rbac.VerbReadFindings, netConv.Detail))
 			// Plan B5: StreamFlows SSE fallback, only when the hot graph is on.
 			if s.live != nil {
 				streamFlows := network.NewStreamFlows(s.live)

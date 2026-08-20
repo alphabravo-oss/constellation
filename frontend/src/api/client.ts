@@ -1822,6 +1822,30 @@ export interface NetworkWorkload {
   /** Real per-severity open-finding counts from the deployments row. */
   critical_count?: number;
   high_count?: number;
+  /** Strongest group policy mode covering this workload (discover/monitor/protect); "" if ungrouped. NV node badging. */
+  policy_mode?: string;
+}
+
+export interface ConversationEntry {
+  protocol: string;
+  application: string;
+  port: number;
+  verdict: string;
+  bytes: number;
+  client_bytes: number; // from→to (initiator)
+  server_bytes: number; // to→from (responses)
+  packets: number;
+  sessions: number;
+  severity: number;
+  threat_id: number;
+  last_seen_at: string;
+}
+export interface ConversationEntries {
+  from: string;
+  to: string;
+  window_hours: number;
+  entries: ConversationEntry[];
+  totals: { bytes: number; client_bytes: number; server_bytes: number; packets: number; sessions: number };
 }
 
 export interface NetworkFlow {
@@ -2107,6 +2131,10 @@ export const network = {
     api.get<ExposureResponse>("/network/exposure", { params }).then((r) => r.data),
   conversations: (params: { hours?: number; cluster_id?: string } = {}) =>
     api.get<NetworkConversations>("/network/conversations", { params }).then((r) => r.data),
+  // NV per-conversation drill-down: every protocol/port/app stream between from→to,
+  // with directional (in/out) bytes + session counts.
+  conversationEntries: (params: { from: string; to: string; hours?: number; cluster_id?: string }) =>
+    api.get<ConversationEntries>("/network/conversations/entries", { params }).then((r) => r.data),
   /** Subscribes to the GET /network/flows:stream SSE channel and invokes
    *  onFlow for each live flow. Returns an unsubscribe fn.
    *

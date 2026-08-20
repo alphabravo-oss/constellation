@@ -819,6 +819,8 @@ function NetworkMapInner() {
       <FlowInspectorPopover
         open={popoverOpen && !!selectedFlow}
         flow={selectedFlow}
+        clusterID={clusterID}
+        hours={hours}
         recentFlows={liveFlows}
         threats={threatsQ.data ?? []}
         lifecycle={lifecycleItems}
@@ -1019,6 +1021,8 @@ function CanvasInner({
 function FlowInspectorPopover({
   open,
   flow,
+  clusterID,
+  hours,
   recentFlows,
   threats,
   lifecycle,
@@ -1027,6 +1031,8 @@ function FlowInspectorPopover({
 }: {
   open: boolean;
   flow: NetworkFlow | null;
+  clusterID: string;
+  hours: number;
   recentFlows: NetworkRecentFlow[];
   threats: RuntimeThreat[];
   lifecycle: NetworkPolicyLifecycle[];
@@ -1116,6 +1122,7 @@ function FlowInspectorPopover({
             <RadixTabs.List className="flex border-b border-border px-2" data-testid="network-flow-inspector-tabs">
               {[
                 { v: "flow", l: "Flow" },
+                { v: "streams", l: "Streams" },
                 { v: "threat", l: "Threat" },
                 { v: "policy", l: "Policy" },
                 { v: "history", l: "History" },
@@ -1137,6 +1144,9 @@ function FlowInspectorPopover({
             <div className="flex-1 overflow-y-auto px-4 py-3">
               <RadixTabs.Content value="flow" className="outline-none">
                 <FlowTab flow={flow} threats={threats} />
+              </RadixTabs.Content>
+              <RadixTabs.Content value="streams" className="outline-none">
+                <StreamsTab flow={flow} clusterID={clusterID} hours={hours} active={tab === "streams"} />
               </RadixTabs.Content>
               <RadixTabs.Content value="threat" className="outline-none">
                 <ThreatTab flow={flow} threats={threats} />
@@ -1228,6 +1238,67 @@ const DP_APP_NAMES: Record<number, string> = {
 
 function appName(id: number): string {
   return DP_APP_NAMES[id] ?? `app ${id}`;
+}
+
+// StreamsTab shows the FULL conversation between the two endpoints (NV's per-conversation
+// drill-down): every protocol/port/application stream with directional in/out bytes +
+// session counts. One clicked edge is a single proto/port; this consolidates the whole pair.
+function StreamsTab({ flow, clusterID, hours, active }: { flow: NetworkFlow; clusterID: string; hours: number; active: boolean }) {
+  const q = useQuery({
+    queryKey: ["conv-entries", clusterID, flow.src, flow.dst, hours],
+    queryFn: () => network.conversationEntries({ from: flow.src, to: flow.dst, cluster_id: clusterID || undefined, hours }),
+    enabled: active && !!flow.src && !!flow.dst,
+    staleTime: 30_000,
+  });
+  if (q.isPending) return <p className="text-xs text-muted-foreground">Loading streams…</p>;
+  const data = q.data;
+  const entries = data?.entries ?? [];
+  if (entries.length === 0) return <p className="text-xs text-muted-foreground">No aggregated streams recorded for this pair in the window.</p>;
+  const t = data!.totals;
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-3 gap-2">
+        <Field label="Streams" value={String(entries.length)} />
+        <Field label="In (→)" value={formatBytes(t.client_bytes)} />
+        <Field label="Out (←)" value={formatBytes(t.server_bytes)} />
+        <Field label="Sessions" value={t.sessions.toLocaleString()} />
+        <Field label="Total bytes" value={formatBytes(t.bytes)} />
+        <Field label="Packets" value={t.packets.toLocaleString()} />
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[11px]">
+          <thead>
+            <tr className="text-left text-[10px] uppercase tracking-wider text-muted-foreground">
+              <th className="py-1 pr-2 font-medium">Proto / App</th>
+              <th className="py-1 pr-2 font-medium">Port</th>
+              <th className="py-1 pr-2 text-right font-medium">In →</th>
+              <th className="py-1 pr-2 text-right font-medium">Out ←</th>
+              <th className="py-1 pr-2 text-right font-medium">Sess</th>
+              <th className="py-1 font-medium">Verdict</th>
+            </tr>
+          </thead>
+          <tbody className="text-mono">
+            {entries.map((e, i) => (
+              <tr key={i} className="border-t border-border/50">
+                <td className="py-1 pr-2">{e.protocol}{e.application ? <span className="text-muted-foreground">/{e.application}</span> : ""}</td>
+                <td className="py-1 pr-2 text-muted-foreground">{e.port || "—"}</td>
+                <td className="py-1 pr-2 text-right">{formatBytes(e.client_bytes)}</td>
+                <td className="py-1 pr-2 text-right">{formatBytes(e.server_bytes)}</td>
+                <td className="py-1 pr-2 text-right">{e.sessions.toLocaleString()}</td>
+                <td className="py-1">
+                  <span className={cn("rounded px-1 text-[10px]", e.verdict === "deny" ? "text-[color:var(--color-status-error)]" : "text-muted-foreground")}>{e.verdict}</span>
+                  {e.threat_id > 0 && <span className="ml-1 text-[color:var(--color-status-error)]" title={`threat ${e.threat_id}`}>⚠</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[10px] leading-tight text-muted-foreground/80">
+        In = {shortName(flow.src)}→{shortName(flow.dst)} payload; Out = responses. Directional bytes are populated on DPI (dp) flows; other sources report totals only.
+      </p>
+    </div>
+  );
 }
 
 function FlowTab({ flow, threats }: { flow: NetworkFlow; threats: RuntimeThreat[] }) {
@@ -2059,11 +2130,17 @@ function NodeLabel({ workload, kind }: { workload: NetworkWorkload; kind?: Netwo
       : tier === "high"
         ? "var(--color-status-warning)"
         : null;
-  // The risk counts badge formats as `12C 84H` when risk_score ≥ 85, else just
-  // findings count; the real data only gives us totals so we synthesise the
-  // breakdown from finding_count + risk tier.
-  const criticalCount = tier === "critical" ? Math.max(1, Math.round(workload.finding_count * 0.18)) : 0;
-  const highCount = Math.max(0, workload.finding_count - criticalCount);
+  // Real per-severity counts from the workload row (deployments.critical_count/high_count).
+  const criticalCount = workload.critical_count ?? 0;
+  const highCount = workload.high_count ?? 0;
+  // NV node policy-mode badge: discover = unprotected (learning only), monitor = alerting,
+  // protect = blocking. Only badge when a mode is known (workload is in a group).
+  const mode = workload.policy_mode || "";
+  const modeColor =
+    mode === "protect" ? "var(--color-severity-low)"
+      : mode === "monitor" ? "var(--color-severity-medium)"
+        : mode === "discover" ? "var(--color-severity-high)"
+          : null;
   return (
     <div className="relative">
       <div className="flex items-center gap-2">
@@ -2079,6 +2156,16 @@ function NodeLabel({ workload, kind }: { workload: NetworkWorkload; kind?: Netwo
                 data-testid={`network-node-kind-${kind}`}
               >
                 {kind}
+              </span>
+            )}
+            {modeColor && (
+              <span
+                className="shrink-0 rounded-sm px-1 text-[9px] uppercase tracking-wide font-medium"
+                style={{ background: `color-mix(in oklab, ${modeColor} 18%, transparent)`, color: modeColor }}
+                title={`Policy mode: ${mode}${mode === "discover" ? " (unprotected — learning only)" : ""}`}
+                data-testid={`network-node-mode-${mode}`}
+              >
+                {mode}
               </span>
             )}
           </div>
@@ -2183,7 +2270,9 @@ function ThreatsCard({
   onPivot: (flowID: string) => void;
 }) {
   const [drilldownID, setDrilldownID] = useState<string | null>(null);
-  const [collapsed, setCollapsed] = useState(false);
+  // Start collapsed so the card never auto-opens over the canvas — it's a compact
+  // "DPI threats · N" pill the operator expands on demand (keeps the map unobstructed).
+  const [collapsed, setCollapsed] = useState(true);
   if (threats.length === 0) return null;
   // Top 5 by reported_at desc. The API already orders by `at DESC`, so we
   // just trim. Higher-severity-first sorting is tempting but the time

@@ -155,10 +155,21 @@ SELECT id::text, name, state
 }
 
 func (h *Network) workloads(r *http.Request, orgID uuid.UUID, clusterID *uuid.UUID, namespace string) ([]map[string]any, error) {
+	// wl_mode: each workload's strongest group policy_mode (NV node badging — Discover/
+	// Monitor/Protect). A workload's mode is the max over the groups it belongs to; resolved
+	// via groups.members ("ns/name"), the same source the dashboard/exposure rollups use.
 	rows, err := h.db.Pool().Query(r.Context(), `
-SELECT d.cluster_id::text, COALESCE(c.name, ''), d.namespace, d.name, d.kind, d.risk_score, d.finding_count, d.critical_count, d.high_count
+WITH wl_mode AS (
+  SELECT jsonb_array_elements_text(g.members) AS wl,
+         MAX(CASE g.policy_mode WHEN 'protect' THEN 3 WHEN 'monitor' THEN 2 ELSE 1 END) AS r
+    FROM groups g
+   WHERE g.org_id = $1 AND ($2::uuid IS NULL OR g.cluster_id = $2)
+   GROUP BY 1)
+SELECT d.cluster_id::text, COALESCE(c.name, ''), d.namespace, d.name, d.kind, d.risk_score, d.finding_count, d.critical_count, d.high_count,
+       CASE m.r WHEN 3 THEN 'protect' WHEN 2 THEN 'monitor' WHEN 1 THEN 'discover' ELSE '' END AS policy_mode
   FROM deployments d
   LEFT JOIN clusters c ON c.id = d.cluster_id
+  LEFT JOIN wl_mode m ON m.wl = d.namespace || '/' || d.name
  WHERE d.org_id = $1
    AND ($2::uuid IS NULL OR d.cluster_id = $2)
    AND ($3::text = '' OR d.namespace = $3)
@@ -169,9 +180,9 @@ SELECT d.cluster_id::text, COALESCE(c.name, ''), d.namespace, d.name, d.kind, d.
 	defer rows.Close()
 	out := []map[string]any{}
 	for rows.Next() {
-		var cluster, clusterName, ns, name, kind string
+		var cluster, clusterName, ns, name, kind, policyMode string
 		var risk, findings, critical, high int
-		if err := rows.Scan(&cluster, &clusterName, &ns, &name, &kind, &risk, &findings, &critical, &high); err != nil {
+		if err := rows.Scan(&cluster, &clusterName, &ns, &name, &kind, &risk, &findings, &critical, &high, &policyMode); err != nil {
 			return nil, err
 		}
 		out = append(out, map[string]any{
@@ -179,6 +190,7 @@ SELECT d.cluster_id::text, COALESCE(c.name, ''), d.namespace, d.name, d.kind, d.
 			"cluster_id": cluster, "cluster_name": clusterName,
 			"risk_score": risk, "finding_count": findings,
 			"critical_count": critical, "high_count": high,
+			"policy_mode": policyMode,
 		})
 	}
 	return out, rows.Err()
