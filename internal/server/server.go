@@ -663,6 +663,7 @@ func (s *Server) buildRouter() chi.Router {
 			r.Post("/clusters/{id}/network-rules", s.requireVerb(rbac.VerbManagePolicies, networkMap.UpsertNetworkRule))
 			r.Put("/clusters/{id}/network-rules", s.requireVerb(rbac.VerbManagePolicies, networkMap.UpsertNetworkRule))
 			r.Delete("/clusters/{id}/network-rules", s.requireVerb(rbac.VerbManagePolicies, networkMap.DeleteNetworkRule))
+			r.Post("/clusters/{id}/network-rules:move-top", s.requireVerb(rbac.VerbManagePolicies, networkMap.MoveNetworkRuleToTop))
 
 			// Wave 5: user-facing list of DPI threats. Same auth as findings.
 			runtimeThreats := runtime.NewRuntimeThreats(s.db)
@@ -934,6 +935,7 @@ func (s *Server) buildRouter() chi.Router {
 
 			dashboard := handler.NewDashboard(s.db)
 			r.Get("/dashboard/summary", s.requireVerb(rbac.VerbReadFindings, dashboard.Summary))
+			r.Get("/dashboard/events-timeline", s.requireVerb(rbac.VerbReadFindings, dashboard.EventsTimeline))
 
 			// B1: runtime-mutable system config (egress proxy, TLS verify + CA bundle,
 			// syslog/SIEM target, scanner autoscale). GET redacts secrets; PATCH applies

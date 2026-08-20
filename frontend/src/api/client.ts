@@ -419,6 +419,8 @@ export const networkRules = {
     api.put<{ ok: boolean; id: number; cfg_type: string }>(`/clusters/${encodeURIComponent(clusterID)}/network-rules`, body).then((r) => r.data),
   remove: (clusterID: string, from: string, to: string) =>
     api.delete(`/clusters/${encodeURIComponent(clusterID)}/network-rules?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`).then((r) => r.data),
+  moveTop: (clusterID: string, from: string, to: string) =>
+    api.post<{ ok: boolean; priority: number }>(`/clusters/${encodeURIComponent(clusterID)}/network-rules:move-top`, { from, to }).then((r) => r.data),
 };
 
 export const nodes = {
@@ -4134,12 +4136,17 @@ export interface ExposedService {
   critical: number;
   high: number;
   risk_score: number;
+  policy_mode: string; // strongest group mode covering the workload (discover=unprotected); "" if ungrouped
 }
 export interface ExposureResponse { ingress: ExposedService[]; egress: ExposedService[] }
 
 export const dashboard = {
   summary: (params: { cluster_id?: string } = {}) =>
     api.get<DashboardSummary>("/dashboard/summary", { params }).then((r) => r.data),
+  // NV Security Events timeline: kept separate from summary — it scans the large events
+  // partition (~6s) and must not slow the primary summary.
+  eventsTimeline: (params: { cluster_id?: string } = {}) =>
+    api.get<{ events_timeline: Array<{ date: string; total: number; critical: number }> }>("/dashboard/events-timeline", { params }).then((r) => r.data),
 };
 
 export const settingsApi = {

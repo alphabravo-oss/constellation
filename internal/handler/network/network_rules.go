@@ -310,6 +310,64 @@ ON CONFLICT (org_id, cluster_id, from_ep, to_ep) DO UPDATE SET
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "id": ruleID(body.From, body.To), "cfg_type": cfgType})
 }
 
+// MoveNetworkRuleToTop bumps a rule to the highest precedence (lowest priority number) so it
+// evaluates first — NV's "Add to Top" / "Move to" primitive. Sets the pair's override priority
+// to (current min override priority − 10), creating a learned_override row if the pair had none
+// (a learned rule keeps its allow action; only precedence changes).
+// POST /api/v1/clusters/{id}/network-rules:move-top {from,to}
+func (h *Network) MoveNetworkRuleToTop(w http.ResponseWriter, r *http.Request) {
+	subj, ok := authctx.SubjectFrom(r.Context())
+	if !ok {
+		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "subject required"})
+		return
+	}
+	clusterID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster id"})
+		return
+	}
+	var body struct {
+		From string `json:"from"`
+		To   string `json:"to"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	body.From, body.To = strings.TrimSpace(body.From), strings.TrimSpace(body.To)
+	if body.From == "" || body.To == "" {
+		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "from and to are required"})
+		return
+	}
+	// New top priority: below every existing override. Default 990 when none exist so a first
+	// move still lands above the 1000-default upsert baseline.
+	var newPri int
+	_ = h.db.Pool().QueryRow(r.Context(),
+		`SELECT COALESCE(MIN(priority), 1000) - 10 FROM network_rule_overrides WHERE org_id = $1 AND cluster_id = $2`,
+		subj.OrgID, clusterID).Scan(&newPri)
+	var learned bool
+	_ = h.db.Pool().QueryRow(r.Context(), `
+SELECT EXISTS (
+  SELECT 1 FROM network_flow_rollups
+   WHERE org_id = $1 AND cluster_id = $2 AND src_workload = $3 AND dst_workload = $4)`,
+		subj.OrgID, clusterID, body.From, body.To).Scan(&learned)
+	cfgType := "user_created"
+	if learned {
+		cfgType = "learned_override"
+	}
+	if _, err := h.db.Pool().Exec(r.Context(), `
+INSERT INTO network_rule_overrides
+  (org_id, cluster_id, from_ep, to_ep, priority, cfg_type, updated_by, updated_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
+ON CONFLICT (org_id, cluster_id, from_ep, to_ep) DO UPDATE SET
+  priority = EXCLUDED.priority, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+		subj.OrgID, clusterID, body.From, body.To, newPri, cfgType, subj.UserID); err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "priority": newPri})
+}
+
 // DeleteNetworkRule drops the override for a pair. A manual rule vanishes; a learned rule
 // reverts to its learned defaults. DELETE /api/v1/clusters/{id}/network-rules?from=&to=
 func (h *Network) DeleteNetworkRule(w http.ResponseWriter, r *http.Request) {

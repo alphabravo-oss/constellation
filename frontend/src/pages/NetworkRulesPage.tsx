@@ -6,7 +6,7 @@
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
-import { Network as NetworkIcon, Check, Ban, Plus, Power, PowerOff, Trash2, Pencil } from "lucide-react";
+import { Network as NetworkIcon, Check, Ban, Plus, Power, PowerOff, Trash2, Pencil, ArrowUpToLine } from "lucide-react";
 
 import { networkRules, type NetworkRule } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
@@ -46,6 +46,10 @@ export function NetworkRulesPage() {
     mutationFn: (r: NetworkRule) => networkRules.remove(clusterId!, r.from, r.to),
     onSuccess: invalidate,
   });
+  const moveTop = useMutation({
+    mutationFn: (r: NetworkRule) => networkRules.moveTop(clusterId!, r.from, r.to),
+    onSuccess: invalidate,
+  });
   const editHref = (r: NetworkRule) =>
     `${clusterId ? `/clusters/${clusterId}` : ""}/network-rules/new?from=${encodeURIComponent(r.from)}&to=${encodeURIComponent(r.to)}&ports=${encodeURIComponent(r.ports)}&applications=${encodeURIComponent(r.applications.join(", "))}&action=${r.action}&comment=${encodeURIComponent(r.comment)}`;
   const all = q.data?.rules ?? [];
@@ -73,11 +77,17 @@ export function NetworkRulesPage() {
     { id: "learned", header: "Type", width: "88px", cell: (r) => <span className="rounded bg-muted px-1.5 py-px text-[10px] text-muted-foreground">{r.learned ? "learned" : r.cfg_type}</span> },
     { id: "matches", header: "Matches", numeric: true, width: "96px", cell: (r) => <span className="text-mono text-xs">{r.match_counter.toLocaleString()}</span>, sort: (a, b) => a.match_counter - b.match_counter },
     { id: "last", header: "Last match", numeric: true, width: "110px", cell: (r) => <span className="text-[10px] text-muted-foreground">{r.last_match_timestamp ? fmtRelative(new Date(r.last_match_timestamp * 1000).toISOString()) : "—"}</span>, sort: (a, b) => a.last_match_timestamp - b.last_match_timestamp },
-    { id: "actions", header: "", width: "132px", cell: (r) => {
-        const busy = upsert.isPending || remove.isPending;
+    { id: "actions", header: "", width: "160px", cell: (r) => {
+        const busy = upsert.isPending || remove.isPending || moveTop.isPending;
         const overridden = r.cfg_type !== "learned"; // has a persisted override / manual rule
+        const isTop = rows.length > 0 && r.id === rows[0].id;
         return (
           <div className="flex items-center justify-end gap-1">
+            <button type="button" title={isTop ? "Already highest precedence" : "Move to top (evaluate first)"} disabled={busy || isTop}
+              onClick={() => moveTop.mutate(r)}
+              className="rounded p-1 hover:bg-accent disabled:opacity-40">
+              <ArrowUpToLine className="h-3.5 w-3.5" />
+            </button>
             <button type="button" title={r.action === "deny" ? "Set to allow" : "Set to deny"} disabled={busy}
               onClick={() => upsert.mutate({ ...r, _action: r.action === "deny" ? "allow" : "deny" })}
               className="rounded p-1 hover:bg-accent disabled:opacity-40">

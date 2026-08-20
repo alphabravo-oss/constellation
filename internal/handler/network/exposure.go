@@ -24,6 +24,7 @@ type exposedServiceDTO struct {
 	Critical      int      `json:"critical"`
 	High          int      `json:"high"`
 	RiskScore     int      `json:"risk_score"`
+	PolicyMode    string   `json:"policy_mode"` // strongest group mode covering the workload (NV per-endpoint policy_mode): discover=unprotected
 }
 
 // Exposure returns the cluster's externally-reachable services split into ingress
@@ -55,7 +56,15 @@ func (h *Network) Exposure(w http.ResponseWriter, r *http.Request) {
 		if direction == "egress" {
 			internalCol, externalWL, externalAddr = "nf.src_workload", "nf.dst_workload", "nf.dst_addr"
 		}
+		// wl_mode: strongest group policy_mode covering each workload (NV per-endpoint
+		// policy_mode). An exposed service still in discover is unprotected attack surface.
 		sql := `
+WITH wl_mode AS (
+  SELECT jsonb_array_elements_text(g.members) AS wl,
+         MAX(CASE g.policy_mode WHEN 'protect' THEN 3 WHEN 'monitor' THEN 2 ELSE 1 END) AS r
+    FROM groups g
+   WHERE g.org_id = $1 AND ($2::uuid IS NULL OR g.cluster_id = $2)
+   GROUP BY 1)
 SELECT ` + internalCol + ` AS workload,
        count(DISTINCT ` + externalAddr + `)::int                                   AS external_peers,
        COALESCE(array_agg(DISTINCT nf.protocol) FILTER (WHERE COALESCE(nf.protocol,'') <> ''), '{}') AS protocols,
@@ -63,11 +72,13 @@ SELECT ` + internalCol + ` AS workload,
        COALESCE(sum(nf.sessions), 0)::bigint                                        AS sessions,
        COALESCE(max(d.critical_count), 0)::int                                      AS critical,
        COALESCE(max(d.high_count), 0)::int                                          AS high,
-       COALESCE(max(d.risk_score), 0)::int                                          AS risk_score
+       COALESCE(max(d.risk_score), 0)::int                                          AS risk_score,
+       CASE max(m.r) WHEN 3 THEN 'protect' WHEN 2 THEN 'monitor' WHEN 1 THEN 'discover' ELSE '' END AS policy_mode
   FROM network_flows nf
   LEFT JOIN deployments d
     ON d.org_id = nf.org_id AND d.cluster_id = nf.cluster_id
    AND (d.namespace || '/' || d.name) = ` + internalCol + `
+  LEFT JOIN wl_mode m ON m.wl = ` + internalCol + `
  WHERE nf.org_id = $1
    AND ($2::uuid IS NULL OR nf.cluster_id = $2)
    AND ` + externalWL + ` = 'external'
@@ -86,7 +97,7 @@ SELECT ` + internalCol + ` AS workload,
 		for rows.Next() {
 			var s exposedServiceDTO
 			if err := rows.Scan(&s.Workload, &s.ExternalPeers, &s.Protocols, &s.Ports,
-				&s.Sessions, &s.Critical, &s.High, &s.RiskScore); err != nil {
+				&s.Sessions, &s.Critical, &s.High, &s.RiskScore, &s.PolicyMode); err != nil {
 				return nil, err
 			}
 			s.Namespace, s.Name = splitWorkload(s.Workload)

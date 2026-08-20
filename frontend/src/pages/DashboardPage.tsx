@@ -23,7 +23,7 @@ import { useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { downloadCsv } from "@/lib/csv";
-import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
+import { Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis } from "recharts";
 import {
   AlertOctagon, AlertTriangle, ShieldAlert, ShieldCheck, Activity,
   TrendingUp, ArrowUpRight, ExternalLink, Database, FileWarning,
@@ -160,6 +160,11 @@ export function DashboardPage() {
   }, [sum.data, openItems]);
   const posture = sum.data?.posture;
   const risk = posture?.security_score ?? 0;
+  const eventsTimelineQ = useQuery({
+    queryKey: ["events-timeline", clusterId],
+    queryFn: () => dashboard.eventsTimeline({ cluster_id: clusterId }),
+    staleTime: 300_000, // 5min — heavy query, secondary widget
+  });
   const exposureQ = useQuery({
     queryKey: ["exposure", clusterId],
     queryFn: () => network.exposure({ cluster_id: clusterId }),
@@ -424,6 +429,33 @@ export function DashboardPage() {
         </Panel>
 
         <Panel
+          title="Security Events"
+          subtitle="High + critical alerts · last 14 days"
+          icon={<AlertTriangle className="h-3.5 w-3.5" />}
+        >
+          {(() => {
+            if (eventsTimelineQ.isPending) return <p className="p-3 text-xs text-muted-foreground">Loading events…</p>;
+            const raw = eventsTimelineQ.data?.events_timeline ?? [];
+            const totalAlerts = raw.reduce((a, d) => a + d.total, 0);
+            if (totalAlerts === 0) return <EmptyState title="No alerting events" hint="No high/critical security events in the last 14 days." />;
+            const tl = raw.map((d) => ({ date: d.date, high: Math.max(0, d.total - d.critical), critical: d.critical }));
+            return (
+              <div className="p-3">
+                <div className="mb-1 text-xs text-muted-foreground">{totalAlerts.toLocaleString()} alerts · {raw.reduce((a, d) => a + d.critical, 0).toLocaleString()} critical</div>
+                <ResponsiveContainer width="100%" height={140}>
+                  <BarChart data={tl} barCategoryGap={2}>
+                    <XAxis dataKey="date" tickFormatter={(d: string) => d.slice(5)} tick={{ fontSize: 9, fill: "var(--color-muted-foreground)" }} interval={1} axisLine={false} tickLine={false} />
+                    <Tooltip contentStyle={tooltipStyle} labelFormatter={(d) => d} formatter={(v: number, n: string) => [v, n === "critical" ? "Critical" : "High"]} />
+                    <Bar dataKey="high" stackId="a" fill="var(--color-severity-high)" radius={[0, 0, 0, 0]} />
+                    <Bar dataKey="critical" stackId="a" fill="var(--color-severity-critical)" radius={[2, 2, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            );
+          })()}
+        </Panel>
+
+        <Panel
           title="Recent Activity"
           icon={<Activity className="h-3.5 w-3.5" />}
         >
@@ -580,6 +612,15 @@ function ExposedRow({ s, dir, clusterPath }: { s: import("@/api/client").Exposed
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-1">
+        {s.policy_mode && (
+          <span title={`Network policy mode: ${s.policy_mode}`}
+            className={cn("rounded px-1.5 py-0.5 text-[9px] uppercase tracking-wide font-medium",
+              s.policy_mode === "protect" ? "bg-[color-mix(in_oklab,var(--color-severity-low)_18%,transparent)] text-[color:var(--color-severity-low)]"
+                : s.policy_mode === "monitor" ? "bg-[color-mix(in_oklab,var(--color-severity-medium)_18%,transparent)] text-[color:var(--color-severity-medium)]"
+                : "bg-[color-mix(in_oklab,var(--color-severity-high)_18%,transparent)] text-[color:var(--color-severity-high)]")}>
+            {s.policy_mode}
+          </span>
+        )}
         {s.critical > 0 && <span className="rounded px-1.5 py-0.5 text-[10px] text-mono font-semibold text-white" style={{ background: "var(--color-severity-critical)" }}>{s.critical}C</span>}
         {s.high > 0 && <span className="rounded px-1.5 py-0.5 text-[10px] text-mono font-semibold text-white" style={{ background: "var(--color-severity-high)" }}>{s.high}H</span>}
         {s.critical === 0 && s.high === 0 && <span className="text-[10px] text-muted-foreground">no crit/high</span>}

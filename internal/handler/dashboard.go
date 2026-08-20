@@ -35,6 +35,14 @@ type dashboardSummaryDTO struct {
 	Posture         dashboardPostureDTO `json:"posture"`
 }
 
+// eventsTimelineDT is one day's bucket of alerting security events (severity high/critical),
+// powering NV's dashboard Security-Events timeline chart.
+type eventsTimelineDT struct {
+	Date     string `json:"date"`     // YYYY-MM-DD
+	Total    int    `json:"total"`    // high + critical alerts that day
+	Critical int    `json:"critical"`
+}
+
 // dashboardPostureDTO carries the NeuVector-style posture rollups: a decomposed
 // Security Risk Score plus the raw factors behind it (vuln location/signals + workload
 // hardening + exposure). Lets the dashboard answer "how secure is this cluster" beyond
@@ -87,6 +95,50 @@ func (h *Dashboard) Summary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// EventsTimeline returns daily counts of ALERTING security events (severity critical/high)
+// over 14 days — NV's dashboard Security-Events timeline. Kept OUT of /dashboard/summary
+// because it scans the large events partition (~6s cold); the summary must stay fast, so this
+// secondary widget loads on its own with its own spinner. GET /dashboard/events-timeline
+func (h *Dashboard) EventsTimeline(w http.ResponseWriter, r *http.Request) {
+	subj, ok := SubjectFrom(r.Context())
+	if !ok {
+		jsonError(w, http.StatusUnauthorized, "no subject")
+		return
+	}
+	clusterArg, err := parseClusterIDParam(r)
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	out := []eventsTimelineDT{}
+	rows, err := h.db.Pool().Query(r.Context(), `
+SELECT date_trunc('day', at)::date AS d,
+       COUNT(*)::int AS total,
+       COUNT(*) FILTER (WHERE severity = 'critical')::int AS critical
+  FROM events
+ WHERE org_id = $1
+   AND ($2::uuid IS NULL OR cluster_id = $2)
+   AND severity IN ('critical','high')
+   AND at > now() - interval '14 days'
+ GROUP BY 1 ORDER BY 1`, subj.OrgID, clusterArg)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, fmt.Sprintf("events timeline: %v", err))
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var d time.Time
+		var t eventsTimelineDT
+		if err := rows.Scan(&d, &t.Total, &t.Critical); err != nil {
+			jsonError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		t.Date = d.Format("2006-01-02")
+		out = append(out, t)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"events_timeline": out})
 }
 
 func (h *Dashboard) aggregate(ctx context.Context, orgID uuid.UUID, clusterArg any) (dashboardSummaryDTO, error) {
