@@ -38,6 +38,11 @@ type SecurityPolicy struct {
 	// org that only cares about the password policy doesn't have to pin session timings.
 	SessionTimeoutMinutes int `json:"session_timeout_minutes"`
 	IdleTimeoutMinutes    int `json:"idle_timeout_minutes"`
+
+	// Brute-force lockout knobs (NV BlockAfterFailedLoginCount / BlockedLoginFailedTime).
+	// Zero means "use the deploy-time default" (maxFailedLogins / loginLockoutWindow consts).
+	LockoutThreshold      int `json:"lockout_threshold"`       // consecutive failures before lockout
+	LockoutWindowMinutes  int `json:"lockout_window_minutes"`  // how long the account stays locked
 }
 
 // Policy bounds, mirroring NeuVector's UserIdleTimeoutMin/Max intent. These keep an admin
@@ -51,7 +56,29 @@ const (
 	idleMinutesMin    = 1            // 1 minute
 	idleMinutesMax    = 12 * 60      // 12 hours
 	historyDepthCeil  = 32           // matches NeuVector _maxPwdHistoryCount
+	lockoutThreshMin  = 1
+	lockoutThreshMax  = 100
+	lockoutWindowMin  = 1            // 1 minute
+	lockoutWindowMax  = 24 * 60      // 24 hours
 )
+
+// EffectiveLockoutThreshold returns the configured consecutive-failure lockout threshold, or
+// fallback when unset (0). Callers pass the deploy-time default (maxFailedLogins).
+func (p SecurityPolicy) EffectiveLockoutThreshold(fallback int) int {
+	if p.LockoutThreshold <= 0 {
+		return fallback
+	}
+	return p.LockoutThreshold
+}
+
+// EffectiveLockoutWindow returns the configured lockout window, or fallback when unset (0).
+// Callers pass the deploy-time default (loginLockoutWindow).
+func (p SecurityPolicy) EffectiveLockoutWindow(fallback time.Duration) time.Duration {
+	if p.LockoutWindowMinutes <= 0 {
+		return fallback
+	}
+	return time.Duration(p.LockoutWindowMinutes) * time.Minute
+}
 
 // DefaultSecurityPolicy is the built-in fallback: exactly the legacy hardcoded behaviour.
 // Password knobs come from DefaultPasswordProfile (12ch/3-class/90d/5-history); the session
@@ -119,6 +146,12 @@ func (p SecurityPolicy) Validate() error {
 	}
 	if p.IdleTimeoutMinutes != 0 && (p.IdleTimeoutMinutes < idleMinutesMin || p.IdleTimeoutMinutes > idleMinutesMax) {
 		return fmt.Errorf("%w: idle_timeout_minutes must be 0 or between %d and %d", ErrInvalidPolicy, idleMinutesMin, idleMinutesMax)
+	}
+	if p.LockoutThreshold != 0 && (p.LockoutThreshold < lockoutThreshMin || p.LockoutThreshold > lockoutThreshMax) {
+		return fmt.Errorf("%w: lockout_threshold must be 0 or between %d and %d", ErrInvalidPolicy, lockoutThreshMin, lockoutThreshMax)
+	}
+	if p.LockoutWindowMinutes != 0 && (p.LockoutWindowMinutes < lockoutWindowMin || p.LockoutWindowMinutes > lockoutWindowMax) {
+		return fmt.Errorf("%w: lockout_window_minutes must be 0 or between %d and %d", ErrInvalidPolicy, lockoutWindowMin, lockoutWindowMax)
 	}
 	return nil
 }

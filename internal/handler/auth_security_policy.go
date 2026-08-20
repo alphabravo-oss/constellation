@@ -43,6 +43,8 @@ type securityPolicyBody struct {
 	HistoryDepth          int   `json:"history_depth"`
 	SessionTimeoutMinutes int   `json:"session_timeout_minutes"`
 	IdleTimeoutMinutes    int   `json:"idle_timeout_minutes"`
+	LockoutThreshold      int   `json:"lockout_threshold"`
+	LockoutWindowMinutes  int   `json:"lockout_window_minutes"`
 	Revision              int64 `json:"revision"`
 }
 
@@ -54,6 +56,8 @@ func toPolicyBody(p auth.SecurityPolicy, rev int64) securityPolicyBody {
 		HistoryDepth:          p.HistoryDepth,
 		SessionTimeoutMinutes: p.SessionTimeoutMinutes,
 		IdleTimeoutMinutes:    p.IdleTimeoutMinutes,
+		LockoutThreshold:      p.LockoutThreshold,
+		LockoutWindowMinutes:  p.LockoutWindowMinutes,
 		Revision:              rev,
 	}
 }
@@ -66,6 +70,8 @@ func (b securityPolicyBody) toModel() auth.SecurityPolicy {
 		HistoryDepth:          b.HistoryDepth,
 		SessionTimeoutMinutes: b.SessionTimeoutMinutes,
 		IdleTimeoutMinutes:    b.IdleTimeoutMinutes,
+		LockoutThreshold:      b.LockoutThreshold,
+		LockoutWindowMinutes:  b.LockoutWindowMinutes,
 	}
 }
 

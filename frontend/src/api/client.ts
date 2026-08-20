@@ -4112,6 +4112,8 @@ export interface SecurityPolicy {
   history_depth: number;
   session_timeout_minutes: number;
   idle_timeout_minutes: number;
+  lockout_threshold: number;
+  lockout_window_minutes: number;
   revision: number;
 }
 

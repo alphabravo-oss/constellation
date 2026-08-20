@@ -101,6 +101,22 @@ export function SecurityPolicyPage() {
             </div>
           </Card>
 
+          <Card
+            title="Account lockout"
+            description="Brute-force protection: lock an account after too many consecutive failed logins."
+          >
+            <div className="grid gap-5 sm:grid-cols-2">
+              <Field label="Failed-login threshold" hint="Lock the account after this many consecutive failures. 0 uses the deploy default (5).">
+                <TextInput type="number" min={0} max={100} value={form.lockout_threshold}
+                  onChange={(e) => set("lockout_threshold", num(e.target.value))} className="w-32" />
+              </Field>
+              <Field label="Lockout window (minutes)" hint="How long the account stays locked after tripping the threshold. 0 uses the deploy default (15).">
+                <TextInput type="number" min={0} max={1440} value={form.lockout_window_minutes}
+                  onChange={(e) => set("lockout_window_minutes", num(e.target.value))} className="w-32" />
+              </Field>
+            </div>
+          </Card>
+
           <div className="flex items-center gap-3">
             <Button type="submit" variant="primary" size="lg" disabled={save.isPending}>
               {save.isPending ? "Saving…" : "Save policy"}

@@ -217,7 +217,7 @@ func (a *Auth) Login(w http.ResponseWriter, r *http.Request) {
 	// A2: brute-force lockout pre-check. If the account is inside the lockout window we
 	// reject before touching the password — and with the same generic message used for a
 	// wrong password / unknown user, so the response leaks no valid/locked/invalid oracle.
-	if lerr := a.loginLocked(r.Context(), principal.UserID); lerr != nil {
+	if lerr := a.loginLocked(r.Context(), principal.OrgID, principal.UserID); lerr != nil {
 		// A2: burn comparable Argon2id time against the decoy before returning, so a locked
 		// account does not respond measurably faster than the unknown-user / wrong-password
 		// branches (which each run one VerifyPassword). Otherwise the latency gap is a
@@ -237,7 +237,7 @@ func (a *Auth) Login(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := auth.VerifyPassword(*principal.PasswordHash, req.Password); err != nil {
 		// A2: count the failure (and trip the lockout once the threshold is crossed).
-		locked := a.recordLoginFailure(r.Context(), principal.UserID)
+		locked := a.recordLoginFailure(r.Context(), principal.OrgID, principal.UserID)
 		a.auditLoginFailure(r.Context(), r, &principal.OrgID, &principal.UserID, req.Email, "bad_password")
 		if locked {
 			a.auditLoginLocked(r.Context(), r, &principal.OrgID, &principal.UserID, req.Email)
@@ -323,7 +323,7 @@ SELECT id, org_id, password_hash, session_epoch, password_changed_at
 // window (A2). It returns errLoginLocked when block_login_since is set and still within
 // loginLockoutWindow. A DB error is returned as-is and treated as a hard failure by the
 // caller (fail closed). Missing row => not locked (no oracle is leaked either way).
-func (a *Auth) loginLocked(ctx context.Context, userID uuid.UUID) error {
+func (a *Auth) loginLocked(ctx context.Context, orgID, userID uuid.UUID) error {
 	var blockSince *time.Time
 	err := a.db.Pool().QueryRow(ctx,
 		`SELECT block_login_since FROM users WHERE id = $1`, userID,
@@ -334,7 +334,12 @@ func (a *Auth) loginLocked(ctx context.Context, userID uuid.UUID) error {
 	if err != nil {
 		return err
 	}
-	if blockSince != nil && time.Since(*blockSince) < loginLockoutWindow {
+	// A1: a per-org SecurityPolicy may override the deploy-time lockout window.
+	window := loginLockoutWindow
+	if pol, _, perr := auth.LoadSecurityPolicy(ctx, a.db.Pool(), orgID); perr == nil {
+		window = pol.EffectiveLockoutWindow(loginLockoutWindow)
+	}
+	if blockSince != nil && time.Since(*blockSince) < window {
 		return errLoginLocked
 	}
 	return nil
@@ -345,7 +350,12 @@ func (a *Auth) loginLocked(ctx context.Context, userID uuid.UUID) error {
 // is now in a locked state so the caller can emit an auth.login.locked audit event
 // (RSP-AUDIT-05). Best-effort: a failure to record the failure must not change the auth
 // outcome (the request is already a 401), and reports not-locked on error.
-func (a *Auth) recordLoginFailure(ctx context.Context, userID uuid.UUID) (locked bool) {
+func (a *Auth) recordLoginFailure(ctx context.Context, orgID, userID uuid.UUID) (locked bool) {
+	// A1: a per-org SecurityPolicy may override the deploy-time failure threshold.
+	threshold := maxFailedLogins
+	if pol, _, perr := auth.LoadSecurityPolicy(ctx, a.db.Pool(), orgID); perr == nil {
+		threshold = pol.EffectiveLockoutThreshold(maxFailedLogins)
+	}
 	err := a.db.Pool().QueryRow(ctx, `
 UPDATE users
    SET failed_login_count = failed_login_count + 1,
@@ -354,7 +364,7 @@ UPDATE users
            ELSE block_login_since
        END
  WHERE id = $1
- RETURNING (failed_login_count >= $2 AND block_login_since IS NOT NULL)`, userID, maxFailedLogins).Scan(&locked)
+ RETURNING (failed_login_count >= $2 AND block_login_since IS NOT NULL)`, userID, threshold).Scan(&locked)
 	if err != nil {
 		slog.WarnContext(ctx, "record login failure", slog.String("err", err.Error()))
 		return false
@@ -787,7 +797,7 @@ func (a *Auth) LDAPLogin(w http.ResponseWriter, r *http.Request) {
 	var lockUserPtr *uuid.UUID
 	if lockKnown {
 		lockUserPtr = &lockUserID
-		if lerr := a.loginLocked(r.Context(), lockUserID); lerr != nil {
+		if lerr := a.loginLocked(r.Context(), uuid.Nil, lockUserID); lerr != nil {
 			a.auditLoginFailure(r.Context(), r, nil, lockUserPtr, req.Username, "account_locked")
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 			return
@@ -798,7 +808,7 @@ func (a *Auth) LDAPLogin(w http.ResponseWriter, r *http.Request) {
 		// A2: count the directory-auth failure against the linked user, when known.
 		var locked bool
 		if lockKnown {
-			locked = a.recordLoginFailure(r.Context(), lockUserID)
+			locked = a.recordLoginFailure(r.Context(), uuid.Nil, lockUserID)
 		}
 		a.auditLoginFailure(r.Context(), r, nil, lockUserPtr, req.Username, "bad_password")
 		if locked {
@@ -883,7 +893,7 @@ func (a *Auth) issueLinkedSession(w http.ResponseWriter, r *http.Request, issuer
 	case err == nil:
 		// A2: even though the directory bind already succeeded, honor an active lockout so
 		// a flood of bad passwords (recorded in LDAPLogin) blocks a subsequent good one.
-		if lerr := a.loginLocked(r.Context(), userID); lerr != nil {
+		if lerr := a.loginLocked(r.Context(), orgID, userID); lerr != nil {
 			a.auditLoginFailure(r.Context(), r, &orgID, &userID, loginUsername(email, subject), "account_locked")
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 			return
