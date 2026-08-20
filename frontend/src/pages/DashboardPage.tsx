@@ -30,7 +30,7 @@ import {
   ServerCog, PackageCheck, RefreshCw, ArrowUp,
 } from "lucide-react";
 
-import { findings, cve, dashboard, clusters, compliance, enterprise, network, downloadAPIFile, groupsApi, type Finding, type PlatformFactsResponse, type Severity } from "@/api/client";
+import { findings, cve, dashboard, clusters, compliance, enterprise, network, downloadAPIFile, groupsApi, policies, type Finding, type PlatformFactsResponse, type Severity } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { StatCard } from "@/components/ui/stat-card";
 import { SeverityBadge } from "@/components/ui/severity-badge";
@@ -114,6 +114,16 @@ export function DashboardPage() {
       void qc.invalidateQueries({ queryKey: ["dashboard", clusterId] });
     },
     onError: () => toast.error("Failed to promote groups"),
+  });
+  // NV NewServiceMode: the mode newly-discovered service groups start in.
+  const newSvcMut = useMutation({
+    mutationFn: (body: { policy_mode?: string; profile_mode?: string }) =>
+      policies.updateServiceModeDefaults(body, { cluster_id: clusterId }),
+    onSuccess: () => {
+      toast.success("New-service default mode updated");
+      void qc.invalidateQueries({ queryKey: ["dashboard", clusterId] });
+    },
+    onError: () => toast.error("Failed to update new-service mode"),
   });
 
   const openItems = useMemo(() => open.data?.findings ?? [], [open.data]);
@@ -281,6 +291,26 @@ export function DashboardPage() {
                     onPromote={(from) => promoteMut.mutate({ dimension: "policy", from })} pending={promoteMut.isPending} />
                   <ModeMaturity label="Process / File mode" groups={groups} discover={e.profile_discover ?? 0} monitor={e.profile_monitor ?? 0} protect={e.profile_protect ?? 0}
                     onPromote={(from) => promoteMut.mutate({ dimension: "profile", from })} pending={promoteMut.isPending} />
+                  <div className="border-t border-border pt-2 space-y-1.5">
+                    <div className="text-xs text-muted-foreground">New services start in <span className="text-muted-foreground/70">(NV new-service mode)</span></div>
+                    <div className="flex items-center gap-2">
+                      {([["Network", "new_service_policy_mode", "policy_mode"], ["Process", "new_service_profile_mode", "profile_mode"]] as const).map(([lbl, field, key]) => (
+                        <label key={key} className="flex items-center gap-1 text-xs">
+                          <span className="text-muted-foreground">{lbl}</span>
+                          <select
+                            className="rounded border border-border bg-background px-1.5 py-0.5 text-xs capitalize disabled:opacity-50"
+                            value={posture?.[field] ?? "monitor"}
+                            disabled={newSvcMut.isPending}
+                            onChange={(ev) => newSvcMut.mutate({ [key]: ev.target.value })}
+                          >
+                            <option value="discover">Discover</option>
+                            <option value="monitor">Monitor</option>
+                            <option value="protect">Protect</option>
+                          </select>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
                   <div className="flex items-center justify-between border-t border-border pt-2 text-xs">
                     <span className="text-muted-foreground">Admission control</span>
                     {(e.admission_enforcing ?? 0) > 0 ? (

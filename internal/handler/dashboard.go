@@ -46,6 +46,8 @@ type dashboardPostureDTO struct {
 	VulnSignals     map[string]int `json:"vuln_signals"`     // kev / fixable / high_epss / corroborated
 	Hardening       map[string]int `json:"hardening"`        // workloads + privileged / host_network / run_as_root / exposed
 	Enforcement     map[string]int `json:"enforcement"`      // groups + discover / monitor / protect (NV service-mode coverage)
+	NewServicePolicyMode  string   `json:"new_service_policy_mode"`  // NV NewServiceMode: default network mode for new groups
+	NewServiceProfileMode string   `json:"new_service_profile_mode"` // NV NewServiceProfileMode
 	TopVulnerable   []topVulnerableWorkloadDTO `json:"top_vulnerable"` // NV "Top Vulnerable Assets"
 }
 
@@ -263,6 +265,14 @@ SELECT COUNT(*)::int,
 	p.Enforcement["groups"], p.Enforcement["discover"], p.Enforcement["monitor"], p.Enforcement["protect"] = grps, gDiscover, gMonitor, gProtect
 	// Process/file profile-mode maturity (NV shows network AND profile mode distributions).
 	p.Enforcement["profile_discover"], p.Enforcement["profile_monitor"], p.Enforcement["profile_protect"] = pDiscover, pMonitor, pProtect
+
+	// New-service default modes (NV NewServiceMode / NewServiceProfileMode). Default monitor.
+	p.NewServicePolicyMode, p.NewServiceProfileMode = "monitor", "monitor"
+	if cid, ok := clusterArg.(uuid.UUID); ok {
+		_ = h.db.Pool().QueryRow(ctx,
+			`SELECT policy_mode, profile_mode FROM service_mode_defaults WHERE org_id = $1 AND cluster_id = $2`,
+			orgID, cid).Scan(&p.NewServicePolicyMode, &p.NewServiceProfileMode)
+	}
 
 	// Admission control coverage (NV: adm_mode + deny_adm_ctrl_rules). Constellation drives
 	// admission via `policies` with engine='constellation-admission'; an enabled policy in

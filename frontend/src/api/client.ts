@@ -4038,6 +4038,11 @@ export const policies = {
     api.get<AdmissionOptions>("/policies/admission/options").then((r) => r.data),
   createAdmissionRule: (body: { name: string; mode: string; criteria: Array<{ key: string; value: string }> }, params: { cluster_id?: string } = {}) =>
     api.post<{ id: string; spec_yaml: string }>("/policies/admission/rules", body, { params }).then((r) => r.data),
+  // NV NewServiceMode / NewServiceProfileMode: default mode new service groups start in.
+  serviceModeDefaults: (params: { cluster_id?: string } = {}) =>
+    api.get<{ cluster_id: string; policy_mode: string; profile_mode: string; updated_at?: string }>("/policies/service-mode-defaults", { params }).then((r) => r.data),
+  updateServiceModeDefaults: (body: { policy_mode?: string; profile_mode?: string }, params: { cluster_id?: string } = {}) =>
+    api.patch<{ cluster_id: string; policy_mode: string; profile_mode: string }>("/policies/service-mode-defaults", body, { params }).then((r) => r.data),
 };
 
 export interface AdmissionCriterionOption {
@@ -4109,7 +4114,9 @@ export interface DashboardSummary {
     vulns_by_location: Record<string, number>;  // image / host / platform
     vuln_signals: Record<string, number>;       // kev / fixable / high_epss / corroborated
     hardening: Record<string, number>;          // workloads / privileged / host_network / run_as_root / exposed
-    enforcement: Record<string, number>;        // groups / discover / monitor / protect
+    enforcement: Record<string, number>;        // groups / discover / monitor / protect / profile_*
+    new_service_policy_mode: string;            // NV NewServiceMode: mode new service groups start in (network)
+    new_service_profile_mode: string;           // NV NewServiceProfileMode: process/file mode for new groups
     top_vulnerable: Array<{ namespace: string; name: string; critical: number; high: number }>;
   };
 }

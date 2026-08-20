@@ -176,11 +176,40 @@ SELECT id, name, kind, comment, criteria, members, learned_from, cfg_type, polic
 	writeJSON(w, http.StatusOK, map[string]any{"groups": out})
 }
 
+// serviceModeDefaults returns the cluster's configured new-service default modes (NV
+// NewServiceMode), or monitor/monitor when unset. Keyed the same as the policy handler.
+func (h *Groups) serviceModeDefaults(ctx context.Context, orgID, clusterID uuid.UUID) (policyMode, profileMode string) {
+	policyMode, profileMode = "monitor", "monitor"
+	_ = h.db.Pool().QueryRow(ctx,
+		`SELECT policy_mode, profile_mode FROM service_mode_defaults WHERE org_id = $1 AND cluster_id = $2`,
+		orgID, clusterID).Scan(&policyMode, &profileMode)
+	return
+}
+
 func (h *Groups) Create(w http.ResponseWriter, r *http.Request) {
 	var body groupBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
+	}
+	subj, _ := SubjectFrom(r.Context())
+	clusterArg, err := parseClusterIDParam(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	// Seed unspecified modes from the cluster's new-service default (NV NewServiceMode).
+	// A caller that supplies an explicit mode always wins; only blank fields inherit.
+	if body.PolicyMode == "" || body.ProfileMode == "" {
+		if cid, ok := clusterArg.(uuid.UUID); ok {
+			dp, dpr := h.serviceModeDefaults(r.Context(), subj.OrgID, cid)
+			if body.PolicyMode == "" {
+				body.PolicyMode = group.Mode(dp)
+			}
+			if body.ProfileMode == "" {
+				body.ProfileMode = group.Mode(dpr)
+			}
+		}
 	}
 	g := &group.Group{Name: strings.TrimSpace(body.Name), Kind: body.Kind,
 		Comment: body.Comment, Criteria: body.Criteria, LearnedFrom: body.LearnedFrom,
@@ -189,12 +218,6 @@ func (h *Groups) Create(w http.ResponseWriter, r *http.Request) {
 		g.CfgType = "user"
 	}
 	if err := g.Validate(); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-	subj, _ := SubjectFrom(r.Context())
-	clusterArg, err := parseClusterIDParam(r)
-	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
