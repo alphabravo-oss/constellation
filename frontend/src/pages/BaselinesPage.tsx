@@ -1,26 +1,24 @@
 // BaselinesPage — Wave L4. Process Baseline lifecycle kanban (NeuVector parity).
 //
 // Three columns: Learn (gray) | Monitor (amber) | Enforce (green/red).
-// Each card represents one workload's process baseline. Click → Drawer with the
-// full process table + audit timeline + promote/rollback footer buttons.
+// Each card represents one workload's process baseline. Click → navigates to the
+// dedicated detail page (runtime/baselines/:baselineId) with the full process
+// table + audit timeline + promote/rollback actions (Astronomer detail-as-a-page).
 //
 // Cluster-scoped: every fetch threads cluster_id (derived from useCluster()).
 import { useMemo, useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Activity, AlertTriangle, GitMerge, ShieldCheck, Sparkles, Clock3, ArrowRight, ArrowLeft } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
+import { Activity, AlertTriangle, GitMerge, ShieldCheck, Sparkles, Clock3 } from "lucide-react";
 
 import {
   baselines as baselinesApi,
   type BaselineSummary,
   type BaselineMode,
-  type BaselineDetail,
 } from "@/api/client";
 import { EntityHeader } from "@/components/EntityHeader";
 import { useCluster } from "@/hooks/useCluster";
-import { Drawer } from "@/components/ui/drawer";
-import { Button } from "@/components/ui/button";
 import { StatusPill, ModePill } from "@/components/ui/status-pill";
-import { DataTable, type Column } from "@/components/ui/data-table";
 import { cn } from "@/lib/cn";
 
 const COLUMNS: Array<{
@@ -37,7 +35,7 @@ const COLUMNS: Array<{
 
 export function BaselinesPage() {
   const { clusterId, cluster, isLoading: clusterLoading } = useCluster();
-  const [selectedWorkload, setSelectedWorkload] = useState<string | null>(null);
+  const navigate = useNavigate();
   const [autoPromote, setAutoPromote] = useState(false);
 
   const listQ = useQuery({
@@ -129,30 +127,18 @@ export function BaselinesPage() {
             tone={col.tone}
             Icon={col.icon}
             profiles={byMode[col.mode]}
-            onSelect={(id) => setSelectedWorkload(id)}
+            onSelect={(id) =>
+              navigate(
+                clusterId
+                  ? `/clusters/${clusterId}/runtime/baselines/${encodeURIComponent(id)}`
+                  : "/clusters",
+              )
+            }
             highlightIDs={autoPromote ? autoPromoteCandidates : []}
             loading={listQ.isPending}
           />
         ))}
       </section>
-
-      <Drawer
-        open={!!selectedWorkload}
-        onOpenChange={(o) => {
-          if (!o) setSelectedWorkload(null);
-        }}
-        width="xl"
-        title={selectedWorkload ?? ""}
-        description="Process baseline — learned exec list and lifecycle audit trail."
-      >
-        {selectedWorkload && (
-          <BaselineDrawerBody
-            workloadID={selectedWorkload}
-            clusterID={clusterId}
-            onClose={() => setSelectedWorkload(null)}
-          />
-        )}
-      </Drawer>
     </div>
   );
 }
@@ -300,180 +286,7 @@ function Stat({
   );
 }
 
-// ----- Drawer body ----------------------------------------------------------
-
-function BaselineDrawerBody({
-  workloadID, clusterID, onClose,
-}: {
-  workloadID: string;
-  clusterID: string | undefined;
-  onClose: () => void;
-}) {
-  const queryClient = useQueryClient();
-  const detailQ = useQuery({
-    queryKey: ["baseline", workloadID, clusterID],
-    queryFn: () => baselinesApi.get(workloadID, { cluster_id: clusterID }),
-  });
-  const setMode = useMutation({
-    mutationFn: (mode: BaselineMode) => baselinesApi.setMode(workloadID, { mode }, { cluster_id: clusterID }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["baseline", workloadID, clusterID] });
-      queryClient.invalidateQueries({ queryKey: ["baselines", clusterID] });
-    },
-  });
-
-  if (detailQ.isPending) {
-    return <p className="text-sm text-muted-foreground">Loading…</p>;
-  }
-  if (detailQ.isError || !detailQ.data) {
-    return <p className="text-sm text-status-error">Failed to load profile.</p>;
-  }
-  const profile = detailQ.data;
-  const canPromote = nextPromoteMode(profile.mode);
-  const canRollback = nextRollbackMode(profile.mode);
-
-  const processColumns: Column<BaselineDetail["processes"][number]>[] = [
-    { id: "name", header: "Process", cell: (p) => <span className="font-mono">{p.name}</span> },
-    {
-      id: "path",
-      header: "Path",
-      className: "max-w-0 truncate text-muted-foreground",
-      cell: (p) => (
-        <span title={`${p.path} ${p.args.join(" ")}`}>
-          {p.path} <span className="text-muted-foreground/60">{p.args.join(" ")}</span>
-        </span>
-      ),
-    },
-    { id: "seen", header: "Seen", numeric: true, cell: (p) => <span className="tabular-nums">{p.observed_count}</span> },
-    { id: "last_seen", header: "Last seen", cell: (p) => <span className="text-muted-foreground">{ageSince(p.last_seen)}</span> },
-  ];
-
-  return (
-    <div className="space-y-5" data-testid="baselines-drawer-body">
-      <section className="grid grid-cols-4 gap-3 rounded-md border border-border bg-muted/30 p-3 text-xs">
-        <DrawerStat label="Mode" value={<ModePill mode={profile.mode} />} />
-        <DrawerStat label="Processes" value={String(profile.learned_processes_count)} />
-        <DrawerStat label="Alerts 24h" value={String(profile.monitored_alerts_24h)} />
-        <DrawerStat label="Blocks 24h" value={String(profile.enforced_blocks_24h)} />
-      </section>
-
-      <section>
-        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Learned processes
-        </h3>
-        <div data-testid="baselines-drawer-process-table">
-          <DataTable
-            rows={profile.processes}
-            columns={processColumns}
-            rowKey={(p) => `${p.name}-${p.path}`}
-            emptyState={<div className="px-2 py-4 text-center text-xs text-muted-foreground">No processes observed yet.</div>}
-          />
-        </div>
-      </section>
-
-      <section>
-        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Mode transitions
-        </h3>
-        <ol className="space-y-2" data-testid="baselines-drawer-timeline">
-          {profile.transitions.map((t, i) => (
-            <li key={i} className="flex gap-3 rounded-md border border-border bg-card px-2.5 py-2 text-xs">
-              <div className="mt-0.5 flex-shrink-0">
-                <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary/15 text-primary">
-                  <ArrowRight className="h-3 w-3" aria-hidden />
-                </span>
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="font-medium">
-                  {t.from ? `${t.from} → ${t.to}` : `Started in ${t.to}`}
-                </p>
-                <p className="text-muted-foreground">{t.reason}</p>
-                <p className="mt-0.5 text-[10px] text-muted-foreground">
-                  {ageSince(t.at)} · actor <span className="font-mono">{t.actor}</span>
-                </p>
-              </div>
-            </li>
-          ))}
-        </ol>
-      </section>
-
-      <DrawerFooter
-        profile={profile}
-        canPromote={canPromote}
-        canRollback={canRollback}
-        pending={setMode.isPending}
-        onPromote={() => canPromote && setMode.mutate(canPromote)}
-        onRollback={() => canRollback && setMode.mutate(canRollback)}
-        onClose={onClose}
-      />
-    </div>
-  );
-}
-
-function DrawerStat({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div>
-      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
-      <div className="mt-1 text-sm font-semibold">{value}</div>
-    </div>
-  );
-}
-
-function DrawerFooter({
-  profile, canPromote, canRollback, pending, onPromote, onRollback, onClose,
-}: {
-  profile: BaselineDetail;
-  canPromote: BaselineMode | null;
-  canRollback: BaselineMode | null;
-  pending: boolean;
-  onPromote: () => void;
-  onRollback: () => void;
-  onClose: () => void;
-}) {
-  return (
-    <div className="sticky bottom-0 -mx-5 -mb-4 mt-4 flex items-center justify-between gap-2 border-t border-border bg-card/95 px-5 py-3 backdrop-blur">
-      <Button variant="ghost" size="sm" onClick={onClose}>Close</Button>
-      <div className="flex items-center gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={!canRollback || pending}
-          onClick={onRollback}
-          data-testid="baselines-drawer-rollback"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
-          {canRollback ? `Roll back to ${canRollback}` : "Roll back"}
-        </Button>
-        <Button
-          variant="primary"
-          size="sm"
-          disabled={!canPromote || pending}
-          onClick={onPromote}
-          data-testid="baselines-drawer-promote"
-        >
-          {canPromote === "monitor" && "Promote to Monitor"}
-          {canPromote === "enforce" && "Promote to Enforce"}
-          {!canPromote && (profile.mode === "enforce" ? "Already enforcing" : "Promote")}
-          {canPromote && <ArrowRight className="h-3.5 w-3.5" aria-hidden />}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
 // ----- helpers --------------------------------------------------------------
-
-function nextPromoteMode(mode: BaselineMode): BaselineMode | null {
-  if (mode === "learn") return "monitor";
-  if (mode === "monitor") return "enforce";
-  return null;
-}
-
-function nextRollbackMode(mode: BaselineMode): BaselineMode | null {
-  if (mode === "monitor") return "learn";
-  if (mode === "enforce") return "monitor";
-  return null;
-}
 
 function qualifiesForAutoPromote(p: BaselineSummary): boolean {
   if (p.mode !== "learn") return false;

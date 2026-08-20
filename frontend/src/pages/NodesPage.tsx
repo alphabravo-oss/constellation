@@ -12,6 +12,7 @@ import {
 import { nodes as nodesApi, type NodeSummary } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { PageHeader } from "@/components/ui/page";
+import { downloadCsv } from "@/lib/csv";
 import { StatCard } from "@/components/ui/stat-card";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { cn } from "@/lib/cn";
@@ -124,16 +125,24 @@ export function NodesPage() {
         title="Nodes"
         description="Host posture, package evidence, runtime-agent health, and node CVEs."
         actions={
-          <Link
-            to={selected ? `/clusters/${clusterId}/nodes/${encodeURIComponent(selected.node)}` : `/clusters/${clusterId}/nodes`}
-            className={cn(
-              "inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm hover:bg-accent",
-              !selected && "pointer-events-none opacity-50",
-            )}
-          >
-            <Server className="h-4 w-4" aria-hidden />
-            Open Node
-          </Link>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => downloadCsv("constellation-nodes", ["Node", "OS", "Kernel", "Arch", "OpenCVEs", "Critical", "High", "Packages", "Containers", "CISFailed", "AgentStatus"],
+                filtered.map((n) => [n.node, displayOS(n), n.kernel_release ?? "", n.arch ?? "", n.open_vulns, n.critical_vulns, n.high_vulns, n.package_count, n.container_count, n.cis_failed, n.runtime_agent_status]))}
+              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-2 text-sm hover:bg-accent"
+            >Export CSV</button>
+            <Link
+              to={selected ? `/clusters/${clusterId}/nodes/${encodeURIComponent(selected.node)}` : `/clusters/${clusterId}/nodes`}
+              className={cn(
+                "inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm hover:bg-accent",
+                !selected && "pointer-events-none opacity-50",
+              )}
+            >
+              <Server className="h-4 w-4" aria-hidden />
+              Open Node
+            </Link>
+          </div>
         }
       />
 

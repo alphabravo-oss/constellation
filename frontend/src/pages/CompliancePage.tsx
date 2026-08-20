@@ -23,6 +23,22 @@ import { PageHeader } from "@/components/ui/page";
 import { StatCard } from "@/components/ui/stat-card";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { DataTable, type Column } from "@/components/ui/data-table";
+import { downloadCsv } from "@/lib/csv";
+
+// regLabel shortens a compliance standard id to a compact badge label.
+function regLabel(std: string): string {
+  const s = std.toLowerCase();
+  if (s.includes("pci")) return "PCI";
+  if (s.includes("nist")) return "NIST";
+  if (s.includes("stig")) return "STIG";
+  if (s.includes("nsa") || s.includes("cisa")) return "NSA/CISA";
+  if (s.includes("cis")) return "CIS";
+  if (s.includes("hipaa")) return "HIPAA";
+  if (s.includes("gdpr")) return "GDPR";
+  if (s.includes("soc2")) return "SOC2";
+  if (s.includes("iso")) return "ISO";
+  return std.split(/[-.]/)[0].toUpperCase();
+}
 
 export function CompliancePage() {
   // Cluster-scoped per the cluster-first IA: every fetch threads cluster_id so we
@@ -124,6 +140,18 @@ export function CompliancePage() {
           {c.evidence && (
             <div className="mt-0.5 max-w-xl truncate text-xs text-muted-foreground" title={c.evidence}>
               {c.evidence}
+            </div>
+          )}
+          {c.tags_v2 && Object.keys(c.tags_v2).length > 0 && (
+            <div className="mt-1 flex flex-wrap items-center gap-1">
+              {Object.entries(c.tags_v2).map(([std, meta]) => {
+                const ref = meta?.references?.[0];
+                return (
+                  <span key={std} className="rounded bg-muted px-1.5 py-px text-[9px] font-medium text-muted-foreground" title={meta?.description || std}>
+                    {regLabel(std)}{ref ? ` ${ref}` : ""}
+                  </span>
+                );
+              })}
             </div>
           )}
           {c.exemption && (
@@ -282,11 +310,21 @@ export function CompliancePage() {
                 </p>
               )}
               {checks.data && checks.data.checks.length > 0 && (
-                <DataTable<ComplianceCheck>
-                  rows={checks.data.checks}
-                  columns={checkColumns}
-                  rowKey={(c) => `${c.framework}-${c.control_id}`}
-                />
+                <>
+                  <div className="mb-2 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => downloadCsv(`constellation-compliance-${active ?? "all"}`, ["Framework", "Control", "Title", "Status", "Severity", "Standards", "Evidence"],
+                        checks.data!.checks.map((c) => [c.framework, c.control_id, c.title, c.effective_status, c.severity, Object.keys(c.tags_v2 ?? {}).map((s) => regLabel(s)).join(" "), c.evidence]))}
+                      className="rounded h-7 px-2.5 text-[11px] border border-border bg-card hover:bg-accent transition-colors"
+                    >Export CSV</button>
+                  </div>
+                  <DataTable<ComplianceCheck>
+                    rows={checks.data.checks}
+                    columns={checkColumns}
+                    rowKey={(c) => `${c.framework}-${c.control_id}`}
+                  />
+                </>
               )}
               {exemptions.data && exemptions.data.exemptions.length > 0 && (
                 <ComplianceExemptionsList

@@ -132,3 +132,31 @@ export function RiskGauge({ score, label, sub, size = 140 }: { score: number; la
     </div>
   );
 }
+
+/**
+ * ScoreGauge — like RiskGauge but for a SAFETY score where HIGH is GOOD (green at 100,
+ * red at 0). Used by the dashboard Security Risk Score. Colors by the inverse tier.
+ */
+export function ScoreGauge({ score, label = "score", sub, size = 140 }: { score: number; label?: string; sub?: string; size?: number }) {
+  const s = Math.max(0, Math.min(100, score));
+  const tier = riskTier(100 - s);
+  const stroke = Math.max(6, Math.round(size * 0.058));
+  const r = (size - stroke * 2) / 2;
+  const c = 2 * Math.PI * r;
+  const filled = (s / 100) * c;
+  const cx = size / 2;
+  return (
+    <div className="relative inline-flex shrink-0" style={{ width: size, height: size }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90 block">
+        <circle cx={cx} cy={cx} r={r} fill="none" stroke="var(--color-border)" strokeWidth={stroke} />
+        <circle cx={cx} cy={cx} r={r} fill="none" stroke={tier.color} strokeWidth={stroke} strokeLinecap="round"
+          strokeDasharray={`${filled} ${c}`} style={{ transition: "stroke-dasharray 320ms var(--ease-out)" }} />
+      </svg>
+      <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center leading-tight">
+        <span className="text-mono text-3xl font-semibold tabular-nums" style={{ color: tier.color }}>{Math.round(s)}</span>
+        <span className="mt-0.5 text-[9px] uppercase tracking-[0.14em] text-muted-foreground">{label}</span>
+        {sub && <span className="mt-0.5 max-w-[88%] truncate text-[9px] text-muted-foreground" title={sub}>{sub}</span>}
+      </div>
+    </div>
+  );
+}

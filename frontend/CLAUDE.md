@@ -22,14 +22,21 @@ When building or editing any page, conform to all of these.
   link straight to a tab. The shared `ui/tabs.tsx` is URL-synced — use it, don't
   reinvent local-state tabs.
 
-## Forms & actions — NO BARE FORMS
-- **Never render a bare/always-open form on a page.** To add something, show a **`+`
-  (add)** affordance; to change something, show a **pencil (edit)** affordance. Both
-  open a **Drawer** (`ui/drawer.tsx`) containing the form. Browsing a page shows lists/
-  cards/verdict only — the form appears on demand.
-- Inside a drawer form, hide expert fields behind `Collapse` ("Advanced").
-- Give users real actions where the backend allows — e.g. "force update", "upload",
+## Forms & actions — DEDICATED PAGES, NOT DRAWERS
+- **Do NOT use the Drawer (`ui/drawer.tsx`) for add/edit forms anymore.** (User
+  directive, 2026-08.) Astronomer opens a **dedicated page** for each create/edit, and
+  Constellation follows the same pattern.
+- **Add** = a **`+` (add)** affordance that NAVIGATES to a `.../new` route rendering a
+  full form page. **Edit** = a **pencil** (or row click) that navigates to a
+  `.../:id` (or `.../:id/edit`) route. A form page has a `PageHeader` with a `backLink`
+  to the list, the form in a `Card`, and Save/Cancel buttons (Cancel navigates back).
+- Browsing the list page shows lists/cards/verdict only — the form lives on its own URL,
+  so it's deep-linkable and back/forward works.
+- Hide expert fields behind `Collapse` ("Advanced") on the form page.
+- Give users real actions where the backend allows — "force update", "upload",
   "refresh now" — don't make a page display-only when an action is possible.
+- The Drawer component still exists ONLY for transient read-only detail peeks that are
+  explicitly not forms; prefer a page even then. Never add a new add/edit Drawer.
 
 ## Clarity — every page explains itself
 - The user must never ask "what is this page / what is this for?" Each page has a
@@ -40,7 +47,7 @@ When building or editing any page, conform to all of these.
 - `ui/verdict-banner.tsx` — the top-line verdict (ok/degraded/critical/info).
 - `ui/collapse.tsx` — "Advanced"/detail disclosure.
 - `ui/tabs.tsx` — URL-synced tabs.
-- `ui/drawer.tsx` — the home for every add/edit form.
+- `ui/drawer.tsx` — DEPRECATED for forms; do not use for add/edit (see Forms above).
 - `ui/stat-card.tsx` — the metric tile; use in a full-width grid.
 - `components/SettingsShell.tsx` — the grouped settings surface.
 - Match the Astronomer-cloned design system (Inter, cool-gray, blue→violet, 8px,

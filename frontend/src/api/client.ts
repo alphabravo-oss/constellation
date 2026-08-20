@@ -97,6 +97,9 @@ export interface Finding {
   fixed_version?: string;
   affected_range?: AffectedRange;
   vulndb_bundle?: VulnDBBundleMetadata;
+  cvss?: number;
+  kev?: boolean;
+  epss?: number;
 }
 
 export interface EngineProvenance {
@@ -142,9 +145,28 @@ export interface Comment {
   created_at: string;
 }
 
+export interface CVERollup {
+  cve: string;
+  severity: Severity;
+  risk_score: number;
+  package?: string;
+  fixed_version?: string;
+  instances: number;
+  affected_images: number;
+  affected_clusters: number;
+  images: string[];
+  last_seen_at: string;
+  cvss?: number;
+  kev?: boolean;
+  has_fix?: boolean;
+}
+
 export const findings = {
   list: (params: { kind?: FindingKind; lifecycle?: Lifecycle; cluster_id?: string; q?: string; limit?: number; offset?: number } = {}) =>
     api.get<{ findings: Finding[]; limit: number; offset: number; lifecycle_counts?: Record<Lifecycle, number> }>("/findings", { params }).then((r) => r.data),
+  // NeuVector-style rollup: one row per CVE with its blast radius (affected images/clusters).
+  byCVE: (params: { cluster_id?: string; lifecycle?: Lifecycle; limit?: number; fixable?: boolean } = {}) =>
+    api.get<{ cves: CVERollup[]; limit: number; offset: number }>("/findings/by-cve", { params: { ...params, fixable: params.fixable ? "true" : undefined } }).then((r) => r.data),
   get: (id: string) => api.get<Finding>(`/findings/${id}`).then((r) => r.data),
   triage:     (id: string, body: { assignee_id?: string; priority?: string }) =>
     api.post(`/findings/${id}/triage`, body).then((r) => r.data),
@@ -343,6 +365,8 @@ export const nodes = {
     api.get<NodeListResponse>(`/clusters/${encodeURIComponent(clusterID)}/nodes`).then((r) => r.data),
   get: (clusterID: string, node: string) =>
     api.get<NodeDetail>(`/clusters/${encodeURIComponent(clusterID)}/nodes/${encodeURIComponent(node)}`).then((r) => r.data),
+  scan: (scanTargetID: string) =>
+    api.post(`/scan/host/${encodeURIComponent(scanTargetID)}`, {}).then((r) => r.data),
 };
 
 export interface Framework { id: string; name: string; category: string }
@@ -356,6 +380,9 @@ export interface ComplianceCheck {
   severity: string;
   evidence: string;
   evaluated_at: string;
+  // Regulation cross-mapping: standard-id -> { profile, references[], description }.
+  // e.g. { "pci-dss-4.0": { references: ["2.2.1"] }, "nist-800-190": {...} }.
+  tags_v2?: Record<string, { profile?: string; references?: string[]; description?: string }>;
   exemption?: {
     id: string;
     reason: string;
@@ -1984,6 +2011,8 @@ export interface NetworkPolicyLifecycleResponse {
 export const network = {
   map: (params: { hours?: number; namespace?: string; verdict?: string; cluster_id?: string } = {}) =>
     api.get<NetworkMap>("/network/map", { params }).then((r) => r.data),
+  exposure: (params: { hours?: number; cluster_id?: string } = {}) =>
+    api.get<ExposureResponse>("/network/exposure", { params }).then((r) => r.data),
   conversations: (params: { hours?: number; cluster_id?: string } = {}) =>
     api.get<NetworkConversations>("/network/conversations", { params }).then((r) => r.data),
   /** Subscribes to the GET /network/flows:stream SSE channel and invokes
@@ -3223,9 +3252,15 @@ export interface ImageSecretsResponse {
 }
 
 export interface ImageLayerDescriptor {
+  index?: number;
   media_type?: string;
   digest?: string;
+  diff_id?: string;
   size_bytes?: number;
+  created_by?: string;
+  command?: string;       // Dockerfile-style instruction (RUN/ADD/COPY…)
+  in_base_image?: boolean; // base OS layer vs application layer
+  package_count?: number;
   annotations?: Record<string, string>;
 }
 
@@ -3869,7 +3904,30 @@ export interface DashboardSummary {
     target_id: string;
     actor_id?: string;
   }>;
+  posture: {
+    security_score: number;                     // RISK score 0-100 (higher = worse), NV model
+    score_breakdown: Record<string, number>;    // protection_mode / exposure / privileged / root / admission / vulnerabilities
+    vulns_by_location: Record<string, number>;  // image / host / platform
+    vuln_signals: Record<string, number>;       // kev / fixable / high_epss / corroborated
+    hardening: Record<string, number>;          // workloads / privileged / host_network / run_as_root / exposed
+    enforcement: Record<string, number>;        // groups / discover / monitor / protect
+    top_vulnerable: Array<{ namespace: string; name: string; critical: number; high: number }>;
+  };
 }
+
+export interface ExposedService {
+  workload: string;
+  namespace: string;
+  name: string;
+  external_peers: number;
+  protocols: string[];
+  ports: number[];
+  sessions: number;
+  critical: number;
+  high: number;
+  risk_score: number;
+}
+export interface ExposureResponse { ingress: ExposedService[]; egress: ExposedService[] }
 
 export const dashboard = {
   summary: (params: { cluster_id?: string } = {}) =>
@@ -3892,6 +3950,53 @@ export const systemConfigApi = {
     api.patch<{ config: Record<string, unknown>; revision: number }>("/system/config", body).then((r) => r.data),
   refreshScanner: () =>
     api.post<{ refresh_now: number; revision: number }>("/scanner/refresh", {}).then((r) => r.data),
+};
+
+// A1: org password + session/idle policy (GET/PUT /auth/security-policy).
+export interface SecurityPolicy {
+  min_length: number;
+  min_classes: number;
+  max_age_days: number;
+  history_depth: number;
+  session_timeout_minutes: number;
+  idle_timeout_minutes: number;
+  revision: number;
+}
+
+export const securityPolicyApi = {
+  get: () => api.get<SecurityPolicy>("/auth/security-policy").then((r) => r.data),
+  put: (body: SecurityPolicy) => api.put<SecurityPolicy>("/auth/security-policy", body).then((r) => r.data),
+};
+
+// SSO / IdP config (LDAP / SAML / OIDC) — full CRUD via /auth-servers.
+export interface AuthServerConfig {
+  // LDAP
+  url?: string; bind_dn?: string; bind_password?: string; base_dn?: string;
+  user_filter?: string; group_attribute?: string; email_attribute?: string;
+  // SAML
+  idp_metadata_xml?: string; entity_id?: string; acs_url?: string; sp_cert_pem?: string; sp_key_pem?: string;
+  // OIDC
+  issuer_url?: string; client_id?: string; client_secret?: string; redirect_url?: string; scopes?: string[];
+}
+
+export interface AuthServer {
+  id?: string;
+  type: string; // ldap | saml | oidc
+  name: string;
+  enabled: boolean;
+  auth_order: number;
+  config: AuthServerConfig;
+  role_mapping: { rules: Record<string, string>; default: string };
+  revision?: number;
+}
+
+export const authServersApi = {
+  list: () => api.get<{ auth_servers: AuthServer[] }>("/auth-servers").then((r) => r.data.auth_servers),
+  create: (body: Omit<AuthServer, "id" | "revision">) =>
+    api.post<AuthServer>("/auth-servers", body).then((r) => r.data),
+  update: (id: string, body: AuthServer) =>
+    api.put<AuthServer>(`/auth-servers/${id}`, body).then((r) => r.data),
+  delete: (id: string) => api.delete(`/auth-servers/${id}`).then((r) => r.data),
 };
 
 export interface Receiver {
@@ -4041,6 +4146,8 @@ export interface CVESearchParams {
   cvss_gt?: number;
   severity?: Severity;
   source?: string;
+  sort?: string;
+  dir?: "asc" | "desc";
 }
 
 export interface CVEStats {
@@ -4156,12 +4263,15 @@ export const cve = {
           cvss_gt: qOrParams.cvss_gt,
           severity: qOrParams.severity,
           source: qOrParams.source,
+          sort: qOrParams.sort,
+          dir: qOrParams.dir,
         };
     return api.get<{ results: CVEResult[]; limit: number; offset: number }>(`/cve/search`, { params }).then((r) => r.data);
   },
   bundle: () => api.get<CVEBundleStatus>(`/cve/bundle/status`).then((r) => r.data),
   stats:  () => api.get<CVEStats>(`/cve/stats`).then((r) => r.data),
-  affected: (id: string) => api.get<CVEAffectedResponse>(`/cve/${encodeURIComponent(id)}/affected`).then((r) => r.data),
+  affected: (id: string, clusterId?: string) =>
+    api.get<CVEAffectedResponse>(`/cve/${encodeURIComponent(id)}/affected`, { params: clusterId ? { cluster_id: clusterId } : undefined }).then((r) => r.data),
 };
 
 // ----- Wave D: Response Rules V2 (NeuVector-style condition catalog) ------
@@ -4434,6 +4544,11 @@ export interface RegistryImageRow {
   last_pushed_at?: string;
   first_seen_at: string;
   last_seen_at: string;
+  scanned: boolean;
+  finding_count: number;
+  last_scanned_at?: string;
+  critical: number;
+  high: number;
 }
 
 export interface RegistryTestResult {

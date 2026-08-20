@@ -49,7 +49,6 @@ import {
 } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { DataTable, type Column } from "@/components/ui/data-table";
-import { Drawer } from "@/components/ui/drawer";
 import { ModePill } from "@/components/ui/status-pill";
 import { PageHeader } from "@/components/ui/page";
 import { StatCard } from "@/components/ui/stat-card";
@@ -88,6 +87,10 @@ export function DeploymentDetailPage() {
             <Pill tone={detail.risk_score >= 80 ? "danger" : detail.risk_score >= 60 ? "warn" : "neutral"}>risk {detail.risk_score}</Pill>
             <Pill tone={openHigh > 0 ? "warn" : "ok"}>{openHigh} high+</Pill>
             <Pill tone="neutral">{detail.kind}</Pill>
+            {/* Security-context posture badges (NeuVector surfaces privileged/root directly). */}
+            {Number(detail.risk_factors?.privileged) > 0 && <Pill tone="danger">privileged</Pill>}
+            {Number(detail.risk_factors?.run_as_root) > 0 && <Pill tone="warn">run-as-root</Pill>}
+            {Number(detail.risk_factors?.host_network) > 0 && <Pill tone="warn">host-network</Pill>}
           </>
         }
         description={detail.workload_ids.join(" · ") || "workload identity pending"}
@@ -257,24 +260,22 @@ function ThreatPivotsPanel({ pivots }: { pivots: DeploymentThreatPivot[] }) {
           </div>
         }
       />
-      <ThreatPivotDrawer pivot={selected} onClose={() => setSelected(null)} />
+      {selected && <ThreatPivotPanel pivot={selected} onClose={() => setSelected(null)} />}
     </section>
   );
 }
 
-function ThreatPivotDrawer({ pivot, onClose }: { pivot: DeploymentThreatPivot | null; onClose: () => void }) {
+function ThreatPivotPanel({ pivot, onClose }: { pivot: DeploymentThreatPivot; onClose: () => void }) {
   return (
-    <Drawer
-      open={!!pivot}
-      onOpenChange={(open) => {
-        if (!open) onClose();
-      }}
-      title={pivot?.title ?? "Threat evidence"}
-      description={pivot ? `${pivot.kind.toUpperCase()} · ${pivot.verdict} · ${formatDate(pivot.at)}` : undefined}
-      width="lg"
-    >
-      {pivot ? (
-        <div className="space-y-4" data-testid="deployment-threat-drawer">
+    <section className="rounded-lg border border-border bg-card shadow-[0_1px_2px_0_rgb(0_0_0/0.04)]" data-testid="deployment-threat-drawer">
+      <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold text-foreground">{pivot.title ?? "Threat evidence"}</h2>
+          <p className="text-xs text-muted-foreground">{`${pivot.kind.toUpperCase()} · ${pivot.verdict} · ${formatDate(pivot.at)}`}</p>
+        </div>
+        <Button variant="ghost" size="sm" onClick={onClose}>Close</Button>
+      </header>
+      <div className="space-y-4 p-5">
           <section className="rounded-md border border-border p-3" data-testid="threat-meta">
             <dl className="grid gap-3 text-sm sm:grid-cols-2">
               <Field label="Workload" value={pivot.workload_id} />
@@ -314,9 +315,8 @@ function ThreatPivotDrawer({ pivot, onClose }: { pivot: DeploymentThreatPivot | 
               </div>
             </section>
           )}
-        </div>
-      ) : null}
-    </Drawer>
+      </div>
+    </section>
   );
 }
 
@@ -835,15 +835,16 @@ function DeploymentActionsPanel({ detail, clusterId }: { detail: DeploymentDetai
                 </Button>
               </div>
             ) : null}
-            <Drawer
-              open={reviewOpen}
-              onOpenChange={setReviewOpen}
-              title="Network policy candidate"
-              description={workload}
-              width="xl"
-              className="z-[60]"
-            >
-              <div className="space-y-4" data-testid="deployment-policy-review-drawer">
+            {reviewOpen && (
+              <div className="mt-3 rounded-lg border border-border bg-card" data-testid="deployment-policy-review-drawer">
+                <div className="flex items-center justify-between border-b border-border px-4 py-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-foreground">Network policy candidate</div>
+                    <div className="truncate text-xs text-muted-foreground">{workload}</div>
+                  </div>
+                  <Button variant="ghost" size="sm" onClick={() => setReviewOpen(false)}>Close</Button>
+                </div>
+                <div className="space-y-4 p-4">
                 {manifestFlavors.length > 1 ? (
                   <div className="flex flex-wrap gap-1 rounded-md border border-border p-1" data-testid="deployment-policy-manifest-tabs">
                     {manifestFlavors.map((flavor) => (
@@ -887,8 +888,9 @@ function DeploymentActionsPanel({ detail, clusterId }: { detail: DeploymentDetai
                     {policy.audit_trail.length === 0 ? <li>No audit events recorded.</li> : null}
                   </ul>
                 </div>
+                </div>
               </div>
-            </Drawer>
+            )}
           </>
         ) : (
           <p className="text-xs text-muted-foreground" data-testid="deployment-policy-empty">

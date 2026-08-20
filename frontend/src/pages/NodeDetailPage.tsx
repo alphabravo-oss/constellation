@@ -1,8 +1,8 @@
 import { useMemo } from "react";
 import type { ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { Boxes, ChevronLeft, Database, Layers, Server, ShieldAlert, ShieldCheck, TerminalSquare } from "lucide-react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Boxes, ChevronLeft, Database, Layers, Server, ShieldAlert, ShieldCheck, TerminalSquare, RefreshCw } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import { nodes as nodesApi, type HostVulnerability, type NodeSummary } from "@/api/client";
@@ -10,6 +10,7 @@ import { useCluster } from "@/hooks/useCluster";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { StatCard } from "@/components/ui/stat-card";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 
 export function NodeDetailPage() {
@@ -25,6 +26,12 @@ export function NodeDetailPage() {
 
   const detail = q.data;
   const node = detail?.node;
+
+  const qc = useQueryClient();
+  const scanMut = useMutation({
+    mutationFn: () => nodesApi.scan(node!.scan_target_id!),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["node-detail", clusterId, nodeName] }),
+  });
 
   if (clusterLoading || q.isPending) {
     return <p className="text-sm text-muted-foreground" data-testid="node-detail-loading">Loading node...</p>;
@@ -52,6 +59,12 @@ export function NodeDetailPage() {
           </>
         }
         description={<>{displayOS(node)} · kernel {node.kernel_release || "unknown"} · {node.arch || "arch unknown"} — host vulnerabilities, CIS benchmark results, and agent-collected inventory for this node.</>}
+        actions={node.scan_target_id ? (
+          <Button size="sm" variant="outline" onClick={() => scanMut.mutate()} disabled={scanMut.isPending}>
+            <RefreshCw className={cn("h-3.5 w-3.5", scanMut.isPending && "animate-spin")} />
+            {scanMut.isPending ? "Queuing…" : scanMut.isSuccess ? "Scan queued" : "Scan node"}
+          </Button>
+        ) : undefined}
       />
 
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5" data-testid="node-stats">
@@ -70,12 +83,14 @@ export function NodeDetailPage() {
 
         <HostVulnerabilitiesTable vulnerabilities={detail.vulnerabilities ?? []} />
 
+        <CisBenchmarkTable cis={detail.cis} observedAt={node.cis_observed_at} />
+
+        <NodeContainersTable containers={detail.containers} observedAt={node.containers_observed_at} clusterId={clusterId} />
+        <NodeProcessesTable processes={detail.processes} observedAt={node.processes_observed_at} />
+
         <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
-          <JsonPanel title="CIS evidence" payload={detail.cis} observedAt={node.cis_observed_at} icon={ShieldCheck} />
           <JsonPanel title="Host facts" payload={detail.facts} observedAt={node.host_facts_observed_at} icon={Server} />
           <JsonPanel title="Package inventory" payload={detail.packages} observedAt={node.packages_observed_at} icon={Database} />
-          <JsonPanel title="Container inventory" payload={detail.containers} observedAt={node.containers_observed_at} icon={Boxes} />
-          <JsonPanel title="Process inventory" payload={detail.processes} observedAt={node.processes_observed_at} icon={TerminalSquare} />
         </div>
       </div>
     </div>
@@ -203,6 +218,103 @@ function HostVulnerabilitiesTable({ vulnerabilities }: { vulnerabilities: HostVu
       />
     </section>
   );
+}
+
+// NodeContainersTable renders the node's running containers as a table (name · pod ·
+// image · state) linked to workloads — replacing the old raw-JSON dump.
+function NodeContainersTable({ containers, observedAt, clusterId }: { containers?: unknown; observedAt?: string; clusterId?: string }) {
+  const items = useMemo(() => {
+    const raw = (containers as { items?: Array<Record<string, unknown>> } | undefined)?.items;
+    return Array.isArray(raw) ? raw : [];
+  }, [containers]);
+  const columns: Column<Record<string, unknown>>[] = [
+    { id: "name", header: "Container", cell: (c) => <span className="text-xs font-medium">{String(c.name ?? "—")}</span>, sort: (a, b) => String(a.name ?? "").localeCompare(String(b.name ?? "")) },
+    { id: "pod", header: "Pod", cell: (c) => (
+        clusterId && c.pod_name
+          ? <Link to={`/clusters/${clusterId}/deployments?q=${encodeURIComponent(String(c.pod_name).replace(/-[a-z0-9]+-[a-z0-9]+$/, ""))}`} className="text-mono text-[11px] text-[color:var(--color-primary)] hover:underline">{String(c.pod_namespace ?? "")}/{String(c.pod_name ?? "")}</Link>
+          : <span className="text-mono text-[11px] text-muted-foreground">{String(c.pod_namespace ?? "")}/{String(c.pod_name ?? "—")}</span>
+      ) },
+    { id: "image", header: "Image", cell: (c) => <span className="text-mono text-[11px] text-muted-foreground max-w-[300px] truncate block" title={String(c.image_ref ?? c.image ?? "")}>{String(c.image_ref ?? c.image ?? "—").replace("sha256:", "").slice(0, 24)}</span> },
+    { id: "state", header: "State", width: "120px", cell: (c) => {
+        const st = String(c.state ?? "").replace("CONTAINER_", "").toLowerCase();
+        return <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", st === "running" ? "bg-[color-mix(in_oklab,var(--color-severity-low)_16%,transparent)] text-[color:var(--color-severity-low)]" : "bg-muted text-muted-foreground")}>{st || "—"}</span>;
+      }, sort: (a, b) => String(a.state ?? "").localeCompare(String(b.state ?? "")) },
+  ];
+  return (
+    <section className="overflow-hidden rounded-lg border border-border bg-card">
+      <header className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
+        <div className="flex items-center gap-2"><Boxes className="h-3.5 w-3.5 text-muted-foreground" /><h2 className="text-sm font-semibold">Running containers</h2></div>
+        <span className="text-mono text-xs text-muted-foreground">{items.length}{observedAt ? ` · ${formatDate(observedAt)}` : ""}</span>
+      </header>
+      {items.length === 0 ? <p className="px-3 py-6 text-center text-xs text-muted-foreground">No container inventory recorded.</p>
+        : <div className="p-2"><DataTable rows={items} columns={columns} rowKey={(c) => String(c.id ?? c.name)} defaultSort={{ id: "name", dir: "asc" }} showDensityToggle={false} /></div>}
+    </section>
+  );
+}
+
+// NodeProcessesTable renders the node's process inventory as a table — replacing raw JSON.
+function NodeProcessesTable({ processes, observedAt }: { processes?: unknown; observedAt?: string }) {
+  const items = useMemo(() => {
+    const raw = (processes as { items?: Array<Record<string, unknown>> } | undefined)?.items;
+    return Array.isArray(raw) ? raw : [];
+  }, [processes]);
+  const columns: Column<Record<string, unknown>>[] = [
+    { id: "pid", header: "PID", width: "70px", numeric: true, cell: (p) => <span className="text-mono text-[11px]">{String(p.pid ?? "—")}</span>, sort: (a, b) => Number(a.pid ?? 0) - Number(b.pid ?? 0) },
+    { id: "comm", header: "Process", width: "150px", cell: (p) => <span className="text-xs font-medium">{String(p.comm ?? "—")}</span>, sort: (a, b) => String(a.comm ?? "").localeCompare(String(b.comm ?? "")) },
+    { id: "uid", header: "User", width: "70px", cell: (p) => <span className={cn("text-mono text-[11px]", Number(p.uid) === 0 && "text-[color:var(--color-severity-high)]")}>{Number(p.uid) === 0 ? "root" : String(p.uid ?? "—")}</span>, sort: (a, b) => Number(a.uid ?? 0) - Number(b.uid ?? 0) },
+    { id: "cmdline", header: "Command line", cell: (p) => <span className="text-mono text-[10px] text-muted-foreground max-w-[520px] truncate block" title={String(p.cmdline ?? "")}>{String(p.cmdline ?? "—")}</span> },
+  ];
+  return (
+    <section className="overflow-hidden rounded-lg border border-border bg-card">
+      <header className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
+        <div className="flex items-center gap-2"><TerminalSquare className="h-3.5 w-3.5 text-muted-foreground" /><h2 className="text-sm font-semibold">Processes</h2></div>
+        <span className="text-mono text-xs text-muted-foreground">{items.length}{observedAt ? ` · ${formatDate(observedAt)}` : ""}</span>
+      </header>
+      {items.length === 0 ? <p className="px-3 py-6 text-center text-xs text-muted-foreground">No process inventory recorded.</p>
+        : <div className="p-2"><DataTable rows={items} columns={columns} rowKey={(p) => String(p.pid)} defaultSort={{ id: "pid", dir: "asc" }} showDensityToggle={false} /></div>}
+    </section>
+  );
+}
+
+// CisBenchmarkTable renders CIS host-benchmark checks as a real, sortable table (fails
+// first) with per-control remediation detail — replacing the old raw-JSON dump and
+// matching NeuVector's compliance list.
+function CisBenchmarkTable({ cis, observedAt }: { cis?: unknown; observedAt?: string }) {
+  const checks = useMemo(() => {
+    const raw = (cis as { checks?: Array<{ id?: string; title?: string; result?: string; detail?: string }> } | undefined)?.checks;
+    return Array.isArray(raw) ? raw : [];
+  }, [cis]);
+  const rank: Record<string, number> = { fail: 0, warn: 1, info: 2, note: 2, pass: 3, skip: 4 };
+  const columns: Column<{ id?: string; title?: string; result?: string; detail?: string }>[] = [
+    { id: "result", header: "Result", width: "88px",
+      cell: (c) => <CisResultBadge result={c.result} />,
+      sort: (a, b) => (rank[(a.result || "").toLowerCase()] ?? 9) - (rank[(b.result || "").toLowerCase()] ?? 9) },
+    { id: "id", header: "Control", width: "120px", cell: (c) => <span className="text-mono text-xs">{c.id || "—"}</span>, sort: (a, b) => (a.id || "").localeCompare(b.id || "") },
+    { id: "title", header: "Title", cell: (c) => <span className="text-xs">{c.title || "—"}</span>, sort: (a, b) => (a.title || "").localeCompare(b.title || "") },
+    { id: "detail", header: "Remediation / detail", cell: (c) => <span className="block max-w-[520px] truncate text-[11px] text-muted-foreground" title={c.detail}>{c.detail || "—"}</span> },
+  ];
+  const fails = checks.filter((c) => (c.result || "").toLowerCase() === "fail").length;
+  return (
+    <section className="overflow-hidden rounded-lg border border-border bg-card">
+      <header className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
+        <div className="flex items-center gap-2"><ShieldCheck className="h-3.5 w-3.5 text-muted-foreground" /><h2 className="text-sm font-semibold">CIS Benchmark</h2></div>
+        <span className="text-mono text-xs text-muted-foreground">{fails} failing / {checks.length} checks{observedAt ? ` · ${formatDate(observedAt)}` : ""}</span>
+      </header>
+      {checks.length === 0 ? (
+        <p className="px-3 py-6 text-center text-xs text-muted-foreground">No CIS benchmark results recorded.</p>
+      ) : (
+        <div className="p-2">
+          <DataTable rows={checks} columns={columns} rowKey={(c) => `${c.id ?? ""}-${c.title ?? ""}`} defaultSort={{ id: "result", dir: "asc" }} showDensityToggle={false} />
+        </div>
+      )}
+    </section>
+  );
+}
+
+function CisResultBadge({ result }: { result?: string }) {
+  const r = (result || "").toLowerCase();
+  const color = r === "fail" ? "var(--color-severity-critical)" : r === "warn" ? "var(--color-severity-high)" : r === "pass" ? "var(--color-severity-low)" : "var(--color-severity-medium)";
+  return <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase" style={{ background: `color-mix(in oklab, ${color} 16%, transparent)`, color }}>{result || "—"}</span>;
 }
 
 function JsonPanel({ title, payload, observedAt, icon: Icon }: { title: string; payload: unknown; observedAt?: string; icon: LucideIcon }) {

@@ -1,12 +1,11 @@
-import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { Crown, GitBranch, Hash, LogOut as LeaveIcon, Plus, Users } from "lucide-react";
 
 import { federation, type FedMember } from "@/api/client";
 import { PageHeader, PageContainer } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { StatCard } from "@/components/ui/stat-card";
-import { Drawer } from "@/components/ui/drawer";
 
 const memberColumns: Column<FedMember>[] = [
   { id: "name", header: "Cluster", cell: (m) => m.name, className: "text-xs font-medium" },
@@ -17,16 +16,14 @@ const memberColumns: Column<FedMember>[] = [
 
 export function FederationPage() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const state = useQuery({ queryKey: ["fed-state"], queryFn: () => federation.state() });
   const members = useQuery({ queryKey: ["fed-members"], queryFn: () => federation.members() });
   const memberRows = members.data?.members ?? [];
-  const [masterID, setMasterID] = useState("");
-  const [clusterName, setClusterName] = useState("");
-  const [joinOpen, setJoinOpen] = useState(false);
 
   const transit = useMutation({
-    mutationFn: (action: "promote" | "demote" | "join" | "leave") =>
-      federation.transition(action, masterID, clusterName),
+    mutationFn: (action: "promote" | "demote" | "leave") =>
+      federation.transition(action),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["fed-state"] }),
   });
 
@@ -65,7 +62,7 @@ export function FederationPage() {
           </button>
           <button
             disabled={cur?.state !== "standalone"}
-            onClick={() => setJoinOpen(true)}
+            onClick={() => navigate("/federation/new")}
             className="inline-flex items-center gap-1.5 rounded-md border border-border bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
             <Plus className="h-3.5 w-3.5" />
@@ -103,49 +100,6 @@ export function FederationPage() {
           }
         />
       </section>
-
-      <Drawer
-        open={joinOpen}
-        onOpenChange={setJoinOpen}
-        title="Join a federation"
-        description="Join an existing federation as a joint cluster. It will receive policies and groups from the named master."
-        width="md"
-      >
-        <form
-          className="space-y-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            transit.mutate("join", { onSuccess: () => setJoinOpen(false) });
-          }}
-        >
-          <label className="block text-xs font-medium">
-            Master id
-            <input
-              className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-              placeholder="master id"
-              value={masterID}
-              onChange={(e) => setMasterID(e.target.value)}
-              required
-            />
-          </label>
-          <label className="block text-xs font-medium">
-            This cluster name
-            <input
-              className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-              placeholder="this cluster name"
-              value={clusterName}
-              onChange={(e) => setClusterName(e.target.value)}
-            />
-          </label>
-          <button
-            type="submit"
-            disabled={!masterID || transit.isPending}
-            className="w-full rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-          >
-            {transit.isPending ? "Joining…" : "Join federation"}
-          </button>
-        </form>
-      </Drawer>
     </PageContainer>
   );
 }

@@ -12,9 +12,9 @@
 //
 // All writes go through the API which writes audit_events; the
 // auto-rollback watcher (Wave A5) handles enforce-mode safety.
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
   ShieldAlert,
@@ -32,17 +32,13 @@ import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { StatCard } from "@/components/ui/stat-card";
 import { StatusPill } from "@/components/ui/status-pill";
-import { Drawer } from "@/components/ui/drawer";
 import { LoadingState, ErrorState, EmptyState } from "@/components/ui/states";
-import { cn } from "@/lib/cn";
 
 import {
   runtimePolicies,
-  type GeneratePolicyResponse,
   type PolicyMatchStats,
   type RuntimePolicy,
   type RuntimePolicyMode,
-  type RuntimePolicyRule,
 } from "@/api/client";
 
 const MODE_BADGE: Record<RuntimePolicyMode, { label: string; tone: "success" | "warning" | "neutral"; icon: React.ReactNode }> = {
@@ -58,6 +54,7 @@ export function RuntimePoliciesPage() {
   // through to a "select a cluster" empty state.
   const { id: pathClusterID } = useParams();
   const clusterID = pathClusterID ?? search.get("cluster_id") ?? "";
+  const navigate = useNavigate();
 
   const queryClient = useQueryClient();
   const q = useQuery({
@@ -66,12 +63,12 @@ export function RuntimePoliciesPage() {
     enabled: !!clusterID,
   });
 
-  const [editorOpen, setEditorOpen] = useState(false);
-  const [editingID, setEditingID] = useState<string | null>(null);
   const [confirmPromoteID, setConfirmPromoteID] = useState<string | null>(null);
 
-  const openNew = () => { setEditingID(null); setEditorOpen(true); };
-  const openEdit = (id: string) => { setEditingID(id); setEditorOpen(true); };
+  // Add/edit now live on dedicated routes (Astronomer pattern; see
+  // frontend/CLAUDE.md). Preserve any ?cluster_id= fallback across the nav.
+  const openNew = () => navigate({ pathname: "new", search: search.toString() });
+  const openEdit = (id: string) => navigate({ pathname: id, search: search.toString() });
 
   const policies = useMemo(() => q.data ?? [], [q.data]);
   const enforceCount = policies.filter((p) => p.mode === "enforce").length;
@@ -160,27 +157,6 @@ export function RuntimePoliciesPage() {
         )}
       </div>
 
-      <Drawer
-        open={editorOpen}
-        onOpenChange={setEditorOpen}
-        width="xl"
-        title={editingID ? "Edit runtime policy" : "New runtime policy"}
-        description="Author the policy's rules, simulate them against observed traffic, or generate a ruleset from what's been seen."
-      >
-        {editorOpen && (
-          <div data-testid="runtime-policies-editor">
-            <PolicyEditor
-              clusterID={clusterID}
-              policyID={editingID}
-              onSaved={() => {
-                setEditorOpen(false);
-                void queryClient.invalidateQueries({ queryKey: ["runtime-policies", clusterID] });
-              }}
-            />
-          </div>
-        )}
-      </Drawer>
-
       <PromoteConfirmDialog
         policyID={confirmPromoteID}
         onClose={() => setConfirmPromoteID(null)}
@@ -237,297 +213,6 @@ function PolicyActions({
       >
         <Trash2 className="h-3.5 w-3.5" />
       </Button>
-    </div>
-  );
-}
-
-function PolicyEditor({
-  clusterID,
-  policyID,
-  onSaved,
-}: {
-  clusterID: string;
-  policyID: string | null;
-  onSaved: (p: RuntimePolicy) => void;
-}) {
-  const queryClient = useQueryClient();
-  const existing = useQuery({
-    queryKey: ["runtime-policy", policyID],
-    queryFn: () => runtimePolicies.get(policyID as string),
-    enabled: !!policyID,
-  });
-
-  const [workload, setWorkload] = useState("");
-  const [namespace, setNamespace] = useState("");
-  const [name, setName] = useState("");
-  const [rulesText, setRulesText] = useState("[]");
-  const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (existing.data) {
-      setWorkload(existing.data.workload);
-      setNamespace(existing.data.namespace);
-      setName(existing.data.name);
-      setRulesText(JSON.stringify(Array.isArray(existing.data.rules) ? existing.data.rules : [], null, 2));
-    } else if (!policyID) {
-      setWorkload("");
-      setNamespace("");
-      setName("");
-      setRulesText("[]");
-    }
-  }, [existing.data, policyID]);
-
-  const parseRules = (): RuntimePolicyRule[] => {
-    const out = JSON.parse(rulesText);
-    if (!Array.isArray(out)) throw new Error("rules must be an array");
-    return out as RuntimePolicyRule[];
-  };
-
-  const save = useMutation({
-    mutationFn: async (): Promise<RuntimePolicy> => {
-      setErr(null);
-      let parsedRules: RuntimePolicyRule[];
-      try {
-        parsedRules = parseRules();
-      } catch (e) {
-        throw new Error("Rules JSON invalid: " + (e as Error).message);
-      }
-      if (policyID) {
-        return runtimePolicies.update(policyID, { rules: parsedRules, name });
-      }
-      return runtimePolicies.create({
-        cluster_id: clusterID,
-        workload, namespace, name,
-        mode: "monitor",
-        rules: parsedRules,
-      });
-    },
-    onSuccess: (p) => {
-      onSaved(p);
-      void queryClient.invalidateQueries({ queryKey: ["runtime-policies", clusterID] });
-    },
-    onError: (e) => setErr((e as Error).message),
-  });
-
-  // Wave B3: Simulate the candidate ruleset against the workload's
-  // observed flows over the last 24h. Requires an existing policy ID for
-  // workload scoping (the route is /runtime-policies/{id}/simulate); the
-  // new-policy path is a future enhancement.
-  const [simStats, setSimStats] = useState<PolicyMatchStats | undefined>(undefined);
-  const simulate = useMutation({
-    mutationFn: async (): Promise<PolicyMatchStats> => {
-      setErr(null);
-      let parsedRules: RuntimePolicyRule[];
-      try {
-        parsedRules = parseRules();
-      } catch (e) {
-        throw new Error("Rules JSON invalid: " + (e as Error).message);
-      }
-      if (!policyID) {
-        throw new Error("Save the policy first; simulation runs against the workload it's bound to.");
-      }
-      return runtimePolicies.simulate(policyID, { rules: parsedRules, as_mode: "enforce" }, 24);
-    },
-    onSuccess: setSimStats,
-    onError: (e) => setErr((e as Error).message),
-  });
-
-  // Wave B4: Generate rules from observed traffic for the workload.
-  // Excludes flows that tripped a threat signature. Result populates the
-  // rules textarea — operator reviews, edits, saves.
-  const [genResult, setGenResult] = useState<GeneratePolicyResponse | undefined>(undefined);
-  const generate = useMutation({
-    mutationFn: async (): Promise<GeneratePolicyResponse> => {
-      setErr(null);
-      if (!workload) throw new Error("Workload is required to generate from observed traffic.");
-      return runtimePolicies.generate({
-        cluster_id: clusterID,
-        workload, namespace: namespace || undefined,
-        hours: 24,
-      });
-    },
-    onSuccess: (g) => {
-      setGenResult(g);
-      // Prefill the editor with the generated rules so the operator can
-      // review + tweak before saving. We DO NOT auto-save — auto-gen is
-      // a draft, not a commit.
-      setRulesText(JSON.stringify(g.rules, null, 2));
-    },
-    onError: (e) => setErr((e as Error).message),
-  });
-
-  return (
-    <div className="space-y-4">
-      <div className="space-y-3" data-testid="runtime-policies-editor-form">
-        <Field label="Workload" value={workload} onChange={setWorkload} placeholder="namespace/deployment" disabled={!!policyID} />
-        <Field label="Namespace" value={namespace} onChange={setNamespace} placeholder="default" disabled={!!policyID} />
-        <Field label="Name" value={name} onChange={setName} placeholder="block-egress-to-internet" />
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Rules (JSON)</div>
-        <textarea
-          className="h-[300px] w-full rounded border border-input bg-card p-2 font-mono text-[11px] outline-none focus:border-[color:var(--color-primary)]"
-          value={rulesText}
-          onChange={(e) => setRulesText(e.target.value)}
-          spellCheck={false}
-          data-testid="runtime-policies-editor-rules"
-        />
-        {err && (
-          <div className="rounded border border-[color:var(--color-status-error)] bg-card p-2 text-[11px] text-[color:var(--color-status-error)]" data-testid="runtime-policies-editor-error">
-            {err}
-          </div>
-        )}
-        <div className="flex items-center gap-2">
-          <Button onClick={() => save.mutate()} disabled={save.isPending} data-testid="runtime-policies-editor-save">
-            {policyID ? "Save changes" : "Create (in monitor mode)"}
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => simulate.mutate()}
-            disabled={simulate.isPending || !policyID}
-            data-testid="runtime-policies-editor-simulate"
-            title={policyID ? "Run the current rules against the last 24h of observed flows for this workload" : "Save the policy first to enable simulation"}
-          >
-            {simulate.isPending ? "Simulating…" : "Simulate"}
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => generate.mutate()}
-            disabled={generate.isPending || !workload}
-            data-testid="runtime-policies-editor-generate"
-            title="Synthesize a default-deny ruleset from the last 24h of observed traffic for this workload. Threat-tagged flows are excluded."
-          >
-            {generate.isPending ? "Generating…" : "Generate from traffic"}
-          </Button>
-          <span className="text-[10px] text-muted-foreground">
-            New policies always start in <b>monitor</b>. Promote separately to enforce.
-          </span>
-        </div>
-      </div>
-      <div className="space-y-2" data-testid="runtime-policies-editor-preview">
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Live preview</div>
-        <pre className="h-[280px] overflow-auto rounded border border-border bg-background/40 p-2 font-mono text-[10px] leading-snug">
-          {JSON.stringify({ cluster_id: clusterID, workload, namespace, name, rules: tryParse(rulesText) }, null, 2)}
-        </pre>
-        {simStats && (
-          <>
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Simulation</div>
-            <MatchStatsPane stats={simStats} />
-          </>
-        )}
-        {genResult && <GenerateResultPane result={genResult} />}
-      </div>
-    </div>
-  );
-}
-
-// GenerateResultPane shows what auto-gen produced: counts of flows it
-// looked at, how many threat-tagged flows it deliberately skipped, and
-// downloadable NetworkPolicy YAML in three flavors.
-function GenerateResultPane({ result }: { result: GeneratePolicyResponse }) {
-  const [yamlTab, setYamlTab] = useState<"native" | "cilium" | "calico">("native");
-  const yaml = result.yaml[yamlTab];
-  const download = (flavor: string) => {
-    const blob = new Blob([result.yaml[flavor as keyof typeof result.yaml]], { type: "text/yaml" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${result.workload.replace("/", "-")}-${flavor}.yaml`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-  return (
-    <div className="space-y-2" data-testid="runtime-policies-generate-result">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Auto-generated from traffic</div>
-      <div className="rounded border border-border bg-card/50 p-2 text-[11px]">
-        <div>
-          Window: <span className="text-mono">{result.window_hours}h</span> ·
-          Flows seen: <span className="text-mono">{result.flows_seen}</span> ·
-          Rules: <span className="text-mono">{result.rules.length}</span>
-        </div>
-        {result.threats_excluded > 0 && (
-          <div className="mt-1 text-[color:var(--color-status-warning)]" data-testid="runtime-policies-generate-threats-excluded">
-            {result.threats_excluded} flow(s) excluded because they tripped a threat signature — they stay alert/deny.
-          </div>
-        )}
-      </div>
-      <details className="text-[11px]">
-        <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
-          Rule summary ({result.summary.length})
-        </summary>
-        <ul className="mt-1 space-y-0.5 rounded border border-border bg-background/40 p-2 font-mono text-[10px]">
-          {result.summary.map((s, i) => <li key={i}>{s}</li>)}
-        </ul>
-      </details>
-      <div>
-        <div className="mb-1 flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-          NetworkPolicy YAML
-          {(["native", "cilium", "calico"] as const).map((f) => (
-            <button
-              key={f}
-              type="button"
-              onClick={() => setYamlTab(f)}
-              className={cn(
-                "rounded border border-border bg-card px-1.5 py-0.5",
-                yamlTab === f && "bg-accent text-foreground",
-              )}
-              data-testid={`runtime-policies-generate-yaml-tab-${f}`}
-            >
-              {f}
-            </button>
-          ))}
-          <button
-            type="button"
-            onClick={() => download(yamlTab)}
-            className="ml-auto rounded border border-border bg-card px-1.5 py-0.5 hover:bg-accent"
-            data-testid={`runtime-policies-generate-yaml-download-${yamlTab}`}
-          >
-            Download
-          </button>
-        </div>
-        <pre className="h-[180px] overflow-auto rounded border border-border bg-background/40 p-2 font-mono text-[10px]">
-          {yaml}
-        </pre>
-      </div>
-    </div>
-  );
-}
-
-function tryParse(s: string): unknown {
-  try {
-    return JSON.parse(s);
-  } catch {
-    return "<invalid JSON>";
-  }
-}
-
-function Field({
-  label,
-  value,
-  onChange,
-  placeholder,
-  disabled,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-  disabled?: boolean;
-}) {
-  return (
-    <div>
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <input
-        type="text"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        disabled={disabled}
-        className={cn(
-          "mt-0.5 w-full rounded border border-input bg-card px-2 py-1 text-xs outline-none focus:border-[color:var(--color-primary)]",
-          disabled && "opacity-60",
-        )}
-      />
     </div>
   );
 }

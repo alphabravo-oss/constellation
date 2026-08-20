@@ -241,34 +241,50 @@ function SignatureEvidenceCard({
 }
 
 function LayersEvidenceCard({ loading, layers, totalSize, result }: { loading: boolean; layers: ImageLayerDescriptor[]; totalSize?: number; result: ImageScanResult }) {
+  // Dockerfile-style reconstruction: one row per layer with the build instruction that
+  // created it, base-vs-app attribution, size, and package count. Mirrors NeuVector's
+  // layered image view (the scanner already computes command/in_base_image/package_count).
   return (
     <section className="overflow-hidden rounded-lg border border-border bg-card">
       <header className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
-        <h2 className="text-sm font-semibold">Layer metadata</h2>
-        <span className="font-mono text-xs text-muted-foreground">{result.layer_count} · {formatBytes(totalSize)}</span>
+        <h2 className="text-sm font-semibold">Image layers · Dockerfile</h2>
+        <span className="font-mono text-xs text-muted-foreground">{result.layer_count} layers · {formatBytes(totalSize)}</span>
       </header>
       {loading ? (
-        <p className="p-3 text-xs text-muted-foreground">Loading layer metadata...</p>
+        <p className="p-3 text-xs text-muted-foreground">Loading layers…</p>
+      ) : layers.length === 0 ? (
+        <p className="px-3 py-6 text-center text-xs text-muted-foreground">No layer metadata recorded.</p>
       ) : (
-        <table className="w-full text-sm">
-          <thead className="bg-muted text-xs uppercase text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2 text-left">Digest</th>
-              <th className="px-3 py-2 text-left">Size</th>
-              <th className="px-3 py-2 text-left">Media</th>
-            </tr>
-          </thead>
-          <tbody>
-            {layers.slice(0, 6).map((layer, index) => (
-              <tr key={layer.digest || index} className="border-t border-border">
-                <td className="max-w-[280px] truncate px-3 py-2 font-mono text-xs" title={layer.digest}>{layer.digest || "-"}</td>
-                <td className="px-3 py-2 font-mono text-xs">{formatBytes(layer.size_bytes)}</td>
-                <td className="max-w-[220px] truncate px-3 py-2 text-xs text-muted-foreground" title={layer.media_type}>{layer.media_type || "-"}</td>
-              </tr>
-            ))}
-            {layers.length === 0 ? <tr><td colSpan={3} className="px-3 py-6 text-center text-xs text-muted-foreground">No layer metadata recorded.</td></tr> : null}
-          </tbody>
-        </table>
+        <ol className="divide-y divide-border">
+          {layers.map((layer, index) => {
+            const cmd = layer.command || layer.created_by || "";
+            const instr = cmd.split(/\s+/)[0]?.toUpperCase();
+            return (
+              <li key={layer.digest || layer.diff_id || index} className="flex items-start gap-3 px-3 py-2">
+                <span className="mt-0.5 w-6 shrink-0 text-right font-mono text-[10px] text-muted-foreground">{layer.index ?? index}</span>
+                <div className="min-w-0 flex-1">
+                  <code className="block whitespace-pre-wrap break-words font-mono text-[11px] leading-snug text-foreground">
+                    {cmd
+                      ? (["RUN","ADD","COPY","ENV","CMD","ENTRYPOINT","WORKDIR","EXPOSE","USER","LABEL","VOLUME","ARG","FROM"].includes(instr ?? "")
+                          ? <><span className="text-[color:var(--color-primary)]">{instr}</span>{cmd.slice(instr!.length)}</>
+                          : cmd)
+                      : <span className="text-muted-foreground">{layer.media_type || "layer"}</span>}
+                  </code>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+                    {layer.in_base_image !== undefined && (
+                      <span className={cn("rounded px-1 py-px font-medium", layer.in_base_image ? "bg-muted text-muted-foreground" : "bg-[color-mix(in_oklab,var(--color-primary)_14%,transparent)] text-[color:var(--color-primary)]")}>
+                        {layer.in_base_image ? "base" : "app"}
+                      </span>
+                    )}
+                    <span className="font-mono">{formatBytes(layer.size_bytes)}</span>
+                    {(layer.package_count ?? 0) > 0 && <span>{layer.package_count} pkg{layer.package_count === 1 ? "" : "s"}</span>}
+                    {layer.digest && <span className="max-w-[160px] truncate font-mono opacity-70" title={layer.digest}>{layer.digest.replace("sha256:", "").slice(0, 12)}</span>}
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
       )}
     </section>
   );
@@ -380,11 +396,14 @@ function FindingsTable({ findings }: { findings: ImageScanFinding[] }) {
       header: "CVE",
       cell: (finding) => (
         <>
-          {finding.external_id ? (
-            <Link to={`/cve/${finding.external_id}`} className="font-mono text-xs font-medium hover:underline">{finding.external_id}</Link>
-          ) : (
-            <span className="font-mono text-xs">-</span>
-          )}
+          <span className="flex items-center gap-1.5">
+            {finding.external_id ? (
+              <Link to={`/cve/${finding.external_id}`} className="font-mono text-xs font-medium hover:underline">{finding.external_id}</Link>
+            ) : (
+              <span className="font-mono text-xs">-</span>
+            )}
+            {finding.kev_listed && <span className="rounded px-1 py-px text-[9px] font-semibold text-white" style={{ background: "var(--color-severity-critical)" }} title="CISA Known-Exploited">KEV</span>}
+          </span>
           <div className="mt-1 max-w-[360px] truncate text-xs text-muted-foreground">{finding.title}</div>
         </>
       ),
@@ -400,6 +419,7 @@ function FindingsTable({ findings }: { findings: ImageScanFinding[] }) {
       ),
     },
     { id: "severity", header: "Severity", cell: (finding) => <SeverityPill severity={finding.severity} /> },
+    { id: "cvss", header: "CVSS", numeric: true, cell: (finding) => <span className="font-mono text-xs" style={{ color: (finding.cvss_base ?? 0) >= 9 ? "var(--color-severity-critical)" : (finding.cvss_base ?? 0) >= 7 ? "var(--color-severity-high)" : "var(--color-foreground)" }}>{finding.cvss_base ? finding.cvss_base.toFixed(1) : "—"}</span>, sort: (a, b) => (a.cvss_base ?? 0) - (b.cvss_base ?? 0) },
     { id: "risk", header: "Risk", cell: (finding) => <span className="font-semibold">{finding.risk_score}</span> },
     { id: "fix", header: "Fix", cell: (finding) => <span className="font-mono text-xs">{finding.fixed_version || "-"}</span> },
   ];

@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import type { ReactNode } from "react";
 import { Database, Pause, Pencil, Play, Plus, RotateCcw, ShieldQuestion, XCircle } from "lucide-react";
 import { toast } from "sonner";
@@ -10,12 +11,10 @@ import { PageHeader, PageContainer } from "@/components/ui/page";
 import { StatCard } from "@/components/ui/stat-card";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
-import { Drawer } from "@/components/ui/drawer";
 import { VerdictBanner, type VerdictStatus } from "@/components/ui/verdict-banner";
 import { Collapse } from "@/components/ui/collapse";
 
 type CloudConnector = ConnectorCoverageOverview["cloud_connectors"][number];
-type RegistryConnector = ConnectorCoverageOverview["registry_connectors"][number];
 
 const cloudColumns: Column<CloudConnector>[] = [
   {
@@ -37,63 +36,13 @@ const cloudColumns: Column<CloudConnector>[] = [
 
 type ScanJobAction = "pause" | "resume" | "retry" | "cancel";
 
-// The connector-config form state; shared by add + edit in the drawer.
-type ConfigFormState = {
-  connector_id: string;
-  connector_type: "registry" | "cloud";
-  provider: string;
-  display_name: string;
-  endpoint: string;
-  auth_mode: string;
-  owner: string;
-  scan_cadence: string;
-  rotation_due_at: string;
-  credential_ref: string;
-};
-
-const inputCls = "mt-1 w-full rounded-md border border-border bg-background p-2 text-sm";
-
-function blankConfig(type: "registry" | "cloud"): ConfigFormState {
-  return {
-    connector_id: "",
-    connector_type: type,
-    provider: "",
-    display_name: "",
-    endpoint: "",
-    auth_mode: "",
-    owner: "",
-    scan_cadence: "daily",
-    rotation_due_at: "",
-    credential_ref: "",
-  };
-}
-
-// Pre-fill the config form for an existing registry connector, merging any saved
-// metadata (owner / cadence / rotation / credential ref) that already exists.
-function configFromRegistry(connector: RegistryConnector, configs: ConnectorCoverageOverview["configs"]): ConfigFormState {
-  const saved = configs.find((c) => c.connector_id === connector.id && c.connector_type === "registry");
-  return {
-    connector_id: connector.id,
-    connector_type: "registry",
-    provider: connector.provider,
-    display_name: connector.name,
-    endpoint: connector.endpoint,
-    auth_mode: connector.auth_mode,
-    owner: saved?.owner ?? "",
-    scan_cadence: saved?.scan_cadence ?? "daily",
-    rotation_due_at: saved?.rotation_due_at ? saved.rotation_due_at.slice(0, 10) : "",
-    credential_ref: saved?.credential_ref ?? "",
-  };
-}
-
 export function ConnectorCoveragePage() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const q = useQuery({ queryKey: ["connector-coverage"], queryFn: connectorCoverage.overview });
   const jobs = useQuery({ queryKey: ["scan-jobs"], queryFn: () => scanJobs.list() });
   const [tab, setTab] = useTabParam("tab", "registries");
   const [cacheScannerID, setCacheScannerID] = useState("");
-  const [configDrawer, setConfigDrawer] = useState<{ type: "registry" | "cloud"; initial: ConfigFormState | null } | null>(null);
-  const [queueOpen, setQueueOpen] = useState(false);
   const cacheData = useQuery({
     queryKey: ["scanner-cache-data", cacheScannerID],
     queryFn: () => connectorCoverage.cacheData(cacheScannerID),
@@ -136,10 +85,6 @@ export function ConnectorCoveragePage() {
   const configs = data?.configs ?? [];
   const jobList = jobs.data?.jobs ?? [];
 
-  // Connector option lists for the config drawer's picker.
-  const registryOptions = registryConnectors.map((c) => ({ id: c.id, name: c.name, provider: c.provider, endpoint: c.endpoint, auth_mode: c.auth_mode }));
-  const cloudOptions = cloudConnectors.map((c) => ({ id: c.id, name: c.name, provider: c.provider, endpoint: c.account, auth_mode: c.auth_mode }));
-
   // Verdict: is every connector ready and everything scanned?
   const registriesReady = (summary?.registry_connectors_ready ?? 0) >= (summary?.registry_connectors_total ?? 0);
   const cloudsReady = (summary?.cloud_connectors_ready ?? 0) >= (summary?.cloud_connectors_total ?? 0);
@@ -173,7 +118,7 @@ export function ConnectorCoveragePage() {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold">Registry connectors</h2>
-            {addButton("Add registry", () => setConfigDrawer({ type: "registry", initial: null }))}
+            {addButton("Add registry", () => navigate("/settings/connectors/new?type=registry"))}
           </div>
 
           <section className="grid gap-3 lg:grid-cols-2" data-testid="registry-connectors">
@@ -208,7 +153,7 @@ export function ConnectorCoveragePage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setConfigDrawer({ type: "registry", initial: configFromRegistry(connector, configs) })}
+                    onClick={() => navigate(`/settings/connectors/${connector.id}`)}
                     className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs hover:bg-accent"
                   >
                     <Pencil className="h-3.5 w-3.5" aria-hidden />
@@ -295,7 +240,7 @@ export function ConnectorCoveragePage() {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold">Cloud accounts</h2>
-            {addButton("Add cloud account", () => setConfigDrawer({ type: "cloud", initial: null }))}
+            {addButton("Add cloud account", () => navigate("/settings/connectors/new?type=cloud"))}
           </div>
           <div className="overflow-x-auto rounded-lg border border-border bg-card" data-testid="cloud-connectors">
             <DataTable<CloudConnector>
@@ -316,7 +261,7 @@ export function ConnectorCoveragePage() {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold">Scan jobs</h2>
-            {addButton("Queue scan", () => setQueueOpen(true))}
+            {addButton("Queue scan", () => navigate("/settings/connectors/scan/new"))}
           </div>
 
           <section className="space-y-2" data-testid="recent-scan-jobs">
@@ -573,218 +518,10 @@ export function ConnectorCoveragePage() {
       </section>
 
       <Tabs value={tab} onValueChange={setTab} items={tabs} />
-
-      <ConnectorConfigDrawer
-        open={configDrawer !== null}
-        onOpenChange={(open) => { if (!open) setConfigDrawer(null); }}
-        connectorType={configDrawer?.type ?? "registry"}
-        connectors={configDrawer?.type === "cloud" ? cloudOptions : registryOptions}
-        initial={configDrawer?.initial ?? null}
-        onSaved={invalidateCoverage}
-      />
-      <QueueScanDrawer open={queueOpen} onOpenChange={setQueueOpen} onQueued={invalidateJobs} />
     </PageContainer>
   );
 }
 
-function ConnectorConfigDrawer({
-  open,
-  onOpenChange,
-  connectorType,
-  connectors,
-  initial,
-  onSaved,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  connectorType: "registry" | "cloud";
-  connectors: Array<{ id: string; name: string; provider: string; endpoint: string; auth_mode: string }>;
-  initial: ConfigFormState | null;
-  onSaved: () => void;
-}) {
-  const [form, setForm] = useState<ConfigFormState>(() => initial ?? blankConfig(connectorType));
-  // Reset the form each time the drawer opens (add = blank, edit = pre-filled).
-  useEffect(() => {
-    if (open) setForm(initial ?? blankConfig(connectorType));
-  }, [open, initial, connectorType]);
-
-  const save = useMutation({
-    mutationFn: () => {
-      const rotation_due_at = form.rotation_due_at
-        ? new Date(`${form.rotation_due_at}T00:00:00Z`).toISOString()
-        : undefined;
-      return connectorCoverage.saveConfig({ ...form, rotation_due_at });
-    },
-    onSuccess: () => {
-      toast.success("Connector metadata saved");
-      onOpenChange(false);
-      onSaved();
-    },
-    onError: () => toast.error("Unable to save connector metadata"),
-  });
-
-  const canSave = Boolean(form.connector_id && form.display_name && form.endpoint && form.auth_mode && form.owner);
-  const noun = connectorType === "registry" ? "registry" : "cloud account";
-  const editing = Boolean(initial);
-
-  return (
-    <Drawer
-      open={open}
-      onOpenChange={onOpenChange}
-      title={`${editing ? "Edit" : "Add"} ${noun}`}
-      description="Save connector metadata and an external secret reference. Raw credentials are never accepted by this API."
-    >
-      <form
-        className="space-y-3 text-sm"
-        data-testid="connector-config-editor"
-        onSubmit={(event) => { event.preventDefault(); if (canSave && !save.isPending) save.mutate(); }}
-      >
-        <label className="block text-xs font-medium">
-          {connectorType === "registry" ? "Registry" : "Cloud account"}
-          <select
-            value={form.connector_id}
-            onChange={(event) => {
-              const connector = connectors.find((item) => item.id === event.target.value);
-              if (!connector) {
-                setForm((current) => ({ ...current, connector_id: "", provider: "", display_name: "", endpoint: "", auth_mode: "" }));
-                return;
-              }
-              setForm((current) => ({
-                ...current,
-                connector_id: connector.id,
-                connector_type: connectorType,
-                provider: connector.provider,
-                display_name: connector.name,
-                endpoint: connector.endpoint,
-                auth_mode: connector.auth_mode,
-              }));
-            }}
-            className={inputCls}
-            data-testid="connector-config-id"
-          >
-            <option value="">Select {noun}</option>
-            {connectors.map((connector) => (
-              <option key={connector.id} value={connector.id}>{connector.name}</option>
-            ))}
-          </select>
-        </label>
-        <TextInput label="Owner" value={form.owner} onChange={(owner) => setForm((current) => ({ ...current, owner }))} testID="connector-config-owner" />
-        <TextInput label="Endpoint" value={form.endpoint} onChange={(endpoint) => setForm((current) => ({ ...current, endpoint }))} />
-        <TextInput label="Auth mode" value={form.auth_mode} onChange={(auth_mode) => setForm((current) => ({ ...current, auth_mode }))} />
-        <TextInput label="Credential ref" value={form.credential_ref} onChange={(credential_ref) => setForm((current) => ({ ...current, credential_ref }))} testID="connector-config-credential-ref" />
-        <Collapse label="Advanced">
-          <div className="space-y-3">
-            <label className="block text-xs font-medium">
-              Scan cadence
-              <select
-                value={form.scan_cadence}
-                onChange={(event) => setForm((current) => ({ ...current, scan_cadence: event.target.value }))}
-                className={inputCls}
-              >
-                <option value="hourly">hourly</option>
-                <option value="daily">daily</option>
-                <option value="weekly">weekly</option>
-              </select>
-            </label>
-            <label className="block text-xs font-medium">
-              Rotation due
-              <input
-                type="date"
-                value={form.rotation_due_at}
-                onChange={(event) => setForm((current) => ({ ...current, rotation_due_at: event.target.value }))}
-                className={inputCls}
-              />
-            </label>
-          </div>
-        </Collapse>
-        <button
-          type="submit"
-          disabled={save.isPending || !canSave}
-          className="w-full rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-          data-testid="connector-config-save"
-        >
-          {save.isPending ? "Saving…" : "Save metadata"}
-        </button>
-      </form>
-    </Drawer>
-  );
-}
-
-function QueueScanDrawer({
-  open,
-  onOpenChange,
-  onQueued,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onQueued: () => void;
-}) {
-  const [form, setForm] = useState({ target_ref: "", platform: "linux/amd64" });
-  useEffect(() => {
-    if (open) setForm({ target_ref: "", platform: "linux/amd64" });
-  }, [open]);
-
-  const enqueue = useMutation({
-    mutationFn: () => scanJobs.enqueue({
-      target_type: "image",
-      target_ref: form.target_ref.trim(),
-      platform: form.platform.trim() || undefined,
-    }),
-    onSuccess: () => {
-      toast.success("Scan job queued");
-      onOpenChange(false);
-      onQueued();
-    },
-    onError: () => toast.error("Unable to queue scan job"),
-  });
-  const canQueue = Boolean(form.target_ref.trim());
-
-  return (
-    <Drawer open={open} onOpenChange={onOpenChange} title="Queue a scan" description="Enqueue an on-demand image scan by reference.">
-      <form
-        className="space-y-3 text-sm"
-        data-testid="queue-scan-target"
-        onSubmit={(event) => { event.preventDefault(); if (canQueue && !enqueue.isPending) enqueue.mutate(); }}
-      >
-        <TextInput label="Target ref" value={form.target_ref} onChange={(target_ref) => setForm((current) => ({ ...current, target_ref }))} testID="queue-scan-target-ref" />
-        <TextInput label="Platform" value={form.platform} onChange={(platform) => setForm((current) => ({ ...current, platform }))} />
-        <button
-          type="submit"
-          disabled={enqueue.isPending || !canQueue}
-          className="inline-flex w-full items-center justify-center gap-1 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-          data-testid="queue-scan"
-        >
-          <Play className="h-4 w-4" aria-hidden />
-          Queue scan
-        </button>
-      </form>
-    </Drawer>
-  );
-}
-
-function TextInput({
-  label,
-  value,
-  onChange,
-  testID,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  testID?: string;
-}) {
-  return (
-    <label className="block text-xs font-medium">
-      {label}
-      <input
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className={inputCls}
-        data-testid={testID}
-      />
-    </label>
-  );
-}
 
 
 function ScanJobCard({ job, busy, onAction }: { job: ScanJob; busy: boolean; onAction: (action: ScanJobAction) => void }) {

@@ -19,8 +19,8 @@
 // All KPIs link to pre-filtered drill-downs; action items launch the Triage
 // drawer in place so the analyst never loses dashboard context.
 
-import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { useMemo } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import {
@@ -29,19 +29,16 @@ import {
   ServerCog, PackageCheck, RefreshCw,
 } from "lucide-react";
 
-import { findings, cve, dashboard, clusters, compliance, enterprise, type Finding, type PlatformFactsResponse, type Severity } from "@/api/client";
+import { findings, cve, dashboard, clusters, compliance, enterprise, network, type Finding, type PlatformFactsResponse, type Severity } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { StatCard } from "@/components/ui/stat-card";
 import { SeverityBadge } from "@/components/ui/severity-badge";
-import { RiskGauge, RiskScore } from "@/components/ui/risk-score";
+import { RiskScore, RiskGauge } from "@/components/ui/risk-score";
 import { Sparkline } from "@/components/ui/sparkline";
 import { Button } from "@/components/ui/button";
-import { Drawer } from "@/components/ui/drawer";
 import { EmptyState } from "@/components/ui/empty-state";
-import { LifecycleBadge } from "@/components/ui/status-pill";
 import { PageHeader } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
-import { WhatIfScore } from "@/components/WhatIfScore";
 import { fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/cn";
 
@@ -52,6 +49,17 @@ const SEVERITY_COLORS: Record<Severity, string> = {
   high:     "var(--color-severity-high)",
   critical: "var(--color-severity-critical)",
 };
+
+// NeuVector's Security Risk Score factors and their point caps (sum = 100). Exposure
+// dominates because external attack surface is the top container risk.
+const SCORE_FACTORS = [
+  { k: "protection_mode", label: "Protection mode", cap: 30 },
+  { k: "exposure",        label: "Ingress/Egress",  cap: 42 },
+  { k: "vulnerabilities", label: "Vulnerabilities", cap: 16 },
+  { k: "privileged",      label: "Privileged",      cap: 4 },
+  { k: "root",            label: "Run as root",     cap: 4 },
+  { k: "admission",       label: "Admission",       cap: 4 },
+] as const;
 
 export function DashboardPage() {
   // Under /clusters/:id/dashboard, scope all data fetches to that cluster.
@@ -128,15 +136,15 @@ export function DashboardPage() {
     }
     return bucketBySeverity(openItems);
   }, [sum.data, openItems]);
-  const compositeRisk = useMemo(() => {
-    if (openItems.length === 0) return 0;
-    const top = openItems.slice().sort((a, b) => b.risk_score - a.risk_score).slice(0, 10);
-    return Math.round(top.reduce((s, f) => s + f.risk_score, 0) / top.length);
-  }, [openItems]);
-
+  const posture = sum.data?.posture;
+  const risk = posture?.security_score ?? 0;
+  const exposureQ = useQuery({
+    queryKey: ["exposure", clusterId],
+    queryFn: () => network.exposure({ cluster_id: clusterId }),
+    enabled: !!clusterId,
+  });
   const trends = useMemo(() => fourteenDayBySeverity(allItems), [allItems]);
   const topActions = useMemo(() => prioritizeActionItems(openItems), [openItems]);
-  const heatmap = useMemo(() => buildHeatmap(openItems), [openItems]);
   const recent = sum.data?.recent_activity ?? [];
 
   // Compliance pass % aggregated across all reported frameworks.
@@ -155,7 +163,7 @@ export function DashboardPage() {
   const runtimeThreats = runtimeToday.data?.summary;
 
   // Triage drawer (in-place from action items)
-  const [drawerFinding, setDrawerFinding] = useState<Finding | null>(null);
+  const navigate = useNavigate();
 
   return (
     <div className="space-y-5" data-testid="dashboard-page" data-cluster-id={clusterId ?? ""}>
@@ -168,93 +176,138 @@ export function DashboardPage() {
         }
       />
 
-      {/* Hero band */}
-      <section className="c-rise c-rise-1 grid grid-cols-1 gap-5 rounded-md border border-border bg-card p-5 star-field lg:grid-cols-[260px_1fr]">
-        <div className="flex items-center gap-5 border-r border-border/60 pr-5">
-          <RiskGauge score={compositeRisk} label="composite" sub={`top-10 avg · ${openItems.length} open`} />
-          <div className="hidden md:flex flex-col gap-1.5 min-w-0">
-            <div className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Posture</div>
-            <div className="text-display text-base font-semibold leading-tight">
-              {compositeRisk >= 80 ? "Elevated" : compositeRisk >= 60 ? "Moderate" : compositeRisk >= 40 ? "Watch" : "Healthy"}
+      {/* Hero band — Security RISK Score (NV model: higher = worse) + its 6 weighted factors */}
+      <section className="c-rise c-rise-1 grid grid-cols-1 gap-6 rounded-md border border-border bg-card p-5 star-field lg:grid-cols-[200px_1fr]">
+        <div className="flex flex-col items-center justify-center gap-3 border-b border-border/60 pb-5 lg:border-b-0 lg:border-r lg:pb-0 lg:pr-5">
+          <RiskGauge score={risk} label="risk score" size={132} />
+          <div className="text-center">
+            <div className="text-display text-sm font-semibold leading-none" style={{ color: risk <= 20 ? "var(--color-severity-low)" : risk <= 50 ? "var(--color-severity-medium)" : "var(--color-severity-critical)" }}>
+              {risk <= 20 ? "Good" : risk <= 50 ? "Fair" : "Poor"}
             </div>
-            <div className="text-[11px] text-muted-foreground leading-snug">
-              {counts.critical} crit · {counts.high} high<br />{counts.accepted} accepted-risk
+            <div className="mt-1 text-[11px] text-muted-foreground">{openItems.length} open findings</div>
+          </div>
+        </div>
+        <div className="flex flex-col justify-between gap-5">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <StatCard label="Critical" value={counts.critical} tone="critical" icon={<AlertOctagon className="h-3 w-3" />} href={clusterPath("/findings?severity=critical")} trend={trends.critical} />
+            <StatCard label="High" value={counts.high} tone="high" icon={<AlertTriangle className="h-3 w-3" />} href={clusterPath("/findings?severity=high")} trend={trends.high} />
+            <StatCard label="Open" value={counts.open} tone="accent" icon={<Activity className="h-3 w-3" />} href={clusterPath("/findings")} trend={trends.open} />
+            <StatCard label="Accepted" value={counts.accepted} tone="neutral" icon={<ShieldCheck className="h-3 w-3" />} href={clusterPath("/findings?lifecycle=accepted")} />
+          </div>
+          {/* Risk factors — NV's 6 weighted contributors (bar = share of its cap). */}
+          <div>
+            <div className="mb-2 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Risk factors · points of 100</div>
+            <div className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2 xl:grid-cols-3">
+              {SCORE_FACTORS.map(({ k, label, cap }) => {
+                const v = posture?.score_breakdown?.[k] ?? 0;
+                const ratio = v / cap;
+                return (
+                  <div key={k} className="flex items-center gap-2 text-[11px]">
+                    <span className="w-[104px] shrink-0 text-muted-foreground">{label}</span>
+                    <div className="h-1.5 flex-1 rounded-full bg-muted overflow-hidden">
+                      <div className="h-full rounded-full" style={{ width: `${Math.round(ratio * 100)}%`, background: ratio >= 0.66 ? "var(--color-severity-critical)" : ratio >= 0.33 ? "var(--color-severity-high)" : "var(--color-severity-medium)" }} />
+                    </div>
+                    <span className="w-11 shrink-0 text-right text-mono tabular-nums text-muted-foreground">{v}/{cap}</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          <StatCard
-            label="Critical"
-            value={counts.critical}
-            tone="critical"
-            icon={<AlertOctagon className="h-3 w-3" />}
-            href={clusterPath("/findings?severity=critical")}
-            trend={trends.critical}
-          />
-          <StatCard
-            label="High"
-            value={counts.high}
-            tone="high"
-            icon={<AlertTriangle className="h-3 w-3" />}
-            href={clusterPath("/findings?severity=high")}
-            trend={trends.high}
-          />
-          <StatCard
-            label="Open"
-            value={counts.open}
-            tone="accent"
-            icon={<Activity className="h-3 w-3" />}
-            href={clusterPath("/findings")}
-            trend={trends.open}
-          />
-          <StatCard
-            label="Accepted"
-            value={counts.accepted}
-            tone="neutral"
-            icon={<ShieldCheck className="h-3 w-3" />}
-            href={clusterPath("/findings?lifecycle=accepted")}
-          />
+      </section>
+
+      {/* Posture metrics — one uniform, scannable grid (compliance · runtime · vuln location · hardening) */}
+      <section className="c-rise c-rise-2 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8">
+        <StatCard label="Compliance" value={complianceSum.isPending ? "…" : compliancePosture.pct == null ? "—" : `${compliancePosture.pct}%`}
+          tone={compliancePosture.pct == null ? "neutral" : compliancePosture.pct >= 90 ? "low" : compliancePosture.pct >= 70 ? "medium" : "high"}
+          icon={<ShieldCheck className="h-3 w-3" />} href={clusterPath("/compliance")}
+          hint={compliancePosture.pct == null ? "no graded controls" : `${compliancePosture.fail} failing`} />
+        <StatCard label="Runtime · 24h" value={runtimeToday.isPending ? "…" : (runtimeThreats?.alerts ?? 0)}
+          tone={(runtimeThreats?.alerts ?? 0) > 0 ? "critical" : "neutral"} icon={<ShieldAlert className="h-3 w-3" />} href={clusterPath("/runtime")}
+          hint={`${runtimeThreats?.blocks ?? 0} blocked`} />
+        <StatCard label="Image CVEs" value={posture?.vulns_by_location?.image ?? 0} tone="accent" icon={<AlertTriangle className="h-3 w-3" />} href={clusterPath("/findings")} hint="in container images" />
+        <StatCard label="Host CVEs" value={posture?.vulns_by_location?.host ?? 0} tone={(posture?.vulns_by_location?.host ?? 0) > 0 ? "high" : "neutral"} icon={<AlertTriangle className="h-3 w-3" />} href={clusterPath("/nodes")} hint="on cluster nodes" />
+        <StatCard label="Fixable now" value={posture?.vuln_signals?.fixable ?? 0} tone="low" icon={<ShieldCheck className="h-3 w-3" />} href={clusterPath("/findings")} hint="patched version exists" />
+        <StatCard label="Privileged" value={posture?.hardening?.privileged ?? 0} tone={(posture?.hardening?.privileged ?? 0) > 0 ? "critical" : "low"} icon={<ShieldAlert className="h-3 w-3" />} href={clusterPath("/deployments")} hint="privileged workloads" />
+        <StatCard label="Run as root" value={posture?.hardening?.run_as_root ?? 0} tone={(posture?.hardening?.run_as_root ?? 0) > 0 ? "high" : "low"} icon={<ShieldAlert className="h-3 w-3" />} href={clusterPath("/deployments")} hint="no non-root enforce" />
+        <StatCard label="Exposed WLs" value={posture?.hardening?.exposed ?? 0} tone={(posture?.hardening?.exposed ?? 0) > 0 ? "medium" : "low"} icon={<Activity className="h-3 w-3" />} href={clusterPath("/network")} hint="externally reachable" />
+      </section>
+
+      {/* Exposed services (ingress/egress) + enforcement coverage — NV signature panels */}
+      <section className="c-rise c-rise-2 grid grid-cols-1 gap-4 lg:grid-cols-[1fr_300px]">
+        <Panel title="Exposed Services" subtitle="Workloads talking to the outside world — correlated with their vulnerabilities" icon={<Activity className="h-3.5 w-3.5" />}>
+          {exposureQ.isPending ? (
+            <p className="p-3 text-xs text-muted-foreground">Loading exposure…</p>
+          ) : ((exposureQ.data?.ingress.length ?? 0) + (exposureQ.data?.egress.length ?? 0)) === 0 ? (
+            <EmptyState title="No external exposure observed" hint="No ingress/egress traffic to external endpoints in the last 7 days." />
+          ) : (
+            <div className="divide-y divide-border">
+              {(exposureQ.data?.ingress ?? []).map((s) => <ExposedRow key={"in" + s.workload} s={s} dir="ingress" clusterPath={clusterPath} />)}
+              {(exposureQ.data?.egress ?? []).map((s) => <ExposedRow key={"eg" + s.workload} s={s} dir="egress" clusterPath={clusterPath} />)}
+            </div>
+          )}
+        </Panel>
+        <div className="space-y-4">
+        <Panel title="Enforcement Coverage" subtitle="Runtime policy mode per group" icon={<ShieldCheck className="h-3.5 w-3.5" />}>
+          <div className="p-3 space-y-3">
+            {(() => {
+              const e = posture?.enforcement ?? { groups: 0, discover: 0, monitor: 0, protect: 0 };
+              const total = e.groups || 1;
+              const modes = [
+                { k: "protect", label: "Protect", color: "var(--color-severity-low)", v: e.protect ?? 0 },
+                { k: "monitor", label: "Monitor", color: "var(--color-severity-medium)", v: e.monitor ?? 0 },
+                { k: "discover", label: "Discover", color: "var(--color-severity-high)", v: e.discover ?? 0 },
+              ];
+              return (
+                <>
+                  <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-muted">
+                    {modes.map((m) => m.v > 0 && <div key={m.k} style={{ width: `${(m.v / total) * 100}%`, background: m.color }} title={`${m.label}: ${m.v}`} />)}
+                  </div>
+                  {modes.map((m) => (
+                    <div key={m.k} className="flex items-center justify-between text-xs">
+                      <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full" style={{ background: m.color }} />{m.label}</span>
+                      <span className="text-mono text-muted-foreground">{m.v} / {e.groups}</span>
+                    </div>
+                  ))}
+                  {(e.protect ?? 0) === 0 && (e.groups ?? 0) > 0 && (
+                    <p className="text-[10px] text-[color:var(--color-severity-high)] leading-snug">No groups in protect mode — runtime is observe-only.</p>
+                  )}
+                  <div className="mt-1 flex items-center justify-between border-t border-border pt-2 text-xs">
+                    <span className="text-muted-foreground">Admission control</span>
+                    {(e.admission_enforcing ?? 0) > 0 ? (
+                      <span className="flex items-center gap-1.5 text-[color:var(--color-severity-low)]"><span className="inline-block h-2 w-2 rounded-full" style={{ background: "var(--color-severity-low)" }} />enforcing · {e.admission_enforcing} rule{(e.admission_enforcing ?? 0) === 1 ? "" : "s"}</span>
+                    ) : (e.admission_policies ?? 0) > 0 ? (
+                      <span className="text-[color:var(--color-severity-medium)]">monitor only</span>
+                    ) : (
+                      <span className="text-[color:var(--color-severity-high)]">not enforcing</span>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        </Panel>
+        <Panel title="Top Vulnerable Assets" subtitle="Workloads with the most critical + high CVEs" icon={<AlertOctagon className="h-3.5 w-3.5" />}>
+          {(posture?.top_vulnerable?.length ?? 0) === 0 ? (
+            <EmptyState title="No vulnerable workloads" hint="Workloads with critical/high CVEs will rank here." />
+          ) : (
+            <ul className="divide-y divide-border">
+              {(posture?.top_vulnerable ?? []).map((t) => (
+                <li key={`${t.namespace}/${t.name}`}>
+                  <Link to={clusterPath(`/deployments?q=${encodeURIComponent(t.name)}`)} className="flex items-center gap-2 px-3 py-2 hover:bg-muted/40 transition-colors">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-medium truncate">{t.name}</div>
+                      <div className="text-[10px] text-muted-foreground truncate">{t.namespace}</div>
+                    </div>
+                    {t.critical > 0 && <span className="rounded px-1.5 py-0.5 text-[10px] text-mono font-semibold text-white" style={{ background: "var(--color-severity-critical)" }}>{t.critical}C</span>}
+                    {t.high > 0 && <span className="rounded px-1.5 py-0.5 text-[10px] text-mono font-semibold text-white" style={{ background: "var(--color-severity-high)" }}>{t.high}H</span>}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Panel>
         </div>
-      </section>
-
-      {/* Posture tiles — compliance + runtime pillars alongside the vuln hero. */}
-      <section className="c-rise c-rise-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <StatCard
-          label="Compliance pass rate"
-          value={
-            complianceSum.isPending ? "…" :
-            compliancePosture.pct == null ? "—" : `${compliancePosture.pct}%`
-          }
-          tone={
-            compliancePosture.pct == null ? "neutral" :
-            compliancePosture.pct >= 90 ? "low" :
-            compliancePosture.pct >= 70 ? "medium" : "high"
-          }
-          icon={<ShieldCheck className="h-3 w-3" />}
-          href={clusterPath("/compliance")}
-          hint={
-            compliancePosture.pct == null
-              ? "No graded controls yet"
-              : `${compliancePosture.fail} failing · ${compliancePosture.frameworks} framework${compliancePosture.frameworks === 1 ? "" : "s"}`
-          }
-        />
-        <StatCard
-          label="Runtime threats · 24h"
-          value={runtimeToday.isPending ? "…" : (runtimeThreats?.alerts ?? 0)}
-          tone={(runtimeThreats?.alerts ?? 0) > 0 ? "critical" : "neutral"}
-          icon={<ShieldAlert className="h-3 w-3" />}
-          href={clusterPath("/runtime")}
-          hint={
-            runtimeToday.isPending
-              ? "Loading…"
-              : `${runtimeThreats?.blocks ?? 0} blocked · ${runtimeThreats?.affected_workloads ?? 0} workloads`
-          }
-        />
-      </section>
-
-      {/* B8: score what-if — "fix these N → score X→Y" */}
-      <section className="c-rise c-rise-2">
-        <WhatIfScore />
       </section>
 
       {clusterId && (
@@ -271,6 +324,7 @@ export function DashboardPage() {
       {/* Action items + recent activity */}
       <section className="c-rise c-rise-3 grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px]">
         <Panel
+          className="min-w-0"
           title="Action Items"
           subtitle="Top 10 open critical and high findings · sorted by composite risk"
           icon={<ShieldAlert className="h-3.5 w-3.5" />}
@@ -296,7 +350,7 @@ export function DashboardPage() {
                     </div>
                   </div>
                   <RiskScore score={f.risk_score} size="sm" />
-                  <Button size="sm" variant="outline" onClick={() => setDrawerFinding(f)}>Triage</Button>
+                  <Button size="sm" variant="outline" onClick={() => navigate(clusterPath(`/findings/${f.id}`))}>Triage</Button>
                 </li>
               ))}
             </ul>
@@ -324,17 +378,6 @@ export function DashboardPage() {
               ))}
             </ul>
           )}
-        </Panel>
-      </section>
-
-      {/* Heatmap */}
-      <section className="c-rise c-rise-4">
-        <Panel
-          title="Critical Exposure Matrix"
-          subtitle="Open findings by asset · severity (top contributors). Click a cell to drill in."
-          icon={<TrendingUp className="h-3.5 w-3.5" />}
-        >
-          <HeatmapMatrix data={heatmap} />
         </Panel>
       </section>
 
@@ -440,8 +483,6 @@ export function DashboardPage() {
           </div>
         </Panel>
       </section>
-
-      <TriageDrawer finding={drawerFinding} onClose={() => setDrawerFinding(null)} />
     </div>
   );
 }
@@ -454,6 +495,32 @@ const tooltipStyle = {
   borderRadius: "6px",
   fontSize: 11,
 };
+
+
+function ExposedRow({ s, dir, clusterPath }: { s: import("@/api/client").ExposedService; dir: "ingress" | "egress"; clusterPath: (p: string) => string }) {
+  return (
+    <Link to={clusterPath(`/deployments?q=${encodeURIComponent(s.name)}`)} className="flex items-center gap-3 px-3 py-2 hover:bg-muted/40 transition-colors">
+      <span className={cn("shrink-0 rounded px-1.5 py-0.5 text-[9px] uppercase tracking-wide font-medium",
+        dir === "ingress" ? "bg-[color-mix(in_oklab,var(--color-severity-high)_16%,transparent)] text-[color:var(--color-severity-high)]" : "bg-muted text-muted-foreground")}>
+        {dir === "ingress" ? "in" : "out"}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="text-xs font-medium truncate">{s.namespace ? `${s.namespace}/` : ""}{s.name}</div>
+        <div className="text-[10px] text-muted-foreground truncate">
+          {s.external_peers} external {dir === "ingress" ? "clients" : "dests"}
+          {s.protocols.length > 0 && ` · ${s.protocols.join("/")}`}
+          {s.ports.length > 0 && ` · :${s.ports.slice(0, 6).join(", :")}`}
+          {s.sessions > 0 && ` · ${s.sessions.toLocaleString()} sessions`}
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        {s.critical > 0 && <span className="rounded px-1.5 py-0.5 text-[10px] text-mono font-semibold text-white" style={{ background: "var(--color-severity-critical)" }}>{s.critical}C</span>}
+        {s.high > 0 && <span className="rounded px-1.5 py-0.5 text-[10px] text-mono font-semibold text-white" style={{ background: "var(--color-severity-high)" }}>{s.high}H</span>}
+        {s.critical === 0 && s.high === 0 && <span className="text-[10px] text-muted-foreground">no crit/high</span>}
+      </div>
+    </Link>
+  );
+}
 
 function Panel({
   title, subtitle, icon, children, rightSlot, className,
@@ -604,132 +671,6 @@ function shortHash(value?: string) {
   return value.length > 18 ? `${value.slice(0, 15)}...` : value;
 }
 
-function HeatmapMatrix({ data }: { data: { rows: string[]; cols: string[]; values: number[][] } }) {
-  const { clusterId } = useCluster();
-  const clusterPath = (path: string) => clusterId ? `/clusters/${clusterId}${path}` : path;
-  if (data.rows.length === 0 || data.cols.length === 0) {
-    return <EmptyState title="No open findings" hint="The asset × severity matrix lights up when new findings land." />;
-  }
-  const max = Math.max(1, ...data.values.flat());
-  return (
-    <div className="overflow-auto px-2 py-1">
-      <table className="text-xs border-separate border-spacing-1">
-        <thead>
-          <tr>
-            <th className="pr-3 pb-2 text-left text-[10px] font-medium uppercase tracking-wider text-muted-foreground">asset id</th>
-            {data.cols.map((c) => (
-              <th key={c} className="px-2 pb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground whitespace-nowrap text-center">
-                {c}
-              </th>
-            ))}
-            <th className="px-2 pb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground text-center">total</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.rows.map((r, i) => {
-            const rowTotal = data.values[i].reduce((a, b) => a + b, 0);
-            return (
-              <tr key={r}>
-                <th className="pr-3 text-left text-[11px] font-medium whitespace-nowrap" title={`asset ${r}`}>
-                  <Link to={clusterPath(`/risk/asset/${encodeURIComponent(r)}`)} className="text-mono text-muted-foreground hover:text-foreground hover:underline">
-                    {r.slice(0, 12)}
-                  </Link>
-                </th>
-                {data.cols.map((c, j) => {
-                  const v = data.values[i][j];
-                  const intensity = v === 0 ? 0 : 0.18 + (v / max) * 0.72;
-                  const sevToken = `var(--color-severity-${c})`;
-                  return (
-                    <td key={c} className="p-0">
-                      <Link
-                        to={clusterPath(`/risk/asset/${encodeURIComponent(r)}`)}
-                        className="flex h-9 w-12 items-center justify-center rounded text-[11px] text-mono transition-all hover:scale-[1.06]"
-                        style={{
-                          background: v === 0
-                            ? "color-mix(in oklab, var(--color-muted) 40%, transparent)"
-                            : `color-mix(in oklab, ${sevToken} ${(intensity * 100).toFixed(0)}%, transparent)`,
-                          color: v === 0 ? "var(--color-muted-foreground)" : "white",
-                        }}
-                        title={`asset ${r} · ${v} ${c} · open risk workspace`}
-                      >
-                        {v === 0 ? "·" : v}
-                      </Link>
-                    </td>
-                  );
-                })}
-                <td className="pl-3 text-right text-[11px] text-mono text-muted-foreground">{rowTotal}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function TriageDrawer({ finding, onClose }: { finding: Finding | null; onClose: () => void }) {
-  const qc = useQueryClient();
-  const { clusterId } = useCluster();
-  const clusterPath = (path: string) => clusterId ? `/clusters/${clusterId}${path}` : path;
-  const [reason, setReason] = useState("");
-  const suppress = useMutation({
-    mutationFn: () => findings.suppress(finding!.id, { reason: reason || "dashboard quick-suppress" }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["findings"] }); onClose(); },
-  });
-  const acceptRisk = useMutation({
-    mutationFn: () => findings.acceptRisk(finding!.id, {
-      reason: reason || "dashboard quick-accept",
-      accepted_until: new Date(Date.now() + 30 * 86400_000).toISOString(),
-    }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["findings"] }); onClose(); },
-  });
-  const triage = useMutation({
-    mutationFn: () => findings.triage(finding!.id, { priority: "high" }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["findings"] }); onClose(); },
-  });
-
-  return (
-    <Drawer
-      open={!!finding}
-      onOpenChange={(o) => { if (!o) onClose(); }}
-      title={finding?.title}
-      description={finding ? `${finding.external_id ?? finding.id.slice(0, 10)} · ${finding.kind}` : undefined}
-    >
-      {finding && (
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <SeverityBadge severity={finding.severity} />
-            <LifecycleBadge lifecycle={finding.lifecycle} />
-            <RiskScore score={finding.risk_score} />
-          </div>
-          <dl className="space-y-1.5 text-xs">
-            <Row k="Asset"    v={<Link to={clusterPath(`/risk/asset/${encodeURIComponent(finding.asset_id)}`)} className="text-mono text-[color:var(--color-primary)] hover:underline">{finding.asset_id.slice(0, 16)}</Link>} />
-            <Row k="First seen" v={<span className="text-mono text-muted-foreground">{fmtRelative(finding.first_seen_at)}</span>} />
-            <Row k="Last seen"  v={<span className="text-mono text-muted-foreground">{fmtRelative(finding.last_seen_at)}</span>} />
-            <Row k="Techniques" v={<span className="text-mono text-[10px] text-muted-foreground">{finding.attack_techniques.join(", ") || "—"}</span>} />
-          </dl>
-          <div>
-            <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Reason (optional)</label>
-            <textarea
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="Why are you taking this action?"
-              className="w-full min-h-[64px] rounded-md border border-input bg-card px-2 py-1.5 text-xs outline-none focus:border-[color:var(--color-primary)]"
-            />
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="primary"     size="sm" onClick={() => triage.mutate()}>Triage</Button>
-            <Button variant="outline"     size="sm" onClick={() => suppress.mutate()}>Suppress</Button>
-            <Button variant="outline"     size="sm" onClick={() => acceptRisk.mutate()}>Accept risk · 30d</Button>
-            <Link to={clusterPath(`/findings/${finding.id}`)} className="ml-auto text-[11px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
-              Open detail <ExternalLink className="h-3 w-3" />
-            </Link>
-          </div>
-        </div>
-      )}
-    </Drawer>
-  );
-}
 
 // ─────────────────────────── pure helpers ───────────────────────────
 
@@ -792,24 +733,3 @@ function fourteenDayBySeverity(items: Finding[]): SeverityTrend {
   return { critical, high, open, openSeries: open };
 }
 
-function buildHeatmap(items: Finding[]): { rows: string[]; cols: string[]; values: number[][] } {
-  // Rows are keyed by the real asset_id (a UUID — the Finding type carries no
-  // asset name/namespace), columns are the real finding severity, and each cell
-  // is the real count of open findings of that severity on the asset.
-  const sevOrder = ["critical", "high", "medium", "low", "info"] as const;
-  const rowSet = new Map<string, number>();
-  const cells = new Map<string, number>();
-  for (const f of items) {
-    if (!sevOrder.includes(f.severity as typeof sevOrder[number])) continue;
-    const row = f.asset_id;
-    if (!rowSet.has(row)) rowSet.set(row, rowSet.size);
-    const k = `${row}|${f.severity}`;
-    cells.set(k, (cells.get(k) ?? 0) + 1);
-  }
-  const rows = Array.from(rowSet.keys()).slice(0, 10);
-  // Always render the canonical severity axis so the matrix has consistent
-  // columns even when only one severity is currently present.
-  const cols = sevOrder.filter((s) => rows.some((r) => (cells.get(`${r}|${s}`) ?? 0) > 0)) as unknown as string[];
-  const values = rows.map((r) => cols.map((c) => cells.get(`${r}|${c}`) ?? 0));
-  return { rows, cols, values };
-}

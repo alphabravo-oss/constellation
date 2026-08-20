@@ -38,6 +38,12 @@ export interface DataTableProps<T> {
   className?: string;
   /** Initial sort */
   defaultSort?: { id: string; dir: "asc" | "desc" };
+  /**
+   * Notified whenever the sort column/direction changes (header click). Pages that
+   * sort SERVER-SIDE (data larger than one page) use this to refetch in the new order;
+   * `null` means sort was cleared. Client-side-only tables can ignore it.
+   */
+  onSortChange?: (sort: { id: string; dir: "asc" | "desc" } | null) => void;
   /** Show density toggle in header right slot. */
   showDensityToggle?: boolean;
   /** data-testid on the wrapper (preserves page/table test hooks after migration). */
@@ -69,6 +75,7 @@ export function DataTable<T>({
   emptyState,
   className,
   defaultSort,
+  onSortChange,
   showDensityToggle = true,
   testId,
   rowTestId,
@@ -77,6 +84,16 @@ export function DataTable<T>({
   const [sorting, setSorting] = useState<SortingState>(
     defaultSort ? [{ id: defaultSort.id, desc: defaultSort.dir === "desc" }] : [],
   );
+  const handleSortingChange: typeof setSorting = (updater) => {
+    setSorting((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      if (onSortChange) {
+        const s = next[0];
+        onSortChange(s ? { id: s.id, dir: s.desc ? "desc" : "asc" } : null);
+      }
+      return next;
+    });
+  };
 
   const rowH = density === "compact" ? "h-6" : density === "comfy" ? "h-10" : "h-8";
   const cellPad = density === "compact" ? "px-2 py-0.5" : density === "comfy" ? "px-3 py-2" : "px-2.5 py-1.5";
@@ -103,7 +120,7 @@ export function DataTable<T>({
     data: rows,
     columns: columnDefs,
     state: { sorting },
-    onSortingChange: setSorting,
+    onSortingChange: handleSortingChange,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getRowId: (row) => String(rowKey(row)),

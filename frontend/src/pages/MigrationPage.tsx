@@ -7,6 +7,9 @@ import { enterprise, type MigrationPreview } from "@/api/client";
 import { PageHeader } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { StatCard } from "@/components/ui/stat-card";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Field, Select, Textarea } from "@/components/ui/form";
 
 type MigrationPolicy = MigrationPreview["policies"][number];
 type MigrationFileProfile = MigrationPreview["file_profiles"][number];
@@ -73,44 +76,48 @@ export function MigrationPage() {
         description="Import policies and file profiles from another security tool. Preview the diff and rollback bundle before applying."
       />
 
-      <section className="rounded-lg border border-border bg-card p-4" data-testid="migration-preview-wizard">
-        <div className="flex flex-wrap items-end gap-3">
-          <label className="block text-xs font-medium">
-            Source
-            <select
-              value={source}
-              onChange={(e) => setSource(e.target.value)}
-              className="mt-1 block rounded-md border border-border bg-background p-2 text-sm"
-              data-testid="migration-source-select"
-            >
-              {sources.length === 0 && <option value="neuvector">NeuVector</option>}
-              {sources.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="button"
-            onClick={() => preview.mutate()}
-            disabled={preview.isPending || exportText.trim().length < 8}
-            className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-            data-testid="migration-preview-submit"
-          >
-            <Wand2 className="h-4 w-4" aria-hidden />
-            Preview import
-          </button>
-        </div>
+      <div data-testid="migration-preview-wizard">
+        <Card
+          title="Paste an export"
+          description="Choose the source tool and paste its exported configuration to preview the generated policies, file profiles, and rollback bundle."
+        >
+          <div className="space-y-5">
+            <div className="flex flex-wrap items-end gap-3">
+              <Field label="Source" className="w-56">
+                <Select
+                  value={source}
+                  onChange={(e) => setSource(e.target.value)}
+                  data-testid="migration-source-select"
+                >
+                  {sources.length === 0 && <option value="neuvector">NeuVector</option>}
+                  {sources.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </Select>
+              </Field>
+              <Button
+                variant="primary"
+                onClick={() => preview.mutate()}
+                disabled={preview.isPending || exportText.trim().length < 8}
+                data-testid="migration-preview-submit"
+              >
+                <Wand2 className="h-4 w-4" aria-hidden />
+                Preview import
+              </Button>
+            </div>
 
-        <textarea
-          value={exportText}
-          onChange={(e) => setExportText(e.target.value)}
-          rows={8}
-          spellCheck={false}
-          placeholder="Paste the exported configuration from your source tool…"
-          className="mt-3 w-full rounded-md border border-border bg-background p-3 font-mono text-xs"
-          data-testid="migration-export-input"
-        />
-      </section>
+            <Textarea
+              value={exportText}
+              onChange={(e) => setExportText(e.target.value)}
+              rows={8}
+              spellCheck={false}
+              placeholder="Paste the exported configuration from your source tool…"
+              className="font-mono text-xs"
+              data-testid="migration-export-input"
+            />
+          </div>
+        </Card>
+      </div>
 
       {data ? (
         <div className="space-y-4" data-testid="migration-preview-result">
@@ -128,12 +135,11 @@ export function MigrationPage() {
               onRowClick={(p) => setSelectedPolicy(p.name)}
               showDensityToggle={false}
             />
-            <div className="rounded-md border border-border p-3">
-              <div className="text-xs font-medium">Generated policy YAML</div>
-              <pre className="mt-2 max-h-64 overflow-auto rounded bg-muted p-2 text-xs" data-testid="migration-preview-yaml">
+            <Card title="Generated policy YAML">
+              <pre className="max-h-64 overflow-auto rounded bg-muted p-2 text-xs" data-testid="migration-preview-yaml">
                 {selected?.spec_yaml ?? "No policy selected."}
               </pre>
-            </div>
+            </Card>
           </div>
           {data.file_profiles.length > 0 ? (
             <div data-testid="migration-preview-file-profiles">
@@ -145,12 +151,11 @@ export function MigrationPage() {
               />
             </div>
           ) : null}
-          <div className="rounded-md border border-border p-3">
-            <div className="text-xs font-medium">Rollback bundle preview</div>
-            <pre className="mt-2 max-h-40 overflow-auto rounded bg-muted p-2 text-xs" data-testid="migration-rollback-bundle">
+          <Card title="Rollback bundle preview" description="Apply this bundle to revert the import if needed.">
+            <pre className="max-h-40 overflow-auto rounded bg-muted p-2 text-xs" data-testid="migration-rollback-bundle">
               {data.rollback_bundle}
             </pre>
-          </div>
+          </Card>
         </div>
       ) : null}
     </div>

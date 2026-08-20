@@ -4,6 +4,7 @@
 // /api/v1/registries endpoints; uses Radix Dialog for the create wizard so the
 // kind picker can swap credential fields per registry kind.
 import { useMemo, useState, type ChangeEvent } from "react";
+import { Link } from "react-router-dom";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -25,6 +26,7 @@ import {
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { StatusPill } from "@/components/ui/status-pill";
+import { useCluster } from "@/hooks/useCluster";
 
 // Closed catalogue of supported registry kinds with display labels + creds
 // field schemas. Keeps the per-kind form rendering tight and self-contained.
@@ -88,6 +90,7 @@ const CADENCES: RegistryCadence[] = ["manual", "hourly", "6h", "daily", "weekly"
 const PROMOTION_THRESHOLDS = ["critical", "high", "medium", "low", "none"];
 
 export function RegistriesPage() {
+  const { clusterId } = useCluster();
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["registries"], queryFn: () => registriesApi.list() });
 
@@ -123,7 +126,12 @@ export function RegistriesPage() {
     { id: "endpoint", header: "Endpoint", cell: (r) => <span className="text-mono text-xs text-muted-foreground">{r.endpoint}</span> },
     { id: "cadence", header: "Cadence", cell: (r) => r.scan_cadence },
     { id: "status", header: "Last sync", cell: (r) => <SyncPill row={r} />, sort: (a, b) => (a.last_sync_at ?? "").localeCompare(b.last_sync_at ?? "") },
-    { id: "images", header: "Images", cell: (r) => <span className="text-mono">{r.images_seen}</span>, numeric: true, sort: (a, b) => a.images_seen - b.images_seen },
+    { id: "images", header: "Images", numeric: true, sort: (a, b) => a.images_seen - b.images_seen,
+      cell: (r) => (
+        <Link to={clusterId ? `/clusters/${clusterId}/registries/${r.id}` : `/registries/${r.id}`} className="text-mono text-[color:var(--color-primary)] hover:underline" onClick={(e) => e.stopPropagation()}>
+          {r.images_seen} →
+        </Link>
+      ) },
     {
       id: "actions",
       header: "",

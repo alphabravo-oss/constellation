@@ -12,9 +12,9 @@
 // Filtering uses the existing /findings?lifecycle= and ?kind= params; the
 // free-text query refines client-side until the backend's DSL is wired through.
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Save, Tag, Bookmark, ChevronDown, ListFilter, ExternalLink } from "lucide-react";
+import { Save, Tag, Bookmark, ChevronDown, ListFilter } from "lucide-react";
 
 import {
   findings,
@@ -22,6 +22,7 @@ import {
   type FindingKind,
   type Lifecycle,
   type Severity,
+  type CVERollup,
 } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { SeverityBadge } from "@/components/ui/severity-badge";
@@ -33,9 +34,9 @@ import { QueryInput } from "@/components/ui/query-input";
 import { FilterChip } from "@/components/ui/filter-chip";
 import { Button } from "@/components/ui/button";
 import { ActionBar } from "@/components/ui/action-bar";
-import { Drawer } from "@/components/ui/drawer";
 import { EmptyState } from "@/components/ui/empty-state";
 import { fmtRelative } from "@/lib/format";
+import { downloadCsv } from "@/lib/csv";
 import { SEVERITY_RANK } from "@/lib/severity";
 import { cn } from "@/lib/cn";
 
@@ -92,9 +93,13 @@ export function FindingsPage() {
   });
   useEffect(() => { localStorage.setItem(SAVED_VIEWS_KEY, JSON.stringify(views)); }, [views]);
 
-  // Selection + drawer
+  // Selection + view mode (instance rows vs NeuVector-style CVE rollup)
   const [selected, setSelected] = useState<Set<React.Key>>(new Set());
-  const [drawer, setDrawer] = useState<Finding | null>(null);
+  // CVE-first by default, matching NeuVector's vulnerability view (one row per CVE +
+  // blast radius). "Instances" (one row per CVE×workload) stays one click away.
+  const [view, setView] = useState<"instances" | "cve">("cve");
+  const navigate = useNavigate();
+  const openFinding = (f: Finding) => navigate(`/clusters/${clusterId}/findings/${f.id}`);
 
   // Data — cluster_id is threaded so the URL is the source of truth for scope.
   const q = useQuery({
@@ -106,6 +111,21 @@ export function FindingsPage() {
       limit: 500,
     }),
   });
+
+  // CVE rollup (NeuVector-style): one row per CVE + its blast radius. Only fetched
+  // when the "By CVE" view is active.
+  const [fixableOnly, setFixableOnly] = useState(false);
+  const cveQ = useQuery({
+    queryKey: ["findings-cve", lifecycle, clusterId, fixableOnly],
+    queryFn: () => findings.byCVE({ cluster_id: clusterId, lifecycle: lifecycle || undefined, limit: 2000, fixable: fixableOnly || undefined }),
+    enabled: view === "cve",
+  });
+  const cveRows = useMemo(() => {
+    const all = cveQ.data?.cves ?? [];
+    if (!query.trim()) return all;
+    const t = query.trim().toLowerCase();
+    return all.filter((c) => c.cve.toLowerCase().includes(t) || (c.package ?? "").toLowerCase().includes(t));
+  }, [cveQ.data, query]);
 
   const rows = useMemo(() => {
     const all = q.data?.findings ?? [];
@@ -146,11 +166,24 @@ export function FindingsPage() {
     {
       id: "cve",
       header: "CVE / ID",
-      cell: (f) => f.external_id
-        ? <Link to={`/cve/${f.external_id}`} className="text-mono text-xs hover:text-[color:var(--color-primary)]">{f.external_id}</Link>
-        : <span className="text-mono text-xs text-muted-foreground">{f.id.slice(0, 10)}</span>,
+      cell: (f) => (
+        <span className="flex items-center gap-1.5">
+          {f.external_id
+            ? <Link to={clusterId ? `/clusters/${clusterId}/cve/${f.external_id}` : `/cve/${f.external_id}`} className="text-mono text-xs hover:text-[color:var(--color-primary)]">{f.external_id}</Link>
+            : <span className="text-mono text-xs text-muted-foreground">{f.id.slice(0, 10)}</span>}
+          {f.kev && <span className="rounded px-1 py-px text-[9px] font-semibold text-white" style={{ background: "var(--color-severity-critical)" }} title="CISA Known-Exploited">KEV</span>}
+        </span>
+      ),
       sort: (a, b) => (a.external_id ?? "").localeCompare(b.external_id ?? ""),
-      width: "150px",
+      width: "170px",
+    },
+    {
+      id: "cvss",
+      header: "CVSS",
+      numeric: true,
+      width: "70px",
+      cell: (f) => <span className="text-mono text-xs" style={{ color: (f.cvss ?? 0) >= 9 ? "var(--color-severity-critical)" : (f.cvss ?? 0) >= 7 ? "var(--color-severity-high)" : "var(--color-foreground)" }}>{f.cvss ? f.cvss.toFixed(1) : "—"}</span>,
+      sort: (a, b) => (a.cvss ?? 0) - (b.cvss ?? 0),
     },
     {
       id: "title",
@@ -158,7 +191,7 @@ export function FindingsPage() {
       cell: (f) => (
         <button
           type="button"
-          onClick={() => setDrawer(f)}
+          onClick={() => openFinding(f)}
           className="text-left text-sm hover:text-[color:var(--color-primary)] truncate max-w-[420px] block"
           title={f.title}
         >
@@ -323,7 +356,50 @@ export function FindingsPage() {
         })}
       </section>
 
-      {/* Group by */}
+      {/* View: per-instance rows vs NeuVector-style CVE rollup */}
+      <div className="flex items-center gap-1.5">
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">View</span>
+        {([["instances", "Instances"], ["cve", "By CVE"]] as Array<["instances" | "cve", string]>).map(([v, l]) => (
+          <button
+            key={v}
+            type="button"
+            onClick={() => setView(v)}
+            className={cn(
+              "rounded h-6 px-2 text-[11px] border transition-colors",
+              view === v
+                ? "bg-[color-mix(in_oklab,var(--color-primary)_18%,transparent)] border-[color-mix(in_oklab,var(--color-primary)_36%,transparent)] text-[color:var(--color-primary)]"
+                : "bg-card border-border hover:bg-accent",
+            )}
+          >{l}</button>
+        ))}
+        <span className="ml-2 text-[10px] text-muted-foreground">
+          {view === "cve" ? "one row per CVE with its blast radius" : "one row per CVE × workload"}
+        </span>
+        {view === "cve" && (
+          <>
+            <button
+              type="button"
+              onClick={() => setFixableOnly((v) => !v)}
+              className={cn(
+                "ml-auto rounded h-6 px-2 text-[11px] border transition-colors",
+                fixableOnly
+                  ? "bg-[color-mix(in_oklab,var(--color-severity-low)_18%,transparent)] border-[color-mix(in_oklab,var(--color-severity-low)_36%,transparent)] text-[color:var(--color-severity-low)]"
+                  : "bg-card border-border hover:bg-accent",
+              )}
+              title="Show only CVEs with a fixed version available"
+            >{fixableOnly ? "✓ " : ""}Fixable only</button>
+            <button
+              type="button"
+              onClick={() => exportCveCsv(cveRows)}
+              className="rounded h-6 px-2 text-[11px] border border-border bg-card hover:bg-accent transition-colors"
+              title="Export the current CVE list as CSV"
+            >Export CSV</button>
+          </>
+        )}
+      </div>
+
+      {/* Group by (instance view only) */}
+      {view === "instances" && (
       <div className="flex items-center gap-1.5">
         <span className="text-[10px] uppercase tracking-wider text-muted-foreground"><ListFilter className="h-3 w-3 inline" /> Group</span>
         {([
@@ -341,11 +417,23 @@ export function FindingsPage() {
             )}
           >{l}</button>
         ))}
-        <div className="ml-auto text-[11px] text-muted-foreground text-mono">{rows.length} match{rows.length === 1 ? "" : "es"}</div>
+        <div className="ml-auto flex items-center gap-2">
+          <span className="text-[11px] text-muted-foreground text-mono">{rows.length} match{rows.length === 1 ? "" : "es"}</span>
+          <button
+            type="button"
+            onClick={() => downloadCsv("constellation-findings", ["CVE/ID", "Severity", "CVSS", "KEV", "Title", "Package", "Fixed", "Risk", "Lifecycle", "LastSeen"],
+              rows.map((f) => [f.external_id ?? f.id, f.severity, f.cvss ?? "", f.kev ? "yes" : "", f.title, f.package_name ?? "", f.fixed_version ?? "", f.risk_score, f.lifecycle, f.last_seen_at]))}
+            className="rounded h-6 px-2 text-[11px] border border-border bg-card hover:bg-accent transition-colors"
+            title="Export the current findings list as CSV"
+          >Export CSV</button>
+        </div>
       </div>
+      )}
 
-      {/* Table */}
-      {groupBy === "none" ? (
+      {/* CVE rollup view */}
+      {view === "cve" ? (
+        <CVETable rows={cveRows} loading={cveQ.isPending} clusterId={clusterId} />
+      ) : groupBy === "none" ? (
         <DataTable
           rows={rows}
           columns={columns}
@@ -355,7 +443,7 @@ export function FindingsPage() {
           selectable
           selected={selected}
           onSelectedChange={setSelected}
-          onRowClick={(f) => setDrawer(f)}
+          onRowClick={(f) => openFinding(f)}
           defaultSort={{ id: "risk", dir: "desc" }}
           emptyState={
             <EmptyState
@@ -386,7 +474,7 @@ export function FindingsPage() {
                 selectable
                 selected={selected}
                 onSelectedChange={setSelected}
-                onRowClick={(f) => setDrawer(f)}
+                onRowClick={(f) => openFinding(f)}
                 showDensityToggle={false}
                 className="rounded-none border-0"
               />
@@ -401,87 +489,76 @@ export function FindingsPage() {
         <Button size="sm" variant="outline" onClick={() => bulkSuppress.mutate()}>Suppress</Button>
         <Button size="sm" variant="outline" onClick={() => bulkAccept.mutate()}>Accept risk · 30d</Button>
       </ActionBar>
-
-      <FindingDrawer finding={drawer} onClose={() => setDrawer(null)} />
     </div>
   );
 }
 
-// ─────────────────────────── helpers + subcomponents ───────────────────────────
-
-function FindingDrawer({ finding, onClose }: { finding: Finding | null; onClose: () => void }) {
-  const qc = useQueryClient();
-  const { clusterId } = useCluster();
-  const suppress = useMutation({
-    mutationFn: () => findings.suppress(finding!.id, { reason: "quick-suppress from drawer" }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["findings"] }); onClose(); },
-  });
-  const accept = useMutation({
-    mutationFn: () => findings.acceptRisk(finding!.id, {
-      reason: "quick-accept from drawer",
-      accepted_until: new Date(Date.now() + 30 * 86400_000).toISOString(),
-    }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["findings"] }); onClose(); },
-  });
-
-  return (
-    <Drawer
-      open={!!finding}
-      onOpenChange={(o) => { if (!o) onClose(); }}
-      title={finding?.title}
-      description={finding ? `${finding.external_id ?? finding.id.slice(0, 10)} · ${finding.kind}` : undefined}
-      footer={finding && (
-        <div className="flex items-center gap-2">
-          <Link to={`/clusters/${clusterId}/findings/${finding.id}`} className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
-            Open full detail <ExternalLink className="h-3 w-3" />
-          </Link>
-          <div className="ml-auto flex items-center gap-1.5">
-            <Button size="sm" variant="outline" onClick={() => suppress.mutate()}>Suppress</Button>
-            <Button size="sm" variant="primary" onClick={() => accept.mutate()}>Accept risk · 30d</Button>
-          </div>
-        </div>
-      )}
-    >
-      {finding && (
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <SeverityBadge severity={finding.severity} />
-            <LifecycleBadge lifecycle={finding.lifecycle} />
-            <RiskScore score={finding.risk_score} />
-          </div>
-          <dl className="space-y-2 text-xs">
-            <KV k="Asset"        v={<Link to={`/clusters/${clusterId}/assets/${finding.asset_id}`} className="text-mono text-[color:var(--color-primary)]">{finding.asset_id}</Link>} />
-            <KV k="External ID"  v={<span className="text-mono">{finding.external_id ?? "—"}</span>} />
-            <KV k="Kind"         v={<span className="text-mono">{finding.kind}</span>} />
-            <KV k="Package"      v={<span className="text-mono">{formatPackage(finding)}</span>} />
-            <KV k="Fixed"        v={<span className="text-mono">{finding.fixed_version ?? finding.affected_range?.fixed_version ?? "—"}</span>} />
-            <KV k="Canonical"    v={<span className="text-mono">{finding.canonical_engine ?? "—"}</span>} />
-            <KV k="Engines"      v={<span className="text-mono">{engineSummary(finding)}</span>} />
-            <KV k="Disagreements" v={<span className="text-mono">{finding.reconciliation_count ?? finding.reconciliation?.length ?? 0}</span>} />
-            <KV k="First seen"   v={<span className="text-mono text-muted-foreground">{fmtRelative(finding.first_seen_at)}</span>} />
-            <KV k="Last seen"    v={<span className="text-mono text-muted-foreground">{fmtRelative(finding.last_seen_at)}</span>} />
-            <KV k="Techniques"   v={
-              finding.attack_techniques.length === 0 ? <span className="text-muted-foreground">—</span> :
-              <span className="flex flex-wrap gap-1 justify-end">
-                {finding.attack_techniques.map((t) => (
-                  <span key={t} className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-mono">{t}</span>
-                ))}
-              </span>
-            } />
-            {finding.accepted_until && <KV k="Accepted until" v={<span className="text-mono">{new Date(finding.accepted_until).toLocaleDateString()}</span>} />}
-          </dl>
-        </div>
-      )}
-    </Drawer>
-  );
+// CVETable — the NeuVector-style rollup: one row per CVE with its blast radius
+// (how many images / clusters it hits and total instances), sorted by risk.
+// exportCveCsv downloads the current CVE rollup as CSV (client-side). Addresses the
+// NeuVector-parity gap where nearly every table lacks ad-hoc export.
+function exportCveCsv(rows: CVERollup[]) {
+  const header = ["CVE", "Severity", "CVSS", "KEV", "Package", "FixedVersion", "AffectedImages", "AffectedClusters", "Instances", "Risk", "LastSeen"];
+  const esc = (v: unknown) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const lines = [header.join(",")];
+  for (const c of rows) {
+    lines.push([c.cve, c.severity, c.cvss ?? "", c.kev ? "yes" : "", c.package ?? "", c.fixed_version ?? "", c.affected_images, c.affected_clusters, c.instances, c.risk_score, c.last_seen_at].map(esc).join(","));
+  }
+  const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `constellation-cves-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
-function KV({ k, v }: { k: string; v: React.ReactNode }) {
+function CVETable({ rows, loading, clusterId }: { rows: CVERollup[]; loading: boolean; clusterId?: string }) {
+  const columns: Column<CVERollup>[] = [
+    { id: "severity", header: "Severity", width: "108px",
+      cell: (c) => <SeverityBadge severity={c.severity} />,
+      sort: (a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] },
+    { id: "cve", header: "CVE", width: "190px",
+      cell: (c) => (
+        <span className="flex items-center gap-1.5">
+          <Link to={clusterId ? `/clusters/${clusterId}/cve/${c.cve}` : `/cve/${c.cve}`} className="text-mono text-xs hover:text-[color:var(--color-primary)]">{c.cve}</Link>
+          {c.kev && <span className="rounded px-1 py-px text-[9px] font-semibold text-white" style={{ background: "var(--color-severity-critical)" }} title="CISA Known-Exploited">KEV</span>}
+        </span>
+      ),
+      sort: (a, b) => a.cve.localeCompare(b.cve) },
+    { id: "cvss", header: "CVSS", numeric: true, width: "72px",
+      cell: (c) => <span className="text-mono text-xs" style={{ color: (c.cvss ?? 0) >= 9 ? "var(--color-severity-critical)" : (c.cvss ?? 0) >= 7 ? "var(--color-severity-high)" : "var(--color-foreground)" }}>{c.cvss ? c.cvss.toFixed(1) : "—"}</span>,
+      sort: (a, b) => (a.cvss ?? 0) - (b.cvss ?? 0) },
+    { id: "package", header: "Package",
+      cell: (c) => <span className="text-mono text-xs">{c.package || "—"}</span> },
+    { id: "fixed", header: "Fixed in",
+      cell: (c) => <span className="text-mono text-xs text-muted-foreground">{c.fixed_version || "—"}</span> },
+    { id: "affected", header: "Affected", numeric: true,
+      cell: (c) => (
+        <span className="text-xs" title={c.images.join("\n")}>
+          {c.affected_images} image{c.affected_images === 1 ? "" : "s"}
+          {c.affected_clusters > 1 ? ` · ${c.affected_clusters} clusters` : ""}
+        </span>
+      ),
+      sort: (a, b) => a.affected_images - b.affected_images },
+    { id: "instances", header: "Instances", numeric: true, width: "96px",
+      cell: (c) => <span className="text-mono text-xs">{c.instances}</span>,
+      sort: (a, b) => a.instances - b.instances },
+    { id: "risk", header: "Risk", numeric: true, width: "80px",
+      cell: (c) => <RiskScore score={c.risk_score} />,
+      sort: (a, b) => a.risk_score - b.risk_score },
+    { id: "age", header: "Age", numeric: true,
+      cell: (c) => <span className="text-[10px] text-muted-foreground">{fmtRelative(c.last_seen_at)}</span>,
+      sort: (a, b) => +new Date(a.last_seen_at) - +new Date(b.last_seen_at) },
+  ];
+  if (loading) return <p className="text-sm text-muted-foreground">Loading CVE rollup…</p>;
   return (
-    <div className="flex items-start justify-between gap-3">
-      <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">{k}</dt>
-      <dd className="text-right">{v}</dd>
-    </div>
+    <DataTable
+      rows={rows}
+      columns={columns}
+      rowKey={(c) => c.cve}
+      defaultSort={{ id: "risk", dir: "desc" }}
+      emptyState={<EmptyState title="No open CVEs" hint="No open vulnerabilities on this cluster." icon={<Tag className="h-8 w-8" />} />}
+    />
   );
 }
 
@@ -602,13 +679,6 @@ function formatPackage(f: Finding): string {
   const version = f.package_version ? `@${f.package_version}` : "";
   const ecosystem = f.package_ecosystem ? ` (${f.package_ecosystem})` : "";
   return `${name}${version}${ecosystem}`;
-}
-
-function engineSummary(f: Finding): string {
-  if (!f.engines?.length) return "—";
-  return f.engines
-    .map((engine) => engine.role ? `${engine.engine}:${engine.role}` : engine.engine)
-    .join(", ");
 }
 
 function groupRows(rows: Finding[], by: GroupBy): Array<{ label: string; items: Finding[] }> {

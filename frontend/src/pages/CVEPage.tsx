@@ -49,12 +49,16 @@ export function CVEPage() {
   const [cvssHigh, setCvssHigh] = useState(false);
   const [severity, setSeverity] = useState<Severity | "">("");
   const [source, setSource] = useState<string>("");
+  // Sort is applied SERVER-SIDE — the catalog is far larger than one page, so a
+  // client-side sort would only reorder the visible 50 rows. Header clicks update this
+  // and refetch in the new global order. Default matches the DataTable's defaultSort.
+  const [sort, setSort] = useState<{ id: string; dir: "asc" | "desc" }>({ id: "cvss", dir: "desc" });
 
   const stats = useQuery({ queryKey: ["cve", "stats"], queryFn: () => cve.stats(), staleTime: 60_000 });
   const bundle = useQuery({ queryKey: ["cve", "bundle"], queryFn: () => cve.bundle(), staleTime: 60_000 });
 
   const search = useQuery({
-    queryKey: ["cve", "search", deferredQ, kevOnly, epssHigh, cvssHigh, severity, source],
+    queryKey: ["cve", "search", deferredQ, kevOnly, epssHigh, cvssHigh, severity, source, sort.id, sort.dir],
     queryFn: () =>
       cve.search({
         q: deferredQ,
@@ -63,6 +67,8 @@ export function CVEPage() {
         cvss_gt: cvssHigh ? 7.0 : undefined,
         severity: severity || undefined,
         source: source || undefined,
+        sort: sort.id,
+        dir: sort.dir,
         limit: 50,
       }),
     placeholderData: keepPreviousData,
@@ -322,6 +328,7 @@ export function CVEPage() {
           rowKey={(r) => r.cve_id}
           onRowClick={(r) => navigate(`/cve/${r.cve_id}`)}
           defaultSort={{ id: "cvss", dir: "desc" }}
+          onSortChange={(s) => setSort(s ?? { id: "cvss", dir: "desc" })}
           emptyState={
             search.isLoading ? (
               <div className="px-6 py-10 text-center text-xs text-muted-foreground">Loading…</div>

@@ -8,28 +8,29 @@
 // never blocks a live workload.
 //
 // Layout: full-width stat row, a full-width workload picker, then the selected
-// workload's rules. Adding a rule happens in a right-side Drawer opened by the
-// "Add rule" (+) button — browsing shows only the lists.
+// workload's rules. Adding / editing a rule happens on a dedicated form page
+// (the Astronomer add/edit-as-a-page pattern): the "Add rule" (+) button and a
+// row's pencil navigate to file-monitor/new and file-monitor/:ruleId. Browsing
+// shows only the lists. The selected workload is carried in the ?workload= param
+// so it survives round-trips to the form page.
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileText, FolderTree, ListChecks, Plus, Trash2 } from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Edit3, FileText, FolderTree, ListChecks, Plus, Trash2 } from "lucide-react";
 
-import { fileProfiles, type FileProfileRuleBehavior } from "@/api/client";
+import { fileProfiles } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { LoadingState, ErrorState, EmptyState } from "@/components/ui/states";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page";
 import { StatCard } from "@/components/ui/stat-card";
-import { Drawer } from "@/components/ui/drawer";
 
 export function FileMonitorPage() {
   const { clusterId, isLoading: clusterLoading } = useCluster();
   const qc = useQueryClient();
-  const [selected, setSelected] = useState<string | null>(null);
-  const [addOpen, setAddOpen] = useState(false);
-  const [filter, setFilter] = useState("/etc/");
-  const [behavior, setBehavior] = useState<FileProfileRuleBehavior>("monitor_change");
-  const [recursive, setRecursive] = useState(true);
+  const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const selected = params.get("workload");
   const [error, setError] = useState<string | null>(null);
 
   const listQ = useQuery({
@@ -51,21 +52,8 @@ export function FileMonitorPage() {
     void qc.invalidateQueries({ queryKey: ["file-monitor-profiles", clusterId] });
   };
 
-  const addMut = useMutation({
-    mutationFn: () =>
-      fileProfiles.createRule(
-        activeWorkload!,
-        { filter, behavior, recursive, reason: "authored via file-monitor console" },
-        { cluster_id: clusterId },
-      ),
-    onSuccess: () => {
-      setError(null);
-      setFilter("/etc/");
-      setAddOpen(false);
-      invalidate();
-    },
-    onError: (e) => setError(e instanceof Error ? e.message : "failed to add rule"),
-  });
+  const gotoForm = (segment: string) =>
+    navigate(`${segment}${activeWorkload ? `?workload=${encodeURIComponent(activeWorkload)}` : ""}`);
 
   const delMut = useMutation({
     mutationFn: (ruleID: string) =>
@@ -93,7 +81,7 @@ export function FileMonitorPage() {
             size="sm"
             variant="primary"
             disabled={!activeWorkload}
-            onClick={() => { setError(null); setAddOpen(true); }}
+            onClick={() => { setError(null); gotoForm("new"); }}
             data-testid="file-monitor-add-open"
           >
             <Plus className="h-3 w-3" /> Add rule
@@ -124,7 +112,7 @@ export function FileMonitorPage() {
                 <button
                   key={p.workload_id}
                   type="button"
-                  onClick={() => setSelected(p.workload_id)}
+                  onClick={() => setParams({ workload: p.workload_id })}
                   className={`rounded-md border bg-card px-3 py-2 text-left transition-colors hover:border-[color-mix(in_oklab,var(--color-primary)_30%,var(--color-border))] ${
                     p.workload_id === activeWorkload ? "border-[color:var(--color-primary)] ring-1 ring-[color:var(--color-primary)]/30" : "border-border"
                   }`}
@@ -155,15 +143,25 @@ export function FileMonitorPage() {
                           {r.behavior}{r.recursive ? " · recursive" : ""}{r.enabled ? "" : " · disabled"}
                         </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => delMut.mutate(r.id)}
-                        disabled={delMut.isPending}
-                        className="text-muted-foreground hover:text-status-error"
-                        aria-label="delete rule"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => gotoForm(r.id)}
+                          className="text-muted-foreground hover:text-foreground"
+                          aria-label="edit rule"
+                        >
+                          <Edit3 className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => delMut.mutate(r.id)}
+                          disabled={delMut.isPending}
+                          className="text-muted-foreground hover:text-status-error"
+                          aria-label="delete rule"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </li>
                   ))}
                   {rules.length === 0 && (
@@ -172,57 +170,10 @@ export function FileMonitorPage() {
                 </ul>
               )}
             </div>
-            {error && !addOpen && <p className="text-[11px] text-status-error">{error}</p>}
+            {error && <p className="text-[11px] text-status-error">{error}</p>}
           </section>
         </>
       )}
-
-      <Drawer
-        open={addOpen}
-        onOpenChange={setAddOpen}
-        title="Add monitor rule"
-        description={
-          <>
-            Watch a path on <span className="font-mono">{activeWorkload}</span>. Defaults to observe-only.
-          </>
-        }
-      >
-        <div className="flex flex-col gap-3">
-          <label className="flex flex-col gap-1 text-[11px]">
-            <span className="text-muted-foreground">Path filter</span>
-            <input
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              className="w-full rounded border border-border bg-background px-2 py-1 font-mono text-xs"
-              placeholder="/etc/ or /bin/*"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-[11px]">
-            <span className="text-muted-foreground">Behavior</span>
-            <select
-              value={behavior}
-              onChange={(e) => setBehavior(e.target.value as FileProfileRuleBehavior)}
-              className="rounded border border-border bg-background px-2 py-1 text-xs"
-            >
-              <option value="monitor_change">monitor_change (observe)</option>
-              <option value="block_access">block_access (enforce)</option>
-            </select>
-          </label>
-          <label className="flex items-center gap-1.5 text-[11px]">
-            <input type="checkbox" checked={recursive} onChange={(e) => setRecursive(e.target.checked)} />
-            recursive
-          </label>
-          <Button
-            size="sm"
-            variant="primary"
-            disabled={!activeWorkload || !filter.trim() || addMut.isPending}
-            onClick={() => addMut.mutate()}
-          >
-            <Plus className="h-3 w-3" /> Add
-          </Button>
-          {error && <p className="text-[11px] text-status-error">{error}</p>}
-        </div>
-      </Drawer>
     </div>
   );
 }

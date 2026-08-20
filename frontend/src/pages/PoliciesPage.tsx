@@ -4,11 +4,10 @@
 // toggle + monitor/enforce mode selector. Clicking a policy opens its YAML in a Monaco
 // editor on the right with a "Save" action. This mirrors StackRox's policy management
 // pane + NeuVector's "Admission Rules" catalog feel.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import Editor from "@monaco-editor/react";
 import { CheckCircle2, Download, Eye, FileJson, GitCompare, ListChecks, Pencil, Play, Plus, Power, ShieldCheck, UploadCloud } from "lucide-react";
 
 import {
@@ -23,7 +22,6 @@ import { useCluster } from "@/hooks/useCluster";
 import { PageHeader } from "@/components/ui/page";
 import { StatCard } from "@/components/ui/stat-card";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
-import { Drawer } from "@/components/ui/drawer";
 import { DataTable, type Column } from "@/components/ui/data-table";
 
 const SAMPLE_ADMISSION_MANIFEST = `apiVersion: v1
@@ -42,9 +40,11 @@ spec:
 
 export function PoliciesPage() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   // Cluster-scoped: policies with cluster_id matching the active cluster OR
   // NULL (org-wide) are shown — the latter cover org-default admission rules.
   const { clusterId, isLoading: clusterLoading } = useCluster();
+  const policiesBase = `/clusters/${clusterId ?? ""}/policies`;
   const q = useQuery({
     queryKey: ["policies", clusterId],
     queryFn: () => policies.list({ cluster_id: clusterId }),
@@ -55,14 +55,7 @@ export function PoliciesPage() {
   });
 
   const [tab, setTab] = useTabParam("tab", "catalog");
-  const [activeID, setActiveID] = useState<string | null>(null);
-  const [editorOpen, setEditorOpen] = useState(false);
-  const active: Policy | undefined = useMemo(
-    () => q.data?.policies.find((p) => p.id === activeID) ?? q.data?.policies[0],
-    [q.data, activeID],
-  );
 
-  const [yaml, setYaml] = useState<string>("");
   const [manifest, setManifest] = useState(SAMPLE_ADMISSION_MANIFEST);
   const [profileSource, setProfileSource] = useState<"catalog" | "bundle">("catalog");
   const [selectedProfileID, setSelectedProfileID] = useState("");
@@ -71,22 +64,10 @@ export function PoliciesPage() {
   const [bundleText, setBundleText] = useState("");
   const [profilePreview, setProfilePreview] = useState<AdmissionProfileImportResponse | null>(null);
   useEffect(() => {
-    if (active) setYaml(active.spec_yaml);
-  }, [active?.id, active?.spec_yaml, active]);
-  useEffect(() => {
     if (!selectedProfileID && profilesQ.data?.profiles.length) {
       setSelectedProfileID(profilesQ.data.profiles[0].id);
     }
   }, [profilesQ.data?.profiles, selectedProfileID]);
-
-  const update = useMutation({
-    mutationFn: (body: Partial<Policy>) => policies.update(active!.id, body),
-    onSuccess: () => {
-      toast.success("Policy updated");
-      qc.invalidateQueries({ queryKey: ["policies", clusterId] });
-    },
-    onError: () => toast.error("Update failed"),
-  });
 
   const simulation = useMutation({
     mutationFn: () => policies.simulate({ manifest }, { cluster_id: clusterId }),
@@ -147,7 +128,7 @@ export function PoliciesPage() {
   const enforceCount = list.filter((p) => p.mode === "enforce").length;
   const profileCount = profilesQ.data?.profiles.length ?? 0;
 
-  const openEditor = (id: string) => { setActiveID(id); setEditorOpen(true); };
+  const openEditor = (id: string) => navigate(`${policiesBase}/${id}`);
 
   const catalogTab = (
     <div className="space-y-4" data-testid="policies-layout">
@@ -159,9 +140,7 @@ export function PoliciesPage() {
               {ps.map((p) => (
                 <li
                   key={p.id}
-                  className={`group rounded-md border bg-card p-3 transition-colors ${
-                    active?.id === p.id && editorOpen ? "border-[color:var(--color-primary)] ring-1 ring-[color:var(--color-primary)]/30" : "border-border hover:border-[color-mix(in_oklab,var(--color-primary)_30%,var(--color-border))]"
-                  }`}
+                  className="group rounded-md border border-border bg-card p-3 transition-colors hover:border-[color-mix(in_oklab,var(--color-primary)_30%,var(--color-border))]"
                   data-testid={`policy-row-${p.name}`}
                 >
                   <button
@@ -354,65 +333,6 @@ export function PoliciesPage() {
           { value: "simulator", label: "Admission simulator", content: simulatorTab },
         ]}
       />
-
-      <Drawer
-        open={editorOpen}
-        onOpenChange={setEditorOpen}
-        width="xl"
-        title={active ? active.name : "Policy"}
-        description={active?.description}
-      >
-        {active && (
-          <div data-testid="policy-editor">
-            <div className="mb-3 flex items-center justify-end gap-2 text-xs">
-              <label className="flex items-center gap-1">
-                mode
-                <select
-                  value={active.mode}
-                  onChange={(e) =>
-                    update.mutate({ mode: e.target.value as "monitor" | "enforce" })
-                  }
-                  className="rounded-md border border-border bg-background px-1.5 py-0.5 text-xs"
-                  data-testid="policy-mode-select"
-                >
-                  <option value="monitor">monitor</option>
-                  <option value="enforce">enforce</option>
-                </select>
-              </label>
-              <button
-                type="button"
-                disabled={update.isPending || yaml === active.spec_yaml}
-                onClick={() => update.mutate({ spec_yaml: yaml })}
-                className="rounded-md bg-foreground px-2.5 py-1 text-xs text-background hover:opacity-90 disabled:opacity-40"
-                data-testid="policy-save"
-              >
-                Save YAML
-              </button>
-            </div>
-            {active.engine === "constellation-admission" && (
-              <AdmissionRuleBuilder
-                policyName={active.name}
-                onApply={setYaml}
-              />
-            )}
-            <div className="overflow-hidden rounded-md border border-border">
-              <Editor
-                height="520px"
-                language="yaml"
-                theme="vs-dark"
-                value={yaml}
-                onChange={(v) => setYaml(v ?? "")}
-                options={{
-                  fontSize: 12,
-                  minimap: { enabled: false },
-                  tabSize: 2,
-                  automaticLayout: true,
-                }}
-              />
-            </div>
-          </div>
-        )}
-      </Drawer>
     </div>
   );
 }
@@ -639,289 +559,6 @@ function AdmissionProfilePanel({
       </div>
     </section>
   );
-}
-
-function AdmissionRuleBuilder({
-  policyName,
-  onApply,
-}: {
-  policyName: string;
-  onApply: (yaml: string) => void;
-}) {
-  const [ruleName, setRuleName] = useState(policyName.split("/").pop() || policyName || "image-evidence-gate");
-  const [maxSeverity, setMaxSeverity] = useState<"medium" | "high" | "critical">("high");
-  const [maxAge, setMaxAge] = useState("24h");
-  const [canonicalEngine, setCanonicalEngine] = useState("vulndb");
-  const [sourceType, setSourceType] = useState<AdmissionEvidenceSource>("repository");
-  const [requireDigestMatch, setRequireDigestMatch] = useState(true);
-  const [requireKnown, setRequireKnown] = useState(true);
-  const [requireBundle, setRequireBundle] = useState(true);
-  const [requireFix, setRequireFix] = useState(false);
-  const [requireTrustedAttestation, setRequireTrustedAttestation] = useState(false);
-  const [attestationPredicateType, setAttestationPredicateType] = useState("https://slsa.dev/provenance/v1");
-  const [attestationIdentity, setAttestationIdentity] = useState("");
-  const [attestationIssuer, setAttestationIssuer] = useState("https://token.actions.githubusercontent.com");
-  const [requireTrustedSignature, setRequireTrustedSignature] = useState(false);
-  const [requireVerifierIdentity, setRequireVerifierIdentity] = useState(false);
-  const [verifierIdentity, setVerifierIdentity] = useState("");
-
-  return (
-    <section className="mb-3 rounded-md border border-border bg-background p-3" data-testid="admission-rule-builder">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <FileJson className="h-4 w-4 text-muted-foreground" aria-hidden />
-          <div>
-            <h3 className="text-xs font-semibold">AdmissionRule Builder</h3>
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={() => onApply(buildAdmissionRuleYAML({
-            ruleName,
-            maxSeverity,
-            maxAge,
-            canonicalEngine,
-            sourceType,
-            requireDigestMatch,
-            requireKnown,
-            requireBundle,
-            requireFix,
-            requireTrustedAttestation,
-            attestationPredicateType,
-            attestationIdentity,
-            attestationIssuer,
-            requireTrustedSignature,
-            requireVerifierIdentity,
-            verifierIdentity,
-          }))}
-          className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs hover:bg-accent/40"
-          data-testid="admission-rule-builder-apply"
-        >
-          <FileJson className="h-3.5 w-3.5" aria-hidden />
-          Apply YAML
-        </button>
-      </div>
-
-      <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
-        <label className="space-y-1 text-xs">
-          <span className="text-muted-foreground">Rule name</span>
-          <input
-            value={ruleName}
-            onChange={(e) => setRuleName(e.target.value)}
-            className="h-8 w-full rounded-md border border-border bg-card px-2 text-xs"
-            data-testid="admission-rule-builder-name"
-          />
-        </label>
-        <label className="space-y-1 text-xs">
-          <span className="text-muted-foreground">Max severity</span>
-          <select
-            value={maxSeverity}
-            onChange={(e) => setMaxSeverity(e.target.value as "medium" | "high" | "critical")}
-            className="h-8 w-full rounded-md border border-border bg-card px-2 text-xs"
-            data-testid="admission-rule-builder-severity"
-          >
-            <option value="medium">medium</option>
-            <option value="high">high</option>
-            <option value="critical">critical</option>
-          </select>
-        </label>
-        <label className="space-y-1 text-xs">
-          <span className="text-muted-foreground">Max scan age</span>
-          <input
-            value={maxAge}
-            onChange={(e) => setMaxAge(e.target.value)}
-            className="h-8 w-full rounded-md border border-border bg-card px-2 text-xs"
-            data-testid="admission-rule-builder-max-age"
-          />
-        </label>
-        <label className="space-y-1 text-xs">
-          <span className="text-muted-foreground">Canonical engine</span>
-          <input
-            value={canonicalEngine}
-            onChange={(e) => setCanonicalEngine(e.target.value)}
-            className="h-8 w-full rounded-md border border-border bg-card px-2 text-xs"
-            data-testid="admission-rule-builder-engine"
-          />
-        </label>
-      </div>
-
-      <div className="mt-3 grid grid-cols-1 gap-2 text-xs md:grid-cols-3">
-        <label className="space-y-1">
-          <span className="text-muted-foreground">Evidence source</span>
-          <select
-            value={sourceType}
-            onChange={(e) => setSourceType(e.target.value as AdmissionEvidenceSource)}
-            className="h-8 w-full rounded-md border border-border bg-card px-2 text-xs"
-            data-testid="admission-rule-builder-source"
-          >
-            <option value="repository">Repository / CI</option>
-            <option value="runtime-agent">Runtime agent</option>
-            <option value="registry">Registry</option>
-            <option value="manual">Manual</option>
-            <option value="any">Any source</option>
-          </select>
-        </label>
-        <Toggle checked={requireDigestMatch} onChange={setRequireDigestMatch} label="Require digest match" testId="admission-rule-builder-digest-match" />
-        <Toggle checked={requireKnown} onChange={setRequireKnown} label="Require known scan result" testId="admission-rule-builder-known" />
-        <Toggle checked={requireBundle} onChange={setRequireBundle} label="Require VulnDB bundle" testId="admission-rule-builder-bundle" />
-        <Toggle checked={requireFix} onChange={setRequireFix} label="Require fix available" testId="admission-rule-builder-fix" />
-        <Toggle checked={requireTrustedAttestation} onChange={setRequireTrustedAttestation} label="Require trusted attestation" testId="admission-rule-builder-attestation" />
-        <label className="space-y-1">
-          <span className="text-muted-foreground">Attestation predicate</span>
-          <input
-            value={attestationPredicateType}
-            onChange={(e) => setAttestationPredicateType(e.target.value)}
-            disabled={!requireTrustedAttestation}
-            className="h-8 w-full rounded-md border border-border bg-card px-2 text-xs disabled:opacity-50"
-            data-testid="admission-rule-builder-attestation-predicate"
-          />
-        </label>
-        <label className="space-y-1">
-          <span className="text-muted-foreground">Attestation identity</span>
-          <input
-            value={attestationIdentity}
-            onChange={(e) => setAttestationIdentity(e.target.value)}
-            disabled={!requireTrustedAttestation}
-            className="h-8 w-full rounded-md border border-border bg-card px-2 text-xs disabled:opacity-50"
-            data-testid="admission-rule-builder-attestation-identity"
-          />
-        </label>
-        <label className="space-y-1">
-          <span className="text-muted-foreground">Attestation issuer</span>
-          <input
-            value={attestationIssuer}
-            onChange={(e) => setAttestationIssuer(e.target.value)}
-            disabled={!requireTrustedAttestation}
-            className="h-8 w-full rounded-md border border-border bg-card px-2 text-xs disabled:opacity-50"
-            data-testid="admission-rule-builder-attestation-issuer"
-          />
-        </label>
-        <Toggle checked={requireTrustedSignature} onChange={setRequireTrustedSignature} label="Require trusted signature" testId="admission-rule-builder-signature" />
-        <Toggle checked={requireVerifierIdentity} onChange={setRequireVerifierIdentity} label="Require verifier identity" testId="admission-rule-builder-identity-required" />
-        <label className="space-y-1">
-          <span className="text-muted-foreground">Allowed identity</span>
-          <input
-            value={verifierIdentity}
-            onChange={(e) => setVerifierIdentity(e.target.value)}
-            disabled={!requireVerifierIdentity}
-            className="h-8 w-full rounded-md border border-border bg-card px-2 text-xs disabled:opacity-50"
-            data-testid="admission-rule-builder-identity"
-          />
-        </label>
-      </div>
-    </section>
-  );
-}
-
-type AdmissionEvidenceSource = "repository" | "runtime-agent" | "registry" | "manual" | "any";
-
-function Toggle({
-  checked,
-  onChange,
-  label,
-  testId,
-}: {
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  label: string;
-  testId: string;
-}) {
-  return (
-    <label className="flex min-h-8 items-center gap-2 rounded-md border border-border bg-card px-2">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-        data-testid={testId}
-      />
-      <span>{label}</span>
-    </label>
-  );
-}
-
-function buildAdmissionRuleYAML({
-  ruleName,
-  maxSeverity,
-  maxAge,
-  canonicalEngine,
-  sourceType,
-  requireDigestMatch,
-  requireKnown,
-  requireBundle,
-  requireFix,
-  requireTrustedAttestation,
-  attestationPredicateType,
-  attestationIdentity,
-  attestationIssuer,
-  requireTrustedSignature,
-  requireVerifierIdentity,
-  verifierIdentity,
-}: {
-  ruleName: string;
-  maxSeverity: "medium" | "high" | "critical";
-  maxAge: string;
-  canonicalEngine: string;
-  sourceType: AdmissionEvidenceSource;
-  requireDigestMatch: boolean;
-  requireKnown: boolean;
-  requireBundle: boolean;
-  requireFix: boolean;
-  requireTrustedAttestation: boolean;
-  attestationPredicateType: string;
-  attestationIdentity: string;
-  attestationIssuer: string;
-  requireTrustedSignature: boolean;
-  requireVerifierIdentity: boolean;
-  verifierIdentity: string;
-}) {
-  const name = ruleName.trim() || "image-evidence-gate";
-  const lines = [
-    "apiVersion: constellation.alphabravo.io/v1alpha1",
-    "kind: AdmissionRule",
-    "metadata:",
-    `  name: ${yamlString(name)}`,
-    "spec:",
-    "  match:",
-    '    kinds: ["Pod"]',
-    "  scanEvidence:",
-    `    maxAge: ${yamlString(maxAge.trim() || "24h")}`,
-    `    requireVulnDBBundle: ${requireBundle}`,
-  ];
-  if (sourceType !== "any") lines.push(`    sourceTypes: [${yamlString(sourceType)}]`);
-  lines.push(`    requireDigestMatch: ${requireDigestMatch}`);
-  if (requireTrustedAttestation) {
-    lines.push("    requireTrustedAttestation: true");
-    const predicate = attestationPredicateType.trim();
-    const identity = attestationIdentity.trim();
-    const issuer = attestationIssuer.trim();
-    if (predicate) lines.push(`    attestationPredicateTypes: [${yamlString(predicate)}]`);
-    if (identity) lines.push(`    allowedAttestationIdentities: [${yamlString(identity)}]`);
-    if (issuer) lines.push(`    allowedAttestationIssuers: [${yamlString(issuer)}]`);
-  }
-  const engine = canonicalEngine.trim();
-  if (engine) lines.push(`    canonicalEngines: [${yamlString(engine)}]`);
-  lines.push(
-    "  vulnerability:",
-    `    maxAllowedSeverity: ${maxSeverity}`,
-    `    requireKnownScanResult: ${requireKnown}`,
-    `    requireFixAvailable: ${requireFix}`,
-  );
-  if (requireTrustedSignature || requireVerifierIdentity || verifierIdentity.trim()) {
-    lines.push(
-      "  imageArtifacts:",
-      "    signature:",
-      `      requireTrusted: ${requireTrustedSignature}`,
-      `      requireVerifierIdentity: ${requireVerifierIdentity}`,
-    );
-    const identity = verifierIdentity.trim();
-    if (identity) lines.push(`      allowedIdentities: [${yamlString(identity)}]`);
-  }
-  lines.push("  action: deny");
-  return `${lines.join("\n")}\n`;
-}
-
-function yamlString(value: string) {
-  return JSON.stringify(value);
 }
 
 function SimulationMatchCard({ match }: { match: PolicySimulation["matches"][number] }) {

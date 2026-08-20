@@ -7,6 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, ExternalLink, Wrench, BookOpen, Bug } from "lucide-react";
 
 import { api, cve as cveApi, type CVEAffectedImage, type CVEAffectedResponse, type Severity } from "@/api/client";
+import { useCluster } from "@/hooks/useCluster";
 import { EntityHeader } from "@/components/EntityHeader";
 import { KevBadge, EpssBadge } from "@/components/ui/kev-badge";
 import { SeverityBadge } from "@/components/ui/severity-badge";
@@ -25,16 +26,27 @@ interface CVEDetail {
 }
 
 export function CVEDetailPage() {
-  const { id } = useParams<{ id: string }>();
+  // Two routes render this page:
+  //   global   /cve/:id                       → params.id = CVE, no cluster
+  //   cluster  /clusters/:id/cve/:cveId        → params.id = CLUSTER, params.cveId = CVE
+  // The distinct `:cveId` param name is REQUIRED: if the nested route reused `:id` it
+  // would shadow the cluster's `:id`, so useCluster() (which reads params.id) would get
+  // the CVE id, "not find" the cluster, and ClusterRouter would bounce to /clusters.
+  const { id, cveId } = useParams<{ id: string; cveId: string }>();
+  const clusterScoped = !!cveId;
+  const cveKey = cveId ?? id;
+  // useCluster reads params.id — correct (the cluster) only on the nested route.
+  const { cluster } = useCluster();
+  const clusterId = clusterScoped ? id : undefined;
   const cveQ = useQuery({
-    queryKey: ["cve", id],
-    queryFn: () => api.get<CVEDetail>(`/cve/${id}`).then((r) => r.data),
-    enabled: !!id,
+    queryKey: ["cve", cveKey],
+    queryFn: () => api.get<CVEDetail>(`/cve/${cveKey}`).then((r) => r.data),
+    enabled: !!cveKey,
   });
   const relatedQ = useQuery({
-    queryKey: ["cve-affected", id],
-    queryFn: () => cveApi.affected(id!),
-    enabled: !!id,
+    queryKey: ["cve-affected", cveKey, clusterId ?? "all"],
+    queryFn: () => cveApi.affected(cveKey!, clusterId),
+    enabled: !!cveKey,
   });
 
   const affected = relatedQ.data;
@@ -56,12 +68,21 @@ export function CVEDetailPage() {
   return (
     <div className="space-y-5" data-testid="cve-detail-page">
       <EntityHeader
-        breadcrumbs={[
-          { label: "CVE DB", to: "/cve" },
-          { label: cve.cve_id },
-        ]}
+        breadcrumbs={
+          clusterId
+            ? [
+                { label: "Clusters", to: "/clusters" },
+                { label: cluster?.name || clusterId.slice(0, 14), to: `/clusters/${clusterId}/dashboard` },
+                { label: "Findings", to: `/clusters/${clusterId}/findings` },
+                { label: cve.cve_id },
+              ]
+            : [
+                { label: "CVE DB", to: "/cve" },
+                { label: cve.cve_id },
+              ]
+        }
         title={<span className="text-mono">{cve.cve_id}</span>}
-        subtitle={cve.title}
+        subtitle={clusterId ? `${cve.title} · scoped to ${cluster?.name || "this cluster"}` : cve.title}
         badges={
           <>
             {cve.cvss_base != null && (

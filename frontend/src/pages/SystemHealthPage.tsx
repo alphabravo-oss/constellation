@@ -19,6 +19,7 @@ import { PageHeader } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
+import { Card } from "@/components/ui/card";
 
 const heartbeatColumns: Column<SystemHealthHeartbeat>[] = [
   { id: "component", header: "Component", className: "font-medium", cell: (hb) => hb.component },
@@ -117,7 +118,8 @@ export function SystemHealthPage() {
       count: crashloop.length,
       content:
         crashloop.length > 0 ? (
-          <ol className="space-y-1.5 rounded-lg border border-border bg-card p-3" data-testid="system-health-crashloop">
+          <Card padded={false}>
+            <ol className="space-y-1.5 p-3" data-testid="system-health-crashloop">
             {crashloop.map((ev) => (
               <li key={ev.id} className="flex items-center justify-between gap-3 rounded-md bg-muted/30 px-3 py-1.5 text-xs">
                 <div className="flex items-center gap-2">
@@ -132,7 +134,8 @@ export function SystemHealthPage() {
                 <div className="text-muted-foreground">{formatRelative(ev.detected_at)}</div>
               </li>
             ))}
-          </ol>
+            </ol>
+          </Card>
         ) : (
           <p className="text-sm text-muted-foreground">No crashloop events. 🎉</p>
         ),
@@ -142,10 +145,9 @@ export function SystemHealthPage() {
       label: "Incidents & Actions",
       count: incidents.length + actions.length,
       content: (
-        <div className="grid gap-3 lg:grid-cols-2">
-          <section className="rounded-lg border border-border bg-card p-4" data-testid="system-health-incidents">
-            <h2 className="text-sm font-semibold">Active incidents</h2>
-            <div className="mt-3 space-y-2">
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card title="Active incidents" description="Open platform incidents affecting the control plane or a connected cluster.">
+            <div data-testid="system-health-incidents" className="space-y-2">
               {incidents.length === 0 && <p className="text-xs text-muted-foreground">No active incidents.</p>}
               {incidents.map((incident) => (
                 <article key={incident.id} className="rounded-md border border-border p-3">
@@ -157,10 +159,9 @@ export function SystemHealthPage() {
                 </article>
               ))}
             </div>
-          </section>
-          <section className="rounded-lg border border-border bg-card p-4" data-testid="system-health-actions">
-            <h2 className="text-sm font-semibold">Remediation actions</h2>
-            <div className="mt-3 space-y-2">
+          </Card>
+          <Card title="Remediation actions" description="Steps assigned to bring degraded or crashlooping components back to healthy.">
+            <div data-testid="system-health-actions" className="space-y-2">
               {actions.length === 0 && <p className="text-xs text-muted-foreground">No open actions.</p>}
               {actions.map((action) => (
                 <article key={action.id} className="rounded-md bg-muted p-3">
@@ -175,14 +176,14 @@ export function SystemHealthPage() {
                 </article>
               ))}
             </div>
-          </section>
+          </Card>
         </div>
       ),
     },
   ];
 
   return (
-    <div className="space-y-5" data-testid="system-health-page">
+    <div className="space-y-6" data-testid="system-health-page">
       {/* ------------- LICENSE BANNER ------------- */}
       {license && license.banner_visible && <LicenseBanner license={license} />}
 

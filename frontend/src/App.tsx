@@ -33,10 +33,27 @@ import { CoveragePage } from "./pages/CoveragePage";
 import { SystemHealthPage } from "./pages/SystemHealthPage";
 import { AccessControlPage } from "./pages/AccessControlPage";
 import { FederationPage } from "./pages/FederationPage";
+import { FederationPeerFormPage } from "./pages/FederationPeerFormPage";
 import { ApiTokensPage } from "./pages/ApiTokensPage";
 import { BackupPage } from "./pages/BackupPage";
 import { ScannerSourcesPage } from "./pages/ScannerSourcesPage";
 import { MigrationPage } from "./pages/MigrationPage";
+import { RegisterClusterPage } from "./pages/RegisterClusterPage";
+import { RoleBindingFormPage } from "./pages/access/RoleBindingFormPage";
+import { ServiceAccountFormPage } from "./pages/access/ServiceAccountFormPage";
+import { AuthProviderFormPage } from "./pages/access/AuthProviderFormPage";
+import { ApiTokenCreatePage } from "./pages/ApiTokenCreatePage";
+import { NvdConfigPage } from "./pages/NvdConfigPage";
+import { BackupDestinationPage } from "./pages/backup/BackupDestinationPage";
+import { BackupSchedulePage } from "./pages/backup/BackupSchedulePage";
+import { BackupRestorePage } from "./pages/backup/BackupRestorePage";
+import { ReceiverFormPage } from "./pages/integrations/ReceiverFormPage";
+import { AttestationPolicyFormPage } from "./pages/AttestationPolicyFormPage";
+import { ConnectorFormPage } from "./pages/connectors/ConnectorFormPage";
+import { QueueScanPage } from "./pages/connectors/QueueScanPage";
+import { SecurityPolicyPage } from "./pages/SecurityPolicyPage";
+import { NetworkProxyPage } from "./pages/NetworkProxyPage";
+import { DataRetentionPage } from "./pages/DataRetentionPage";
 import { AttestationTrustPage } from "./pages/AttestationTrustPage";
 
 // Cluster-scoped pages — lazy-loaded so the picker stays cheap.
@@ -73,7 +90,15 @@ const DeploymentDetailPage  = lazy(() => import("./pages/DeploymentDetailPage").
 const AuditPage             = lazy(() => import("./pages/AuditPage").then((m) => ({ default: m.AuditPage })));
 const ClusterHealthPage     = lazy(() => import("./pages/ClusterHealthPage").then((m) => ({ default: m.ClusterHealthPage })));
 const BaselinesPage         = lazy(() => import("./pages/BaselinesPage").then((m) => ({ default: m.BaselinesPage })));
+const BaselineDetailPage    = lazy(() => import("./pages/baselines/BaselineDetailPage").then((m) => ({ default: m.BaselineDetailPage })));
+const PolicyFormPage        = lazy(() => import("./pages/PolicyFormPage").then((m) => ({ default: m.PolicyFormPage })));
+const ResponseRuleFormPage  = lazy(() => import("./pages/ResponseRuleFormPage").then((m) => ({ default: m.ResponseRuleFormPage })));
+const RuntimePolicyFormPage = lazy(() => import("./pages/RuntimePolicyFormPage").then((m) => ({ default: m.RuntimePolicyFormPage })));
+const RuntimeDLPFormPage    = lazy(() => import("./pages/RuntimeDLPFormPage").then((m) => ({ default: m.RuntimeDLPFormPage })));
+const RuntimeSignatureFormPage = lazy(() => import("./pages/RuntimeSignatureFormPage").then((m) => ({ default: m.RuntimeSignatureFormPage })));
+const FileMonitorFormPage   = lazy(() => import("./pages/FileMonitorFormPage").then((m) => ({ default: m.FileMonitorFormPage })));
 const RegistriesPage        = lazy(() => import("./pages/RegistriesPage").then((m) => ({ default: m.RegistriesPage })));
+const RegistryImagesPage    = lazy(() => import("./pages/RegistryImagesPage").then((m) => ({ default: m.RegistryImagesPage })));
 const ComponentsPage        = lazy(() => import("./pages/ComponentsPage").then((m) => ({ default: m.ComponentsPage })));
 
 function SuspenseRoute({ children }: { children: React.ReactNode }) {
@@ -115,6 +140,7 @@ export function App() {
           <Route path="dashboard"     element={<SuspenseRoute><DashboardPage /></SuspenseRoute>} />
           <Route path="findings"      element={<SuspenseRoute><FindingsPage /></SuspenseRoute>} />
           <Route path="findings/:fid" element={<SuspenseRoute><FindingDetailPage /></SuspenseRoute>} />
+          <Route path="cve/:cveId"    element={<CVEDetailPage />} />
           <Route path="nodes"         element={<SuspenseRoute><NodesPage /></SuspenseRoute>} />
           <Route path="nodes/:nodeName" element={<SuspenseRoute><NodeDetailPage /></SuspenseRoute>} />
           <Route path="images"        element={<SuspenseRoute><ImageScansPage /></SuspenseRoute>} />
@@ -128,24 +154,37 @@ export function App() {
           <Route path="deployments/:did" element={<SuspenseRoute><DeploymentDetailPage /></SuspenseRoute>} />
           <Route path="compliance"    element={<SuspenseRoute><CompliancePage /></SuspenseRoute>} />
           <Route path="registries"    element={<SuspenseRoute><RegistriesPage /></SuspenseRoute>} />
+          <Route path="registries/:regId" element={<SuspenseRoute><RegistryImagesPage /></SuspenseRoute>} />
           <Route path="exceptions"    element={<SuspenseRoute><VulnerabilityExceptionsPage /></SuspenseRoute>} />
           <Route path="runtime"       element={<SuspenseRoute><RuntimePage /></SuspenseRoute>} />
           <Route path="runtime/baselines" element={<SuspenseRoute><BaselinesPage /></SuspenseRoute>} />
+          <Route path="runtime/baselines/:baselineId" element={<SuspenseRoute><BaselineDetailPage /></SuspenseRoute>} />
           <Route path="response"      element={<SuspenseRoute><ResponsePage /></SuspenseRoute>} />
           <Route path="response-rules" element={<SuspenseRoute><ResponseRulesPage /></SuspenseRoute>} />
+          <Route path="response-rules/new"     element={<SuspenseRoute><ResponseRuleFormPage /></SuspenseRoute>} />
+          <Route path="response-rules/:ruleId" element={<SuspenseRoute><ResponseRuleFormPage /></SuspenseRoute>} />
           <Route path="vuln-profiles" element={<SuspenseRoute><VulnProfilePage /></SuspenseRoute>} />
           <Route path="groups"        element={<SuspenseRoute><GroupsPage /></SuspenseRoute>} />
           <Route path="file-monitor"  element={<SuspenseRoute><FileMonitorPage /></SuspenseRoute>} />
+          <Route path="file-monitor/new"     element={<SuspenseRoute><FileMonitorFormPage /></SuspenseRoute>} />
+          <Route path="file-monitor/:ruleId" element={<SuspenseRoute><FileMonitorFormPage /></SuspenseRoute>} />
           <Route path="timeline"      element={<SuspenseRoute><TimelinePage /></SuspenseRoute>} />
           <Route path="network"       element={<SuspenseRoute><NetworkMapPage /></SuspenseRoute>} />
           {/* Wave B1: runtime_policies CRUD UI. cluster_id from :id param. */}
           <Route path="runtime-policies" element={<SuspenseRoute><RuntimePoliciesPage /></SuspenseRoute>} />
+          <Route path="runtime-policies/new"       element={<SuspenseRoute><RuntimePolicyFormPage /></SuspenseRoute>} />
+          <Route path="runtime-policies/:policyId" element={<SuspenseRoute><RuntimePolicyFormPage /></SuspenseRoute>} />
           {/* Wave C4: DLP regex rules. */}
           <Route path="runtime-dlp" element={<SuspenseRoute><RuntimeDLPPage /></SuspenseRoute>} />
+          <Route path="runtime-dlp/new"    element={<SuspenseRoute><RuntimeDLPFormPage /></SuspenseRoute>} />
+          <Route path="runtime-dlp/:ruleId" element={<SuspenseRoute><RuntimeDLPFormPage /></SuspenseRoute>} />
           {/* Wave D4: custom DPI signatures. */}
           <Route path="runtime-signatures" element={<SuspenseRoute><RuntimeSignaturesPage /></SuspenseRoute>} />
+          <Route path="runtime-signatures/new"   element={<SuspenseRoute><RuntimeSignatureFormPage /></SuspenseRoute>} />
+          <Route path="runtime-signatures/:sigId" element={<SuspenseRoute><RuntimeSignatureFormPage /></SuspenseRoute>} />
           <Route path="policies"      element={<SuspenseRoute><PoliciesPage /></SuspenseRoute>} />
           <Route path="policies/new"  element={<SuspenseRoute><PolicyWizardPage /></SuspenseRoute>} />
+          <Route path="policies/:policyId" element={<SuspenseRoute><PolicyFormPage /></SuspenseRoute>} />
           <Route path="audit"         element={<SuspenseRoute><AuditPage /></SuspenseRoute>} />
           <Route path="components"    element={<SuspenseRoute><ComponentsPage /></SuspenseRoute>} />
           <Route path="risk/:entityType/:entityId" element={<SuspenseRoute><RiskDetailPage /></SuspenseRoute>} />
@@ -156,6 +195,7 @@ export function App() {
         <Route path="cve"             element={<CVEPage />} />
         <Route path="cve/:id"         element={<CVEDetailPage />} />
         <Route path="federation"      element={<FederationPage />} />
+        <Route path="federation/new"  element={<FederationPeerFormPage />} />
         <Route path="posture"         element={<CoveragePage />} />
 
         {/* Legacy redirects — old flat routes now live under the Settings shell
@@ -167,14 +207,34 @@ export function App() {
         {/* Settings — one grouped shell, one home per feature (SettingsShell sub-nav). */}
         <Route path="settings" element={<SettingsShell />}>
           <Route index element={<SettingsLanding />} />
+          <Route path="clusters/new"      element={<RegisterClusterPage />} />
           <Route path="access"            element={<AccessControlPage />} />
+          <Route path="access/bindings/new"          element={<RoleBindingFormPage />} />
+          <Route path="access/service-accounts/new"  element={<ServiceAccountFormPage />} />
+          <Route path="access/sso/new"               element={<AuthProviderFormPage />} />
+          <Route path="access/sso/:id"               element={<AuthProviderFormPage />} />
           <Route path="api-tokens"        element={<ApiTokensPage />} />
+          <Route path="api-tokens/new"    element={<ApiTokenCreatePage />} />
+          <Route path="security-policy"   element={<SecurityPolicyPage />} />
           <Route path="attestation-trust" element={<AttestationTrustPage />} />
+          <Route path="attestation-trust/new" element={<AttestationPolicyFormPage />} />
+          <Route path="attestation-trust/:id" element={<AttestationPolicyFormPage />} />
           <Route path="health"            element={<SystemHealthPage />} />
           <Route path="scanner"           element={<ScannerSourcesPage />} />
+          <Route path="scanner/nvd"       element={<NvdConfigPage />} />
+          <Route path="network"           element={<NetworkProxyPage />} />
+          <Route path="retention"         element={<DataRetentionPage />} />
           <Route path="backup"            element={<BackupPage />} />
+          <Route path="backup/destination" element={<BackupDestinationPage />} />
+          <Route path="backup/schedule"    element={<BackupSchedulePage />} />
+          <Route path="backup/restore"     element={<BackupRestorePage />} />
           <Route path="integrations"      element={<IntegrationsPage />} />
+          <Route path="integrations/receivers/new" element={<ReceiverFormPage />} />
+          <Route path="integrations/receivers/:id" element={<ReceiverFormPage />} />
           <Route path="connectors"        element={<ConnectorCoveragePage />} />
+          <Route path="connectors/new"     element={<ConnectorFormPage />} />
+          <Route path="connectors/:id"     element={<ConnectorFormPage />} />
+          <Route path="connectors/scan/new" element={<QueueScanPage />} />
           <Route path="migration"         element={<MigrationPage />} />
           <Route path="vulndb"            element={<Navigate to="/settings/scanner" replace />} />
         </Route>

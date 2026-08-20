@@ -9,9 +9,9 @@
 // Layout: full-width stat row + rules table. Authoring/editing happens in a
 // right-side Drawer opened by the "New rule" (+) button or a row's pencil —
 // browsing the page shows only the verdict + list.
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   ShieldAlert,
   ShieldCheck,
@@ -27,9 +27,7 @@ import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { StatCard } from "@/components/ui/stat-card";
 import { StatusPill } from "@/components/ui/status-pill";
-import { Drawer } from "@/components/ui/drawer";
 import { LoadingState, ErrorState, EmptyState } from "@/components/ui/states";
-import { cn } from "@/lib/cn";
 
 import {
   runtimeDLP,
@@ -47,16 +45,18 @@ export function RuntimeDLPPage() {
   const [search] = useSearchParams();
   const { id: pathClusterID } = useParams();
   const clusterID = pathClusterID ?? search.get("cluster_id") ?? "";
+  const navigate = useNavigate();
 
-  const queryClient = useQueryClient();
   const q = useQuery({
     queryKey: ["runtime-dlp-rules", clusterID],
     queryFn: () => runtimeDLP.list(clusterID),
     enabled: !!clusterID,
   });
 
-  // null = drawer closed, "" = new rule, "<id>" = editing that rule.
-  const [editingID, setEditingID] = useState<string | null>(null);
+  // Add/edit now live on dedicated routes (Astronomer pattern; see
+  // frontend/CLAUDE.md). Preserve any ?cluster_id= fallback across the nav.
+  const openNew = () => navigate({ pathname: "new", search: search.toString() });
+  const openEdit = (id: string) => navigate({ pathname: id, search: search.toString() });
   const rules = useMemo(() => q.data ?? [], [q.data]);
   const enforceCount = rules.filter((r) => r.mode === "enforce").length;
   const monitorCount = rules.filter((r) => r.mode === "monitor").length;
@@ -80,7 +80,7 @@ export function RuntimeDLPPage() {
       cell: (r) => (Array.isArray(r.patterns) ? r.patterns.length : 0),
       sort: (a, b) => (Array.isArray(a.patterns) ? a.patterns.length : 0) - (Array.isArray(b.patterns) ? b.patterns.length : 0),
     },
-    { id: "actions", header: "Actions", className: "text-right", cell: (r) => <DLPActions r={r} onEdit={() => setEditingID(r.id)} /> },
+    { id: "actions", header: "Actions", className: "text-right", cell: (r) => <DLPActions r={r} onEdit={() => openEdit(r.id)} /> },
   ];
 
   if (!clusterID) {
@@ -96,7 +96,7 @@ export function RuntimeDLPPage() {
         title="DLP Rules"
         description="Data-loss-prevention patterns dp scans network payloads for. New rules start in monitor mode; promote one to enforce to start blocking matches."
         actions={
-          <Button size="sm" variant="outline" onClick={() => setEditingID("")} data-testid="runtime-dlp-new">
+          <Button size="sm" variant="outline" onClick={openNew} data-testid="runtime-dlp-new">
             <Plus className="mr-1 h-3.5 w-3.5" /> New rule
           </Button>
         }
@@ -121,24 +121,6 @@ export function RuntimeDLPPage() {
           />
         )}
       </div>
-
-      <Drawer
-        open={editingID !== null}
-        onOpenChange={(o) => { if (!o) setEditingID(null); }}
-        title={editingID ? "Edit DLP rule" : "New DLP rule"}
-        description="PCRE patterns dp's hyperscan engine compiles and scans payloads against."
-      >
-        {editingID !== null && (
-          <DLPEditor
-            clusterID={clusterID}
-            ruleID={editingID || null}
-            onSaved={() => {
-              setEditingID(null);
-              void queryClient.invalidateQueries({ queryKey: ["runtime-dlp-rules", clusterID] });
-            }}
-          />
-        )}
-      </Drawer>
     </div>
   );
 }
@@ -183,142 +165,6 @@ function DLPActions({ r, onEdit }: { r: DLPRule; onEdit: () => void }) {
       >
         <Trash2 className="h-3.5 w-3.5" />
       </Button>
-    </div>
-  );
-}
-
-function DLPEditor({
-  clusterID,
-  ruleID,
-  onSaved,
-}: {
-  clusterID: string;
-  ruleID: string | null;
-  onSaved: (r: DLPRule) => void;
-}) {
-  const existing = useQuery({
-    queryKey: ["runtime-dlp-rule", ruleID],
-    queryFn: () => runtimeDLP.get(ruleID as string),
-    enabled: !!ruleID,
-  });
-
-  const [name, setName] = useState("");
-  const [severity, setSeverity] = useState(5);
-  const [description, setDescription] = useState("");
-  // One pattern per line for easy authoring. Empty lines are dropped on save.
-  const [patternsText, setPatternsText] = useState("");
-  const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (existing.data) {
-      setName(existing.data.name);
-      setSeverity(existing.data.severity);
-      setDescription(existing.data.description ?? "");
-      setPatternsText((existing.data.patterns ?? []).join("\n"));
-    } else if (!ruleID) {
-      setName("");
-      setSeverity(5);
-      setDescription("");
-      setPatternsText("");
-    }
-  }, [existing.data, ruleID]);
-
-  const parsedPatterns = (): string[] =>
-    patternsText.split("\n").map((s) => s.trim()).filter(Boolean);
-
-  const save = useMutation({
-    mutationFn: async (): Promise<DLPRule> => {
-      setErr(null);
-      const patterns = parsedPatterns();
-      if (patterns.length === 0) throw new Error("at least one pattern is required");
-      if (ruleID) {
-        return runtimeDLP.update(ruleID, { patterns, severity, description });
-      }
-      if (!name) throw new Error("name is required");
-      return runtimeDLP.create({
-        cluster_id: clusterID, name, severity, patterns, description,
-        mode: "monitor",
-      });
-    },
-    onSuccess: onSaved,
-    onError: (e) => setErr((e as Error).message),
-  });
-
-  return (
-    <div className="flex flex-col gap-3" data-testid="runtime-dlp-editor">
-      <DLPField label="Name" value={name} onChange={setName} disabled={!!ruleID} placeholder="aws-keys" />
-      <div className="flex items-center gap-2">
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Severity</div>
-        <input
-          type="range"
-          min={1}
-          max={9}
-          value={severity}
-          onChange={(e) => setSeverity(Number(e.target.value))}
-          className="flex-1"
-          data-testid="runtime-dlp-editor-severity"
-        />
-        <span className="text-mono text-xs tabular-nums">{severity}</span>
-      </div>
-      <DLPField label="Description" value={description} onChange={setDescription} placeholder="What does this catch?" />
-      <div className="flex flex-col">
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Patterns (one PCRE per line)</div>
-        <textarea
-          className="mt-0.5 min-h-[220px] w-full rounded border border-input bg-background p-2 font-mono text-[11px] outline-none focus:border-[color:var(--color-primary)]"
-          value={patternsText}
-          onChange={(e) => setPatternsText(e.target.value)}
-          spellCheck={false}
-          placeholder={"AKIA[0-9A-Z]{16}\nAIza[0-9A-Za-z\\-_]{35}"}
-          data-testid="runtime-dlp-editor-patterns"
-        />
-      </div>
-      {err && (
-        <div
-          className="rounded border border-[color:var(--color-status-error)] bg-card p-2 text-[11px] text-[color:var(--color-status-error)]"
-          data-testid="runtime-dlp-editor-error"
-        >
-          {err}
-        </div>
-      )}
-      <div className="flex flex-col gap-2">
-        <Button onClick={() => save.mutate()} disabled={save.isPending} data-testid="runtime-dlp-editor-save">
-          {ruleID ? "Save changes" : "Create (in monitor mode)"}
-        </Button>
-        <span className="text-[10px] text-muted-foreground">
-          dp's hyperscan validates each pattern on compile; bad regex = the rule fails to apply and an audit event records the error.
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function DLPField({
-  label,
-  value,
-  onChange,
-  placeholder,
-  disabled,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-  disabled?: boolean;
-}) {
-  return (
-    <div>
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <input
-        type="text"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        disabled={disabled}
-        className={cn(
-          "mt-0.5 w-full rounded border border-input bg-background px-2 py-1 text-xs outline-none focus:border-[color:var(--color-primary)]",
-          disabled && "opacity-60",
-        )}
-      />
     </div>
   );
 }
