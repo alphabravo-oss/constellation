@@ -11,7 +11,9 @@ _Generated 2026-08-19 · 207 gaps across 12 functional areas · produced by a 12
 >
 > **High tier so far:** admission **criteria rule builder + options catalog** (rows 4–5) **done** — `GET /policies/admission/options` + `POST /policies/admission/rules` compile structured criteria to the engine YAML server-side (validated, verified enforcing via `/policies/assess`), with a dropdown builder UI + a structured admission rules table. The whole admission cluster (state, rules table, dry-run, builder) is now NV-parity.
 >
-> Next tier (high): cross-cutting **server-side pagination/sort/filter** (kill the hard LIMIT caps across 8+ lists), **CVSS/fixable** joins into `/findings`, and response-rule **evaluation order** (row 6).
+> **Cross-cutting pagination (priority 4) — largely done.** A shared `Pager` (total + cursor modes) + `useDebounced` now back server-side paging on every high-volume table: **findings by-CVE** (total + `?q=` search), **registry images** (total + `?q=`), **audit log** (cursor `has_more`, no COUNT on 43M rows), and the **incident timeline** (cursor `has_more` over a 4-table UNION). Network **conversations/map** are graph views (their LIMIT is a top-by-volume render cap, not table truncation) and **containers** returns a full-set security summary — both intentionally excluded. Remaining: nodes (500, low volume).
+>
+> Next tier (high): **CVSS base/vector** joins into the instances `/findings` view, and response-rule **evaluation order** (row 6).
 
 
 ---
