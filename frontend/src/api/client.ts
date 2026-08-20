@@ -400,9 +400,23 @@ export interface NetworkRule {
   match_counter: number;
   last_match_timestamp: number;
 }
+export interface NetworkRuleInput {
+  from: string;
+  to: string;
+  ports?: string;
+  applications?: string[];
+  action?: "allow" | "deny";
+  disable?: boolean;
+  comment?: string;
+  priority?: number;
+}
 export const networkRules = {
   list: (clusterID: string) =>
-    api.get<{ cluster_id: string; rules: NetworkRule[]; summary: { total: number; allow: number; deny: number; learned: number } }>(`/clusters/${encodeURIComponent(clusterID)}/network-rules`).then((r) => r.data),
+    api.get<{ cluster_id: string; rules: NetworkRule[]; summary: { total: number; allow: number; deny: number; learned: number; disabled: number } }>(`/clusters/${encodeURIComponent(clusterID)}/network-rules`).then((r) => r.data),
+  upsert: (clusterID: string, body: NetworkRuleInput) =>
+    api.put<{ ok: boolean; id: number; cfg_type: string }>(`/clusters/${encodeURIComponent(clusterID)}/network-rules`, body).then((r) => r.data),
+  remove: (clusterID: string, from: string, to: string) =>
+    api.delete(`/clusters/${encodeURIComponent(clusterID)}/network-rules?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`).then((r) => r.data),
 };
 
 export const nodes = {

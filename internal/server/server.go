@@ -660,6 +660,9 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/network/map", s.requireVerb(rbac.VerbReadFindings, networkMap.Map))
 			r.Get("/network/exposure", s.requireVerb(rbac.VerbReadFindings, networkMap.Exposure))
 			r.Get("/clusters/{id}/network-rules", s.requireVerb(rbac.VerbReadFindings, networkMap.NetworkRules))
+			r.Post("/clusters/{id}/network-rules", s.requireVerb(rbac.VerbManagePolicies, networkMap.UpsertNetworkRule))
+			r.Put("/clusters/{id}/network-rules", s.requireVerb(rbac.VerbManagePolicies, networkMap.UpsertNetworkRule))
+			r.Delete("/clusters/{id}/network-rules", s.requireVerb(rbac.VerbManagePolicies, networkMap.DeleteNetworkRule))
 
 			// Wave 5: user-facing list of DPI threats. Same auth as findings.
 			runtimeThreats := runtime.NewRuntimeThreats(s.db)
