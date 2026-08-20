@@ -1083,6 +1083,8 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/policies/admission/state", s.requireVerb(rbac.VerbReadFindings, policies.AdmissionState))
 			r.Patch("/policies/admission/state", s.requireVerb(rbac.VerbManagePolicies, policies.UpdateAdmissionState))
 			r.Get("/policies/admission/rules", s.requireVerb(rbac.VerbReadFindings, policies.AdmissionRules))
+			r.Get("/policies/admission/options", s.requireVerb(rbac.VerbReadFindings, policies.AdmissionOptions))
+			r.Post("/policies/admission/rules", s.requireVerb(rbac.VerbManagePolicies, policies.CreateAdmissionRule))
 
 			policyFields := policy.NewPolicyFields()
 			r.Get("/policy/fields", s.requireVerb(rbac.VerbReadFindings, policyFields.List))

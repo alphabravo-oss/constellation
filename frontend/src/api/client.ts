@@ -3980,7 +3980,25 @@ export const policies = {
     api.post<AdmissionAssessResult>("/policies/assess", body, { params }).then((r) => r.data),
   admissionRules: (params: { cluster_id?: string } = {}) =>
     api.get<{ rules: AdmissionRuleRow[]; total: number }>("/policies/admission/rules", { params }).then((r) => r.data),
+  admissionOptions: () =>
+    api.get<AdmissionOptions>("/policies/admission/options").then((r) => r.data),
+  createAdmissionRule: (body: { name: string; mode: string; criteria: Array<{ key: string; value: string }> }, params: { cluster_id?: string } = {}) =>
+    api.post<{ id: string; spec_yaml: string }>("/policies/admission/rules", body, { params }).then((r) => r.data),
 };
+
+export interface AdmissionCriterionOption {
+  key: string;
+  label: string;
+  value_type: "none" | "int" | "float" | "csv" | "severity" | "pss";
+  placeholder?: string;
+  help: string;
+}
+export interface AdmissionOptions {
+  criteria: AdmissionCriterionOption[];
+  rule_modes: string[];
+  severities: string[];
+  pss_levels: string[];
+}
 
 export interface AdmissionRuleRow {
   id: string;

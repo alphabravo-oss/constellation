@@ -71,6 +71,7 @@ const AssetsPage            = lazy(() => import("./pages/AssetsPage").then((m) =
 const AssetDetailPage       = lazy(() => import("./pages/AssetDetailPage").then((m) => ({ default: m.AssetDetailPage })));
 const PoliciesPage          = lazy(() => import("./pages/PoliciesPage").then((m) => ({ default: m.PoliciesPage })));
 const AdmissionPage         = lazy(() => import("./pages/AdmissionPage").then((m) => ({ default: m.AdmissionPage })));
+const AdmissionRuleFormPage = lazy(() => import("./pages/AdmissionRuleFormPage").then((m) => ({ default: m.AdmissionRuleFormPage })));
 const PolicyWizardPage      = lazy(() => import("./pages/PolicyWizardPage").then((m) => ({ default: m.PolicyWizardPage })));
 const RiskDetailPage        = lazy(() => import("./pages/RiskDetailPage").then((m) => ({ default: m.RiskDetailPage })));
 const CompliancePage        = lazy(() => import("./pages/CompliancePage").then((m) => ({ default: m.CompliancePage })));
@@ -192,6 +193,7 @@ export function App() {
           <Route path="runtime-signatures/new"   element={<SuspenseRoute><RuntimeSignatureFormPage /></SuspenseRoute>} />
           <Route path="runtime-signatures/:sigId" element={<SuspenseRoute><RuntimeSignatureFormPage /></SuspenseRoute>} />
           <Route path="admission"     element={<SuspenseRoute><AdmissionPage /></SuspenseRoute>} />
+          <Route path="admission/new" element={<SuspenseRoute><AdmissionRuleFormPage /></SuspenseRoute>} />
           <Route path="policies"      element={<SuspenseRoute><PoliciesPage /></SuspenseRoute>} />
           <Route path="policies/new"  element={<SuspenseRoute><PolicyWizardPage /></SuspenseRoute>} />
           <Route path="policies/:policyId" element={<SuspenseRoute><PolicyFormPage /></SuspenseRoute>} />

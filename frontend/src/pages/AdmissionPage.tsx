@@ -7,7 +7,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ShieldCheck } from "lucide-react";
 
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { policies as policiesApi, type AdmissionStateInput, type AdmissionRuleRow } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { PageHeader } from "@/components/ui/page";
@@ -15,10 +15,11 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch, Field, Select, TextInput } from "@/components/ui/form";
 import { VerdictBanner, type VerdictStatus } from "@/components/ui/verdict-banner";
-import { Power, PowerOff, Trash2 } from "lucide-react";
+import { Power, PowerOff, Trash2, Plus } from "lucide-react";
 
 export function AdmissionPage() {
   const { clusterId } = useCluster();
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const params = { cluster_id: clusterId };
   const stateQ = useQuery({
@@ -113,7 +114,12 @@ export function AdmissionPage() {
 
       <Card
         title="Admission rules"
-        description="The deny/monitor rules evaluated at admission time, with their criteria. Authored on the Policies page; build a rule there, then enable/disable it here."
+        description="The deny/monitor rules evaluated at admission time, with their criteria. Build one from dropdowns, then enable/disable it here."
+        action={
+          <Button size="sm" variant="primary" onClick={() => navigate(`${clusterId ? `/clusters/${clusterId}` : ""}/admission/new`)}>
+            <Plus className="h-3.5 w-3.5" /> Add rule
+          </Button>
+        }
       >
         {rulesQ.isPending ? (
           <p className="text-sm text-muted-foreground">Loading rules…</p>
