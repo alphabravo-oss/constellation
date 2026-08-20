@@ -3,8 +3,9 @@
 // the network rules that reference it — the single surface NV shows per group. Our
 // Groups list previously only showed counts with no drill-in.
 import { Link, useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, UsersRound } from "lucide-react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { ChevronLeft, UsersRound, ArrowUp } from "lucide-react";
+import { toast } from "sonner";
 
 import { groupsApi, type Group } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
@@ -23,14 +24,33 @@ function ModeBadge({ mode, label }: { mode?: string; label: string }) {
   );
 }
 
+const NEXT_MODE: Record<string, string> = { discover: "monitor", monitor: "protect" };
+
 export function GroupDetailPage() {
   const { groupId } = useParams<{ groupId: string }>();
   const { clusterId } = useCluster();
+  const qc = useQueryClient();
   const q = useQuery({ queryKey: ["groups", clusterId], queryFn: () => groupsApi.list({ cluster_id: clusterId }) });
   const group: Group | undefined = q.data?.groups.find((g) => g.id === groupId);
 
+  const promote = useMutation({
+    mutationFn: (dim: "policy_mode" | "profile_mode") => {
+      const next = NEXT_MODE[(group![dim] as string) ?? "discover"] as Group["policy_mode"];
+      return groupsApi.update(group!.id, {
+        name: group!.name, kind: group!.kind, comment: group!.comment, criteria: group!.criteria,
+        members: group!.members, learned_from: group!.learned_from, cfg_type: group!.cfg_type,
+        policy_mode: dim === "policy_mode" ? next : group!.policy_mode,
+        profile_mode: dim === "profile_mode" ? next : group!.profile_mode,
+      });
+    },
+    onSuccess: (_r, dim) => { toast.success(`Promoted ${dim === "policy_mode" ? "network" : "process"} mode`); void qc.invalidateQueries({ queryKey: ["groups", clusterId] }); },
+    onError: () => toast.error("Failed to promote"),
+  });
+
   if (q.isPending) return <p className="text-sm text-muted-foreground">Loading group…</p>;
   if (!group) return <p className="text-sm text-status-error">Group not found.</p>;
+  const g = group;
+  const nextOf = (m?: string) => NEXT_MODE[m ?? "discover"];
 
   return (
     <div className="space-y-4">
@@ -49,8 +69,24 @@ export function GroupDetailPage() {
 
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div className="rounded-md border border-border bg-card p-3 space-y-2">
-          <ModeBadge mode={group.policy_mode} label="Network mode" />
-          <ModeBadge mode={group.profile_mode} label="Process/file mode" />
+          <div className="flex items-center justify-between gap-2">
+            <ModeBadge mode={g.policy_mode} label="Network mode" />
+            {nextOf(g.policy_mode) && g.cfg_type !== "learned" && (
+              <button type="button" disabled={promote.isPending} onClick={() => promote.mutate("policy_mode")}
+                className="inline-flex items-center gap-0.5 rounded border border-border px-1.5 py-0.5 text-[10px] hover:bg-accent disabled:opacity-40">
+                <ArrowUp className="h-3 w-3" />{nextOf(g.policy_mode)}
+              </button>
+            )}
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <ModeBadge mode={g.profile_mode} label="Process/file mode" />
+            {nextOf(g.profile_mode) && g.cfg_type !== "learned" && (
+              <button type="button" disabled={promote.isPending} onClick={() => promote.mutate("profile_mode")}
+                className="inline-flex items-center gap-0.5 rounded border border-border px-1.5 py-0.5 text-[10px] hover:bg-accent disabled:opacity-40">
+                <ArrowUp className="h-3 w-3" />{nextOf(g.profile_mode)}
+              </button>
+            )}
+          </div>
         </div>
         <StatCard label="Members" value={group.members?.length ?? 0} icon={<UsersRound className="h-3.5 w-3.5" />} />
         <StatCard label="Criteria" value={group.criteria?.length ?? 0} />
