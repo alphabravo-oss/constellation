@@ -30,7 +30,7 @@ import {
   ServerCog, PackageCheck, RefreshCw,
 } from "lucide-react";
 
-import { findings, cve, dashboard, clusters, compliance, enterprise, network, type Finding, type PlatformFactsResponse, type Severity } from "@/api/client";
+import { findings, cve, dashboard, clusters, compliance, enterprise, network, downloadAPIFile, type Finding, type PlatformFactsResponse, type Severity } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { StatCard } from "@/components/ui/stat-card";
 import { SeverityBadge } from "@/components/ui/severity-badge";
@@ -174,6 +174,16 @@ export function DashboardPage() {
           clusterId
             ? "Risk-first snapshot for this cluster. Click any tile to drill in."
             : "A risk-first snapshot of your fleet. Click any tile to drill in."
+        }
+        actions={
+          <button
+            type="button"
+            title="Download the executive security report (open it to print or save as PDF)"
+            onClick={() => downloadAPIFile("/reports/executive.pdf", "constellation-executive-report.html")}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-2 text-sm hover:bg-accent"
+          >
+            <FileWarning className="h-4 w-4" /> Executive report
+          </button>
         }
       />
 
