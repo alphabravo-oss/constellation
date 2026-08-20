@@ -4529,6 +4529,12 @@ export const groupsApi = {
   update: (id: string, body: Omit<Group, "id"|"created_at"|"updated_at">) =>
     api.put<{ id: string }>(`/groups/${id}`, body).then((r) => r.data),
   delete: (id: string) => api.delete(`/groups/${id}`).then((r) => r.data),
+  exportYaml: (params: { cluster_id?: string } = {}) =>
+    api.get<string>("/groups:export", { params, responseType: "text", headers: { Accept: "application/x-yaml" } }).then((r) => r.data),
+  importYaml: (yaml: string, params: { cluster_id?: string } = {}) =>
+    api.post<{ created: number; updated: number; results: Array<{ name: string; status: string; error?: string }> }>(
+      "/groups:import", yaml, { params, headers: { "Content-Type": "application/x-yaml" } },
+    ).then((r) => r.data),
 };
 
 // ----- Wave D: Federation ------

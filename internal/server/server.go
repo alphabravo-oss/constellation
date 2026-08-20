@@ -845,6 +845,8 @@ func (s *Server) buildRouter() chi.Router {
 
 			groupsHandler := handler.NewGroups(s.db, s.auditLog)
 			r.Get("/groups", s.requireVerb(rbac.VerbReadFindings, groupsHandler.List))
+			r.Get("/groups:export", s.requireVerb(rbac.VerbReadFindings, groupsHandler.Export))
+			r.Post("/groups:import", s.requireVerb(rbac.VerbManagePolicies, groupsHandler.Import))
 			r.Post("/groups", s.requireVerb(rbac.VerbManagePolicies, groupsHandler.Create))
 			r.Put("/groups/{id}", s.requireVerb(rbac.VerbManagePolicies, groupsHandler.Update))
 			r.Delete("/groups/{id}", s.requireVerb(rbac.VerbManagePolicies, groupsHandler.Delete))

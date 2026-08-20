@@ -26,6 +26,8 @@ export interface CrudPageProps<T extends { id: string }, TBody> {
   emptyBody: () => TBody;
   toBody: (row: T) => TBody;
   columns: Array<{ header: string; render: (row: T) => React.ReactNode }>;
+  // Optional extra controls rendered in the page header (e.g. import/export).
+  headerActions?: React.ReactNode;
 }
 
 export function CrudPage<T extends { id: string }, TBody>({
@@ -36,6 +38,7 @@ export function CrudPage<T extends { id: string }, TBody>({
   emptyBody,
   toBody,
   columns,
+  headerActions,
 }: CrudPageProps<T, TBody>) {
   const qc = useQueryClient();
   // Cluster-scoped per the cluster-first IA. clusterId is undefined when this
@@ -99,13 +102,16 @@ export function CrudPage<T extends { id: string }, TBody>({
           <h1 className="text-xl font-semibold">{title}</h1>
           <p className="text-sm text-muted-foreground">{description}</p>
         </div>
-        <button
-          type="button"
-          onClick={openCreate}
-          className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
-        >
-          <Plus className="h-3.5 w-3.5" /> New
-        </button>
+        <div className="flex items-center gap-2">
+          {headerActions}
+          <button
+            type="button"
+            onClick={openCreate}
+            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
+          >
+            <Plus className="h-3.5 w-3.5" /> New
+          </button>
+        </div>
       </header>
 
       <section className="rounded-lg border border-border bg-card">
