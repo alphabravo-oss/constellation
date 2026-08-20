@@ -1,9 +1,13 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { LoadingState, ErrorState, EmptyState } from "@/components/ui/states";
 import { PageHeader } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
+import { Pager } from "@/components/ui/pager";
+
+const PAGE = 100;
 
 interface AuditEvent {
   id: number;
@@ -29,13 +33,16 @@ export function AuditPage() {
   // deployments/compliance_checks/policies rows of the active cluster so we only
   // surface events that touched something inside this cluster.
   const { clusterId, isLoading: clusterLoading } = useCluster();
+  const [page, setPage] = useState(0);
   const q = useQuery({
-    queryKey: ["audit", clusterId],
+    queryKey: ["audit", clusterId, page],
     queryFn: () =>
       api
-        .get<{ events: AuditEvent[] }>("/audit/events", { params: { limit: 100, cluster_id: clusterId } })
+        .get<{ events: AuditEvent[]; has_more: boolean }>("/audit/events", { params: { limit: PAGE, offset: page * PAGE, cluster_id: clusterId } })
         .then((r) => r.data),
+    placeholderData: keepPreviousData,
   });
+  const events = q.data?.events ?? [];
 
   if (clusterLoading) {
     return <LoadingState label="Loading cluster…" />;
@@ -51,10 +58,13 @@ export function AuditPage() {
         <LoadingState label="Loading audit events…" />
       ) : q.isError ? (
         <ErrorState error={q.error} />
-      ) : (q.data?.events.length ?? 0) === 0 ? (
-        <EmptyState title="No audit events" hint="Actions taken in this cluster will appear here." />
+      ) : events.length === 0 ? (
+        <EmptyState title={page > 0 ? "No more events" : "No audit events"} hint="Actions taken in this cluster will appear here." />
       ) : (
-      <DataTable rows={q.data?.events ?? []} columns={auditColumns} rowKey={(e) => e.id} />
+        <>
+          <DataTable rows={events} columns={auditColumns} rowKey={(e) => e.id} />
+          <Pager page={page} pageSize={PAGE} hasMore={q.data?.has_more} rowsOnPage={events.length} onPage={setPage} />
+        </>
       )}
     </div>
   );

@@ -39,6 +39,13 @@ func (a *Audit) List(w http.ResponseWriter, r *http.Request) {
 		limit = 100
 	}
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	if offset < 0 {
+		offset = 0
+	}
+	// audit_events is 10s of millions of rows, so an exact COUNT(*) per page would be a
+	// slow full scan. Instead fetch one extra row to learn whether a next page exists —
+	// cursor-style has_more paging, cheap at any table size.
+	fetch := limit + 1
 	clusterArg, err := parseClusterIDParam(r)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -103,7 +110,7 @@ SELECT id, org_id, actor_id, action, COALESCE(target_kind,''), COALESCE(target_i
         SELECT $3::text
        ))
  ORDER BY id DESC
- LIMIT $4 OFFSET $5`, subj.OrgID, action, clusterArg, limit, offset, controlPrefixes)
+ LIMIT $4 OFFSET $5`, subj.OrgID, action, clusterArg, fetch, offset, controlPrefixes)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -127,7 +134,13 @@ SELECT id, org_id, actor_id, action, COALESCE(target_kind,''), COALESCE(target_i
 		}
 		out = append(out, d)
 	}
-	resp := map[string]any{"events": out, "limit": limit, "offset": offset}
+	// Trim the probe row and report whether another page exists.
+	hasMore := false
+	if len(out) > limit {
+		hasMore = true
+		out = out[:limit]
+	}
+	resp := map[string]any{"events": out, "limit": limit, "offset": offset, "has_more": hasMore}
 	if fw != "" && ctrl != "" {
 		resp["control_mapping"] = map[string]any{
 			"framework":      fw,
