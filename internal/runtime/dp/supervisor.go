@@ -272,6 +272,10 @@ func (s *Supervisor) Start(ctx context.Context) error {
 	// current generation. Set before keepAliveLoop is launched below, so the
 	// hot path only ever reads an immutable func pointer (no mutex, no race).
 	s.client.onReply = func() { s.readyGen.Store(s.generation.Load()) }
+	// Session dumps arrive on the request socket (dp sends them to g_client_addr,
+	// not the notification socket), so the keepalive reader demuxes them and hands
+	// each complete snapshot here → the live-session cache.
+	s.client.onSessionDump = func(sessions []*Session) { s.sessions.Replace(sessions) }
 
 	// Tap manager — Wave 3a. Drives dp's per-interface AF_PACKET state
 	// from the configured provider. Optional: if the caller didn't supply

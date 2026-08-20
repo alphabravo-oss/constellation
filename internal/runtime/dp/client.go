@@ -176,6 +176,16 @@ type dpClient struct {
 	// without synchronization is race-free.
 	onReply func()
 
+	// onSessionDump, if non-nil, receives each COMPLETE ctrl_list_session dump.
+	// dp sends session-list datagrams to the CLIENT (request) socket via
+	// dp_ctrl_send_binary → g_client_addr (main.c:420, ctrl.c:132) — the SAME
+	// socket keepalive replies arrive on, NOT the notification socket. So the
+	// keepalive reader is the only thing that sees them; it demuxes KindSessionList
+	// here and hands the reassembled snapshot to the supervisor (→ SessionCache.Replace).
+	// Set-once before keepAliveLoop launches. Touched only by the keepalive goroutine.
+	onSessionDump func([]*Session)
+	sessAsm       SessionDumpAssembler
+
 	// Stats
 	kaSent    atomic.Uint64
 	kaReplied atomic.Uint64
@@ -289,47 +299,70 @@ func (c *dpClient) keepAliveOnce(ctx context.Context) error {
 	}
 	c.kaSent.Add(1)
 
-	// Reply
+	// Reply. dp interleaves ctrl_list_session response datagrams (KindSessionList)
+	// with keepalive replies on THIS socket, so read in a loop: demux session-list
+	// datagrams into the session cache and keep reading until our keepalive reply
+	// (matching seq) arrives. The overall 3s deadline bounds the whole drain.
+	deadline := time.Now().Add(3 * time.Second)
 	buf := make([]byte, DPMsgSize)
-	if err := conn.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
-		c.kaErrors.Add(1)
-		return fmt.Errorf("set read deadline: %w", err)
-	}
-	n, err := conn.Read(buf)
-	if err != nil {
-		var ne net.Error
-		if errors.As(err, &ne) && ne.Timeout() {
-			c.kaTimeout.Add(1)
-			return fmt.Errorf("read: timeout waiting for reply (seq=%d)", seq)
+	for {
+		if err := conn.SetReadDeadline(deadline); err != nil {
+			c.kaErrors.Add(1)
+			return fmt.Errorf("set read deadline: %w", err)
 		}
-		c.kaErrors.Add(1)
-		c.resetOnErr()
-		return fmt.Errorf("read: %w", err)
+		n, err := conn.Read(buf)
+		if err != nil {
+			var ne net.Error
+			if errors.As(err, &ne) && ne.Timeout() {
+				c.kaTimeout.Add(1)
+				return fmt.Errorf("read: timeout waiting for reply (seq=%d)", seq)
+			}
+			c.kaErrors.Add(1)
+			c.resetOnErr()
+			return fmt.Errorf("read: %w", err)
+		}
+		if n < dpMsgHdrSize {
+			c.kaErrors.Add(1)
+			return fmt.Errorf("short datagram (%d bytes)", n)
+		}
+		hdr, off, err := decodeHdr(buf[:n])
+		if err != nil {
+			c.kaErrors.Add(1)
+			return fmt.Errorf("decode hdr: %w", err)
+		}
+		// Session-list dump (dp → g_client_addr). Reassemble across datagrams;
+		// hand each complete snapshot to the supervisor.
+		if hdr.Kind == KindSessionList {
+			sessions, derr := decodeSessions(buf[off:n])
+			if derr == nil {
+				if complete := c.sessAsm.Add(sessions, hdr.More != 0); complete {
+					dump := c.sessAsm.Take()
+					if c.onSessionDump != nil {
+						c.onSessionDump(dump)
+					}
+				}
+			}
+			continue // keep reading for our keepalive reply
+		}
+		if hdr.Kind != KindKeepAlive {
+			// Some other async datagram on the request socket — skip it, keep waiting.
+			continue
+		}
+		if n < dpMsgHdrSize+4 {
+			c.kaErrors.Add(1)
+			return fmt.Errorf("short reply (%d bytes)", n)
+		}
+		gotSeq := binary.BigEndian.Uint32(buf[off : off+4])
+		if gotSeq != seq {
+			// A stale/duplicate keepalive reply — ignore and keep waiting for ours.
+			continue
+		}
+		c.kaReplied.Add(1)
+		if c.onReply != nil {
+			c.onReply()
+		}
+		return nil
 	}
-
-	if n < dpMsgHdrSize+4 {
-		c.kaErrors.Add(1)
-		return fmt.Errorf("short reply (%d bytes)", n)
-	}
-	hdr, off, err := decodeHdr(buf[:n])
-	if err != nil {
-		c.kaErrors.Add(1)
-		return fmt.Errorf("decode hdr: %w", err)
-	}
-	if hdr.Kind != KindKeepAlive {
-		c.kaErrors.Add(1)
-		return fmt.Errorf("unexpected reply kind %s (want keep_alive)", kindName(hdr.Kind))
-	}
-	gotSeq := binary.BigEndian.Uint32(buf[off : off+4])
-	if gotSeq != seq {
-		c.kaErrors.Add(1)
-		return fmt.Errorf("seq mismatch: sent=%d got=%d", seq, gotSeq)
-	}
-	c.kaReplied.Add(1)
-	if c.onReply != nil {
-		c.onReply()
-	}
-	return nil
 }
 
 // sendOneway marshals a request and writes it to dp's listening socket
