@@ -4,6 +4,13 @@ _Generated 2026-08-19 · 207 gaps across 12 functional areas · produced by a 12
 
 **Severity breakdown:** 3 critical · 57 high · 96 medium · 51 low.
 
+> **Progress (2026-08-20):** All **3 critical** gaps are now closed and deployed:
+> 1. **Groups + Network Rules** — NV-style Group detail page (mode/criteria/members) + full **Network Rules CRUD** (allow↔deny, enable/disable, add/edit manual rules, revert; `network_rule_overrides` table, migration 138).
+> 2. **Process baselines** — per-process **allow/deny rule CRUD** on `BaselineDetailPage` (`process_profile_rules`, migration 139).
+> 3. **Admission Control** — global **state surface** (enable / monitor·protect / default-action / failure-policy; `admission_state`, migration 140) + a **dry-run assessor** wired to the previously-dead `POST /policies/assess`.
+>
+> Next tier (high): admission **criteria rule builder** + options catalog (assessment rows 4–5), cross-cutting **server-side pagination/sort/filter** (kill the hard LIMIT caps), and **CVSS/fixable** joins into `/findings`.
+
 
 ---
 
