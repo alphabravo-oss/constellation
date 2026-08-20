@@ -725,6 +725,12 @@ func (h *ScanJobs) Complete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if target.Type == "image" {
+		// Node-local evidence scans (runtime-agent scans a RUNNING container by its
+		// image DIGEST, NV-style) arrive with no registry ref → Repository/Tag empty
+		// and Ref="sha256:…". Resolve the friendly repo:tag from the K8s workload map
+		// so the asset + scan result are named (and collapse against any registry scan
+		// of the same image) instead of showing as a bare hash.
+		resolveEvidenceImageName(r.Context(), tx, orgID, &identity)
 		target.ImageRef = identity.Ref
 		target.ImageDigest = identity.Digest
 		target.Platform = identity.Platform
@@ -1131,6 +1137,60 @@ func imageSignatureInfo(signature *scanner.SignatureResult) (bool, string) {
 	return signature.Signed, string(raw)
 }
 
+// resolveEvidenceImageName fills a human repo:tag for an evidence-scanned image whose
+// ref is only a content digest. The node-local evidence path has no registry ref, so
+// identity arrives with Repository/Tag empty and Ref="sha256:…". K8s knows the friendly
+// name via image_workload_links (digest → repository/tag); look it up so the asset and
+// scan result are named. Best-effort: unresolvable digests (e.g. a container already
+// gone) are left as-is and get swept by the orphan retention monitor.
+func resolveEvidenceImageName(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, identity *scanImageIdentity) {
+	if identity == nil || identity.Repository != "" || identity.Digest == "" {
+		return
+	}
+	// Two sources, in order:
+	//  1. a workload link that already carries a repo:tag (digests match).
+	//  2. the link's DEPLOYMENT image_refs — needed because the runtime-agent keys
+	//     evidence by the image's content/config digest while K8s records the registry
+	//     manifest digest; the two differ for pulled images, so digest-equality alone
+	//     misses them. The workload relationship (link.deployment_id) is stable, so we
+	//     pull the deployment's named ref regardless of which digest form it holds.
+	var named string
+	err := tx.QueryRow(ctx, `
+SELECT COALESCE(
+  (SELECT l.image_ref FROM image_workload_links l
+    WHERE l.org_id = $1 AND (l.image_digest = $2 OR l.image_digest = $3)
+      AND COALESCE(l.image_repository,'') <> '' AND l.image_ref !~ '^sha256:'
+    ORDER BY length(l.image_ref) LIMIT 1),
+  (SELECT ref FROM image_workload_links l
+     JOIN deployments d ON d.id = l.deployment_id
+     CROSS JOIN LATERAL unnest(d.image_refs) AS ref
+    WHERE l.org_id = $1 AND (l.image_digest = $2 OR l.image_digest = $3 OR l.image_ref = $2 OR l.image_ref = $3)
+      AND ref !~ '^sha256:'
+    ORDER BY (ref ~ '/[^/@]+:[^/@]+') DESC, length(ref) LIMIT 1),
+  '')`, orgID, identity.Digest, identity.Ref).Scan(&named)
+	if err != nil {
+		return // transient — leave digest-only
+	}
+	named = strings.TrimSpace(named)
+	if named == "" {
+		return // unresolvable (e.g. a true infra/pause container) — leave digest-only
+	}
+	parsed := imageid.Parse(named)
+	if parsed.Repository == "" {
+		return
+	}
+	// Keep OUR evidence digest as the identity (it keys the scan result); take only the
+	// human repo:tag from the resolved ref.
+	identity.Repository = parsed.Repository
+	identity.Tag = parsed.Tag
+	if parsed.Tag != "" {
+		identity.Ref = parsed.Repository + ":" + parsed.Tag
+	} else {
+		identity.Ref = parsed.Repository
+	}
+	identity.NormalizedRef = parsed.Repository + "@" + identity.Digest
+}
+
 func upsertImageScanResult(ctx context.Context, tx pgx.Tx, orgID, jobID uuid.UUID, target handler.ScanTarget, identity scanImageIdentity, assetID uuid.UUID, packageCount, findingCount int) (uuid.UUID, error) {
 	resultID := uuid.New()
 	err := tx.QueryRow(ctx, `
@@ -1483,13 +1543,36 @@ func promoteImageFindingsToWorkloads(ctx context.Context, tx pgx.Tx, orgID, resu
 	// internal/handler/cve.go correlates image scans to workloads.
 	var inserted int
 	err := tx.QueryRow(ctx, `
-WITH prior AS (
+WITH deleted AS (
+    -- Supersede by the IMAGE ASSET, not the scan_target_id: the same image can be
+    -- scanned via several targets (registry ref, resolved digest, discoverer/runtime-
+    -- agent), each producing its own image_scan_result. Deleting only this target's
+    -- prior findings left the OTHER targets' identical findings behind → the same CVE
+    -- on the same image duplicated 2-6x. Keying the supersede on asset_id collapses
+    -- every path for an image to the latest scan's findings. User triage decisions are
+    -- still preserved below (matched by scan_finding_key + cluster_id).
     DELETE FROM findings
      WHERE org_id = $1
        AND target_type = 'image-workload'
-       AND scan_target_id = $4
+       AND asset_id = $3
     RETURNING detail_json->>'scan_finding_key' AS finding_key, cluster_id,
               lifecycle, assignee_id, accepted_until, priority, first_seen_at
+),
+prior AS (
+    -- Collapse any pre-existing duplicate rows for the same (finding_key, cluster) to a
+    -- SINGLE prior. The LEFT JOIN below joins prior back onto each re-inserted finding;
+    -- if two dup rows already existed for a key, joining BOTH re-created two rows every
+    -- rescan — a self-perpetuating doubling loop that promote-by-asset alone never broke.
+    -- DISTINCT ON guarantees ≤1 prior per (key, cluster) so the re-insert can't multiply.
+    -- Winner keeps a real triage decision (accepted_until set, else an assignee) and the
+    -- earliest true first_seen_at.
+    SELECT DISTINCT ON (finding_key, cluster_id)
+           finding_key, cluster_id, lifecycle, assignee_id, accepted_until, priority, first_seen_at
+      FROM deleted
+     ORDER BY finding_key, cluster_id,
+              (accepted_until IS NOT NULL) DESC,
+              (assignee_id IS NOT NULL) DESC,
+              first_seen_at ASC
 ),
 promoted AS (
 INSERT INTO findings (

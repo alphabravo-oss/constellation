@@ -386,6 +386,7 @@ type workload struct {
 	labels    map[string]string
 	hostNet   bool
 	priv      bool
+	rootRisk  bool
 	aiFlag    bool
 	images    []string // container + init container image refs, deduped
 	// imageDigests maps a running image ref (the spec/status image, e.g.
@@ -498,6 +499,7 @@ func (r *reconciler) list(ctx context.Context) ([]workload, error) {
 			labels:    d.Labels,
 			hostNet:   ps.HostNetwork,
 			priv:      anyPrivileged(ps.Containers) || anyPrivileged(ps.InitContainers),
+			rootRisk:  runsAsRoot(ps),
 			images:    collectImages(ps),
 			aiFlag:    labelTrue(d.Labels, "ai-workload"),
 		})
@@ -517,6 +519,7 @@ func (r *reconciler) list(ctx context.Context) ([]workload, error) {
 			labels:    s.Labels,
 			hostNet:   ps.HostNetwork,
 			priv:      anyPrivileged(ps.Containers) || anyPrivileged(ps.InitContainers),
+			rootRisk:  runsAsRoot(ps),
 			images:    collectImages(ps),
 			aiFlag:    labelTrue(s.Labels, "ai-workload"),
 		})
@@ -536,6 +539,7 @@ func (r *reconciler) list(ctx context.Context) ([]workload, error) {
 			labels:    d.Labels,
 			hostNet:   ps.HostNetwork,
 			priv:      anyPrivileged(ps.Containers) || anyPrivileged(ps.InitContainers),
+			rootRisk:  runsAsRoot(ps),
 			images:    collectImages(ps),
 			aiFlag:    labelTrue(d.Labels, "ai-workload"),
 		})
@@ -631,6 +635,25 @@ func anyPrivileged(cs []corev1.Container) bool {
 	return false
 }
 
+// runsAsRoot flags a workload as root-risk when nothing enforces non-root: neither the
+// pod securityContext (RunAsNonRoot=true / RunAsUser>0) nor at least one app container.
+// Mirrors NeuVector's run-as-root hardening signal (a WL that CAN run as uid 0).
+func runsAsRoot(ps corev1.PodSpec) bool {
+	nonRootSC := func(runAsNonRoot *bool, runAsUser *int64) bool {
+		return (runAsNonRoot != nil && *runAsNonRoot) || (runAsUser != nil && *runAsUser > 0)
+	}
+	if ps.SecurityContext != nil && nonRootSC(ps.SecurityContext.RunAsNonRoot, ps.SecurityContext.RunAsUser) {
+		return false
+	}
+	for i := range ps.Containers {
+		sc := ps.Containers[i].SecurityContext
+		if sc == nil || !nonRootSC(sc.RunAsNonRoot, sc.RunAsUser) {
+			return true
+		}
+	}
+	return false
+}
+
 func collectImages(ps corev1.PodSpec) []string {
 	return mergeImageRefs(nil, podSpecImages(ps)...)
 }
@@ -672,6 +695,41 @@ func podStatusImageRefs(pod corev1.Pod) []string {
 	return mergeImageRefs(nil, out...)
 }
 
+// imageRefRegistryVariants returns the ref plus the forms with Docker Hub's implicit
+// registry/namespace stripped, so a digest resolved from the K8s-qualified status ref
+// ("docker.io/constellation/api:gs17") also keys under the bare spec ref
+// ("constellation/api:gs17") the scan targets use. Order: most-qualified first.
+func imageRefRegistryVariants(ref string) []string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return nil
+	}
+	out := []string{ref}
+	seen := map[string]struct{}{ref: {}}
+	add := func(s string) {
+		if s == "" {
+			return
+		}
+		if _, ok := seen[s]; ok {
+			return
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	cur := ref
+	for _, prefix := range []string{"index.docker.io/", "docker.io/"} {
+		if strings.HasPrefix(cur, prefix) {
+			cur = strings.TrimPrefix(cur, prefix)
+			add(cur)
+		}
+	}
+	// Official images: "library/postgres:16" is spec'd as "postgres:16".
+	if strings.HasPrefix(cur, "library/") {
+		add(strings.TrimPrefix(cur, "library/"))
+	}
+	return out
+}
+
 func normalizeKubeImageID(imageID string) string {
 	imageID = strings.TrimSpace(imageID)
 	if imageID == "" {
@@ -705,11 +763,22 @@ func podStatusImageDigests(pod corev1.Pod) map[string]string {
 		// The spec ref (status.Image, e.g. a tag) is the ref we link/scan on, so
 		// map it to the digest. Also map the normalized imageID ref itself so a
 		// "repo@sha256:..." ref resolves to its own digest.
+		//
+		// K8s status.Image carries the FULLY-QUALIFIED ref (e.g.
+		// "docker.io/constellation/api:gs17") even when the pod spec used a bare ref
+		// ("constellation/api:gs17"). The scan target / image_workload_links key on the
+		// SPEC ref, so also map the default-registry-stripped variants — otherwise a
+		// locally-built image (spec omits the registry) never gets its digest and can't
+		// join to the runtime-agent's digest-keyed local evidence (WS-F1).
 		if ref := strings.TrimSpace(status.Image); ref != "" {
-			out[ref] = digest
+			for _, v := range imageRefRegistryVariants(ref) {
+				out[v] = digest
+			}
 		}
 		if ref := normalizeKubeImageID(status.ImageID); ref != "" {
-			out[ref] = digest
+			for _, v := range imageRefRegistryVariants(ref) {
+				out[v] = digest
+			}
 		}
 	}
 	return out
@@ -805,6 +874,9 @@ func (r *reconciler) upsertWorkload(ctx context.Context, w workload) error {
 	if w.hostNet {
 		factors["host_network"] = 10
 	}
+	if w.rootRisk {
+		factors["run_as_root"] = 8
+	}
 	if w.aiFlag {
 		factors["ai_workload"] = 5
 	}
@@ -834,7 +906,7 @@ ON CONFLICT (org_id, cluster_id, namespace, name, kind) DO UPDATE
        -- otherwise a stale privileged=15 survives after the workload is redeployed unprivileged.
        -- Additive/computed factors (cvss, kev, net_exposure) written by rollupRiskCounts are
        -- preserved because they are not part of the stripped structural key set.
-       risk_factors = (deployments.risk_factors - 'privileged' - 'host_network' - 'ai_workload')
+       risk_factors = (deployments.risk_factors - 'privileged' - 'host_network' - 'run_as_root' - 'ai_workload')
                       || EXCLUDED.risk_factors,
        image_refs   = EXCLUDED.image_refs,
        last_seen_at = NOW()

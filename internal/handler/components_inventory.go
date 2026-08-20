@@ -189,7 +189,7 @@ func (h *ComponentsInventory) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	clusterNames := loadClusterNames(r.Context(), h.db, hbs)
-	scored := scoreHeartbeats(hbs, clusterNames)
+	scored := scoreHeartbeats(hbs, clusterNames, loadRecentRestarts(r.Context(), h.db.Pool(), subj.OrgID))
 	filteredInstances := make([]componentInstanceDTO, 0, len(hbs))
 	for i, hb := range hbs {
 		if clusterID != nil {
@@ -288,7 +288,7 @@ func (h *ComponentsInventory) componentHeartbeat(ctx context.Context, orgID uuid
 		return HeartbeatRow{}, heartbeatDTO{}, false, err
 	}
 	clusterNames := loadClusterNames(ctx, h.db, hbs)
-	scored := scoreHeartbeats(hbs, clusterNames)
+	scored := scoreHeartbeats(hbs, clusterNames, loadRecentRestarts(ctx, h.db.Pool(), orgID))
 	for i, hb := range hbs {
 		if hb.ID == id {
 			return hb, scored[i], true, nil

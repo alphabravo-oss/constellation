@@ -663,11 +663,25 @@ func (h *Registries) Images(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := h.db.Pool().Query(r.Context(), `
-SELECT id, repository, tags, COALESCE(digests, '{}'::jsonb), COALESCE(last_pushed_at, ''),
-       first_seen_at, last_seen_at
-  FROM registry_images
- WHERE registry_id = $1 AND org_id = $2
- ORDER BY last_seen_at DESC
+SELECT ri.id, ri.repository, ri.tags, COALESCE(ri.digests, '{}'::jsonb), COALESCE(ri.last_pushed_at, ''),
+       ri.first_seen_at, ri.last_seen_at,
+       (sr.id IS NOT NULL)                       AS scanned,
+       COALESCE(sr.finding_count, 0)             AS finding_count,
+       sr.last_scanned_at,
+       COALESCE(sr.max_severity_critical, 0)     AS critical,
+       COALESCE(sr.max_severity_high, 0)         AS high
+  FROM registry_images ri
+  LEFT JOIN LATERAL (
+      SELECT r.id, r.finding_count, r.last_scanned_at,
+             (SELECT count(*) FROM image_scan_findings f WHERE f.image_scan_result_id = r.id AND f.severity = 'critical') AS max_severity_critical,
+             (SELECT count(*) FROM image_scan_findings f WHERE f.image_scan_result_id = r.id AND f.severity = 'high')     AS max_severity_high
+        FROM image_scan_results r
+       WHERE r.org_id = ri.org_id AND r.image_repository = ri.repository
+       ORDER BY r.last_scanned_at DESC NULLS LAST
+       LIMIT 1
+  ) sr ON true
+ WHERE ri.registry_id = $1 AND ri.org_id = $2
+ ORDER BY sr.finding_count DESC NULLS LAST, ri.last_seen_at DESC
  LIMIT 500`, id, subj.OrgID)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
@@ -676,20 +690,26 @@ SELECT id, repository, tags, COALESCE(digests, '{}'::jsonb), COALESCE(last_pushe
 	defer rows.Close()
 
 	type imgRow struct {
-		ID           uuid.UUID         `json:"id"`
-		Repository   string            `json:"repository"`
-		Tags         []string          `json:"tags"`
-		Digests      map[string]string `json:"digests"`
-		LastPushedAt string            `json:"last_pushed_at,omitempty"`
-		FirstSeenAt  time.Time         `json:"first_seen_at"`
-		LastSeenAt   time.Time         `json:"last_seen_at"`
+		ID            uuid.UUID         `json:"id"`
+		Repository    string            `json:"repository"`
+		Tags          []string          `json:"tags"`
+		Digests       map[string]string `json:"digests"`
+		LastPushedAt  string            `json:"last_pushed_at,omitempty"`
+		FirstSeenAt   time.Time         `json:"first_seen_at"`
+		LastSeenAt    time.Time         `json:"last_seen_at"`
+		Scanned       bool              `json:"scanned"`
+		FindingCount  int               `json:"finding_count"`
+		LastScannedAt *time.Time        `json:"last_scanned_at,omitempty"`
+		Critical      int               `json:"critical"`
+		High          int               `json:"high"`
 	}
 	out := []imgRow{}
 	for rows.Next() {
 		var ir imgRow
 		var digestsRaw []byte
 		if err := rows.Scan(&ir.ID, &ir.Repository, &ir.Tags, &digestsRaw, &ir.LastPushedAt,
-			&ir.FirstSeenAt, &ir.LastSeenAt); err != nil {
+			&ir.FirstSeenAt, &ir.LastSeenAt, &ir.Scanned, &ir.FindingCount, &ir.LastScannedAt,
+			&ir.Critical, &ir.High); err != nil {
 			jsonError(w, http.StatusInternalServerError, err.Error())
 			return
 		}

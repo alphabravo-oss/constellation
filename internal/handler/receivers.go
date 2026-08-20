@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -74,6 +75,35 @@ type receiverDeliveryDTO struct {
 	FinalState     string   `json:"final_state,omitempty"`
 	NextRetryAt    string   `json:"next_retry_at,omitempty"`
 	SignedAt       string   `json:"signed_at,omitempty"`
+}
+
+// emailRecipients extracts config.to (array or comma string) from a receiver's config,
+// trimming blanks. Mirrors the dispatcher's parse so create-validation and delivery agree.
+func emailRecipients(cfg json.RawMessage) []string {
+	if len(cfg) == 0 {
+		return nil
+	}
+	var parsed struct {
+		To json.RawMessage `json:"to"`
+	}
+	if err := json.Unmarshal(cfg, &parsed); err != nil || len(parsed.To) == 0 {
+		return nil
+	}
+	var list []string
+	if json.Unmarshal(parsed.To, &list) != nil {
+		var single string
+		if json.Unmarshal(parsed.To, &single) != nil {
+			return nil
+		}
+		list = strings.Split(single, ",")
+	}
+	out := make([]string, 0, len(list))
+	for _, s := range list {
+		if s = strings.TrimSpace(s); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // List returns receivers + recent delivery history for the calling org.
@@ -255,17 +285,33 @@ func (h *Receivers) Create(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	if req.Name == "" || req.Kind == "" || req.Endpoint == "" {
-		jsonError(w, http.StatusBadRequest, "name, kind, endpoint required")
+	if req.Name == "" || req.Kind == "" {
+		jsonError(w, http.StatusBadRequest, "name, kind required")
 		return
 	}
-	// SSRF guard (create-time): the dispatcher POSTs alert traffic to this endpoint, so an
-	// attacker-controlled internal URL would let a notify rule reach cloud metadata / internal
-	// services. Require https + a public host here; the dispatcher additionally re-checks the
-	// RESOLVED IP at dial time (defeating DNS rebind).
-	if err := notify.PublicURLAllowed(req.Endpoint); err != nil {
-		jsonError(w, http.StatusBadRequest, "invalid endpoint: "+err.Error())
-		return
+	if req.Kind == "email" {
+		// Email is an SMTP send, not an HTTP POST, so the URL/SSRF guard doesn't apply
+		// (an internal corporate relay is legitimate). Recipients live in config.to; the
+		// endpoint is a human-readable summary of them.
+		recips := emailRecipients(req.Config)
+		if len(recips) == 0 {
+			jsonError(w, http.StatusBadRequest, "email receiver requires config.to (one or more recipient addresses)")
+			return
+		}
+		req.Endpoint = "mailto:" + strings.Join(recips, ",")
+	} else {
+		if req.Endpoint == "" {
+			jsonError(w, http.StatusBadRequest, "endpoint required")
+			return
+		}
+		// SSRF guard (create-time): the dispatcher POSTs alert traffic to this endpoint, so an
+		// attacker-controlled internal URL would let a notify rule reach cloud metadata / internal
+		// services. Require https + a public host here; the dispatcher additionally re-checks the
+		// RESOLVED IP at dial time (defeating DNS rebind).
+		if err := notify.PublicURLAllowed(req.Endpoint); err != nil {
+			jsonError(w, http.StatusBadRequest, "invalid endpoint: "+err.Error())
+			return
+		}
 	}
 	if req.Environment == "" {
 		req.Environment = "production"
@@ -343,8 +389,10 @@ func (h *Receivers) Patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// SSRF guard (patch-time): re-validate when the endpoint is being changed so a receiver
-	// can't be repointed at an internal/metadata URL after creation. Mirrors Create.
-	if req.Endpoint != nil {
+	// can't be repointed at an internal/metadata URL after creation. Mirrors Create. An
+	// email receiver's endpoint is a mailto: summary (not an HTTP target), so the guard
+	// only applies to http(s) endpoints.
+	if req.Endpoint != nil && strings.HasPrefix(*req.Endpoint, "http") {
 		if err := notify.PublicURLAllowed(*req.Endpoint); err != nil {
 			jsonError(w, http.StatusBadRequest, "invalid endpoint: "+err.Error())
 			return

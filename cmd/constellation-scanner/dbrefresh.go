@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 )
 
@@ -60,6 +61,33 @@ func (w *worker) refreshVulnDBs(ctx context.Context, offline bool) {
 	}
 	run("trivy", "image", "--download-db-only", "--quiet")
 	run("grype", "db", "update", "-q")
+	// Grype's updater downloads each DB into a `grype-db-download<rand>` staging dir
+	// under the cache and, on some paths, leaves it behind after importing into the
+	// versioned dir (`6/`). Across many refreshes these pile up — ~50 dirs / 10GB was
+	// observed. Sweep them after every update; the active versioned DB is untouched.
+	w.pruneGrypeStaging()
+}
+
+// pruneGrypeStaging removes grype's abandoned download-staging dirs from the grype
+// cache, keeping the active versioned DB (e.g. `6/`). Best-effort + quiet.
+func (w *worker) pruneGrypeStaging() {
+	dir := os.Getenv("GRYPE_DB_CACHE_DIR")
+	if dir == "" {
+		dir = "/tmp/grype/db"
+	}
+	matches, err := filepath.Glob(filepath.Join(dir, "grype-db-download*"))
+	if err != nil {
+		return
+	}
+	removed := 0
+	for _, m := range matches {
+		if err := os.RemoveAll(m); err == nil {
+			removed++
+		}
+	}
+	if removed > 0 {
+		w.logger.Info("grype cache: pruned stale download-staging dirs", "count", removed, "dir", dir)
+	}
 }
 
 // dbRefreshLoop keeps the Trivy/Grype DBs fresh on the effective interval. The

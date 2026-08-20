@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -19,6 +20,7 @@ import (
 	"github.com/alphabravocompany/constellation/internal/handler/findings"
 	"github.com/alphabravocompany/constellation/internal/handler/network"
 	"github.com/alphabravocompany/constellation/internal/handler/runtime"
+	"github.com/alphabravocompany/constellation/internal/syscfg"
 	"github.com/alphabravocompany/constellation/pkg/backup"
 	regsecrets "github.com/alphabravocompany/constellation/pkg/registry/secrets"
 )
@@ -106,11 +108,85 @@ func (s *Server) startSingletonLoops(ctx context.Context) {
 		runtime.NewRuntimePolicyStore(s.db, s.auditLog), s.tel.Logger)
 	go membershipReconciler.Run(ctx)
 
+	// Retention horizons resolved LIVE from system config (primary org) each pass, so
+	// an admin can set them from the Settings UI without a restart. 0 days = disabled
+	// (falls back to any env default). Bounds the two biggest storage sinks.
+	retentionResolver := func(pick func(syscfg.Config) int) func(context.Context) time.Duration {
+		return func(rctx context.Context) time.Duration {
+			if s.syscfg == nil {
+				return 0
+			}
+			var orgID uuid.UUID
+			if err := s.db.Pool().QueryRow(rctx, `SELECT id FROM orgs ORDER BY created_at LIMIT 1`).Scan(&orgID); err != nil {
+				return 0
+			}
+			return time.Duration(pick(s.syscfg.Get(rctx, orgID))) * 24 * time.Hour
+		}
+	}
+	// Day-count variant of the same resolver, for the partition manager (which drops
+	// whole daily partitions past the horizon rather than DELETE-ing rows).
+	retentionDaysResolver := func(pick func(syscfg.Config) int) func(context.Context) int {
+		return func(rctx context.Context) int {
+			if s.syscfg == nil {
+				return 0
+			}
+			var orgID uuid.UUID
+			if err := s.db.Pool().QueryRow(rctx, `SELECT id FROM orgs ORDER BY created_at LIMIT 1`).Scan(&orgID); err != nil {
+				return 0
+			}
+			return pick(s.syscfg.Get(rctx, orgID))
+		}
+	}
+
+	// Auto-scan running workloads (NeuVector enable_auto_scan_workload): the discoverer
+	// inventories running images but does NOT scan them — this loop closes that gap by
+	// (re)scanning each running image via the live Trivy/Grype pipeline on a cadence.
+	// Default ON (auto_scan_disabled=false); rescan window from auto_scan_rescan_hours.
+	go handler.RunWorkloadAutoScan(ctx, s.db.Pool(),
+		func(rctx context.Context) bool {
+			if s.syscfg == nil {
+				return true
+			}
+			var orgID uuid.UUID
+			if err := s.db.Pool().QueryRow(rctx, `SELECT id FROM orgs ORDER BY created_at LIMIT 1`).Scan(&orgID); err != nil {
+				return true
+			}
+			return !s.syscfg.Get(rctx, orgID).AutoScanDisabled
+		},
+		retentionDaysResolver(func(c syscfg.Config) int { return c.AutoScanRescanHours }),
+		s.tel.Logger)
+
+	// Partition manager: pre-create daily partitions for events + network_flows and DROP
+	// ones past the retention horizon. A partition DROP reclaims disk instantly (no dead-
+	// tuple bloat), so this is the primary retention mechanism for the two big time-series
+	// tables; the DELETE loops above drain the legacy DEFAULT partition of pre-partitioning
+	// history. Leader-gated.
+	go handler.RunPartitionManager(ctx, s.db.Pool(), []handler.PartitionedTable{
+		{Parent: "events", RetentionDays: retentionDaysResolver(func(c syscfg.Config) int { return c.EventsRetentionDays })},
+		{Parent: "network_flows", RetentionDays: retentionDaysResolver(func(c syscfg.Config) int { return c.NetworkFlowRetentionDays })},
+	}, s.tel.Logger)
+
 	// NET perf: keep the network_flow_rollups pre-aggregate hot (the durable
 	// backing for /network/map + /network/conversations). Singleton so replicas
-	// don't race the fold watermark; optional retention prune is env-gated.
+	// don't race the fold watermark; retention prune reads the live horizon.
 	rollupRefresher := network.NewRollupRefresher(s.db)
+	rollupRefresher.SetRetentionResolver(retentionResolver(func(c syscfg.Config) int { return c.NetworkFlowRetentionDays }))
 	rollupRefresher.Start(ctx)
+
+	// Events retention: prune the events table (the other unbounded sink) on the live
+	// horizon. Leader-gated + batched; no-op while events_retention_days is 0.
+	go handler.RunEventsRetentionMonitor(ctx, s.db.Pool(),
+		retentionResolver(func(c syscfg.Config) int { return c.EventsRetentionDays }), s.tel.Logger)
+
+	// scan_jobs retention: prune terminal (completed/failed/canceled) jobs past the
+	// horizon (NeuVector-style stale-job cleanup). Live jobs + image_scan_results untouched.
+	go handler.RunScanJobsRetentionMonitor(ctx, s.db.Pool(),
+		retentionResolver(func(c syscfg.Config) int { return c.ScanJobRetentionDays }), s.tel.Logger)
+
+	// Orphan evidence scan-result cleanup: drop digest-only image_scan_results that no
+	// longer back a running workload (node-local evidence of dead containers). Keeps the
+	// CVE affected-images list honest; named registry scans untouched. Runs once on start.
+	go handler.RunOrphanImageScanResultMonitor(ctx, s.db.Pool(), s.tel.Logger)
 
 	// Phase B: retroactively re-resolve flows stamped "cluster/<ip>" at ingest,
 	// now that pod_ips retains history and the resolver is time-aware. Shares the

@@ -59,6 +59,28 @@ VALUES ($1, $2, 'vulnerability', $3, $4, $4, $5, 80, 'open')`,
 	if got.OpenFindings != 3 {
 		t.Fatalf("expected 3 open findings, got %d", got.OpenFindings)
 	}
+
+	// A resolved/accepted finding must NOT inflate the severity rollup — the tiles
+	// count OPEN posture only (they link to the open findings view). Insert a
+	// resolved critical and confirm FindingsTotal and the critical bucket are
+	// unchanged.
+	if _, err := pool.Exec(ctx, `
+INSERT INTO findings (org_id, asset_id, kind, external_id, title, description, severity, risk_score, lifecycle)
+VALUES ($1, $2, 'vulnerability', 'CVE-2099-resolved', 'dash resolved', 'dash resolved', 'critical', 90, 'resolved')`,
+		orgID, assetID); err != nil {
+		t.Fatalf("resolved finding: %v", err)
+	}
+	w = httptest.NewRecorder()
+	NewDashboard(d).Summary(w, req)
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode 2: %v", err)
+	}
+	if got.FindingsTotal != 3 {
+		t.Fatalf("resolved finding must not inflate severity rollup; got total=%d rollup=%v", got.FindingsTotal, got.FindingsByLevel)
+	}
+	if got.FindingsByLevel["critical"] != 1 {
+		t.Fatalf("expected 1 OPEN critical, got %d", got.FindingsByLevel["critical"])
+	}
 	if got.AssetsTotal < 1 {
 		t.Fatalf("expected at least 1 asset, got %d", got.AssetsTotal)
 	}

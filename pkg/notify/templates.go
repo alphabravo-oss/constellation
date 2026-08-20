@@ -136,11 +136,28 @@ func pickTemplate(kind, id string) (string, string, error) {
 		return servicenowTemplate, "application/json", nil
 	case "teams":
 		return teamsTemplate, "application/json", nil
+	case "email":
+		return emailTemplate, "text/plain", nil
 	case "webhook", "":
 		return webhookTemplate, "application/json", nil
 	}
 	return webhookTemplate, "application/json", nil
 }
+
+// Email: a readable plain-text body. The dispatcher uses the alert Title as the
+// subject and this rendering as the message body.
+const emailTemplate = `[{{ upper .Severity }}] {{ .TitleRaw }}
+
+Kind:      {{ .Kind }}
+Severity:  {{ .Severity }}
+Cluster:   {{ .Cluster }}
+Workload:  {{ .Workload }}
+Fired at:  {{ .FiredAt }}
+{{ if .BodyRaw }}
+{{ .BodyRaw }}
+{{ end }}
+Open in Constellation: {{ .URL }}
+`
 
 // Slack: blocks-formatted (header + section). Severity prefix surfaces the priority.
 const slackTemplate = `{

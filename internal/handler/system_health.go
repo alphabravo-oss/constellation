@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/pkg/version"
@@ -229,7 +230,7 @@ func (h *SystemHealth) Cluster(w http.ResponseWriter, r *http.Request) {
 	}
 	clusterName, _ := clusterNameFor(ctx, h.db, clusterID)
 	clusterHBs := filterHeartbeats(hbs, &clusterID)
-	dtos := scoreHeartbeats(clusterHBs, map[uuid.UUID]string{clusterID: clusterName})
+	dtos := scoreHeartbeats(clusterHBs, map[uuid.UUID]string{clusterID: clusterName}, loadRecentRestarts(ctx, h.db.Pool(), subj.OrgID))
 	drift := summarizeCluster(clusterID.String(), clusterName, dtos)
 
 	restarts, _ := LoadRestartEvents(ctx, h.db.Pool(), subj.OrgID, 100)
@@ -398,7 +399,7 @@ func (h *SystemHealth) overlayHeartbeats(parent context.Context, out *systemHeal
 	hbs, err := LoadHeartbeats(ctx, h.db.Pool(), subj.OrgID)
 	if err == nil {
 		clusterNames := loadClusterNames(ctx, h.db, hbs)
-		dtos := scoreHeartbeats(hbs, clusterNames)
+		dtos := scoreHeartbeats(hbs, clusterNames, loadRecentRestarts(ctx, h.db.Pool(), subj.OrgID))
 		out.Heartbeats = dtos
 		out.VersionDrift = summarizeAllClusters(dtos, clusterNames)
 		// Tile counters.
@@ -455,29 +456,133 @@ func (h *SystemHealth) overlayHeartbeats(parent context.Context, out *systemHeal
 //   - degraded: scanner is alive but its local VulnDB/cache dependencies are not
 //     ready
 //   - healthy: otherwise
-func scoreHeartbeats(hbs []HeartbeatRow, clusterNames map[uuid.UUID]string) []heartbeatDTO {
+// loadRecentRestarts counts restart events per instance (component\x00hostname) in
+// the last hour, so crashloop scoring reflects restarting-right-now rather than the
+// lifetime restart_count. Returns an empty map on error (nothing flagged crashlooping).
+func loadRecentRestarts(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID) map[string]int {
+	out := map[string]int{}
+	evs, err := LoadRestartEvents(ctx, pool, orgID, 200)
+	if err != nil {
+		return out
+	}
+	cutoff := time.Now().Add(-time.Hour)
+	for _, ev := range evs {
+		if ev.DetectedAt.After(cutoff) {
+			out[ev.Component+"\x00"+ev.Hostname]++
+		}
+	}
+	return out
+}
+
+// isOneShotHeartbeat reports whether a heartbeat's metadata declares a one-shot /
+// periodic job (e.g. the compliance collector). Such a component runs, beats once,
+// and exits — it must not be scored on continuous liveness ("stale").
+func isOneShotHeartbeat(meta map[string]any) bool {
+	v, ok := meta["one_shot"]
+	if !ok {
+		return false
+	}
+	b, _ := v.(bool)
+	return b
+}
+
+// clusterKey renders a heartbeat's cluster_id for use in a dedup map key ("" for
+// control-plane / NULL cluster).
+func clusterKey(id *uuid.UUID) string {
+	if id == nil {
+		return ""
+	}
+	return id.String()
+}
+
+// collapseInstances reduces multiple heartbeat rows for the same (component,
+// cluster) to the meaningful set: every FRESH instance (beating within `fresh`) so
+// horizontal replicas all show; but if none is fresh, just the single latest row so
+// a redeploy's leftover pods / a cronjob's old runs / a full outage each render once.
+// Group order is preserved (first appearance wins) for a stable table.
+func collapseInstances(hbs []HeartbeatRow, now time.Time, fresh time.Duration) []HeartbeatRow {
+	groups := map[string][]HeartbeatRow{}
+	order := make([]string, 0, len(hbs))
+	for _, hb := range hbs {
+		k := hb.Component + "\x00" + clusterKey(hb.ClusterID)
+		if _, ok := groups[k]; !ok {
+			order = append(order, k)
+		}
+		groups[k] = append(groups[k], hb)
+	}
+	out := make([]HeartbeatRow, 0, len(hbs))
+	for _, k := range order {
+		g := groups[k]
+		liveFound := false
+		for _, hb := range g {
+			if now.Sub(hb.LastSeenAt) <= fresh {
+				out = append(out, hb)
+				liveFound = true
+			}
+		}
+		if !liveFound {
+			latest := g[0]
+			for _, hb := range g[1:] {
+				if hb.LastSeenAt.After(latest.LastSeenAt) {
+					latest = hb
+				}
+			}
+			out = append(out, latest)
+		}
+	}
+	return out
+}
+
+func scoreHeartbeats(hbs []HeartbeatRow, clusterNames map[uuid.UUID]string, recentRestarts map[string]int) []heartbeatDTO {
 	// Determine the "current" commit: the most-recent commit across all
 	// components, treated as the canonical control-plane SHA. The spec also
 	// asks for "max(commit)" — taking max by last_seen_at within each
 	// component group is more useful in practice because the strings aren't
 	// monotonic.
+	now := time.Now().UTC()
+
+	// Collapse each (component, cluster) to the instance(s) that matter, so a redeploy
+	// (old pod's row lingers up to 15m before GC), a cronjob's past runs, and horizontal
+	// replicas all render cleanly:
+	//   - if ANY instance is fresh (beating within the stale window), show only the
+	//     fresh ones — live replicas stay, superseded dead pods drop.
+	//   - if none is fresh (component fully down, or a cronjob idle between runs), show
+	//     just the latest so a real outage still surfaces exactly once.
+	// The live window is tight (2m) because every component beats ~every 60s, so a
+	// just-replaced pod's frozen row falls out of "live" quickly instead of masquerading
+	// as a replica. Genuine outages still cross the 5m stale threshold below.
+	hbs = collapseInstances(hbs, now, 2*time.Minute)
+
+	// Determine the "current" commit: the most-recent commit across the surviving
+	// components, treated as the canonical control-plane SHA (drift is measured against it).
 	current := freshestCommitOverall(hbs)
 
-	now := time.Now().UTC()
 	out := make([]heartbeatDTO, 0, len(hbs))
 	for _, hb := range hbs {
 		status := "healthy"
 		reason := ""
-		switch {
-		case now.Sub(hb.LastSeenAt) > 5*time.Minute:
-			status = "stale"
-			reason = fmt.Sprintf("last seen %s ago", now.Sub(hb.LastSeenAt).Truncate(time.Second))
-		case hb.RestartCount > 3:
-			status = "crashlooping"
-			reason = fmt.Sprintf("%d restarts observed", hb.RestartCount)
-		case current != "" && hb.Commit != "" && hb.Commit != current:
-			status = "drift"
-			reason = "commit " + shortSha(hb.Commit) + " != control-plane " + shortSha(current)
+		if isOneShotHeartbeat(hb.Metadata) {
+			// Periodic / one-shot jobs (cronjobs like the compliance collector) run,
+			// beat once, and exit — being idle between runs is NORMAL, not "stale". Score
+			// them on their last OUTCOME, not liveness: healthy unless the last run errored.
+			if hb.LastError != "" {
+				status = "degraded"
+				reason = hb.LastError
+			} else {
+				reason = "last ran " + now.Sub(hb.LastSeenAt).Truncate(time.Minute).String() + " ago"
+			}
+		} else {
+			switch {
+			case now.Sub(hb.LastSeenAt) > 5*time.Minute:
+				status = "stale"
+				reason = fmt.Sprintf("last seen %s ago", now.Sub(hb.LastSeenAt).Truncate(time.Second))
+			case recentRestarts[hb.Component+"\x00"+hb.Hostname] > 3:
+				status = "crashlooping"
+				reason = fmt.Sprintf("%d restarts in the last hour", recentRestarts[hb.Component+"\x00"+hb.Hostname])
+			case current != "" && hb.Commit != "" && hb.Commit != current:
+				status = "drift"
+				reason = "commit " + shortSha(hb.Commit) + " != control-plane " + shortSha(current)
+			}
 		}
 		if status == "healthy" && hb.Component == "scanner" {
 			if scannerReason := scannerHeartbeatDegradedReason(hb.Metadata); scannerReason != "" {
@@ -573,7 +678,12 @@ func scannerHeartbeatDegradedReason(metadata map[string]any) string {
 			if len(item) == 0 {
 				continue
 			}
-			if metadataBool(item, "configured") && !metadataBool(item, "writable") {
+			// Only a cache that EXISTS but is not writable is a real problem (a
+			// permission/mount error). A "missing" scratch dir (e.g. xdg /tmp/.cache,
+			// syft /tmp/syft) is created lazily on the first scan and must NOT mark the
+			// scanner degraded — the vuln databases that matter (grype/trivy) report
+			// their own readiness above.
+			if metadataBool(item, "configured") && metadataBool(item, "present") && !metadataBool(item, "writable") {
 				status := metadataString(item, "status")
 				if status == "" {
 					status = "not-writable"

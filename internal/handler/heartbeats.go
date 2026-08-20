@@ -246,6 +246,23 @@ UPDATE component_heartbeats
 	); err != nil {
 		return 0, 0, err
 	}
+	// Garbage-collect this component's dead instances: when an instance beats, drop
+	// same-(org, cluster, component) rows from prior pods (different hostname) that
+	// haven't reported in >15m. Redeploys otherwise leave a stale row per old pod
+	// name, cluttering System Health with phantom "stale" components. Live replicas
+	// (all beating within the window) are preserved; a fully-down component keeps its
+	// row and correctly surfaces as stale.
+	if _, err = tx.Exec(ctx, `
+DELETE FROM component_heartbeats
+ WHERE org_id = $1
+   AND ((cluster_id = $2) OR (cluster_id IS NULL AND $2::uuid IS NULL))
+   AND component = $3
+   AND id <> $4
+   AND last_seen_at < NOW() - INTERVAL '15 minutes'`,
+		orgID, clusterArg, body.Component, heartbeatID,
+	); err != nil {
+		return 0, 0, err
+	}
 	if err = tx.Commit(ctx); err != nil {
 		return 0, 0, err
 	}

@@ -61,6 +61,12 @@ func NewDefaultWithConfig(cfg AggregatorConfig) *Aggregator {
 	if !cfg.DisableGrype {
 		a.PackageMatchers = append(a.PackageMatchers, &GrypePackageMatcher{})
 	}
+	// Trivy as a SECOND package matcher so the ScanPackages path (host/platform/
+	// node-local evidence) gets grype+trivy corroboration, not grype alone. dedupe()
+	// merges the two by (cve, package) into one finding with an engines provenance list.
+	if !cfg.DisableTrivy {
+		a.PackageMatchers = append(a.PackageMatchers, &TrivyPackageMatcher{})
+	}
 	return a
 }
 
@@ -314,7 +320,7 @@ func dedupe(engines []EngineResult) []Finding {
 				f.Engine = source
 			}
 			pk := pkgKey{
-				eco:  strings.ToLower(f.Package.Ecosystem),
+				eco:  normalizeEco(f.Package.Ecosystem),
 				name: f.Package.Name,
 				ver:  f.Package.Version,
 			}
@@ -727,6 +733,23 @@ type pkgKey struct {
 	eco, name, ver string
 }
 
+// normalizeEco folds an engine-specific ecosystem label to a canonical form so the
+// SAME OS package keys identically across engines during dedupe — Grype labels
+// Alpine packages "apk" while Trivy labels them "alpine" (deb↔debian/ubuntu,
+// rpm↔redhat/amazon/photon, …); both must land in one bucket or a CVE both engines
+// report double-counts. Falls back to the raw lowercased label when there's no known
+// purl mapping, so unrelated ecosystems stay distinct.
+func normalizeEco(eco string) string {
+	e := strings.ToLower(strings.TrimSpace(eco))
+	if e == "" {
+		return ""
+	}
+	if t := purlType(e); t != "generic" {
+		return t
+	}
+	return e
+}
+
 // vulnIDSet returns the distinct, upper-cased, non-empty vulnerability identifiers
 // a finding is known by (primary id + aliases).
 func vulnIDSet(id string, aliases []string) []string {
@@ -785,7 +808,7 @@ func buildCanonicalIDIndex(engines []EngineResult) map[pkgKey]map[string]string 
 	for _, e := range engines {
 		for _, f := range e.Findings {
 			pk := pkgKey{
-				eco:  strings.ToLower(f.Package.Ecosystem),
+				eco:  normalizeEco(f.Package.Ecosystem),
 				name: f.Package.Name,
 				ver:  f.Package.Version,
 			}

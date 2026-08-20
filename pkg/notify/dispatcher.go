@@ -74,6 +74,12 @@ type DispatcherConfig struct {
 	// because the resolver reads the live config each call. Independent of the HTTP
 	// receiver fan-out — a syslog failure never blocks receiver delivery.
 	SyslogTarget func(ctx context.Context, orgID uuid.UUID) (*Syslog, bool)
+
+	// SMTPServer resolves the LIVE global SMTP server for an org so an "email"
+	// receiver can be delivered. Returns (_, false) when no SMTP server is
+	// configured (email receivers then fail with a clear message). Wired to the
+	// runtime-mutable system config, like SyslogTarget.
+	SMTPServer func(ctx context.Context, orgID uuid.UUID) (Email, bool)
 }
 
 // Dispatcher is the persisted-receiver dispatcher.
@@ -390,12 +396,19 @@ func (d *Dispatcher) process(ctx context.Context, j *job) {
 		return
 	}
 
-	// Render + sign + POST.
+	// Render the body once (both HTTP and email paths use it).
 	body, contentType, err := renderBody(j.receiver, j.event)
 	if err != nil {
 		d.handleFailure(ctx, j, fmt.Sprintf("render: %v", err))
 		return
 	}
+
+	// Email is an SMTP send, not an HTTP POST — branch before the HTTP machinery.
+	if strings.EqualFold(j.receiver.Kind, "email") {
+		d.processEmail(ctx, j, body)
+		return
+	}
+
 	sig, signedAt := signHMAC(j.receiver.SecretKey, body, d.cfg.Now())
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, j.receiver.Endpoint, bytes.NewReader(body))
@@ -427,6 +440,12 @@ func (d *Dispatcher) process(ctx context.Context, j *job) {
 	}
 
 	// Success.
+	d.markDelivered(ctx, j, latency, signedAt)
+}
+
+// markDelivered records a successful delivery + flips the receiver healthy. Shared
+// by the HTTP and email send paths.
+func (d *Dispatcher) markDelivered(ctx context.Context, j *job, latencyMs int, signedAt time.Time) {
 	_, _ = d.pool.Exec(ctx, `
 UPDATE receiver_deliveries
    SET status      = 'delivered',
@@ -436,10 +455,74 @@ UPDATE receiver_deliveries
        signed_at   = $3,
        delivered_at = NOW(),
        next_retry_at = NULL
- WHERE id = $1`, j.deliveryID, latency, signedAt)
+ WHERE id = $1`, j.deliveryID, latencyMs, signedAt)
 	_, _ = d.pool.Exec(ctx, `
 UPDATE receivers SET last_verified_at = NOW(), status = 'healthy', status_message = NULL
  WHERE id = $1`, j.receiver.ID)
+}
+
+// processEmail delivers a rendered body via SMTP. The alert Title is the subject;
+// recipients come from the receiver's config ({"to": ["a@x.com", ...]}). Uses the
+// same retry/backoff bookkeeping as the HTTP path.
+func (d *Dispatcher) processEmail(ctx context.Context, j *job, body []byte) {
+	if d.cfg.SMTPServer == nil {
+		d.handleFailure(ctx, j, "email: no SMTP server configured")
+		return
+	}
+	server, ok := d.cfg.SMTPServer(ctx, j.receiver.OrgID)
+	if !ok {
+		d.handleFailure(ctx, j, "email: no SMTP server configured")
+		return
+	}
+	to := parseEmailRecipients(j.receiver.Config)
+	if len(to) == 0 {
+		d.handleFailure(ctx, j, "email: receiver has no recipients")
+		return
+	}
+	subject := j.event.Title
+	if subject == "" {
+		subject = "Constellation: " + j.event.Kind
+	}
+	start := d.cfg.Now()
+	if err := server.SendMail(ctx, to, subject, string(body)); err != nil {
+		d.handleFailure(ctx, j, err.Error())
+		return
+	}
+	latency := int(d.cfg.Now().Sub(start) / time.Millisecond)
+	d.markDelivered(ctx, j, latency, d.cfg.Now())
+}
+
+// parseEmailRecipients pulls the recipient list from a receiver's config JSON. It
+// accepts {"to": ["a", "b"]} or {"to": "a, b"}.
+func parseEmailRecipients(cfg []byte) []string {
+	if len(cfg) == 0 {
+		return nil
+	}
+	var parsed struct {
+		To json.RawMessage `json:"to"`
+	}
+	if err := json.Unmarshal(cfg, &parsed); err != nil || len(parsed.To) == 0 {
+		return nil
+	}
+	var list []string
+	if json.Unmarshal(parsed.To, &list) == nil && len(list) > 0 {
+		return cleanRecipients(list)
+	}
+	var single string
+	if json.Unmarshal(parsed.To, &single) == nil && single != "" {
+		return cleanRecipients(strings.Split(single, ","))
+	}
+	return nil
+}
+
+func cleanRecipients(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if s = strings.TrimSpace(s); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func (d *Dispatcher) handleFailure(ctx context.Context, j *job, msg string) {

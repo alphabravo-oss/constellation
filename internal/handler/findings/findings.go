@@ -62,6 +62,9 @@ type findingDTO struct {
 	FixedVersion        string                         `json:"fixed_version,omitempty"`
 	AffectedRange       *scanner.AffectedRange         `json:"affected_range,omitempty"`
 	VulnDBBundle        *scanner.BundleMetadata        `json:"vulndb_bundle,omitempty"`
+	CVSS                float64                        `json:"cvss,omitempty"`
+	KEV                 bool                           `json:"kev,omitempty"`
+	EPSS                float64                        `json:"epss,omitempty"`
 }
 
 func (f *Findings) List(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +110,13 @@ SELECT id, kind, external_id, title, severity, risk_score, lifecycle, asset_id, 
  WHERE org_id = $1
    AND ($2::text = '' OR kind = $2)
    AND ($3::text = '' OR lifecycle = $3)
-   AND ($4::uuid IS NULL OR cluster_id = $4)`+extraWhere+`
+   AND ($4::uuid IS NULL OR cluster_id = $4)
+   -- Exclude the runtime-agent pod-scan duplicate: every running container's vulns are
+   -- also recorded as 'image-workload' (image scan → workload), which is the canonical,
+   -- deduped/named/cross-engine-merged representation. The 'workload' rows are a second
+   -- copy of the same CVEs that only power the Deployment detail page; counting them here
+   -- double-counted every vuln. See dashboard.go + findings_by_cve.go (same exclusion).
+   AND NOT (kind = 'vulnerability' AND target_type = 'workload')`+extraWhere+`
  ORDER BY risk_score DESC, last_seen_at DESC
  LIMIT $`+strconv.Itoa(len(args)-1)+` OFFSET $`+strconv.Itoa(len(args)), args...)
 	if err != nil {
@@ -139,7 +148,9 @@ SELECT lifecycle, count(*)
   FROM findings
  WHERE org_id = $1
    AND ($2::text = '' OR kind = $2)
- GROUP BY lifecycle`, subj.OrgID, kind)
+   AND ($3::uuid IS NULL OR cluster_id = $3)
+   AND NOT (kind = 'vulnerability' AND target_type = 'workload')
+ GROUP BY lifecycle`, subj.OrgID, kind, clusterArg)
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -252,6 +263,9 @@ func hydrateFindingProvenance(d *findingDTO, enginesRaw, detailRaw []byte) {
 		FixedVersion    string                         `json:"fixed"`
 		AffectedRange   *scanner.AffectedRange         `json:"affected_range"`
 		VulnDBBundle    *scanner.BundleMetadata        `json:"vulndb_bundle"`
+		CVSSBase        float64                        `json:"cvss_base"`
+		KEV             bool                           `json:"kev"`
+		EPSS            float64                        `json:"epss"`
 	}
 	if len(detailRaw) > 0 && string(detailRaw) != "null" {
 		_ = json.Unmarshal(detailRaw, &detail)
@@ -282,6 +296,9 @@ func hydrateFindingProvenance(d *findingDTO, enginesRaw, detailRaw []byte) {
 		}
 	}
 	d.VulnDBBundle = detail.VulnDBBundle
+	d.CVSS = detail.CVSSBase
+	d.KEV = detail.KEV
+	d.EPSS = detail.EPSS
 }
 
 func loadOrComputeDecomposition(stored, inputsRaw []byte, score int) risk.Decomposition {

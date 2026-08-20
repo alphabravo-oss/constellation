@@ -523,3 +523,27 @@ func TestDedupe_MergesAliasEquivalentFindings(t *testing.T) {
 type errAlways string
 
 func (e errAlways) Error() string { return string(e) }
+
+// TestDedupe_MergesAcrossEcosystemAliases proves grype+trivy corroboration survives
+// their DIFFERENT OS-ecosystem labels for the same package: grype tags an Alpine
+// package "apk", trivy tags it "alpine". normalizeEco must fold both so the CVE is
+// ONE finding with two engines — not double-counted. This is the ScanPackages
+// (node-local) merge guarantee.
+func TestDedupe_MergesAcrossEcosystemAliases(t *testing.T) {
+	findings := dedupe([]EngineResult{
+		{Engine: "grype", Findings: []EngineFinding{{
+			Engine: "grype", VulnerabilityID: "CVE-2026-2673", Severity: "high",
+			Package: Package{Ecosystem: "apk", Name: "openssl", Version: "3.5.5-r0"}, Confidence: 0.85,
+		}}},
+		{Engine: "trivy", Findings: []EngineFinding{{
+			Engine: "trivy", VulnerabilityID: "CVE-2026-2673", Severity: "high",
+			Package: Package{Ecosystem: "alpine", Name: "openssl", Version: "3.5.5-r0"}, Confidence: 0.85,
+		}}},
+	})
+	if len(findings) != 1 {
+		t.Fatalf("apk/alpine label mismatch must still merge to one finding, got %d", len(findings))
+	}
+	if len(findings[0].Engines) != 2 {
+		t.Fatalf("both grype and trivy must appear in provenance, got %+v", findings[0].Engines)
+	}
+}

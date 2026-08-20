@@ -27,8 +27,18 @@ type RollupRefresher struct {
 	db        *db.DB
 	interval  time.Duration
 	lag       time.Duration // don't fold flows newer than now()-lag, to tolerate clock skew / late arrivals
-	retention time.Duration // 0 = disabled
+	retention time.Duration // env-derived default; 0 = disabled
 	pruneBatch int64
+	// liveRetention, when set, returns the runtime-configured horizon (from system
+	// config) each pass; a value > 0 overrides the env default so an admin can set
+	// retention from the UI without a restart. 0 falls back to the env default.
+	liveRetention func(ctx context.Context) time.Duration
+}
+
+// SetRetentionResolver wires a live retention-horizon source (system config). Called
+// once at startup. See RollupRefresher.liveRetention.
+func (rr *RollupRefresher) SetRetentionResolver(fn func(ctx context.Context) time.Duration) {
+	rr.liveRetention = fn
 }
 
 func NewRollupRefresher(d *db.DB) *RollupRefresher {
@@ -72,11 +82,17 @@ func (rr *RollupRefresher) runOnce(ctx context.Context) {
 		// Only noisy on the first-boot backfill; steady-state incremental passes are sub-second.
 		slog.Info("network flow rollup refresh", slog.Duration("took", d))
 	}
-	if rr.retention > 0 {
-		if deleted, err := rr.prune(ctx); err != nil {
+	horizon := rr.retention
+	if rr.liveRetention != nil {
+		if live := rr.liveRetention(ctx); live > 0 {
+			horizon = live
+		}
+	}
+	if horizon > 0 {
+		if deleted, err := rr.prune(ctx, horizon); err != nil {
 			slog.Warn("network flow retention prune", slog.String("err", err.Error()))
 		} else if deleted > 0 {
-			slog.Info("network flow retention prune", slog.Int64("deleted", deleted), slog.String("horizon", rr.retention.String()))
+			slog.Info("network flow retention prune", slog.Int64("deleted", deleted), slog.String("horizon", horizon.String()))
 		}
 	}
 }
@@ -219,8 +235,8 @@ func (rr *RollupRefresher) RefoldWindow(ctx context.Context, from, to time.Time)
 // table but everything currently lands in the default partition, so there are no
 // time partitions to DROP cheaply; a per-day partitioning + DROP is the upgrade
 // path once the ingest side rotates partitions.
-func (rr *RollupRefresher) prune(ctx context.Context) (int64, error) {
-	horizon := strconv.FormatInt(int64(rr.retention/time.Second), 10)
+func (rr *RollupRefresher) prune(ctx context.Context, retention time.Duration) (int64, error) {
+	horizon := strconv.FormatInt(int64(retention/time.Second), 10)
 	tag, err := rr.db.Pool().Exec(ctx, `
 DELETE FROM network_flows
  WHERE ctid IN (

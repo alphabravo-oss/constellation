@@ -101,11 +101,16 @@ func (h *NetworkConversations) List(w http.ResponseWriter, r *http.Request) {
 	// useful for the org-level overview but a UI passing cluster_id
 	// gets a per-cluster view. Same shape as /network/map.
 	clusterID := strings.TrimSpace(r.URL.Query().Get("cluster_id"))
+	// Namespace + verdict filters (previously accepted by the UI but silently ignored).
+	namespace := strings.TrimSpace(r.URL.Query().Get("namespace"))
+	verdict := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("verdict")))
 
 	// Plan B5: serve from the hot in-memory graph when enabled. The cache only
 	// holds the recent TTL window, so it's used as a low-latency accelerator;
 	// when it has nothing for this org we fall through to the durable SQL path.
-	if h.live != nil {
+	// The in-memory graph can't apply namespace/verdict filters, so skip it when
+	// either is set and serve the filterable SQL path instead.
+	if h.live != nil && namespace == "" && verdict == "" {
 		var cid *uuid.UUID
 		if clusterID != "" {
 			if u, err := uuid.Parse(clusterID); err == nil {
@@ -140,9 +145,11 @@ SELECT src_workload, dst_workload, protocol, dst_port,
  WHERE org_id = $1
    AND ($2::text = '' OR cluster_id::text = $2)
    AND bucket >= date_trunc('hour', NOW() - ($3::int * INTERVAL '1 hour'))
+   AND ($4::text = '' OR verdict = $4)
+   AND ($5::text = '' OR src_workload LIKE $5 || '/%' OR dst_workload LIKE $5 || '/%')
  GROUP BY src_workload, dst_workload, protocol, dst_port, l7_protocol, verdict
  ORDER BY SUM(sum_bytes) DESC
- LIMIT 5000`, subj.OrgID, clusterID, hours)
+ LIMIT 5000`, subj.OrgID, clusterID, hours, verdict, namespace)
 	if err != nil {
 		// network_flows table may be absent in non-runtime envs; degrade to empty graph.
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{

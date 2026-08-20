@@ -226,6 +226,7 @@ func New(ctx context.Context, cfg Config, tel *observability.Telemetry, database
 	dispatcher := notify.NewDispatcher(database.Pool(), notify.DispatcherConfig{
 		Logger:       tel.Logger,
 		SyslogTarget: sysCfgProvider.SyslogSender,
+		SMTPServer:   sysCfgProvider.SMTPSender,
 	})
 	dispatcher.Start(ctx)
 	var astronomerJWT *astronomer.Validator
@@ -633,6 +634,7 @@ func (s *Server) buildRouter() chi.Router {
 
 			findingsH := findings.NewFindings(s.db, s.auditLog, s.dispatcher)
 			r.Get("/findings", s.requireVerb(rbac.VerbReadFindings, findingsH.List))
+			r.Get("/findings/by-cve", s.requireVerb(rbac.VerbReadFindings, findingsH.ByCVE))
 			eventsExport := runtime.NewEventsExport(s.db.Pool())
 			r.Get("/events:export", s.requireVerb(rbac.VerbReadFindings, eventsExport.Export))
 			r.Get("/findings/{id}", s.requireVerb(rbac.VerbReadFindings, findingsH.Get))
@@ -656,6 +658,7 @@ func (s *Server) buildRouter() chi.Router {
 
 			networkMap := network.NewNetwork(s.db)
 			r.Get("/network/map", s.requireVerb(rbac.VerbReadFindings, networkMap.Map))
+			r.Get("/network/exposure", s.requireVerb(rbac.VerbReadFindings, networkMap.Exposure))
 
 			// Wave 5: user-facing list of DPI threats. Same auth as findings.
 			runtimeThreats := runtime.NewRuntimeThreats(s.db)

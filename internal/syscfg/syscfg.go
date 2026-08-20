@@ -84,6 +84,37 @@ type Config struct {
 	NVDAPIKey string `json:"nvd_api_key,omitempty"`
 	// NVDMirrorURL overrides the NVD API base (air-gapped mirror of the 2.0 feed).
 	NVDMirrorURL string `json:"nvd_mirror_url,omitempty"`
+
+	// SMTP is the global email server for the "email" notification receiver kind.
+	// Empty Host means email delivery is unconfigured.
+	SMTP SMTPServer `json:"smtp"`
+
+	// Retention windows in days. 0 = disabled (never prune). Read live by the
+	// retention loops, so a PATCH takes effect without a restart. These bound the
+	// two biggest sources of unbounded storage growth: raw network flows + events.
+	NetworkFlowRetentionDays int `json:"network_flow_retention_days,omitempty"`
+	EventsRetentionDays      int `json:"events_retention_days,omitempty"`
+	// ScanJobRetentionDays bounds the scan_jobs queue history: terminal jobs
+	// (completed/failed/canceled) older than this are pruned. 0 = keep forever.
+	ScanJobRetentionDays int `json:"scan_job_retention_days,omitempty"`
+
+	// AutoScanDisabled turns OFF the automatic scanning of running-workload images
+	// (NeuVector `enable_auto_scan_workload`). Default false = auto-scan ON, so a
+	// discovered running image is scanned by the live pipeline without a manual trigger.
+	AutoScanDisabled bool `json:"auto_scan_disabled,omitempty"`
+	// AutoScanRescanHours is how often an already-scanned running image is re-scanned by
+	// the auto-scan loop. 0 = default (24h).
+	AutoScanRescanHours int `json:"auto_scan_rescan_hours,omitempty"`
+}
+
+// SMTPServer is the global outbound email server. Password is redacted on GET.
+type SMTPServer struct {
+	Host     string `json:"host,omitempty"`
+	Port     int    `json:"port,omitempty"`
+	Username string `json:"username,omitempty"`
+	Password string `json:"password,omitempty"` // SECRET: redacted on GET
+	From     string `json:"from,omitempty"`
+	STARTTLS bool   `json:"starttls,omitempty"`
 }
 
 // EgressProxy holds the proxy routing knobs (mirrors HTTPS_PROXY / NO_PROXY env).
@@ -144,6 +175,26 @@ func (c Config) Validate() error {
 	if c.ScannerDBRefreshMinutes != 0 && (c.ScannerDBRefreshMinutes < 15 || c.ScannerDBRefreshMinutes > 30*24*60) {
 		return fmt.Errorf("scanner_db_refresh_minutes must be 0 or between 15 and 43200: %d", c.ScannerDBRefreshMinutes)
 	}
+	if strings.TrimSpace(c.SMTP.Host) != "" {
+		if c.SMTP.Port <= 0 || c.SMTP.Port > 65535 {
+			return fmt.Errorf("smtp.port out of range: %d", c.SMTP.Port)
+		}
+		if strings.TrimSpace(c.SMTP.From) == "" {
+			return errors.New("smtp.from is required when an SMTP host is set")
+		}
+	}
+	for name, d := range map[string]int{
+		"network_flow_retention_days": c.NetworkFlowRetentionDays,
+		"events_retention_days":       c.EventsRetentionDays,
+		"scan_job_retention_days":     c.ScanJobRetentionDays,
+	} {
+		if d < 0 || d > 3650 {
+			return fmt.Errorf("%s must be between 0 and 3650: %d", name, d)
+		}
+	}
+	if c.AutoScanRescanHours < 0 || c.AutoScanRescanHours > 24*365 {
+		return fmt.Errorf("auto_scan_rescan_hours out of range: %d", c.AutoScanRescanHours)
+	}
 	return nil
 }
 
@@ -183,6 +234,9 @@ func (c Config) Redacted() Config {
 	}
 	if strings.TrimSpace(c.NVDAPIKey) != "" {
 		out.NVDAPIKey = redactedMarker
+	}
+	if strings.TrimSpace(c.SMTP.Password) != "" {
+		out.SMTP.Password = redactedMarker
 	}
 	out.EgressProxy.HTTPSProxy = redactProxyUserinfo(c.EgressProxy.HTTPSProxy)
 	return out
@@ -234,6 +288,9 @@ func (c Config) ApplyPatch(patch json.RawMessage) (Config, error) {
 	}
 	if merged.NVDAPIKey == redactedMarker {
 		merged.NVDAPIKey = c.NVDAPIKey // preserve the existing key on redacted echo
+	}
+	if merged.SMTP.Password == redactedMarker {
+		merged.SMTP.Password = c.SMTP.Password // preserve the existing SMTP password on redacted echo
 	}
 	// If the proxy URL was echoed back with its userinfo still redacted (a GET→edit→PATCH
 	// round-trip of the masked value), restore the original credentialed URL so the secret

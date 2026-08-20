@@ -2745,3 +2745,94 @@ SELECT cluster_id, match_key, scope, origin, source_kind
 
 // Silence unused-import linter if test DB isn't reachable.
 var _ = pgxpool.New
+
+// TestResolveEvidenceImageName verifies a digest-only evidence scan identity gets its
+// human repo:tag filled in from the workload map (and that an unmapped digest is left
+// untouched rather than guessed).
+func TestResolveEvidenceImageName(t *testing.T) {
+	d := openTestDB(t)
+	defer d.Close()
+	ctx := context.Background()
+	pool := d.Pool()
+
+	var orgID uuid.UUID
+	if err := pool.QueryRow(ctx, `SELECT id FROM orgs ORDER BY created_at LIMIT 1`).Scan(&orgID); err != nil {
+		t.Skipf("no org in test db: %v", err)
+	}
+	clusterID := uuid.New()
+	deploymentID := uuid.New()
+	digest := "sha256:" + strings.Repeat("ab12", 16) // 64 hex
+	repo := "registry.example.com/team/widget"
+	ref := repo + ":v1.2.3"
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM image_workload_links WHERE org_id=$1 AND image_digest=$2`, orgID, digest)
+	})
+	if _, err := pool.Exec(ctx, `
+INSERT INTO image_workload_links (org_id, cluster_id, deployment_id, workload_id, namespace, name, kind,
+    image_ref, image_ref_normalized, image_repository, image_tag, image_digest)
+VALUES ($1,$2,$3,'team/widget','team','widget','Deployment',$4,$4,$5,'v1.2.3',$6)`,
+		orgID, clusterID, deploymentID, ref, repo, digest); err != nil {
+		t.Fatalf("link insert: %v", err)
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+
+	// digest-only identity (as the evidence path produces it)
+	id := scanImageIdentity{Ref: digest, Digest: digest}
+	resolveEvidenceImageName(ctx, tx, orgID, &id)
+	if id.Repository != repo {
+		t.Fatalf("repository not resolved: got %q want %q", id.Repository, repo)
+	}
+	if id.Tag != "v1.2.3" {
+		t.Fatalf("tag not resolved: got %q", id.Tag)
+	}
+	if id.Ref != ref {
+		t.Fatalf("ref not upgraded: got %q want %q", id.Ref, ref)
+	}
+
+	// unmapped digest → left as-is (no fabricated name)
+	un := scanImageIdentity{Ref: "sha256:" + strings.Repeat("ffff", 16), Digest: "sha256:" + strings.Repeat("ffff", 16)}
+	resolveEvidenceImageName(ctx, tx, orgID, &un)
+	if un.Repository != "" {
+		t.Fatalf("unmapped digest must stay nameless, got repository=%q", un.Repository)
+	}
+
+	// Deployment fallback: the runtime-agent's content digest differs from the registry
+	// manifest digest, so the link is nameless (repository empty, ref=content digest) but
+	// its deployment carries the named ref. Resolution must go through the workload.
+	contentDigest := "sha256:" + strings.Repeat("cd34", 16)
+	manifestRef := "registry.k8s.io/team/gadget:v2.0.0@sha256:" + strings.Repeat("beef", 16)
+	dep2 := uuid.New()
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM image_workload_links WHERE org_id=$1 AND image_ref=$2`, orgID, contentDigest)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM deployments WHERE id=$1`, dep2)
+	})
+	if _, err := pool.Exec(ctx, `INSERT INTO deployments (id, org_id, cluster_id, namespace, name, kind, image_refs)
+VALUES ($1,$2,$3,'team','gadget','Deployment',$4)`, dep2, orgID, clusterID, []string{manifestRef, "registry.k8s.io/team/gadget@sha256:" + strings.Repeat("beef", 16)}); err != nil {
+		t.Fatalf("dep2 insert: %v", err)
+	}
+	// nameless link (no repository), image_ref is the content digest
+	if _, err := pool.Exec(ctx, `
+INSERT INTO image_workload_links (org_id, cluster_id, deployment_id, workload_id, namespace, name, kind,
+    image_ref, image_ref_normalized, image_repository, image_tag, image_digest)
+VALUES ($1,$2,$3,'team/gadget','team','gadget','Deployment',$4,$4,'','',$4)`,
+		orgID, clusterID, dep2, contentDigest); err != nil {
+		t.Fatalf("nameless link insert: %v", err)
+	}
+	viaDep := scanImageIdentity{Ref: contentDigest, Digest: contentDigest}
+	resolveEvidenceImageName(ctx, tx, orgID, &viaDep)
+	if viaDep.Repository != "registry.k8s.io/team/gadget" {
+		t.Fatalf("deployment fallback repository: got %q", viaDep.Repository)
+	}
+	if viaDep.Tag != "v2.0.0" {
+		t.Fatalf("deployment fallback tag: got %q", viaDep.Tag)
+	}
+	// the scan-keying digest stays the CONTENT digest, not the manifest one
+	if viaDep.Digest != contentDigest {
+		t.Fatalf("evidence digest must be preserved, got %q", viaDep.Digest)
+	}
+}

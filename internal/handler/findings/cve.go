@@ -183,6 +183,18 @@ func severityRange(s string) (lo, hi float64, ok bool) {
 	return 0, 0, false
 }
 
+// cveSortColumns whitelists the sortable columns for CVE search → SQL expression, so
+// the client's chosen sort column can be applied server-side across the whole catalog
+// (not just the current page). Keys match the frontend column ids.
+var cveSortColumns = map[string]string{
+	"cve_id":    "cve_id",
+	"cvss":      "cvss_base",
+	"severity":  "cvss_base",
+	"epss":      "epss_probability",
+	"kev":       "kev_listed",
+	"published": "published_at",
+}
+
 func (c *CVE) Search(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
@@ -265,16 +277,28 @@ func (c *CVE) Search(w http.ResponseWriter, r *http.Request) {
 		where = "WHERE " + strings.Join(clauses, " AND ")
 	}
 
+	// Server-side sort: the catalog is far larger than one page, so client-side sort
+	// over the returned rows only reorders the visible slice. Map the requested column
+	// to a whitelisted expression (no injection — column is never interpolated from raw
+	// input) and default to the relevance ordering when unset.
+	orderBy := `kev_listed DESC,
+          epss_probability DESC NULLS LAST,
+          cvss_base DESC NULLS LAST,
+          published_at DESC NULLS LAST`
+	if col, ok := cveSortColumns[strings.ToLower(strings.TrimSpace(r.URL.Query().Get("sort")))]; ok {
+		dir := "DESC"
+		if strings.ToLower(strings.TrimSpace(r.URL.Query().Get("dir"))) == "asc" {
+			dir = "ASC"
+		}
+		orderBy = col + " " + dir + " NULLS LAST, cve_id ASC"
+	}
 	args = append(args, limit, offset)
 	sql := `
 SELECT cve_id, COALESCE(title,''), COALESCE(description,''), cvss_base, cvss_vector,
        kev_listed, kev_added, epss_probability, epss_updated_at, aliases, affected, sources,
        published_at, modified_at
   FROM cve_records ` + where + `
- ORDER BY kev_listed DESC,
-          epss_probability DESC NULLS LAST,
-          cvss_base DESC NULLS LAST,
-          published_at DESC NULLS LAST
+ ORDER BY ` + orderBy + `
  LIMIT $` + strconv.Itoa(len(args)-1) + ` OFFSET $` + strconv.Itoa(len(args))
 
 	rows, err := c.db.Pool().Query(r.Context(), sql, args...)
@@ -328,6 +352,18 @@ func (c *CVE) Affected(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "missing cve id"})
 		return
 	}
+	// Optional cluster scope: when the CVE detail is opened from inside a cluster,
+	// the blast radius (images/workloads/clusters + summary) is restricted to that
+	// cluster so the page reflects the cluster context, not the whole org.
+	var clusterArg any
+	if cs := strings.TrimSpace(r.URL.Query().Get("cluster_id")); cs != "" {
+		cid, perr := uuid.Parse(cs)
+		if perr != nil {
+			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster_id"})
+			return
+		}
+		clusterArg = cid
+	}
 
 	imageRows, err := c.db.Pool().Query(r.Context(), `
 SELECT r.id,
@@ -364,11 +400,19 @@ SELECT r.id,
   JOIN image_scan_results r ON r.id = f.image_scan_result_id
  WHERE f.org_id = $1
    AND UPPER(COALESCE(f.external_id, '')) = $2
+   AND ($3::uuid IS NULL OR EXISTS (
+        SELECT 1 FROM image_workload_links l
+         WHERE l.org_id = f.org_id AND l.cluster_id = $3
+           AND (l.image_digest = r.image_digest
+                OR l.image_ref = r.image_ref
+                OR l.image_ref_normalized = r.image_ref_normalized
+                OR (COALESCE(r.image_repository,'') <> '' AND l.image_repository = r.image_repository
+                    AND (COALESCE(r.image_tag,'') = '' OR l.image_tag = r.image_tag)))))
  GROUP BY r.id, r.asset_id, r.image_ref, r.image_ref_normalized, r.image_repository,
           r.image_tag, r.image_digest, r.platform, r.scanner_profile,
           r.vulndb_bundle_version, r.vulndb_bundle_hash, r.last_scanned_at
  ORDER BY max_risk_score DESC, r.last_scanned_at DESC
- LIMIT 500`, subj.OrgID, id)
+ LIMIT 500`, subj.OrgID, id, clusterArg)
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -464,6 +508,7 @@ SELECT l.cluster_id,
   FROM matches m
   JOIN image_workload_links l
     ON l.org_id = $1
+   AND ($3::uuid IS NULL OR l.cluster_id = $3)
    AND (
         (m.image_digest <> '' AND l.image_digest = m.image_digest)
      OR (m.image_ref <> '' AND l.image_ref = m.image_ref)
@@ -473,7 +518,7 @@ SELECT l.cluster_id,
   LEFT JOIN clusters c ON c.id = l.cluster_id AND c.org_id = $1
  GROUP BY l.cluster_id, c.name, l.deployment_id, l.workload_id, l.namespace, l.name, l.kind
  ORDER BY max_risk_score DESC, MAX(l.last_seen_at) DESC
- LIMIT 1000`, subj.OrgID, id)
+ LIMIT 1000`, subj.OrgID, id, clusterArg)
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
