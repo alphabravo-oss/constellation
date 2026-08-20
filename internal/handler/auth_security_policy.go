@@ -39,6 +39,10 @@ func NewAuthSecurityPolicy(d *db.DB, a *audit.Logger) *AuthSecurityPolicy {
 type securityPolicyBody struct {
 	MinLength             int   `json:"min_length"`
 	MinClasses            int   `json:"min_classes"`
+	MinUppercase          int   `json:"min_uppercase"`
+	MinLowercase          int   `json:"min_lowercase"`
+	MinDigit              int   `json:"min_digit"`
+	MinSpecial            int   `json:"min_special"`
 	MaxAgeDays            int   `json:"max_age_days"`
 	HistoryDepth          int   `json:"history_depth"`
 	SessionTimeoutMinutes int   `json:"session_timeout_minutes"`
@@ -52,6 +56,10 @@ func toPolicyBody(p auth.SecurityPolicy, rev int64) securityPolicyBody {
 	return securityPolicyBody{
 		MinLength:             p.MinLength,
 		MinClasses:            p.MinClasses,
+		MinUppercase:          p.MinUppercase,
+		MinLowercase:          p.MinLowercase,
+		MinDigit:              p.MinDigit,
+		MinSpecial:            p.MinSpecial,
 		MaxAgeDays:            p.MaxAgeDays,
 		HistoryDepth:          p.HistoryDepth,
 		SessionTimeoutMinutes: p.SessionTimeoutMinutes,
@@ -66,6 +74,10 @@ func (b securityPolicyBody) toModel() auth.SecurityPolicy {
 	return auth.SecurityPolicy{
 		MinLength:             b.MinLength,
 		MinClasses:            b.MinClasses,
+		MinUppercase:          b.MinUppercase,
+		MinLowercase:          b.MinLowercase,
+		MinDigit:              b.MinDigit,
+		MinSpecial:            b.MinSpecial,
 		MaxAgeDays:            b.MaxAgeDays,
 		HistoryDepth:          b.HistoryDepth,
 		SessionTimeoutMinutes: b.SessionTimeoutMinutes,

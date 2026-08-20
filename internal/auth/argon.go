@@ -91,6 +91,12 @@ type PasswordProfile struct {
 	// MinClasses is the minimum number of distinct character classes the password must
 	// contain, out of {lowercase, uppercase, digit, symbol}.
 	MinClasses int
+	// Per-character-class minimums (NeuVector's per-class requirements). Zero on any of these
+	// means "no specific minimum for this class" — MinClasses still applies on top.
+	MinUppercase int
+	MinLowercase int
+	MinDigit     int
+	MinSpecial   int
 	// MaxAge is how long a password is valid before a change is required; zero disables.
 	MaxAge time.Duration
 	// HistoryDepth is how many recent password hashes are retained + checked for reuse;
@@ -123,27 +129,41 @@ func ValidatePassword(profile PasswordProfile, pw string) error {
 	if n := len([]rune(pw)); n < profile.MinLength {
 		return fmt.Errorf("%w: must be at least %d characters", ErrWeakPassword, profile.MinLength)
 	}
-	var hasLower, hasUpper, hasDigit, hasSymbol bool
+	var nLower, nUpper, nDigit, nSymbol int
 	for _, r := range pw {
 		switch {
 		case unicode.IsLower(r):
-			hasLower = true
+			nLower++
 		case unicode.IsUpper(r):
-			hasUpper = true
+			nUpper++
 		case unicode.IsDigit(r):
-			hasDigit = true
+			nDigit++
 		default:
-			hasSymbol = true
+			nSymbol++
 		}
 	}
 	classes := 0
-	for _, ok := range []bool{hasLower, hasUpper, hasDigit, hasSymbol} {
-		if ok {
+	for _, n := range []int{nLower, nUpper, nDigit, nSymbol} {
+		if n > 0 {
 			classes++
 		}
 	}
 	if classes < profile.MinClasses {
 		return fmt.Errorf("%w: must include at least %d of lowercase/uppercase/digit/symbol", ErrWeakPassword, profile.MinClasses)
+	}
+	// Per-class minimums (checked after the class-count rule).
+	for _, c := range []struct {
+		min, have int
+		label     string
+	}{
+		{profile.MinUppercase, nUpper, "uppercase"},
+		{profile.MinLowercase, nLower, "lowercase"},
+		{profile.MinDigit, nDigit, "digit"},
+		{profile.MinSpecial, nSymbol, "special"},
+	} {
+		if c.min > 0 && c.have < c.min {
+			return fmt.Errorf("%w: must include at least %d %s character(s)", ErrWeakPassword, c.min, c.label)
+		}
 	}
 	return nil
 }

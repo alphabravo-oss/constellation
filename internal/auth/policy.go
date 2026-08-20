@@ -30,6 +30,10 @@ type SecurityPolicy struct {
 	// Password strength / lifecycle knobs (map onto PasswordProfile).
 	MinLength    int `json:"min_length"`
 	MinClasses   int `json:"min_classes"`
+	MinUppercase int `json:"min_uppercase"` // per-class minimums (0 = no specific minimum)
+	MinLowercase int `json:"min_lowercase"`
+	MinDigit     int `json:"min_digit"`
+	MinSpecial   int `json:"min_special"`
 	MaxAgeDays   int `json:"max_age_days"`  // 0 disables expiration (EnablePwdExpiration=false)
 	HistoryDepth int `json:"history_depth"` // 0 disables reuse checking
 
@@ -100,6 +104,10 @@ func (p SecurityPolicy) PasswordProfile() PasswordProfile {
 	return PasswordProfile{
 		MinLength:    p.MinLength,
 		MinClasses:   p.MinClasses,
+		MinUppercase: p.MinUppercase,
+		MinLowercase: p.MinLowercase,
+		MinDigit:     p.MinDigit,
+		MinSpecial:   p.MinSpecial,
 		MaxAge:       time.Duration(p.MaxAgeDays) * 24 * time.Hour,
 		HistoryDepth: p.HistoryDepth,
 	}
@@ -133,6 +141,14 @@ func (p SecurityPolicy) Validate() error {
 	}
 	if p.MinClasses < 0 || p.MinClasses > maxClasses {
 		return fmt.Errorf("%w: min_classes must be between 0 and %d", ErrInvalidPolicy, maxClasses)
+	}
+	for _, c := range []struct {
+		v     int
+		label string
+	}{{p.MinUppercase, "min_uppercase"}, {p.MinLowercase, "min_lowercase"}, {p.MinDigit, "min_digit"}, {p.MinSpecial, "min_special"}} {
+		if c.v < 0 || c.v > p.MinLength {
+			return fmt.Errorf("%w: %s must be between 0 and min_length (%d)", ErrInvalidPolicy, c.label, p.MinLength)
+		}
 	}
 	if p.MaxAgeDays < 0 {
 		return fmt.Errorf("%w: max_age_days must be >= 0", ErrInvalidPolicy)

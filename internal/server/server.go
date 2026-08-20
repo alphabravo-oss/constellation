@@ -717,6 +717,8 @@ func (s *Server) buildRouter() chi.Router {
 			// (monitor / enforce / disabled) and same audit-action mapping.
 			rtDLP := runtime.NewRuntimeDLPHTTP(s.db, s.auditLog)
 			r.Get("/runtime-dlp-rules", s.requireVerb(rbac.VerbReadFindings, rtDLP.List))
+			r.Get("/runtime-dlp-rules:export", s.requireVerb(rbac.VerbReadFindings, rtDLP.Export))
+			r.Post("/runtime-dlp-rules:import", s.requireVerb(rbac.VerbManagePolicies, rtDLP.Import))
 			r.Get("/runtime-dlp-rules/{id}", s.requireVerb(rbac.VerbReadFindings, rtDLP.Get))
 			r.Post("/runtime-dlp-rules", s.requireVerb(rbac.VerbManagePolicies, rtDLP.Create))
 			r.Put("/runtime-dlp-rules/{id}", s.requireVerb(rbac.VerbManagePolicies, rtDLP.Update))

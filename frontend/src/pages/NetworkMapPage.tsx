@@ -46,6 +46,7 @@ import { toast } from "sonner";
 
 import {
   network,
+  quarantine,
   runtimePcap,
   runtimeThreats,
   type NetworkFlow,
@@ -236,6 +237,15 @@ function NetworkMapInner() {
       void queryClient.invalidateQueries({ queryKey: ["network-policy-lifecycle"] });
       void queryClient.invalidateQueries({ queryKey: ["network-map"] });
     },
+  });
+
+  // Quarantine the selected workload directly from the graph — NeuVector surfaces
+  // quarantine as a per-node incident-response action. Reuses the audited quarantine model.
+  const quarantineMut = useMutation({
+    mutationFn: ({ workload, reason }: { workload: string; reason: string }) =>
+      quarantine.create({ cluster_id: clusterID, scope: "workload", match_key: workload, reason, expires_in_hours: 24 }),
+    onSuccess: () => { toast.success("Workload quarantined"); void queryClient.invalidateQueries({ queryKey: ["network-map"] }); },
+    onError: () => toast.error("Failed to quarantine workload"),
   });
 
   const workloads = q.data?.workloads ?? EMPTY_WORKLOADS;
@@ -760,13 +770,28 @@ function NetworkMapInner() {
               flows={flows}
               onSelectFlow={(id) => { selectFlow(id); setPopoverOpen(true); }}
             />
-            <button
-              type="button"
-              onClick={() => setSelectedWorkloadID(null)}
-              className="mt-2 text-[10px] text-muted-foreground hover:text-foreground"
-            >
-              close
-            </button>
+            <div className="mt-2 flex items-center justify-between">
+              {selectedWorkload.kind !== "External" && clusterID ? (
+                <button
+                  type="button"
+                  disabled={quarantineMut.isPending}
+                  onClick={() => {
+                    const reason = window.prompt(`Quarantine ${selectedWorkload.id}? Enter a reason:`, "manual isolation from network map");
+                    if (reason) quarantineMut.mutate({ workload: selectedWorkload.id, reason });
+                  }}
+                  className="inline-flex items-center gap-1 rounded border border-[color:var(--color-severity-critical)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--color-severity-critical)] hover:bg-[color:color-mix(in_oklab,var(--color-severity-critical)_12%,transparent)] disabled:opacity-40"
+                >
+                  <Ban className="h-3 w-3" /> Quarantine
+                </button>
+              ) : <span />}
+              <button
+                type="button"
+                onClick={() => setSelectedWorkloadID(null)}
+                className="text-[10px] text-muted-foreground hover:text-foreground"
+              >
+                close
+              </button>
+            </div>
           </div>
         )}
         {/* Policy-lifecycle bottom-left — collapsed chip by default; expands

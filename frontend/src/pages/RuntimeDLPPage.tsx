@@ -25,6 +25,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
+import { ImportExportButtons } from "@/components/ImportExportButtons";
 import { StatCard } from "@/components/ui/stat-card";
 import { StatusPill } from "@/components/ui/status-pill";
 import { LoadingState, ErrorState, EmptyState } from "@/components/ui/states";
@@ -46,6 +47,7 @@ export function RuntimeDLPPage() {
   const { id: pathClusterID } = useParams();
   const clusterID = pathClusterID ?? search.get("cluster_id") ?? "";
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const q = useQuery({
     queryKey: ["runtime-dlp-rules", clusterID],
@@ -96,9 +98,18 @@ export function RuntimeDLPPage() {
         title="DLP Rules"
         description="Data-loss-prevention patterns dp scans network payloads for. New rules start in monitor mode; promote one to enforce to start blocking matches."
         actions={
-          <Button size="sm" variant="outline" onClick={openNew} data-testid="runtime-dlp-new">
-            <Plus className="mr-1 h-3.5 w-3.5" /> New rule
-          </Button>
+          <div className="flex items-center gap-2">
+            <ImportExportButtons
+              filename="constellation-dlp-rules.yaml"
+              label="DLP rules"
+              exportYaml={() => runtimeDLP.exportYaml(clusterID)}
+              importYaml={(text) => runtimeDLP.importYaml(clusterID, text)}
+              onImported={() => void queryClient.invalidateQueries({ queryKey: ["runtime-dlp-rules", clusterID] })}
+            />
+            <Button size="sm" variant="outline" onClick={openNew} data-testid="runtime-dlp-new">
+              <Plus className="mr-1 h-3.5 w-3.5" /> New rule
+            </Button>
+          </div>
         }
       />
 

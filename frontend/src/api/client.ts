@@ -2289,6 +2289,12 @@ export const runtimeDLP = {
     api.post<DLPRule>(`/runtime-dlp-rules/${encodeURIComponent(id)}/disable`).then((r) => r.data),
   remove: (id: string) =>
     api.delete<{ deleted: string }>(`/runtime-dlp-rules/${encodeURIComponent(id)}`).then((r) => r.data),
+  exportYaml: (cluster_id: string) =>
+    api.get<string>("/runtime-dlp-rules:export", { params: { cluster_id }, responseType: "text", headers: { Accept: "application/x-yaml" } }).then((r) => r.data),
+  importYaml: (cluster_id: string, yaml: string) =>
+    api.post<{ created: number; updated: number; results: Array<{ name: string; status: string; error?: string }> }>(
+      "/runtime-dlp-rules:import", yaml, { params: { cluster_id }, headers: { "Content-Type": "application/x-yaml" } },
+    ).then((r) => r.data),
 };
 
 /** Wave D4: Custom DPI signatures. Backed by the same runtime_dlp_rules
@@ -4121,6 +4127,10 @@ export const systemConfigApi = {
 export interface SecurityPolicy {
   min_length: number;
   min_classes: number;
+  min_uppercase: number;
+  min_lowercase: number;
+  min_digit: number;
+  min_special: number;
   max_age_days: number;
   history_depth: number;
   session_timeout_minutes: number;

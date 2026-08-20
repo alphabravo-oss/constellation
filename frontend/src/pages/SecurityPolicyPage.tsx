@@ -74,6 +74,22 @@ export function SecurityPolicyPage() {
                 <TextInput type="number" min={1} max={4} value={form.min_classes}
                   onChange={(e) => set("min_classes", num(e.target.value))} className="w-32" />
               </Field>
+              <Field label="Min uppercase" hint="Minimum uppercase letters. 0 = no specific minimum.">
+                <TextInput type="number" min={0} value={form.min_uppercase}
+                  onChange={(e) => set("min_uppercase", num(e.target.value))} className="w-32" />
+              </Field>
+              <Field label="Min lowercase" hint="Minimum lowercase letters. 0 = no specific minimum.">
+                <TextInput type="number" min={0} value={form.min_lowercase}
+                  onChange={(e) => set("min_lowercase", num(e.target.value))} className="w-32" />
+              </Field>
+              <Field label="Min digits" hint="Minimum digits. 0 = no specific minimum.">
+                <TextInput type="number" min={0} value={form.min_digit}
+                  onChange={(e) => set("min_digit", num(e.target.value))} className="w-32" />
+              </Field>
+              <Field label="Min special" hint="Minimum special characters. 0 = no specific minimum.">
+                <TextInput type="number" min={0} value={form.min_special}
+                  onChange={(e) => set("min_special", num(e.target.value))} className="w-32" />
+              </Field>
               <Field label="Maximum age (days)" hint="Force a change after this many days. 0 disables expiry.">
                 <TextInput type="number" min={0} value={form.max_age_days}
                   onChange={(e) => set("max_age_days", num(e.target.value))} className="w-32" />
