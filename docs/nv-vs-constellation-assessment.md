@@ -9,7 +9,9 @@ _Generated 2026-08-19 · 207 gaps across 12 functional areas · produced by a 12
 > 2. **Process baselines** — per-process **allow/deny rule CRUD** on `BaselineDetailPage` (`process_profile_rules`, migration 139).
 > 3. **Admission Control** — global **state surface** (enable / monitor·protect / default-action / failure-policy; `admission_state`, migration 140) + a **dry-run assessor** wired to the previously-dead `POST /policies/assess`.
 >
-> Next tier (high): admission **criteria rule builder** + options catalog (assessment rows 4–5), cross-cutting **server-side pagination/sort/filter** (kill the hard LIMIT caps), and **CVSS/fixable** joins into `/findings`.
+> **High tier so far:** admission **criteria rule builder + options catalog** (rows 4–5) **done** — `GET /policies/admission/options` + `POST /policies/admission/rules` compile structured criteria to the engine YAML server-side (validated, verified enforcing via `/policies/assess`), with a dropdown builder UI + a structured admission rules table. The whole admission cluster (state, rules table, dry-run, builder) is now NV-parity.
+>
+> Next tier (high): cross-cutting **server-side pagination/sort/filter** (kill the hard LIMIT caps across 8+ lists), **CVSS/fixable** joins into `/findings`, and response-rule **evaluation order** (row 6).
 
 
 ---
