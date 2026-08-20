@@ -157,7 +157,12 @@ api:
     OTEL_EXPORTER_OTLP_ENDPOINT: ""
     JWT_ISSUER: constellation
     JWT_AUDIENCE: constellation-api
-    JWT_TTL: 1h
+    # Absolute session lifetime. 24h matches the live deploy; keeping it here stops a
+    # helm redeploy from regressing sessions back to hourly logouts.
+    JWT_TTL: 24h
+    # Concurrent live JWT sessions per user before the oldest is evicted (default 5 in
+    # code). Raised so shared automation logins can't evict a human user's session.
+    MAX_CONCURRENT_SESSIONS: "25"
   # A5: by default (jwtKeysSecret unset) the api signs sessions RS256 with a
   # shared keypair it generates + persists in the session_signing_keys table on
   # first boot, so JWT_KEYS is NOT injected and no symmetric secret is created.

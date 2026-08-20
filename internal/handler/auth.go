@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -150,11 +152,22 @@ const (
 	// once the threshold is crossed. The failure count itself does not decay with time; it
 	// is cleared only by a successful authentication (see recordLoginSuccess).
 	loginLockoutWindow = 15 * time.Minute
-	// maxConcurrentSessions caps the number of simultaneously-live JWT sessions per
-	// user (A3). A login past the cap evicts the user's oldest session(s). Like the
-	// lockout knobs above, this moves into per-org system_config (B1) later.
-	maxConcurrentSessions = 5
 )
+
+// maxConcurrentSessions caps the number of simultaneously-live JWT sessions per user (A3).
+// A login past the cap evicts the user's oldest session(s). Overridable via
+// MAX_CONCURRENT_SESSIONS (default 5) so shared automation logins can't crowd out a human
+// user's session on a busy dev instance; moves into per-org system_config (B1) later.
+var maxConcurrentSessions = envIntDefault("MAX_CONCURRENT_SESSIONS", 5)
+
+func envIntDefault(key string, def int) int {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return def
+}
 
 // errLoginLocked is the sentinel returned by the lockout pre-check. The HTTP layer maps
 // it (and every other auth failure) to the same generic 401 so a caller cannot use the
