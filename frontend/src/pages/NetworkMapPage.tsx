@@ -1261,8 +1261,10 @@ function appName(id: number): string {
 }
 
 // StreamsTab shows the FULL conversation between the two endpoints (NV's per-conversation
-// drill-down): every protocol/port/application stream with directional in/out bytes +
-// session counts. One clicked edge is a single proto/port; this consolidates the whole pair.
+// drill-down): every protocol/port/application stream from→to with its total bytes and
+// session count. Direction is the edge itself (from→to) — like NeuVector, per-connection
+// client/server byte split lives in the Live Sessions view, not the folded conversation
+// (dp's connection reports sum both directions into one figure).
 function StreamsTab({ flow, clusterID, hours, active }: { flow: NetworkFlow; clusterID: string; hours: number; active: boolean }) {
   const q = useQuery({
     queryKey: ["conv-entries", clusterID, flow.src, flow.dst, hours],
@@ -1279,10 +1281,8 @@ function StreamsTab({ flow, clusterID, hours, active }: { flow: NetworkFlow; clu
     <div className="space-y-3">
       <div className="grid grid-cols-3 gap-2">
         <Field label="Streams" value={String(entries.length)} />
-        <Field label="In (→)" value={formatBytes(t.client_bytes)} />
-        <Field label="Out (←)" value={formatBytes(t.server_bytes)} />
-        <Field label="Sessions" value={t.sessions.toLocaleString()} />
         <Field label="Total bytes" value={formatBytes(t.bytes)} />
+        <Field label="Sessions" value={t.sessions.toLocaleString()} />
         <Field label="Packets" value={t.packets.toLocaleString()} />
       </div>
       <div className="overflow-x-auto">
@@ -1291,9 +1291,8 @@ function StreamsTab({ flow, clusterID, hours, active }: { flow: NetworkFlow; clu
             <tr className="text-left text-[10px] uppercase tracking-wider text-muted-foreground">
               <th className="py-1 pr-2 font-medium">Proto / App</th>
               <th className="py-1 pr-2 font-medium">Port</th>
-              <th className="py-1 pr-2 text-right font-medium">In →</th>
-              <th className="py-1 pr-2 text-right font-medium">Out ←</th>
-              <th className="py-1 pr-2 text-right font-medium">Sess</th>
+              <th className="py-1 pr-2 text-right font-medium">Bytes</th>
+              <th className="py-1 pr-2 text-right font-medium">Sessions</th>
               <th className="py-1 font-medium">Verdict</th>
             </tr>
           </thead>
@@ -1302,8 +1301,7 @@ function StreamsTab({ flow, clusterID, hours, active }: { flow: NetworkFlow; clu
               <tr key={i} className="border-t border-border/50">
                 <td className="py-1 pr-2">{e.protocol}{e.application ? <span className="text-muted-foreground">/{e.application}</span> : ""}</td>
                 <td className="py-1 pr-2 text-muted-foreground">{e.port || "—"}</td>
-                <td className="py-1 pr-2 text-right">{formatBytes(e.client_bytes)}</td>
-                <td className="py-1 pr-2 text-right">{formatBytes(e.server_bytes)}</td>
+                <td className="py-1 pr-2 text-right">{formatBytes(e.bytes)}</td>
                 <td className="py-1 pr-2 text-right">{e.sessions.toLocaleString()}</td>
                 <td className="py-1">
                   <span className={cn("rounded px-1 text-[10px]", e.verdict === "deny" ? "text-[color:var(--color-status-error)]" : "text-muted-foreground")}>{e.verdict}</span>
@@ -1315,7 +1313,7 @@ function StreamsTab({ flow, clusterID, hours, active }: { flow: NetworkFlow; clu
         </table>
       </div>
       <p className="text-[10px] leading-tight text-muted-foreground/80">
-        In = {shortName(flow.src)}→{shortName(flow.dst)} payload; Out = responses. Directional bytes are populated on DPI (dp) flows; other sources report totals only.
+        Traffic {shortName(flow.src)} → {shortName(flow.dst)}, per protocol/port stream. Per-connection client/server byte split is in the Live Sessions panel.
       </p>
     </div>
   );

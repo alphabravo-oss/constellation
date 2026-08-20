@@ -429,7 +429,7 @@ SELECT id::text, org_id::text, cluster_id::text,
 			jsonError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		t.ThreatName = handler.NeuVectorThreatName(uint32(t.ThreatID))
+		t.ThreatName = resolveThreatName(uint32(t.ThreatID))
 		t.Category = threatCategory(t.ThreatID)
 		out = append(out, t)
 	}
@@ -534,7 +534,7 @@ SELECT id::text, org_id::text, cluster_id::text,
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	t.ThreatName = handler.NeuVectorThreatName(uint32(t.ThreatID))
+	t.ThreatName = resolveThreatName(uint32(t.ThreatID))
 	t.Category = threatCategory(t.ThreatID)
 	t.Packet = packet
 	if preview := parsePacketL7(packet, t.DstPort); preview != nil {

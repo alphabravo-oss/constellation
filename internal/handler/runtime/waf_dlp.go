@@ -3,6 +3,7 @@ package runtime
 import (
 	"strings"
 
+	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/runtime/dp"
 	"github.com/alphabravocompany/constellation/internal/runtime/waf"
 )
@@ -105,6 +106,36 @@ func WAFRuleTable(enforce bool) []*dp.WAFRule {
 		})
 	}
 	return out
+}
+
+// wafNameByID maps a dp WAF sig id (40000+) back to its human CRS rule message,
+// reproducing WAFRuleTable's exact filter+order so id-40000 lines up with the rule
+// dp actually matched. dp reports WAF hits as "WAF: id 40002"; this turns that into
+// "SQL Injection Attempt (UNION SELECT)" the way NeuVector labels sensor hits.
+var wafNameByID = func() map[uint32]string {
+	m := map[uint32]string{}
+	i := 0
+	for _, r := range waf.BuiltinCRS().Rules {
+		if wafOpToPattern(r.Operator) == "" {
+			continue
+		}
+		m[dp.WAFSigID(i)] = r.Msg
+		i++
+	}
+	return m
+}()
+
+// WAFThreatName returns the CRS rule message for a dp WAF sig id (40000-49999),
+// or "" if the id isn't a known WAF rule.
+func WAFThreatName(id uint32) string { return wafNameByID[id] }
+
+// resolveThreatName labels a dp threat id: WAF sensor hits (40000-49999) get their
+// CRS rule message; everything else falls back to the built-in DPI signature names.
+func resolveThreatName(id uint32) string {
+	if n := WAFThreatName(id); n != "" {
+		return n
+	}
+	return handler.NeuVectorThreatName(id)
 }
 
 // PushWAFRules compiles the CRS pack into dp's hyperscan DB and binds it to the
