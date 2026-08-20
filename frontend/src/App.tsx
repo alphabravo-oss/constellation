@@ -79,6 +79,7 @@ const ResponsePage          = lazy(() => import("./pages/ResponsePage").then((m)
 const ResponseRulesPage     = lazy(() => import("./pages/ResponseRulesPage").then((m) => ({ default: m.ResponseRulesPage })));
 const VulnProfilePage       = lazy(() => import("./pages/VulnProfilePage").then((m) => ({ default: m.VulnProfilePage })));
 const GroupsPage            = lazy(() => import("./pages/GroupsPage").then((m) => ({ default: m.GroupsPage })));
+const GroupDetailPage       = lazy(() => import("./pages/GroupDetailPage").then((m) => ({ default: m.GroupDetailPage })));
 const FileMonitorPage       = lazy(() => import("./pages/FileMonitorPage").then((m) => ({ default: m.FileMonitorPage })));
 const TimelinePage          = lazy(() => import("./pages/TimelinePage").then((m) => ({ default: m.TimelinePage })));
 const NetworkMapPage        = lazy(() => import("./pages/NetworkMapPage").then((m) => ({ default: m.NetworkMapPage })));
@@ -168,6 +169,7 @@ export function App() {
           <Route path="response-rules/:ruleId" element={<SuspenseRoute><ResponseRuleFormPage /></SuspenseRoute>} />
           <Route path="vuln-profiles" element={<SuspenseRoute><VulnProfilePage /></SuspenseRoute>} />
           <Route path="groups"        element={<SuspenseRoute><GroupsPage /></SuspenseRoute>} />
+          <Route path="groups/:groupId" element={<SuspenseRoute><GroupDetailPage /></SuspenseRoute>} />
           <Route path="file-monitor"  element={<SuspenseRoute><FileMonitorPage /></SuspenseRoute>} />
           <Route path="file-monitor/new"     element={<SuspenseRoute><FileMonitorFormPage /></SuspenseRoute>} />
           <Route path="file-monitor/:ruleId" element={<SuspenseRoute><FileMonitorFormPage /></SuspenseRoute>} />

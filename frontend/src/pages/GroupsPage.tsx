@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { CrudPage } from "@/components/CrudPage";
 import { groupsApi, type Group } from "@/api/client";
 
@@ -36,9 +37,10 @@ export function GroupsPage() {
         profile_mode: g.profile_mode,
       })}
       columns={[
-        { header: "Name", render: (g) => <span className="font-medium">{g.name}</span> },
+        { header: "Name", render: (g) => <Link to={g.id} className="font-medium text-[color:var(--color-primary)] hover:underline">{g.name}</Link> },
         { header: "Kind", render: (g) => g.kind },
-        { header: "Mode", render: (g) => g.policy_mode ?? "monitor" },
+        { header: "Network mode", render: (g) => g.policy_mode ?? "monitor" },
+        { header: "Process mode", render: (g) => g.profile_mode ?? "monitor" },
         { header: "Criteria", render: (g) => g.criteria.length },
         { header: "Members", render: (g) => g.members?.length ?? 0 },
       ]}
