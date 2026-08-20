@@ -219,6 +219,18 @@ SELECT cluster_id
  ORDER BY created_at DESC
  LIMIT 1`, tok.ID).Scan(&cid)
 	if errors.Is(err, pgx.ErrNoRows) {
+		// No init-bundle mapping — e.g. the bundle was lost in a repave, so agent
+		// reports would otherwise land with a NULL cluster_id and never show up on the
+		// cluster's node pages. Fall back to the org's cluster ONLY when the org has
+		// exactly one (unambiguous). Multi-cluster orgs still return nil rather than
+		// guessing — unlike the old "oldest cluster" heuristic that mis-attributed them.
+		var n int
+		var single uuid.UUID
+		if e2 := d.Pool().QueryRow(ctx,
+			`SELECT count(*), COALESCE((array_agg(id ORDER BY created_at))[1], '00000000-0000-0000-0000-000000000000'::uuid) FROM clusters WHERE org_id = $1`,
+			tok.OrgID).Scan(&n, &single); e2 == nil && n == 1 {
+			return &single, nil
+		}
 		return nil, nil
 	}
 	if err != nil {
