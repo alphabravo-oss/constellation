@@ -77,6 +77,9 @@ type Check struct {
 	Status      string `json:"status"`   // pass | fail | manual | not_applicable
 	Severity    string `json:"severity"` // info | low | medium | high | critical
 	Evidence    string `json:"evidence,omitempty"`
+	// Remediation is the human-readable fix guidance (kube-bench/docker-bench parse it per
+	// control). NeuVector shows it inline on every failing control.
+	Remediation string `json:"remediation,omitempty"`
 }
 
 // Mapping is the cross-framework mapping for one internal check ID. When an internal check

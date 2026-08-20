@@ -73,6 +73,7 @@ func (c *Compliance) Checks(w http.ResponseWriter, r *http.Request) {
 	rows, err := c.db.Pool().Query(r.Context(), `
 SELECT cc.framework, cc.control_id, cc.title, COALESCE(cc.description,''), cc.status, cc.severity,
        COALESCE(cc.evidence,''), cc.evaluated_at, COALESCE(cc.tags_v2, '{}'::jsonb),
+       COALESCE(cc.remediation,''),
        ce.id::text, ce.reason, ce.expires_at
   FROM compliance_checks cc
   LEFT JOIN LATERAL (
@@ -102,7 +103,7 @@ SELECT cc.framework, cc.control_id, cc.title, COALESCE(cc.description,''), cc.st
 	out := []map[string]any{}
 	for rows.Next() {
 		var row struct {
-			Framework, ControlID, Title, Description, Status, Severity, Evidence string
+			Framework, ControlID, Title, Description, Status, Severity, Evidence, Remediation string
 		}
 		// evaluated_at is a timestamptz; scan into time.Time then format. Scanning
 		// into a string fails the pgx binary path (OID 1184).
@@ -111,7 +112,7 @@ SELECT cc.framework, cc.control_id, cc.title, COALESCE(cc.description,''), cc.st
 		var exemptionExpiresAt *time.Time
 		var tags []byte
 		if err := rows.Scan(&row.Framework, &row.ControlID, &row.Title, &row.Description,
-			&row.Status, &row.Severity, &row.Evidence, &when, &tags, &exemptionID, &exemptionReason, &exemptionExpiresAt); err != nil {
+			&row.Status, &row.Severity, &row.Evidence, &when, &tags, &row.Remediation, &exemptionID, &exemptionReason, &exemptionExpiresAt); err != nil {
 			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
@@ -138,6 +139,7 @@ SELECT cc.framework, cc.control_id, cc.title, COALESCE(cc.description,''), cc.st
 			"effective_status": effectiveStatus,
 			"severity":         row.Severity,
 			"evidence":         row.Evidence,
+			"remediation":      row.Remediation,
 			"evaluated_at":     when.UTC().Format(time.RFC3339),
 			"tags_v2":          tagsParsed,
 		}
@@ -368,8 +370,8 @@ func (c *Compliance) Ingest(w http.ResponseWriter, r *http.Request) {
 		// partial unique index from migration 136 (WHERE node IS NOT NULL — the k8s-object
 		// collector, which stores many rows per control with node NULL, is unaffected).
 		if _, err := tx.Exec(r.Context(), `
-INSERT INTO compliance_checks (org_id, cluster_id, node, framework, control_id, title, description, status, severity, evidence, tags_v2)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+INSERT INTO compliance_checks (org_id, cluster_id, node, framework, control_id, title, description, status, severity, evidence, tags_v2, remediation)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 ON CONFLICT (org_id, COALESCE(cluster_id, '00000000-0000-0000-0000-000000000000'::uuid), node, framework, control_id) WHERE node IS NOT NULL
 DO UPDATE SET
     title = EXCLUDED.title,
@@ -378,8 +380,9 @@ DO UPDATE SET
     severity = EXCLUDED.severity,
     evidence = EXCLUDED.evidence,
     tags_v2 = EXCLUDED.tags_v2,
+    remediation = EXCLUDED.remediation,
     evaluated_at = NOW()`,
-			subj.OrgID, clusterArg, node, ck.Framework, ck.ControlID, ck.Title, ck.Description, ck.Status, ck.Severity, ck.Evidence, tagsRaw,
+			subj.OrgID, clusterArg, node, ck.Framework, ck.ControlID, ck.Title, ck.Description, ck.Status, ck.Severity, ck.Evidence, tagsRaw, ck.Remediation,
 		); err != nil {
 			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return

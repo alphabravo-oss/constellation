@@ -142,6 +142,11 @@ export function CompliancePage() {
               {c.evidence}
             </div>
           )}
+          {c.remediation && c.effective_status === "fail" && (
+            <div className="mt-1 max-w-xl rounded border-l-2 border-[color:var(--color-severity-medium)] bg-muted/40 px-2 py-1 text-[11px] text-muted-foreground">
+              <span className="font-medium text-foreground">Remediation: </span>{c.remediation}
+            </div>
+          )}
           {c.tags_v2 && Object.keys(c.tags_v2).length > 0 && (
             <div className="mt-1 flex flex-wrap items-center gap-1">
               {Object.entries(c.tags_v2).map(([std, meta]) => {

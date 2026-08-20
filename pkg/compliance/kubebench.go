@@ -140,12 +140,13 @@ func kbResultToCheck(r kbResult, framework string) Check {
 		status = "manual"
 	}
 	return Check{
-		Framework: framework,
-		ControlID: r.TestNumber,
-		Title:     r.TestDesc,
-		Status:    status,
-		Severity:  severityForKBNumber(r.TestNumber),
-		Evidence:  strings.TrimSpace(r.ActualValue),
+		Framework:   framework,
+		ControlID:   r.TestNumber,
+		Title:       r.TestDesc,
+		Status:      status,
+		Severity:    severityForKBNumber(r.TestNumber),
+		Evidence:    strings.TrimSpace(r.ActualValue),
+		Remediation: strings.TrimSpace(r.Remediation),
 	}
 }
 
