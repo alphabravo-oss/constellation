@@ -22,6 +22,7 @@
 import { useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { downloadCsv } from "@/lib/csv";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import {
   AlertOctagon, AlertTriangle, ShieldAlert, ShieldCheck, Activity,
@@ -287,7 +288,16 @@ export function DashboardPage() {
             })()}
           </div>
         </Panel>
-        <Panel title="Top Vulnerable Assets" subtitle="Workloads with the most critical + high CVEs" icon={<AlertOctagon className="h-3.5 w-3.5" />}>
+        <Panel title="Top Vulnerable Assets" subtitle="Workloads with the most critical + high CVEs" icon={<AlertOctagon className="h-3.5 w-3.5" />}
+          rightSlot={(posture?.top_vulnerable?.length ?? 0) > 0 ? (
+            <button type="button"
+              onClick={() => downloadCsv("constellation-exposure", ["Namespace", "Workload", "Critical", "High"],
+                (posture?.top_vulnerable ?? []).map((t) => [t.namespace, t.name, t.critical, t.high]))}
+              className="rounded-md border border-border bg-card px-2 py-1 text-[10px] font-medium hover:bg-accent">
+              Export CSV
+            </button>
+          ) : undefined}
+        >
           {(posture?.top_vulnerable?.length ?? 0) === 0 ? (
             <EmptyState title="No vulnerable workloads" hint="Workloads with critical/high CVEs will rank here." />
           ) : (
