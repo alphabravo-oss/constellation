@@ -12,6 +12,7 @@ import { PageHeader } from "@/components/ui/page";
 import { StatCard } from "@/components/ui/stat-card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
+import { fmtBytes } from "@/lib/format";
 
 export function NodeDetailPage() {
   const { nodeName: nodeParam } = useParams<{ nodeName: string }>();
@@ -105,6 +106,8 @@ function HostPosture({ node }: { node: NodeSummary }) {
         <Field label="Operating system" value={displayOS(node)} />
         <Field label="Kernel" value={node.kernel_release || "-"} />
         <Field label="Architecture" value={node.arch || "-"} />
+        <Field label="CPUs" value={node.cpu_count ? String(node.cpu_count) : "-"} />
+        <Field label="Memory" value={node.memory_bytes ? fmtBytes(node.memory_bytes) : "-"} />
         <Field label="CRI runtime" value={node.cri_runtime || "-"} />
         <Field label="CNI" value={node.cni_name || "-"} />
         <Field label="CIS profile" value={node.cis_profile || "-"} />

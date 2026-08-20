@@ -302,6 +302,8 @@ export interface NodeSummary {
   cri_runtime?: string;
   btf_present?: boolean;
   nfqueue_capable?: boolean;
+  cpu_count?: number;
+  memory_bytes?: number;
   package_count: number;
   package_source?: string;
   container_count: number;

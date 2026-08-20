@@ -38,14 +38,15 @@ type HostFacts struct {
 	ObservedAt   time.Time       `json:"observed_at"`
 	AgentVersion string          `json:"agent_version,omitempty"`
 
-	OS     hostFactsOS     `json:"os,omitempty"`
-	Kernel hostFactsKernel `json:"kernel,omitempty"`
-	CGroup hostFactsCGroup `json:"cgroup,omitempty"`
-	BPF    hostFactsBPF    `json:"bpf,omitempty"`
-	Net    hostFactsNet    `json:"net,omitempty"`
-	CNI    hostFactsCNI    `json:"cni,omitempty"`
-	CRI    hostFactsCRI    `json:"cri,omitempty"`
-	Caps   []string        `json:"capabilities,omitempty"`
+	OS       hostFactsOS       `json:"os,omitempty"`
+	Kernel   hostFactsKernel   `json:"kernel,omitempty"`
+	CGroup   hostFactsCGroup   `json:"cgroup,omitempty"`
+	BPF      hostFactsBPF      `json:"bpf,omitempty"`
+	Net      hostFactsNet      `json:"net,omitempty"`
+	CNI      hostFactsCNI      `json:"cni,omitempty"`
+	CRI      hostFactsCRI      `json:"cri,omitempty"`
+	Hardware hostFactsHardware `json:"hardware,omitempty"`
+	Caps     []string          `json:"capabilities,omitempty"`
 
 	// Raw is the whole document as-received, persisted to host_facts.facts.
 	// Set by the handler before insert.
@@ -58,6 +59,11 @@ type hostFactsOS struct {
 	PrettyName string `json:"pretty_name,omitempty"`
 	Version    string `json:"version,omitempty"`
 	VersionID  string `json:"version_id,omitempty"`
+}
+
+type hostFactsHardware struct {
+	CPUCount    int   `json:"cpu_count,omitempty"`
+	MemoryBytes int64 `json:"memory_bytes,omitempty"`
 }
 
 type hostFactsKernel struct {

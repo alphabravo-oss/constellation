@@ -17,6 +17,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -34,13 +35,14 @@ type Facts struct {
 	ObservedAt   time.Time `json:"observed_at"`
 	AgentVersion string    `json:"agent_version,omitempty"`
 
-	OS     OSInfo     `json:"os"`
-	Kernel KernelInfo `json:"kernel"`
-	CGroup CGroupInfo `json:"cgroup"`
-	BPF    BPFInfo    `json:"bpf"`
-	Net    NetInfo    `json:"net"`
-	CNI    CNIInfo    `json:"cni"`
-	CRI    CRIInfo    `json:"cri"`
+	OS       OSInfo       `json:"os"`
+	Kernel   KernelInfo   `json:"kernel"`
+	CGroup   CGroupInfo   `json:"cgroup"`
+	BPF      BPFInfo      `json:"bpf"`
+	Net      NetInfo      `json:"net"`
+	CNI      CNIInfo      `json:"cni"`
+	CRI      CRIInfo      `json:"cri"`
+	Hardware HardwareInfo `json:"hardware"`
 
 	// Capabilities visible to the agent process (effective set).
 	Capabilities []string `json:"capabilities,omitempty"`
@@ -217,8 +219,72 @@ func Collect(ctx context.Context, opts Options) Facts {
 	f.CNI = collectCNI(opts.CNIDir)
 	f.CRI, f.CRISockets = collectCRI(opts)
 	f.Capabilities = collectCapabilities()
+	f.Hardware = collectHardware(opts)
 
 	return f
+}
+
+// HardwareInfo is the node's basic hardware capacity — CPU count + total memory. NeuVector
+// shows these on every host row; Constellation never collected them before.
+type HardwareInfo struct {
+	CPUCount    int   `json:"cpu_count,omitempty"`
+	MemoryBytes int64 `json:"memory_bytes,omitempty"`
+}
+
+// collectHardware reads the host's CPU count and total memory. It prefers the host's
+// /proc (via /proc/1/root or the /host mount) so the pod's cgroup limits don't mask the
+// real node capacity; it falls back to the agent's own view.
+func collectHardware(opts Options) HardwareInfo {
+	var h HardwareInfo
+	// Memory: MemTotal from /proc/meminfo (kB).
+	for _, p := range procPaths(opts, "meminfo") {
+		if b, err := os.ReadFile(p); err == nil {
+			for _, line := range strings.Split(string(b), "\n") {
+				if strings.HasPrefix(line, "MemTotal:") {
+					fields := strings.Fields(line)
+					if len(fields) >= 2 {
+						if kb, err := strconv.ParseInt(fields[1], 10, 64); err == nil {
+							h.MemoryBytes = kb * 1024
+						}
+					}
+					break
+				}
+			}
+			if h.MemoryBytes > 0 {
+				break
+			}
+		}
+	}
+	// CPU count: distinct "processor" lines in /proc/cpuinfo (host view), else runtime.NumCPU.
+	for _, p := range procPaths(opts, "cpuinfo") {
+		if b, err := os.ReadFile(p); err == nil {
+			n := 0
+			for _, line := range strings.Split(string(b), "\n") {
+				if strings.HasPrefix(line, "processor") {
+					n++
+				}
+			}
+			if n > 0 {
+				h.CPUCount = n
+				break
+			}
+		}
+	}
+	if h.CPUCount == 0 {
+		h.CPUCount = runtime.NumCPU()
+	}
+	return h
+}
+
+// procPaths returns candidate absolute paths for a /proc file, preferring the host's view
+// (the /host bind mount and /proc/1/root) over the agent container's own /proc.
+func procPaths(opts Options, name string) []string {
+	paths := []string{}
+	if opts.HostRoot != "" {
+		paths = append(paths, opts.HostRoot+"/proc/"+name)
+	}
+	paths = append(paths, "/proc/1/root/proc/"+name, "/host/proc/"+name, "/proc/"+name)
+	return paths
 }
 
 // ---------------------------------------------------------------------------

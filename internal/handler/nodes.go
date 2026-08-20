@@ -36,6 +36,8 @@ type NodeSummary struct {
 	CRIRuntime             string     `json:"cri_runtime,omitempty"`
 	BTFPresent             *bool      `json:"btf_present,omitempty"`
 	NFQueueCapable         *bool      `json:"nfqueue_capable,omitempty"`
+	CPUCount               int        `json:"cpu_count,omitempty"`
+	MemoryBytes            int64      `json:"memory_bytes,omitempty"`
 	PackageCount           int        `json:"package_count"`
 	PackageSource          string     `json:"package_source,omitempty"`
 	ContainerCount         int        `json:"container_count"`
@@ -188,6 +190,7 @@ SELECT n.node,
        COALESCE(hf.os_id, ''), COALESCE(hf.os_version_id, ''), COALESCE(hf.kernel_release, ''),
        COALESCE(hf.arch, ''), COALESCE(hf.cni_name, ''), COALESCE(hf.cri_runtime, ''),
        hf.btf_present, hf.nfqueue_capable,
+       COALESCE(hf.cpu_count, 0), COALESCE(hf.memory_bytes, 0),
        COALESCE(hp.package_count, 0), COALESCE(hp.source, ''),
        COALESCE(hc.container_count, 0), COALESCE(hpr.process_count, 0),
        COALESCE(cis.profile, ''), COALESCE(cis.passed, 0), COALESCE(cis.failed, 0),
@@ -208,7 +211,9 @@ SELECT n.node,
   FROM node_names n
   LEFT JOIN LATERAL (
       SELECT os_id, os_version_id, kernel_release, arch, btf_present, nfqueue_capable,
-             cni_name, cri_runtime, observed_at
+             cni_name, cri_runtime, observed_at,
+             (facts->'hardware'->>'cpu_count')::int      AS cpu_count,
+             (facts->'hardware'->>'memory_bytes')::bigint AS memory_bytes
         FROM host_facts
        WHERE org_id = $1 AND cluster_id = $2 AND node = n.node
        ORDER BY observed_at DESC LIMIT 1
@@ -288,6 +293,7 @@ SELECT n.node,
 			&item.OSID, &item.OSVersionID, &item.KernelRelease,
 			&item.Arch, &item.CNIName, &item.CRIRuntime,
 			&item.BTFPresent, &item.NFQueueCapable,
+			&item.CPUCount, &item.MemoryBytes,
 			&item.PackageCount, &item.PackageSource,
 			&item.ContainerCount, &item.ProcessCount,
 			&item.CISProfile, &item.CISPassed, &item.CISFailed,
