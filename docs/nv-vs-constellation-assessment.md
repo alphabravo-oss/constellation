@@ -15,6 +15,8 @@ _Generated 2026-08-19 · 207 gaps across 12 functional areas · produced by a 12
 >
 > Next tier (high): **CVSS base/vector** joins into the instances `/findings` view, and response-rule **evaluation order** (row 6).
 
+> **Backlog closed (2026-08-20).** Every achievable critical/high/medium item is shipped and deployed. Beyond the criticals + admission + pagination noted above: response-rule **evaluation order** (priority-driven), **create-local-user** + **custom role editor**, YAML **export/import** for groups/vuln-profiles/DLP, **compliance remediation** surfacing, dashboard + timeline **CSV export** + executive-report download, **configurable lockout** + per-character-class password minimums, **network-graph quarantine** action, **per-host CPU/memory** collection, and **image CIS-Docker config checks**. Also fixed a latent **agent→cluster attribution** bug that had frozen the node surface at a pre-repave snapshot. The only items intentionally not done need net-new subsystems with no clean surface (e.g. wkhtmltopdf-rendered PDFs vs the HTML print fallback already shipped).
+
 
 ---
 
