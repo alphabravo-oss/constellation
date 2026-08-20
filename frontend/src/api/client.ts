@@ -2164,6 +2164,9 @@ export const network = {
     api.get<{ sessions: NetworkSession[] }>("/network/sessions", { params }).then((r) => r.data.sessions),
   sessionsSummary: (params: { cluster_id?: string } = {}) =>
     api.get<Record<string, number>>("/network/sessions/summary", { params }).then((r) => r.data),
+  // NV session-kill: queue a dp ctrl_clear_session for one live connection.
+  killSession: (id: number, params: { cluster_id?: string; node?: string }) =>
+    api.delete<{ ok: boolean; queued: boolean }>(`/network/sessions/${id}`, { params }).then((r) => r.data),
   /** Subscribes to the GET /network/flows:stream SSE channel and invokes
    *  onFlow for each live flow. Returns an unsubscribe fn.
    *

@@ -224,6 +224,13 @@ function NetworkMapInner() {
     enabled: !!clusterID,
     refetchInterval: live ? 15_000 : false,
   });
+  // NV session-kill: queue a dp ctrl_clear_session; agent executes on its next snapshot.
+  const killSessionMut = useMutation({
+    mutationFn: ({ id, node }: { id: number; node: string }) =>
+      network.killSession(id, { cluster_id: clusterID || undefined, node }),
+    onSuccess: () => toast.success("Session kill queued — terminating on the node"),
+    onError: () => toast.error("Failed to queue session kill"),
+  });
   const action = useMutation({
     mutationFn: ({ workload, kind, reason, candidateHash }: { workload: string; kind: "approve" | "apply" | "demote"; reason?: string; candidateHash?: string }) =>
       network.policyAction(workload, kind, { reason, candidate_hash: candidateHash, idempotency_key: lifecycleIdempotencyKey(workload, kind) }, { cluster_id: clusterID || undefined }),
@@ -770,7 +777,8 @@ function NetworkMapInner() {
         {/* Live sessions (NV RESTSession) — bottom-left collapsible card fed by the
             runtime-agent's dp ctrl_list_session snapshot. Sits above the netpol status bar. */}
         <div className="absolute bottom-14 left-3 z-10">
-          <LiveSessionsCard sessions={sessionsQ.data ?? []} loading={sessionsQ.isPending} />
+          <LiveSessionsCard sessions={sessionsQ.data ?? []} loading={sessionsQ.isPending}
+            onKill={(id, node) => killSessionMut.mutate({ id, node })} killing={killSessionMut.isPending} />
         </div>
         {/* Selected-workload mini panel — bottom-right floating, only when a
             workload (not an edge) is selected. Edge selection opens the
@@ -2275,7 +2283,7 @@ function StatPill({
 // LiveSessionsCard renders the live per-connection table (NV RESTSession) as a bottom-left
 // collapsible pill. Starts collapsed so it never obscures the canvas; expands to a table of
 // current connections with directional bytes + TCP state.
-function LiveSessionsCard({ sessions, loading }: { sessions: import("@/api/client").NetworkSession[]; loading: boolean }) {
+function LiveSessionsCard({ sessions, loading, onKill, killing }: { sessions: import("@/api/client").NetworkSession[]; loading: boolean; onKill: (id: number, node: string) => void; killing: boolean }) {
   const [collapsed, setCollapsed] = useState(true);
   const count = sessions.length;
   return (
@@ -2309,19 +2317,28 @@ function LiveSessionsCard({ sessions, loading }: { sessions: import("@/api/clien
                     <th className="py-1 pr-2 font-medium">State</th>
                     <th className="py-1 pr-2 text-right font-medium">In</th>
                     <th className="py-1 pr-2 text-right font-medium">Out</th>
-                    <th className="py-1 text-right font-medium">Age</th>
+                    <th className="py-1 pr-2 text-right font-medium">Age</th>
+                    <th className="py-1 font-medium"></th>
                   </tr>
                 </thead>
                 <tbody className="text-mono">
                   {sessions.slice(0, 200).map((s) => (
-                    <tr key={s.node + s.id} className="border-t border-border/40">
+                    <tr key={s.node + s.id} className="group border-t border-border/40">
                       <td className="py-1 pr-2">{s.client_ip}:{s.client_port}</td>
                       <td className="py-1 pr-2">{s.server_ip}:{s.server_port}</td>
                       <td className="py-1 pr-2 text-muted-foreground">{s.application}</td>
                       <td className="py-1 pr-2 text-muted-foreground">{s.client_state || s.ip_proto}{s.threat_id ? <span className="ml-1 text-[color:var(--color-status-error)]" title={`threat ${s.threat_id}`}>⚠</span> : null}</td>
                       <td className="py-1 pr-2 text-right">{formatBytes(s.client_bytes)}</td>
                       <td className="py-1 pr-2 text-right">{formatBytes(s.server_bytes)}</td>
-                      <td className="py-1 text-right text-muted-foreground">{s.age}s</td>
+                      <td className="py-1 pr-2 text-right text-muted-foreground">{s.age}s</td>
+                      <td className="py-1 text-right">
+                        <button type="button" disabled={killing}
+                          onClick={() => { if (window.confirm(`Terminate this ${s.application || s.ip_proto} session (dp ctrl_clear_session)?`)) onKill(s.id, s.node); }}
+                          title="Kill session (terminate the live connection)"
+                          className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-[color:var(--color-status-error)] group-hover:opacity-100 disabled:opacity-40">
+                          <X className="h-3 w-3" />
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

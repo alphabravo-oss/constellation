@@ -136,10 +136,10 @@ func sessionUploadLoop(
 	logger *slog.Logger,
 	url, token, node string,
 	interval time.Duration,
-	cache *dp.SessionCache,
+	sup *dp.Supervisor,
 	uploaded, dropped *atomic.Uint64,
 ) {
-	if cache == nil {
+	if sup == nil || sup.Sessions() == nil {
 		return
 	}
 	client := sharedUploadClient
@@ -150,7 +150,7 @@ func sessionUploadLoop(
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			sessions := cache.List()
+			sessions := sup.Sessions().List()
 			if len(sessions) == 0 {
 				continue
 			}
@@ -158,21 +158,37 @@ func sessionUploadLoop(
 			for _, s := range sessions {
 				batch = append(batch, dpSessionToRow(s, node))
 			}
-			if err := postSessionBatch(ctx, client, url, token, batch); err != nil {
+			kills, err := postSessionBatch(ctx, client, url, token, batch)
+			if err != nil {
 				logger.Warn("session upload failed; dropping snapshot",
 					slog.Int("sessions", len(batch)), slog.String("err", err.Error()))
 				dropped.Add(uint64(len(batch)))
 				continue
 			}
 			uploaded.Add(uint64(len(batch)))
+			// NV session-kill: the control plane returns any session ids an operator
+			// asked to terminate; issue dp ctrl_clear_session for each.
+			for _, id := range kills {
+				if err := sup.ClearSession(id); err != nil {
+					logger.Warn("session kill failed", slog.Uint64("id", uint64(id)), slog.String("err", err.Error()))
+				} else {
+					logger.Info("session killed via dp ctrl_clear_session", slog.Uint64("id", uint64(id)))
+				}
+			}
 		}
 	}
 }
 
-func postSessionBatch(ctx context.Context, client *http.Client, url, token string, batch []sessionUploadRow) error {
+type sessionUploadResp struct {
+	Accepted int      `json:"accepted"`
+	Kill     []uint32 `json:"kill"`
+}
+
+// postSessionBatch uploads the snapshot and returns the ids the server wants killed.
+func postSessionBatch(ctx context.Context, client *http.Client, url, token string, batch []sessionUploadRow) ([]uint32, error) {
 	body, err := json.Marshal(batch)
 	if err != nil {
-		return fmt.Errorf("marshal: %w", err)
+		return nil, fmt.Errorf("marshal: %w", err)
 	}
 	delays := []time.Duration{0, 200 * time.Millisecond, 800 * time.Millisecond}
 	var lastErr error
@@ -180,13 +196,13 @@ func postSessionBatch(ctx context.Context, client *http.Client, url, token strin
 		if delay > 0 {
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
+				return nil, ctx.Err()
 			case <-time.After(delay):
 			}
 		}
 		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 		if err != nil {
-			return fmt.Errorf("new request: %w", err)
+			return nil, fmt.Errorf("new request: %w", err)
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -195,18 +211,20 @@ func postSessionBatch(ctx context.Context, client *http.Client, url, token strin
 			lastErr = err
 			continue
 		}
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 65536))
 		_ = resp.Body.Close()
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			return nil
+			var parsed sessionUploadResp
+			_ = json.Unmarshal(respBody, &parsed)
+			return parsed.Kill, nil
 		}
 		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
-			return fmt.Errorf("server %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+			return nil, fmt.Errorf("server %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
 		}
 		lastErr = fmt.Errorf("server %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
 	}
 	if lastErr == nil {
 		lastErr = errors.New("unknown session upload failure")
 	}
-	return lastErr
+	return nil, lastErr
 }

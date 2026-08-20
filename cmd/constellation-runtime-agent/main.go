@@ -417,7 +417,7 @@ func main() {
 			// shows current connections. Snapshot, not stream — dp already keeps
 			// the authoritative cache.
 			go sessionUploadLoop(ctx, logger, apiURL+"/api/v1/network-sessions:bulk", apiToken,
-				node, 15*time.Second, dpSup.Sessions(), &nSessionsUploaded, &nSessionsDropped)
+				node, 15*time.Second, dpSup, &nSessionsUploaded, &nSessionsDropped)
 		}
 
 		// NET-3: Hubble lane. On Cilium clusters the dp/iptables datapath is

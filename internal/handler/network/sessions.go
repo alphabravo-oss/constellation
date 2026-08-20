@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	"github.com/alphabravocompany/constellation/internal/handler"
@@ -141,7 +142,48 @@ ON CONFLICT (org_id, cluster_id, node, id) DO UPDATE SET
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"accepted": accepted})
+	// Deliver + consume pending session-kill requests for this node (NV session-kill).
+	// The agent issues dp ctrl_clear_session for each id it gets back.
+	kills := []int64{}
+	if kr, err := h.db.Pool().Query(r.Context(),
+		`DELETE FROM network_session_kills WHERE org_id = $1 AND cluster_id = $2 AND node = $3 RETURNING session_id`,
+		tok.OrgID, clusterID, node); err == nil {
+		defer kr.Close()
+		for kr.Next() {
+			var id int64
+			if kr.Scan(&id) == nil {
+				kills = append(kills, id)
+			}
+		}
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"accepted": accepted, "kill": kills})
+}
+
+// KillSession queues a request to terminate one live session (NV DELETE /v1/session).
+// The runtime-agent picks it up on its next snapshot upload and issues dp
+// ctrl_clear_session. DELETE /network/sessions/{id}?node=&cluster_id=
+func (h *Network) KillSession(w http.ResponseWriter, r *http.Request) {
+	subj, _ := authctx.SubjectFrom(r.Context())
+	clusterID, err := h.resolveNetworkCluster(r, subj.OrgID)
+	if err != nil || clusterID == nil {
+		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "cluster_id required"})
+		return
+	}
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid session id"})
+		return
+	}
+	node := strings.TrimSpace(r.URL.Query().Get("node"))
+	if _, err := h.db.Pool().Exec(r.Context(), `
+INSERT INTO network_session_kills (org_id, cluster_id, node, session_id, requested_by, requested_at)
+VALUES ($1,$2,$3,$4,$5,NOW())
+ON CONFLICT (org_id, cluster_id, node, session_id) DO UPDATE SET requested_by = EXCLUDED.requested_by, requested_at = NOW()`,
+		subj.OrgID, *clusterID, node, id, subj.UserID); err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "queued": true, "session_id": id})
 }
 
 // sessionDTO is one live connection returned to the UI (NV RESTSession).

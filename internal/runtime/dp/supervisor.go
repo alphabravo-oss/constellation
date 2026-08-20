@@ -177,6 +177,14 @@ func New(opt Options) *Supervisor {
 // a matching session. Wave C1.
 func (s *Supervisor) Sessions() *SessionCache { return s.sessions }
 
+// ClearSession asks dp to terminate one live session by its dp id (NV session-kill).
+func (s *Supervisor) ClearSession(id uint32) error {
+	if s == nil || s.client == nil {
+		return fmt.Errorf("dp: supervisor not started")
+	}
+	return s.client.ClearSession(id)
+}
+
 // TapMACs returns the EPMAC of every interface dp is currently inspecting.
 // Wave C4.5: the DLP sync worker uses this to scope BuildDLPRules pushes
 // to the workloads on this node. Returns nil before the supervisor has

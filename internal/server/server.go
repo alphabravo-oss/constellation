@@ -661,6 +661,7 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/network/exposure", s.requireVerb(rbac.VerbReadFindings, networkMap.Exposure))
 			r.Get("/network/sessions", s.requireVerb(rbac.VerbReadFindings, networkMap.Sessions))
 			r.Get("/network/sessions/summary", s.requireVerb(rbac.VerbReadFindings, networkMap.SessionsSummary))
+			r.Delete("/network/sessions/{id}", s.requireVerb(rbac.VerbManagePolicies, networkMap.KillSession))
 			r.Get("/clusters/{id}/network-rules", s.requireVerb(rbac.VerbReadFindings, networkMap.NetworkRules))
 			r.Post("/clusters/{id}/network-rules", s.requireVerb(rbac.VerbManagePolicies, networkMap.UpsertNetworkRule))
 			r.Put("/clusters/{id}/network-rules", s.requireVerb(rbac.VerbManagePolicies, networkMap.UpsertNetworkRule))

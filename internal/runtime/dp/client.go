@@ -58,6 +58,24 @@ type tapPort struct {
 type addTapPortReq struct{ Add *tapPort `json:"ctrl_add_tap_port"` }
 type delTapPortReq struct{ Del *tapPort `json:"ctrl_del_tap_port"` }
 
+// clearSessionReq maps to dp's ctrl_clear_session (ctrl.c:1250). filter_id is the
+// dp session id to terminate; 0 would clear ALL sessions, so callers must pass a
+// specific id. Fire-and-forget like the other oneway ctrl commands.
+type clearSessionReq struct {
+	Clear clearSessionPayload `json:"ctrl_clear_session"`
+}
+type clearSessionPayload struct {
+	FilterID uint32 `json:"filter_id"`
+}
+
+// ClearSession asks dp to terminate the session with the given id (NV session-kill).
+func (c *dpClient) ClearSession(id uint32) error {
+	if id == 0 {
+		return fmt.Errorf("dp: refusing clear-session with id 0 (would clear all)")
+	}
+	return c.sendOneway(&clearSessionReq{Clear: clearSessionPayload{FilterID: id}})
+}
+
 // setDebugPayload — mirrors NeuVector dp_apis.DPSetDebug. Categories are the
 // short names dp recognises (see third_party/neuvector/dp/debug.c): "ctrl",
 // "packet", "session", "timer", "tcp", "parser", "log", "ddos", "policy", "dlp"
