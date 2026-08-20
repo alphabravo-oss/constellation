@@ -11,6 +11,7 @@ import { deployments, type Deployment } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
+import { downloadCsv } from "@/lib/csv";
 import { StatCard } from "@/components/ui/stat-card";
 
 export function DeploymentsPage() {
@@ -109,17 +110,25 @@ export function DeploymentsPage() {
         title="Deployments at risk"
         description="Your riskiest deployments first. The score blends open vulnerabilities, exploit signals (CVSS, KEV), runtime exposure, and workload posture."
         actions={
-          <label className="flex items-center gap-2 text-xs">
-            <span className="text-muted-foreground">Namespace</span>
-            <input
-              type="text"
-              value={namespace}
-              onChange={(e) => setNamespace(e.target.value)}
-              placeholder="(all)"
-              className="rounded-md border border-border bg-card px-2 py-1 text-sm"
-              data-testid="namespace-filter"
-            />
-          </label>
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-2 text-xs">
+              <span className="text-muted-foreground">Namespace</span>
+              <input
+                type="text"
+                value={namespace}
+                onChange={(e) => setNamespace(e.target.value)}
+                placeholder="(all)"
+                className="rounded-md border border-border bg-card px-2 py-1 text-sm"
+                data-testid="namespace-filter"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => downloadCsv("constellation-workloads", ["Namespace", "Name", "Kind", "Risk", "Findings", "Critical", "High", "Privileged", "RunAsRoot", "HostNetwork", "LastSeen"],
+                rows.map((d) => [d.namespace, d.name, d.kind, d.risk_score, d.finding_count, d.critical_count, d.high_count, Number(d.risk_factors?.privileged) > 0 ? "yes" : "", Number(d.risk_factors?.run_as_root) > 0 ? "yes" : "", Number(d.risk_factors?.host_network) > 0 ? "yes" : "", d.last_seen_at]))}
+              className="rounded-md border border-border bg-card px-3 py-1.5 text-sm hover:bg-accent"
+            >Export CSV</button>
+          </div>
         }
       />
 
