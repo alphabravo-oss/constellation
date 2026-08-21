@@ -161,6 +161,7 @@ func buildAdmissionSpecYAML(body createAdmissionRuleBody) (string, error) {
 	images := map[string]any{}
 	containers := map[string]any{}
 	vuln := map[string]any{}
+	pod := map[string]any{}
 	var conditions []map[string]any
 
 	csv := func(v string) []string {
@@ -231,6 +232,37 @@ func buildAdmissionSpecYAML(body createAdmissionRuleBody) (string, error) {
 			}
 		case "require_fix_available":
 			vuln["requireFixAvailable"] = true
+		case "max_medium_cves":
+			n, err := strconv.Atoi(strings.TrimSpace(c.Value))
+			if err != nil || n < 0 {
+				return "", fmt.Errorf("max_medium_cves must be a non-negative integer")
+			}
+			vuln["maxMediumCount"] = n
+		case "max_critical_with_fix_cves":
+			n, err := strconv.Atoi(strings.TrimSpace(c.Value))
+			if err != nil || n < 0 {
+				return "", fmt.Errorf("max_critical_with_fix_cves must be a non-negative integer")
+			}
+			vuln["maxCriticalWithFixCount"] = n
+		case "max_high_with_fix_cves":
+			n, err := strconv.Atoi(strings.TrimSpace(c.Value))
+			if err != nil || n < 0 {
+				return "", fmt.Errorf("max_high_with_fix_cves must be a non-negative integer")
+			}
+			vuln["maxHighWithFixCount"] = n
+		case "host_ipc":
+			cond("spec.hostIPC")
+		case "allow_privilege_escalation":
+			cond("spec.containers[*].securityContext.allowPrivilegeEscalation")
+		case "image_no_os":
+			cond("spec.imageNoOS")
+		case "require_resource_limits":
+			pod["resourceLimit"] = map[string]any{
+				"requireCpuRequest":    true,
+				"requireCpuLimit":      true,
+				"requireMemoryRequest": true,
+				"requireMemoryLimit":   true,
+			}
 		case "pss_level":
 			lvl := strings.ToLower(strings.TrimSpace(c.Value))
 			if lvl != "baseline" && lvl != "restricted" {
@@ -253,6 +285,9 @@ func buildAdmissionSpecYAML(body createAdmissionRuleBody) (string, error) {
 	}
 	if len(vuln) > 0 {
 		spec["vulnerability"] = vuln
+	}
+	if len(pod) > 0 {
+		spec["pod"] = pod
 	}
 	if len(conditions) > 0 {
 		spec["conditions"] = map[string]any{"any": conditions}
@@ -295,14 +330,25 @@ func summarizeAdmissionSpec(specYAML string) (action string, criteria []string) 
 				RequireReadOnlyRootFilesystem bool `yaml:"requireReadOnlyRootFilesystem"`
 			} `yaml:"containers"`
 			Vulnerability struct {
-				MaxAllowedSeverity  string   `yaml:"maxAllowedSeverity"`
-				MaxCriticalCount    *int     `yaml:"maxCriticalCount"`
-				MaxHighCount        *int     `yaml:"maxHighCount"`
-				MaxCveScoreCount    *int     `yaml:"maxCveScoreCount"`
-				CveScore            float64  `yaml:"cveScore"`
-				DeniedCVEs          []string `yaml:"deniedCVEs"`
-				RequireFixAvailable bool     `yaml:"requireFixAvailable"`
+				MaxAllowedSeverity      string   `yaml:"maxAllowedSeverity"`
+				MaxCriticalCount        *int     `yaml:"maxCriticalCount"`
+				MaxHighCount            *int     `yaml:"maxHighCount"`
+				MaxMediumCount          *int     `yaml:"maxMediumCount"`
+				MaxCriticalWithFixCount *int     `yaml:"maxCriticalWithFixCount"`
+				MaxHighWithFixCount     *int     `yaml:"maxHighWithFixCount"`
+				MaxCveScoreCount        *int     `yaml:"maxCveScoreCount"`
+				CveScore                float64  `yaml:"cveScore"`
+				DeniedCVEs              []string `yaml:"deniedCVEs"`
+				RequireFixAvailable     bool     `yaml:"requireFixAvailable"`
 			} `yaml:"vulnerability"`
+			Pod struct {
+				ResourceLimit struct {
+					RequireCPURequest    bool `yaml:"requireCpuRequest"`
+					RequireCPULimit      bool `yaml:"requireCpuLimit"`
+					RequireMemoryRequest bool `yaml:"requireMemoryRequest"`
+					RequireMemoryLimit   bool `yaml:"requireMemoryLimit"`
+				} `yaml:"resourceLimit"`
+			} `yaml:"pod"`
 			PodSecurityStandard struct {
 				Level string `yaml:"level"`
 			} `yaml:"podSecurityStandard"`
@@ -339,6 +385,15 @@ func summarizeAdmissionSpec(specYAML string) (action string, criteria []string) 
 	if s.Vulnerability.MaxHighCount != nil {
 		criteria = append(criteria, fmt.Sprintf("max %d high CVEs", *s.Vulnerability.MaxHighCount))
 	}
+	if s.Vulnerability.MaxMediumCount != nil {
+		criteria = append(criteria, fmt.Sprintf("max %d medium CVEs", *s.Vulnerability.MaxMediumCount))
+	}
+	if s.Vulnerability.MaxCriticalWithFixCount != nil {
+		criteria = append(criteria, fmt.Sprintf("max %d fixable critical CVEs", *s.Vulnerability.MaxCriticalWithFixCount))
+	}
+	if s.Vulnerability.MaxHighWithFixCount != nil {
+		criteria = append(criteria, fmt.Sprintf("max %d fixable high CVEs", *s.Vulnerability.MaxHighWithFixCount))
+	}
 	if s.Vulnerability.MaxCveScoreCount != nil {
 		criteria = append(criteria, fmt.Sprintf("max %d CVEs at CVSS ≥ %.1f", *s.Vulnerability.MaxCveScoreCount, s.Vulnerability.CveScore))
 	}
@@ -350,6 +405,9 @@ func summarizeAdmissionSpec(specYAML string) (action string, criteria []string) 
 	}
 	if s.Vulnerability.RequireFixAvailable {
 		criteria = append(criteria, "require fix available")
+	}
+	if rl := s.Pod.ResourceLimit; rl.RequireCPURequest || rl.RequireCPULimit || rl.RequireMemoryRequest || rl.RequireMemoryLimit {
+		criteria = append(criteria, "require resource limits")
 	}
 	if strings.TrimSpace(s.PodSecurityStandard.Level) != "" {
 		criteria = append(criteria, "PSS "+strings.ToLower(s.PodSecurityStandard.Level))

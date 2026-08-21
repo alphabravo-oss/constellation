@@ -21,6 +21,7 @@ import (
 	admissionv1 "k8s.io/api/admission/v1"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
@@ -426,9 +427,27 @@ func (r Rule) isAllow() bool { return r.Effect == EffectAllow }
 
 // RuleConditions describes what the rule looks for.
 type RuleConditions struct {
-	Privileged                *bool // when true, denies privileged: true
-	HostNetwork               *bool // when true, denies hostNetwork: true
-	HostPID                   *bool
+	Privileged  *bool // when true, denies privileged: true
+	HostNetwork *bool // when true, denies hostNetwork: true
+	HostPID     *bool
+	// HostIPC, when true, denies pods that share the host IPC namespace
+	// (spec.hostIPC=true). NeuVector CriteriaKeyShareIpcWithHost (ADM-26).
+	HostIPC *bool
+	// AllowPrivilegeEscalation, when true, denies any container whose
+	// securityContext.allowPrivilegeEscalation is true. Standalone criterion
+	// (NeuVector CriteriaKeyAllowPrivEscalation, ADM-26); distinct from the
+	// privileged check.
+	AllowPrivilegeEscalation *bool
+	// ImageNoOS, when true, denies pods whose image carries no OS layer (a
+	// scratch/distroless base with no package database to scan). The scanner's
+	// pre-admission mutation stamps ${ImageNoOSAnnotation}="true" on such pods —
+	// mirroring the RequireImageSignature annotation contract — because the base
+	// OS cannot be derived from the pod spec alone. NeuVector CriteriaKeyImageNoOS
+	// (ADM-26).
+	ImageNoOS *bool
+	// ResourceLimit, when set, denies containers that omit or exceed cpu/memory
+	// requests and limits. NeuVector CriteriaKeyRequestLimit (ADM-26).
+	ResourceLimit             *ResourceLimitCondition
 	ReadOnlyRootFS            *bool    // when true, denies missing readOnlyRootFilesystem
 	AllowedImageRegistries    []string // image registry allowlist; empty = no restriction
 	RequireImageSignature     *bool    // when true, denies images without ${SignatureAnnotation}
@@ -476,6 +495,9 @@ type EvidenceGate struct {
 	MaxAllowedSeverity           string   // vulnerability: deny severities above this value
 	MaxCriticalCVEs              *int     // vulnerability: deny if distinct critical CVEs exceed this (nil = unset)
 	MaxHighCVEs                  *int     // vulnerability: deny if distinct high CVEs exceed this (nil = unset)
+	MaxMediumCVEs                *int     // vulnerability: deny if distinct medium CVEs exceed this (nil = unset; NeuVector-style cveMediumCount, ADM-29)
+	MaxCriticalWithFixCVEs       *int     // vulnerability: deny if distinct critical CVEs that have a fix available exceed this (nil = unset; ADM-29)
+	MaxHighWithFixCVEs           *int     // vulnerability: deny if distinct high CVEs that have a fix available exceed this (nil = unset; ADM-29)
 	MaxCVEsAtOrAboveScore        *int     // vulnerability: deny if distinct CVEs with CVSS base score >= MinCVEScore exceed this (nil = unset; NeuVector CriteriaKeyCVEScoreCount)
 	MinCVEScore                  float64  // vulnerability: CVSS base score threshold for MaxCVEsAtOrAboveScore
 	DeniedCVEs                   []string // vulnerability: deny if any of these CVE ids is present, regardless of severity/count (NeuVector CriteriaKeyCVENames). Normalized upper-case.
@@ -504,9 +526,34 @@ type EvidenceGate struct {
 	AllowedVerifierIdentities    []string
 }
 
+// ResourceLimitCondition denies containers that omit or exceed cpu/memory
+// requests and limits (NeuVector CriteriaKeyRequestLimit, ADM-26). The Require*
+// flags catch a missing request/limit; the Max* thresholds (Kubernetes quantity
+// strings such as "500m" or "512Mi") catch a limit set too high. Empty Max*
+// strings disable the exceed check for that resource.
+type ResourceLimitCondition struct {
+	RequireCPURequest    bool
+	RequireCPULimit      bool
+	RequireMemoryRequest bool
+	RequireMemoryLimit   bool
+	MaxCPULimit          string
+	MaxMemoryLimit       string
+}
+
+func (r *ResourceLimitCondition) any() bool {
+	return r != nil && (r.RequireCPURequest || r.RequireCPULimit || r.RequireMemoryRequest ||
+		r.RequireMemoryLimit || strings.TrimSpace(r.MaxCPULimit) != "" || strings.TrimSpace(r.MaxMemoryLimit) != "")
+}
+
 // SignatureAnnotation is the pod annotation that surfaces "image is signed by trusted identity".
 // In production this is set by the scanner's signature verifier as a pre-admission mutation.
 const SignatureAnnotation = "constellation.alphabravo.io/image-signed"
+
+// ImageNoOSAnnotation is the pod annotation the scanner's pre-admission mutation
+// stamps ("true") when a container image has no OS layer (a scratch/distroless
+// base with no package database). The ImageNoOS condition reads it because the
+// base OS is not derivable from the pod spec. NeuVector CriteriaKeyImageNoOS.
+const ImageNoOSAnnotation = "constellation.alphabravo.io/image-no-os"
 
 // NewEngine constructs an Engine with the v1 built-in defaults.
 func NewEngine() *PolicyEngine {
@@ -902,6 +949,28 @@ func evalPodRule(ctx context.Context, r Rule, pod *corev1.Pod, evidence Evidence
 			return "hostPID=true", true, nil
 		}
 	}
+	if c.HostIPC != nil && *c.HostIPC {
+		if pod.Spec.HostIPC {
+			return "hostIPC=true", true, nil
+		}
+	}
+	if c.AllowPrivilegeEscalation != nil && *c.AllowPrivilegeEscalation {
+		for _, ctr := range allContainers(pod) {
+			if ctr.SecurityContext != nil && ctr.SecurityContext.AllowPrivilegeEscalation != nil && *ctr.SecurityContext.AllowPrivilegeEscalation {
+				return fmt.Sprintf("container %q allows privilege escalation", ctr.Name), true, nil
+			}
+		}
+	}
+	if c.ImageNoOS != nil && *c.ImageNoOS {
+		if pod.Annotations[ImageNoOSAnnotation] == "true" {
+			return "image has no OS layer", true, nil
+		}
+	}
+	if c.ResourceLimit.any() {
+		if reason, hit := podResourceLimitViolation(pod, c.ResourceLimit); hit {
+			return reason, true, nil
+		}
+	}
 	if c.ReadOnlyRootFS != nil && *c.ReadOnlyRootFS {
 		for _, ctr := range allContainers(pod) {
 			if ctr.SecurityContext == nil || ctr.SecurityContext.ReadOnlyRootFilesystem == nil || !*ctr.SecurityContext.ReadOnlyRootFilesystem {
@@ -1017,6 +1086,42 @@ func podRunsAsRoot(pod *corev1.Pod) (string, bool) {
 		}
 		if !ctrRunAsNonRoot {
 			return fmt.Sprintf("container %q does not set runAsNonRoot=true", ctr.Name), true
+		}
+	}
+	return "", false
+}
+
+// podResourceLimitViolation reports the first container that omits a required
+// cpu/memory request or limit, or whose cpu/memory limit exceeds the configured
+// maximum. Returns (reason, true) on the first violation, ("", false) if every
+// container satisfies the condition (ADM-26, NeuVector CriteriaKeyRequestLimit).
+func podResourceLimitViolation(pod *corev1.Pod, cond *ResourceLimitCondition) (string, bool) {
+	for _, ctr := range allContainers(pod) {
+		if cond.RequireCPURequest && ctr.Resources.Requests.Cpu().IsZero() {
+			return fmt.Sprintf("container %q has no CPU request", ctr.Name), true
+		}
+		if cond.RequireCPULimit && ctr.Resources.Limits.Cpu().IsZero() {
+			return fmt.Sprintf("container %q has no CPU limit", ctr.Name), true
+		}
+		if cond.RequireMemoryRequest && ctr.Resources.Requests.Memory().IsZero() {
+			return fmt.Sprintf("container %q has no memory request", ctr.Name), true
+		}
+		if cond.RequireMemoryLimit && ctr.Resources.Limits.Memory().IsZero() {
+			return fmt.Sprintf("container %q has no memory limit", ctr.Name), true
+		}
+		if max := strings.TrimSpace(cond.MaxCPULimit); max != "" {
+			if q, err := resource.ParseQuantity(max); err == nil {
+				if cpu := ctr.Resources.Limits.Cpu(); !cpu.IsZero() && cpu.Cmp(q) > 0 {
+					return fmt.Sprintf("container %q CPU limit %s exceeds max %s", ctr.Name, cpu.String(), max), true
+				}
+			}
+		}
+		if max := strings.TrimSpace(cond.MaxMemoryLimit); max != "" {
+			if q, err := resource.ParseQuantity(max); err == nil {
+				if mem := ctr.Resources.Limits.Memory(); !mem.IsZero() && mem.Cmp(q) > 0 {
+					return fmt.Sprintf("container %q memory limit %s exceeds max %s", ctr.Name, mem.String(), max), true
+				}
+			}
 		}
 	}
 	return "", false
@@ -1201,6 +1306,11 @@ var podTemplateKinds = map[string]bool{
 	"ReplicationController": true,
 	"Job":                   true,
 	"CronJob":               true,
+	// OpenShift DeploymentConfig (apps.openshift.io/v1) embeds its PodTemplateSpec
+	// at spec.template, the same path as the apps/v1 controllers, so the generic
+	// extractor handles it unchanged. Without this entry admission is bypassed for
+	// DeploymentConfig-created pods on OCP (ADM-30).
+	"DeploymentConfig": true,
 }
 
 // isPodTemplateKind reports whether kind is a controller whose object embeds a

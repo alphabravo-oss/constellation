@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 type admissionRuleDocument struct {
@@ -47,20 +48,23 @@ type admissionRuleSpec struct {
 	} `yaml:"images"`
 	ScanEvidence  admissionRuleScanEvidence `yaml:"scanEvidence"`
 	Vulnerability struct {
-		MaxAllowedSeverity     string   `yaml:"maxAllowedSeverity"`
-		MaxCriticalCount       *int     `yaml:"maxCriticalCount"`
-		MaxHighCount           *int     `yaml:"maxHighCount"`
-		MaxCveScoreCount       *int     `yaml:"maxCveScoreCount"` // deny if CVEs with CVSS score >= cveScore exceed this count
-		CveScore               float64  `yaml:"cveScore"`         // CVSS base score threshold for maxCveScoreCount
-		DeniedCVEs             []string `yaml:"deniedCVEs"`       // deny if any of these CVE ids is present regardless of severity/count (NeuVector CriteriaKeyCVENames)
-		CveGraceDays           *int     `yaml:"cveGraceDays"`     // ignore CVEs published within this many days when counting/denying (NeuVector SubCriteriaPublishDays)
-		RequireKnownScanResult bool     `yaml:"requireKnownScanResult"`
-		HonorActiveExceptions  bool     `yaml:"honorActiveExceptions"`
-		MaxScanAge             string   `yaml:"maxScanAge"`
-		RequireVulnDBBundle    bool     `yaml:"requireVulnDBBundle"`
-		CanonicalEngine        string   `yaml:"canonicalEngine"`
-		CanonicalEngines       []string `yaml:"canonicalEngines"`
-		RequireFixAvailable    bool     `yaml:"requireFixAvailable"`
+		MaxAllowedSeverity      string   `yaml:"maxAllowedSeverity"`
+		MaxCriticalCount        *int     `yaml:"maxCriticalCount"`
+		MaxHighCount            *int     `yaml:"maxHighCount"`
+		MaxMediumCount          *int     `yaml:"maxMediumCount"`          // ADM-29: deny if distinct medium CVEs exceed this
+		MaxCriticalWithFixCount *int     `yaml:"maxCriticalWithFixCount"` // ADM-29: deny if distinct critical CVEs that have a fix exceed this
+		MaxHighWithFixCount     *int     `yaml:"maxHighWithFixCount"`     // ADM-29: deny if distinct high CVEs that have a fix exceed this
+		MaxCveScoreCount        *int     `yaml:"maxCveScoreCount"`        // deny if CVEs with CVSS score >= cveScore exceed this count
+		CveScore                float64  `yaml:"cveScore"`                // CVSS base score threshold for maxCveScoreCount
+		DeniedCVEs              []string `yaml:"deniedCVEs"`              // deny if any of these CVE ids is present regardless of severity/count (NeuVector CriteriaKeyCVENames)
+		CveGraceDays            *int     `yaml:"cveGraceDays"`            // ignore CVEs published within this many days when counting/denying (NeuVector SubCriteriaPublishDays)
+		RequireKnownScanResult  bool     `yaml:"requireKnownScanResult"`
+		HonorActiveExceptions   bool     `yaml:"honorActiveExceptions"`
+		MaxScanAge              string   `yaml:"maxScanAge"`
+		RequireVulnDBBundle     bool     `yaml:"requireVulnDBBundle"`
+		CanonicalEngine         string   `yaml:"canonicalEngine"`
+		CanonicalEngines        []string `yaml:"canonicalEngines"`
+		RequireFixAvailable     bool     `yaml:"requireFixAvailable"`
 	} `yaml:"vulnerability"`
 	Findings struct {
 		Kinds             []string `yaml:"kinds"`
@@ -97,6 +101,19 @@ type admissionRuleSpec struct {
 		// permits PVCs that omit storageClassName (cluster default).
 		AllowedStorageClasses []string `yaml:"allowedStorageClasses"`
 	} `yaml:"persistentVolumeClaim"`
+	// Pod carries long-tail pod-spec criteria (ADM-26) that are not simple
+	// boolean field-equals conditions. Boolean pod criteria (hostIPC,
+	// allowPrivilegeEscalation, imageNoOS) go through conditions.any instead.
+	Pod struct {
+		ResourceLimit struct {
+			RequireCPURequest    bool   `yaml:"requireCpuRequest"`
+			RequireCPULimit      bool   `yaml:"requireCpuLimit"`
+			RequireMemoryRequest bool   `yaml:"requireMemoryRequest"`
+			RequireMemoryLimit   bool   `yaml:"requireMemoryLimit"`
+			MaxCPULimit          string `yaml:"maxCpuLimit"`
+			MaxMemoryLimit       string `yaml:"maxMemoryLimit"`
+		} `yaml:"resourceLimit"`
+	} `yaml:"pod"`
 	Identity struct {
 		// UserMatch / GroupMatch are anchored regexps evaluated against the
 		// AdmissionReview userInfo (username and groups). A match fires the rule.
@@ -207,6 +224,17 @@ func RuleFromYAML(id, title, description, mode, specYAML string) (rule Rule, sup
 			elevatedFields.hostNetwork = true
 		case "spec.hostpid":
 			elevatedFields.hostPID = true
+		case "spec.hostipc":
+			// ADM-26: share host IPC namespace (NeuVector CriteriaKeyShareIpcWithHost).
+			conditions.HostIPC = boolPtr(true)
+		case "spec.containers[*].securitycontext.allowprivilegeescalation",
+			"spec.initcontainers[*].securitycontext.allowprivilegeescalation",
+			"spec.ephemeralcontainers[*].securitycontext.allowprivilegeescalation":
+			// ADM-26: standalone allowPrivilegeEscalation (NeuVector CriteriaKeyAllowPrivEscalation).
+			conditions.AllowPrivilegeEscalation = boolPtr(true)
+		case "spec.imagenoos":
+			// ADM-26: image without OS layer (NeuVector CriteriaKeyImageNoOS).
+			conditions.ImageNoOS = boolPtr(true)
 		}
 	}
 
@@ -249,6 +277,31 @@ func RuleFromYAML(id, title, description, mode, specYAML string) (rule Rule, sup
 	if len(doc.Spec.PersistentVolumeClaim.AllowedStorageClasses) > 0 {
 		conditions.AllowedStorageClasses = append([]string(nil), doc.Spec.PersistentVolumeClaim.AllowedStorageClasses...)
 	}
+	// ADM-26: long-tail resource-limit criterion. Validate any Max* quantity at
+	// load time so a malformed threshold surfaces to the operator instead of
+	// silently failing open at evaluation.
+	rl := doc.Spec.Pod.ResourceLimit
+	resourceCond := &ResourceLimitCondition{
+		RequireCPURequest:    rl.RequireCPURequest,
+		RequireCPULimit:      rl.RequireCPULimit,
+		RequireMemoryRequest: rl.RequireMemoryRequest,
+		RequireMemoryLimit:   rl.RequireMemoryLimit,
+		MaxCPULimit:          strings.TrimSpace(rl.MaxCPULimit),
+		MaxMemoryLimit:       strings.TrimSpace(rl.MaxMemoryLimit),
+	}
+	if resourceCond.MaxCPULimit != "" {
+		if _, err := resource.ParseQuantity(resourceCond.MaxCPULimit); err != nil {
+			return Rule{}, false, fmt.Errorf("pod.resourceLimit.maxCpuLimit %q is not a valid quantity: %w", resourceCond.MaxCPULimit, err)
+		}
+	}
+	if resourceCond.MaxMemoryLimit != "" {
+		if _, err := resource.ParseQuantity(resourceCond.MaxMemoryLimit); err != nil {
+			return Rule{}, false, fmt.Errorf("pod.resourceLimit.maxMemoryLimit %q is not a valid quantity: %w", resourceCond.MaxMemoryLimit, err)
+		}
+	}
+	if resourceCond.any() {
+		conditions.ResourceLimit = resourceCond
+	}
 	if v := strings.TrimSpace(doc.Spec.Identity.UserMatch); v != "" {
 		// C3: reject an uncompilable identity regex at load time. An invalid
 		// pattern would otherwise compile to nil at evaluation and silently never
@@ -288,6 +341,9 @@ func RuleFromYAML(id, title, description, mode, specYAML string) (rule Rule, sup
 	if doc.Spec.Vulnerability.MaxAllowedSeverity != "" ||
 		doc.Spec.Vulnerability.MaxCriticalCount != nil ||
 		doc.Spec.Vulnerability.MaxHighCount != nil ||
+		doc.Spec.Vulnerability.MaxMediumCount != nil ||
+		doc.Spec.Vulnerability.MaxCriticalWithFixCount != nil ||
+		doc.Spec.Vulnerability.MaxHighWithFixCount != nil ||
 		doc.Spec.Vulnerability.MaxCveScoreCount != nil ||
 		doc.Spec.Vulnerability.RequireFixAvailable ||
 		doc.Spec.Vulnerability.RequireKnownScanResult ||
@@ -297,6 +353,9 @@ func RuleFromYAML(id, title, description, mode, specYAML string) (rule Rule, sup
 			MaxAllowedSeverity:     strings.ToLower(strings.TrimSpace(doc.Spec.Vulnerability.MaxAllowedSeverity)),
 			MaxCriticalCVEs:        doc.Spec.Vulnerability.MaxCriticalCount,
 			MaxHighCVEs:            doc.Spec.Vulnerability.MaxHighCount,
+			MaxMediumCVEs:          doc.Spec.Vulnerability.MaxMediumCount,
+			MaxCriticalWithFixCVEs: doc.Spec.Vulnerability.MaxCriticalWithFixCount,
+			MaxHighWithFixCVEs:     doc.Spec.Vulnerability.MaxHighWithFixCount,
 			MaxCVEsAtOrAboveScore:  doc.Spec.Vulnerability.MaxCveScoreCount,
 			MinCVEScore:            doc.Spec.Vulnerability.CveScore,
 			DeniedCVEs:             deniedCVEs,
@@ -542,6 +601,10 @@ func hasSupportedConditions(c RuleConditions) bool {
 	return c.Privileged != nil ||
 		c.HostNetwork != nil ||
 		c.HostPID != nil ||
+		c.HostIPC != nil ||
+		c.AllowPrivilegeEscalation != nil ||
+		c.ImageNoOS != nil ||
+		c.ResourceLimit.any() ||
 		c.ReadOnlyRootFS != nil ||
 		c.RequireImageSignature != nil ||
 		c.RequireNonRoot != nil ||

@@ -159,7 +159,8 @@ func (s *Source) EvaluateAdmissionEvidenceWithDetails(ctx context.Context, rule 
 			// Count-based vulnerability gate (deny if distinct critical/high CVE
 			// counts exceed the thresholds), independent of the any-above-severity
 			// path below.
-			if gate.Type == "vulnerability" && (gate.MaxCriticalCVEs != nil || gate.MaxHighCVEs != nil) {
+			if gate.Type == "vulnerability" && (gate.MaxCriticalCVEs != nil || gate.MaxHighCVEs != nil ||
+				gate.MaxMediumCVEs != nil || gate.MaxCriticalWithFixCVEs != nil || gate.MaxHighWithFixCVEs != nil) {
 				reason, denied, err := s.findVulnCountHit(ctx, gate, image)
 				if err != nil {
 					return "", false, nil, err
@@ -467,14 +468,21 @@ SELECT a.id
 // engines is not double-counted. Honors active image acceptances when the gate
 // opts in. Returns (reason, denied, err).
 func (s *Source) findVulnCountHit(ctx context.Context, gate admission.EvidenceGate, image admissionEvidenceImage) (string, bool, error) {
-	if gate.MaxCriticalCVEs == nil && gate.MaxHighCVEs == nil {
+	if gate.MaxCriticalCVEs == nil && gate.MaxHighCVEs == nil && gate.MaxMediumCVEs == nil &&
+		gate.MaxCriticalWithFixCVEs == nil && gate.MaxHighWithFixCVEs == nil {
 		return "", false, nil
 	}
-	var crit, high int
+	// A CVE counts as fixable when it carries a non-empty fixed_version, the same
+	// convention the maxAllowedSeverity path uses for requireFixAvailable.
+	const fixAvail = `NULLIF(f.fixed_version, '') IS NOT NULL`
+	var crit, high, medium, critFix, highFix int
 	err := s.pool.QueryRow(ctx, `
 SELECT
   COUNT(DISTINCT f.external_id) FILTER (WHERE lower(f.severity)='critical' AND COALESCE(f.external_id,'')<>'' AND `+cveGraceKeepClause("$5")+`),
-  COUNT(DISTINCT f.external_id) FILTER (WHERE lower(f.severity)='high'     AND COALESCE(f.external_id,'')<>'' AND `+cveGraceKeepClause("$5")+`)
+  COUNT(DISTINCT f.external_id) FILTER (WHERE lower(f.severity)='high'     AND COALESCE(f.external_id,'')<>'' AND `+cveGraceKeepClause("$5")+`),
+  COUNT(DISTINCT f.external_id) FILTER (WHERE lower(f.severity)='medium'   AND COALESCE(f.external_id,'')<>'' AND `+cveGraceKeepClause("$5")+`),
+  COUNT(DISTINCT f.external_id) FILTER (WHERE lower(f.severity)='critical' AND COALESCE(f.external_id,'')<>'' AND `+fixAvail+` AND `+cveGraceKeepClause("$5")+`),
+  COUNT(DISTINCT f.external_id) FILTER (WHERE lower(f.severity)='high'     AND COALESCE(f.external_id,'')<>'' AND `+fixAvail+` AND `+cveGraceKeepClause("$5")+`)
   FROM image_scan_results r
   JOIN image_scan_findings f ON f.org_id = r.org_id AND f.image_scan_result_id = r.id
  WHERE r.org_id = $1
@@ -483,7 +491,7 @@ SELECT
         SELECT 1 FROM image_acceptances ia
          WHERE ia.org_id = r.org_id AND ia.image_digest = r.image_digest
            AND ia.revoked_at IS NULL AND ia.accepted_until > NOW()))`,
-		s.orgID, image.Candidates, image.Digest, gate.HonorActiveExceptions, graceDaysArg(gate)).Scan(&crit, &high)
+		s.orgID, image.Candidates, image.Digest, gate.HonorActiveExceptions, graceDaysArg(gate)).Scan(&crit, &high, &medium, &critFix, &highFix)
 	if err != nil {
 		return "", false, err
 	}
@@ -492,6 +500,15 @@ SELECT
 	}
 	if gate.MaxHighCVEs != nil && high > *gate.MaxHighCVEs {
 		return fmt.Sprintf("image %q has %d high CVEs (policy allows at most %d)", image.Raw, high, *gate.MaxHighCVEs), true, nil
+	}
+	if gate.MaxMediumCVEs != nil && medium > *gate.MaxMediumCVEs {
+		return fmt.Sprintf("image %q has %d medium CVEs (policy allows at most %d)", image.Raw, medium, *gate.MaxMediumCVEs), true, nil
+	}
+	if gate.MaxCriticalWithFixCVEs != nil && critFix > *gate.MaxCriticalWithFixCVEs {
+		return fmt.Sprintf("image %q has %d fixable critical CVEs (policy allows at most %d)", image.Raw, critFix, *gate.MaxCriticalWithFixCVEs), true, nil
+	}
+	if gate.MaxHighWithFixCVEs != nil && highFix > *gate.MaxHighWithFixCVEs {
+		return fmt.Sprintf("image %q has %d fixable high CVEs (policy allows at most %d)", image.Raw, highFix, *gate.MaxHighWithFixCVEs), true, nil
 	}
 	return "", false, nil
 }
