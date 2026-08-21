@@ -236,6 +236,18 @@ func (s *Supervisor) EnforceDPIScopeMACs() (wafMACs, dlpMACs map[string]bool) {
 	return s.enforce.enforceDPIScopeMACs()
 }
 
+// EnforceMACs returns every active inline (NFQUEUE) enforce-mode ep MAC. The
+// policy-sync worker unions these with TapMACs so the dp policy table is pushed
+// to inline eps as well — an inline-only workload is skipped by the tap
+// reconciler, so without this its verdict-capable ep never receives a rule
+// table and dp default-allows it. Nil before the enforce manager starts.
+func (s *Supervisor) EnforceMACs() []string {
+	if s == nil || s.enforce == nil {
+		return nil
+	}
+	return s.enforce.allMACs()
+}
+
 // Generation returns the current dp lifecycle generation: it equals the number
 // of times dp has been (re)started and is bumped atomically each time a new dp
 // instance is launched. Consumers compare it against a cached value to detect a

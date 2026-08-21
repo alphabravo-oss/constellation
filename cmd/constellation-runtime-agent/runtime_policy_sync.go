@@ -193,7 +193,11 @@ func (w *RuntimePolicySyncWorker) SyncOnce(ctx context.Context) {
 		return
 	}
 
-	merged := buildMergedWorkloadPolicy(policies, w.cfg.DPSup.TapMACs())
+	// Scope the merged table to tap MACs UNION inline-enforce MACs. An inline
+	// (NFQUEUE) workload is skipped by the tap reconciler, so its verdict-capable
+	// ep is absent from TapMACs; without unioning EnforceMACs the policy table
+	// never reaches it and dp default-allows the very workload we put inline.
+	merged := buildMergedWorkloadPolicy(policies, unionMACs(w.cfg.DPSup.TapMACs(), w.cfg.DPSup.EnforceMACs()))
 
 	// Feed the FQDN allow-set every successful sync (cheap, idempotent) so the
 	// resolver only learns IPs for names an active rule references. This is the
@@ -273,6 +277,22 @@ func (w *RuntimePolicySyncWorker) SyncOnce(ctx context.Context) {
 // contributes no rules. Each rule is stamped with its policy's dp_policy_id so
 // the wire PolicyRule.ID echoes back through DPMsgConnect.PolicyId. Mirrors
 // handler/runtime.RuntimePolicy.ToWorkloadPolicy, kept in sync by shape.
+// unionMACs merges two MAC lists, de-duplicated, preserving order (a first).
+func unionMACs(a, b []string) []string {
+	seen := make(map[string]bool, len(a)+len(b))
+	out := make([]string, 0, len(a)+len(b))
+	for _, list := range [][]string{a, b} {
+		for _, m := range list {
+			if m == "" || seen[m] {
+				continue
+			}
+			seen[m] = true
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 func buildMergedWorkloadPolicy(policies []runtimePolicyWire, macs []string) *dp.WorkloadPolicy {
 	out := &dp.WorkloadPolicy{
 		WorkloadID: "node",

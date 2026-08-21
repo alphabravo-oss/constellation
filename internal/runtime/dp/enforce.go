@@ -342,6 +342,22 @@ func (m *enforceManager) enforceDPIScopeMACs() (wafMACs, dlpMACs map[string]bool
 	return wafMACs, dlpMACs
 }
 
+// allMACs returns every active inline (NFQUEUE) enforce ep MAC. The policy-sync
+// worker unions these with the tap MACs so a rule table is pushed to inline eps
+// too — without this an inline workload gets the NFQUEUE datapath but no policy
+// table (dp default-allows it), the enforce-path analogue of the DLP/WAF bind.
+func (m *enforceManager) allMACs() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]string, 0, len(m.current))
+	for _, t := range m.current {
+		if t.EPMAC != "" {
+			out = append(out, t.EPMAC)
+		}
+	}
+	return out
+}
+
 // isEnforcedMAC reports whether mac is currently an active inline (NFQUEUE)
 // enforce target. The tap reconciler consults this as a belt-and-suspenders
 // guard over the EnforceTarget skip: even if a transient Enforce=false flap in
