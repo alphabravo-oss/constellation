@@ -947,6 +947,9 @@ func (s *Server) buildRouter() chi.Router {
 			r.Post("/users/{id}/force-password-reset", s.requireVerb(rbac.VerbManageUsers, users.ForcePasswordReset))
 			// AUTH-LOCKOUT-17: clear a brute-force lockout (failed-login counter + block window).
 			r.Post("/users/{id}/unlock", s.requireVerb(rbac.VerbManageUsers, users.Unlock))
+			// AUTH-USERCRUD-20: local-user create/update (org-scoped, priv-escalation-guarded).
+			r.Post("/users", s.requireVerb(rbac.VerbManageUsers, users.Create))
+			r.Put("/users/{id}", s.requireVerb(rbac.VerbManageUsers, users.Update))
 
 			dashboard := handler.NewDashboard(s.db)
 			r.Get("/dashboard/summary", s.requireVerb(rbac.VerbReadFindings, dashboard.Summary))
@@ -1027,6 +1030,10 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/sbom/spdx/{asset_id}", s.requireVerb(rbac.VerbReadFindings, sboms.SPDX))
 			r.Get("/sbom/cyclonedx/{asset_id}", s.requireVerb(rbac.VerbReadFindings, sboms.CycloneDX))
 			r.Get("/sbom/mbom/{asset_id}", s.requireVerb(rbac.VerbReadFindings, sboms.MBOM))
+			// SCAN-VEX-37: VEX export (OpenVEX + CycloneDX VEX) from an asset's findings.
+			vex := handler.NewVEX(s.db)
+			r.Get("/vex/openvex/{asset_id}", s.requireVerb(rbac.VerbReadFindings, vex.OpenVEX))
+			r.Get("/vex/cyclonedx/{asset_id}", s.requireVerb(rbac.VerbReadFindings, vex.CycloneDX))
 
 			compl := compliance.NewCompliance(s.db, s.auditLog).WithResponseAlerts(
 				runtime.NewResponseDispatch(s.db, s.dispatcher),
@@ -1045,6 +1052,10 @@ func (s *Server) buildRouter() chi.Router {
 			r.Post("/compliance/exemptions", s.requireVerb(rbac.VerbManagePolicies, compl.CreateExemption))
 			r.Post("/compliance/exemptions/{id}/revoke", s.requireVerb(rbac.VerbManagePolicies, compl.RevokeExemption))
 			r.Post("/compliance/ingest", s.requireVerb(rbac.VerbManagePolicies, compl.Ingest))
+			// CMP-RUN-31: on-demand bench run — UI/API enqueues, the runner (same token as
+			// ingest) drains the queue in watch mode.
+			r.Post("/compliance/bench/run", s.requireVerb(rbac.VerbManagePolicies, compl.RunBench))
+			r.Post("/compliance/bench/claim", s.requireVerb(rbac.VerbManagePolicies, compl.ClaimBenchRun))
 
 			// Wave N8: production-grade scheduled compliance runs backed by the
 			// compliance_schedules + compliance_runs tables (migration 039). The
@@ -1223,6 +1234,11 @@ func (s *Server) buildRouter() chi.Router {
 			registries := handler.NewRegistries(s.db, s.auditLog)
 			r.Get("/registries", s.requireVerb(rbac.VerbReadFindings, registries.List))
 			r.Post("/registries", s.requireVerb(rbac.VerbManageRegistries, registries.Create))
+			// SIG-ROOTS-38: per-org sigstore roots-of-trust CRUD.
+			sigRoots := handler.NewSigstoreRoots(s.db, s.auditLog)
+			r.Get("/sigstore-roots", s.requireVerb(rbac.VerbReadFindings, sigRoots.List))
+			r.Post("/sigstore-roots", s.requireVerb(rbac.VerbManageRegistries, sigRoots.Create))
+			r.Delete("/sigstore-roots/{id}", s.requireVerb(rbac.VerbManageRegistries, sigRoots.Delete))
 			r.Get("/registries/{id}", s.requireVerb(rbac.VerbReadFindings, registries.Get))
 			r.Patch("/registries/{id}", s.requireVerb(rbac.VerbManageRegistries, registries.Patch))
 			r.Delete("/registries/{id}", s.requireVerb(rbac.VerbManageRegistries, registries.Delete))
