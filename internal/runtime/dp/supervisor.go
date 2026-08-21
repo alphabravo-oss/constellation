@@ -185,6 +185,21 @@ func (s *Supervisor) ClearSession(id uint32) error {
 	return s.client.ClearSession(id)
 }
 
+// SetWeakTLSDetection enables/disables the weak-TLS version signatures (SSLv3, TLS 1.0,
+// TLS 1.1) at runtime. Off by default (noisy false positives in tap mode); the console can
+// turn it on when genuine legacy-TLS detection is wanted.
+func (s *Supervisor) SetWeakTLSDetection(enable bool) error {
+	if s == nil || s.client == nil {
+		return fmt.Errorf("dp: supervisor not started")
+	}
+	for _, idx := range []uint32{ThreatSSLv3, ThreatTLS10, ThreatTLS11} {
+		if err := s.client.SetThreatStatus(idx, enable); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // TapMACs returns the EPMAC of every interface dp is currently inspecting.
 // Wave C4.5: the DLP sync worker uses this to scope BuildDLPRules pushes
 // to the workloads on this node. Returns nil before the supervisor has

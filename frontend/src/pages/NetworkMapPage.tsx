@@ -46,6 +46,7 @@ import { toast } from "sonner";
 
 import {
   network,
+  policies,
   quarantine,
   runtimePcap,
   runtimeThreats,
@@ -223,6 +224,17 @@ function NetworkMapInner() {
     queryFn: () => network.sessions({ cluster_id: clusterID || undefined }),
     enabled: !!clusterID,
     refetchInterval: live ? 15_000 : false,
+  });
+  // DPI toggle: weak-TLS version detection (SSLv3/TLS1.0/1.1). Applied live by the agent.
+  const dpiSettingsQ = useQuery({
+    queryKey: ["dpi-threat-settings", clusterID],
+    queryFn: () => policies.dpiThreatSettings({ cluster_id: clusterID || undefined }),
+    enabled: !!clusterID,
+  });
+  const dpiToggleMut = useMutation({
+    mutationFn: (weak_tls_enabled: boolean) => policies.updateDpiThreatSettings({ weak_tls_enabled }, { cluster_id: clusterID || undefined }),
+    onSuccess: (r) => { toast.success(`Weak-TLS detection ${r.weak_tls_enabled ? "enabled" : "disabled"} — applies within ~15s`); void queryClient.invalidateQueries({ queryKey: ["dpi-threat-settings", clusterID] }); },
+    onError: () => toast.error("Failed to update DPI setting"),
   });
   // NV session-kill: queue a dp ctrl_clear_session; agent executes on its next snapshot.
   const killSessionMut = useMutation({
@@ -768,6 +780,9 @@ function NetworkMapInner() {
         <ThreatsCard
           threats={threatsQ.data ?? []}
           flows={flows}
+          weakTLS={dpiSettingsQ.data?.weak_tls_enabled ?? false}
+          onToggleWeakTLS={(v) => dpiToggleMut.mutate(v)}
+          toggling={dpiToggleMut.isPending}
           onPivot={(flowID) => {
             selectFlow(flowID);
             setPopoverOpen(true);
@@ -2352,17 +2367,22 @@ function LiveSessionsCard({ sessions, loading, onKill, killing }: { sessions: im
 function ThreatsCard({
   threats,
   flows,
+  weakTLS,
+  onToggleWeakTLS,
+  toggling,
   onPivot,
 }: {
   threats: RuntimeThreat[];
   flows: NetworkFlow[];
+  weakTLS: boolean;
+  onToggleWeakTLS: (v: boolean) => void;
+  toggling: boolean;
   onPivot: (flowID: string) => void;
 }) {
   const [drilldownID, setDrilldownID] = useState<string | null>(null);
   // Start collapsed so the card never auto-opens over the canvas — it's a compact
   // "DPI threats · N" pill the operator expands on demand (keeps the map unobstructed).
   const [collapsed, setCollapsed] = useState(true);
-  if (threats.length === 0) return null;
   // Top 5 by reported_at desc. The API already orders by `at DESC`, so we
   // just trim. Higher-severity-first sorting is tempting but the time
   // ordering matches what an operator scanning for "what just happened"
@@ -2384,16 +2404,18 @@ function ThreatsCard({
     const byPort = flows.find((f) => f.dst_port === t.dst_port);
     return byPort?.id ?? null;
   };
+  const hot = threats.length > 0;
   return (
     <>
       <div
         className={cn(
-          "max-w-[80vw] rounded-md border border-[color:var(--color-status-error)]/60 bg-card/95 p-2 text-[11px] shadow-[var(--elev-2)] backdrop-blur",
+          "max-w-[80vw] rounded-md border bg-card/95 p-2 text-[11px] shadow-[var(--elev-2)] backdrop-blur",
+          hot ? "border-[color:var(--color-status-error)]/60" : "border-border",
           collapsed ? "w-auto" : "w-[340px]",
         )}
         data-testid="network-threats-card"
       >
-        <div className="mb-1 flex items-center justify-between px-1 text-[10px] uppercase tracking-wider text-[color:var(--color-status-error)]">
+        <div className={cn("mb-1 flex items-center justify-between px-1 text-[10px] uppercase tracking-wider", hot ? "text-[color:var(--color-status-error)]" : "text-muted-foreground")}>
           <span className="flex items-center gap-1">
             <ShieldAlert className="h-3 w-3" aria-hidden />
             DPI threats · {threats.length}
@@ -2473,6 +2495,22 @@ function ThreatsCard({
             + {threats.length - recent.length} more in window
           </div>
         )}
+        {!hot && (
+          <p className="px-1 py-1 text-[10px] text-muted-foreground">No DPI threats in the last 24h.</p>
+        )}
+        {/* DPI signature toggle (NV-style): weak-TLS version detection is off by default
+            (dp reads the legacy TLS record version in tap mode → false positives on modern HTTPS). */}
+        <label className="mt-1 flex items-center justify-between gap-2 border-t border-border/60 px-1 pt-1.5 text-[10px]">
+          <span className="text-muted-foreground">Detect weak TLS <span className="text-muted-foreground/70">(SSLv3 / TLS 1.0-1.1)</span></span>
+          <input
+            type="checkbox"
+            checked={weakTLS}
+            disabled={toggling}
+            onChange={(e) => onToggleWeakTLS(e.target.checked)}
+            className="h-3.5 w-3.5 accent-[color:var(--color-primary)] disabled:opacity-50"
+            data-testid="network-weak-tls-toggle"
+          />
+        </label>
         </>
         )}
       </div>

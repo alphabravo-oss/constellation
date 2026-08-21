@@ -4100,6 +4100,11 @@ export const policies = {
     api.get<AdmissionOptions>("/policies/admission/options").then((r) => r.data),
   createAdmissionRule: (body: { name: string; mode: string; criteria: Array<{ key: string; value: string }> }, params: { cluster_id?: string } = {}) =>
     api.post<{ id: string; spec_yaml: string }>("/policies/admission/rules", body, { params }).then((r) => r.data),
+  // DPI signature toggles (weak-TLS version detection). Applied live by the runtime-agent.
+  dpiThreatSettings: (params: { cluster_id?: string } = {}) =>
+    api.get<{ cluster_id: string; weak_tls_enabled: boolean }>("/policies/dpi-threats", { params }).then((r) => r.data),
+  updateDpiThreatSettings: (body: { weak_tls_enabled: boolean }, params: { cluster_id?: string } = {}) =>
+    api.patch<{ cluster_id: string; weak_tls_enabled: boolean }>("/policies/dpi-threats", body, { params }).then((r) => r.data),
   // NV NewServiceMode / NewServiceProfileMode: default mode new service groups start in.
   serviceModeDefaults: (params: { cluster_id?: string } = {}) =>
     api.get<{ cluster_id: string; policy_mode: string; profile_mode: string; updated_at?: string }>("/policies/service-mode-defaults", { params }).then((r) => r.data),

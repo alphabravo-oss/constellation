@@ -145,6 +145,7 @@ func sessionUploadLoop(
 	client := sharedUploadClient
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	var weakTLSApplied *bool // last value pushed to dp; nil until first apply
 	for {
 		select {
 		case <-ctx.Done():
@@ -158,7 +159,7 @@ func sessionUploadLoop(
 			for _, s := range sessions {
 				batch = append(batch, dpSessionToRow(s, node))
 			}
-			kills, err := postSessionBatch(ctx, client, url, token, batch)
+			resp, err := postSessionBatch(ctx, client, url, token, batch)
 			if err != nil {
 				logger.Warn("session upload failed; dropping snapshot",
 					slog.Int("sessions", len(batch)), slog.String("err", err.Error()))
@@ -168,11 +169,21 @@ func sessionUploadLoop(
 			uploaded.Add(uint64(len(batch)))
 			// NV session-kill: the control plane returns any session ids an operator
 			// asked to terminate; issue dp ctrl_clear_session for each.
-			for _, id := range kills {
+			for _, id := range resp.Kill {
 				if err := sup.ClearSession(id); err != nil {
 					logger.Warn("session kill failed", slog.Uint64("id", uint64(id)), slog.String("err", err.Error()))
 				} else {
 					logger.Info("session killed via dp ctrl_clear_session", slog.Uint64("id", uint64(id)))
+				}
+			}
+			// Apply the cluster's weak-TLS detection toggle live (only when it changes).
+			if weakTLSApplied == nil || *weakTLSApplied != resp.WeakTLS {
+				if err := sup.SetWeakTLSDetection(resp.WeakTLS); err != nil {
+					logger.Warn("set weak-TLS detection failed", slog.Bool("enable", resp.WeakTLS), slog.String("err", err.Error()))
+				} else {
+					v := resp.WeakTLS
+					weakTLSApplied = &v
+					logger.Info("weak-TLS detection applied", slog.Bool("enabled", resp.WeakTLS))
 				}
 			}
 		}
@@ -182,10 +193,12 @@ func sessionUploadLoop(
 type sessionUploadResp struct {
 	Accepted int      `json:"accepted"`
 	Kill     []uint32 `json:"kill"`
+	WeakTLS  bool     `json:"weak_tls"`
 }
 
-// postSessionBatch uploads the snapshot and returns the ids the server wants killed.
-func postSessionBatch(ctx context.Context, client *http.Client, url, token string, batch []sessionUploadRow) ([]uint32, error) {
+// postSessionBatch uploads the snapshot and returns the server's response (kill ids +
+// the weak-TLS toggle).
+func postSessionBatch(ctx context.Context, client *http.Client, url, token string, batch []sessionUploadRow) (*sessionUploadResp, error) {
 	body, err := json.Marshal(batch)
 	if err != nil {
 		return nil, fmt.Errorf("marshal: %w", err)
@@ -216,7 +229,7 @@ func postSessionBatch(ctx context.Context, client *http.Client, url, token strin
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			var parsed sessionUploadResp
 			_ = json.Unmarshal(respBody, &parsed)
-			return parsed.Kill, nil
+			return &parsed, nil
 		}
 		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
 			return nil, fmt.Errorf("server %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))

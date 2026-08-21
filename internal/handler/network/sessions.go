@@ -156,7 +156,12 @@ ON CONFLICT (org_id, cluster_id, node, id) DO UPDATE SET
 			}
 		}
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"accepted": accepted, "kill": kills})
+	// Carry the cluster's DPI toggle back so the agent applies it live via dp ctrl_set_threat.
+	weakTLS := false
+	_ = h.db.Pool().QueryRow(r.Context(),
+		`SELECT weak_tls_enabled FROM dpi_threat_settings WHERE org_id = $1 AND cluster_id = $2`,
+		tok.OrgID, clusterID).Scan(&weakTLS)
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"accepted": accepted, "kill": kills, "weak_tls": weakTLS})
 }
 
 // KillSession queues a request to terminate one live session (NV DELETE /v1/session).

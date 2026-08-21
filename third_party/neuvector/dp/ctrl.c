@@ -1261,6 +1261,19 @@ static int dp_ctrl_clear_session(json_t *msg)
     return 0;
 }
 
+// Constellation: runtime toggle of a built-in DPI threat signature. threat_config[]
+// is global and dpi_threat_trigger() checks dpi_threat_status() before firing, so this
+// takes effect live on all data threads with no restart. Used to enable/disable noisy
+// weak-TLS version detections (SSLv3 etc) from the console.
+static int dp_ctrl_set_threat(json_t *msg)
+{
+    uint32_t idx = json_integer_value(json_object_get(msg, "threat"));
+    bool enable = json_is_true(json_object_get(msg, "enable"));
+    dpi_set_threat_status(idx, enable);
+    DEBUG_CTRL("set threat %u enable=%d\n", idx, enable);
+    return 0;
+}
+
 static int dp_ctrl_list_meter(json_t *msg)
 {
     int thr_id;
@@ -2450,6 +2463,8 @@ static int dp_ctrl_handler(int fd)
             ret = dp_ctrl_list_session(msg);
         } else if (strcmp(key, "ctrl_clear_session") == 0) {
             ret = dp_ctrl_clear_session(msg);
+        } else if (strcmp(key, "ctrl_set_threat") == 0) {
+            ret = dp_ctrl_set_threat(msg);
         } else if (strcmp(key, "ctrl_list_meter") == 0) {
             ret = dp_ctrl_list_meter(msg);
         } else if (strcmp(key, "ctrl_set_debug") == 0) {

@@ -68,6 +68,29 @@ type clearSessionPayload struct {
 	FilterID uint32 `json:"filter_id"`
 }
 
+// DPI_THRT_* enum indices (dpi/dpi_log.h) for the weak-TLS version signatures that
+// dp lets us toggle at runtime. These index the global threat_config[] table.
+const (
+	ThreatSSLv3   uint32 = 16 // DPI_THRT_SSL_VER_2OR3
+	ThreatTLS10   uint32 = 17 // DPI_THRT_SSL_TLS_1DOT0
+	ThreatTLS11   uint32 = 29 // DPI_THRT_SSL_TLS_1DOT1
+)
+
+// setThreatReq maps to dp's ctrl_set_threat (ctrl.c): toggle a built-in DPI signature
+// live. `threat` is the DPI_THRT_* enum index; `enable` turns it on/off.
+type setThreatReq struct {
+	Set setThreatPayload `json:"ctrl_set_threat"`
+}
+type setThreatPayload struct {
+	Threat uint32 `json:"threat"`
+	Enable bool   `json:"enable"`
+}
+
+// SetThreatStatus enables/disables a built-in dp threat signature at runtime.
+func (c *dpClient) SetThreatStatus(idx uint32, enable bool) error {
+	return c.sendOneway(&setThreatReq{Set: setThreatPayload{Threat: idx, Enable: enable}})
+}
+
 // ClearSession asks dp to terminate the session with the given id (NV session-kill).
 func (c *dpClient) ClearSession(id uint32) error {
 	if id == 0 {
