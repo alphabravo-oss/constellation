@@ -251,6 +251,13 @@ func (w *RuntimePolicySyncWorker) SyncOnce(ctx context.Context) {
 		return
 	}
 
+	// NET-ICMP-47: arm dp's ICMP policy engine when — and only when — a pushed rule
+	// actually targets ICMP. Off by default, dp blanket-allows ICMP and IPProtoAny rules
+	// cover TCP+UDP only; enabling it lets IPProtoICMP rules bite. Sent with the (gated)
+	// push so it re-asserts on rule change + dp restart. dp holds the flag globally.
+	if err := w.cfg.DPSup.SetICMPPolicy(mergedHasICMP(merged)); err != nil {
+		w.cfg.Logger.Debug("runtime policy sync: SetICMPPolicy", slog.String("err", err.Error()))
+	}
 	if err := w.cfg.DPSup.PushPolicy(merged, dp.CmdModify); err != nil {
 		w.errors.Add(1)
 		w.cfg.Logger.Warn("runtime policy sync: push failed", slog.String("err", err.Error()))
@@ -277,6 +284,20 @@ func (w *RuntimePolicySyncWorker) SyncOnce(ctx context.Context) {
 // contributes no rules. Each rule is stamped with its policy's dp_policy_id so
 // the wire PolicyRule.ID echoes back through DPMsgConnect.PolicyId. Mirrors
 // handler/runtime.RuntimePolicy.ToWorkloadPolicy, kept in sync by shape.
+// mergedHasICMP reports whether any rule in the merged policy targets ICMP, so the
+// caller arms dp's ICMP policy engine only when it's actually needed (NET-ICMP-47).
+func mergedHasICMP(p *dp.WorkloadPolicy) bool {
+	if p == nil {
+		return false
+	}
+	for _, r := range p.Rules {
+		if r != nil && r.IPProto == dp.IPProtoICMP {
+			return true
+		}
+	}
+	return false
+}
+
 // unionMACs merges two MAC lists, de-duplicated, preserving order (a first).
 func unionMACs(a, b []string) []string {
 	seen := make(map[string]bool, len(a)+len(b))
