@@ -72,6 +72,7 @@ const (
 	ActionNotify     ActionKind = "notify"     // dispatch via pkg/notify
 	ActionQuarantine ActionKind = "quarantine" // runtime quarantine (Wave A data plane)
 	ActionIsolate    ActionKind = "isolate"    // network policy isolate
+	ActionKill       ActionKind = "kill"       // sever a live process/session (RT-KILL-02 responder)
 	ActionTicket     ActionKind = "ticket"     // create ITSM ticket (alias for notify w/ Jira/SNOW)
 )
 
@@ -233,6 +234,10 @@ func compileCached(pattern string) (*regexp.Regexp, error) {
 type Runtime interface {
 	Quarantine(ctx context.Context, workload string, reason string) error
 	Isolate(ctx context.Context, workload string, reason string) error
+	// Kill enqueues a targeted kill_process response action for the workload, which the
+	// runtime-agent responder pulls and executes (SIGKILL). Mirrors Isolate: the bridge
+	// captures org/cluster at construction, so the workload + reason are all it needs.
+	Kill(ctx context.Context, workload string, reason string) error
 }
 
 // Engine evaluates events against a rule set and dispatches actions.
@@ -335,6 +340,16 @@ func (e *Engine) fire(ctx context.Context, r *Rule, ev *Event) Dispatched {
 				continue
 			}
 			d.Actions = append(d.Actions, "isolate")
+		case ActionKill:
+			if e.runtime == nil {
+				d.Warnings = append(d.Warnings, "runtime bridge unavailable (Wave A data plane required)")
+				continue
+			}
+			if err := e.runtime.Kill(ctx, ev.Workload, r.Name); err != nil {
+				d.Warnings = append(d.Warnings, fmt.Sprintf("kill: %v", err))
+				continue
+			}
+			d.Actions = append(d.Actions, "kill")
 		default:
 			d.Warnings = append(d.Warnings, fmt.Sprintf("unknown action %q", act.Kind))
 		}
@@ -366,7 +381,7 @@ func (r *Rule) Validate() error {
 	}
 	for _, a := range r.Actions {
 		switch a.Kind {
-		case ActionNotify, ActionQuarantine, ActionIsolate, ActionTicket:
+		case ActionNotify, ActionQuarantine, ActionIsolate, ActionKill, ActionTicket:
 		default:
 			return fmt.Errorf("response: invalid action kind %q", a.Kind)
 		}

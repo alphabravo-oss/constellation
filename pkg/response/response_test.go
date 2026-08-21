@@ -23,6 +23,7 @@ func (s *fakeReceiver) Send(_ context.Context, a []notify.Alert) error {
 type fakeRuntime struct {
 	quarantined []string
 	isolated    []string
+	killed      []string
 	err         error
 }
 
@@ -32,6 +33,10 @@ func (s *fakeRuntime) Quarantine(_ context.Context, w, _ string) error {
 }
 func (s *fakeRuntime) Isolate(_ context.Context, w, _ string) error {
 	s.isolated = append(s.isolated, w)
+	return s.err
+}
+func (s *fakeRuntime) Kill(_ context.Context, w, _ string) error {
+	s.killed = append(s.killed, w)
 	return s.err
 }
 
@@ -113,6 +118,23 @@ func TestEngine_Dispatch_NotifyAndQuarantine(t *testing.T) {
 	}
 }
 
+func TestEngine_Dispatch_Kill(t *testing.T) {
+	rt := &fakeRuntime{}
+	eng := NewEngine(nil, rt, nil)
+	eng.SetRules([]Rule{{
+		ID: "r1", Name: "kill-shell", Enabled: true, EventType: EventRuntime,
+		Conditions: []Condition{{Type: CondName, Value: ".*"}},
+		Actions:    []Action{{Kind: ActionKill}},
+	}})
+	got := eng.Dispatch(context.Background(), &Event{ID: "e1", Name: "x", Type: EventRuntime, Workload: "default/api"})
+	if len(got) != 1 || len(got[0].Warnings) != 0 {
+		t.Fatalf("unexpected dispatch result: %+v", got)
+	}
+	if len(rt.killed) != 1 || rt.killed[0] != "default/api" {
+		t.Fatalf("expected kill to fire for default/api; got %v", rt.killed)
+	}
+}
+
 func TestEngine_Dispatch_RuntimeMissing(t *testing.T) {
 	eng := NewEngine(nil, nil, nil)
 	eng.SetRules([]Rule{{
@@ -136,6 +158,7 @@ func TestRule_Validate(t *testing.T) {
 		{Rule{Name: "n", EventType: EventRuntime, Conditions: []Condition{{Type: CondName, Value: "[bad"}}}, true},
 		{Rule{Name: "n", EventType: EventRuntime, Actions: []Action{{Kind: "wat"}}}, true},
 		{Rule{Name: "ok", EventType: EventRuntime, Conditions: []Condition{{Type: CondName, Value: ".*"}}, Actions: []Action{{Kind: ActionNotify, Target: "slack"}}}, false},
+		{Rule{Name: "kill-ok", EventType: EventRuntime, Actions: []Action{{Kind: ActionKill}}}, false},
 	}
 	for i, c := range cases {
 		err := c.r.Validate()

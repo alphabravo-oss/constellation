@@ -68,6 +68,29 @@ func (q *quarantineRuntime) Isolate(ctx context.Context, workload, reason string
 	return q.enqueueCordon(ctx, workload, reason, entryID)
 }
 
+// Kill enqueues a targeted kill_process response action (RT-KILL-02) for the running
+// workload onto runtime_response_actions. The runtime-agent responder pulls pending rows
+// for its node (GET /runtime/response-actions:pending), SIGKILLs the resolved pid, and
+// POSTs the outcome back to the :result sink. Best-effort and node-agnostic: the row is
+// left node='' so it's offered to every agent in the cluster; each agent's
+// killProcessDecision guards against killing the wrong process (comm/container/pid checks),
+// so an empty-target row is harmless where the workload isn't present.
+//
+// Mirrors Isolate's shape (org/cluster captured at construction, workload+reason in). The
+// pid/comm are resolved by the agent from the workload/container at execution time; the
+// Runtime interface carries only the workload, so nothing narrower is passed through here.
+func (q *quarantineRuntime) Kill(ctx context.Context, workload, reason string) error {
+	matchKey := strings.TrimSpace(workload)
+	if matchKey == "" {
+		return nil // nothing to target
+	}
+	_, err := q.db.Pool().Exec(ctx, `
+INSERT INTO runtime_response_actions (org_id, cluster_id, type, workload_id, state)
+VALUES ($1, $2, 'kill_process', $3, 'pending')`,
+		q.orgID, q.clusterID, matchKey)
+	return err
+}
+
 // record inserts the origin='auto' quarantine entry and returns its id. A nil id (with no
 // error) means there was nothing to record or an existing active entry collapsed the insert.
 func (q *quarantineRuntime) record(ctx context.Context, workload, reason string) (*uuid.UUID, error) {
