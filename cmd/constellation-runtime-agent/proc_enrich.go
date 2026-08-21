@@ -29,6 +29,22 @@ import (
 // procRoot is the proc filesystem root, overridable in tests. Defaults to "/proc".
 var procRoot = "/proc"
 
+// execHashEnabled gates RT-MATCH-16 per-exec binary hashing on the ingest path.
+// Default OFF: hashing (a bounded prefix of) every exec's binary is a hot-path cost;
+// full-path + parent matching already catches the rename-to-allowed-name case, and
+// the hash only adds same-path content-swap detection. Opt-in via
+// CONSTELLATION_PROCESS_EXEC_HASH so operators who want content matching can enable it.
+var execHashEnabled = procBoolFromEnv(os.Getenv("CONSTELLATION_PROCESS_EXEC_HASH"))
+
+func procBoolFromEnv(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "on", "enabled":
+		return true
+	default:
+		return false
+	}
+}
+
 // procExecMaxAncestorWalk bounds the lineage walk in execIsAnchored. Mirrors
 // NeuVector's "up to 4 ancestors" runc-child walk in IsAllowedShieldProcess.
 const procExecMaxAncestorWalk = 16

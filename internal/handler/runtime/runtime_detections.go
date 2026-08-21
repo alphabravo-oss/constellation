@@ -144,6 +144,22 @@ func realUIDEscalation(ev *IngestEvent) bool {
 	return ev.RuidKnown && ev.UID == 0 && ev.Ruid != 0
 }
 
+// setuidWithoutExec reports whether a uid_change event represents a privilege
+// escalation: a long-running process changed its effective UID to root (0) from a
+// non-root UID WITHOUT executing a new binary. A setuid binary or sudo escalates at
+// exec time (covered by realUIDEscalation); this catches the exec-less case — a
+// process that called setuid(2)/setresuid(2) directly, the classic in-process
+// privilege escalation. The agent's UID monitor only emits kind=uid_change when it
+// observed the change on an already-running pid with no exec in between, so the
+// server trusts the event kind and just confirms the escalation direction (to root
+// from non-root). Absent the agent monitor there are no uid_change events => no-op.
+func setuidWithoutExec(ev *IngestEvent) bool {
+	if ev == nil || ev.Kind != "uid_change" {
+		return false
+	}
+	return ev.UID == 0 && ev.PrevUID != 0
+}
+
 // reverseShell reports whether an exec is a likely reverse shell: its stdio (fd 0/1/2) was a
 // socket at exec time (the agent's StdioSocket enrichment) AND it is not an exec we'd expect
 // to legitimately have socket stdio. We combine the StdioSocket tell with the existing

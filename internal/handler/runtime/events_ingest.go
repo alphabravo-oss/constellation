@@ -140,6 +140,20 @@ type IngestEvent struct {
 	RuidKnown   bool   `json:"ruid_known,omitempty"`
 	StdioSocket bool   `json:"stdio_socket,omitempty"`
 
+	// RT-MATCH-16 process-match enrichment (optional). ExePath is the resolved
+	// /proc/<pid>/exe target; ExeSha256 the opt-in bounded content hash; ParentName the
+	// parent comm. Persisted in the process_exec payload so the DB-derived baseline
+	// bundle can pin allowed processes to a full path/hash/parent, defeating a
+	// rename-to-allowed-name bypass. Absent => the baseline falls back to basename.
+	ExePath    string `json:"exe_path,omitempty"`
+	ExeSha256  string `json:"exe_sha256,omitempty"`
+	ParentName string `json:"parent_name,omitempty"`
+
+	// PrevUID is the effective UID a process held BEFORE a setuid(2) UID change with no
+	// intervening exec (RT-SETUID-49; kind=uid_change). UID above is the new (escalated)
+	// effective UID. Both set only for uid_change events emitted by the agent's UID monitor.
+	PrevUID uint32 `json:"prev_uid,omitempty"`
+
 	// Network fields (kind=tcp_connect / tcp_accept).
 	Direction string `json:"direction,omitempty"`
 	Protocol  string `json:"protocol,omitempty"`
@@ -1112,6 +1126,17 @@ func (h *EventsIngest) classifyEvent(orgID uuid.UUID, ev *IngestEvent, fileRules
 	if ev.Kind == "file_open" {
 		return h.classifyFileOpen(ev, fileRules, cls)
 	}
+	// RT-SETUID-49: a running process that escalated its effective UID to root via
+	// setuid(2) WITHOUT an intervening exec (the agent's UID monitor only emits this
+	// kind for that case) is a strong privilege-escalation signal — NeuVector's
+	// rootEscalationCheck flags the same on its process monitor, not just at exec.
+	if setuidWithoutExec(ev) {
+		cls.Severity = "high"
+		cls.Verdict = "alert"
+		cls.Reason = "setuid-without-exec"
+		cls.Techniques = attack.Map(attack.EventPrivilegeEscalation)
+		return cls
+	}
 	if ev.Kind != "process_exec" {
 		return cls
 	}
@@ -1271,6 +1296,22 @@ func payloadFor(ev *IngestEvent, cls eventClassification) []byte {
 		if ev.RuidKnown {
 			m["ruid"] = ev.Ruid
 		}
+		// RT-MATCH-16 process-match enrichment (present only when the agent sent it).
+		if p := strings.TrimSpace(ev.ExePath); p != "" {
+			m["exe_path"] = p
+		}
+		if s := strings.TrimSpace(ev.ExeSha256); s != "" {
+			m["exe_sha256"] = s
+		}
+		if pn := strings.TrimSpace(ev.ParentName); pn != "" {
+			m["parent_name"] = pn
+		}
+	case "uid_change":
+		// RT-SETUID-49: privilege escalation via setuid(2) with no exec.
+		m["pid"] = ev.PID
+		m["comm"] = ev.Comm
+		m["uid"] = ev.UID
+		m["prev_uid"] = ev.PrevUID
 	case "tcp_connect", "tcp_accept":
 		m["pid"] = ev.PID
 		m["comm"] = ev.Comm

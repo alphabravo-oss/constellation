@@ -137,6 +137,34 @@ func bridgeBasenameEntries(basenames []string) []processProfileEntry {
 	return out
 }
 
+// entriesFromBundle converts the server's rich baseline entries (RT-MATCH-16) into
+// the agent-side matcher's processProfileEntry form. Empty/whitespace entries are
+// dropped. An unspecified action defaults to allow. Returns nil when there are no
+// usable entries so the caller can fall back to bridgeBasenameEntries.
+func entriesFromBundle(entries []processBaselineEntryWire) []processProfileEntry {
+	out := make([]processProfileEntry, 0, len(entries))
+	for _, e := range entries {
+		pe := processProfileEntry{
+			Basename:   strings.TrimSpace(e.Basename),
+			Path:       strings.TrimSpace(e.Path),
+			Sha256:     strings.TrimSpace(e.Sha256),
+			ParentName: strings.TrimSpace(e.ParentName),
+			Action:     processActionAllow,
+		}
+		if strings.EqualFold(strings.TrimSpace(e.Action), processActionDeny) {
+			pe.Action = processActionDeny
+		}
+		if pe.Basename == "" && pe.Path == "" && pe.Sha256 == "" && pe.ParentName == "" {
+			continue
+		}
+		out = append(out, pe)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // ----- P0-4 zero-drift (anchor + shield) pure decision -----------------------
 //
 // Models NeuVector's ProfileZeroDrift (agent/probe/faccess_linux.go

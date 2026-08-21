@@ -38,7 +38,7 @@ type processEnforcerConfig struct {
 	// OnKill reports a killed exec. reason is the block cause ("zero-drift:image-drift"
 	// | "zero-drift:unanchored" | "baseline") so the server records WHY the process was
 	// killed, mirroring the reason OnAlert carries for monitor-mode observations.
-	OnKill   func(pid int, workloadID, containerID, comm, filename, reason string)
+	OnKill func(pid int, workloadID, containerID, comm, filename, reason string)
 
 	// Workloads resolves a container ID to its identity, including the container
 	// start time the zero-drift provenance proxy needs. Optional: when nil, the
@@ -155,15 +155,18 @@ func (e *processEnforcer) baselineViolation(pid int, comm, filename, wl string) 
 		return false
 	}
 	row, ok := lookupProcessBaselineRow(rows, wl)
-	if !ok || row.Mode != "enforce" || len(row.Processes) == 0 {
+	if !ok || row.Mode != "enforce" || (len(row.Processes) == 0 && len(row.Entries) == 0) {
 		return false
 	}
-	// ponytail: the server bundle (internal/handler/runtime/process_baselines_bundle.go,
-	// a different subsystem) still ships a flat []string of basenames, so we bridge to
-	// allow-by-basename entries. Rich Path/Sha256/Action entries — the actual `mv evil
-	// /bin/nginx` fix at the profile layer — need that bundle (and a schema migration)
-	// to emit CLUSProcessProfileEntry-shaped rows.
-	entries := bridgeBasenameEntries(row.Processes)
+	// RT-MATCH-16: the server bundle now emits rich Entries (full path + sha256 +
+	// parent + action) built from learned observations and authored rules, so a
+	// binary renamed/relocated to an allowed basename is rejected on the path key.
+	// A row without Entries (older server, or a process with no absolute path) falls
+	// back to allow-by-basename — bug-for-bug identical to the legacy matcher.
+	entries := entriesFromBundle(row.Entries)
+	if len(entries) == 0 {
+		entries = bridgeBasenameEntries(row.Processes)
+	}
 	return !processProfileAllows(entries, e.execContext(pid, comm, filename))
 }
 

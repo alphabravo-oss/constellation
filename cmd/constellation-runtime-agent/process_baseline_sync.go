@@ -42,7 +42,19 @@ type processBaselineRowWire struct {
 	Name           string   `json:"name,omitempty"`
 	Mode           string   `json:"mode"`
 	Processes      []string `json:"processes"`
-	UpdatedAt      string   `json:"updated_at"`
+	// RT-MATCH-16: rich per-process entries (full path + sha256 + parent + action).
+	// Present only from a server that emits them; empty => fall back to Processes.
+	Entries   []processBaselineEntryWire `json:"entries,omitempty"`
+	UpdatedAt string                     `json:"updated_at"`
+}
+
+// processBaselineEntryWire mirrors the server's processBundleEntry.
+type processBaselineEntryWire struct {
+	Basename   string `json:"basename,omitempty"`
+	Path       string `json:"path,omitempty"`
+	Sha256     string `json:"sha256,omitempty"`
+	ParentName string `json:"parent_name,omitempty"`
+	Action     string `json:"action"`
 }
 
 type processBaselineBundleWire struct {
@@ -182,6 +194,10 @@ func fingerprintProcessBaselines(rows []processBaselineRowWire) string {
 		_, _ = h.Write([]byte{0})
 		for _, p := range row.Processes {
 			_, _ = h.Write([]byte(p))
+			_, _ = h.Write([]byte{0})
+		}
+		for _, e := range row.Entries {
+			_, _ = h.Write([]byte(e.Basename + "|" + e.Path + "|" + e.Sha256 + "|" + e.ParentName + "|" + e.Action))
 			_, _ = h.Write([]byte{0})
 		}
 		_, _ = h.Write([]byte(row.UpdatedAt))

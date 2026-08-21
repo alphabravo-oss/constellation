@@ -84,6 +84,95 @@ func TestBridgeBasenameEntries(t *testing.T) {
 	}
 }
 
+// TestEntriesFromBundleRejectsRenamedBinary is the RT-MATCH-16 acceptance at the
+// matcher layer: a bundle that pins the learned nginx to its full path rejects a
+// binary renamed to the allowed basename at a DIFFERENT path, whereas the legacy
+// basename-only bundle would wrongly allow it.
+func TestEntriesFromBundleRejectsRenamedBinary(t *testing.T) {
+	// Rich bundle: nginx learned at its real path.
+	rich := entriesFromBundle([]processBaselineEntryWire{
+		{Basename: "nginx", Path: "/usr/sbin/nginx", Action: "allow"},
+	})
+	legit := processExecContext{Comm: "nginx", ExePath: "/usr/sbin/nginx"}
+	renamed := processExecContext{Comm: "nginx", ExePath: "/tmp/nginx"} // evil renamed to allowed name
+
+	if !processProfileAllows(rich, legit) {
+		t.Fatalf("legit nginx at learned path must be allowed")
+	}
+	if processProfileAllows(rich, renamed) {
+		t.Fatalf("RT-MATCH-16: renamed binary at /tmp/nginx must be REJECTED by full-path match")
+	}
+
+	// The legacy basename bundle (what shipped before) would allow the rename — this
+	// asserts the fix actually changed behavior, not that the matcher was always strict.
+	legacy := bridgeBasenameEntries([]string{"nginx"})
+	if !processProfileAllows(legacy, renamed) {
+		t.Fatalf("sanity: legacy basename-only match should (wrongly) allow the rename")
+	}
+}
+
+// TestEntriesFromBundleFallback verifies an entry with no absolute path stays a
+// basename wildcard (the documented fallback for older rows).
+func TestEntriesFromBundleFallback(t *testing.T) {
+	entries := entriesFromBundle([]processBaselineEntryWire{{Basename: "sh", Action: "allow"}})
+	if !processProfileAllows(entries, processExecContext{Comm: "sh", ExePath: "/bin/sh"}) {
+		t.Fatalf("basename-only entry must allow any path for that basename")
+	}
+	// A deny entry from an authored rule wins.
+	deny := entriesFromBundle([]processBaselineEntryWire{
+		{Basename: "sh", Action: "allow"},
+		{Basename: "curl", Action: "deny"},
+	})
+	if processProfileAllows(deny, processExecContext{Comm: "curl", ExePath: "/usr/bin/curl"}) {
+		t.Fatalf("authored deny entry must reject curl")
+	}
+	// Empty entries -> nil so the caller falls back to basename bridging.
+	if entriesFromBundle(nil) != nil {
+		t.Fatalf("no entries must return nil for fallback")
+	}
+}
+
+// TestDetectSetuidEscalations is the RT-SETUID-49 agent-side pure detection: a pid
+// that escalates its effective UID to 0 on the same process instance (no exec) is
+// reported; pid reuse and non-escalations are not.
+func TestDetectSetuidEscalations(t *testing.T) {
+	prev := map[uint32]uidSample{
+		100: {euid: 1000, startTicks: 5, comm: "app", container: "c1"}, // will escalate
+		200: {euid: 0, startTicks: 7, comm: "root", container: "c1"},   // already root
+		300: {euid: 1000, startTicks: 9, comm: "gone", container: "c1"},
+	}
+	cur := map[uint32]uidSample{
+		100: {euid: 0, startTicks: 5, comm: "app", container: "c1"},  // escalated, same instance
+		200: {euid: 0, startTicks: 7, comm: "root", container: "c1"}, // unchanged root
+		300: {euid: 0, startTicks: 99, comm: "reuse", container: "c1"}, // pid reused (diff startTicks)
+	}
+	got := detectSetuidEscalations(prev, cur)
+	if len(got) != 1 {
+		t.Fatalf("want exactly 1 escalation, got %d: %+v", len(got), got)
+	}
+	if got[0].PID != 100 || got[0].PrevUID != 1000 || got[0].UID != 0 {
+		t.Fatalf("unexpected escalation: %+v", got[0])
+	}
+}
+
+func TestExecTrackerExcludesExecDriven(t *testing.T) {
+	tr := newExecTracker()
+	base := time.Now()
+	tr.Record(100, base.Add(1*time.Second))
+	if !tr.ExecedSince(100, base) {
+		t.Fatalf("pid that exec'd after the sample window must be reported")
+	}
+	if tr.ExecedSince(200, base) {
+		t.Fatalf("pid that never exec'd must not be reported")
+	}
+	// A nil tracker is safe and reports false.
+	var nilTr *execTracker
+	nilTr.Record(1, base)
+	if nilTr.ExecedSince(1, base) {
+		t.Fatalf("nil tracker must report false")
+	}
+}
+
 func TestExecIsDrift(t *testing.T) {
 	cases := []struct {
 		z    zeroDriftContext

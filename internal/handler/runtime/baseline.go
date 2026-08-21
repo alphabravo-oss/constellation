@@ -51,12 +51,111 @@ type Baselines struct {
 // for the lifetime of the process; lifecycle state is persisted when storage is
 // available and only falls back to memory for storage-free tests.
 func NewBaselines(d *db.DB, a *audit.Logger) *Baselines {
-	return &Baselines{
+	h := &Baselines{
 		db:       d,
 		auditLog: a,
 		engine:   baseline.NewEngine(),
 		state:    map[string]*baselineState{},
 	}
+	// RT-DRIFT-50: rehydrate the in-memory baseline map (the ONLY source BaselineMode
+	// consults on the runtime-drift hot path) from the DB at startup, so a fresh /
+	// restarted API classifies drift immediately instead of staying blind until a
+	// List/Get request happens to repopulate the workload. Best-effort, off the
+	// request path; a missing table (pre-migration) is a no-op.
+	if d != nil {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			_ = h.Hydrate(ctx)
+		}()
+	}
+	return h
+}
+
+// Hydrate loads persisted process-baseline state (mode + learned process set) from the
+// DB into the in-memory map BaselineMode reads (RT-DRIFT-50). Idempotent and safe to
+// call repeatedly. Best-effort: a missing process_baseline_states table (pre-migration)
+// returns nil so a fresh DB doesn't error.
+func (h *Baselines) Hydrate(ctx context.Context) error {
+	if h.db == nil {
+		return nil
+	}
+	rows, err := h.db.Pool().Query(ctx, `
+SELECT org_id, cluster_id::text, workload_id, COALESCE(namespace,''), COALESCE(name,''), mode,
+       learn_started_at, monitor_started_at, enforce_started_at
+  FROM process_baseline_states`)
+	if err != nil {
+		if strings.Contains(err.Error(), "process_baseline_states") {
+			return nil
+		}
+		return err
+	}
+	type hydrateRow struct {
+		orgID      uuid.UUID
+		clusterID  string
+		workloadID string
+		namespace  string
+		name       string
+		mode       string
+		learnAt    time.Time
+		monitorAt  *time.Time
+		enforceAt  *time.Time
+	}
+	var pending []hydrateRow
+	for rows.Next() {
+		var hr hydrateRow
+		if err := rows.Scan(&hr.orgID, &hr.clusterID, &hr.workloadID, &hr.namespace, &hr.name,
+			&hr.mode, &hr.learnAt, &hr.monitorAt, &hr.enforceAt); err != nil {
+			rows.Close()
+			return err
+		}
+		pending = append(pending, hr)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	// Resolve observations after the cursor is drained (each does its own query).
+	for _, hr := range pending {
+		clusterID, perr := uuid.Parse(hr.clusterID)
+		if perr != nil {
+			continue
+		}
+		st := &baselineState{
+			WorkloadID:     hr.workloadID,
+			ClusterID:      hr.clusterID,
+			Namespace:      hr.namespace,
+			Name:           hr.name,
+			Mode:           baseline.Mode(hr.mode),
+			LearnStartedAt: hr.learnAt,
+		}
+		if hr.monitorAt != nil {
+			st.MonitorStartedAt = *hr.monitorAt
+		}
+		if hr.enforceAt != nil {
+			st.EnforceStartedAt = *hr.enforceAt
+		}
+		if procs, alerts, blocks, lastNew, oerr := h.processObservations(ctx, hr.orgID, clusterID, hr.workloadID); oerr == nil {
+			st.Processes = procs
+			st.Alerts24h = alerts
+			st.Blocks24h = blocks
+			st.LastNewProcessAt = lastNew
+		}
+		h.cacheState(st)
+	}
+	return nil
+}
+
+// cacheState stores st into the in-memory map keyed clusterID::workloadID (the same key
+// the memory-state path uses) so BaselineMode can serve it on the hot path. Overwrites a
+// prior entry so a re-hydrate / SetMode refreshes rather than duplicates.
+func (h *Baselines) cacheState(st *baselineState) {
+	if st == nil {
+		return
+	}
+	h.mu.Lock()
+	h.state[st.ClusterID+"::"+st.WorkloadID] = st
+	h.mu.Unlock()
 }
 
 // baselineState is the per-workload bookkeeping that lives alongside the engine
@@ -78,9 +177,14 @@ type baselineState struct {
 }
 
 type processObservation struct {
-	Name          string
-	Args          []string
-	Path          string
+	Name string
+	Args []string
+	Path string
+	// RT-MATCH-16: full-path + content + lineage keys captured from the agent's
+	// /proc exec enrichment (empty when the agent did not send them — the baseline
+	// then falls back to basename-only matching for that process).
+	Sha256        string
+	ParentName    string
 	ObservedCount int
 	FirstSeen     time.Time
 	LastSeen      time.Time
@@ -494,6 +598,10 @@ RETURNING workload_id, cluster_id::text, namespace, name, mode,
 	}
 	state.Transitions = transitions
 	h.driveEngineToMode(wl.WorkloadID, state.Mode)
+	// RT-DRIFT-50: keep the hot-path BaselineMode map current on every List/Get/SetMode
+	// (in addition to the startup Hydrate), so a DB-backed workload's mode + learned set
+	// are served to the drift classifier without waiting for the next full hydrate.
+	h.cacheState(&state)
 	return &state, nil
 }
 
@@ -539,9 +647,12 @@ SELECT severity,
 	defer rows.Close()
 
 	type processPayload struct {
-		Comm     string   `json:"comm"`
-		Filename string   `json:"filename"`
-		Args     []string `json:"args"`
+		Comm       string   `json:"comm"`
+		Filename   string   `json:"filename"`
+		Args       []string `json:"args"`
+		ExePath    string   `json:"exe_path"`
+		ExeSha256  string   `json:"exe_sha256"`
+		ParentName string   `json:"parent_name"`
 	}
 	processes := map[string]*processObservation{}
 	var alerts24h, blocks24h int
@@ -566,20 +677,36 @@ SELECT severity,
 		if processName == "" {
 			continue
 		}
-		key := processName + "\x00" + strings.TrimSpace(payload.Filename)
+		// RT-MATCH-16: prefer the agent-resolved /proc/<pid>/exe path (canonical,
+		// symlink/relative-safe) over the raw execve filename for the learned path.
+		canonPath := strings.TrimSpace(payload.ExePath)
+		if canonPath == "" {
+			canonPath = strings.TrimSpace(payload.Filename)
+		}
+		key := processName + "\x00" + canonPath
 		item, ok := processes[key]
 		if !ok {
 			item = &processObservation{
-				Name:      processName,
-				Args:      append([]string(nil), payload.Args...),
-				Path:      strings.TrimSpace(payload.Filename),
-				FirstSeen: at,
-				LastSeen:  at,
+				Name:       processName,
+				Args:       append([]string(nil), payload.Args...),
+				Path:       canonPath,
+				Sha256:     strings.TrimSpace(payload.ExeSha256),
+				ParentName: strings.TrimSpace(payload.ParentName),
+				FirstSeen:  at,
+				LastSeen:   at,
 			}
 			processes[key] = item
 			if lastNewProcessAt.IsZero() || at.After(lastNewProcessAt) {
 				lastNewProcessAt = at.UTC()
 			}
+		}
+		// Backfill hash/parent if a later observation of the same path carries them
+		// (e.g. hashing was enabled after the first sighting).
+		if item.Sha256 == "" {
+			item.Sha256 = strings.TrimSpace(payload.ExeSha256)
+		}
+		if item.ParentName == "" {
+			item.ParentName = strings.TrimSpace(payload.ParentName)
 		}
 		item.ObservedCount++
 		if at.Before(item.FirstSeen) {

@@ -445,6 +445,9 @@ func main() {
 	// procEnforcer is consulted inline in the exec event loop below; nil-safe so
 	// it no-ops when upload is disabled or the enforcer isn't constructed.
 	var procEnforcer *processEnforcer
+	// uidExecTracker records exec times so the RT-SETUID-49 UID monitor can exclude
+	// exec-driven UID changes. nil-safe: Record/ExecedSince no-op on a nil tracker.
+	var uidExecTracker *execTracker
 	if uploadEnabled {
 		fileEnforcementStatus := newFileProfileEnforcementStatusStore()
 		fileRulesWorker := NewFileProfileRuleSyncWorker(FileProfileRuleSyncConfig{
@@ -570,6 +573,44 @@ func main() {
 					Comm:   ev.Comm,
 					Path:   ev.Path,
 					Sha256: ev.Sha256,
+				}
+				select {
+				case toUpload <- ie:
+				default:
+					nDropped.Add(1)
+				}
+			},
+		})
+
+		// RT-SETUID-49: exec-less privilege-escalation monitor. Samples container
+		// process effective UIDs from /proc and reports a uid_change when a process
+		// escalates to root via setuid(2) with no exec. Default OFF (opt-in). The
+		// exec tracker (fed from the exec loop below) lets it exclude exec-driven
+		// escalations, which realUIDEscalation already covers.
+		uidExecTracker = newExecTracker()
+		go uidMonitorLoop(ctx, uidMonitorConfig{
+			Disabled:  !uidMonitorEnabledFromEnv(os.Getenv("CONSTELLATION_PROCESS_UID_MONITOR")),
+			Node:      node,
+			Interval:  hostScanIntervalFromEnv(os.Getenv("CONSTELLATION_PROCESS_UID_MONITOR_INTERVAL"), 30*time.Second),
+			Exec:      uidExecTracker,
+			Workloads: workloads,
+			Logger:    logger,
+			OnEscalation: func(e uidEscalation, workloadID, namespace, pod string) {
+				if toUpload == nil {
+					return
+				}
+				ie := ingestEvent{
+					At:          time.Now().UTC(),
+					Kind:        "uid_change",
+					Node:        node,
+					WorkloadID:  workloadID,
+					Namespace:   namespace,
+					Pod:         pod,
+					ContainerID: e.Container,
+					PID:         e.PID,
+					UID:         e.UID,
+					PrevUID:     e.PrevUID,
+					Comm:        e.Comm,
 				}
 				select {
 				case toUpload <- ie:
@@ -960,6 +1001,21 @@ func main() {
 					ie.Ruid = enr.Ruid
 					ie.RuidKnown = true
 				}
+				// RT-MATCH-16: capture the resolved exe path + parent comm (cheap:
+				// one readlink + one small read) so the server-derived baseline can
+				// key on full path/parent, not just basename. The sha256 is opt-in
+				// (CONSTELLATION_PROCESS_EXEC_HASH) since hashing every exec's binary
+				// is a hot-path cost. Best-effort: a short-lived exec leaves them empty.
+				meta := enrichExecMeta(ev.Process.PID)
+				if execHashEnabled {
+					meta = meta.withHash(ev.Process.PID)
+				}
+				ie.ExePath = meta.ExePath
+				ie.ExeSha256 = meta.Sha256
+				ie.ParentName = meta.ParentComm
+				// RT-SETUID-49: record the exec so the UID monitor can distinguish an
+				// exec-driven UID change (this) from a bare setuid(2) escalation.
+				uidExecTracker.Record(ev.Process.PID, ie.At)
 				ident := workloads.Resolve(ev.Process.ContainerID)
 				ie.WorkloadID = ident.WorkloadID
 				ie.Namespace = ident.Namespace
@@ -1186,6 +1242,20 @@ type ingestEvent struct {
 	Ruid        uint32 `json:"ruid,omitempty"`
 	RuidKnown   bool   `json:"ruid_known,omitempty"`
 	StdioSocket bool   `json:"stdio_socket,omitempty"`
+
+	// RT-MATCH-16 process-match enrichment (optional; absent => basename-only match).
+	// ExePath is the resolved /proc/<pid>/exe target (canonical, symlink/relative-safe),
+	// ExeSha256 the bounded content hash (opt-in via CONSTELLATION_PROCESS_EXEC_HASH),
+	// and ParentName the parent process comm. These let the server-shipped baseline
+	// pin an allowed process to a full path + hash + parent rather than its basename,
+	// so a renamed/relocated binary running under an allowed name is still caught.
+	ExePath    string `json:"exe_path,omitempty"`
+	ExeSha256  string `json:"exe_sha256,omitempty"`
+	ParentName string `json:"parent_name,omitempty"`
+
+	// PrevUID is the pre-escalation effective UID for a kind=uid_change event
+	// (RT-SETUID-49); UID above is the new (root) effective UID.
+	PrevUID uint32 `json:"prev_uid,omitempty"`
 
 	Direction string `json:"direction,omitempty"`
 	Protocol  string `json:"protocol,omitempty"`

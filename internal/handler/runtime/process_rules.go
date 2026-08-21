@@ -35,6 +35,8 @@ type processRuleDTO struct {
 	RuleID      string `json:"rule_id"`
 	Name        string `json:"name"`
 	Path        string `json:"path"`
+	Sha256      string `json:"sha256"`
+	ParentName  string `json:"parent_name"`
 	Action      string `json:"action"`
 	User        string `json:"user"`
 	AllowUpdate bool   `json:"allow_update"`
@@ -46,6 +48,8 @@ type processRuleDTO struct {
 type processRuleBody struct {
 	Name        string `json:"name"`
 	Path        string `json:"path"`
+	Sha256      string `json:"sha256"`
+	ParentName  string `json:"parent_name"`
 	Action      string `json:"action"`
 	User        string `json:"user"`
 	AllowUpdate bool   `json:"allow_update"`
@@ -62,7 +66,7 @@ func (h *Baselines) loadProcessRules(ctx context.Context, orgID uuid.UUID, clust
 		return out
 	}
 	rows, err := h.db.Pool().Query(ctx, `
-SELECT id::text, name, path, action, proc_user, allow_update, enabled, description, updated_at
+SELECT id::text, name, path, COALESCE(sha256,''), COALESCE(parent_name,''), action, proc_user, allow_update, enabled, description, updated_at
   FROM process_profile_rules
  WHERE org_id = $1 AND cluster_id = $2 AND workload_id = $3
  ORDER BY action DESC, name`, orgID, cid, workloadID)
@@ -73,7 +77,7 @@ SELECT id::text, name, path, action, proc_user, allow_update, enabled, descripti
 	for rows.Next() {
 		var d processRuleDTO
 		var updated time.Time
-		if err := rows.Scan(&d.RuleID, &d.Name, &d.Path, &d.Action, &d.User, &d.AllowUpdate, &d.Enabled, &d.Description, &updated); err != nil {
+		if err := rows.Scan(&d.RuleID, &d.Name, &d.Path, &d.Sha256, &d.ParentName, &d.Action, &d.User, &d.AllowUpdate, &d.Enabled, &d.Description, &updated); err != nil {
 			return out
 		}
 		d.UpdatedAt = updated.UTC().Format(time.RFC3339)
@@ -108,6 +112,8 @@ func (h *Baselines) resolveRuleWorkload(w http.ResponseWriter, r *http.Request) 
 func normalizeProcessRuleBody(b processRuleBody) (processRuleBody, error) {
 	b.Name = strings.TrimSpace(b.Name)
 	b.Path = strings.TrimSpace(b.Path)
+	b.Sha256 = strings.ToLower(strings.TrimSpace(b.Sha256))
+	b.ParentName = strings.TrimSpace(b.ParentName)
 	b.User = strings.TrimSpace(b.User)
 	if b.Name == "" && b.Path == "" {
 		return b, errProcessRule("name or path is required")
@@ -156,14 +162,15 @@ func (h *Baselines) CreateRule(w http.ResponseWriter, r *http.Request) {
 	var updated time.Time
 	err = h.db.Pool().QueryRow(r.Context(), `
 INSERT INTO process_profile_rules
-  (org_id, cluster_id, workload_id, name, path, action, proc_user, allow_update, enabled, description, created_by, updated_by)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11)
+  (org_id, cluster_id, workload_id, name, path, sha256, parent_name, action, proc_user, allow_update, enabled, description, created_by, updated_by)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13)
 ON CONFLICT (org_id, cluster_id, workload_id, name, path) DO UPDATE SET
+  sha256 = EXCLUDED.sha256, parent_name = EXCLUDED.parent_name,
   action = EXCLUDED.action, proc_user = EXCLUDED.proc_user, allow_update = EXCLUDED.allow_update,
   enabled = EXCLUDED.enabled, description = EXCLUDED.description, updated_by = EXCLUDED.updated_by, updated_at = NOW()
-RETURNING id::text, name, path, action, proc_user, allow_update, enabled, description, updated_at`,
-		subj.OrgID, cid, wl.WorkloadID, body.Name, body.Path, body.Action, body.User, body.AllowUpdate, enabled, body.Description, subj.UserID).
-		Scan(&d.RuleID, &d.Name, &d.Path, &d.Action, &d.User, &d.AllowUpdate, &d.Enabled, &d.Description, &updated)
+RETURNING id::text, name, path, COALESCE(sha256,''), COALESCE(parent_name,''), action, proc_user, allow_update, enabled, description, updated_at`,
+		subj.OrgID, cid, wl.WorkloadID, body.Name, body.Path, body.Sha256, body.ParentName, body.Action, body.User, body.AllowUpdate, enabled, body.Description, subj.UserID).
+		Scan(&d.RuleID, &d.Name, &d.Path, &d.Sha256, &d.ParentName, &d.Action, &d.User, &d.AllowUpdate, &d.Enabled, &d.Description, &updated)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -203,13 +210,13 @@ func (h *Baselines) UpdateRule(w http.ResponseWriter, r *http.Request) {
 	var updated time.Time
 	err = h.db.Pool().QueryRow(r.Context(), `
 UPDATE process_profile_rules
-   SET name = $1, path = $2, action = $3, proc_user = $4, allow_update = $5,
-       enabled = $6, description = $7, updated_by = $8, updated_at = NOW()
- WHERE org_id = $9 AND cluster_id = $10 AND workload_id = $11 AND id = $12
-RETURNING id::text, name, path, action, proc_user, allow_update, enabled, description, updated_at`,
-		body.Name, body.Path, body.Action, body.User, body.AllowUpdate, enabled, body.Description, subj.UserID,
+   SET name = $1, path = $2, sha256 = $3, parent_name = $4, action = $5, proc_user = $6, allow_update = $7,
+       enabled = $8, description = $9, updated_by = $10, updated_at = NOW()
+ WHERE org_id = $11 AND cluster_id = $12 AND workload_id = $13 AND id = $14
+RETURNING id::text, name, path, COALESCE(sha256,''), COALESCE(parent_name,''), action, proc_user, allow_update, enabled, description, updated_at`,
+		body.Name, body.Path, body.Sha256, body.ParentName, body.Action, body.User, body.AllowUpdate, enabled, body.Description, subj.UserID,
 		subj.OrgID, cid, wl.WorkloadID, ruleID).
-		Scan(&d.RuleID, &d.Name, &d.Path, &d.Action, &d.User, &d.AllowUpdate, &d.Enabled, &d.Description, &updated)
+		Scan(&d.RuleID, &d.Name, &d.Path, &d.Sha256, &d.ParentName, &d.Action, &d.User, &d.AllowUpdate, &d.Enabled, &d.Description, &updated)
 	if err != nil {
 		jsonError(w, http.StatusNotFound, "rule not found")
 		return

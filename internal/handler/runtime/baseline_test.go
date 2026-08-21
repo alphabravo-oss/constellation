@@ -102,6 +102,69 @@ INSERT INTO events (
 	}
 }
 
+// TestBaselinesHydrateFromDB is the RT-DRIFT-50 check: a persisted baseline state +
+// its learned process observations are rehydrated into the in-memory map on startup,
+// so BaselineMode (the drift-classifier hot path) serves the mode + learned set after
+// a restart WITHOUT any prior List/Get request. Before the fix, h.state started empty
+// for DB-backed workloads and drift classification silently never fired post-restart.
+func TestBaselinesHydrateFromDB(t *testing.T) {
+	d := openTestDB(t)
+	defer d.Close()
+
+	ctx := context.Background()
+	pool := d.Pool()
+	for _, table := range []string{"events", "process_baseline_states"} {
+		var regclass string
+		if err := pool.QueryRow(ctx, `SELECT COALESCE(to_regclass('public.' || $1)::text, '')`, table).Scan(&regclass); err != nil || regclass == "" {
+			t.Skipf("skipping: %s migration not applied (%v)", table, err)
+		}
+	}
+
+	orgID := uuid.New()
+	clusterID := uuid.New()
+	now := time.Now().UTC()
+	workloadID := "default/api"
+
+	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, display_name) VALUES ($1, $2, 'Hydrate Test')`, orgID, "hydrate-"+orgID.String()); err != nil {
+		t.Fatalf("org: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgID) })
+	if _, err := pool.Exec(ctx, `INSERT INTO clusters (id, org_id, name, distro, state) VALUES ($1, $2, 'hydrate-cluster', 'k3s', 'connected')`, clusterID, orgID); err != nil {
+		t.Fatalf("cluster: %v", err)
+	}
+	// Persisted baseline state in monitor mode — no List/Get has run this process.
+	if _, err := pool.Exec(ctx, `
+INSERT INTO process_baseline_states (org_id, cluster_id, workload_id, namespace, name, mode, learn_started_at, monitor_started_at)
+VALUES ($1, $2, $3, 'default', 'api', 'monitor', $4, $4)`, orgID, clusterID, workloadID, now); err != nil {
+		t.Fatalf("baseline state: %v", err)
+	}
+	// A learned process observation attributed directly to the owner workload.
+	if _, err := pool.Exec(ctx, `
+INSERT INTO events (org_id, cluster_id, node_id, kind, source, severity, verdict, workload_id, payload, at)
+VALUES ($1, $2, 'test-node', 'process_exec', 'runtime-agent', 'medium', 'observed', $3,
+    '{"comm":"nginx","filename":"/usr/sbin/nginx","exe_path":"/usr/sbin/nginx"}'::jsonb, $4)`,
+		orgID, clusterID, workloadID, now); err != nil {
+		t.Fatalf("event: %v", err)
+	}
+
+	// Fresh handler, explicit hydrate (deterministic, not racing the constructor goroutine).
+	b := NewBaselines(d, nil)
+	if err := b.Hydrate(ctx); err != nil {
+		t.Fatalf("hydrate: %v", err)
+	}
+
+	mode, set, ok := b.BaselineMode(orgID, workloadID)
+	if !ok {
+		t.Fatalf("expected BaselineMode to resolve the hydrated workload after restart")
+	}
+	if string(mode) != "monitor" {
+		t.Fatalf("mode = %q want monitor", mode)
+	}
+	if _, has := set["nginx"]; !has {
+		t.Fatalf("learned set = %v, expected to contain nginx", set)
+	}
+}
+
 // TestBaselineModeDriftWiring is the WS-F2 end-to-end check: the Baselines handler's
 // in-memory state feeds the events-ingest drift classifier. No DB required — we seed
 // the in-memory state map directly and drive EventsIngest.classify through it.

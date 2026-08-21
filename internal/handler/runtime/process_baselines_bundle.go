@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"net/http"
 	"sort"
 	"strings"
@@ -23,8 +24,24 @@ type processBaselineBundleRow struct {
 	Namespace      string   `json:"namespace,omitempty"`
 	Name           string   `json:"name,omitempty"`
 	Mode           string   `json:"mode"`      // learn|monitor|enforce
-	Processes      []string `json:"processes"` // allowed basenames, deduped+sorted
-	UpdatedAt      string   `json:"updated_at"`
+	Processes      []string `json:"processes"` // allowed basenames, deduped+sorted (legacy fallback)
+	// RT-MATCH-16: rich per-process entries carrying full path + optional sha256 +
+	// parent name + action, so the agent enforcer can reject a renamed/relocated
+	// binary running under an allowed basename. Additive: an agent that ignores it
+	// (or a row with no entries) falls back to the basename Processes set above.
+	Entries   []processBundleEntry `json:"entries,omitempty"`
+	UpdatedAt string               `json:"updated_at"`
+}
+
+// processBundleEntry mirrors the agent's processProfileEntry / NeuVector's
+// CLUSProcessProfileEntry: every non-empty key field is an AND constraint the exec
+// must satisfy. Action is "allow" (learned/authored-allow) or "deny" (authored-deny).
+type processBundleEntry struct {
+	Basename   string `json:"basename,omitempty"`
+	Path       string `json:"path,omitempty"`
+	Sha256     string `json:"sha256,omitempty"`
+	ParentName string `json:"parent_name,omitempty"`
+	Action     string `json:"action"`
 }
 
 type processBaselineBundleDTO struct {
@@ -112,6 +129,14 @@ SELECT s.workload_id,
 		return
 	}
 
+	// Authored allow/deny rules (RT-MATCH-16) for the whole cluster in one query,
+	// grouped by workload, so the per-workload loop below doesn't N+1.
+	ruleEntries, err := h.loadProcessRuleEntries(r.Context(), tok.OrgID, clusterID)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "process rules: "+err.Error())
+		return
+	}
+
 	// Resolve the allowed-process set per workload from observations. Done after
 	// the cursor is drained so we don't hold the row cursor open across queries.
 	for _, p := range pendings {
@@ -121,6 +146,8 @@ SELECT s.workload_id,
 			return
 		}
 		p.row.Processes = allowedBasenames(obs)
+		// Rich entries: learned observations (allow) + authored rules (allow/deny).
+		p.row.Entries = append(allowedEntries(obs), ruleEntries[p.row.WorkloadID]...)
 		bundle.Rows = append(bundle.Rows, p.row)
 	}
 
@@ -135,6 +162,88 @@ SELECT s.workload_id,
 	bundle.Rows = appendFedProcessBaselineRows(bundle.Rows, fedPayloads)
 
 	httpx.WriteJSON(w, http.StatusOK, bundle)
+}
+
+// allowedEntries builds rich allow-entries from learned observations (RT-MATCH-16).
+// When a process was seen with a canonical absolute path, the entry pins that full
+// path (+ hash/parent when captured) so a binary renamed/relocated to an allowed
+// basename no longer matches. When no absolute path is known (older rows / relative
+// execve filename), the entry is basename-only — the documented fallback, identical
+// to the legacy behavior for that process.
+func allowedEntries(obs []processObservation) []processBundleEntry {
+	out := make([]processBundleEntry, 0, len(obs))
+	seen := map[string]struct{}{}
+	for _, p := range obs {
+		name := strings.TrimSpace(p.Name)
+		path := strings.TrimSpace(p.Path)
+		if name == "" && path == "" {
+			continue
+		}
+		e := processBundleEntry{Action: "allow"}
+		// Only pin an absolute path; a relative/empty path stays a wildcard so we
+		// never false-reject a legitimately-relocated-but-canonical exec.
+		if strings.HasPrefix(path, "/") {
+			e.Path = path
+			e.Basename = pathBasename(path)
+			e.Sha256 = strings.TrimSpace(p.Sha256)
+			e.ParentName = strings.TrimSpace(p.ParentName)
+		} else {
+			e.Basename = name
+		}
+		if e.Basename == "" && e.Path == "" {
+			continue
+		}
+		k := e.Basename + "\x00" + e.Path + "\x00" + e.Sha256 + "\x00" + e.ParentName
+		if _, dup := seen[k]; dup {
+			continue
+		}
+		seen[k] = struct{}{}
+		out = append(out, e)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Path != out[j].Path {
+			return out[i].Path < out[j].Path
+		}
+		return out[i].Basename < out[j].Basename
+	})
+	return out
+}
+
+// loadProcessRuleEntries loads the authored allow/deny process rules for a cluster and
+// groups them by workload as rich entries (RT-MATCH-16). Degrades to an empty map if
+// the table/columns haven't been migrated yet, so the bundle never fails on a stale DB.
+func (h *Baselines) loadProcessRuleEntries(ctx context.Context, orgID, clusterID uuid.UUID) (map[string][]processBundleEntry, error) {
+	out := map[string][]processBundleEntry{}
+	rows, err := h.db.Pool().Query(ctx, `
+SELECT workload_id, name, path, COALESCE(sha256,''), COALESCE(parent_name,''), action
+  FROM process_profile_rules
+ WHERE org_id = $1 AND cluster_id = $2 AND enabled = TRUE`, orgID, clusterID)
+	if err != nil {
+		// Missing table/column (pre-migration) is non-fatal: no authored entries.
+		if strings.Contains(err.Error(), "process_profile_rules") ||
+			strings.Contains(err.Error(), "sha256") || strings.Contains(err.Error(), "parent_name") {
+			return out, nil
+		}
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var workloadID, name, path, sha, parent, action string
+		if err := rows.Scan(&workloadID, &name, &path, &sha, &parent, &action); err != nil {
+			return nil, err
+		}
+		if action != "deny" {
+			action = "allow"
+		}
+		out[workloadID] = append(out[workloadID], processBundleEntry{
+			Basename:   strings.TrimSpace(name),
+			Path:       strings.TrimSpace(path),
+			Sha256:     strings.TrimSpace(sha),
+			ParentName: strings.TrimSpace(parent),
+			Action:     action,
+		})
+	}
+	return out, rows.Err()
 }
 
 // allowedBasenames collapses observed processes to a deduped, sorted basename set
