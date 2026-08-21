@@ -49,6 +49,9 @@ type config struct {
 	benchmark string
 	clusterID string
 	node      string
+	// watchInterval > 0 turns the runner into a resident poller for on-demand
+	// run requests (CMP-RUN-31). Zero = one-shot CronJob mode.
+	watchInterval time.Duration
 }
 
 func main() {
@@ -64,10 +67,37 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
+	// CMP-RUN-31: watch mode. When BENCH_WATCH_INTERVAL is set the runner stays
+	// resident and polls the control plane for on-demand run requests
+	// (POST /compliance/bench/claim) instead of running once and exiting. This is
+	// what turns the enqueue handler into a fresh benchmark run. Default (unset) =
+	// the historical one-shot CronJob behaviour.
+	if cfg.watchInterval > 0 {
+		watchLoop(ctx, http.DefaultClient, cfg, logger)
+		return
+	}
+
+	if err := runAndIngest(ctx, http.DefaultClient, cfg, logger); err != nil {
+		logger.Error("bench run", "err", err.Error())
+		os.Exit(1)
+	}
+
+	// Best-effort heartbeat so the runner shows up in the components table like
+	// the other one-shot jobs (compliance-collector).
+	if version.HeartbeatConfigured(cfg.hbCfg) {
+		if err := version.SendOnceExternal(ctx, cfg.hbCfg); err != nil {
+			logger.Warn("heartbeat failed", "err", err.Error())
+		}
+	}
+}
+
+// runAndIngest execs the benchmark and POSTs the report to /compliance/ingest,
+// attributing the results to this cluster/node. Shared by the one-shot and watch
+// paths.
+func runAndIngest(ctx context.Context, client *http.Client, cfg config, logger *slog.Logger) error {
 	report, err := runBenchmark(ctx, cfg.binary, cfg.args)
 	if err != nil {
-		logger.Error("run benchmark", "binary", cfg.binary, "err", err.Error())
-		os.Exit(1)
+		return fmt.Errorf("run benchmark %s: %w", cfg.binary, err)
 	}
 
 	endpoint := strings.TrimRight(cfg.apiURL, "/") + fmt.Sprintf(ingestPathFormat, cfg.profile)
@@ -83,18 +113,73 @@ func main() {
 	if cfg.node != "" {
 		endpoint += "&node=" + url.QueryEscape(cfg.node)
 	}
-	if err := postReport(ctx, http.DefaultClient, endpoint, cfg.token, report); err != nil {
-		logger.Error("post report", "url", endpoint, "err", err.Error())
-		os.Exit(1)
+	if err := postReport(ctx, client, endpoint, cfg.token, report); err != nil {
+		return fmt.Errorf("post report %s: %w", endpoint, err)
 	}
 	logger.Info("ingest succeeded", "profile", cfg.profile, "benchmark", cfg.benchmark, "bytes", len(report))
+	return nil
+}
 
-	// Best-effort heartbeat so the runner shows up in the components table like
-	// the other one-shot jobs (compliance-collector).
-	if version.HeartbeatConfigured(cfg.hbCfg) {
-		if err := version.SendOnceExternal(ctx, cfg.hbCfg); err != nil {
-			logger.Warn("heartbeat failed", "err", err.Error())
+// watchLoop polls the control plane for pending on-demand run requests and
+// services each one by running the benchmark and ingesting the report. It also
+// heartbeats on every tick so the resident runner stays visible in the health
+// table. The loop exits when ctx is cancelled.
+func watchLoop(ctx context.Context, client *http.Client, cfg config, logger *slog.Logger) {
+	logger.Info("watch mode started", "interval", cfg.watchInterval.String(), "profile", cfg.profile)
+	ticker := time.NewTicker(cfg.watchInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Info("watch mode stopping")
+			return
+		case <-ticker.C:
+			claimed, err := claimPendingRun(ctx, client, cfg)
+			if err != nil {
+				logger.Warn("claim poll failed", "err", err.Error())
+			} else if claimed {
+				logger.Info("claimed on-demand bench run; executing")
+				if err := runAndIngest(ctx, client, cfg, logger); err != nil {
+					logger.Error("on-demand bench run", "err", err.Error())
+				}
+			}
+			if version.HeartbeatConfigured(cfg.hbCfg) {
+				if err := version.SendOnceExternal(ctx, cfg.hbCfg); err != nil {
+					logger.Warn("heartbeat failed", "err", err.Error())
+				}
+			}
 		}
+	}
+}
+
+// claimPendingRun asks the control plane for the next pending run request for
+// this cluster+profile. HTTP 200 => a request was claimed (run it); 204 => queue
+// empty. The claim is atomic server-side (FOR UPDATE SKIP LOCKED).
+func claimPendingRun(ctx context.Context, client *http.Client, cfg config) (bool, error) {
+	reqCtx, cancel := context.WithTimeout(ctx, postTimeout)
+	defer cancel()
+	endpoint := strings.TrimRight(cfg.apiURL, "/") + "/api/v1/compliance/bench/claim?profile=" + url.QueryEscape(cfg.profile)
+	if cfg.clusterID != "" {
+		endpoint += "&cluster_id=" + url.QueryEscape(cfg.clusterID)
+	}
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint, nil)
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("Authorization", "Bearer "+cfg.token)
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxReportBytes))
+	switch {
+	case resp.StatusCode == http.StatusNoContent:
+		return false, nil
+	case resp.StatusCode == http.StatusOK:
+		return true, nil
+	default:
+		return false, fmt.Errorf("claim returned %d", resp.StatusCode)
 	}
 }
 
@@ -125,6 +210,16 @@ func loadConfig() (config, error) {
 		args = append(args, "--benchmark", benchmark)
 	}
 
+	// BENCH_WATCH_INTERVAL (e.g. "30s") opts the runner into resident watch mode.
+	var watchInterval time.Duration
+	if raw := strings.TrimSpace(os.Getenv("BENCH_WATCH_INTERVAL")); raw != "" {
+		d, perr := time.ParseDuration(raw)
+		if perr != nil {
+			return config{}, fmt.Errorf("invalid BENCH_WATCH_INTERVAL %q: %w", raw, perr)
+		}
+		watchInterval = d
+	}
+
 	hbCfg := version.HeartbeatConfigFromEnv(componentName, version.HeartbeatEnvOptions{
 		APIBaseURL:   apiURL,
 		TokenEnv:     []string{"CONSTELLATION_KUBE_BENCH_RUNNER_TOKEN", "RUNTIME_AGENT_TOKEN"},
@@ -151,7 +246,8 @@ func loadConfig() (config, error) {
 		// NODE_NAME is the standard downward-API field-ref env; set it on the pod spec
 		// when the runner runs per-node so results dedup per (cluster, node). Empty for a
 		// cluster-level run — the ingest handler then keys on the cluster alone.
-		node: strings.TrimSpace(os.Getenv("NODE_NAME")),
+		node:          strings.TrimSpace(os.Getenv("NODE_NAME")),
+		watchInterval: watchInterval,
 	}, nil
 }
 

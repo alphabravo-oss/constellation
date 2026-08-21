@@ -290,6 +290,38 @@ kubeBenchRunner:
     requests: { cpu: 50m,  memory: 64Mi }
 
 # ---------------------------------------------------------------------------
+# docker-bench runner (opt-in) — CMP-DOCKER-33
+# ---------------------------------------------------------------------------
+# Mirror of kubeBenchRunner for CIS Docker host controls. Runs the upstream
+# docker-bench-security script on a schedule and POSTs its JSON to
+# /api/v1/compliance/ingest?profile=docker-bench (the server-side docker-bench
+# parser already exists). Disabled by default; the image must bundle the
+# docker-bench-security binary alongside the constellation-kube-bench-runner.
+dockerBenchRunner:
+  enabled: false
+  schedule: "47 */6 * * *"
+  # Selects the server-side ingest parser; keep "docker-bench".
+  profile: docker-bench
+  # Upstream binary/script to exec; must be present in the image.
+  binary: docker-bench-security
+  # Extra args passed to the binary (whitespace-split). "--json" is appended
+  # automatically when absent.
+  args: ""
+  clusterId: ""
+  clusterName: ""
+  image:
+    repository: ""
+    tag: ""
+  # Host paths docker-bench needs to audit (docker daemon config, socket, etc.).
+  # Empty by default; supply for your host, e.g. mount /etc, /var/lib, and the
+  # docker socket read-only.
+  hostVolumes: []
+  hostVolumeMounts: []
+  resources:
+    limits:   { cpu: 200m, memory: 256Mi }
+    requests: { cpu: 50m,  memory: 64Mi }
+
+# ---------------------------------------------------------------------------
 # Admission webhook
 # ---------------------------------------------------------------------------
 # The admission Deployment serves /validate over HTTPS. TLS material is

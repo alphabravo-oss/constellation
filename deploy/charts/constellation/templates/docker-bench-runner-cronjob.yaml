@@ -1,0 +1,80 @@
+{{- if .Values.dockerBenchRunner.enabled }}
+{{- $clusterName := default (default .Release.Namespace .Values.clusterRegistration.name) .Values.dockerBenchRunner.clusterName -}}
+{{- $image := .Values.dockerBenchRunner.image.repository -}}
+{{- if not $image }}{{- fail "dockerBenchRunner.enabled requires dockerBenchRunner.image.repository (the image must contain both the kube-bench-runner binary and the upstream docker-bench-security binary)" }}{{- end }}
+{{- $tag := default (include "constellation.imageTag" .) .Values.dockerBenchRunner.image.tag -}}
+{{- $image = printf "%s:%s" $image $tag -}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "constellation.fullname" . }}-docker-bench
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: docker-bench-runner
+spec:
+  schedule: {{ .Values.dockerBenchRunner.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: {{ include "constellation.name" . }}
+            app.kubernetes.io/component: docker-bench-runner
+        spec:
+          {{- include "constellation.pullSecrets" . | nindent 10 }}
+          {{- include "constellation.podSecurityContext" . | nindent 10 }}
+          # docker-bench inspects the host daemon config, file permissions, and
+          # running containers, so it runs on the host PID namespace and mounts
+          # host paths read-only.
+          hostPID: true
+          restartPolicy: OnFailure
+          containers:
+            - name: runner
+              image: {{ $image }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: ["/usr/local/bin/constellation-kube-bench-runner"]
+              env:
+                - name: CONSTELLATION_API_URL
+                  value: {{ include "constellation.apiURL" . | quote }}
+                - name: BENCH_PROFILE
+                  value: {{ .Values.dockerBenchRunner.profile | quote }}
+                - name: BENCH_BINARY
+                  value: {{ .Values.dockerBenchRunner.binary | quote }}
+                - name: BENCH_ARGS
+                  value: {{ .Values.dockerBenchRunner.args | quote }}
+                - name: CONSTELLATION_CLUSTER_NAME
+                  value: {{ $clusterName | quote }}
+                {{- if .Values.dockerBenchRunner.clusterId }}
+                - name: CONSTELLATION_CLUSTER_ID
+                  value: {{ .Values.dockerBenchRunner.clusterId | quote }}
+                {{- else if .Values.clusterRegistration.clusterId }}
+                - name: CONSTELLATION_CLUSTER_ID
+                  value: {{ .Values.clusterRegistration.clusterId | quote }}
+                {{- end }}
+                - name: CONSTELLATION_KUBE_BENCH_RUNNER_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "constellation.runtimeAgentTokenSecret" . }}
+                      key: token
+                      optional: true
+                - name: RUNTIME_AGENT_TOKEN_FILE
+                  value: /var/run/constellation/runtime-agent-token/token
+              volumeMounts:
+                - name: runtime-agent-token
+                  mountPath: /var/run/constellation/runtime-agent-token
+                  readOnly: true
+                {{- with .Values.dockerBenchRunner.hostVolumeMounts }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}
+              resources: {{- toYaml .Values.dockerBenchRunner.resources | nindent 16 }}
+          volumes:
+            - name: runtime-agent-token
+              secret:
+                secretName: {{ include "constellation.runtimeAgentTokenSecret" . }}
+                optional: true
+            {{- with .Values.dockerBenchRunner.hostVolumes }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+{{- end }}
