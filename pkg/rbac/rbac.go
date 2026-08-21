@@ -11,6 +11,7 @@ package rbac
 import (
 	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/google/uuid"
 )
@@ -224,6 +225,51 @@ func AuthorizeWithCustom(assignments []RoleAssignment, verb Verb, resource Resou
 		}
 	}
 	return fmt.Errorf("%w: verb=%s", ErrForbidden, verb)
+}
+
+// NamespaceRestriction reports whether a subject's access to `verb` (within the
+// org/cluster scope of `resource`, ignoring `resource.Namespace`) is limited to a
+// specific set of namespaces. It underpins RBAC-NS-24 row-level list filtering:
+//
+//   - restricted=false  → the subject has an org/cluster-wide (namespace="") grant
+//     for `verb`, OR no grant at all. Callers apply NO namespace filter (a no-grant
+//     subject is denied by Authorize separately).
+//   - restricted=true   → every assignment granting `verb` is namespace-scoped;
+//     `namespaces` is the de-duplicated set the subject may see. Callers MUST filter
+//     list rows to this set. Never empty when restricted is true.
+//
+// This is deliberately conservative: a single namespace-unrestricted grant for the
+// verb makes the subject unrestricted (restricted=false), so we never narrow a user
+// who legitimately has cluster-wide read.
+func NamespaceRestriction(assignments []RoleAssignment, verb Verb, resource Resource, custom map[string][]Verb) (namespaces []string, restricted bool) {
+	seen := map[string]bool{}
+	for _, a := range assignments {
+		if a.Scope.OrgID != resource.OrgID {
+			continue
+		}
+		if a.Scope.ClusterID != nil && (resource.ClusterID == nil || *a.Scope.ClusterID != *resource.ClusterID) {
+			continue
+		}
+		if a.Scope.ProjectID != nil && (resource.ProjectID == nil || *a.Scope.ProjectID != *resource.ProjectID) {
+			continue
+		}
+		if !roleGrants(a.Role, verb) && !customGrants(custom, a.Role, verb) {
+			continue
+		}
+		// A namespace-unrestricted grant for this verb ⇒ full access, no filter.
+		if a.Scope.Namespace == "" {
+			return nil, false
+		}
+		if !seen[a.Scope.Namespace] {
+			seen[a.Scope.Namespace] = true
+			namespaces = append(namespaces, a.Scope.Namespace)
+		}
+	}
+	if len(namespaces) == 0 {
+		return nil, false // no grant for this verb at all — Authorize denies separately
+	}
+	sort.Strings(namespaces)
+	return namespaces, true
 }
 
 func roleGrants(role string, verb Verb) bool {

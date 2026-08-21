@@ -339,6 +339,13 @@ func (h *Deployments) List(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	// RBAC-NS-24 row filtering: a namespace-restricted subject (set by requireVerbNS on
+	// the route) sees only its granted namespaces. nil ⇒ no restriction. NULL::text[]
+	// disables the ANY() clause, so an unrestricted caller is unaffected.
+	var nsFilter []string
+	if allowed, ok := NamespaceFilterFrom(r.Context()); ok {
+		nsFilter = allowed
+	}
 
 	rows, err := h.db.Pool().Query(r.Context(), `
 SELECT id, namespace, name, kind, COALESCE(labels,'{}'::jsonb), risk_score, COALESCE(risk_factors,'{}'::jsonb),
@@ -347,8 +354,9 @@ SELECT id, namespace, name, kind, COALESCE(labels,'{}'::jsonb), risk_score, COAL
  WHERE org_id = $1
    AND ($2::text = '' OR namespace = $2)
    AND ($3::uuid IS NULL OR cluster_id = $3)
+   AND ($5::text[] IS NULL OR namespace = ANY($5))
  ORDER BY risk_score DESC, last_seen_at DESC
- LIMIT $4`, subj.OrgID, namespace, clusterArg, limit)
+ LIMIT $4`, subj.OrgID, namespace, clusterArg, limit, nsFilter)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

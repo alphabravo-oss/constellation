@@ -60,3 +60,20 @@ func SubjectFrom(ctx context.Context) (Subject, bool) {
 	s, ok := ctx.Value(subjectKey{}).(Subject)
 	return s, ok
 }
+
+type nsFilterKey struct{}
+
+// WithNamespaceFilter attaches the set of namespaces a namespace-restricted subject
+// may see (RBAC-NS-24 row filtering). Set by requireVerbNS on an unfiltered list when
+// the subject has only namespace-scoped grants; a filter-aware list handler MUST read
+// it via NamespaceFilterFrom and constrain its query. Absent = no restriction.
+func WithNamespaceFilter(ctx context.Context, namespaces []string) context.Context {
+	return context.WithValue(ctx, nsFilterKey{}, namespaces)
+}
+
+// NamespaceFilterFrom returns the namespace allow-list attached by WithNamespaceFilter.
+// ok is true only when a non-empty restriction is present.
+func NamespaceFilterFrom(ctx context.Context) (namespaces []string, ok bool) {
+	ns, _ := ctx.Value(nsFilterKey{}).([]string)
+	return ns, len(ns) > 0
+}

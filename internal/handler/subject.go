@@ -20,3 +20,6 @@ var WithSubject = authctx.WithSubject
 
 // SubjectFrom is an alias for authctx.SubjectFrom.
 var SubjectFrom = authctx.SubjectFrom
+
+// NamespaceFilterFrom is an alias for authctx.NamespaceFilterFrom (RBAC-NS-24 row filter).
+var NamespaceFilterFrom = authctx.NamespaceFilterFrom

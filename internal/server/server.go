@@ -652,7 +652,9 @@ func (s *Server) buildRouter() chi.Router {
 
 			deps := handler.NewDeployments(s.db, s.auditLog).
 				WithNetworkPolicyLookup(netpolicy.NewNetworkPolicies(s.db).LifecycleForWorkload)
-			r.Get("/deployments", s.requireVerb(rbac.VerbReadFindings, deps.List))
+			// RBAC-NS-24: requireVerbNS so a namespace-scoped subject can list and is
+			// row-filtered to its namespaces (deps.List honors NamespaceFilterFrom).
+			r.Get("/deployments", s.requireVerbNS(rbac.VerbReadFindings, deps.List))
 			r.Get("/deployments/{id}", s.requireVerb(rbac.VerbReadFindings, deps.Get))
 			r.Get("/violations", s.requireVerb(rbac.VerbReadFindings, deps.Violations))
 
@@ -1913,6 +1915,57 @@ func (s *Server) requireVerb(verb rbac.Verb, h http.HandlerFunc) http.HandlerFun
 			return
 		}
 		h(w, r)
+	}
+}
+
+// requireVerbNS is requireVerb for namespace-filterable LIST handlers (RBAC-NS-24 row
+// filtering). It differs only in the unfiltered case: when the request targets no single
+// namespace and the subject has ONLY namespace-scoped grants for `verb` (no org/cluster-wide
+// grant), instead of denying it authorizes the list and attaches the subject's allowed
+// namespaces via authctx.WithNamespaceFilter — which the wrapped handler MUST honor by
+// constraining its query. Use this ONLY on list handlers that read NamespaceFilterFrom;
+// everywhere else keep plain requireVerb (a namespace-scoped subject stays deny-closed).
+func (s *Server) requireVerbNS(verb rbac.Verb, h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		subj, ok := authctx.SubjectFrom(r.Context())
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "no subject")
+			return
+		}
+		if !subj.HasTokenScope(verb) {
+			writeError(w, http.StatusForbidden, "forbidden: token lacks scope "+string(verb))
+			return
+		}
+		res := rbac.Resource{OrgID: subj.OrgID}
+		if cid := clusterScopeFromRequest(r); cid != nil {
+			res.ClusterID = cid
+		}
+		var custom map[string][]rbac.Verb
+		if s.customRoles != nil {
+			custom = s.customRoles.VerbsForOrg(r.Context(), subj.OrgID)
+		}
+		if ns := namespaceScopeFromRequest(r); ns != "" {
+			// Targeted at one namespace: strict — it must be granted (identical to requireVerb).
+			res.Namespace = ns
+			if err := rbac.AuthorizeWithCustom(subj.Assignments, verb, res, custom); err != nil {
+				writeError(w, http.StatusForbidden, "forbidden: "+string(verb))
+				return
+			}
+			h(w, r)
+			return
+		}
+		// Unfiltered list. A namespace-unrestricted grant (res.Namespace == "") passes as-is.
+		if err := rbac.AuthorizeWithCustom(subj.Assignments, verb, res, custom); err == nil {
+			h(w, r)
+			return
+		}
+		// No unrestricted grant — allow the list only if the subject is namespace-restricted,
+		// and constrain it to those namespaces.
+		if allowed, restricted := rbac.NamespaceRestriction(subj.Assignments, verb, res, custom); restricted {
+			h(w, r.WithContext(authctx.WithNamespaceFilter(r.Context(), allowed)))
+			return
+		}
+		writeError(w, http.StatusForbidden, "forbidden: "+string(verb))
 	}
 }
 
