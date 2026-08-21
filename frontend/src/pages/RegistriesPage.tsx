@@ -50,12 +50,15 @@ const KINDS: Array<{
     fields: [
       { key: "region", label: "AWS region", placeholder: "us-east-1" },
       { key: "role_arn", label: "IAM role ARN (assumed)", placeholder: "arn:aws:iam::123:role/constellation-ecr-reader" },
+      { key: "access_key_id", label: "Access key ID", helper: "Static IAM keys (optional — else the ambient/role chain is used)" },
+      { key: "secret_access_key", label: "Secret access key", secret: true },
     ] },
   { kind: "gcr", label: "Google Artifact Registry",
     endpointHint: "projects/<id>/locations/<region>/repositories/<repo>",
     fields: [
       { key: "resource_path", label: "GCP repo path", placeholder: "projects/myproj/locations/us-central1/repositories/main" },
-      { key: "token", label: "OAuth2 access token", secret: true, helper: "from a service-account key" },
+      { key: "service_account_json", label: "Service-account JSON key", secret: true, helper: "Paste the SA key — Constellation mints + refreshes OAuth tokens itself (no ~1h expiry)" },
+      { key: "token", label: "OAuth2 access token", secret: true, helper: "Alternative: a pre-acquired token (expires in ~1h)" },
     ] },
   { kind: "acr", label: "Azure Container Registry", endpointHint: "myregistry.azurecr.io",
     fields: [
