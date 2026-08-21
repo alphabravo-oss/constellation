@@ -68,6 +68,26 @@ spec:
             - name: POD_NAMESPACE
               valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
 {{- end }}
+{{- if .Values.federation.masterUrl }}
+            # FED-JOIN-25: joint-side federation config. When masterUrl is set this
+            # controller is a joint: the background poller (ReconcileFedSyncLoop) pulls the
+            # named master, and `constellationctl federation join` / POST /federation/join-remote
+            # fall back to these when no master_url/token is passed. Leave masterUrl empty
+            # (the default) for a standalone or master controller.
+            - name: CONSTELLATION_FED_MASTER_URL
+              value: {{ .Values.federation.masterUrl | quote }}
+{{- if .Values.federation.joinTokenSecret }}
+            - name: CONSTELLATION_FED_MASTER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.federation.joinTokenSecret }}
+                  key: {{ .Values.federation.joinTokenSecretKey | default "token" }}
+                  optional: true
+{{- else if .Values.federation.joinToken }}
+            - name: CONSTELLATION_FED_MASTER_TOKEN
+              value: {{ .Values.federation.joinToken | quote }}
+{{- end }}
+{{- end }}
             - name: CONSTELLATION_API_TOKEN
               valueFrom:
                 secretKeyRef:

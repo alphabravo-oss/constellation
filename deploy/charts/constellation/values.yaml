@@ -186,6 +186,26 @@ api:
     leaseName: ""
 
 # ---------------------------------------------------------------------------
+# Federation (FED-JOIN-25) — joint-side config
+# ---------------------------------------------------------------------------
+# Set masterUrl to make this controller a JOINT of a federation master. The
+# background poller then pulls that master's federated rules, and both
+# `constellationctl federation join` and POST /federation/join-remote fall back
+# to these values when no master_url/token is supplied. Leave masterUrl empty
+# (the default) for a standalone or master controller.
+federation:
+  # Base URL of the federation master, e.g. https://master.example.com. Empty =
+  # not a joint (no federation env is injected at all).
+  masterUrl: ""
+  # Join token minted by the master (constellationctl on the master / the
+  # /federation/join-tokens API). Prefer joinTokenSecret over an inline value.
+  joinToken: ""
+  # Optional: read the join token from an existing Secret instead of joinToken.
+  # When set it wins over joinToken.
+  joinTokenSecret: ""
+  joinTokenSecretKey: "token"
+
+# ---------------------------------------------------------------------------
 # Kubernetes operator (reconciles ConstellationCluster CRs)
 # ---------------------------------------------------------------------------
 operator:

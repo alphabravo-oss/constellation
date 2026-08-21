@@ -36,7 +36,7 @@ func main() {
 		Use:   "constellationctl",
 		Short: "Constellation operator CLI",
 	}
-	root.AddCommand(loginCmd(), imageCheckCmd(), auditCmd(), versionCmd(), iacCheckCmd(), modelCheckCmd(), policyCmd(), clusterCmd(), tokensCmd(), networkFlowsCmd(), backupCmd(), vulndbCmd(), serverlessCmd(), repositoryCmd())
+	root.AddCommand(loginCmd(), imageCheckCmd(), auditCmd(), versionCmd(), iacCheckCmd(), modelCheckCmd(), policyCmd(), clusterCmd(), tokensCmd(), networkFlowsCmd(), backupCmd(), vulndbCmd(), serverlessCmd(), repositoryCmd(), federationCmd())
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
 	}
