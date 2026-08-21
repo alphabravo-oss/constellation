@@ -123,12 +123,37 @@ type EgressProxy struct {
 	NoProxy    string `json:"no_proxy,omitempty"`
 }
 
-// SyslogTarget is the syslog/SIEM destination: host:port over udp|tcp. Empty Host
+// SyslogTarget is the syslog/SIEM destination: host:port over udp|tcp|tls. Empty Host
 // means "no syslog target configured" (the audit/notifier sender skips syslog).
+//
+// SIEM-TLS-14 adds TLS transport, structured formats, and level/category filtering
+// (parity with NeuVector's SyslogServerCert / SyslogInJSON / syslog_level+categories).
+// All new fields are optional and default to the legacy behavior: plaintext + rfc5424 +
+// no filtering, so existing configs are unaffected.
 type SyslogTarget struct {
 	Host     string `json:"host,omitempty"`
 	Port     int    `json:"port,omitempty"`
-	Protocol string `json:"protocol,omitempty"` // "udp" | "tcp"
+	Protocol string `json:"protocol,omitempty"` // "udp" | "tcp" | "tls"
+
+	// TLS forces the TLS transport even when Protocol is left blank/tcp (Protocol "tls"
+	// is equivalent). Over untrusted networks a SIEM export must be TLS.
+	TLS bool `json:"tls,omitempty"`
+	// CACert is an optional PEM CA bundle used to verify the collector's server cert.
+	// Empty => the system root pool is used.
+	CACert string `json:"ca_cert,omitempty"`
+	// ClientCert / ClientKey are an optional PEM client keypair for mutual TLS.
+	// ClientKey is a SECRET: redacted on GET.
+	ClientCert string `json:"client_cert,omitempty"`
+	ClientKey  string `json:"client_key,omitempty"`
+
+	// Format is the wire encoding: "" or "rfc5424" (default) | "json" | "cef".
+	Format string `json:"format,omitempty"`
+	// MinLevel drops events below this severity (critical|high|medium|low|info).
+	// Empty = no floor (ship all levels).
+	MinLevel string `json:"min_level,omitempty"`
+	// Categories, when non-empty, restricts shipping to events whose kind is in the set.
+	// Empty = all categories.
+	Categories []string `json:"categories,omitempty"`
 }
 
 // Addr returns "host:port" or "" when no host is configured.
@@ -166,9 +191,31 @@ func (c Config) Validate() error {
 			return fmt.Errorf("syslog_siem_target.port out of range: %d", c.SyslogSIEM.Port)
 		}
 		switch c.SyslogSIEM.Protocol {
-		case "", "udp", "tcp":
+		case "", "udp", "tcp", "tls":
 		default:
-			return fmt.Errorf("syslog_siem_target.protocol must be udp or tcp: %q", c.SyslogSIEM.Protocol)
+			return fmt.Errorf("syslog_siem_target.protocol must be udp, tcp, or tls: %q", c.SyslogSIEM.Protocol)
+		}
+		switch strings.ToLower(c.SyslogSIEM.Format) {
+		case "", "rfc5424", "json", "cef":
+		default:
+			return fmt.Errorf("syslog_siem_target.format must be rfc5424, json, or cef: %q", c.SyslogSIEM.Format)
+		}
+		if ml := strings.ToLower(strings.TrimSpace(c.SyslogSIEM.MinLevel)); ml != "" {
+			switch ml {
+			case "critical", "high", "medium", "low", "info":
+			default:
+				return fmt.Errorf("syslog_siem_target.min_level must be critical, high, medium, low, or info: %q", c.SyslogSIEM.MinLevel)
+			}
+		}
+		if ca := strings.TrimSpace(c.SyslogSIEM.CACert); ca != "" && !validCABundle(ca) {
+			return errors.New("syslog_siem_target.ca_cert is not a valid PEM certificate bundle")
+		}
+		// mTLS requires both halves of the client keypair (a redacted-echo key is
+		// restored to its stored value by ApplyPatch before Validate runs).
+		hasCert := strings.TrimSpace(c.SyslogSIEM.ClientCert) != ""
+		hasKey := strings.TrimSpace(c.SyslogSIEM.ClientKey) != ""
+		if hasCert != hasKey {
+			return errors.New("syslog_siem_target.client_cert and client_key must both be set for mTLS")
 		}
 	}
 	// 0 = use scanner env default; otherwise clamp to a sane window (15 min .. 30 days).
@@ -238,6 +285,9 @@ func (c Config) Redacted() Config {
 	if strings.TrimSpace(c.SMTP.Password) != "" {
 		out.SMTP.Password = redactedMarker
 	}
+	if strings.TrimSpace(c.SyslogSIEM.ClientKey) != "" {
+		out.SyslogSIEM.ClientKey = redactedMarker
+	}
 	out.EgressProxy.HTTPSProxy = redactProxyUserinfo(c.EgressProxy.HTTPSProxy)
 	return out
 }
@@ -291,6 +341,9 @@ func (c Config) ApplyPatch(patch json.RawMessage) (Config, error) {
 	}
 	if merged.SMTP.Password == redactedMarker {
 		merged.SMTP.Password = c.SMTP.Password // preserve the existing SMTP password on redacted echo
+	}
+	if merged.SyslogSIEM.ClientKey == redactedMarker {
+		merged.SyslogSIEM.ClientKey = c.SyslogSIEM.ClientKey // preserve the existing mTLS key on redacted echo
 	}
 	// If the proxy URL was echoed back with its userinfo still redacted (a GET→edit→PATCH
 	// round-trip of the masked value), restore the original credentialed URL so the secret

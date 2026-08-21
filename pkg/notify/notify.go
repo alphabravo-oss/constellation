@@ -12,6 +12,8 @@ package notify
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -356,17 +358,45 @@ func teamsThemeColor(severity string) string {
 
 // ----------------------------------- Syslog / SIEM ------------------------------------
 
-// Syslog writes one RFC5424-framed message per alert to a syslog collector over UDP or
-// TCP. It is a non-HTTP receiver: a SIEM that ingests syslog (Splunk, QRadar, Sentinel
-// via a forwarder, rsyslog, …) becomes a routable destination. Network is the transport
-// ("udp"|"tcp"); Addr is host:port. Facility/AppName default to local0/constellation.
+// Syslog writes one framed message per alert to a syslog collector. It is a non-HTTP
+// receiver: a SIEM that ingests syslog (Splunk, QRadar, Sentinel via a forwarder,
+// rsyslog, …) becomes a routable destination. Network is the transport ("udp"|"tcp"|
+// "tls"); Addr is host:port. Facility/AppName default to local0/constellation.
+//
+// Enterprise SIEM over untrusted networks (SIEM-TLS-14, parity with NeuVector's
+// SyslogServerCert / SyslogInJSON / category+level filtering):
+//   - Network "tls" dials with crypto/tls. CACertPEM (optional) verifies the server;
+//     when empty, the system root pool is used. ClientCertPEM/ClientKeyPEM (optional)
+//     enable mTLS.
+//   - Format selects the wire encoding: "rfc5424" (default), "json", or "cef".
+//   - MinLevel + Categories filter which events are shipped.
 type Syslog struct {
-	Network  string // "udp" | "tcp"; default "udp"
+	Network  string // "udp" | "tcp" | "tls"; default "udp"
 	Addr     string // host:port, e.g. "siem.internal:514"
 	Facility int    // syslog facility number (0-23); default 16 (local0)
 	AppName  string // RFC5424 APP-NAME; default "constellation"
 	Hostname string // RFC5424 HOSTNAME; default OS hostname
 	Timeout  time.Duration
+
+	// TLS transport (Network == "tls"). CACertPEM verifies the server when set; empty
+	// falls back to the system root pool. ClientCertPEM/ClientKeyPEM enable mTLS. ServerName
+	// overrides the name verified against the server cert (defaults to Addr's host).
+	CACertPEM     string
+	ClientCertPEM string
+	ClientKeyPEM  string
+	ServerName    string
+
+	// Format is the wire encoding: "rfc5424" (default) | "json" | "cef".
+	Format string
+
+	// MinLevel drops events below this severity (critical>high>medium>low>info). Empty = no floor.
+	MinLevel string
+	// Categories, when non-empty, restricts shipping to events whose Kind is in the set.
+	Categories []string
+
+	// Product / Version populate the CEF header (default "constellation" / "1.0").
+	Product string
+	Version string
 
 	// Now lets tests pin the timestamp; defaults to time.Now.
 	Now func() time.Time
@@ -385,33 +415,118 @@ func (s *Syslog) Send(ctx context.Context, alerts []Alert) error {
 	if s.Addr == "" {
 		return errors.New("syslog: Addr empty")
 	}
+	// Apply level/category filtering first; if nothing survives, don't even dial.
+	shipped := alerts[:0:0]
+	for _, a := range alerts {
+		if s.shouldShip(a) {
+			shipped = append(shipped, a)
+		}
+	}
+	if len(shipped) == 0 {
+		return nil
+	}
 	network := s.Network
 	if network == "" {
 		network = "udp"
 	}
-	d := net.Dialer{Timeout: nonzeroDur(s.Timeout, 10*time.Second)}
-	conn, err := d.DialContext(ctx, network, s.Addr)
+	conn, err := s.dial(ctx, network)
 	if err != nil {
 		return fmt.Errorf("syslog: dial %s %s: %w", network, s.Addr, err)
 	}
 	defer conn.Close()
-	for _, a := range alerts {
-		msg := s.formatRFC5424(a)
-		if _, err := io.WriteString(conn, msg); err != nil {
+	for _, a := range shipped {
+		if _, err := io.WriteString(conn, s.format(a)); err != nil {
 			return fmt.Errorf("syslog: write: %w", err)
 		}
 	}
 	return nil
 }
 
+// dial opens the transport. "tls" dials over TCP with crypto/tls; everything else is a
+// plain net.Dial (udp/tcp), preserving the existing plaintext paths unchanged.
+func (s *Syslog) dial(ctx context.Context, network string) (net.Conn, error) {
+	nd := net.Dialer{Timeout: nonzeroDur(s.Timeout, 10*time.Second)}
+	if network == "tls" {
+		cfg, err := s.tlsConfig()
+		if err != nil {
+			return nil, err
+		}
+		td := tls.Dialer{NetDialer: &nd, Config: cfg}
+		return td.DialContext(ctx, "tcp", s.Addr)
+	}
+	return nd.DialContext(ctx, network, s.Addr)
+}
+
+// tlsConfig builds the client TLS config: an optional PEM CA pins server verification
+// (empty => system roots), and an optional client cert/key pair enables mTLS.
+func (s *Syslog) tlsConfig() (*tls.Config, error) {
+	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
+	name := s.ServerName
+	if name == "" {
+		if h, _, err := net.SplitHostPort(s.Addr); err == nil {
+			name = h
+		}
+	}
+	if name != "" {
+		cfg.ServerName = name
+	}
+	if ca := strings.TrimSpace(s.CACertPEM); ca != "" {
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM([]byte(s.CACertPEM)) {
+			return nil, errors.New("syslog: CACertPEM is not a valid PEM certificate bundle")
+		}
+		cfg.RootCAs = pool
+	}
+	if strings.TrimSpace(s.ClientCertPEM) != "" || strings.TrimSpace(s.ClientKeyPEM) != "" {
+		cert, err := tls.X509KeyPair([]byte(s.ClientCertPEM), []byte(s.ClientKeyPEM))
+		if err != nil {
+			return nil, fmt.Errorf("syslog: client cert/key: %w", err)
+		}
+		cfg.Certificates = []tls.Certificate{cert}
+	}
+	return cfg, nil
+}
+
+// shouldShip applies the min-level floor and the category allow-list. An empty MinLevel
+// keeps every level; an empty Categories keeps every category (backward-compatible).
+func (s *Syslog) shouldShip(a Alert) bool {
+	if s.MinLevel != "" && severityRank(a.Severity) < severityRank(s.MinLevel) {
+		return false
+	}
+	if len(s.Categories) > 0 {
+		for _, c := range s.Categories {
+			if strings.EqualFold(strings.TrimSpace(c), a.Kind) {
+				return true
+			}
+		}
+		return false
+	}
+	return true
+}
+
+// format renders one alert in the configured wire encoding, defaulting to RFC5424.
+func (s *Syslog) format(a Alert) string {
+	switch strings.ToLower(strings.TrimSpace(s.Format)) {
+	case "json":
+		return s.formatJSON(a)
+	case "cef":
+		return s.formatCEF(a)
+	default:
+		return s.formatRFC5424(a)
+	}
+}
+
+func (s *Syslog) nowTime() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
+}
+
 // formatRFC5424 renders one alert as an RFC5424 syslog line (with a trailing newline so
 // stream/TCP collectors frame on it). PRI = facility*8 + severity. STRUCTURED-DATA carries
 // the alert's identifying fields under a Constellation-namespaced SD-ID.
 func (s *Syslog) formatRFC5424(a Alert) string {
-	now := time.Now
-	if s.Now != nil {
-		now = s.Now
-	}
 	facility := s.Facility
 	if facility < 0 || facility > 23 {
 		facility = 16
@@ -421,7 +536,7 @@ func (s *Syslog) formatRFC5424(a Alert) string {
 	app := nonempty(s.AppName, "constellation")
 	ts := a.FiredAt
 	if ts.IsZero() {
-		ts = now()
+		ts = s.nowTime()
 	}
 	msgID := nonempty(a.Kind, "alert")
 	sd := fmt.Sprintf(
@@ -448,6 +563,131 @@ func syslogSeverity(severity string) int {
 		return 6 // Informational
 	}
 	return 6
+}
+
+// formatJSON renders one alert as a single-line JSON object (newline-framed so stream/TCP
+// collectors frame on it). Parity with NeuVector's SyslogInJSON. Field names mirror the
+// RFC5424 structured-data keys so a SIEM parses either format into the same schema.
+func (s *Syslog) formatJSON(a Alert) string {
+	ts := a.FiredAt
+	if ts.IsZero() {
+		ts = s.nowTime()
+	}
+	m := map[string]any{
+		"id":        a.ID,
+		"org_id":    a.OrgID,
+		"severity":  a.Severity,
+		"kind":      a.Kind,
+		"category":  a.Kind,
+		"title":     a.Title,
+		"cluster":   a.Cluster,
+		"workload":  a.Workload,
+		"url":       a.URL,
+		"timestamp": ts.UTC().Format(time.RFC3339),
+		"host":      nonempty(s.Hostname, osHostname()),
+		"app":       nonempty(s.AppName, "constellation"),
+	}
+	if len(a.Labels) > 0 {
+		m["labels"] = a.Labels
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		// Should not happen for this map shape; fall back to RFC5424 rather than drop.
+		return s.formatRFC5424(a)
+	}
+	return string(b) + "\n"
+}
+
+// formatCEF renders one alert as an ArcSight CEF line (newline-framed):
+//
+//	CEF:0|Constellation|<product>|<version>|<sig>|<name>|<sev>|<extensions>
+//
+// The alert's fields map to standard CEF extension keys (cat, msg, request, cs1/cs2 for
+// cluster/workload, src/dst when carried on labels).
+func (s *Syslog) formatCEF(a Alert) string {
+	product := nonempty(s.Product, "constellation")
+	version := nonempty(s.Version, "1.0")
+	sig := nonempty(a.Kind, "alert")
+	name := nonempty(a.Title, sig)
+	ts := a.FiredAt
+	if ts.IsZero() {
+		ts = s.nowTime()
+	}
+	exts := []string{
+		"externalId=" + cefEscapeExt(a.ID),
+		"cat=" + cefEscapeExt(a.Kind),
+		"cs1Label=Cluster",
+		"cs1=" + cefEscapeExt(a.Cluster),
+		"cs2Label=Workload",
+		"cs2=" + cefEscapeExt(a.Workload),
+		"msg=" + cefEscapeExt(a.Title),
+		"request=" + cefEscapeExt(a.URL),
+		"rt=" + cefEscapeExt(ts.UTC().Format(time.RFC3339)),
+		"ConstellationSeverity=" + cefEscapeExt(a.Severity),
+	}
+	if v := firstLabel(a.Labels, "src", "src_ip", "source_ip"); v != "" {
+		exts = append(exts, "src="+cefEscapeExt(v))
+	}
+	if v := firstLabel(a.Labels, "dst", "dst_ip", "dest_ip", "destination_ip"); v != "" {
+		exts = append(exts, "dst="+cefEscapeExt(v))
+	}
+	header := fmt.Sprintf("CEF:0|Constellation|%s|%s|%s|%s|%d",
+		cefEscapeHeader(product), cefEscapeHeader(version),
+		cefEscapeHeader(sig), cefEscapeHeader(name), cefSeverity(a.Severity))
+	return header + "|" + strings.Join(exts, " ") + "\n"
+}
+
+// severityRank orders Constellation severities so higher = more severe (for MinLevel
+// comparisons). Unknown/empty ranks lowest.
+func severityRank(sev string) int {
+	switch strings.ToLower(strings.TrimSpace(sev)) {
+	case "critical":
+		return 4
+	case "high":
+		return 3
+	case "medium":
+		return 2
+	case "low":
+		return 1
+	}
+	return 0
+}
+
+// cefSeverity maps Constellation severity to the CEF 0-10 severity scale.
+func cefSeverity(sev string) int {
+	switch strings.ToLower(strings.TrimSpace(sev)) {
+	case "critical":
+		return 10
+	case "high":
+		return 8
+	case "medium":
+		return 5
+	case "low":
+		return 3
+	case "info":
+		return 1
+	}
+	return 1
+}
+
+// cefEscapeHeader escapes the characters CEF reserves inside a header field (\ and |).
+func cefEscapeHeader(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `|`, `\|`, "\n", " ", "\r", " ").Replace(s)
+}
+
+// cefEscapeExt escapes the characters CEF reserves inside an extension value (\ and =).
+func cefEscapeExt(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `=`, `\=`, "\n", " ", "\r", " ").Replace(s)
+}
+
+// firstLabel returns the first non-empty value among the given label keys.
+func firstLabel(labels map[string]string, keys ...string) string {
+	for _, k := range keys {
+		if v := strings.TrimSpace(labels[k]); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // sdEscape escapes the three characters RFC5424 reserves inside SD-PARAM values.

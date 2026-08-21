@@ -16,14 +16,25 @@ import (
 // (the Provider cache is refreshed by the reloader). Returning a fresh sender per call
 // is cheap — notify.Syslog dials lazily inside Send.
 func (p *Provider) SyslogSender(ctx context.Context, orgID uuid.UUID) (*notify.Syslog, bool) {
-	cfg := p.Get(ctx, orgID)
-	addr := cfg.SyslogSIEM.Addr()
+	t := p.Get(ctx, orgID).SyslogSIEM
+	addr := t.Addr()
 	if addr == "" {
 		return nil, false
 	}
-	network := cfg.SyslogSIEM.Protocol
+	network := t.Protocol
 	if network == "" {
 		network = "udp"
 	}
-	return notify.NewSyslog(network, addr), true
+	// The TLS toggle (or protocol "tls") selects the crypto/tls transport.
+	if t.TLS || network == "tls" {
+		network = "tls"
+	}
+	s := notify.NewSyslog(network, addr)
+	s.CACertPEM = t.CACert
+	s.ClientCertPEM = t.ClientCert
+	s.ClientKeyPEM = t.ClientKey
+	s.Format = t.Format
+	s.MinLevel = t.MinLevel
+	s.Categories = t.Categories
+	return s, true
 }

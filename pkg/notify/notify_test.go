@@ -182,6 +182,126 @@ func TestSyslog_SendOverUDP(t *testing.T) {
 	}
 }
 
+func TestSyslog_JSONFormat(t *testing.T) {
+	fixed := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
+	s := &Syslog{Format: "json", Hostname: "node-1", AppName: "constellation"}
+	a := Alert{
+		ID: "f-1", OrgID: "org-9", Severity: "high", Kind: "finding",
+		Title: "CVE-2026-0001 in nginx", Cluster: "prod", Workload: "web",
+		URL: "https://c/x", FiredAt: fixed, Labels: map[string]string{"team": "sec"},
+	}
+	line := s.format(a)
+	if !strings.HasSuffix(line, "\n") {
+		t.Fatalf("json line not newline-framed: %q", line)
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(line), &m); err != nil {
+		t.Fatalf("json does not parse: %v (%q)", err, line)
+	}
+	for k, want := range map[string]string{
+		"id": "f-1", "org_id": "org-9", "severity": "high", "kind": "finding",
+		"category": "finding", "title": "CVE-2026-0001 in nginx", "cluster": "prod",
+		"workload": "web", "url": "https://c/x", "host": "node-1",
+		"app": "constellation", "timestamp": "2026-06-17T12:00:00Z",
+	} {
+		if got, _ := m[k].(string); got != want {
+			t.Errorf("json[%q] = %q, want %q", k, got, want)
+		}
+	}
+	if labels, ok := m["labels"].(map[string]any); !ok || labels["team"] != "sec" {
+		t.Errorf("labels not carried: %v", m["labels"])
+	}
+}
+
+func TestSyslog_CEFFormat(t *testing.T) {
+	fixed := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
+	s := &Syslog{Format: "cef", Product: "constellation", Version: "1.0", Now: func() time.Time { return fixed }}
+	a := Alert{
+		ID: "f-1", Severity: "critical", Kind: "runtime", Title: "reverse shell",
+		Cluster: "prod", Workload: "api", URL: "https://c/x", FiredAt: fixed,
+		Labels: map[string]string{"src": "10.0.0.1", "dst_ip": "10.0.0.2"},
+	}
+	line := s.format(a)
+	if !strings.HasPrefix(line, "CEF:0|Constellation|constellation|1.0|runtime|reverse shell|10|") {
+		t.Fatalf("bad CEF header: %q", line)
+	}
+	for _, want := range []string{
+		"cat=runtime", "cs1Label=Cluster", "cs1=prod", "cs2=api", "msg=reverse shell",
+		"request=https://c/x", "rt=2026-06-17T12:00:00Z", "src=10.0.0.1", "dst=10.0.0.2",
+		"externalId=f-1", "ConstellationSeverity=critical",
+	} {
+		if !strings.Contains(line, want) {
+			t.Errorf("CEF missing %q in %q", want, line)
+		}
+	}
+	if !strings.HasSuffix(line, "\n") {
+		t.Fatalf("CEF line not newline-framed: %q", line)
+	}
+}
+
+func TestSyslog_CEFEscaping(t *testing.T) {
+	s := &Syslog{Format: "cef"}
+	a := Alert{Kind: "a|b", Title: "pipe|and\\slash", Severity: "low",
+		Labels: map[string]string{"src": "k=v"}}
+	line := s.format(a)
+	// Header field: | and \ escaped.
+	if !strings.Contains(line, `|a\|b|pipe\|and\\slash|`) {
+		t.Fatalf("CEF header not escaped: %q", line)
+	}
+	// Extension value: = escaped.
+	if !strings.Contains(line, `src=k\=v`) {
+		t.Fatalf("CEF extension not escaped: %q", line)
+	}
+}
+
+func TestSyslog_LevelAndCategoryFilter(t *testing.T) {
+	tests := []struct {
+		name       string
+		minLevel   string
+		categories []string
+		alert      Alert
+		wantShip   bool
+	}{
+		{"no filter ships info", "", nil, Alert{Severity: "info", Kind: "finding"}, true},
+		{"min high drops medium", "high", nil, Alert{Severity: "medium", Kind: "finding"}, false},
+		{"min high ships high", "high", nil, Alert{Severity: "high", Kind: "finding"}, true},
+		{"min high ships critical", "high", nil, Alert{Severity: "critical", Kind: "runtime"}, true},
+		{"min low drops empty sev", "low", nil, Alert{Severity: "", Kind: "finding"}, false},
+		{"category allow match", "", []string{"runtime"}, Alert{Severity: "high", Kind: "runtime"}, true},
+		{"category allow miss", "", []string{"runtime"}, Alert{Severity: "high", Kind: "finding"}, false},
+		{"category case-insensitive", "", []string{"Runtime"}, Alert{Severity: "high", Kind: "runtime"}, true},
+		{"level and category both pass", "medium", []string{"finding"}, Alert{Severity: "high", Kind: "finding"}, true},
+		{"level ok category fails", "medium", []string{"runtime"}, Alert{Severity: "high", Kind: "finding"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Syslog{MinLevel: tt.minLevel, Categories: tt.categories}
+			if got := s.shouldShip(tt.alert); got != tt.wantShip {
+				t.Fatalf("shouldShip = %v, want %v", got, tt.wantShip)
+			}
+		})
+	}
+}
+
+func TestSyslog_FilterSkipsSendWhenEmpty(t *testing.T) {
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pc.Close()
+	s := NewSyslog("udp", pc.LocalAddr().String())
+	s.MinLevel = "critical"
+	// A low-severity alert is filtered out; Send must succeed without dialing/writing.
+	if err := s.Send(context.Background(), []Alert{testAlert("low", "prod", "api")}); err != nil {
+		t.Fatalf("filtered Send returned error: %v", err)
+	}
+	buf := make([]byte, 512)
+	_ = pc.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+	if n, _, err := pc.ReadFrom(buf); err == nil {
+		t.Fatalf("expected no datagram, got %q", buf[:n])
+	}
+}
+
 // Mock receiver that records send calls without doing I/O.
 type recordingReceiver struct {
 	mu    sync.Mutex
