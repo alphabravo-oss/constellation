@@ -33,6 +33,16 @@ var procRoot = "/proc"
 // NeuVector's "up to 4 ancestors" runc-child walk in IsAllowedShieldProcess.
 const procExecMaxAncestorWalk = 16
 
+// procCmdlineMaxArgs / procCmdlineMaxBytes bound the per-exec /proc/<pid>/cmdline read
+// (RT-ARGV-15). The eBPF exec record does not carry argv — the tracepoint hard-codes
+// args[0]=0 (internal/runtime/ebpf/bpf/runtime.bpf.c) — so argument-based detections
+// (download cradles like `curl|bash`, base64-decode-to-shell) depend on this userspace
+// read. The caps keep the cost fixed regardless of a pathological argv.
+const (
+	procCmdlineMaxArgs  = 64
+	procCmdlineMaxBytes = 4096
+)
+
 // procExecHashMaxBytes caps how much of an executable we sha256 for the P0-2 hash
 // key. Hashing the whole binary of every exec would be a hot-path cost; the first
 // few MiB is enough to distinguish a swapped binary (the `mv evil /bin/nginx`
@@ -48,6 +58,39 @@ type procExecMeta struct {
 	Sha256     string // lowercase hex of the exe (best-effort, capped)
 	PPID       uint32
 	ParentComm string
+}
+
+// readProcCmdline reads /proc/<pid>/cmdline (NUL-separated, NUL-terminated argv) under
+// procRoot and returns the argument vector, best-effort. This is the RT-ARGV-15 userspace
+// fallback for the argv the eBPF exec record omits (args[0] hard-coded to 0 in the BPF
+// tracepoint). It is bounded to procCmdlineMaxBytes read and procCmdlineMaxArgs entries so
+// the per-exec cost is fixed. A short-lived exec that already exited yields an unreadable or
+// empty file -> nil (no error); the caller keeps whatever argv it already had.
+func readProcCmdline(pid uint32) []string {
+	raw := procReadFile(procRoot + "/" + strconv.FormatUint(uint64(pid), 10) + "/cmdline")
+	if len(raw) == 0 {
+		return nil
+	}
+	if len(raw) > procCmdlineMaxBytes {
+		raw = raw[:procCmdlineMaxBytes]
+	}
+	// cmdline separates and terminates each arg with a NUL, so a trailing NUL produces an
+	// empty final field; skip empties and cap the count.
+	parts := strings.Split(raw, "\x00")
+	args := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p == "" {
+			continue
+		}
+		args = append(args, p)
+		if len(args) >= procCmdlineMaxArgs {
+			break
+		}
+	}
+	if len(args) == 0 {
+		return nil
+	}
+	return args
 }
 
 // enrichExecMeta reads the resolved exe path, parent pid+comm for pid under
