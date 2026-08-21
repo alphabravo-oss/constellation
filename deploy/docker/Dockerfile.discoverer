@@ -12,7 +12,7 @@
 # per-managed-cluster pattern.
 
 ARG GO_VERSION=1.26
-ARG WOLFI_IMAGE=cgr.dev/chainguard/wolfi-base@sha256:34977aa13765da89f60fee8fe5230e2bb1c55192df08e383c58221ee0d1277fb
+ARG RUNTIME_IMAGE=debian:bookworm-slim
 
 FROM golang:${GO_VERSION}-bookworm AS build
 WORKDIR /src
@@ -24,10 +24,12 @@ ENV CGO_ENABLED=0 GOOS=linux
 RUN go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
       -o /out/constellation-discoverer ./cmd/constellation-discoverer
 
-FROM ${WOLFI_IMAGE} AS runtime
-RUN apk add --no-cache ca-certificates tzdata
+FROM ${RUNTIME_IMAGE} AS runtime
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates tzdata \
+ && rm -rf /var/lib/apt/lists/*
 COPY --from=build /out/constellation-discoverer /usr/local/bin/constellation-discoverer
-RUN addgroup -S constellation && adduser -S -G constellation -h /home/constellation -s /sbin/nologin constellation
+RUN groupadd -r constellation && useradd -r -g constellation -m -d /home/constellation -s /usr/sbin/nologin constellation
 USER constellation
 WORKDIR /home/constellation
 ENTRYPOINT ["/usr/local/bin/constellation-discoverer"]

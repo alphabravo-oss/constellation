@@ -25,7 +25,7 @@ ARG TRIVY_SHA256_AMD64=1816b632dfe529869c740c0913e36bd1629cb7688bd5634f4a858c1d5
 ARG TRIVY_SHA256_ARM64=7e3924a974e912e57b4a99f65ece7931f8079584dae12eb7845024f97087bdfd
 ARG GRYPE_SHA256_AMD64=c06e79287aa4d7343d7937571cf33154b560cbe483c6897369c53e2970fae647
 ARG GRYPE_SHA256_ARM64=c6b58fc8eea0607af6374e88781bfeb5192b0db79d639693cc924925efe22253
-ARG WOLFI_IMAGE=cgr.dev/chainguard/wolfi-base@sha256:34977aa13765da89f60fee8fe5230e2bb1c55192df08e383c58221ee0d1277fb
+ARG RUNTIME_IMAGE=debian:bookworm-slim
 
 # -----------------------------------------------------------------------------
 # Build the Go binary from deploy/e2e/scanner-driver.
@@ -87,8 +87,14 @@ RUN set -eux; \
 # -----------------------------------------------------------------------------
 # Runtime.
 # -----------------------------------------------------------------------------
-FROM ${WOLFI_IMAGE} AS runtime
-RUN apk add --no-cache ca-certificates tzdata bash docker-cli
+# docker CLI (static binary) from the official image — avoids debian's heavy docker.io pkg.
+FROM docker:27-cli AS dockercli
+
+FROM ${RUNTIME_IMAGE} AS runtime
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates tzdata bash \
+ && rm -rf /var/lib/apt/lists/*
+COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=tools /tools/syft   /usr/local/bin/syft
 COPY --from=tools /tools/trivy  /usr/local/bin/trivy
 COPY --from=tools /tools/grype  /usr/local/bin/grype

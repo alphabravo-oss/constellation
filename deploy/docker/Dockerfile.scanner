@@ -21,7 +21,7 @@ ARG COSIGN_SHA256_AMD64=064954c5d8c7e3b28188eee5b1727b31c411550bc5fefd41aa672d3c
 ARG COSIGN_SHA256_ARM64=56a16480bdd56ec789abaa65924402f6b92c0041f06885995853c05567b76f34
 ARG ORAS_SHA256_AMD64=6cdc692f929100feb08aa8de584d02f7bcc30ec7d88bc2adc2054d782db57c64
 ARG ORAS_SHA256_ARM64=7649738b48fde10542bcc8b0e9b460ba83936c75fb5be01ee6d4443764a14352
-ARG WOLFI_IMAGE=cgr.dev/chainguard/wolfi-base@sha256:34977aa13765da89f60fee8fe5230e2bb1c55192df08e383c58221ee0d1277fb
+ARG RUNTIME_IMAGE=debian:bookworm-slim
 
 # -----------------------------------------------------------------------------
 # Build the Go binary.
@@ -105,8 +105,10 @@ RUN /tools/syft --version >/dev/null \
 # -----------------------------------------------------------------------------
 # Runtime
 # -----------------------------------------------------------------------------
-FROM ${WOLFI_IMAGE} AS runtime
-RUN apk add --no-cache ca-certificates tzdata git
+FROM ${RUNTIME_IMAGE} AS runtime
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates tzdata git \
+ && rm -rf /var/lib/apt/lists/*
 
 COPY --from=tools /tools/syft   /usr/local/bin/syft
 COPY --from=tools /tools/trivy  /usr/local/bin/trivy
@@ -116,7 +118,7 @@ COPY --from=tools /tools/oras   /usr/local/bin/oras
 
 COPY --from=build /out/constellation-scanner /usr/local/bin/constellation-scanner
 
-RUN addgroup -S -g 10001 constellation && adduser -S -u 10001 -G constellation -h /home/constellation -s /sbin/nologin constellation
+RUN groupadd -r -g 10001 constellation && useradd -r -u 10001 -g constellation -m -d /home/constellation -s /usr/sbin/nologin constellation
 
 USER 10001:10001
 WORKDIR /home/constellation

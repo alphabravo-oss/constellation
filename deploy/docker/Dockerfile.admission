@@ -5,7 +5,7 @@
 # mounted at /etc/webhook/certs (cert-manager Certificate or operator-bootstrapped).
 
 ARG GO_VERSION=1.26
-ARG WOLFI_IMAGE=cgr.dev/chainguard/wolfi-base@sha256:34977aa13765da89f60fee8fe5230e2bb1c55192df08e383c58221ee0d1277fb
+ARG RUNTIME_IMAGE=debian:bookworm-slim
 
 FROM golang:${GO_VERSION}-bookworm AS build
 WORKDIR /src
@@ -17,10 +17,12 @@ ENV CGO_ENABLED=0 GOOS=linux
 RUN go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
       -o /out/constellation-admission ./cmd/constellation-admission
 
-FROM ${WOLFI_IMAGE} AS runtime
-RUN apk add --no-cache ca-certificates tzdata
+FROM ${RUNTIME_IMAGE} AS runtime
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates tzdata \
+ && rm -rf /var/lib/apt/lists/*
 COPY --from=build /out/constellation-admission /usr/local/bin/constellation-admission
-RUN addgroup -S -g 10001 constellation && adduser -S -u 10001 -G constellation constellation
+RUN groupadd -r -g 10001 constellation && useradd -r -u 10001 -g constellation constellation
 USER 10001:10001
 EXPOSE 8443
 ENTRYPOINT ["/usr/local/bin/constellation-admission"]

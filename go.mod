@@ -23,7 +23,7 @@ require (
 	github.com/google/cel-go v0.28.0
 	github.com/google/go-containerregistry v0.21.6
 	github.com/google/uuid v1.6.0
-	github.com/jackc/pgx/v5 v5.8.0
+	github.com/jackc/pgx/v5 v5.10.0
 	github.com/open-policy-agent/opa v1.16.1
 	github.com/prometheus/client_golang v1.23.2
 	github.com/spf13/cobra v1.10.2

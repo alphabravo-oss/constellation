@@ -8,7 +8,9 @@
 # /openapi.json proxy correctly (see deploy/charts/constellation/templates/frontend-deployment.yaml).
 
 ARG NODE_VERSION=22
-ARG WOLFI_NGINX_IMAGE=cgr.dev/chainguard/nginx@sha256:fdd65ea225da60875e24a8b45d1e65501f9e4991b3b097ae65ed8a4c8f3782a3
+# Official nginx (nginx Inc. unprivileged variant): alpine-based, low-vuln, runs nonroot on
+# 8080 out of the box — matches nginx.conf. Off Chainguard per project policy.
+ARG NGINX_IMAGE=nginxinc/nginx-unprivileged:stable-alpine
 
 # -----------------------------------------------------------------------------
 # Stage 1 — build the SPA.
@@ -28,10 +30,10 @@ RUN npm run build
 # -----------------------------------------------------------------------------
 # Stage 2 — serve with nginx.
 # -----------------------------------------------------------------------------
-FROM ${WOLFI_NGINX_IMAGE} AS runtime
+FROM ${NGINX_IMAGE} AS runtime
 
 COPY --from=build /src/dist /usr/share/nginx/html
 COPY deploy/docker/nginx.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 8080
-USER 65532
+# nginx-unprivileged already runs as uid 101 (nonroot); no USER override needed.

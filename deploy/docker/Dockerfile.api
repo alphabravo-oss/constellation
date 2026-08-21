@@ -5,7 +5,7 @@
 # live in the scanner image, which receives jobs over HTTP from this API.
 
 ARG GO_VERSION=1.26
-ARG WOLFI_IMAGE=cgr.dev/chainguard/wolfi-base@sha256:34977aa13765da89f60fee8fe5230e2bb1c55192df08e383c58221ee0d1277fb
+ARG RUNTIME_IMAGE=debian:bookworm-slim
 
 # -----------------------------------------------------------------------------
 # Build
@@ -22,13 +22,16 @@ RUN go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
  && go build -trimpath -ldflags="-s -w" -o /out/constellationctl ./cmd/constellationctl
 
 # -----------------------------------------------------------------------------
-# Runtime — minimal wolfi-base, no scanner CLIs.
+# Runtime — minimal debian-slim, no scanner CLIs. (Off Chainguard per project policy.)
 # -----------------------------------------------------------------------------
-FROM ${WOLFI_IMAGE} AS runtime
-RUN apk add --no-cache ca-certificates tzdata
+FROM ${RUNTIME_IMAGE} AS runtime
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates tzdata \
+ && rm -rf /var/lib/apt/lists/* \
+ && groupadd -r -g 10001 constellation \
+ && useradd -r -u 10001 -g constellation -m -d /home/constellation -s /usr/sbin/nologin constellation
 COPY --from=build /out/constellation-api /usr/local/bin/constellation-api
 COPY --from=build /out/constellationctl  /usr/local/bin/constellationctl
-RUN addgroup -S -g 10001 constellation && adduser -S -u 10001 -G constellation -h /home/constellation -s /sbin/nologin constellation
 USER 10001:10001
 WORKDIR /home/constellation
 EXPOSE 8080

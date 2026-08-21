@@ -118,21 +118,11 @@ RUN if [ "${FIPS}" = "1" ] || [ "${FIPS}" = "true" ]; then \
 # trades up from ~80MB to ~250MB; that's the cost of running an inline
 # data-plane.
 # -----------------------------------------------------------------------------
-FROM debian:${DEBIAN_TAG} AS runtime
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates tzdata curl \
-      bpftool \
-      iproute2 iptables ethtool tcpdump kmod procps \
-      libpcap0.8 libpcre2-8-0 \
-      libnetfilter-queue1 libnfnetlink0 libmnl0 \
-      libvectorscan5 libjansson4 libjemalloc2 \
-      liburcu8 \
- && rm -rf /var/lib/apt/lists/*
-
-# crictl — the upstream Kubernetes CRI debug CLI. Used by Slice C
-# host-container inventory collector (internal/runtime/hostscan/containers.go).
-# Works against both containerd and cri-o sockets without runtime-specific
-# code on our side. Pin to a known release for reproducible builds.
+# crictl download stage — keeps curl (and its libcurl/libssh2 CVE surface) OUT of the
+# runtime image. crictl is the upstream Kubernetes CRI debug CLI used by the host-container
+# inventory collector (internal/runtime/hostscan/containers.go). Pinned + sha256-verified.
+FROM debian:${DEBIAN_TAG} AS crictl-dl
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl && rm -rf /var/lib/apt/lists/*
 ARG CRICTL_VERSION
 ARG CRICTL_SHA256_AMD64
 ARG CRICTL_SHA256_ARM64
@@ -147,6 +137,21 @@ RUN ARCH="$(uname -m)" && case "$ARCH" in \
  && rm -f /tmp/crictl.tar.gz \
  && chmod +x /usr/local/bin/crictl
 
+FROM debian:${DEBIAN_TAG} AS runtime
+# Only the packages the agent + dp actually need at runtime. Notably NO bpftool: it's a
+# build-time codegen tool (bpf/Makefile → vmlinux.h) and dragged in ~570 CVEs; the agent
+# loads its BPF object at runtime via the pure-Go cilium/ebpf library, not the CLI. NO curl
+# either — crictl is downloaded in the stage above and copied in.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates tzdata \
+      iproute2 iptables ethtool tcpdump kmod procps \
+      libpcap0.8 libpcre2-8-0 \
+      libnetfilter-queue1 libnfnetlink0 libmnl0 \
+      libvectorscan5 libjansson4 libjemalloc2 \
+      liburcu8 \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY --from=crictl-dl /usr/local/bin/crictl                        /usr/local/bin/crictl
 COPY --from=go-build  /out/constellation-runtime-agent              /usr/local/bin/constellation-runtime-agent
 COPY --from=bpf-build /src/bpf/runtime.bpf.o                        /opt/constellation/runtime.bpf.o
 COPY --from=dp-build  /src/third_party/neuvector/dp/dp              /usr/local/bin/dp
