@@ -66,6 +66,12 @@ type dlpRuleWire struct {
 	Mode     string   `json:"mode"` // monitor | enforce | disabled
 	Patterns []string `json:"patterns"`
 	Version  int64    `json:"version"`
+	// Category routes the rule (NET-42): "waf" rows enforce on dp's WAF path
+	// (RESET) via the WAF rule table; "dlp"/"signature"/"" feed the DLP
+	// detector (DROP). The server already serializes this field on every
+	// bundle row (runtime.DLPRule.Category); older servers omit it → "" → DLP,
+	// preserving today's behaviour.
+	Category string `json:"category"`
 	// ScopeMACs is the optional per-workload scope (P1-5). Empty/nil means
 	// "apply to every workload this agent taps" (the fleet-wide default). A
 	// non-empty list restricts the rule to those workload MACs.
@@ -281,13 +287,19 @@ func (w *DLPSyncWorker) SyncOnce(ctx context.Context) {
 		return
 	}
 
+	// NET-42: split the fetched rules by category. WAF rows enforce on dp's WAF
+	// path (RESET) and join the built-in CRS pack in the wafRules set; every
+	// other category feeds the DLP detector (DROP). Before this, category='waf'
+	// rows fell through to planDLPPushes and degraded to DLP silently.
+	dlpWire, wafWire := splitDLPWAFRules(rules)
 	wafRules := runtime.WAFRuleTable(w.cfg.EnforceEnabled)
+	wafRules = append(wafRules, userWAFRules(wafWire, w.cfg.EnforceEnabled)...)
 
 	// DLP + WAF compile into ONE dp detector per endpoint (two builds clobber —
 	// dpi_dlp_detect_update replaces the ep's prior detector). So each MAC gets a
 	// single BuildDetector carrying exactly the rule sets it opted into.
 	// DLP rules are scoped per workload (P1-5); group by scope over DLP-opted MACs.
-	pushes := planDLPPushes(rules, sortedKeys(dlpOpt), w.cfg.EnforceEnabled)
+	pushes := planDLPPushes(dlpWire, sortedKeys(dlpOpt), w.cfg.EnforceEnabled)
 	covered := make(map[string]struct{}, len(dlpOpt))
 	for _, p := range pushes {
 		for _, m := range p.macs {
@@ -477,6 +489,61 @@ func planDLPPushes(rules []dlpRuleWire, tapMACs []string, enforceEnabled bool) [
 	out := make([]dlpPush, 0, len(order))
 	for _, k := range order {
 		out = append(out, *groups[k])
+	}
+	return out
+}
+
+// splitDLPWAFRules partitions fetched bundle rows by category (NET-42): rows
+// whose Category is "waf" go to the WAF path, everything else ("dlp",
+// "signature", or "" from an older server) stays on the DLP path. Order within
+// each partition is preserved so downstream grouping + signatures stay stable.
+func splitDLPWAFRules(rules []dlpRuleWire) (dlp, waf []dlpRuleWire) {
+	for _, r := range rules {
+		if r.Category == string(runtime.CategoryWAF) {
+			waf = append(waf, r)
+		} else {
+			dlp = append(dlp, r)
+		}
+	}
+	return dlp, waf
+}
+
+// userWAFRules converts category='waf' bundle rows into dp WAF rules so they
+// enforce on the WAF path (RESET the offending HTTP session) instead of
+// degrading to the DLP path (silent DROP). Two shape differences from a DLP
+// rule are handled here:
+//
+//   - Sig id: WAF rules must fall in dp's WAF range (40000-49999). We map the
+//     row's dp_rule_id through dp.UserWAFSigID (45000-49999), disjoint from the
+//     built-in CRS pack (40000-40xxx via WAFSigID) so the two never collide.
+//   - Context: a dp WAF pattern must name the HTTP buffer it matches. A
+//     user-authored rule carries no per-pattern context, so each pattern is
+//     scanned across all three buffers (url / header / body) — the safe default
+//     that matches wherever an attack string lands.
+//
+// Mode follows the same fleet enforce gate as DLP + the CRS pack: a rule RESETs
+// only when its authored mode is "enforce" AND the gate is on (effectiveDLPMode).
+func userWAFRules(rules []dlpRuleWire, enforceEnabled bool) []*dp.WAFRule {
+	out := make([]*dp.WAFRule, 0, len(rules))
+	for _, r := range rules {
+		pats := make([]dp.WAFPattern, 0, len(r.Patterns)*3)
+		for _, p := range r.Patterns {
+			if strings.TrimSpace(p) == "" {
+				continue
+			}
+			for _, ctx := range []string{dp.WAFCtxURL, dp.WAFCtxHead, dp.WAFCtxBody} {
+				pats = append(pats, dp.WAFPattern{Context: ctx, Value: p})
+			}
+		}
+		if len(pats) == 0 {
+			continue
+		}
+		out = append(out, &dp.WAFRule{
+			Name:     dp.SanitizeSigName(r.Name),
+			ID:       dp.UserWAFSigID(uint32(r.DPRuleID)),
+			Patterns: pats,
+			Mode:     effectiveDLPMode(r.Mode, enforceEnabled),
+		})
 	}
 	return out
 }

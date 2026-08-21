@@ -26,6 +26,25 @@ func WAFSigID(index int) uint32 {
 	return dpMinWAFSigID + uint32(index)%dpWAFSigSpan
 }
 
+// dpUserWAFBase splits dp's WAF sig-id range (40000-49999): the built-in CRS
+// pack occupies the low end via WAFSigID (40000 + small index), and
+// user-authored WAF rules map into the high end here so the two never collide.
+const (
+	dpUserWAFBase uint32 = 45000
+	dpUserWAFSpan uint32 = 5000 // 45000-49999
+)
+
+// UserWAFSigID maps a DB dp_rule_id (the same sequence DLP rules use, starting
+// at 9000) into the USER portion of dp's WAF sig-id range (45000-49999), kept
+// disjoint from the built-in CRS pack (40000-40xxx via WAFSigID). This is the
+// WAF analogue of DLPSigID: it lets a user-authored WAF rule enforce on dp's
+// WAF path (RESET) instead of degrading to the DLP path (DROP).
+// ponytail: modulo 5000 collides only if two ids differ by exactly 5000; fine
+// for typical custom-rule counts (mirrors DLPSigID's note).
+func UserWAFSigID(dbID uint32) uint32 {
+	return dpUserWAFBase + dbID%dpUserWAFSpan
+}
+
 // DLPSigID maps a DB dp_rule_id into dp's user sig-id range (20000-29999).
 // ponytail: modulo 10000 — collides only if two ids differ by exactly 10000;
 // fine for the built-ins and typical custom-rule counts. Fix the dp_id sequence

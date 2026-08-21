@@ -64,10 +64,17 @@ type DLPCategory string
 const (
 	CategoryDLP       DLPCategory = "dlp"
 	CategorySignature DLPCategory = "signature"
+	// CategoryWAF (NET-42) marks a user-authored WAF rule: an inbound
+	// web-attack matcher that must enforce on dp's WAF path (RESET the
+	// offending HTTP session) rather than the DLP path (silent DROP). The
+	// agent's dlp_sync worker routes these rows into the dp WAF rule set
+	// (sig ids 40000-49999) alongside the built-in CRS pack; every other
+	// category feeds the DLP detector. Defaults to ingress (apply_dir=2).
+	CategoryWAF DLPCategory = "waf"
 )
 
 func (c DLPCategory) Valid() bool {
-	return c == CategoryDLP || c == CategorySignature
+	return c == CategoryDLP || c == CategorySignature || c == CategoryWAF
 }
 
 // DLPRule is one row in runtime_dlp_rules. Despite the table name, a row
@@ -175,9 +182,12 @@ func (s *RuntimeDLPStore) Insert(ctx context.Context, r *DLPRule, requestID stri
 		// Default differs per category: DLP is egress-only (catches data
 		// exfil); custom signatures match bidirectionally (could be an
 		// inbound attack or outbound C2).
-		if r.Category == CategorySignature {
+		switch r.Category {
+		case CategorySignature:
 			r.ApplyDir = 3 // both
-		} else {
+		case CategoryWAF:
+			r.ApplyDir = 2 // ingress: WAF blocks inbound web attacks
+		default:
 			r.ApplyDir = 1 // egress
 		}
 	}

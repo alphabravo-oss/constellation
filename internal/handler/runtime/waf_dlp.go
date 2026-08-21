@@ -1,8 +1,13 @@
 package runtime
 
 import (
+	"context"
+	"sort"
 	"strings"
 
+	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/runtime/dp"
 	"github.com/alphabravocompany/constellation/internal/runtime/waf"
@@ -162,6 +167,165 @@ func PushWAFRules(sup *dp.Supervisor, macs []string, enforce bool) error {
 	}
 	return sup.ConfigureWAFRules(macs, rules)
 }
+
+// ----- NET-43: group → DLP/WAF sensor binding --------------------------------
+//
+// NeuVector binds a DLP/WAF SENSOR (a named rule set) to a GROUP, so every
+// current and future member workload of that group inherits the sensor
+// (controller/cache dlp_group / waf_group). Constellation's only DPI opt-in was
+// per-POD-LABEL (dpi.constellation.alphabravo.io/waf|dlp), which can't express
+// "this whole group runs sensor S". group_dpi_sensor_bindings (migration 153)
+// adds that binding as an ADDITIONAL path — the label opt-in keeps working
+// unchanged.
+//
+// Resolution (resolveSensorMACs, below) is the tractable, unit-tested core: it
+// turns bindings + group membership + a workload→MAC map into the set of MACs
+// each sensor must bind to, exactly the scope the DLP push already understands
+// (runtime_dlp_rules.scope_macs). Wiring that resolved scope into the agent
+// bundle (serving dlp_sensors / waf_groups rows scoped to those MACs) and the
+// sensor-authoring REST routes are the documented follow-up — see the note at
+// the end of this block. No server.go route is added here.
+
+// SensorKind selects which sensor table a binding references: 'dlp' →
+// dlp_sensors(id), 'waf' → waf_groups(id) (026_waf_dlp.sql).
+type SensorKind string
+
+const (
+	SensorKindDLP SensorKind = "dlp"
+	SensorKindWAF SensorKind = "waf"
+)
+
+func (k SensorKind) Valid() bool { return k == SensorKindDLP || k == SensorKindWAF }
+
+// GroupSensorBinding is one row of group_dpi_sensor_bindings: sensor SensorID
+// (of kind Kind) attached to group GroupID.
+type GroupSensorBinding struct {
+	ID       uuid.UUID  `json:"id"`
+	OrgID    uuid.UUID  `json:"org_id"`
+	GroupID  uuid.UUID  `json:"group_id"`
+	Kind     SensorKind `json:"sensor_kind"`
+	SensorID uuid.UUID  `json:"sensor_id"`
+}
+
+// SensorKey identifies a sensor across bindings so multiple groups pointing at
+// the same sensor aggregate into one MAC set.
+type SensorKey struct {
+	Kind SensorKind
+	ID   uuid.UUID
+}
+
+// GroupSensorBindingStore persists group→sensor bindings.
+type GroupSensorBindingStore struct{ db *db.DB }
+
+// NewGroupSensorBindingStore builds the store.
+func NewGroupSensorBindingStore(d *db.DB) *GroupSensorBindingStore {
+	return &GroupSensorBindingStore{db: d}
+}
+
+// Bind attaches a sensor to a group (idempotent on the UNIQUE key). Returns the
+// binding id.
+func (s *GroupSensorBindingStore) Bind(ctx context.Context, orgID, groupID uuid.UUID, kind SensorKind, sensorID uuid.UUID, by *uuid.UUID) (uuid.UUID, error) {
+	if !kind.Valid() {
+		return uuid.Nil, errInvalidSensorKind
+	}
+	var id uuid.UUID
+	err := s.db.Pool().QueryRow(ctx, `
+INSERT INTO group_dpi_sensor_bindings (org_id, group_id, sensor_kind, sensor_id, created_by)
+VALUES ($1,$2,$3,$4,$5)
+ON CONFLICT (group_id, sensor_kind, sensor_id) DO UPDATE SET sensor_id = EXCLUDED.sensor_id
+RETURNING id`, orgID, groupID, string(kind), sensorID, by).Scan(&id)
+	return id, err
+}
+
+// Unbind removes a binding by id, scoped to the org.
+func (s *GroupSensorBindingStore) Unbind(ctx context.Context, orgID, id uuid.UUID) error {
+	_, err := s.db.Pool().Exec(ctx,
+		`DELETE FROM group_dpi_sensor_bindings WHERE id = $1 AND org_id = $2`, id, orgID)
+	return err
+}
+
+// ListForOrg returns every binding for the org.
+func (s *GroupSensorBindingStore) ListForOrg(ctx context.Context, orgID uuid.UUID) ([]GroupSensorBinding, error) {
+	rows, err := s.db.Pool().Query(ctx,
+		`SELECT id, org_id, group_id, sensor_kind, sensor_id
+		   FROM group_dpi_sensor_bindings WHERE org_id = $1`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []GroupSensorBinding
+	for rows.Next() {
+		var b GroupSensorBinding
+		var kind string
+		if err := rows.Scan(&b.ID, &b.OrgID, &b.GroupID, &kind, &b.SensorID); err != nil {
+			return nil, err
+		}
+		b.Kind = SensorKind(kind)
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
+// errInvalidSensorKind is returned by Bind for an unknown sensor kind.
+var errInvalidSensorKind = &sensorKindError{}
+
+type sensorKindError struct{}
+
+func (*sensorKindError) Error() string { return "sensor_kind must be 'dlp' or 'waf'" }
+
+// resolveSensorMACs is the tested core of the group→sensor binding: it resolves
+// every binding down to the set of workload MACs its sensor must bind to.
+//
+//	bindings      — group→sensor rows (any org subset the caller loaded).
+//	groupMembers  — group id → its member workload ids (ns/name), as the group
+//	                membership reconciler computes them (groups.members).
+//	workloadMACs  — workload id → the tap MACs of that workload's pods.
+//
+// The result maps each sensor (kind+id) to the sorted, de-duplicated union of
+// the MACs of every group bound to it. A binding whose group has no members, or
+// whose members have no known MACs, contributes nothing (not an error) — it
+// simply hasn't been observed on the datapath yet. Pure + deterministic so the
+// binding logic is unit-testable without a live dp or DB.
+func resolveSensorMACs(bindings []GroupSensorBinding, groupMembers map[uuid.UUID][]string, workloadMACs map[string][]string) map[SensorKey][]string {
+	acc := map[SensorKey]map[string]struct{}{}
+	for _, b := range bindings {
+		key := SensorKey{Kind: b.Kind, ID: b.SensorID}
+		set := acc[key]
+		if set == nil {
+			set = map[string]struct{}{}
+			acc[key] = set
+		}
+		for _, wl := range groupMembers[b.GroupID] {
+			for _, mac := range workloadMACs[wl] {
+				m := strings.ToLower(strings.TrimSpace(mac))
+				if m != "" {
+					set[m] = struct{}{}
+				}
+			}
+		}
+	}
+	out := make(map[SensorKey][]string, len(acc))
+	for key, set := range acc {
+		macs := make([]string, 0, len(set))
+		for m := range set {
+			macs = append(macs, m)
+		}
+		sort.Strings(macs)
+		out[key] = macs
+	}
+	return out
+}
+
+// FOLLOW-UP (NET-43 wiring, deferred): to make a binding enforce end-to-end,
+// wire resolveSensorMACs into the agent bundle so runtime_dlp / WAF rows carry
+// each sensor's rules scoped to the resolved MACs (the DLP push already honours
+// scope_macs). That needs a server-side workload→MAC map (deployments carry no
+// MAC today; ep_mac is observed on runtime_threats / network_sessions) plus the
+// sensor-authoring REST routes for dlp_sensors / waf_groups. Route to wire when
+// that lands (server.go, left as a comment per task constraints):
+//
+//	// r.Method(http.MethodPost, "/api/v1/runtime/groups/{id}/dpi-sensors", bindingsHTTP.Bind)   // manage-policies
+//	// r.Method(http.MethodDelete, "/api/v1/runtime/dpi-sensor-bindings/{id}", bindingsHTTP.Unbind) // manage-policies
 
 // DLP sensors CRUD (the /dlp/sensors REST surface + ConstellationDLPSensor CRD)
 // was removed following the WS-G G1 precedent: like the deleted /waf/groups CRUD,
