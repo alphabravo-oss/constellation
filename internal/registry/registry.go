@@ -153,5 +153,11 @@ func All(cfg map[string]Config) []Connector {
 	if c, ok := cfg["openshift"]; ok {
 		out = append(out, NewOpenShift(c))
 	}
+	if c, ok := cfg["nexus"]; ok {
+		out = append(out, NewNexus(c))
+	}
+	if c, ok := cfg["generic-v2"]; ok {
+		out = append(out, NewGenericV2(c))
+	}
 	return out
 }

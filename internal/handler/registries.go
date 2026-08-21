@@ -67,6 +67,12 @@ var validKinds = map[string]bool{
 	"harbor":     true,
 	"gitlab":     true,
 	"jfrog":      true,
+	// REG-KINDS-34: reach the connectors that already exist in internal/registry but
+	// were previously unreachable because their kind was not accepted here.
+	"ibmcloud":   true,
+	"openshift":  true,
+	"nexus":      true,
+	"generic-v2": true,
 }
 
 // validAuthKinds enumerates the auth shapes the storage layer understands.
@@ -881,6 +887,25 @@ func BuildConnector(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, ki
 		return registry.NewGitLab(cfg), nil
 	case "jfrog":
 		return registry.NewJFrog(cfg), nil
+	case "ibmcloud":
+		// IBM Cloud Container Registry: IAM API key (Password) → bearer token, plus the
+		// account GUID (Account header) and optional custom IAM token endpoint.
+		cfg.Endpoint = stripScheme(endpoint)
+		cfg.Account = creds["account"]
+		cfg.TokenURL = creds["token_url"]
+		return registry.NewIBMCloud(cfg), nil
+	case "openshift":
+		// OpenShift internal registry: v2 /_catalog with an oc bearer token or SA login.
+		cfg.Endpoint = stripScheme(endpoint)
+		return registry.NewOpenShift(cfg), nil
+	case "nexus":
+		// Sonatype Nexus docker connector: plain v2 /_catalog behind HTTP Basic.
+		cfg.Endpoint = stripScheme(endpoint)
+		return registry.NewNexus(cfg), nil
+	case "generic-v2":
+		// Any standard Docker Registry v2 (registry:2 / private v2 behind Basic auth).
+		cfg.Endpoint = stripScheme(endpoint)
+		return registry.NewGenericV2(cfg), nil
 	default:
 		return nil, fmt.Errorf("unknown registry kind %q", kind)
 	}
