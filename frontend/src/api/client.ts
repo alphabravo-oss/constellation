@@ -1855,6 +1855,24 @@ export interface NetworkPeer {
   last_seen_at: string;
 }
 
+// Phase-1 CNI enforcement action (isolate | block_ip) reconciled by the applier.
+export interface EnforcementAction {
+  id: string;
+  kind: "isolate" | "block_ip";
+  target: string;
+  namespace: string;
+  workload?: string;
+  direction?: string;
+  flavor: string;
+  resource_ref: string;
+  state: string;
+  reason?: string;
+  created_by?: string;
+  last_status?: string;
+  last_error?: string;
+  created_at: string;
+}
+
 export interface ConversationEntries {
   from: string;
   to: string;
@@ -2003,6 +2021,10 @@ export interface NetworkMap {
     allowed?: number;
     alerted?: number;
     blocked?: number;
+    cni?: string;
+    /** Whether the cluster's CNI (Cilium/Calico) can enforce a per-IP deny.
+     *  false on flannel/native → the UI hides "Block IP". */
+    deny_capable_cni?: boolean;
   };
   workloads: NetworkWorkload[];
   flows: NetworkFlow[];
@@ -2188,6 +2210,24 @@ export const network = {
   // NV session-kill: queue a dp ctrl_clear_session for one live connection.
   killSession: (id: number, params: { cluster_id?: string; node?: string }) =>
     api.delete<{ ok: boolean; queued: boolean }>(`/network/sessions/${id}`, { params }).then((r) => r.data),
+  // Phase-1 CNI enforcement (Tier 1, no dp inline): isolate a workload (native
+  // default-deny NetworkPolicy) or block a workload's traffic to one IP (Cilium
+  // egress/ingress deny). The network-policy-applier reconciles these to the cluster.
+  enforcement: {
+    list: (params: { cluster_id?: string; state?: string } = {}) =>
+      api.get<{ actions: EnforcementAction[] }>("/network/enforcement", { params }).then((r) => r.data.actions),
+    create: (
+      body: {
+        kind: "isolate" | "block_ip";
+        target: string;
+        workload?: string;
+        direction?: "egress" | "ingress" | "both";
+        reason: string;
+      },
+      params: { cluster_id?: string } = {},
+    ) => api.post<EnforcementAction>("/network/enforcement", body, { params }).then((r) => r.data),
+    lift: (id: string) => api.delete<{ status: string }>(`/network/enforcement/${id}`).then((r) => r.data),
+  },
   /** Subscribes to the GET /network/flows:stream SSE channel and invokes
    *  onFlow for each live flow. Returns an unsubscribe fn.
    *

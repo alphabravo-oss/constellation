@@ -98,6 +98,11 @@ func (h *Network) Map(w http.ResponseWriter, r *http.Request) {
 	if clusterID != nil {
 		summary["selected_cluster_id"] = clusterID.String()
 	}
+	// Whether this cluster's CNI can enforce a per-IP deny (Cilium/Calico). The UI
+	// uses it to hide "Block IP" on native/flannel clusters where it can't apply.
+	cni := h.clusterCNI(r, subj.OrgID, clusterID)
+	summary["cni"] = cni
+	summary["deny_capable_cni"] = denyCapableCNI(cni)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"summary":      summary,
 		"workloads":    workloads,

@@ -273,6 +273,9 @@ function NetworkMapInner() {
     onSuccess: () => { toast.success("Workload quarantined"); void queryClient.invalidateQueries({ queryKey: ["network-map"] }); },
     onError: () => toast.error("Failed to quarantine workload"),
   });
+  // Phase-1 CNI enforcement (isolate workload / block IP) — the network-enforced
+  // sibling of quarantine (which only blocks re-admission via the webhook).
+  const enforceMut = useEnforce(clusterID);
 
   const workloads = q.data?.workloads ?? EMPTY_WORKLOADS;
   const flowsRaw = q.data?.flows ?? EMPTY_FLOWS;
@@ -515,6 +518,9 @@ function NetworkMapInner() {
   // (no 5-tile row), no right-rail (the L2 edge-popover replaces it),
   // single-row filter strip. Canvas fills the viewport.
   const workloadCount = q.data?.summary.workloads ?? workloads.length;
+  // Whether this cluster's CNI can enforce a per-IP deny (Cilium/Calico). Gates the
+  // "Block IP" affordance — on flannel/native it can't apply, so we hide it.
+  const denyCapable = q.data?.summary.deny_capable_cni ?? false;
   const flowCount = q.data?.summary.flows ?? flowsRaw.length;
   const volume = fmtBytes(q.data?.summary.total_bytes ?? 0);
   const blocked = flowsRaw.filter((f) => f.state === "denied").length;
@@ -791,7 +797,8 @@ function NetworkMapInner() {
         </div>
         {/* Live sessions (NV RESTSession) — bottom-left collapsible card fed by the
             runtime-agent's dp ctrl_list_session snapshot. Sits above the netpol status bar. */}
-        <div className="absolute bottom-14 left-3 z-10">
+        <div className="absolute bottom-14 left-3 z-10 space-y-2">
+          <EnforcementCard clusterID={clusterID} />
           <LiveSessionsCard sessions={sessionsQ.data ?? []} loading={sessionsQ.isPending}
             onKill={(id, node) => killSessionMut.mutate({ id, node })} killing={killSessionMut.isPending} />
         </div>
@@ -805,21 +812,37 @@ function NetworkMapInner() {
               flows={flows}
               clusterID={clusterID}
               hours={hours}
+              denyCapable={denyCapable}
               onSelectFlow={(id) => { selectFlow(id); setPopoverOpen(true); }}
             />
             <div className="mt-2 flex items-center justify-between">
               {selectedWorkload.kind !== "External" && clusterID ? (
-                <button
-                  type="button"
-                  disabled={quarantineMut.isPending}
-                  onClick={() => {
-                    const reason = window.prompt(`Quarantine ${selectedWorkload.id}? Enter a reason:`, "manual isolation from network map");
-                    if (reason) quarantineMut.mutate({ workload: selectedWorkload.id, reason });
-                  }}
-                  className="inline-flex items-center gap-1 rounded border border-[color:var(--color-severity-critical)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--color-severity-critical)] hover:bg-[color:color-mix(in_oklab,var(--color-severity-critical)_12%,transparent)] disabled:opacity-40"
-                >
-                  <Ban className="h-3 w-3" /> Quarantine
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={enforceMut.isPending}
+                    title="Cut this workload off the network with a default-deny NetworkPolicy (CNI-enforced)"
+                    onClick={() => {
+                      const reason = window.prompt(`Isolate ${selectedWorkload.id}?\nApplies a default-deny NetworkPolicy over its pods (blocks all ingress + egress). Enter a reason:`, "manual isolation from network map");
+                      if (reason) enforceMut.mutate({ kind: "isolate", target: selectedWorkload.id, reason });
+                    }}
+                    className="inline-flex items-center gap-1 rounded border border-[color:var(--color-severity-critical)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--color-severity-critical)] hover:bg-[color:color-mix(in_oklab,var(--color-severity-critical)_12%,transparent)] disabled:opacity-40"
+                  >
+                    <Lock className="h-3 w-3" /> Isolate
+                  </button>
+                  <button
+                    type="button"
+                    disabled={quarantineMut.isPending}
+                    title="Add to the admission-webhook deny list (blocks re-admission / reschedule)"
+                    onClick={() => {
+                      const reason = window.prompt(`Quarantine ${selectedWorkload.id}? Enter a reason:`, "manual isolation from network map");
+                      if (reason) quarantineMut.mutate({ workload: selectedWorkload.id, reason });
+                    }}
+                    className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-[10px] font-medium text-muted-foreground hover:bg-muted disabled:opacity-40"
+                  >
+                    <Ban className="h-3 w-3" /> Quarantine
+                  </button>
+                </div>
               ) : <span />}
               <button
                 type="button"
@@ -858,6 +881,7 @@ function NetworkMapInner() {
         flow={selectedFlow}
         clusterID={clusterID}
         hours={hours}
+        denyCapable={denyCapable}
         recentFlows={liveFlows}
         threats={threatsQ.data ?? []}
         lifecycle={lifecycleItems}
@@ -1060,6 +1084,7 @@ function FlowInspectorPopover({
   flow,
   clusterID,
   hours,
+  denyCapable,
   recentFlows,
   threats,
   lifecycle,
@@ -1070,6 +1095,7 @@ function FlowInspectorPopover({
   flow: NetworkFlow | null;
   clusterID: string;
   hours: number;
+  denyCapable: boolean;
   recentFlows: NetworkRecentFlow[];
   threats: RuntimeThreat[];
   lifecycle: NetworkPolicyLifecycle[];
@@ -1184,7 +1210,7 @@ function FlowInspectorPopover({
                 <FlowTab flow={flow} threats={threats} />
               </RadixTabs.Content>
               <RadixTabs.Content value="peers" className="outline-none">
-                <EdgePeersTab flow={flow} clusterID={clusterID} hours={hours} active={tab === "peers"} />
+                <EdgePeersTab flow={flow} clusterID={clusterID} hours={hours} denyCapable={denyCapable} active={tab === "peers"} />
               </RadixTabs.Content>
               <RadixTabs.Content value="streams" className="outline-none">
                 <StreamsTab flow={flow} clusterID={clusterID} hours={hours} active={tab === "streams"} />
@@ -1281,11 +1307,83 @@ function appName(id: number): string {
   return DP_APP_NAMES[id] ?? `app ${id}`;
 }
 
+// useEnforce drives Phase-1 CNI enforcement from the map: isolate a workload
+// (native default-deny NetworkPolicy) or block a workload's traffic to one IP
+// (Cilium egress/ingress deny). The network-policy-applier reconciles within ~15s.
+function useEnforce(clusterID: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { kind: "isolate" | "block_ip"; target: string; workload?: string; direction?: "egress" | "ingress" | "both"; reason: string }) =>
+      network.enforcement.create(body, { cluster_id: clusterID || undefined }),
+    onSuccess: (a) => {
+      toast.success(a.kind === "isolate"
+        ? `Isolate policy queued for ${shortName(a.target)} — applies within ~15s`
+        : `Block queued: ${a.workload ? shortName(a.workload) + " ✕ " : ""}${a.target} — applies within ~15s`);
+      void queryClient.invalidateQueries({ queryKey: ["network-enforcement"] });
+    },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    onError: (e: any) => toast.error(e?.response?.data?.error || "Enforcement action failed"),
+  });
+}
+
+// blockPeer prompts for a reason and blocks a workload's traffic to one external IP.
+function blockPeer(enforce: ReturnType<typeof useEnforce>, workload: string, ip: string, direction: "ingress" | "egress") {
+  const reason = window.prompt(`Block ${shortName(workload)} ${direction === "egress" ? "→" : "←"} ${ip}?\nAdds a Cilium ${direction} deny for just this IP. Enter a reason:`, "manual block from network map");
+  if (reason) enforce.mutate({ kind: "block_ip", target: ip, workload, direction, reason });
+}
+
+// EnforcementCard lists active block/isolate actions with a lift (✕) control — the
+// mirror of LiveSessionsCard, but for durable CNI policy rather than one connection.
+function EnforcementCard({ clusterID }: { clusterID: string }) {
+  const queryClient = useQueryClient();
+  const q = useQuery({
+    queryKey: ["network-enforcement", clusterID],
+    queryFn: () => network.enforcement.list({ cluster_id: clusterID || undefined }),
+    refetchInterval: 20_000,
+  });
+  const lift = useMutation({
+    mutationFn: (id: string) => network.enforcement.lift(id),
+    onSuccess: () => { toast.success("Lifting — policy removed within ~15s"); void queryClient.invalidateQueries({ queryKey: ["network-enforcement", clusterID] }); },
+    onError: () => toast.error("Failed to lift"),
+  });
+  const actions = q.data ?? [];
+  if (actions.length === 0) return null;
+  return (
+    <div className="rounded-md border border-border bg-card/95 p-3 shadow-[var(--elev-1)]" data-testid="network-enforcement-card">
+      <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold">
+        <Ban className="h-3.5 w-3.5 text-[color:var(--color-severity-critical)]" /> Active enforcement ({actions.length})
+      </div>
+      <ul className="max-h-56 space-y-1 overflow-auto pr-1">
+        {actions.map((a) => (
+          <li key={a.id} className="flex items-center justify-between gap-2 rounded border border-border/60 p-1.5 text-[11px]">
+            <div className="min-w-0">
+              <div className="flex items-center gap-1">
+                <span className="rounded bg-muted px-1 text-[9px] uppercase text-muted-foreground">{a.kind === "isolate" ? "isolate" : "block"}</span>
+                <span className="truncate text-mono font-medium">{a.kind === "isolate" ? shortName(a.target) : `${a.workload ? shortName(a.workload) + " ✕ " : ""}${a.target}`}</span>
+              </div>
+              <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
+                {a.state === "lifting" ? "lifting…" : a.last_status === "error" ? <span className="text-[color:var(--color-severity-critical)]">error: {a.last_error}</span> : a.last_status === "ok" ? "applied" : "pending apply"}
+                {a.reason ? ` · ${a.reason}` : ""}
+              </div>
+            </div>
+            {a.state !== "lifting" && (
+              <button type="button" title="Lift this enforcement" disabled={lift.isPending} onClick={() => lift.mutate(a.id)}
+                className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-[color:var(--color-severity-critical)] disabled:opacity-40">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 // EdgePeersTab expands a clicked edge into the individual peer IPs behind it. The map folds
 // all external peers into one "external" node, so a workload→external line is a single edge;
 // this lists every real IP that edge represents (the whole point of "click the line to
 // external and see the IPs").
-function EdgePeersTab({ flow, clusterID, hours, active }: { flow: NetworkFlow; clusterID: string; hours: number; active: boolean }) {
+function EdgePeersTab({ flow, clusterID, hours, denyCapable, active }: { flow: NetworkFlow; clusterID: string; hours: number; denyCapable: boolean; active: boolean }) {
   const isAgg = (id: string) => id === "external" || id.startsWith("external/");
   // Pick the workload side + the direction of THIS edge relative to it.
   let workload = flow.src;
@@ -1294,6 +1392,7 @@ function EdgePeersTab({ flow, clusterID, hours, active }: { flow: NetworkFlow; c
   if (isAgg(flow.dst)) { workload = flow.src; direction = "egress"; peerIsExternal = true; }
   else if (isAgg(flow.src)) { workload = flow.dst; direction = "ingress"; peerIsExternal = true; }
   else { workload = flow.src; direction = "egress"; }
+  const enforce = useEnforce(clusterID);
   const q = useQuery({
     queryKey: ["edge-peers", clusterID, workload, hours],
     queryFn: () => network.peers({ workload, cluster_id: clusterID || undefined, hours }),
@@ -1320,6 +1419,13 @@ function EdgePeersTab({ flow, clusterID, hours, active }: { flow: NetworkFlow; c
               <span className="flex shrink-0 items-center gap-1">
                 {p.external && <span className="rounded bg-[color-mix(in_oklab,var(--color-severity-medium)_18%,transparent)] px-1 text-[9px] uppercase text-[color:var(--color-severity-medium)]">ext</span>}
                 {p.protocols.length ? <span className="text-[9px] uppercase text-muted-foreground/70">{p.protocols[0]}</span> : null}
+                {p.external && clusterID && denyCapable ? (
+                  <button type="button" title={`Block ${shortName(workload)} ${direction === "egress" ? "→" : "←"} ${p.peer_ip}`}
+                    onClick={() => blockPeer(enforce, workload, p.peer_ip, direction)}
+                    className="rounded p-0.5 text-muted-foreground hover:text-[color:var(--color-severity-critical)]">
+                    <Ban className="h-3 w-3" />
+                  </button>
+                ) : null}
               </span>
             </div>
             <div className="mt-0.5 text-[10px] text-muted-foreground truncate">
@@ -1632,8 +1738,9 @@ function HistoryTab({ data, samples }: { data: number[]; samples: NetworkRecentF
 // dismissed without changing the selected flow (e.g. user closed the dialog
 // but still wants the data visible in the right rail).
 
-function WorkloadDrilldown({ workload, flows, clusterID, hours, onSelectFlow }: { workload: NetworkWorkload; flows: NetworkFlow[]; clusterID: string; hours: number; onSelectFlow: (flowID: string) => void }) {
+function WorkloadDrilldown({ workload, flows, clusterID, hours, denyCapable, onSelectFlow }: { workload: NetworkWorkload; flows: NetworkFlow[]; clusterID: string; hours: number; denyCapable: boolean; onSelectFlow: (flowID: string) => void }) {
   const [tab, setTab] = useState<"ingress" | "egress" | "peers">("egress");
+  const enforce = useEnforce(clusterID);
   const related = flows.filter((f) => f.src === workload.id || f.dst === workload.id);
   const ingressFlows = related.filter((f) => f.dst === workload.id);
   const egressFlows = related.filter((f) => f.src === workload.id);
@@ -1699,6 +1806,13 @@ function WorkloadDrilldown({ workload, flows, clusterID, hours, onSelectFlow }: 
                     <span className="flex items-center gap-1 shrink-0">
                       {p.external && <span className="rounded bg-[color-mix(in_oklab,var(--color-severity-medium)_18%,transparent)] px-1 text-[9px] uppercase text-[color:var(--color-severity-medium)]">ext</span>}
                       <span className="rounded bg-muted px-1 text-[9px] uppercase text-muted-foreground">{p.direction === "ingress" ? "in" : "out"}</span>
+                      {p.external && clusterID && denyCapable ? (
+                        <button type="button" title={`Block ${shortName(workload.id)} ${p.direction === "egress" ? "→" : "←"} ${p.peer_ip}`}
+                          onClick={() => blockPeer(enforce, workload.id, p.peer_ip, p.direction)}
+                          className="rounded p-0.5 text-muted-foreground hover:text-[color:var(--color-severity-critical)]">
+                          <Ban className="h-3 w-3" />
+                        </button>
+                      ) : null}
                     </span>
                   </div>
                   <div className="mt-0.5 text-[10px] text-muted-foreground truncate">

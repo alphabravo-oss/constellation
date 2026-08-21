@@ -191,7 +191,77 @@ func runOnce(ctx context.Context, pool *pgxpool.Pool, client netpolicyapply.Reso
 		}
 		logger.Info("network policy reconciled", attrs...)
 	}
+	if err := reconcileEnforcement(ctx, pool, client, clusterID, logger); err != nil {
+		logger.Warn("enforcement reconcile failed", slog.String("err", err.Error()))
+	}
 	return nil
+}
+
+// reconcileEnforcement applies Phase-1 block/isolate actions to the cluster.
+// active  -> apply the stored manifest; lifting -> delete it, then mark removed.
+// The manifest carries its own flavor (native NetworkPolicy for isolate, Cilium
+// CiliumNetworkPolicy for block_ip), independent of the applier's allow-policy flavor.
+func reconcileEnforcement(ctx context.Context, pool *pgxpool.Pool, client netpolicyapply.ResourceClient, clusterID string, logger *slog.Logger) error {
+	rows, err := pool.Query(ctx, `
+SELECT id::text, manifest_flavor, manifest, state
+  FROM network_enforcement_actions
+ WHERE cluster_id = $1 AND state IN ('active', 'lifting')`, clusterID)
+	if err != nil {
+		return err
+	}
+	type action struct{ id, flavor, manifest, state string }
+	var actions []action
+	for rows.Next() {
+		var a action
+		if err := rows.Scan(&a.id, &a.flavor, &a.manifest, &a.state); err != nil {
+			rows.Close()
+			return err
+		}
+		actions = append(actions, a)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for _, a := range actions {
+		resource, manifestJSON, perr := netpolicyapply.ParseManifest(netpolicyapply.Flavor(a.flavor), a.manifest)
+		if perr != nil {
+			updateEnforcementStatus(ctx, pool, a.id, "error", perr.Error(), "")
+			logger.Warn("enforcement parse failed", slog.String("id", a.id), slog.String("err", perr.Error()))
+			continue
+		}
+		if a.state == "lifting" {
+			if derr := client.Delete(ctx, resource); derr != nil {
+				updateEnforcementStatus(ctx, pool, a.id, "error", derr.Error(), "")
+				continue
+			}
+			updateEnforcementStatus(ctx, pool, a.id, "ok", "", "removed")
+			logger.Info("enforcement removed", slog.String("id", a.id), slog.String("resource", resource.Ref()))
+			continue
+		}
+		if aerr := client.Apply(ctx, resource, manifestJSON); aerr != nil {
+			updateEnforcementStatus(ctx, pool, a.id, "error", aerr.Error(), "")
+			continue
+		}
+		updateEnforcementStatus(ctx, pool, a.id, "ok", "", "")
+		logger.Info("enforcement applied", slog.String("id", a.id), slog.String("resource", resource.Ref()))
+	}
+	return nil
+}
+
+// updateEnforcementStatus records the reconcile outcome; newState (when non-empty)
+// transitions the row (e.g. lifting -> removed after a successful delete).
+func updateEnforcementStatus(ctx context.Context, pool *pgxpool.Pool, id, status, errMsg, newState string) {
+	_, _ = pool.Exec(ctx, `
+UPDATE network_enforcement_actions
+   SET last_status = $2,
+       last_error = $3,
+       state = COALESCE(NULLIF($4,''), state),
+       last_applied_at = CASE WHEN $2 = 'ok' AND $4 = '' THEN NOW() ELSE last_applied_at END,
+       last_deleted_at = CASE WHEN $2 = 'ok' AND $4 = 'removed' THEN NOW() ELSE last_deleted_at END,
+       updated_at = NOW()
+ WHERE id = $1`, id, status, errMsg, newState)
 }
 
 func resolveClusterID(ctx context.Context, pool *pgxpool.Pool, cfg config) (string, error) {
