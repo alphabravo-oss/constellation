@@ -92,7 +92,11 @@ static threat_config_t threat_config[] = {
 [DPI_THRT_SSH_VER_1] = {true, DPI_ACTION_ALLOW, },
 [DPI_THRT_SSL_HEARTBLEED] = {true, DPI_ACTION_DROP, },
 [DPI_THRT_SSL_CIPHER_OVF] = {true, DPI_ACTION_DROP, },
-[DPI_THRT_SSL_VER_2OR3] = {true, DPI_ACTION_DROP, },
+// Constellation: SSLv3-version flagging disabled by default — in tap mode dp reads the
+// legacy ClientHello record version (0x0300), which modern TLS 1.2/1.3 clients set for
+// compatibility, so it false-positives on ordinary HTTPS (e.g. ingress traffic). Consistent
+// with TLS_1DOT0/1DOT1 below, which are also off unless explicitly enabled by config.
+[DPI_THRT_SSL_VER_2OR3] = {false, DPI_ACTION_ALLOW, },
 [DPI_THRT_SSL_TLS_1DOT0] = {false, DPI_ACTION_ALLOW, },
 [DPI_THRT_HTTP_NEG_LEN] = {true, DPI_ACTION_DROP, },
 [DPI_THRT_HTTP_SMUGGLING] = {true, DPI_ACTION_DROP, },
