@@ -111,8 +111,8 @@ var OrderedTables = []string{
 	"registries",            // 14 (auth_secret stays AES-GCM SEALED; hex-encoded, never cleartext)
 	"waf_groups",            // 15
 	"runtime_dlp_rules",     // 16 (NET-BACKUP-44: the LIVE enforced DLP + L7/WAF rule store —
-	//      the single authoritative table after waf_groups CRUD (WS-G G1) and dlp_sensors
-	//      (P0-01) were removed; FK org_id+cluster_id so it restores after clusters)
+	//      the single authoritative table after waf_groups CRUD (WS-G G1) and the
+	//      DLP-sensor CRUD (P0-01) were removed; FK org_id+cluster_id so it restores after clusters)
 	"image_acceptances",     // 17
 	"custom_frameworks",     // 18
 	"api_tokens",            // 19 (optional; token_hash EXCLUDED — metadata only, not restorable)

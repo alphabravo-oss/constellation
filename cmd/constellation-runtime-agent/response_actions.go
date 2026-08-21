@@ -17,9 +17,19 @@
 // unit-tested; the syscall/exec layer is a thin wrapper.
 //
 // Transport: the responder is driven by a pull-poller against the control plane
-// (responseActionWorker), mirroring the other runtime sync workers. The server
-// endpoint that emits pending actions is a separate subsystem — see
-// TODO(matrix) on responseActionWorker.fetch.
+// (responseActionWorker), mirroring the other runtime sync workers.
+//
+// STATUS (RT-KILL-02): the responder EXECUTION layer below (killProcess SIGKILL,
+// killSession conntrack-delete, decision logic) is complete and unit-tested, and
+// the poller is gated OFF by default and 404s harmlessly until a producer exists.
+// Pre-exec/inline BLOCKING of a policy violation is already delivered end-to-end
+// by the enforcer path (set runtimeAgent.enforcement.mode=protect — RT-ENFORCE-01,
+// network/L7 inline shipped). What remains for full parity is the server-side
+// PRODUCER — GET /api/v1/runtime/response-actions:pending + a :complete sink + a
+// pkg/response ActionKill that enqueues onto them — so a response RULE can kill an
+// already-RUNNING process/session on a threat. The responder here is that
+// producer's ready-made execution half. Tracked as RT-KILL-02 in
+// docs/NEUVECTOR-PARITY-PLAN-2026-08.md.
 package main
 
 import (
