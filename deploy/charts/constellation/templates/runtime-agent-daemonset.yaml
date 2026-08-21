@@ -185,6 +185,11 @@ spec:
             # dpi.constellation.alphabravo.io/enforce label. Fail-open (--queue-bypass).
             - name: CONSTELLATION_DP_ENFORCE
               value: "{{ if and (eq .Values.runtimeAgent.enforcement.mode "protect") .Values.runtimeAgent.enforcement.network }}true{{ else }}false{{ end }}"
+            # L7 (WAF/DLP) inline enforce gate — enforce-mode DPI rules RESET/DROP only
+            # when mode=protect AND network=true (pod on the NFQUEUE path) AND dpi=true.
+            # Per-workload via the dpi.constellation.alphabravo.io/{waf,dlp} labels.
+            - name: CONSTELLATION_DLP_ENFORCE
+              value: "{{ if and (eq .Values.runtimeAgent.enforcement.mode "protect") .Values.runtimeAgent.enforcement.network .Values.runtimeAgent.enforcement.dpi }}true{{ else }}false{{ end }}"
             # Additive-only: extra namespaces that enforcement must never touch. The
             # core protected set (constellation-system + kube-system family + host)
             # is baked into the agent and cannot be removed here.

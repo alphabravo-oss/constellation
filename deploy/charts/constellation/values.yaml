@@ -487,6 +487,13 @@ runtimeAgent:
     #   (3) only on NFQUEUE-safe CNIs (flannel/calico/kube-router — NOT Cilium
     #   eBPF unless dp.enforceOnCilium is set). Verify on a canary before scaling.
     network: false       # arm inline NFQUEUE enforcement (when mode=protect)
+    # dpi: arm L7 inline enforcement — WAF (OWASP CRS) and DLP verdicts RESET/DROP
+    # the offending session inline, instead of only alerting. Requires mode=protect
+    # AND network=true (the pod must be on the NFQUEUE datapath for dp to have a
+    # verdict path) AND the per-workload labels dpi.constellation.alphabravo.io/waf
+    # (or /dlp) = true. Default OFF — L7 rules can false-positive (e.g. CRS SQLi on a
+    # workload's own DB egress); opt a workload in by label and verify on a canary.
+    dpi: false           # arm WAF/DLP inline drop/reset (when mode=protect + network)
     # ADDITIVE ONLY: extra namespaces enforcement must never touch. The core
     # protected set — this release's own namespace, kube-system/kube-public/
     # kube-node-lease, and the host itself — is baked into the agent and cannot be
