@@ -659,6 +659,7 @@ func (s *Server) buildRouter() chi.Router {
 			networkMap := network.NewNetwork(s.db)
 			r.Get("/network/map", s.requireVerb(rbac.VerbReadFindings, networkMap.Map))
 			r.Get("/network/exposure", s.requireVerb(rbac.VerbReadFindings, networkMap.Exposure))
+			r.Get("/network/peers", s.requireVerb(rbac.VerbReadFindings, networkMap.Peers))
 			r.Get("/network/sessions", s.requireVerb(rbac.VerbReadFindings, networkMap.Sessions))
 			r.Get("/network/sessions/summary", s.requireVerb(rbac.VerbReadFindings, networkMap.SessionsSummary))
 			r.Delete("/network/sessions/{id}", s.requireVerb(rbac.VerbManagePolicies, networkMap.KillSession))

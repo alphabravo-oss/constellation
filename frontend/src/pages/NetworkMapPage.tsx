@@ -803,6 +803,8 @@ function NetworkMapInner() {
             <WorkloadDrilldown
               workload={selectedWorkload}
               flows={flows}
+              clusterID={clusterID}
+              hours={hours}
               onSelectFlow={(id) => { selectFlow(id); setPopoverOpen(true); }}
             />
             <div className="mt-2 flex items-center justify-between">
@@ -1574,12 +1576,19 @@ function HistoryTab({ data, samples }: { data: number[]; samples: NetworkRecentF
 // dismissed without changing the selected flow (e.g. user closed the dialog
 // but still wants the data visible in the right rail).
 
-function WorkloadDrilldown({ workload, flows, onSelectFlow }: { workload: NetworkWorkload; flows: NetworkFlow[]; onSelectFlow: (flowID: string) => void }) {
-  const [tab, setTab] = useState<"ingress" | "egress">("egress");
+function WorkloadDrilldown({ workload, flows, clusterID, hours, onSelectFlow }: { workload: NetworkWorkload; flows: NetworkFlow[]; clusterID: string; hours: number; onSelectFlow: (flowID: string) => void }) {
+  const [tab, setTab] = useState<"ingress" | "egress" | "peers">("egress");
   const related = flows.filter((f) => f.src === workload.id || f.dst === workload.id);
   const ingressFlows = related.filter((f) => f.dst === workload.id);
   const egressFlows = related.filter((f) => f.src === workload.id);
   const visibleFlows = tab === "ingress" ? ingressFlows : egressFlows;
+  // NV-style per-peer list: every individual peer IP (incl. external) for this workload.
+  const peersQ = useQuery({
+    queryKey: ["network-peers", clusterID, workload.id, hours],
+    queryFn: () => network.peers({ workload: workload.id, cluster_id: clusterID || undefined, hours }),
+    enabled: tab === "peers" && !!workload.id,
+    staleTime: 30_000,
+  });
   return (
     <div className="space-y-4" data-testid="network-workload-detail">
       <div>
@@ -1610,7 +1619,41 @@ function WorkloadDrilldown({ workload, flows, onSelectFlow }: { workload: Networ
           >
             Egress
           </button>
+          <button
+            type="button"
+            className={`rounded-md px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${tab === "peers" ? "bg-accent text-foreground" : "bg-muted text-muted-foreground"}`}
+            onClick={() => setTab("peers")}
+            data-testid="network-workload-peers-tab"
+            title="Every individual peer IP (incl. external) this workload talked to"
+          >
+            Peers
+          </button>
         </div>
+        {tab === "peers" ? (
+          peersQ.isPending ? (
+            <p className="px-1 py-2 text-xs text-muted-foreground">Loading peers…</p>
+          ) : (peersQ.data ?? []).length === 0 ? (
+            <p className="px-1 py-2 text-xs text-muted-foreground">No individual peers observed.</p>
+          ) : (
+            <ul className="max-h-72 space-y-1 overflow-auto pr-1 text-xs" data-testid="network-workload-peers">
+              {(peersQ.data ?? []).map((p, i) => (
+                <li key={p.direction + p.peer_ip + i} className="rounded border border-border/60 p-1.5">
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="text-mono font-medium">{p.fqdn || p.peer || p.peer_ip}</span>
+                    <span className="flex items-center gap-1 shrink-0">
+                      {p.external && <span className="rounded bg-[color-mix(in_oklab,var(--color-severity-medium)_18%,transparent)] px-1 text-[9px] uppercase text-[color:var(--color-severity-medium)]">ext</span>}
+                      <span className="rounded bg-muted px-1 text-[9px] uppercase text-muted-foreground">{p.direction === "ingress" ? "in" : "out"}</span>
+                    </span>
+                  </div>
+                  <div className="mt-0.5 text-[10px] text-muted-foreground truncate">
+                    {p.fqdn || p.peer ? <span className="text-mono">{p.peer_ip} · </span> : null}
+                    {formatBytes(p.bytes)}{p.sessions > 0 ? ` · ${p.sessions.toLocaleString()} sess` : ""}{p.ports.length ? ` · :${p.ports.slice(0, 5).join(", :")}` : ""}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )
+        ) : (
         <ul className="max-h-72 space-y-2 overflow-auto pr-1 text-sm">
           {visibleFlows.map((f) => (
             <li key={f.id}>
@@ -1630,6 +1673,7 @@ function WorkloadDrilldown({ workload, flows, onSelectFlow }: { workload: Networ
           ))}
           {visibleFlows.length === 0 && <li className="text-xs text-muted-foreground">No observed traffic in this direction.</li>}
         </ul>
+        )}
       </div>
     </div>
   );

@@ -1840,6 +1840,21 @@ export interface ConversationEntry {
   threat_id: number;
   last_seen_at: string;
 }
+export interface NetworkPeer {
+  peer_ip: string;
+  peer?: string;
+  fqdn?: string;
+  direction: "ingress" | "egress";
+  external: boolean;
+  bytes: number;
+  sessions: number;
+  packets: number;
+  ports: number[];
+  protocols: string[];
+  verdict: string;
+  last_seen_at: string;
+}
+
 export interface ConversationEntries {
   from: string;
   to: string;
@@ -2160,6 +2175,9 @@ export const network = {
     api.get<NetworkConversations>("/network/conversations", { params }).then((r) => r.data),
   // NV per-conversation drill-down: every protocol/port/app stream between from→to,
   // with directional (in/out) bytes + session counts.
+  // NV per-conversation peer list: every individual peer IP (incl. external) for a workload.
+  peers: (params: { workload: string; hours?: number; cluster_id?: string }) =>
+    api.get<{ workload: string; peers: NetworkPeer[] }>("/network/peers", { params }).then((r) => r.data.peers),
   conversationEntries: (params: { from: string; to: string; hours?: number; cluster_id?: string }) =>
     api.get<ConversationEntries>("/network/conversations/entries", { params }).then((r) => r.data),
   // NV RESTSession: the live per-connection table (dp ctrl_list_session snapshot).
