@@ -872,6 +872,9 @@ func (s *Server) buildRouter() chi.Router {
 			r.Delete("/federation/members/{id}", s.requireVerb(rbac.VerbManageOrg, fed.KickMember))
 			// D1: master mints a short-lived signed join token for a joining cluster.
 			r.Post("/federation/join-tokens", s.requireVerb(rbac.VerbManageOrg, fed.MintJoinToken))
+			// FED-JOIN-25: joint side of mTLS federation — call a master's /federation/join,
+			// persist the issued client cert/key + CA, flip local state to joint.
+			r.Post("/federation/join-remote", s.requireVerb(rbac.VerbManageOrg, fed.JoinRemote))
 			// NOTE: GET /federation/sync is NO LONGER in the user-JWT block — it moved to a
 			// dedicated fed-credential group below so a generic read-findings JWT can no
 			// longer pull the federated rule log (D1). The exchange endpoint
@@ -940,6 +943,8 @@ func (s *Server) buildRouter() chi.Router {
 			r.Post("/users/{id}/disable", s.requireVerb(rbac.VerbManageUsers, users.Disable))
 			r.Delete("/users/{id}", s.requireVerb(rbac.VerbManageUsers, users.Delete))
 			r.Post("/users/{id}/force-password-reset", s.requireVerb(rbac.VerbManageUsers, users.ForcePasswordReset))
+			// AUTH-LOCKOUT-17: clear a brute-force lockout (failed-login counter + block window).
+			r.Post("/users/{id}/unlock", s.requireVerb(rbac.VerbManageUsers, users.Unlock))
 
 			dashboard := handler.NewDashboard(s.db)
 			r.Get("/dashboard/summary", s.requireVerb(rbac.VerbReadFindings, dashboard.Summary))
@@ -1375,6 +1380,11 @@ func (s *Server) buildRouter() chi.Router {
 			// runtime-agent-token auth + org/cluster scoping as the other bundles;
 			// without this the worker 404s and dp runs with an empty rule table.
 			r.Get("/runtime/policies:bundle", runtime.NewRuntimePoliciesHTTP(s.db, s.auditLog).AgentPolicyBundle)
+			// RT-KILL-02: response-action producer — the agent's responseActionWorker polls
+			// :pending for queued kill_process/kill_session actions and POSTs :result back.
+			rap := runtime.NewResponseActions(s.db)
+			r.Get("/runtime/response-actions:pending", rap.Pending)
+			r.Post("/runtime/response-actions:result", rap.Result)
 
 			// E1: enabled declarative response rules for the agent's stream evaluator,
 			// priority-ordered. Same :sync pull shape + runtime-agent-token auth as the
