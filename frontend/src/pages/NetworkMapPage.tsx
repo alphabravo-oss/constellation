@@ -1159,6 +1159,7 @@ function FlowInspectorPopover({
             <RadixTabs.List className="flex border-b border-border px-2" data-testid="network-flow-inspector-tabs">
               {[
                 { v: "flow", l: "Flow" },
+                { v: "peers", l: "Peer IPs" },
                 { v: "streams", l: "Streams" },
                 { v: "threat", l: "Threat" },
                 { v: "policy", l: "Policy" },
@@ -1181,6 +1182,9 @@ function FlowInspectorPopover({
             <div className="flex-1 overflow-y-auto px-4 py-3">
               <RadixTabs.Content value="flow" className="outline-none">
                 <FlowTab flow={flow} threats={threats} />
+              </RadixTabs.Content>
+              <RadixTabs.Content value="peers" className="outline-none">
+                <EdgePeersTab flow={flow} clusterID={clusterID} hours={hours} active={tab === "peers"} />
               </RadixTabs.Content>
               <RadixTabs.Content value="streams" className="outline-none">
                 <StreamsTab flow={flow} clusterID={clusterID} hours={hours} active={tab === "streams"} />
@@ -1275,6 +1279,58 @@ const DP_APP_NAMES: Record<number, string> = {
 
 function appName(id: number): string {
   return DP_APP_NAMES[id] ?? `app ${id}`;
+}
+
+// EdgePeersTab expands a clicked edge into the individual peer IPs behind it. The map folds
+// all external peers into one "external" node, so a workload→external line is a single edge;
+// this lists every real IP that edge represents (the whole point of "click the line to
+// external and see the IPs").
+function EdgePeersTab({ flow, clusterID, hours, active }: { flow: NetworkFlow; clusterID: string; hours: number; active: boolean }) {
+  const isAgg = (id: string) => id === "external" || id.startsWith("external/");
+  // Pick the workload side + the direction of THIS edge relative to it.
+  let workload = flow.src;
+  let direction: "ingress" | "egress" = "egress";
+  let peerIsExternal = false;
+  if (isAgg(flow.dst)) { workload = flow.src; direction = "egress"; peerIsExternal = true; }
+  else if (isAgg(flow.src)) { workload = flow.dst; direction = "ingress"; peerIsExternal = true; }
+  else { workload = flow.src; direction = "egress"; }
+  const q = useQuery({
+    queryKey: ["edge-peers", clusterID, workload, hours],
+    queryFn: () => network.peers({ workload, cluster_id: clusterID || undefined, hours }),
+    enabled: active && !!workload && !isAgg(workload),
+    staleTime: 30_000,
+  });
+  if (isAgg(workload)) return <p className="text-xs text-muted-foreground">Select an edge with a workload endpoint to list its peer IPs.</p>;
+  if (q.isPending) return <p className="text-xs text-muted-foreground">Loading peer IPs…</p>;
+  let peers = (q.data ?? []).filter((p) => p.direction === direction);
+  if (peerIsExternal) peers = peers.filter((p) => p.external);
+  if (peers.length === 0) return <p className="text-xs text-muted-foreground">No individual peer IPs recorded for this direction.</p>;
+  const totalBytes = peers.reduce((a, p) => a + p.bytes, 0);
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+        <span>{peers.length} {peerIsExternal ? "external " : ""}peer{peers.length === 1 ? "" : "s"} · {shortName(workload)} {direction === "egress" ? "→ out" : "← in"}</span>
+        <span>{formatBytes(totalBytes)}</span>
+      </div>
+      <ul className="max-h-[340px] space-y-1 overflow-auto pr-1">
+        {peers.map((p, i) => (
+          <li key={p.peer_ip + i} className="rounded border border-border/60 p-1.5 text-[11px]">
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-mono font-medium">{p.fqdn || p.peer || p.peer_ip}</span>
+              <span className="flex shrink-0 items-center gap-1">
+                {p.external && <span className="rounded bg-[color-mix(in_oklab,var(--color-severity-medium)_18%,transparent)] px-1 text-[9px] uppercase text-[color:var(--color-severity-medium)]">ext</span>}
+                {p.protocols.length ? <span className="text-[9px] uppercase text-muted-foreground/70">{p.protocols[0]}</span> : null}
+              </span>
+            </div>
+            <div className="mt-0.5 text-[10px] text-muted-foreground truncate">
+              {(p.fqdn || p.peer) ? <span className="text-mono">{p.peer_ip} · </span> : null}
+              {formatBytes(p.bytes)}{p.sessions > 0 ? ` · ${p.sessions.toLocaleString()} sess` : ""}{p.ports.length ? ` · :${p.ports.slice(0, 6).join(", :")}` : ""}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 // StreamsTab shows the FULL conversation between the two endpoints (NV's per-conversation
