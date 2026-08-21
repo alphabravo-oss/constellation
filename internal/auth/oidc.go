@@ -30,6 +30,19 @@ type OIDCConfig struct {
 	RedirectURL  string
 	Scopes       []string    // defaults to ["openid","email","profile"]
 	RoleMapping  RoleMapping // group(claim)->Constellation role map applied at JIT login (parity with SAML/LDAP)
+	// GroupClaim is the id_token claim NAME carrying the user's group/role membership
+	// (AUTH-OIDC-18). Defaults to "groups" when empty. Azure AD emits "roles"; some Keycloak
+	// realm setups use a custom mapper name — a non-"groups" IdP would otherwise yield zero
+	// groups and provision role-less JIT users.
+	GroupClaim string
+}
+
+// groupClaimName returns the configured id_token group claim, defaulting to "groups".
+func (c OIDCConfig) groupClaimName() string {
+	if strings.TrimSpace(c.GroupClaim) != "" {
+		return c.GroupClaim
+	}
+	return "groups"
 }
 
 // OIDCClient is the minimum surface for tests + the handler. The real implementation lives
@@ -258,7 +271,9 @@ func (c *OIDCClient) verifyIDToken(ctx context.Context, idToken string) (*IDToke
 	if v, ok := raw["nonce"].(string); ok {
 		out.Nonce = v
 	}
-	out.Groups = stringSlice(raw["groups"])
+	// AUTH-OIDC-18: read the CONFIGURED group claim (default "groups") rather than a hardcoded
+	// "groups" key, so Azure AD ("roles") / custom-mapper IdPs resolve their groups->roles.
+	out.Groups = stringSlice(raw[c.cfg.groupClaimName()])
 	if v, ok := raw["exp"].(float64); ok {
 		out.ExpiresAt = int64(v)
 	}

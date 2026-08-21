@@ -63,7 +63,11 @@ type ServerConfig struct {
 	BaseDN         string `json:"base_dn,omitempty"`
 	UserFilter     string `json:"user_filter,omitempty"`
 	GroupAttribute string `json:"group_attribute,omitempty"`
-	EmailAttribute string `json:"email_attribute,omitempty"`
+	// GroupBaseDN + GroupMemberAttribute drive the AUTH-LDAP-19 secondary group-search
+	// (OpenLDAP posixGroup/memberUid, groupOfNames/member). Both are set together or neither.
+	GroupBaseDN          string `json:"group_base_dn,omitempty"`
+	GroupMemberAttribute string `json:"group_member_attribute,omitempty"`
+	EmailAttribute       string `json:"email_attribute,omitempty"`
 
 	// --- SAML ---
 	IdPMetadataXML string `json:"idp_metadata_xml,omitempty"`
@@ -78,6 +82,9 @@ type ServerConfig struct {
 	ClientSecret string   `json:"client_secret,omitempty"` // SECRET
 	RedirectURL  string   `json:"redirect_url,omitempty"`
 	Scopes       []string `json:"scopes,omitempty"`
+	// GroupsClaim is the id_token claim carrying group membership (AUTH-OIDC-18); default
+	// "groups". Set to "roles" for Azure AD, or a custom mapper name for Keycloak.
+	GroupsClaim string `json:"groups_claim,omitempty"`
 }
 
 // Validate enforces the per-type required fields so a malformed row can never become a live
@@ -96,6 +103,10 @@ func (s AuthServer) Validate() error {
 		}
 		if !strings.Contains(s.Config.UserFilter, "%s") {
 			return errors.New("auth server (ldap): user_filter must contain %s username placeholder")
+		}
+		// AUTH-LDAP-19: the secondary group-search needs both its base DN and member attribute.
+		if (strings.TrimSpace(s.Config.GroupBaseDN) == "") != (strings.TrimSpace(s.Config.GroupMemberAttribute) == "") {
+			return errors.New("auth server (ldap): group_base_dn and group_member_attribute must be set together")
 		}
 	case ServerTypeSAML:
 		if strings.TrimSpace(s.Config.IdPMetadataXML) == "" {
@@ -471,14 +482,16 @@ func BuildProviders(ctx context.Context, srvs []AuthServer, sealer Sealer) (*OID
 
 func (s AuthServer) toLDAPConfig() LDAPConfig {
 	return LDAPConfig{
-		URL:            s.Config.URL,
-		BindDN:         s.Config.BindDN,
-		BindPassword:   s.Config.BindPassword,
-		BaseDN:         s.Config.BaseDN,
-		UserFilter:     s.Config.UserFilter,
-		GroupAttribute: s.Config.GroupAttribute,
-		EmailAttribute: s.Config.EmailAttribute,
-		RoleMapping:    s.RoleMapping,
+		URL:                  s.Config.URL,
+		BindDN:               s.Config.BindDN,
+		BindPassword:         s.Config.BindPassword,
+		BaseDN:               s.Config.BaseDN,
+		UserFilter:           s.Config.UserFilter,
+		GroupAttribute:       s.Config.GroupAttribute,
+		GroupBaseDN:          s.Config.GroupBaseDN,
+		GroupMemberAttribute: s.Config.GroupMemberAttribute,
+		EmailAttribute:       s.Config.EmailAttribute,
+		RoleMapping:          s.RoleMapping,
 	}
 }
 
@@ -502,6 +515,7 @@ func (s AuthServer) toOIDCConfig() OIDCConfig {
 		ClientSecret: s.Config.ClientSecret,
 		RedirectURL:  s.Config.RedirectURL,
 		Scopes:       s.Config.Scopes,
+		GroupClaim:   s.Config.GroupsClaim,
 		RoleMapping:  s.RoleMapping,
 	}
 }

@@ -204,6 +204,98 @@ func TestOIDC_RejectsBadSignature(t *testing.T) {
 	}
 }
 
+// claimIdP stands up an IdP whose /token stamps the given group values under claimName (and NOT
+// under "groups"), so AUTH-OIDC-18's configurable GroupClaim can be exercised: an Azure-AD-style
+// "roles" claim or a Keycloak custom mapper name.
+func claimIdP(t *testing.T, claimName string, values []any) *httptest.Server {
+	t.Helper()
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	var base string
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"issuer":                 base,
+			"authorization_endpoint": base + "/authorize",
+			"token_endpoint":         base + "/token",
+			"jwks_uri":               base + "/jwks",
+		})
+	})
+	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
+		nBytes := priv.PublicKey.N.Bytes()
+		eBytes := big.NewInt(int64(priv.PublicKey.E)).Bytes()
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"keys": []map[string]any{{
+				"kty": "RSA", "kid": "test", "alg": "RS256",
+				"n": base64.RawURLEncoding.EncodeToString(nBytes),
+				"e": base64.RawURLEncoding.EncodeToString(eBytes),
+			}},
+		})
+	})
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		claims := jwt.MapClaims{
+			"iss": base, "sub": "user-42", "email": "alice@example.test",
+			"iat": time.Now().Unix(), "exp": time.Now().Add(5 * time.Minute).Unix(),
+			"aud": "client-test", "nonce": fakeIdPNonce,
+			claimName: values,
+		}
+		tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+		tok.Header["kid"] = "test"
+		signed, err := tok.SignedString(priv)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"id_token": signed, "access_token": "tok"})
+	})
+	srv := httptest.NewServer(mux)
+	base = srv.URL
+	return srv
+}
+
+// TestOIDC_ConfigurableGroupClaim proves AUTH-OIDC-18: the configured GroupClaim name is read
+// (Azure AD emits "roles"), and the hardcoded "groups" default no longer applies when a custom
+// claim is set.
+func TestOIDC_ConfigurableGroupClaim(t *testing.T) {
+	srv := claimIdP(t, "roles", []any{"platform-admins", "viewers"})
+	defer srv.Close()
+	ctx := context.Background()
+
+	// With GroupClaim="roles", the "roles" claim is read into Groups.
+	c, err := NewOIDCClient(ctx, OIDCConfig{
+		IssuerURL: srv.URL, ClientID: "client-test", ClientSecret: "secret",
+		RedirectURL: "http://localhost:8080/cb", GroupClaim: "roles",
+	})
+	if err != nil {
+		t.Fatalf("NewOIDCClient: %v", err)
+	}
+	claims, _, err := c.Exchange(ctx, "code", "verifier", fakeIdPNonce)
+	if err != nil {
+		t.Fatalf("Exchange: %v", err)
+	}
+	if len(claims.Groups) != 2 || claims.Groups[0] != "platform-admins" || claims.Groups[1] != "viewers" {
+		t.Fatalf("GroupClaim=roles: groups = %v, want [platform-admins viewers]", claims.Groups)
+	}
+
+	// With the default config (no GroupClaim => "groups"), the "roles"-only token yields no groups.
+	cDefault, err := NewOIDCClient(ctx, OIDCConfig{
+		IssuerURL: srv.URL, ClientID: "client-test", ClientSecret: "secret",
+		RedirectURL: "http://localhost:8080/cb",
+	})
+	if err != nil {
+		t.Fatalf("NewOIDCClient default: %v", err)
+	}
+	claimsDefault, _, err := cDefault.Exchange(ctx, "code", "verifier", fakeIdPNonce)
+	if err != nil {
+		t.Fatalf("Exchange default: %v", err)
+	}
+	if len(claimsDefault.Groups) != 0 {
+		t.Fatalf("default groups claim: got %v, want none (roles claim must be ignored)", claimsDefault.Groups)
+	}
+}
+
 // nonceIdP stands up an IdP whose /token stamps a fixed `nonce` claim into the id_token,
 // letting us exercise nonce binding/validation in Exchange.
 func nonceIdP(t *testing.T, tokenNonce string) *httptest.Server {

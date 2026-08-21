@@ -89,4 +89,37 @@ func TestNewLDAPProvider_Validation(t *testing.T) {
 	if _, err := NewLDAPProvider(LDAPConfig{URL: "ldap://x", BaseDN: "dc=x", UserFilter: "(uid=%s)"}); err != nil {
 		t.Fatalf("valid config rejected: %v", err)
 	}
+	// AUTH-LDAP-19: group-search config must be all-or-nothing.
+	if _, err := NewLDAPProvider(LDAPConfig{URL: "ldap://x", BaseDN: "dc=x", UserFilter: "(uid=%s)", GroupBaseDN: "ou=groups,dc=x"}); err == nil {
+		t.Fatal("expected error: GroupBaseDN without GroupMemberAttribute")
+	}
+	if _, err := NewLDAPProvider(LDAPConfig{URL: "ldap://x", BaseDN: "dc=x", UserFilter: "(uid=%s)", GroupMemberAttribute: "memberUid"}); err == nil {
+		t.Fatal("expected error: GroupMemberAttribute without GroupBaseDN")
+	}
+	if _, err := NewLDAPProvider(LDAPConfig{URL: "ldap://x", BaseDN: "dc=x", UserFilter: "(uid=%s)", GroupBaseDN: "ou=groups,dc=x", GroupMemberAttribute: "memberUid"}); err != nil {
+		t.Fatalf("valid group-search config rejected: %v", err)
+	}
+}
+
+// TestLDAP_GroupSearchFilter proves AUTH-LDAP-19's secondary-search filter construction: a
+// posixGroup "memberUid" keys on the bare login username, while a groupOfNames "member" keys on
+// the user's full DN; both values are filter-escaped.
+func TestLDAP_GroupSearchFilter(t *testing.T) {
+	const userDN = "uid=alice,ou=people,dc=example,dc=com"
+	// posixGroup: memberUid=<uid>
+	if got := groupSearchFilter("memberUid", userDN, "alice"); got != "(memberUid=alice)" {
+		t.Fatalf("posixGroup filter = %q, want (memberUid=alice)", got)
+	}
+	// groupOfNames: member=<userDN>
+	if got := groupSearchFilter("member", userDN, "alice"); got != "(member="+userDN+")" {
+		t.Fatalf("groupOfNames filter = %q, want (member=%s)", got, userDN)
+	}
+	// Special characters in the value are escaped (LDAP filter injection defense).
+	if got := groupSearchFilter("memberUid", userDN, "a(b)*"); got != `(memberUid=a\28b\29\2a)` {
+		t.Fatalf("escaped filter = %q, want (memberUid=a\\28b\\29\\2a)", got)
+	}
+	// Unconfigured => empty filter.
+	if got := groupSearchFilter("", userDN, "alice"); got != "" {
+		t.Fatalf("empty memberAttr filter = %q, want empty", got)
+	}
 }

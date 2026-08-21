@@ -26,6 +26,15 @@ type LDAPConfig struct {
 	// If set, groups are read directly from the user entry (the common AD case) and no
 	// second search is needed.
 	GroupAttribute string
+	// GroupBaseDN + GroupMemberAttribute enable the secondary group-search (AUTH-LDAP-19), for
+	// directories whose group membership lives on the GROUP object rather than the user entry —
+	// OpenLDAP posixGroup (memberUid=<uid>) / groupOfNames (member=<userDN>). When GroupBaseDN
+	// is set, after the user bind the provider searches GroupBaseDN for
+	// (GroupMemberAttribute=<value>) and adds the matching groups' CNs. The value is the login
+	// username for a "memberUid" attribute (posixGroup keys on the bare uid), else the user's
+	// full DN (groupOfNames/groupOfUniqueNames key on the DN). Both must be set together.
+	GroupBaseDN          string
+	GroupMemberAttribute string
 	// EmailAttribute holds the user's email (e.g. "mail"). Optional.
 	EmailAttribute string
 	// RoleMapping turns group CNs into Constellation roles.
@@ -48,6 +57,11 @@ func NewLDAPProvider(cfg LDAPConfig) (*LDAPProvider, error) {
 	}
 	if !strings.Contains(cfg.UserFilter, "%s") {
 		return nil, errors.New("ldap: UserFilter must contain %s username placeholder")
+	}
+	// AUTH-LDAP-19: the secondary group-search needs both its base DN and its member attribute;
+	// one without the other is a misconfiguration (nothing to search, or nowhere to search).
+	if (cfg.GroupBaseDN == "") != (cfg.GroupMemberAttribute == "") {
+		return nil, errors.New("ldap: GroupBaseDN and GroupMemberAttribute must be set together")
 	}
 	return &LDAPProvider{cfg: cfg}, nil
 }
@@ -123,7 +137,69 @@ func (p *LDAPProvider) Authenticate(username, password string) (*LDAPIdentity, e
 	if err := conn.Bind(userDN, password); err != nil {
 		return nil, fmt.Errorf("ldap: user bind: %w", err)
 	}
-	return p.identityFromEntry(res.Entries[0]), nil
+	id := p.identityFromEntry(res.Entries[0])
+	// AUTH-LDAP-19: when a group-search is configured, resolve groups from the GROUP objects
+	// (posixGroup/groupOfNames) — the case the user-entry GroupAttribute cannot express. Re-bind
+	// the service account first, since the just-bound user may lack read access to the group tree.
+	// A search failure is non-fatal: it just leaves the entry-derived groups (fail-soft), so a
+	// transient group-tree hiccup never blocks an otherwise-valid login.
+	if p.cfg.GroupBaseDN != "" && p.cfg.GroupMemberAttribute != "" {
+		if p.cfg.BindDN != "" {
+			if berr := conn.Bind(p.cfg.BindDN, p.cfg.BindPassword); berr != nil {
+				return id, nil
+			}
+		}
+		if groups := p.searchGroups(conn, userDN, username); len(groups) > 0 {
+			id.Groups = append(id.Groups, groups...)
+			id.Roles = p.cfg.RoleMapping.MapRoles(id.Groups)
+			id.ScopedRoles = p.cfg.RoleMapping.MapScopedRoles(id.Groups)
+		}
+	}
+	return id, nil
+}
+
+// groupSearchFilter builds the LDAP filter for the AUTH-LDAP-19 secondary group-search. The
+// membership value is the bare login username for a "memberUid" attribute (posixGroup keys on the
+// uid), else the user's full DN (groupOfNames/groupOfUniqueNames key on the DN). Both inputs are
+// filter-escaped. It is a pure function so the filter construction is unit-testable without a
+// live directory. Returns "" when the search is not configured.
+func groupSearchFilter(memberAttr, userDN, username string) string {
+	if strings.TrimSpace(memberAttr) == "" {
+		return ""
+	}
+	val := userDN
+	if strings.EqualFold(memberAttr, "memberUid") {
+		val = username
+	}
+	return fmt.Sprintf("(%s=%s)", memberAttr, ldap.EscapeFilter(val))
+}
+
+// searchGroups runs the secondary group-search against GroupBaseDN and returns the matching
+// groups' CNs. conn must already be bound (service account preferred). Fail-soft: any error
+// yields no groups rather than failing the login.
+func (p *LDAPProvider) searchGroups(conn *ldap.Conn, userDN, username string) []string {
+	filter := groupSearchFilter(p.cfg.GroupMemberAttribute, userDN, username)
+	if filter == "" || p.cfg.GroupBaseDN == "" {
+		return nil
+	}
+	res, err := conn.Search(ldap.NewSearchRequest(
+		p.cfg.GroupBaseDN, ldap.ScopeWholeSubtree, ldap.NeverDerefAliases,
+		0, 0, false, filter, []string{"cn"}, nil,
+	))
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range res.Entries {
+		cn := e.GetAttributeValue("cn")
+		if cn == "" {
+			cn = groupCN(e.DN)
+		}
+		if cn != "" {
+			out = append(out, cn)
+		}
+	}
+	return out
 }
 
 // ResolveUserDN binds the service account and locates the user's DN by UserFilter WITHOUT

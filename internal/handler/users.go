@@ -206,6 +206,49 @@ UPDATE users
 	writeJSON(w, http.StatusOK, map[string]string{"status": "reset_required"})
 }
 
+// Unlock clears a user's brute-force lockout (AUTH-LOCKOUT-17): it zeroes failed_login_count
+// and NULLs block_login_since for a user in the caller's org, so an account locked by repeated
+// failed logins can be restored without waiting out the lockout window. Scoped to the caller's
+// org so an admin cannot unlock users in another tenant. Idempotent — unlocking a non-locked
+// user is a no-op that still returns 200. Gated by rbac.VerbManageUsers in the router.
+//
+// ROUTE (add to internal/server/server.go alongside the other /users/{id}/... routes, e.g. after
+// the force-password-reset line ~942):
+//
+//	r.Post("/users/{id}/unlock", s.requireVerb(rbac.VerbManageUsers, users.Unlock))
+func (h *Users) Unlock(w http.ResponseWriter, r *http.Request) {
+	if h.db == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "db unavailable"})
+		return
+	}
+	subj, ok := SubjectFrom(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "no subject"})
+		return
+	}
+	targetID, err := targetUserID(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	tag, err := h.db.Pool().Exec(r.Context(), `
+UPDATE users
+   SET failed_login_count = 0,
+       block_login_since = NULL,
+       updated_at = now()
+ WHERE id = $1 AND org_id = $2`, targetID, subj.OrgID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "unlock user"})
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	h.logUserAction(r.Context(), subj.OrgID, subj.UserID, "user.unlock", targetID)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "unlocked"})
+}
+
 func (h *Users) logUserAction(ctx context.Context, orgID, actorID uuid.UUID, action string, targetID uuid.UUID) {
 	if h.audit == nil {
 		return

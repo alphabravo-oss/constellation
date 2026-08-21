@@ -721,6 +721,9 @@ func (a *Auth) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	claims, _, err := oidc.Exchange(r.Context(), code, verifierCookie.Value, nonceCookie.Value)
 	if err != nil {
+		// RSP-AUDIT-05: a failed OIDC code exchange / id_token validation is a failed login
+		// attempt on the OIDC path — audit it (identity unknown pre-validation, so no username).
+		a.auditLoginFailure(r.Context(), r, nil, nil, "", "oidc_exchange_failed")
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
 		return
 	}
@@ -760,6 +763,9 @@ func (a *Auth) SAMLACS(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := parse(r)
 	if err != nil {
+		// RSP-AUDIT-05: a rejected/invalid SAML assertion is a failed login attempt on the SAML
+		// path — audit it (identity unresolved pre-validation, so no username).
+		a.auditLoginFailure(r.Context(), r, nil, nil, "", "saml_validation_failed")
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
 		return
 	}
