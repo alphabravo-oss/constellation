@@ -168,3 +168,69 @@ func TestRule_Validate(t *testing.T) {
 	}
 	_ = errors.New
 }
+
+// RSP-CVE-52 — count/age-based CVE conditions.
+func TestRule_Match_CVECounts(t *testing.T) {
+	// Event carries: 2 critical, 1 high, one of the criticals fixable & old.
+	ev := &Event{Type: EventScan, CVEs: []CVERef{
+		{ID: "CVE-A", Severity: "critical", BaseScore: 9.8, Fixed: true, AgeDays: 120},
+		{ID: "CVE-B", Severity: "critical", BaseScore: 9.1},
+		{ID: "CVE-C", Severity: "high", BaseScore: 7.5, Fixed: true, AgeDays: 5},
+	}}
+	cond := func(t CondType, v string) Rule {
+		return Rule{Enabled: true, EventType: EventScan, Conditions: []Condition{{Type: t, Value: v}}}
+	}
+	cases := []struct {
+		name string
+		rule Rule
+		want bool
+	}{
+		{"critical_count>=2 matches", cond(CondCVECriticalCount, "2"), true},
+		{"critical_count>=3 no match", cond(CondCVECriticalCount, "3"), false},
+		{"high_count>=3 matches (high-or-above)", cond(CondCVEHighCount, "3"), true},
+		{"high_count>=4 no match", cond(CondCVEHighCount, "4"), false},
+		{"with_fix_count>=2 matches", cond(CondCVEWithFixCount, "2"), true},
+		{"with_fix_count>=3 no match", cond(CondCVEWithFixCount, "3"), false},
+		{"max_age_days>30 matches (fixable & 120d old)", cond(CondCVEMaxAgeDays, "30"), true},
+		{"max_age_days>200 no match", cond(CondCVEMaxAgeDays, "200"), false},
+	}
+	for _, c := range cases {
+		if got := c.rule.Match(ev); got != c.want {
+			t.Errorf("%s: got %v want %v", c.name, got, c.want)
+		}
+	}
+
+	// An age gate must ignore a CVE with no available fix even if it is old.
+	unfixedOld := &Event{Type: EventScan, CVEs: []CVERef{{ID: "CVE-X", Severity: "high", AgeDays: 999}}}
+	ageRule := cond(CondCVEMaxAgeDays, "30")
+	if ageRule.Match(unfixedOld) {
+		t.Error("max_age_days should not match an unfixable (no-fix) CVE")
+	}
+
+	// Empty CVE set never matches a count/age condition.
+	empty := &Event{Type: EventScan}
+	for _, ct := range []CondType{CondCVECriticalCount, CondCVEHighCount, CondCVEWithFixCount, CondCVEMaxAgeDays} {
+		rule := cond(ct, "1")
+		if rule.Match(empty) {
+			t.Errorf("%s matched an event with no CVEs", ct)
+		}
+	}
+}
+
+func TestRule_Validate_CVECounts(t *testing.T) {
+	cases := []struct {
+		r    Rule
+		want bool // want error
+	}{
+		{Rule{Name: "ok", Conditions: []Condition{{Type: CondCVECriticalCount, Value: "3"}}}, false},
+		{Rule{Name: "ok", Conditions: []Condition{{Type: CondCVEMaxAgeDays, Value: "0"}}}, false},
+		{Rule{Name: "bad", Conditions: []Condition{{Type: CondCVEHighCount, Value: "abc"}}}, true},
+		{Rule{Name: "neg", Conditions: []Condition{{Type: CondCVEWithFixCount, Value: "-1"}}}, true},
+		{Rule{Name: "empty", Conditions: []Condition{{Type: CondCVECriticalCount, Value: ""}}}, true},
+	}
+	for i, c := range cases {
+		if err := c.r.Validate(); (err != nil) != c.want {
+			t.Errorf("case %d: gotErr=%v want=%v", i, err, c.want)
+		}
+	}
+}

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -37,6 +38,15 @@ const (
 	CondCVECritical CondType = "cve_critical" // CVE criticality + score floor
 	CondProc        CondType = "proc"         // process name pattern
 	CondEventType   CondType = "event_type"   // admission|runtime|scan|compliance
+
+	// Count-based CVE conditions (RSP-CVE-52) mirror NeuVector's vulnerability
+	// count/age gates. Value is an integer N; the condition matches when the
+	// event carries at least N qualifying CVEs (or, for the age gate, a fixable
+	// CVE older than N days).
+	CondCVECriticalCount CondType = "cve_critical_count" // >= N critical CVEs
+	CondCVEHighCount     CondType = "cve_high_count"     // >= N high-or-above CVEs
+	CondCVEWithFixCount  CondType = "cve_with_fix_count" // >= N CVEs with a fix available
+	CondCVEMaxAgeDays    CondType = "cve_max_age_days"   // a fixable CVE older than N days
 )
 
 // EventType is the canonical event category.
@@ -123,6 +133,8 @@ type CVERef struct {
 	ID        string  // CVE-2024-1234
 	Severity  string  // info|low|medium|high|critical
 	BaseScore float64 // CVSS base score
+	Fixed     bool    // a fix (patched version) is available
+	AgeDays   int     // days since the CVE was published/disclosed (0 = unknown)
 }
 
 // Match returns true if every condition + the selector matches the event.
@@ -175,12 +187,47 @@ func matchCondition(c *Condition, ev *Event) bool {
 			}
 		}
 		return false
+	case CondCVECriticalCount:
+		return countCVEsAtLeast(ev, "critical") >= parseInt(c.Value)
+	case CondCVEHighCount:
+		return countCVEsAtLeast(ev, "high") >= parseInt(c.Value)
+	case CondCVEWithFixCount:
+		n := 0
+		for _, cv := range ev.CVEs {
+			if cv.Fixed {
+				n++
+			}
+		}
+		return n >= parseInt(c.Value)
+	case CondCVEMaxAgeDays:
+		maxAge := parseInt(c.Value)
+		for _, cv := range ev.CVEs {
+			// A fixable CVE left unpatched beyond the window is the risk NeuVector's
+			// age gate targets — an available fix that has not been applied in N days.
+			if cv.Fixed && cv.AgeDays > maxAge {
+				return true
+			}
+		}
+		return false
 	case CondProc:
 		return regexMatch(c.Value, ev.ProcessName)
 	case CondEventType:
 		return strings.EqualFold(c.Value, string(ev.Type))
 	}
 	return false
+}
+
+// countCVEsAtLeast returns the number of the event's CVEs whose severity is at
+// least minSeverity (using the shared severity ranking).
+func countCVEsAtLeast(ev *Event, minSeverity string) int {
+	floor := severityRank[minSeverity]
+	n := 0
+	for _, cv := range ev.CVEs {
+		if severityRank[strings.ToLower(cv.Severity)] >= floor {
+			n++
+		}
+	}
+	return n
 }
 
 func regexMatch(pattern, s string) bool {
@@ -200,6 +247,14 @@ func parseFloat(s string) float64 {
 		return 0
 	}
 	return f
+}
+
+func parseInt(s string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 // ----------------------------- regex cache -----------------------------------
@@ -369,13 +424,21 @@ func (r *Rule) Validate() error {
 	}
 	for _, c := range r.Conditions {
 		switch c.Type {
-		case CondName, CondLevel, CondCVECritical, CondProc, CondEventType:
+		case CondName, CondLevel, CondCVECritical, CondProc, CondEventType,
+			CondCVECriticalCount, CondCVEHighCount, CondCVEWithFixCount, CondCVEMaxAgeDays:
 		default:
 			return fmt.Errorf("response: invalid condition type %q", c.Type)
 		}
 		if c.Type == CondName || c.Type == CondProc {
 			if _, err := regexp.Compile(c.Value); err != nil {
 				return fmt.Errorf("response: invalid regex on %s: %w", c.Type, err)
+			}
+		}
+		switch c.Type {
+		case CondCVECriticalCount, CondCVEHighCount, CondCVEWithFixCount, CondCVEMaxAgeDays:
+			n, err := strconv.Atoi(strings.TrimSpace(c.Value))
+			if err != nil || n < 0 {
+				return fmt.Errorf("response: %s requires a non-negative integer value, got %q", c.Type, c.Value)
 			}
 		}
 	}
