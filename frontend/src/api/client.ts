@@ -1908,6 +1908,9 @@ export interface NetworkFlow {
 
   /** dp-only: NeuVector signature ID if this flow tripped a threat detector. */
   threat_id?: number;
+  /** Resolved threat name for threat_id — lets the inspector label the threat even when
+   *  the packet-level runtime_threats row has aged out of the window or been purged. */
+  threat_name?: string;
   /** dp-only: 1-9 severity scale; 0 / undefined when no threat. */
   severity?: number;
 

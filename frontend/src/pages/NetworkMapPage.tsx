@@ -1391,7 +1391,7 @@ function FlowTab({ flow, threats }: { flow: NetworkFlow; threats: RuntimeThreat[
           <dl className="grid grid-cols-2 gap-1 text-muted-foreground">
             <Field
               label="Threat"
-              value={matchedThreat?.threat_name || matchedThreat?.msg || `signature ${flow.threat_id}`}
+              value={matchedThreat?.threat_name || matchedThreat?.msg || flow.threat_name || `signature ${flow.threat_id}`}
             />
             {(flow.severity ?? 0) > 0 && <Field label="Severity" value={severityLabel(flow.severity as number)} />}
             {(flow.application_id ?? 0) > 0 && (
@@ -1412,6 +1412,26 @@ function ThreatTab({ flow, threats }: { flow: NetworkFlow; threats: RuntimeThrea
   const [drilldownID, setDrilldownID] = useState<string | null>(null);
   const matched = matchFlowThreats(flow, threats);
   if (matched.length === 0) {
+    // The flow carries a threat_id (dp flagged it) but the packet-level runtime_threats row
+    // isn't loaded — it aged out of the window or was purged. Be honest: name the threat
+    // rather than implying nothing happened.
+    if ((flow.threat_id ?? 0) > 0) {
+      return (
+        <div className="space-y-2" data-testid="network-threat-tab">
+          <div className="rounded-md border border-[color:var(--color-status-error)]/50 bg-muted/40 p-2 text-xs">
+            <div className="flex items-center gap-1.5 font-medium text-[color:var(--color-status-error)]">
+              <ShieldAlert className="h-3.5 w-3.5" aria-hidden />
+              {flow.threat_name || `signature ${flow.threat_id}`}
+            </div>
+            <p className="mt-1 text-[11px] leading-tight text-muted-foreground">
+              dp flagged this signature on the conversation, but the packet-level detail is no
+              longer retained (older than the threat window or cleared). The signature id and
+              name above are from the flow record.
+            </p>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="space-y-2" data-testid="network-threat-tab">
         <p className="text-xs text-muted-foreground">No DPI threat detected on this conversation.</p>

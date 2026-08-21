@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/alphabravocompany/constellation/internal/db"
+	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
 	"github.com/alphabravocompany/constellation/internal/handler/netutil"
@@ -293,6 +294,10 @@ SELECT cluster_id::text, src_workload, dst_workload, protocol, l7_protocol, dst_
 			}
 			if maxThreatID != nil && *maxThreatID > 0 {
 				row["threat_id"] = *maxThreatID
+				// Resolve a name so the edge/inspector can label the threat even when the
+				// packet-level runtime_threats row has aged out of the 24h window or been
+				// purged — otherwise the edge shows a threat the drilldown can't find.
+				row["threat_name"] = threatNameForFlow(*maxThreatID)
 			}
 			if maxSeverity != nil && *maxSeverity > 0 {
 				row["severity"] = *maxSeverity
@@ -304,6 +309,21 @@ SELECT cluster_id::text, src_workload, dst_workload, protocol, l7_protocol, dst_
 		out = append(out, row)
 	}
 	return out, rows.Err()
+}
+
+// threatNameForFlow resolves a dp threat id to a readable name for the flow row. DPI
+// built-ins (1001-2027) use the shared NeuVector name table; WAF sensor hits (40000-49999)
+// get a generic label here (the full CRS rule name lives in the runtime package, which the
+// threats-list endpoint uses). This lets the edge/inspector show a name even without the
+// full runtime_threats row.
+func threatNameForFlow(id int32) string {
+	if id >= 40000 && id <= 49999 {
+		return fmt.Sprintf("WAF signature %d", id)
+	}
+	if n := handler.NeuVectorThreatName(uint32(id)); n != "" {
+		return n
+	}
+	return fmt.Sprintf("signature %d", id)
 }
 
 func (h *Network) recentFlows(r *http.Request, orgID uuid.UUID, clusterID *uuid.UUID, hours int, namespace, verdict string) ([]map[string]any, error) {
