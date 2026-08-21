@@ -476,6 +476,17 @@ runtimeAgent:
     process: true        # kill out-of-baseline execs (when mode=protect)
     file: true           # deny protected-file access (when mode=protect)
     exec: true           # block exec of drifted binaries (when mode=protect)
+    # network: arm the INLINE (NFQUEUE) network datapath so dp's policy Deny /
+    # WAF / DLP verdicts actually DROP packets (NeuVector-style inline enforcer),
+    # instead of only alerting in tap mode. Requires mode=protect. Default OFF —
+    # this is the highest-risk enforcer: it routes a pod's packets through dp.
+    # SAFETY: (1) per-workload — a pod goes inline ONLY when it carries the label
+    #   dpi.constellation.alphabravo.io/enforce=true, so turning this on affects
+    #   NO existing workload until you label one; (2) fail-OPEN — the iptables
+    #   redirect uses --queue-bypass, so if dp dies the pod stays connected;
+    #   (3) only on NFQUEUE-safe CNIs (flannel/calico/kube-router — NOT Cilium
+    #   eBPF unless dp.enforceOnCilium is set). Verify on a canary before scaling.
+    network: false       # arm inline NFQUEUE enforcement (when mode=protect)
     # ADDITIVE ONLY: extra namespaces enforcement must never touch. The core
     # protected set — this release's own namespace, kube-system/kube-public/
     # kube-node-lease, and the host itself — is baked into the agent and cannot be
