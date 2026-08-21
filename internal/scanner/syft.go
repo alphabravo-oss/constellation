@@ -332,10 +332,35 @@ func withTimeout(parent context.Context, requested, fallback time.Duration) (con
 	return context.WithTimeout(parent, d)
 }
 
+// registryEnv builds the environment for an engine subprocess, exporting
+// registry credentials under the variables Trivy, Grype and Syft actually read.
+//
+// The previous DOCKER_USER / DOCKER_PASSWORD pair was dead: no scan tool reads
+// those names, so private-registry pulls always ran unauthenticated. Trivy reads
+// TRIVY_USERNAME / TRIVY_PASSWORD; Grype reads GRYPE_REGISTRY_AUTH_USERNAME /
+// _PASSWORD (+ _AUTHORITY); Syft reads SYFT_REGISTRY_AUTH_USERNAME / _PASSWORD
+// (+ _AUTHORITY). DOCKER_CONFIG points every go-containerregistry-based pull at
+// the per-job docker config.json the caller wrote.
 func registryEnv(opts ScanOptions) []string {
 	env := os.Environ()
 	if opts.Username != "" || opts.Password != "" {
-		env = append(env, "DOCKER_USER="+opts.Username, "DOCKER_PASSWORD="+opts.Password)
+		env = append(env,
+			"TRIVY_USERNAME="+opts.Username,
+			"TRIVY_PASSWORD="+opts.Password,
+			"GRYPE_REGISTRY_AUTH_USERNAME="+opts.Username,
+			"GRYPE_REGISTRY_AUTH_PASSWORD="+opts.Password,
+			"SYFT_REGISTRY_AUTH_USERNAME="+opts.Username,
+			"SYFT_REGISTRY_AUTH_PASSWORD="+opts.Password,
+		)
+		if opts.RegistryAuthority != "" {
+			env = append(env,
+				"GRYPE_REGISTRY_AUTH_AUTHORITY="+opts.RegistryAuthority,
+				"SYFT_REGISTRY_AUTH_AUTHORITY="+opts.RegistryAuthority,
+			)
+		}
+	}
+	if opts.DockerConfigDir != "" {
+		env = append(env, "DOCKER_CONFIG="+opts.DockerConfigDir)
 	}
 	return env
 }

@@ -1325,6 +1325,10 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/scan-evidence/{id}", evidence.Get)
 			// Runtime config the scanner polls (UI-settable via system_config): how
 			// often to refresh Trivy/Grype DBs, and whether it's air-gapped.
+			// REG-PRIVAUTH-11: per-job registry credential delivery. The scanner
+			// unseals registries.auth_secret for its job's registry_id (org-scoped,
+			// audited) so it can authenticate private-image pulls.
+			r.Get("/scanner/registry-credentials", handler.NewRegistryCredentials(s.db, s.auditLog).Get)
 			r.Get("/scanner/config", func(w http.ResponseWriter, r *http.Request) {
 				subj, ok := authctx.SubjectFrom(r.Context())
 				if !ok {

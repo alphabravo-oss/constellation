@@ -59,9 +59,22 @@ type ScanOptions struct {
 	// Insecure: tolerate self-signed registries. Translated to --insecure / --insecure-skip-tls.
 	Insecure bool
 
-	// Username / Password: optional registry credentials.
+	// Username / Password: optional registry credentials. Threaded into the
+	// per-engine environment (registryEnv) as TRIVY_*/GRYPE_*/SYFT_* so the
+	// underlying scan tools authenticate against private registries.
 	Username string
 	Password string
+
+	// RegistryAuthority is the registry host (e.g. "ghcr.io", "docker.io") the
+	// Username/Password apply to. Grype and Syft scope credentials per-authority
+	// via GRYPE_REGISTRY_AUTH_AUTHORITY / SYFT_REGISTRY_AUTH_AUTHORITY.
+	RegistryAuthority string
+
+	// DockerConfigDir, when set, points DOCKER_CONFIG at a directory holding a
+	// per-job docker config.json with the registry credentials. This is the
+	// credential channel go-containerregistry (Syft/Grype/Trivy image pulls)
+	// reads. The caller owns the directory lifecycle (create + cleanup per job).
+	DockerConfigDir string
 
 	// Platform pins the OS/arch for multi-arch images (e.g. "linux/amd64").
 	Platform string

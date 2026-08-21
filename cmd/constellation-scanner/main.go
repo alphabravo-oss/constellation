@@ -23,6 +23,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -31,6 +32,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -340,6 +342,7 @@ type scanJob struct {
 	TargetClusterID *string `json:"target_cluster_id,omitempty"`
 	SourceType      string  `json:"source_type,omitempty"`
 	SourceRef       string  `json:"source_ref,omitempty"`
+	RegistryID      *string `json:"registry_id,omitempty"`
 	ImageDigest     string  `json:"image_digest,omitempty"`
 	Platform        string  `json:"platform,omitempty"`
 	InventoryHash   string  `json:"inventory_hash,omitempty"`
@@ -525,6 +528,13 @@ func (w *worker) executeJob(ctx context.Context, j *scanJob) {
 			_ = w.reportFailure(ctx, j.ID, "missing_target_ref")
 			return
 		}
+		// REG-PRIVAUTH-11: a registry-scoped job carries the credentials needed
+		// to pull from a private registry. Fetch + materialize them (per-job
+		// docker config.json + TRIVY_/GRYPE_/SYFT_ env) for the scan tools, and
+		// clean them up when the job returns. Best-effort: a fetch failure logs
+		// and proceeds unauthenticated (public images still scan).
+		regAuth, releaseRegAuth := w.resolveRegistryAuth(ctx, j, imageRef)
+		defer releaseRegAuth()
 		hasEvidence := j.EvidenceID != nil && strings.TrimSpace(*j.EvidenceID) != ""
 		// scanFromEvidence scans the image's pre-collected package inventory
 		// (no registry pull). It sets res/err and returns true when it handled
@@ -573,7 +583,16 @@ func (w *worker) executeJob(ctx context.Context, j *scanJob) {
 		}
 		imageRef = pinnedRef
 		j.TargetRef = pinnedRef
-		res, err = w.agg.Scan(ctx, imageRef, scanner.ScanOptions{Platform: j.Platform, Timeout: w.jobTimeout, IncludeIaC: w.iacEnabled, GoReachability: w.goReachabilityEnabled})
+		res, err = w.agg.Scan(ctx, imageRef, scanner.ScanOptions{
+			Platform:          j.Platform,
+			Timeout:           w.jobTimeout,
+			IncludeIaC:        w.iacEnabled,
+			GoReachability:    w.goReachabilityEnabled,
+			Username:          regAuth.Username,
+			Password:          regAuth.Password,
+			RegistryAuthority: regAuth.Authority,
+			DockerConfigDir:   regAuth.DockerConfigDir,
+		})
 		if err != nil && scanFromEvidence("registry scan failed: "+err.Error()) {
 			// Node-local images (e.g. a bare sha256: ref that resolves but syft
 			// can't pull) fall back to collected package evidence.
@@ -1001,6 +1020,160 @@ func (w *worker) fetchEvidence(ctx context.Context, evidenceID string) (*scanEvi
 		return nil, fmt.Errorf("fetch evidence: package count mismatch")
 	}
 	return &evidence, nil
+}
+
+// registryCredentials mirrors the control-plane RegistryCredentialsDTO
+// (internal/handler/registry_credentials.go). Kept narrow on purpose.
+type registryCredentials struct {
+	RegistryID string `json:"registry_id"`
+	Kind       string `json:"kind"`
+	AuthKind   string `json:"auth_kind"`
+	Endpoint   string `json:"endpoint,omitempty"`
+	Username   string `json:"username,omitempty"`
+	Password   string `json:"password,omitempty"`
+	Token      string `json:"token,omitempty"`
+}
+
+// registryAuth is the materialized, ready-to-use credential set for one scan.
+type registryAuth struct {
+	Username        string
+	Password        string
+	Authority       string // registry host the credentials apply to
+	DockerConfigDir string // dir holding a per-job docker config.json, or ""
+}
+
+// resolveRegistryAuth fetches per-registry credentials for a registry-scoped job
+// (REG-PRIVAUTH-11) and materializes them for the scan tools: it writes a
+// per-job temporary docker config.json (DOCKER_CONFIG) and returns the
+// username/password/authority the aggregator threads into TRIVY_/GRYPE_/SYFT_
+// env. The returned cleanup func removes the temp dir; it is always non-nil and
+// safe to call. On any error (no registry_id, fetch failure, empty creds) it
+// returns a zero registryAuth and a no-op cleanup so the scan proceeds
+// unauthenticated — public images still scan.
+func (w *worker) resolveRegistryAuth(ctx context.Context, j *scanJob, imageRef string) (registryAuth, func()) {
+	noop := func() {}
+	if j == nil || j.RegistryID == nil || strings.TrimSpace(*j.RegistryID) == "" {
+		return registryAuth{}, noop
+	}
+	registryID := strings.TrimSpace(*j.RegistryID)
+
+	creds, err := w.fetchRegistryCredentials(ctx, registryID)
+	if err != nil {
+		w.logger.Warn("fetch registry credentials", "job_id", j.ID, "registry_id", registryID, "err", err)
+		w.setLastError("fetch registry credentials: " + err.Error())
+		return registryAuth{}, noop
+	}
+	// Token-only auth (e.g. GHCR PAT, bearer) is delivered as the password with
+	// a conventional username; static user/pass passes through unchanged.
+	username, password := creds.Username, creds.Password
+	if password == "" && creds.Token != "" {
+		password = creds.Token
+		if username == "" {
+			username = "x-access-token"
+		}
+	}
+	if username == "" && password == "" {
+		// Registry configured with auth_kind=none (or empty secret): nothing to do.
+		return registryAuth{}, noop
+	}
+
+	authority := registryAuthority(imageRef, creds.Endpoint)
+
+	dir, err := os.MkdirTemp("", "constellation-scan-dockercfg-")
+	if err != nil {
+		w.logger.Warn("create docker config dir", "job_id", j.ID, "err", err)
+		// Still hand back the env-var credentials; only the config.json is lost.
+		return registryAuth{Username: username, Password: password, Authority: authority}, noop
+	}
+	cleanup := func() {
+		if rmErr := os.RemoveAll(dir); rmErr != nil {
+			w.logger.Warn("cleanup docker config dir", "job_id", j.ID, "dir", dir, "err", rmErr)
+		}
+	}
+	if err := writeDockerConfig(dir, authority, username, password); err != nil {
+		w.logger.Warn("write docker config", "job_id", j.ID, "err", err)
+		cleanup()
+		return registryAuth{Username: username, Password: password, Authority: authority}, noop
+	}
+
+	return registryAuth{
+		Username:        username,
+		Password:        password,
+		Authority:       authority,
+		DockerConfigDir: dir,
+	}, cleanup
+}
+
+// fetchRegistryCredentials calls the control-plane endpoint that unseals the
+// registry's stored credentials for this scanner's org (scanner-token auth).
+func (w *worker) fetchRegistryCredentials(ctx context.Context, registryID string) (*registryCredentials, error) {
+	url := w.controlPlane + "/api/v1/scanner/registry-credentials?registry_id=" + neturl.QueryEscape(registryID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+w.token)
+	w.setScannerHeaders(req)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var creds registryCredentials
+	if err := json.NewDecoder(resp.Body).Decode(&creds); err != nil {
+		return nil, err
+	}
+	return &creds, nil
+}
+
+// registryAuthority derives the registry host the credentials apply to. It
+// prefers the host embedded in the (normalized) image ref and falls back to the
+// configured registry endpoint. Docker Hub refs normalize to the docker.io host.
+func registryAuthority(imageRef, endpoint string) string {
+	repo := imageid.Parse(imageRef).Repository
+	if repo != "" {
+		if host := repo[:strings.IndexByte(repo+"/", '/')]; host != "" {
+			return host
+		}
+	}
+	endpoint = strings.TrimSpace(endpoint)
+	endpoint = strings.TrimPrefix(endpoint, "https://")
+	endpoint = strings.TrimPrefix(endpoint, "http://")
+	if slash := strings.IndexByte(endpoint, '/'); slash >= 0 {
+		endpoint = endpoint[:slash]
+	}
+	return endpoint
+}
+
+// writeDockerConfig writes a per-job docker config.json into dir, keyed by the
+// registry authority. This is the credential channel go-containerregistry
+// (Syft/Grype/Trivy image pulls) reads via DOCKER_CONFIG. For Docker Hub the
+// legacy index host is added too so refs under either key authenticate.
+func writeDockerConfig(dir, authority, username, password string) error {
+	auth := base64.StdEncoding.EncodeToString([]byte(username + ":" + password))
+	auths := map[string]any{
+		authority: map[string]string{
+			"auth":     auth,
+			"username": username,
+			"password": password,
+		},
+	}
+	if authority == "docker.io" {
+		auths["https://index.docker.io/v1/"] = map[string]string{
+			"auth":     auth,
+			"username": username,
+			"password": password,
+		}
+	}
+	body, err := json.Marshal(map[string]any{"auths": auths})
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "config.json"), body, 0o600)
 }
 
 func (w *worker) reportSuccess(ctx context.Context, p scanResultPayload) error {
