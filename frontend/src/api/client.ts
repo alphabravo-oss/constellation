@@ -162,8 +162,8 @@ export interface CVERollup {
 }
 
 export const findings = {
-  list: (params: { kind?: FindingKind; lifecycle?: Lifecycle; cluster_id?: string; q?: string; limit?: number; offset?: number } = {}) =>
-    api.get<{ findings: Finding[]; limit: number; offset: number; lifecycle_counts?: Record<Lifecycle, number> }>("/findings", { params }).then((r) => r.data),
+  list: (params: { kind?: FindingKind; lifecycle?: Lifecycle; cluster_id?: string; q?: string; limit?: number; offset?: number; fixable?: boolean } = {}) =>
+    api.get<{ findings: Finding[]; limit: number; offset: number; lifecycle_counts?: Record<Lifecycle, number> }>("/findings", { params: { ...params, fixable: params.fixable ? "1" : undefined } }).then((r) => r.data),
   // NeuVector-style rollup: one row per CVE with its blast radius (affected images/clusters).
   byCVE: (params: { cluster_id?: string; lifecycle?: Lifecycle; limit?: number; offset?: number; fixable?: boolean; q?: string } = {}) =>
     api.get<{ cves: CVERollup[]; limit: number; offset: number; total: number }>("/findings/by-cve", { params: { ...params, fixable: params.fixable ? "true" : undefined, q: params.q || undefined } }).then((r) => r.data),

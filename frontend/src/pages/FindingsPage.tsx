@@ -103,13 +103,18 @@ export function FindingsPage() {
   const navigate = useNavigate();
   const openFinding = (f: Finding) => navigate(`/clusters/${clusterId}/findings/${f.id}`);
 
+  // Fixable-only toggle (hide won't-fix / not-fixed vulns) — shared by both the findings
+  // list and the by-CVE rollup.
+  const [fixableOnly, setFixableOnly] = useState(false);
   // Data — cluster_id is threaded so the URL is the source of truth for scope.
   const q = useQuery({
-    queryKey: ["findings", kind, lifecycle, clusterId],
+    queryKey: ["findings", kind, lifecycle, clusterId, fixableOnly],
     queryFn: () => findings.list({
       kind: kind || undefined,
       lifecycle: lifecycle || undefined,
       cluster_id: clusterId,
+      // Only meaningful for vulnerabilities; harmless on other kinds (they have no fixed field).
+      fixable: fixableOnly || undefined,
       limit: 500,
     }),
   });
@@ -118,7 +123,6 @@ export function FindingsPage() {
   // search + paging (NV-style) so we never fetch-all-then-truncate. Only fetched when
   // the "By CVE" view is active.
   const CVE_PAGE = 100;
-  const [fixableOnly, setFixableOnly] = useState(false);
   const [cvePage, setCvePage] = useState(0);
   const cveSearch = useDebounced(query.trim(), 300);
   useEffect(() => { setCvePage(0); }, [cveSearch, lifecycle, clusterId, fixableOnly]);
@@ -382,26 +386,24 @@ export function FindingsPage() {
         <span className="ml-2 text-[10px] text-muted-foreground">
           {view === "cve" ? "one row per CVE with its blast radius" : "one row per CVE × workload"}
         </span>
+        <button
+          type="button"
+          onClick={() => setFixableOnly((v) => !v)}
+          className={cn(
+            "ml-auto rounded h-6 px-2 text-[11px] border transition-colors",
+            fixableOnly
+              ? "bg-[color-mix(in_oklab,var(--color-severity-low)_18%,transparent)] border-[color-mix(in_oklab,var(--color-severity-low)_36%,transparent)] text-[color:var(--color-severity-low)]"
+              : "bg-card border-border hover:bg-accent",
+          )}
+          title="Hide vulnerabilities with no available fix (won't-fix / not-fixed)"
+        >{fixableOnly ? "✓ " : ""}Fixable only</button>
         {view === "cve" && (
-          <>
-            <button
-              type="button"
-              onClick={() => setFixableOnly((v) => !v)}
-              className={cn(
-                "ml-auto rounded h-6 px-2 text-[11px] border transition-colors",
-                fixableOnly
-                  ? "bg-[color-mix(in_oklab,var(--color-severity-low)_18%,transparent)] border-[color-mix(in_oklab,var(--color-severity-low)_36%,transparent)] text-[color:var(--color-severity-low)]"
-                  : "bg-card border-border hover:bg-accent",
-              )}
-              title="Show only CVEs with a fixed version available"
-            >{fixableOnly ? "✓ " : ""}Fixable only</button>
-            <button
-              type="button"
-              onClick={() => exportCveCsv(cveRows)}
-              className="rounded h-6 px-2 text-[11px] border border-border bg-card hover:bg-accent transition-colors"
-              title="Export the current CVE list as CSV"
-            >Export CSV</button>
-          </>
+          <button
+            type="button"
+            onClick={() => exportCveCsv(cveRows)}
+            className="rounded h-6 px-2 text-[11px] border border-border bg-card hover:bg-accent transition-colors"
+            title="Export the current CVE list as CSV"
+          >Export CSV</button>
         )}
       </div>
 

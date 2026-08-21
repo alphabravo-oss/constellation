@@ -71,6 +71,9 @@ func (f *Findings) List(w http.ResponseWriter, r *http.Request) {
 	subj, _ := authctx.SubjectFrom(r.Context())
 	kind := r.URL.Query().Get("kind")
 	lifecycle := r.URL.Query().Get("lifecycle")
+	// fixable=1 hides vulnerabilities with no available fix ("won't-fix"/"not-fixed") —
+	// a detail_json.fixed that is empty or "false". Fixed carries the fix version(s).
+	fixable := r.URL.Query().Get("fixable") == "1" || r.URL.Query().Get("fixable") == "true"
 	qstr := r.URL.Query().Get("q")
 	clusterIDStr := r.URL.Query().Get("cluster_id")
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
@@ -100,6 +103,10 @@ func (f *Findings) List(w http.ResponseWriter, r *http.Request) {
 	if !compiled.Empty() {
 		extraWhere = " AND " + sqlx.ShiftPlaceholders(compiled.Where, len(args))
 		args = append(args, compiled.Args...)
+	}
+	// Literal condition — no positional arg, so LIMIT/OFFSET placeholder indices are unchanged.
+	if fixable {
+		extraWhere += ` AND COALESCE(detail_json->>'fixed','') NOT IN ('', 'false')`
 	}
 	args = append(args, limit, offset)
 	rows, err := f.db.Pool().Query(r.Context(), `

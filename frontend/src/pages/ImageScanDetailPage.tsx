@@ -476,15 +476,26 @@ function FindingsTable({ findings }: { findings: ImageScanFinding[] }) {
     { id: "risk", header: "Risk", cell: (finding) => <span className="font-semibold">{finding.risk_score}</span> },
     { id: "fix", header: "Fix", cell: (finding) => <span className="font-mono text-xs">{finding.fixed_version || "-"}</span> },
   ];
+  const [fixableOnly, setFixableOnly] = useState(false);
+  const shown = fixableOnly
+    ? findings.filter((f) => (f.fixed_version || "").trim() !== "" && (f.fixed_version || "").toLowerCase() !== "false")
+    : findings;
+  const hiddenCount = findings.length - shown.length;
   return (
     <section className="overflow-hidden rounded-lg border border-border bg-card">
-      <header className="border-b border-border px-3 py-2">
-        <h2 className="text-sm font-semibold">Vulnerable packages</h2>
-        <p className="mt-1 text-xs text-muted-foreground">Vulnerability findings for this image, aggregated across the enabled scanners.</p>
+      <header className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
+        <div>
+          <h2 className="text-sm font-semibold">Vulnerable packages</h2>
+          <p className="mt-1 text-xs text-muted-foreground">Vulnerability findings for this image, aggregated across the enabled scanners.</p>
+        </div>
+        <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground" title="Hide vulnerabilities with no available fix (won't-fix / not-fixed)">
+          <input type="checkbox" checked={fixableOnly} onChange={(e) => setFixableOnly(e.target.checked)} className="h-3.5 w-3.5 accent-[color:var(--color-primary)]" data-testid="image-scan-fixable-toggle" />
+          Fixable only{fixableOnly && hiddenCount > 0 ? ` (${hiddenCount} hidden)` : ""}
+        </label>
       </header>
       <div data-testid="image-scan-findings">
         <DataTable
-          rows={findings}
+          rows={shown}
           columns={columns}
           rowKey={(finding) => finding.id}
           showDensityToggle={false}
