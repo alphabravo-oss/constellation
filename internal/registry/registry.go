@@ -63,6 +63,36 @@ type Config struct {
 	// Defaults to https://iam.cloud.ibm.com/identity/token when empty.
 	TokenURL string
 
+	// AuthKind mirrors the stored registries.auth_kind ("static" | "aws-iam-role" |
+	// "gcp-service-account" | "azure-managed-id" | "none"). Cloud connectors branch on
+	// it to decide how to acquire (and refresh) a short-lived registry token. Empty is
+	// treated as "static" / caller-supplied Token, preserving pre-token-minting behavior.
+	AuthKind string
+
+	// --- Cloud-native auth material (REG-CLOUDAUTH-12) -------------------------------
+	// Populated by the handler from the decrypted credential map for the relevant kind;
+	// unused fields stay empty. Connectors mint short-lived registry tokens from these
+	// and cache them (see tokencache.go) so non-manual scan cadences survive token TTL.
+
+	// ServiceAccountJSON is a GCP service-account key (the full JSON). Used to mint an
+	// OAuth access token (scope cloud-platform) for GCR / Artifact Registry.
+	ServiceAccountJSON string
+
+	// TenantID / ClientID / ClientSecret are the Azure AD application (client-
+	// credentials) identity used to obtain an AAD token, then an ACR token. For
+	// managed identity (AuthKind="azure-managed-id") only TenantID is consulted and
+	// ClientID optionally selects a user-assigned identity at the IMDS endpoint.
+	TenantID     string
+	ClientID     string
+	ClientSecret string
+
+	// AccessKeyID / SecretAccessKey / SessionToken are static AWS credentials for ECR.
+	// When set they are used via aws credentials.NewStaticCredentialsProvider instead of
+	// the ambient SDK chain.
+	AccessKeyID     string
+	SecretAccessKey string
+	SessionToken    string
+
 	// HTTPClient, when non-nil, is the shared outbound client the connector must use for
 	// all registry traffic. The server builds it from the LIVE system config
 	// (syscfg.Provider.HTTPClient) so a PATCH to egress_proxy / tls_verify / ca_bundle_pem

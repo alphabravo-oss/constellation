@@ -838,6 +838,16 @@ func BuildConnector(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, ki
 		Token:    creds["token"],
 		Region:   creds["region"],
 		Endpoint: endpoint,
+		AuthKind: authKind,
+		// Cloud-native auth material (REG-CLOUDAUTH-12). Connectors mint + cache
+		// short-lived registry tokens from these so scheduled cadences survive TTL.
+		ServiceAccountJSON: firstNonEmptyCred(creds, "service_account_json", "json_key", "service_account_key"),
+		TenantID:           creds["tenant_id"],
+		ClientID:           creds["client_id"],
+		ClientSecret:       creds["client_secret"],
+		AccessKeyID:        firstNonEmptyCred(creds, "access_key_id", "aws_access_key_id"),
+		SecretAccessKey:    firstNonEmptyCred(creds, "secret_access_key", "aws_secret_access_key"),
+		SessionToken:       firstNonEmptyCred(creds, "session_token", "aws_session_token"),
 		// Live outbound client: honors the org's runtime egress-proxy / TLS knobs.
 		HTTPClient: syscfg.NewProvider(pool).HTTPClient(ctx, orgID, 30*time.Second),
 	}
@@ -880,6 +890,18 @@ func stripScheme(s string) string {
 	s = strings.TrimPrefix(s, "https://")
 	s = strings.TrimPrefix(s, "http://")
 	return strings.TrimRight(s, "/")
+}
+
+// firstNonEmptyCred returns the first non-empty value among the given credential-map
+// keys, letting callers accept a couple of common aliases (e.g. access_key_id vs
+// aws_access_key_id) without duplicating lookups.
+func firstNonEmptyCred(creds map[string]string, keys ...string) string {
+	for _, k := range keys {
+		if v := strings.TrimSpace(creds[k]); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // -----------------------------------------------------------------------------

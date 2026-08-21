@@ -35,17 +35,18 @@ func NewArtifactRegistry(cfg Config) *ArtifactRegistry {
 func (a *ArtifactRegistry) Name() string { return "artifact-registry" }
 
 func (a *ArtifactRegistry) ListImages(ctx context.Context) ([]Image, error) {
-	if a.cfg.Token == "" {
-		return nil, errors.New("artifact-registry: OAuth access token required")
-	}
 	// cfg.Endpoint = "projects/<id>/locations/<region>/repositories/<repo>"
 	if a.cfg.Endpoint == "" {
 		return nil, errors.New("artifact-registry: Endpoint=projects/.../locations/.../repositories/... required")
 	}
+	token, err := a.cfg.gcpAccessToken(ctx, a.client)
+	if err != nil {
+		return nil, fmt.Errorf("artifact-registry: %w", err)
+	}
 	url := fmt.Sprintf("https://artifactregistry.googleapis.com/v1/%s/dockerImages?pageSize=200",
 		strings.TrimPrefix(a.cfg.Endpoint, "/"))
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	req.Header.Set("Authorization", "Bearer "+a.cfg.Token)
+	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := a.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("artifact-registry: %w", err)
@@ -78,7 +79,12 @@ func (a *ArtifactRegistry) ListImages(ctx context.Context) ([]Image, error) {
 }
 
 func (a *ArtifactRegistry) ResolveDigest(ctx context.Context, ref string) (string, error) {
-	return resolveDigestViaV2(ctx, a.client, ref, a.cfg.Token)
+	token, err := a.cfg.gcpAccessToken(ctx, a.client)
+	if err != nil {
+		// Fall back to an anonymous v2 lookup (public images) rather than hard-failing.
+		return resolveDigestViaV2(ctx, a.client, ref, "")
+	}
+	return resolveDigestViaV2(ctx, a.client, ref, token)
 }
 
 // =====================================================================================
@@ -100,13 +106,14 @@ func (a *ACR) ListImages(ctx context.Context) ([]Image, error) {
 	if a.cfg.Endpoint == "" {
 		return nil, errors.New("acr: Endpoint=<registry>.azurecr.io required")
 	}
-	if a.cfg.Token == "" {
-		return nil, errors.New("acr: Token required (Azure AD)")
+	token, err := a.cfg.acrAccessToken(ctx, a.client, a.cfg.Endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("acr: %w", err)
 	}
 	// v2 catalog endpoint — ACR supports it natively.
 	url := fmt.Sprintf("https://%s/v2/_catalog?n=500", a.cfg.Endpoint)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	req.Header.Set("Authorization", "Bearer "+a.cfg.Token)
+	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := a.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("acr: %w", err)
@@ -126,12 +133,16 @@ func (a *ACR) ListImages(ctx context.Context) ([]Image, error) {
 	for _, r := range doc.Repositories {
 		out = append(out, Image{Repository: a.cfg.Endpoint + "/" + r})
 	}
-	populateTagsViaV2(ctx, a.client, out, a.cfg.Token)
+	populateTagsViaV2(ctx, a.client, out, token)
 	return out, nil
 }
 
 func (a *ACR) ResolveDigest(ctx context.Context, ref string) (string, error) {
-	return resolveDigestViaV2(ctx, a.client, ref, a.cfg.Token)
+	token, err := a.cfg.acrAccessToken(ctx, a.client, a.cfg.Endpoint)
+	if err != nil {
+		return resolveDigestViaV2(ctx, a.client, ref, "")
+	}
+	return resolveDigestViaV2(ctx, a.client, ref, token)
 }
 
 // =====================================================================================
@@ -214,31 +225,77 @@ func (h *Harbor) ListImages(ctx context.Context) ([]Image, error) {
 	if h.cfg.Username == "" || h.cfg.Password == "" {
 		return nil, errors.New("harbor: Username + Password required")
 	}
-	url := strings.TrimRight(h.cfg.Endpoint, "/") + "/api/v2.0/projects/_default/repositories?page_size=100"
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	req.SetBasicAuth(h.cfg.Username, h.cfg.Password)
-	resp, err := h.client.Do(req)
+	base := strings.TrimRight(h.cfg.Endpoint, "/")
+	host := stripSchemeReg(h.cfg.Endpoint)
+
+	// 1. Enumerate projects (paginated).
+	projects, err := h.harborGetPaged(ctx, base+"/api/v2.0/projects")
 	if err != nil {
-		return nil, fmt.Errorf("harbor: %w", err)
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("harbor: status %d", resp.StatusCode)
-	}
-	var repos []struct {
-		Name string `json:"name"`
-	}
-	if err := json.Unmarshal(body, &repos); err != nil {
 		return nil, err
 	}
-	host := strings.TrimPrefix(strings.TrimPrefix(h.cfg.Endpoint, "https://"), "http://")
-	out := make([]Image, 0, len(repos))
-	for _, r := range repos {
-		out = append(out, Image{Repository: host + "/" + r.Name})
+
+	// 2. Per project, enumerate repositories (paginated). Harbor returns the repo
+	// "name" already qualified as "<project>/<repo>".
+	out := []Image{}
+	for _, p := range projects {
+		if p.Name == "" {
+			continue
+		}
+		reposURL := base + "/api/v2.0/projects/" + url.PathEscape(p.Name) + "/repositories"
+		repos, err := h.harborGetPaged(ctx, reposURL)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range repos {
+			if r.Name == "" {
+				continue
+			}
+			out = append(out, Image{Repository: host + "/" + r.Name})
+		}
 	}
 	populateTagsViaV2(ctx, h.client, out, "")
 	return out, nil
+}
+
+// namedEntity captures the only field Harbor's project + repository list responses
+// have in common that we need: the object name.
+type namedEntity struct {
+	Name string `json:"name"`
+}
+
+// harborGetPaged accumulates a Harbor list endpoint across pages. Harbor uses
+// page/page_size query params and advertises more pages via a Link: rel="next"
+// header (and X-Total-Count); we page until a short page with no next link.
+func (h *Harbor) harborGetPaged(ctx context.Context, endpoint string) ([]namedEntity, error) {
+	const pageSize = 100
+	var acc []namedEntity
+	for page := 1; ; page++ {
+		u := fmt.Sprintf("%s?page=%d&page_size=%d", endpoint, page, pageSize)
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		req.SetBasicAuth(h.cfg.Username, h.cfg.Password)
+		req.Header.Set("Accept", "application/json")
+		resp, err := h.client.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("harbor: %w", err)
+		}
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+		link := resp.Header.Get("Link")
+		status := resp.StatusCode
+		resp.Body.Close()
+		if status != 200 {
+			return nil, fmt.Errorf("harbor: status %d", status)
+		}
+		var page1 []namedEntity
+		if err := json.Unmarshal(body, &page1); err != nil {
+			return nil, fmt.Errorf("harbor: decode list: %w", err)
+		}
+		acc = append(acc, page1...)
+		// Stop when this page is short (or empty) and Harbor advertises no next page.
+		if len(page1) == 0 || (len(page1) < pageSize && !strings.Contains(link, `rel="next"`)) {
+			break
+		}
+	}
+	return acc, nil
 }
 
 func (h *Harbor) ResolveDigest(ctx context.Context, ref string) (string, error) {
@@ -267,37 +324,81 @@ func (g *GitLab) ListImages(ctx context.Context) ([]Image, error) {
 	if g.cfg.Token == "" {
 		return nil, errors.New("gitlab: PAT (read_registry scope) required")
 	}
-	url := strings.TrimRight(g.cfg.Endpoint, "/") + "/api/v4/registry/repositories?per_page=100"
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	req.Header.Set("PRIVATE-TOKEN", g.cfg.Token)
-	resp, err := g.client.Do(req)
+	base := strings.TrimRight(g.cfg.Endpoint, "/")
+
+	// 1. Enumerate the token's membership projects (paginated). There is no valid
+	// instance-wide registry-repositories list endpoint; discovery is per-project.
+	projects, err := gitlabGetPaged[glProject](ctx, g, base+"/api/v4/projects", url.Values{"membership": {"true"}})
 	if err != nil {
-		return nil, fmt.Errorf("gitlab: %w", err)
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("gitlab: status %d", resp.StatusCode)
-	}
-	var repos []struct {
-		ID       int       `json:"id"`
-		Path     string    `json:"path"`
-		Location string    `json:"location"`
-		Updated  time.Time `json:"updated_at"`
-	}
-	if err := json.Unmarshal(body, &repos); err != nil {
 		return nil, err
 	}
-	base := strings.TrimRight(g.cfg.Endpoint, "/")
-	out := make([]Image, 0, len(repos))
-	for _, r := range repos {
-		out = append(out, Image{
-			Repository: r.Location,
-			Tags:       g.repoTags(ctx, base, r.ID),
-			PushedAt:   r.Updated.UTC().Format(time.RFC3339),
-		})
+
+	// 2. Per project, enumerate container-registry repositories (paginated).
+	out := []Image{}
+	for _, p := range projects {
+		endpoint := fmt.Sprintf("%s/api/v4/projects/%d/registry/repositories", base, p.ID)
+		repos, err := gitlabGetPaged[glRepo](ctx, g, endpoint, nil)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range repos {
+			out = append(out, Image{
+				Repository: r.Location,
+				Tags:       g.repoTags(ctx, base, r.ID),
+				PushedAt:   r.Updated.UTC().Format(time.RFC3339),
+			})
+		}
 	}
 	return out, nil
+}
+
+type glProject struct {
+	ID int `json:"id"`
+}
+
+type glRepo struct {
+	ID       int       `json:"id"`
+	Path     string    `json:"path"`
+	Location string    `json:"location"`
+	Updated  time.Time `json:"updated_at"`
+}
+
+// gitlabGetPaged fetches a GitLab list endpoint across all pages, following the
+// X-Next-Page header, JSON-decoding each page into []T. extra carries endpoint-
+// specific query params (e.g. membership=true).
+func gitlabGetPaged[T any](ctx context.Context, g *GitLab, endpoint string, extra url.Values) ([]T, error) {
+	var acc []T
+	page := "1"
+	for page != "" {
+		q := url.Values{"per_page": {"100"}, "page": {page}}
+		for k, vs := range extra {
+			for _, v := range vs {
+				q.Add(k, v)
+			}
+		}
+		u := endpoint + "?" + q.Encode()
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		req.Header.Set("PRIVATE-TOKEN", g.cfg.Token)
+		req.Header.Set("Accept", "application/json")
+		resp, err := g.client.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("gitlab: %w", err)
+		}
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+		next := resp.Header.Get("X-Next-Page")
+		status := resp.StatusCode
+		resp.Body.Close()
+		if status != 200 {
+			return nil, fmt.Errorf("gitlab: status %d", status)
+		}
+		var pg []T
+		if err := json.Unmarshal(body, &pg); err != nil {
+			return nil, fmt.Errorf("gitlab: decode list: %w", err)
+		}
+		acc = append(acc, pg...)
+		page = next
+	}
+	return acc, nil
 }
 
 // repoTags enumerates a GitLab container-registry repository's tags via
@@ -358,13 +459,68 @@ func (j *JFrog) ListImages(ctx context.Context) ([]Image, error) {
 	if j.cfg.Token == "" && j.cfg.Password == "" {
 		return nil, errors.New("jfrog: Token or Password required")
 	}
-	// JFrog's /api/docker/<repo>/v2/_catalog endpoint
-	url := strings.TrimRight(j.cfg.Endpoint, "/") + "/api/docker/" + strings.TrimPrefix(j.cfg.Username, "/") + "/v2/_catalog?n=500"
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	base := strings.TrimRight(j.cfg.Endpoint, "/")
+	host := stripSchemeReg(j.cfg.Endpoint)
+
+	// 1. Discover the Docker repositories via Artifactory's repositories API rather
+	// than assuming a single repo key. Each entry's "key" is a Docker repo (local,
+	// remote, or virtual per its "type"); "packageType" confirms it is Docker.
+	repoBody, err := j.get(ctx, base+"/api/repositories?type=docker")
+	if err != nil {
+		return nil, err
+	}
+	var dockerRepos []struct {
+		Key         string `json:"key"`
+		Type        string `json:"type"`        // local | remote | virtual (mode)
+		PackageType string `json:"packageType"` // "Docker"
+	}
+	if err := json.Unmarshal(repoBody, &dockerRepos); err != nil {
+		return nil, fmt.Errorf("jfrog: decode repositories: %w", err)
+	}
+
+	// 2. For each Docker repo key, enumerate its images via the repo-scoped v2
+	// catalog. Images are addressed as <host>/<repoKey>/<image>.
+	out := []Image{}
+	for _, dr := range dockerRepos {
+		if dr.Key == "" {
+			continue
+		}
+		catBody, err := j.get(ctx, base+"/api/docker/"+url.PathEscape(dr.Key)+"/v2/_catalog?n=500")
+		if err != nil {
+			// A single unreadable repo (e.g. a remote proxy) must not abort the walk.
+			continue
+		}
+		var cat struct {
+			Repositories []string `json:"repositories"`
+		}
+		if err := json.Unmarshal(catBody, &cat); err != nil {
+			continue
+		}
+		for _, r := range cat.Repositories {
+			out = append(out, Image{Repository: host + "/" + dr.Key + "/" + r})
+		}
+	}
+	populateTagsViaV2(ctx, j.client, out, j.cfg.Token)
+	return out, nil
+}
+
+// get performs an authenticated Artifactory GET and returns the body, mapping non-200
+// to an error. Auth is a bearer token when supplied, else basic auth with the
+// configured username (falling back to "anonymous") + password.
+func (j *JFrog) get(ctx context.Context, u string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
 	if j.cfg.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+j.cfg.Token)
 	} else {
-		req.SetBasicAuth("anonymous", j.cfg.Password)
+		user := j.cfg.Username
+		if user == "" {
+			user = "anonymous"
+		}
+		req.SetBasicAuth(user, j.cfg.Password)
 	}
 	resp, err := j.client.Do(req)
 	if err != nil {
@@ -375,21 +531,17 @@ func (j *JFrog) ListImages(ctx context.Context) ([]Image, error) {
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("jfrog: status %d", resp.StatusCode)
 	}
-	var doc struct {
-		Repositories []string `json:"repositories"`
-	}
-	if err := json.Unmarshal(body, &doc); err != nil {
-		return nil, err
-	}
-	host := strings.TrimPrefix(strings.TrimPrefix(j.cfg.Endpoint, "https://"), "http://")
-	out := make([]Image, 0, len(doc.Repositories))
-	for _, r := range doc.Repositories {
-		out = append(out, Image{Repository: host + "/" + r})
-	}
-	populateTagsViaV2(ctx, j.client, out, j.cfg.Token)
-	return out, nil
+	return body, nil
 }
 
 func (j *JFrog) ResolveDigest(ctx context.Context, ref string) (string, error) {
 	return resolveDigestViaV2(ctx, j.client, ref, j.cfg.Token)
+}
+
+// stripSchemeReg trims a leading http(s):// and any trailing slash, yielding the bare
+// host(:port)[/path] used to qualify repository names.
+func stripSchemeReg(s string) string {
+	s = strings.TrimPrefix(s, "https://")
+	s = strings.TrimPrefix(s, "http://")
+	return strings.TrimRight(s, "/")
 }
