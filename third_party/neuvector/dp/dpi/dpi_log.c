@@ -86,7 +86,11 @@ static threat_config_t threat_config[] = {
 [DPI_THRT_TCP_SPLIT_HDSHK] = {true, DPI_ACTION_ALLOW, },
 [DPI_THRT_TCP_NODATA] = {false, DPI_ACTION_RESET, }, // FIXME: disabled because tap rx is prone to packet loss
 [DPI_THRT_TCP_SMALL_WINDOW] = {false, DPI_ACTION_RESET, },
-[DPI_THRT_TCP_SMALL_MSS] = {true, DPI_ACTION_DROP, },
+// Constellation: TCP_SMALL_MSS disabled by default — a small TCP MSS (<256) is common
+// on public ingress (VPNs, mobile carriers, PMTU) so it false-positives as a "threat" on
+// ordinary external traffic. Consistent with the other tap-mode-noisy TCP checks below
+// (TCP_NODATA/SMALL_WINDOW) that are also off.
+[DPI_THRT_TCP_SMALL_MSS] = {false, DPI_ACTION_ALLOW, },
 [DPI_THRT_PING_DEATH] = {true, DPI_ACTION_DROP, },
 [DPI_THRT_DNS_LOOP_PTR] = {true, DPI_ACTION_DROP, },
 [DPI_THRT_SSH_VER_1] = {true, DPI_ACTION_ALLOW, },

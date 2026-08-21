@@ -68,6 +68,16 @@ ON CONFLICT (org_id, cluster_id) DO UPDATE SET
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// When disabling weak-TLS detection, purge the weak-TLS threat rows AND clear the
+	// lingering references on flow rollups/raw flows — otherwise a bucket keeps
+	// max_threat_id for its lifetime and the map keeps painting a stale "threat" edge for
+	// a signature that's now off. IDs: 2011 SSLv3, 2012 TLS1.0, 2027 TLS1.1.
+	if !body.WeakTLSEnabled {
+		ctx := r.Context()
+		_, _ = p.db.Pool().Exec(ctx, `DELETE FROM runtime_threats WHERE org_id=$1 AND cluster_id=$2 AND threat_id IN (2011,2012,2027)`, subj.OrgID, clusterID)
+		_, _ = p.db.Pool().Exec(ctx, `UPDATE network_flow_rollups SET max_threat_id=0, max_severity=0 WHERE org_id=$1 AND cluster_id=$2 AND max_threat_id IN (2011,2012,2027)`, subj.OrgID, clusterID)
+		_, _ = p.db.Pool().Exec(ctx, `UPDATE network_flows SET threat_id=NULL, severity=NULL WHERE org_id=$1 AND cluster_id=$2 AND threat_id IN (2011,2012,2027)`, subj.OrgID, clusterID)
+	}
 	if p.auditLog != nil {
 		orgID, userID := subj.OrgID, subj.UserID
 		actorIP := net.ParseIP(r.RemoteAddr)
