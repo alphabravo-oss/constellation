@@ -1892,6 +1892,8 @@ func (s *Server) requireVerb(verb rbac.Verb, h http.HandlerFunc) http.HandlerFun
 		if cid := clusterScopeFromRequest(r); cid != nil {
 			res.ClusterID = cid
 		}
+		// RBAC-NS-24: derive the namespace scope so namespace-scoped grants authorize.
+		res.Namespace = namespaceScopeFromRequest(r)
 		var custom map[string][]rbac.Verb
 		if s.customRoles != nil {
 			custom = s.customRoles.VerbsForOrg(r.Context(), subj.OrgID)
@@ -1929,6 +1931,23 @@ func clusterScopeFromPattern(pattern, idParam string) *uuid.UUID {
 		return nil
 	}
 	return &cid
+}
+
+// namespaceScopeFromRequest derives the namespace a request targets, so a namespace-scoped
+// role grant (rbac.Scope.Namespace) actually authorizes — RBAC-NS-24: the engine already
+// honors Resource.Namespace (pkg/rbac Authorize), but nothing set it, leaving namespace grants
+// dead. A {namespace}/{ns} route param wins; otherwise the ?namespace= query filter. Empty when
+// the request targets no single namespace (an unfiltered list), which stays deny-closed for a
+// namespace-scoped subject — safe: they get access by naming their namespace. Row-level
+// auto-filtering of unfiltered lists to the subject's namespaces is the documented follow-up.
+func namespaceScopeFromRequest(r *http.Request) string {
+	if ns := strings.TrimSpace(chi.URLParam(r, "namespace")); ns != "" {
+		return ns
+	}
+	if ns := strings.TrimSpace(chi.URLParam(r, "ns")); ns != "" {
+		return ns
+	}
+	return strings.TrimSpace(r.URL.Query().Get("namespace"))
 }
 
 // ---------------- handlers (root) ----------------
