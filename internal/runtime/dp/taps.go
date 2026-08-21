@@ -178,6 +178,17 @@ func (m *tapManager) reconcileOnce(ctx context.Context) {
 		if d.Enforce {
 			continue
 		}
+		// Also skip any MAC the inline enforce path already owns. The provider's
+		// Enforce flag can flap (a container-list race where one Desired() snapshot
+		// misses the enforce label), which would otherwise let a veth back into the
+		// tap set even though the enforce path is driving it. dp keys the ep by MAC:
+		// tap and nfq SHARE one io_ep + policy_hdl, so a competing tap registration
+		// (AddMAC/ConfigMAC tap=true) resets ep->tap=true and silently converts the
+		// inline DENY into ACCEPT. Excluding it here means the removal loop below
+		// tears our tap port down and leaves the ep to the enforce path.
+		if m.isEnforcedMAC != nil && d.EPMAC != "" && m.isEnforcedMAC(d.EPMAC) {
+			continue
+		}
 		want[d.key()] = d
 	}
 
@@ -262,7 +273,14 @@ func (m *tapManager) reconcileOnce(ctx context.Context) {
 		if _, still := want[k]; still {
 			continue
 		}
-		if t.EPMAC != "" {
+		// Never DelMAC a veth the inline enforce path now owns. dp keys the ep by
+		// MAC and tap+nfq share ONE io_ep: DelMAC removes that ep from g_ep_map,
+		// wiping the enforce path's policy_hdl (→ policy_id=0, default-allow) and,
+		// on the next add_mac, resetting ep->tap=true (→ DENY silently ACCEPTed).
+		// We still tear down our own tap PORT (dp stops mirroring), but the MAC/ep
+		// stays with the enforce reconciler, which re-asserts tap=false each pass.
+		enforced := m.isEnforcedMAC != nil && t.EPMAC != "" && m.isEnforcedMAC(t.EPMAC)
+		if t.EPMAC != "" && !enforced {
 			if err := m.client.DelMAC(t.Iface, t.EPMAC); err != nil {
 				m.logger.Debug("dp tap: DelMAC (best-effort)",
 					slog.String("iface", t.Iface), slog.String("err", err.Error()))
