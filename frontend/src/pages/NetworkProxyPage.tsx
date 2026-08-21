@@ -8,12 +8,17 @@ import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Field, TextInput, Textarea, Select, Switch } from "@/components/ui/form";
+import { Collapse } from "@/components/ui/collapse";
 
 /**
  * Network & Proxy — outbound connectivity for the platform: egress proxy, upstream
  * TLS trust, and the syslog/SIEM mirror. All hot-reloaded (no restart).
  */
-type SyslogTarget = { host?: string; port?: number; protocol?: string };
+type SyslogTarget = {
+  host?: string; port?: number; protocol?: string;
+  format?: string; min_level?: string; categories?: string[];
+  ca_cert?: string; client_cert?: string; client_key?: string;
+};
 type EgressProxy = { https_proxy?: string; no_proxy?: string };
 
 export function NetworkProxyPage() {
@@ -27,6 +32,12 @@ export function NetworkProxyPage() {
   const [syslogHost, setSyslogHost] = useState("");
   const [syslogPort, setSyslogPort] = useState(514);
   const [syslogProto, setSyslogProto] = useState("udp");
+  const [syslogFormat, setSyslogFormat] = useState("rfc5424");
+  const [syslogMinLevel, setSyslogMinLevel] = useState("");
+  const [syslogCategories, setSyslogCategories] = useState("");
+  const [syslogCaCert, setSyslogCaCert] = useState("");
+  const [syslogClientCert, setSyslogClientCert] = useState("");
+  const [syslogClientKey, setSyslogClientKey] = useState("");
 
   useEffect(() => {
     const c = q.data?.config;
@@ -40,6 +51,12 @@ export function NetworkProxyPage() {
     setSyslogHost(syslog.host ?? "");
     setSyslogPort(typeof syslog.port === "number" && syslog.port > 0 ? syslog.port : 514);
     setSyslogProto(syslog.protocol || "udp");
+    setSyslogFormat(syslog.format || "rfc5424");
+    setSyslogMinLevel(syslog.min_level ?? "");
+    setSyslogCategories(Array.isArray(syslog.categories) ? syslog.categories.join(", ") : "");
+    setSyslogCaCert(typeof syslog.ca_cert === "string" ? syslog.ca_cert : "");
+    setSyslogClientCert(typeof syslog.client_cert === "string" ? syslog.client_cert : "");
+    setSyslogClientKey(typeof syslog.client_key === "string" ? syslog.client_key : "");
   }, [q.data]);
 
   const save = useMutation({
@@ -68,8 +85,15 @@ export function NetworkProxyPage() {
       egress_proxy: { https_proxy: httpsProxy.trim(), no_proxy: noProxy.trim() },
       tls_verify: tlsVerify,
       ca_bundle_pem: caBundle,
+      // client_key follows the redacted-secret pattern: the masked marker is sent
+      // back unchanged so the backend keeps the stored key.
       syslog_siem_target: syslogHost.trim()
-        ? { host: syslogHost.trim(), port: syslogPort, protocol: syslogProto }
+        ? {
+            host: syslogHost.trim(), port: syslogPort, protocol: syslogProto,
+            format: syslogFormat, min_level: syslogMinLevel,
+            categories: syslogCategories.split(",").map((s) => s.trim()).filter(Boolean),
+            ca_cert: syslogCaCert, client_cert: syslogClientCert, client_key: syslogClientKey,
+          }
         : { host: "", port: 0, protocol: "" },
     });
   };
@@ -136,9 +160,51 @@ export function NetworkProxyPage() {
               <Select value={syslogProto} onChange={(e) => setSyslogProto(e.target.value)}>
                 <option value="udp">UDP</option>
                 <option value="tcp">TCP</option>
+                <option value="tls">TLS</option>
               </Select>
             </Field>
           </div>
+          <Collapse label="Advanced — format, filtering & TLS certificates">
+            <div className="space-y-5 pt-2">
+              <div className="grid gap-5 sm:grid-cols-3">
+                <Field label="Format" hint="Wire format sent to the collector.">
+                  <Select value={syslogFormat} onChange={(e) => setSyslogFormat(e.target.value)}>
+                    <option value="rfc5424">RFC5424 (syslog)</option>
+                    <option value="json">JSON</option>
+                    <option value="cef">CEF (ArcSight)</option>
+                  </Select>
+                </Field>
+                <Field label="Minimum severity" hint="Drop events below this level. Blank = ship all.">
+                  <Select value={syslogMinLevel} onChange={(e) => setSyslogMinLevel(e.target.value)}>
+                    <option value="">All</option>
+                    <option value="info">Info</option>
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                    <option value="critical">Critical</option>
+                  </Select>
+                </Field>
+                <Field label="Categories" hint="Comma-separated event kinds (e.g. finding, runtime, compliance). Blank = all.">
+                  <TextInput value={syslogCategories} onChange={(e) => setSyslogCategories(e.target.value)} placeholder="finding, runtime, compliance" />
+                </Field>
+              </div>
+              <p className="text-xs text-muted-foreground">TLS certificates apply only when Protocol = TLS. Leave the CA blank to use the system trust store; add a client cert + key for mutual TLS.</p>
+              <Field label="Server CA (PEM)" hint="Optional. The collector's CA to verify its certificate.">
+                <Textarea value={syslogCaCert} onChange={(e) => setSyslogCaCert(e.target.value)} rows={4} className="font-mono text-xs"
+                  placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" />
+              </Field>
+              <div className="grid gap-5 sm:grid-cols-2">
+                <Field label="Client certificate (PEM)" hint="Optional. For mutual TLS.">
+                  <Textarea value={syslogClientCert} onChange={(e) => setSyslogClientCert(e.target.value)} rows={4} className="font-mono text-xs"
+                    placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" />
+                </Field>
+                <Field label="Client key (PEM)" hint={syslogClientKey === "***REDACTED***" ? "A client key is set. Leave the masked value to keep it, or paste a new key." : "Optional. For mutual TLS. Stored securely and masked."}>
+                  <Textarea value={syslogClientKey} onChange={(e) => setSyslogClientKey(e.target.value)} rows={syslogClientKey === "***REDACTED***" ? 1 : 4} className="font-mono text-xs"
+                    placeholder="-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----" />
+                </Field>
+              </div>
+            </div>
+          </Collapse>
         </Card>
 
         <Button type="submit" variant="primary" size="lg" disabled={save.isPending || q.isLoading}>
