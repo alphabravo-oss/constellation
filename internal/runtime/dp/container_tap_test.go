@@ -163,6 +163,107 @@ func TestContainerTapDedupsSharedNetns(t *testing.T) {
 	}
 }
 
+// TestContainerTapMultiNIC covers NET-46: a Multus / multi-CNI pod with two UP
+// non-loopback interfaces must yield one TapTarget per NIC (both carrying the
+// pod's identity), while a single-NIC pod still yields exactly one. It injects
+// the readIfaces seam directly (the multi-NIC production path).
+func TestContainerTapMultiNIC(t *testing.T) {
+	const multiNS = "/proc/1000/ns/net"
+	const singleNS = "/proc/2000/ns/net"
+	ifaces := map[string][]netIface{
+		multiNS: {
+			{name: "eth0", mac: "aa:bb:cc:00:00:01", ips: []string{"10.1.0.5"}},
+			{name: "net1", mac: "aa:bb:cc:00:00:99", ips: []string{"192.168.0.5"}},
+		},
+		singleNS: {
+			{name: "eth0", mac: "aa:bb:cc:00:00:02", ips: []string{"10.1.0.6"}},
+		},
+	}
+	p := &ContainerTapProvider{
+		logger:   quietLogger(),
+		procRoot: "/proc",
+		listContainers: func(ctx context.Context) ([]RunningContainer, error) {
+			return []RunningContainer{
+				{ID: "multi", PodName: "mpod", Namespace: "ns", Labels: map[string]string{"app": "m"}, PID: 1000},
+				{ID: "single", PodName: "spod", Namespace: "ns", PID: 2000},
+			}, nil
+		},
+		readIfaces: func(netns string) ([]netIface, error) {
+			v, ok := ifaces[netns]
+			if !ok {
+				return nil, errors.New("no fixture for " + netns)
+			}
+			return v, nil
+		},
+	}
+
+	got, err := p.Desired(context.Background())
+	if err != nil {
+		t.Fatalf("Desired: %v", err)
+	}
+	// 2 NICs for the multi pod + 1 for the single pod = 3 targets.
+	if len(got) != 3 {
+		t.Fatalf("want 3 targets (2 for multi-NIC pod + 1), got %d: %+v", len(got), got)
+	}
+
+	byKey := map[string]TapTarget{}
+	for _, tt := range got {
+		byKey[tt.NetNS+"|"+tt.Iface] = tt
+	}
+	eth0, ok := byKey[multiNS+"|eth0"]
+	if !ok {
+		t.Fatalf("missing multi-NIC pod eth0 target: %+v", got)
+	}
+	net1, ok := byKey[multiNS+"|net1"]
+	if !ok {
+		t.Fatalf("missing multi-NIC pod net1 (second NIC) target: %+v", got)
+	}
+	// Primary keeps its own canonical MAC/IP; secondary keeps its own.
+	if eth0.EPMAC != "aa:bb:cc:00:00:01" || len(eth0.PIPS) != 1 || eth0.PIPS[0] != "10.1.0.5" {
+		t.Errorf("primary NIC MAC/IP wrong: %+v", eth0)
+	}
+	if net1.EPMAC != "aa:bb:cc:00:00:99" || len(net1.PIPS) != 1 || net1.PIPS[0] != "192.168.0.5" {
+		t.Errorf("secondary NIC MAC/IP wrong: %+v", net1)
+	}
+	// Pod identity is carried onto EVERY NIC's target.
+	for _, tt := range []TapTarget{eth0, net1} {
+		if tt.PodName != "mpod" || tt.Namespace != "ns" || tt.Labels["app"] != "m" {
+			t.Errorf("NIC %s missing pod identity: %+v", tt.Iface, tt)
+		}
+	}
+
+	// Single-NIC pod yields exactly one target.
+	single := 0
+	for _, tt := range got {
+		if tt.NetNS == singleNS {
+			single++
+		}
+	}
+	if single != 1 {
+		t.Fatalf("single-NIC pod must yield exactly one target, got %d", single)
+	}
+}
+
+// TestAllInterfacesExcludesLoopback checks that the in-netns reader never
+// returns the loopback interface (it filters FlagLoopback). Runs against the
+// test process's own netns; skipped where there is no usable non-loopback NIC.
+func TestAllInterfacesExcludesLoopback(t *testing.T) {
+	ifaces, err := allInterfaces()
+	if err != nil {
+		t.Skipf("no up non-loopback interface in this environment: %v", err)
+	}
+	for _, ni := range ifaces {
+		if ni.name == "lo" {
+			t.Fatalf("loopback must be excluded, got %+v", ni)
+		}
+		for _, ip := range ni.ips {
+			if ip == "127.0.0.1" {
+				t.Fatalf("loopback address must be excluded, got %+v", ni)
+			}
+		}
+	}
+}
+
 func TestContainerTapListError(t *testing.T) {
 	p := newTestProvider(nil, errors.New("no CRI socket"), ifaceFixture(), 0)
 	if _, err := p.Desired(context.Background()); err == nil {

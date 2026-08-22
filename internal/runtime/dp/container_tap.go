@@ -83,9 +83,18 @@ type ContainerTapProvider struct {
 	agentNetnsInode uint64
 
 	// Injection points for tests. Production wires these to the real crictl
-	// lister and the setns-based interface reader. readIface also returns the
-	// interface's IPv4 addresses (used only for the proxymesh lo-tap PIPS).
+	// lister and the setns-based interface reader.
+	//
+	// readIfaces returns EVERY up, non-loopback interface in the pod netns
+	// (name + MAC + IPv4s), primary (eth0) first — so a Multus / multi-CNI pod
+	// is tapped on all of its NICs, not just the first (NET-46). Production
+	// wires it to interfacesInNetns.
+	//
+	// readIface is the legacy single-primary seam kept ONLY for the existing
+	// tests that inject it; when readIfaces is nil, Desired adapts readIface
+	// into a one-element slice (the primary). Production leaves it nil.
 	listContainers ContainerLister
+	readIfaces     func(netnsPath string) ([]netIface, error)
 	readIface      func(netnsPath string) (iface, mac string, ips []string, err error)
 
 	// meshDetect reports whether the pod at this PID runs a service-mesh
@@ -105,16 +114,20 @@ func NewContainerTapProvider(logger *slog.Logger, lister ContainerLister) TapPro
 		procRoot:        "/proc",
 		agentNetnsInode: netnsInode("/proc/self/ns/net"),
 		listContainers:  lister,
-		readIface:       interfaceInNetns,
+		readIfaces:      interfacesInNetns,
 	}
 	p.meshDetect = func(pid int) bool { return hasMeshListener(p.procRoot, pid) }
 	return p
 }
 
-// Desired returns one TapTarget per running, non-host-network container:
-// {NetNS: /proc/<pid>/ns/net, Iface: <primary up non-loopback iface, e.g.
-// eth0>, EPMAC: <that iface's MAC>}. A failure on any single container is
-// logged and skipped; it never aborts the whole reconcile.
+// Desired returns one TapTarget per (netns, iface) for every running,
+// non-host-network container: {NetNS: /proc/<pid>/ns/net, Iface: <up
+// non-loopback iface, e.g. eth0>, EPMAC: <that iface's MAC>}. A pod with
+// multiple CNI attachments (Multus) yields one target per NIC — the primary
+// (eth0) carries the pod's canonical MAC/IP for policy attribution, secondary
+// NICs are additional taps with their own MAC/IP but the same pod identity
+// (NET-46). A failure on any single container is logged and skipped; it never
+// aborts the whole reconcile.
 func (p *ContainerTapProvider) Desired(ctx context.Context) ([]TapTarget, error) {
 	containers, err := p.listContainers(ctx)
 	if err != nil {
@@ -122,7 +135,8 @@ func (p *ContainerTapProvider) Desired(ctx context.Context) ([]TapTarget, error)
 	}
 
 	out := make([]TapTarget, 0, len(containers))
-	seen := make(map[string]struct{}, len(containers)) // dedup by netns path
+	seenNetns := make(map[string]struct{}, len(containers))  // netns already processed
+	seenTarget := make(map[string]struct{}, len(containers)) // dedup by netns+iface (TapTarget.key())
 	for _, c := range containers {
 		if c.PID <= 0 {
 			continue
@@ -140,49 +154,78 @@ func (p *ContainerTapProvider) Desired(ctx context.Context) ([]TapTarget, error)
 			}
 		}
 
-		// Multiple containers in a pod share one netns; tap it once.
-		if _, dup := seen[netnsPath]; dup {
+		// Multiple containers in a pod share one netns; read + tap it once.
+		if _, dup := seenNetns[netnsPath]; dup {
 			continue
 		}
 
-		iface, mac, ips, err := p.readIface(netnsPath)
+		ifaces, err := p.ifacesFor(netnsPath)
 		if err != nil {
 			p.logger.Debug("dp container-tap: read iface failed",
 				slog.String("id", c.ID), slog.String("pod", c.PodName),
 				slog.String("netns", netnsPath), slog.String("err", err.Error()))
 			continue
 		}
-		if iface == "" || mac == "" || mac == "00:00:00:00:00:00" {
+
+		// Listening-port hints so dp identifies this pod as the server on those
+		// ports and fixes TAP session direction -> L7 parser recruitment ->
+		// DLP/WAF. Per-netns (per-pid), so computed once and carried on every
+		// NIC of the pod. See listenPortApps / ConfigMAC.
+		apps := listenPortApps(p.procRoot, c.PID)
+
+		// Emit one target per up non-loopback NIC. ifaces[0] is the primary
+		// (eth0); the pod's canonical MAC/IP therefore rides the primary target,
+		// while secondary NICs are additional taps carrying their own MAC/IP.
+		var primaryMAC string
+		var primaryIPs []string
+		for _, ni := range ifaces {
+			if ni.name == "" || ni.mac == "" || ni.mac == "00:00:00:00:00:00" {
+				continue
+			}
+			key := netnsPath + "|" + ni.name
+			if _, dup := seenTarget[key]; dup {
+				continue
+			}
+			seenTarget[key] = struct{}{}
+			if primaryMAC == "" {
+				primaryMAC, primaryIPs = ni.mac, ni.ips
+			}
+			out = append(out, TapTarget{
+				NetNS: netnsPath,
+				Iface: ni.name,
+				EPMAC: ni.mac,
+				Apps:  apps,
+				// Per-workload DPI opt-in (from pod labels; default off).
+				WAF:     c.WAF,
+				DLP:     c.DLP,
+				Enforce: c.Enforce,
+				// Pod identity for group→sensor binding resolution (NET-43),
+				// carried onto every NIC's target; the lo/proxymesh tap below
+				// keeps no identity — it shares the pod but is keyed by a
+				// synthetic MAC dp uses only for loopback attribution.
+				Namespace: c.Namespace,
+				PodName:   c.PodName,
+				Labels:    c.Labels,
+				// This NIC's IPs, carried so the enforce (NFQUEUE) provider can
+				// hand them to dp via AddMAC: on the inline path dp needs
+				// ep->pips to determine packet direction (faked L2 mac) -> L7
+				// recruit -> DLP/WAF. Unused by the tap path itself (eth0 AddMAC
+				// passes nil, matching NeuVector's tap branch). See
+				// EnforceTarget.PIPS.
+				PIPS: ni.ips,
+			})
+		}
+		if primaryMAC == "" {
+			// No usable NIC on this pod; leave the netns un-marked so a later
+			// container in the same pod can retry (matches the pre-NET-46 miss
+			// behavior).
 			continue
 		}
+		seenNetns[netnsPath] = struct{}{}
 
-		seen[netnsPath] = struct{}{}
-		out = append(out, TapTarget{
-			NetNS: netnsPath,
-			Iface: iface,
-			EPMAC: mac,
-			// Listening-port hints so dp identifies this pod as the server on
-			// those ports and fixes TAP session direction -> L7 parser
-			// recruitment -> DLP/WAF. See listenPortApps / ConfigMAC.
-			Apps: listenPortApps(p.procRoot, c.PID),
-			// Per-workload DPI opt-in (from pod labels; default off).
-			WAF:     c.WAF,
-			DLP:     c.DLP,
-			Enforce: c.Enforce,
-			// Pod identity for group→sensor binding resolution (NET-43). Carried
-			// only on the eth0 tap (the pod's workload MAC); the lo/proxymesh tap
-			// below keeps no identity — it shares the pod but is keyed by a
-			// synthetic MAC dp uses only for loopback attribution.
-			Namespace: c.Namespace,
-			PodName:   c.PodName,
-			Labels:    c.Labels,
-			// Pod IPs, carried so the enforce (NFQUEUE) provider can hand them to
-			// dp via AddMAC: on the inline path dp needs ep->pips to determine
-			// packet direction (faked L2 mac) -> L7 recruit -> DLP/WAF. Unused by
-			// the tap path itself (eth0 AddMAC passes nil, matching NeuVector's
-			// tap branch). See EnforceTarget.PIPS.
-			PIPS: ips,
-		})
+		// The mesh lo-tap attributes loopback flows to the pod's PRIMARY
+		// (eth0) MAC/IPs, so use those.
+		mac, ips := primaryMAC, primaryIPs
 
 		// Service-mesh lo-tap (MONITOR-ONLY, default off). If this pod runs a
 		// sidecar proxy, ALSO tap its loopback so envoy<->app east-west traffic
@@ -238,16 +281,41 @@ func netnsInode(path string) uint64 {
 	return st.Ino
 }
 
-// interfaceInNetns enters the network namespace at netnsPath and returns the
-// first UP, non-loopback interface's name and MAC (typically eth0). It mirrors
-// NeuVector's CallNetNamespaceFuncWithoutLock (share/system/system_linux.go:
-// 132-165): lock the OS thread, save the caller's netns, setns into the
-// target, run the work, then ALWAYS setns back.
+// netIface is one up, non-loopback interface discovered inside a pod netns:
+// its name, MAC, and IPv4 addresses. A Multus / multi-CNI pod has more than
+// one; readIfaces returns them primary (eth0) first.
+type netIface struct {
+	name string
+	mac  string
+	ips  []string
+}
+
+// ifacesFor returns every up, non-loopback interface in the pod netns, primary
+// first. It prefers the readIfaces seam (production: interfacesInNetns); when
+// only the legacy single-primary readIface seam is injected (some tests), it
+// adapts that into a one-element slice so those tests keep working.
+func (p *ContainerTapProvider) ifacesFor(netnsPath string) ([]netIface, error) {
+	if p.readIfaces != nil {
+		return p.readIfaces(netnsPath)
+	}
+	name, mac, ips, err := p.readIface(netnsPath)
+	if err != nil {
+		return nil, err
+	}
+	return []netIface{{name: name, mac: mac, ips: ips}}, nil
+}
+
+// interfacesInNetns enters the network namespace at netnsPath and returns ALL
+// UP, non-loopback interfaces (name + MAC + IPv4s), primary (eth0) first — so a
+// pod with multiple CNI attachments (Multus) is tapped on every NIC, not just
+// the first. It mirrors NeuVector's CallNetNamespaceFuncWithoutLock
+// (share/system/system_linux.go:132-165): lock the OS thread, save the caller's
+// netns, setns into the target, run the work, then ALWAYS setns back.
 //
 // Restore is guaranteed by defer even on panic. We deliberately do NOT
 // UnlockOSThread if the restore fails — a thread left in a foreign netns must
 // die with the goroutine rather than be reused for unrelated work.
-func interfaceInNetns(netnsPath string) (iface, mac string, ips []string, err error) {
+func interfacesInNetns(netnsPath string) (ifaces []netIface, err error) {
 	// Pin this goroutine to its OS thread for the whole setns window.
 	runtime.LockOSThread()
 
@@ -261,7 +329,7 @@ func interfaceInNetns(netnsPath string) (iface, mac string, ips []string, err er
 		savedFD, err = unix.Open(savedPath, unix.O_RDONLY|unix.O_CLOEXEC, 0)
 		if err != nil {
 			runtime.UnlockOSThread()
-			return "", "", nil, fmt.Errorf("open current netns: %w", err)
+			return nil, fmt.Errorf("open current netns: %w", err)
 		}
 	}
 
@@ -269,7 +337,7 @@ func interfaceInNetns(netnsPath string) (iface, mac string, ips []string, err er
 	if err != nil {
 		unix.Close(savedFD)
 		runtime.UnlockOSThread()
-		return "", "", nil, fmt.Errorf("open target netns %s: %w", netnsPath, err)
+		return nil, fmt.Errorf("open target netns %s: %w", netnsPath, err)
 	}
 
 	// Enter the container's netns.
@@ -277,7 +345,7 @@ func interfaceInNetns(netnsPath string) (iface, mac string, ips []string, err er
 		unix.Close(targetFD)
 		unix.Close(savedFD)
 		runtime.UnlockOSThread()
-		return "", "", nil, fmt.Errorf("setns into %s: %w", netnsPath, err)
+		return nil, fmt.Errorf("setns into %s: %w", netnsPath, err)
 	}
 	unix.Close(targetFD)
 
@@ -297,17 +365,21 @@ func interfaceInNetns(netnsPath string) (iface, mac string, ips []string, err er
 		runtime.UnlockOSThread()
 	}()
 
-	return primaryInterface()
+	return allInterfaces()
 }
 
-// primaryInterface returns the first UP, non-loopback interface (its name, MAC
-// and IPv4 addresses) in the CURRENT netns. Called only while inside a target
-// container netns. The IPv4 list feeds the proxymesh lo-tap PIPS.
-func primaryInterface() (name, mac string, ips []string, err error) {
+// allInterfaces returns EVERY UP, non-loopback interface (name, MAC and IPv4
+// addresses) in the CURRENT netns, primary first: eth0 ranks ahead of all
+// others, the rest sorted by name, so the ordering is deterministic and the
+// pod's canonical NIC stays the primary. Called only while inside a target
+// container netns. The IPv4 lists feed each tap's PIPS (and the primary's the
+// proxymesh lo-tap PIPS).
+func allInterfaces() ([]netIface, error) {
 	ifaces, err := net.Interfaces()
 	if err != nil {
-		return "", "", nil, fmt.Errorf("list interfaces: %w", err)
+		return nil, fmt.Errorf("list interfaces: %w", err)
 	}
+	var out []netIface
 	for _, ifi := range ifaces {
 		if ifi.Flags&net.FlagLoopback != 0 {
 			continue
@@ -319,6 +391,7 @@ func primaryInterface() (name, mac string, ips []string, err error) {
 		if mac == "" {
 			continue
 		}
+		var ips []string
 		addrs, _ := ifi.Addrs()
 		for _, a := range addrs {
 			if ipn, ok := a.(*net.IPNet); ok {
@@ -327,9 +400,21 @@ func primaryInterface() (name, mac string, ips []string, err error) {
 				}
 			}
 		}
-		return ifi.Name, mac, ips, nil
+		out = append(out, netIface{name: ifi.Name, mac: mac, ips: ips})
 	}
-	return "", "", nil, fmt.Errorf("no up non-loopback interface")
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no up non-loopback interface")
+	}
+	// Deterministic order: eth0 (the pod's primary NIC) first, then the rest
+	// sorted by name.
+	sort.SliceStable(out, func(i, j int) bool {
+		ei, ej := out[i].name == "eth0", out[j].name == "eth0"
+		if ei != ej {
+			return ei
+		}
+		return out[i].name < out[j].name
+	})
+	return out, nil
 }
 
 // proxyMeshMAC derives the synthetic "lkst"-prefixed EP MAC dp requires to
