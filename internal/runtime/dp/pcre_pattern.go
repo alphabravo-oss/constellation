@@ -154,12 +154,57 @@ func validFlags(s string) bool {
 // pattern that normalizes to empty. Returns nil for a nil input so an unset
 // pattern list stays unset on the wire.
 func normalizePCREList(pats []string) []string {
+	// A nil context list body-scopes every pattern — identical to the old
+	// per-pattern NormalizePCREPattern loop this used to run inline.
+	return normalizePCREListWithContexts(pats, nil)
+}
+
+// DLPCtxURI/Header/Body/Packet are the per-pattern DLP match-context tokens the
+// rule schema {pattern, op, context} accepts. They mirror NeuVector's
+// share.DlpPatternContext* set. dpDLPContext maps them to the value dp's
+// dpi_sigopt_context_parser accepts (url|header|body|packet); an empty or
+// unknown token falls back to the "body" default so a bad context can never
+// make dp reject the whole rule (NET-40).
+const (
+	DLPCtxURI    = "uri"
+	DLPCtxHeader = "header"
+	DLPCtxBody   = "body"
+	DLPCtxPacket = "packet"
+)
+
+// dpDLPContext maps a DLP schema context token to a context dp accepts. "uri"
+// selects dp's URI_ORIGIN buffer (which dp names "url"); header/body/packet pass
+// through; everything else (including "") defaults to "body", matching the
+// pre-NET-40 hardcoded behaviour.
+func dpDLPContext(ctx string) string {
+	switch strings.ToLower(strings.TrimSpace(ctx)) {
+	case DLPCtxURI, "url":
+		return "url"
+	case DLPCtxHeader:
+		return "header"
+	case DLPCtxPacket:
+		return "packet"
+	default:
+		return defaultDLPContext
+	}
+}
+
+// normalizePCREListWithContexts is normalizePCREList with an index-aligned
+// per-pattern context list (NET-40). ctxs[i] selects the dp match context for
+// pats[i]; a missing/empty entry uses the "body" default, so a caller that
+// passes a nil ctxs slice reproduces normalizePCREList exactly (every pattern
+// body-scoped). Patterns that normalize to empty are dropped.
+func normalizePCREListWithContexts(pats, ctxs []string) []string {
 	if pats == nil {
 		return nil
 	}
 	out := make([]string, 0, len(pats))
-	for _, p := range pats {
-		if n := NormalizePCREPattern(p); n != "" {
+	for i, p := range pats {
+		ctx := defaultDLPContext
+		if i < len(ctxs) && strings.TrimSpace(ctxs[i]) != "" {
+			ctx = dpDLPContext(ctxs[i])
+		}
+		if n := normalizePCREWithContext(p, ctx); n != "" {
 			out = append(out, n)
 		}
 	}

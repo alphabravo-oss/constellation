@@ -330,6 +330,15 @@ type DLPRule struct {
 	ID       uint32   `json:"id"`
 	Patterns []string `json:"patterns"` // PCRE; dp's hyperscan validates on compile
 
+	// Contexts is the optional index-aligned per-pattern match context
+	// (NET-40): Contexts[i] scopes Patterns[i] to dp's uri/header/body/packet
+	// buffer. It is agent-side only — normalizeDLPPatterns folds each context
+	// INTO the pattern string ("...; context <ctx>") before the wire, so this
+	// field is never serialized to dp (json:"-"). A nil/short slice, or an empty
+	// entry, defaults that pattern to "body" — the pre-NET-40 behaviour, so
+	// existing callers that leave it unset are unchanged.
+	Contexts []string `json:"-"`
+
 	// Mode is agent-side only ("monitor" | "enforce"); it drives the
 	// ctrl_cfg_dlp action binding, not the ctrl_bld_dlp pattern-compile
 	// message, hence json:"-". BuildDLPRules ignores it; ConfigureDLPRules
@@ -384,7 +393,7 @@ func normalizeDLPPatterns(rules []*DLPRule) []*DLPRule {
 			continue
 		}
 		cp := *r
-		cp.Patterns = normalizePCREList(r.Patterns)
+		cp.Patterns = normalizePCREListWithContexts(r.Patterns, r.Contexts)
 		out = append(out, &cp)
 	}
 	return out

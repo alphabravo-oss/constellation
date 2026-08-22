@@ -106,16 +106,29 @@ type DLPRule struct {
 	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
-// DecodePatterns reads the JSONB patterns column as a string slice.
+// DecodePatterns reads the JSONB patterns column as a slice of pattern strings.
+// It accepts both the legacy bare-string array and the NET-40
+// {pattern, op, context} object array, returning just the pattern strings (used
+// for the audit count). Use DecodePatternSpecs when the op/context are needed.
 func (r *DLPRule) DecodePatterns() ([]string, error) {
-	if len(r.Patterns) == 0 || string(r.Patterns) == "null" {
+	specs, err := dlp.ParsePatternSpecs(r.Patterns)
+	if err != nil {
+		return nil, err
+	}
+	if specs == nil {
 		return nil, nil
 	}
-	var out []string
-	if err := json.Unmarshal(r.Patterns, &out); err != nil {
-		return nil, fmt.Errorf("decode patterns: %w", err)
+	out := make([]string, len(specs))
+	for i, sp := range specs {
+		out[i] = sp.Pattern
 	}
 	return out, nil
+}
+
+// DecodePatternSpecs reads the JSONB patterns column as structured NET-40 specs
+// (pattern + op + context), accepting the legacy bare-string form too.
+func (r *DLPRule) DecodePatternSpecs() ([]dlp.PatternSpec, error) {
+	return dlp.ParsePatternSpecs(r.Patterns)
 }
 
 // RuntimeDLPStore is the persistence layer.
@@ -199,13 +212,14 @@ func (s *RuntimeDLPStore) Insert(ctx context.Context, r *DLPRule, requestID stri
 	}
 	// Authoring-time validation (P1-03): reject rules dp would silently drop —
 	// >=1 pattern, count/length caps, no wildcard-only, and every pattern must
-	// compile. Without this a typo'd regex returns 201, shows "enforce", and
-	// never fires (fail-open). Mirrors NeuVector's validateDlpRuleConfig.
-	pats, err := r.DecodePatterns()
+	// compile. NET-40 adds per-pattern op/context validation so an unknown
+	// context (which makes dp reject the whole compiled rule) is caught here
+	// rather than failing open. Mirrors NeuVector's validateDlpRuleConfig.
+	specs, err := r.DecodePatternSpecs()
 	if err != nil {
 		return uuid.Nil, errors.New("patterns is not valid JSON")
 	}
-	if err := dlp.ValidatePatterns(pats); err != nil {
+	if err := dlp.ValidateSpecs(specs); err != nil {
 		return uuid.Nil, err
 	}
 	scopeArg := scopeMACsJSON(r.ScopeMACs)
@@ -227,6 +241,12 @@ RETURNING id, dp_rule_id`,
 	r.Version = 1
 	if s.auditLog != nil {
 		_ = s.auditLog.LogPolicyCreate(ctx, r.OrgID, r.CreatedBy, snapshotDLP(r), requestID)
+	}
+	// NET-45: federate the rule to joints (master-only; LogFedRevision no-ops
+	// otherwise). Record the fully-scanned row so the fed template carries the
+	// same shape the agent bundle serves (e.g. patterns defaulted to '[]').
+	if full, gerr := s.Get(ctx, r.OrgID, id); gerr == nil {
+		recordFedDLPRule(ctx, s.db.Pool(), r.OrgID, full)
 	}
 	return id, nil
 }
@@ -339,11 +359,11 @@ func (s *RuntimeDLPStore) Update(ctx context.Context, orgID, id uuid.UUID,
 		if !json.Valid(patterns) {
 			return nil, errors.New("patterns is not valid JSON")
 		}
-		var pats []string
-		if err := json.Unmarshal(patterns, &pats); err != nil {
+		specs, err := dlp.ParsePatternSpecs(patterns)
+		if err != nil {
 			return nil, errors.New("patterns is not valid JSON")
 		}
-		if err := dlp.ValidatePatterns(pats); err != nil {
+		if err := dlp.ValidateSpecs(specs); err != nil {
 			return nil, err
 		}
 	}
@@ -378,6 +398,8 @@ UPDATE runtime_dlp_rules
 		_ = s.auditLog.LogPolicyEvent(ctx, orgID, &by, audit.ActionPolicyUpdate,
 			ptrSnapDLP(before), ptrSnapDLP(after), requestID)
 	}
+	// NET-45: re-federate the updated rule (master-only).
+	recordFedDLPRule(ctx, s.db.Pool(), orgID, after)
 	return after, nil
 }
 
@@ -411,12 +433,16 @@ func (s *RuntimeDLPStore) SetMode(ctx context.Context, orgID, id uuid.UUID,
 	if tag.RowsAffected() == 0 {
 		return errors.New("not found")
 	}
-	if s.auditLog != nil {
-		after, err := s.Get(ctx, orgID, id)
-		if err == nil {
-			_ = s.auditLog.LogPolicyModeChange(ctx, orgID, &by,
-				snapshotDLP(before), snapshotDLP(after), false /*system*/, requestID)
-		}
+	after, aerr := s.Get(ctx, orgID, id)
+	if s.auditLog != nil && aerr == nil {
+		_ = s.auditLog.LogPolicyModeChange(ctx, orgID, &by,
+			snapshotDLP(before), snapshotDLP(after), false /*system*/, requestID)
+	}
+	// NET-45: re-federate on mode change (master-only). A demote to 'disabled'
+	// tombstones the fed template so joints stop serving it, mirroring the
+	// enabled-only cluster bundle; promote/monitor re-authors it.
+	if aerr == nil {
+		recordFedDLPRule(ctx, s.db.Pool(), orgID, after)
 	}
 	return nil
 }
@@ -438,6 +464,9 @@ func (s *RuntimeDLPStore) Delete(ctx context.Context, orgID, id uuid.UUID, by *u
 	if s.auditLog != nil {
 		_ = s.auditLog.LogPolicyDelete(ctx, orgID, by, snapshotDLP(before), requestID)
 	}
+	// NET-45: tombstone the fed template so joints drop their read-only copy
+	// (master-only via LogFedRevision).
+	recordFedDLPRuleDelete(ctx, s.db.Pool(), orgID, id)
 	return nil
 }
 
@@ -504,6 +533,16 @@ func (h *RuntimeDLPHTTP) AgentBundle(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	// NET-45: merge master-authored (federated) DLP/WAF rules read-only. On a joint
+	// these were replicated from its master into fed_runtime_profiles and apply
+	// fleet-wide across every cluster; on a master/standalone the table is empty so
+	// this is a no-op. A load error must not deny the (authoritative) local bundle.
+	if fedPayloads, ferr := fetchFedRuntimeProfilePayloads(r.Context(), h.store.db.Pool(), tok.OrgID, handler.FedKindRuntimeDLP); ferr != nil {
+		slog.Default().Warn("dlp bundle: load fed rules failed",
+			slog.String("org", tok.OrgID.String()), slog.String("err", ferr.Error()))
+	} else {
+		rows = appendFedDLPRows(rows, fedPayloads)
 	}
 	// NET-43: also deliver the org's group→sensor bindings and each bound group's
 	// SELECTOR so the agent can scope the DLP/WAF push to a bound group's member

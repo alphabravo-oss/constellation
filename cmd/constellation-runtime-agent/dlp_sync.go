@@ -20,6 +20,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -68,6 +69,14 @@ type dlpRuleWire struct {
 	Severity int16    `json:"severity"`
 	Mode     string   `json:"mode"` // monitor | enforce | disabled
 	Patterns []string `json:"patterns"`
+	// Contexts / Ops are the NET-40 index-aligned per-pattern metadata parsed
+	// out of the `patterns` array by UnmarshalJSON. The bundle encodes each
+	// pattern either as a bare string (legacy) OR as an object
+	// {pattern, op, context}; a bare string yields Context="" (→ dp "body"
+	// default) and Op="" (→ plain regex). These are internal to the agent and
+	// never re-serialized, hence json:"-".
+	Contexts []string `json:"-"`
+	Ops      []string `json:"-"`
 	Version  int64    `json:"version"`
 	// Category routes the rule (NET-42): "waf" rows enforce on dp's WAF path
 	// (RESET) via the WAF rule table; "dlp"/"signature"/"" feed the DLP
@@ -79,6 +88,73 @@ type dlpRuleWire struct {
 	// "apply to every workload this agent taps" (the fleet-wide default). A
 	// non-empty list restricts the rule to those workload MACs.
 	ScopeMACs []string `json:"scope_macs,omitempty"`
+}
+
+// UnmarshalJSON decodes a bundle rule, parsing the `patterns` array element by
+// element so it can carry the NET-40 per-pattern {pattern, op, context} shape
+// while staying backward-compatible with the legacy bare-string form. Every
+// other field decodes through the struct's tags via the `alias` shadow; only
+// `patterns` is intercepted (the outer json.RawMessage shadows the promoted
+// alias.Patterns field, so the alias never sees it) and split into the
+// index-aligned Patterns / Ops / Contexts slices.
+func (r *dlpRuleWire) UnmarshalJSON(b []byte) error {
+	type alias dlpRuleWire
+	aux := struct {
+		*alias
+		Patterns json.RawMessage `json:"patterns"`
+	}{alias: (*alias)(r)}
+	if err := json.Unmarshal(b, &aux); err != nil {
+		return err
+	}
+	pats, ops, ctxs, err := parseDLPPatterns(aux.Patterns)
+	if err != nil {
+		return err
+	}
+	r.Patterns, r.Ops, r.Contexts = pats, ops, ctxs
+	return nil
+}
+
+// parseDLPPatterns splits a bundle `patterns` array into index-aligned
+// (patterns, ops, contexts). Each element is either a bare string (legacy →
+// op/context empty) or an object {pattern, op, context}. A nil/empty/"null"
+// input returns all-nil so an unset list stays unset.
+func parseDLPPatterns(raw json.RawMessage) (pats, ops, ctxs []string, err error) {
+	s := strings.TrimSpace(string(raw))
+	if s == "" || s == "null" {
+		return nil, nil, nil, nil
+	}
+	var elems []json.RawMessage
+	if err := json.Unmarshal(raw, &elems); err != nil {
+		return nil, nil, nil, err
+	}
+	pats = make([]string, 0, len(elems))
+	ops = make([]string, 0, len(elems))
+	ctxs = make([]string, 0, len(elems))
+	for _, e := range elems {
+		t := bytes.TrimSpace(e)
+		if len(t) > 0 && t[0] == '"' {
+			var str string
+			if err := json.Unmarshal(t, &str); err != nil {
+				return nil, nil, nil, err
+			}
+			pats = append(pats, str)
+			ops = append(ops, "")
+			ctxs = append(ctxs, "")
+			continue
+		}
+		var obj struct {
+			Pattern string `json:"pattern"`
+			Op      string `json:"op"`
+			Context string `json:"context"`
+		}
+		if err := json.Unmarshal(t, &obj); err != nil {
+			return nil, nil, nil, err
+		}
+		pats = append(pats, obj.Pattern)
+		ops = append(ops, obj.Op)
+		ctxs = append(ctxs, obj.Context)
+	}
+	return pats, ops, ctxs, nil
 }
 
 type dlpListResponse struct {
@@ -227,6 +303,9 @@ func (w *DLPSyncWorker) SyncOnce(ctx context.Context) {
 		return
 	}
 	rules := bundle.rules
+	// NET-41: refresh the built-in PII sig-id set so the threat emit path can
+	// re-validate (Luhn / SSN sentinel) hits dp can't filter itself.
+	setValidatedThreatIDs(rules)
 	macs := w.cfg.DPSup.TapMACs()
 	// Inline-only enforce workloads are skipped by the tap reconciler, so their
 	// veths never appear in TapMACs(); their per-workload DPI opt-in rides the
@@ -453,6 +532,48 @@ func effectiveDLPMode(mode string, enforceEnabled bool) string {
 	return mode
 }
 
+// wafContextFor maps a NET-40 schema context token to a dp WAF buffer. ok is
+// false for an empty/unset context so userWAFRules keeps its url/head/body
+// fan-out; "uri" selects the URL buffer, "header" the header block, and
+// body/packet the entity body (WAF has no packet buffer — it is an HTTP path).
+func wafContextFor(ctx string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(ctx)) {
+	case "":
+		return "", false
+	case dp.DLPCtxURI, "url":
+		return dp.WAFCtxURL, true
+	case dp.DLPCtxHeader:
+		return dp.WAFCtxHead, true
+	default: // body, packet, or anything unrecognised
+		return dp.WAFCtxBody, true
+	}
+}
+
+// applyDLPOps applies each pattern's op (NET-40): "not_regex"/"not"/"!" prepend
+// a "!" so dp negates the match (dp.NormalizePCREPattern already understands a
+// leading "!"), matching NeuVector's CriteriaOpNotRegex. Any other op (including
+// "regex" and the empty legacy value) passes the pattern through untouched. A
+// pattern that already carries a leading "!" is left alone (no double-negation).
+// ops may be nil/short — missing entries are treated as "regex".
+func applyDLPOps(pats, ops []string) []string {
+	if len(pats) == 0 {
+		return pats
+	}
+	out := make([]string, len(pats))
+	for i, p := range pats {
+		op := ""
+		if i < len(ops) {
+			op = strings.ToLower(strings.TrimSpace(ops[i]))
+		}
+		if (op == "not_regex" || op == "not" || op == "!") && !strings.HasPrefix(strings.TrimSpace(p), "!") {
+			out[i] = "!" + p
+		} else {
+			out[i] = p
+		}
+	}
+	return out
+}
+
 // planDLPPushes partitions rules across the agent's tap MACs by scope.
 //
 //   - A rule with no ScopeMACs applies to every tap MAC (fleet-wide default).
@@ -473,9 +594,13 @@ func planDLPPushes(rules []dlpRuleWire, tapMACs []string, enforceEnabled bool) [
 		// (dpi_sig.c). Our dp_rule_id sequence starts at 9000, so map it into
 		// dp's user range; sanitize the name defensively.
 		dr := &dp.DLPRule{
-			Name:     dp.SanitizeSigName(r.Name),
-			ID:       dp.DLPSigID(uint32(r.DPRuleID)),
-			Patterns: r.Patterns,
+			Name: dp.SanitizeSigName(r.Name),
+			ID:   dp.DLPSigID(uint32(r.DPRuleID)),
+			// NET-40: apply each pattern's op (negation) and carry its context
+			// through so dp scans it in the authored buffer instead of the
+			// forced "body" default. applyDLPOp is a no-op for legacy rows.
+			Patterns: applyDLPOps(r.Patterns, r.Ops),
+			Contexts: r.Contexts,
 			Mode:     effectiveDLPMode(r.Mode, enforceEnabled),
 		}
 		var scope map[string]struct{}
@@ -560,12 +685,24 @@ func userWAFRules(rules []dlpRuleWire, enforceEnabled bool) []*dp.WAFRule {
 	out := make([]*dp.WAFRule, 0, len(rules))
 	for _, r := range rules {
 		pats := make([]dp.WAFPattern, 0, len(r.Patterns)*3)
-		for _, p := range r.Patterns {
+		for i, p := range r.Patterns {
 			if strings.TrimSpace(p) == "" {
 				continue
 			}
-			for _, ctx := range []string{dp.WAFCtxURL, dp.WAFCtxHead, dp.WAFCtxBody} {
-				pats = append(pats, dp.WAFPattern{Context: ctx, Value: p})
+			// NET-40: when the author scoped this pattern to a specific
+			// context, honour it (one buffer) instead of fanning across all
+			// three. A legacy pattern (no context) keeps the safe url/head/body
+			// fan-out so an attack string matches wherever it lands.
+			ctx := ""
+			if i < len(r.Contexts) {
+				ctx = r.Contexts[i]
+			}
+			if wc, ok := wafContextFor(ctx); ok {
+				pats = append(pats, dp.WAFPattern{Context: wc, Value: p})
+				continue
+			}
+			for _, wc := range []string{dp.WAFCtxURL, dp.WAFCtxHead, dp.WAFCtxBody} {
+				pats = append(pats, dp.WAFPattern{Context: wc, Value: p})
 			}
 		}
 		if len(pats) == 0 {

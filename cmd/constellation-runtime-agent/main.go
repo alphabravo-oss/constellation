@@ -859,10 +859,17 @@ func main() {
 						// count so the IPC reader never stalls.
 						if threatOut != nil {
 							row := dpThreatToIngest(ev, node)
-							select {
-							case threatOut <- row:
-							default:
+							// NET-41: drop built-in PII DLP false positives dp
+							// can't filter (payload has no Luhn-valid card / issuable
+							// SSN). Conservative: only suppresses a proven non-match.
+							if suppressDLPFalsePositive(row) {
 								nThreatsDropped.Add(1)
+							} else {
+								select {
+								case threatOut <- row:
+								default:
+									nThreatsDropped.Add(1)
+								}
 							}
 						}
 						_ = enc.Encode(map[string]any{
