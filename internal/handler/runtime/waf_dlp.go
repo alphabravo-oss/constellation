@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
 	"sort"
 	"strings"
 
@@ -9,8 +11,12 @@ import (
 
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler"
+	"github.com/alphabravocompany/constellation/internal/handler/authctx"
+	"github.com/alphabravocompany/constellation/internal/handler/httpx"
 	"github.com/alphabravocompany/constellation/internal/runtime/dp"
 	"github.com/alphabravocompany/constellation/internal/runtime/waf"
+	"github.com/alphabravocompany/constellation/pkg/audit"
+	"github.com/alphabravocompany/constellation/pkg/group"
 )
 
 // WAF rule enforcement was removed (WS-G G1): the /waf/groups CRUD never had
@@ -316,16 +322,186 @@ func resolveSensorMACs(bindings []GroupSensorBinding, groupMembers map[uuid.UUID
 	return out
 }
 
-// FOLLOW-UP (NET-43 wiring, deferred): to make a binding enforce end-to-end,
-// wire resolveSensorMACs into the agent bundle so runtime_dlp / WAF rows carry
-// each sensor's rules scoped to the resolved MACs (the DLP push already honours
-// scope_macs). That needs a server-side workload→MAC map (deployments carry no
-// MAC today; ep_mac is observed on runtime_threats / network_sessions) plus the
-// sensor-authoring REST routes for dlp_sensors / waf_groups. Route to wire when
-// that lands (server.go, left as a comment per task constraints):
+// ResolveSensorMACs is the exported entry point to resolveSensorMACs so the
+// runtime-agent (package main) can reuse the tested resolution core when it maps
+// its locally-tapped pods → bound groups → the MACs each sensor must scope to.
+func ResolveSensorMACs(bindings []GroupSensorBinding, groupMembers map[uuid.UUID][]string, workloadMACs map[string][]string) map[SensorKey][]string {
+	return resolveSensorMACs(bindings, groupMembers, workloadMACs)
+}
+
+// ----- NET-43: bundle delivery of bound group definitions --------------------
 //
-//	// r.Method(http.MethodPost, "/api/v1/runtime/groups/{id}/dpi-sensors", bindingsHTTP.Bind)   // manage-policies
-//	// r.Method(http.MethodDelete, "/api/v1/runtime/dpi-sensor-bindings/{id}", bindingsHTTP.Unbind) // manage-policies
+// The agent resolves bindings against its LOCAL pods (deployments carry no MAC
+// server-side; only the agent knows a pod's MAC + labels), so the bundle ships
+// each bound group's SELECTOR (namespace + label criteria) alongside the
+// bindings. The agent matches its tapped pods against those selectors (pkg/group
+// Group.Matches) to derive per-pod group membership, then scopes the DLP/WAF push
+// to the matched pods' MACs.
+
+// BoundGroupDef is one bound group's identity + selector, delivered in the agent
+// bundle so the agent can match local pods to the group without a server-side
+// workload→MAC map. Criteria are the group's raw selector rows ([{key,value,op}]).
+type BoundGroupDef struct {
+	ID       uuid.UUID         `json:"id"`
+	Name     string            `json:"name"`
+	Criteria []group.Criterion `json:"criteria"`
+}
+
+// BoundGroupDefs loads the selector of every group that has at least one
+// group_dpi_sensor_binding in the org. Only bound groups are returned — an
+// unbound group's selector is irrelevant to the DPI push.
+func (s *GroupSensorBindingStore) BoundGroupDefs(ctx context.Context, orgID uuid.UUID) ([]BoundGroupDef, error) {
+	rows, err := s.db.Pool().Query(ctx, `
+SELECT g.id, g.name, COALESCE(g.criteria,'[]'::jsonb)
+  FROM groups g
+ WHERE g.org_id = $1
+   AND EXISTS (SELECT 1 FROM group_dpi_sensor_bindings b WHERE b.group_id = g.id AND b.org_id = $1)`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []BoundGroupDef
+	for rows.Next() {
+		var d BoundGroupDef
+		var criteria []byte
+		if err := rows.Scan(&d.ID, &d.Name, &criteria); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal(criteria, &d.Criteria)
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// ----- NET-43: group→sensor binding HTTP surface -----------------------------
+
+// GroupSensorBindingsHTTP wraps the binding store with org-scoped, audited HTTP
+// handlers. Bind/Unbind write hash-chained audit rows exactly like the DLP-rule
+// CRUD; List is a plain read.
+type GroupSensorBindingsHTTP struct {
+	store    *GroupSensorBindingStore
+	auditLog *audit.Logger
+}
+
+// NewGroupSensorBindingsHTTP builds the HTTP surface. auditLog may be nil in tests.
+func NewGroupSensorBindingsHTTP(d *db.DB, auditLog *audit.Logger) *GroupSensorBindingsHTTP {
+	return &GroupSensorBindingsHTTP{store: NewGroupSensorBindingStore(d), auditLog: auditLog}
+}
+
+// bindActionCreate / bindActionDelete are the audit action codes for the two
+// mutations, mirroring the runtime.* namespace pkg/audit already uses.
+const (
+	bindActionCreate = "runtime.dpi_sensor_binding.create"
+	bindActionDelete = "runtime.dpi_sensor_binding.delete"
+)
+
+// BindRequest is the POST body: attach sensor SensorID (kind SensorKind) to GroupID.
+type BindRequest struct {
+	GroupID    uuid.UUID  `json:"group_id"`
+	SensorKind SensorKind `json:"sensor_kind"`
+	SensorID   uuid.UUID  `json:"sensor_id"`
+}
+
+// Bind handles POST /runtime/dpi-sensor-bindings.
+func (h *GroupSensorBindingsHTTP) Bind(w http.ResponseWriter, r *http.Request) {
+	sub, ok := authctx.SubjectFrom(r.Context())
+	if !ok {
+		jsonError(w, http.StatusUnauthorized, "auth required")
+		return
+	}
+	var req BindRequest
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, http.StatusBadRequest, "invalid body: "+err.Error())
+		return
+	}
+	if req.GroupID == uuid.Nil {
+		jsonError(w, http.StatusBadRequest, "group_id is required")
+		return
+	}
+	if req.SensorID == uuid.Nil {
+		jsonError(w, http.StatusBadRequest, "sensor_id is required")
+		return
+	}
+	if !req.SensorKind.Valid() {
+		jsonError(w, http.StatusBadRequest, "sensor_kind must be 'dlp' or 'waf'")
+		return
+	}
+	id, err := h.store.Bind(r.Context(), sub.OrgID, req.GroupID, req.SensorKind, req.SensorID, &sub.UserID)
+	if err != nil {
+		// A group_id that isn't in this org trips the FK; surface it as a 400
+		// rather than a 500 so the caller can correct it.
+		if strings.Contains(err.Error(), "foreign key") || strings.Contains(err.Error(), "violates") {
+			jsonError(w, http.StatusBadRequest, "group not found")
+			return
+		}
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	binding := GroupSensorBinding{
+		ID: id, OrgID: sub.OrgID, GroupID: req.GroupID,
+		Kind: req.SensorKind, SensorID: req.SensorID,
+	}
+	if h.auditLog != nil {
+		_, _, _ = h.auditLog.Log(r.Context(), audit.Event{
+			OrgID: &sub.OrgID, ActorID: &sub.UserID,
+			Action: bindActionCreate, TargetKind: "dpi_sensor_binding", TargetID: id.String(),
+			After: binding, RequestID: requestIDFrom(r),
+		})
+	}
+	httpx.WriteJSON(w, http.StatusCreated, binding)
+}
+
+// List handles GET /runtime/dpi-sensor-bindings — every binding in the org.
+func (h *GroupSensorBindingsHTTP) List(w http.ResponseWriter, r *http.Request) {
+	sub, ok := authctx.SubjectFrom(r.Context())
+	if !ok {
+		jsonError(w, http.StatusUnauthorized, "auth required")
+		return
+	}
+	rows, err := h.store.ListForOrg(r.Context(), sub.OrgID)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"bindings": rows})
+}
+
+// Unbind handles DELETE /runtime/dpi-sensor-bindings/{id}.
+func (h *GroupSensorBindingsHTTP) Unbind(w http.ResponseWriter, r *http.Request) {
+	sub, ok := authctx.SubjectFrom(r.Context())
+	if !ok {
+		jsonError(w, http.StatusUnauthorized, "auth required")
+		return
+	}
+	id, err := uuid.Parse(pathTail(r.URL.Path))
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	if err := h.store.Unbind(r.Context(), sub.OrgID, id); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if h.auditLog != nil {
+		_, _, _ = h.auditLog.Log(r.Context(), audit.Event{
+			OrgID: &sub.OrgID, ActorID: &sub.UserID,
+			Action: bindActionDelete, TargetKind: "dpi_sensor_binding", TargetID: id.String(),
+			RequestID: requestIDFrom(r),
+		})
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"deleted": id})
+}
+
+// ROUTES TO WIRE (internal/server/server.go — left as a comment per task
+// constraints). Bindings mutate DPI scope, so create/delete take VerbManagePolicies
+// and the read takes VerbReadFindings. Register alongside the other /runtime
+// user-RBAC routes (the JWT group near /runtime-dlp-rules):
+//
+//	bindingsHTTP := runtime.NewGroupSensorBindingsHTTP(s.db, s.auditLog)
+//	r.Post("/runtime/dpi-sensor-bindings", s.requireVerb(rbac.VerbManagePolicies, bindingsHTTP.Bind))
+//	r.Get("/runtime/dpi-sensor-bindings", s.requireVerb(rbac.VerbReadFindings, bindingsHTTP.List))
+//	r.Delete("/runtime/dpi-sensor-bindings/{id}", s.requireVerb(rbac.VerbManagePolicies, bindingsHTTP.Unbind))
 
 // DLP sensors CRUD (the /dlp/sensors REST surface + ConstellationDLPSensor CRD)
 // was removed following the WS-G G1 precedent: like the deleted /waf/groups CRUD,

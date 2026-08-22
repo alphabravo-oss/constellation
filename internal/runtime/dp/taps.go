@@ -58,6 +58,26 @@ type TapTarget struct {
 	// enforceManager) so a veth is never both mirrored and NFQUEUE'd. Set by the
 	// lister only under the agent enforce gate + pod opt-in (default false).
 	Enforce bool
+
+	// Namespace / PodName / Labels are the tapped pod's Kubernetes identity,
+	// carried so the DLP/WAF sync worker can match this local pod against
+	// group→sensor bindings (NET-43): groups are namespace + label selectors, and
+	// the agent is the only place that knows a MAC's pod labels. Populated by the
+	// ContainerTapProvider; empty for the env/veth providers (which have no pod
+	// identity), leaving those MACs eligible only for the label opt-in path.
+	Namespace string
+	PodName   string
+	Labels    map[string]string
+}
+
+// PodTapMeta is the pod identity of one actively-tapped MAC, exposed so the
+// DLP/WAF sync worker can resolve group→sensor bindings (NET-43) against the
+// pods this agent actually taps. MAC is the tap EPMAC (dp's workload handle).
+type PodTapMeta struct {
+	MAC       string
+	Namespace string
+	PodName   string
+	Labels    map[string]string
 }
 
 // key returns the dedup key dp uses internally (netns+iface), so the
@@ -339,6 +359,29 @@ func (m *tapManager) dpiScopeMACs() (wafMACs, dlpMACs map[string]bool) {
 		}
 	}
 	return wafMACs, dlpMACs
+}
+
+// podMeta returns the pod identity (namespace, name, labels) of every
+// actively-tapped MAC that carries one. Only ContainerTapProvider populates
+// pod identity, so env/veth-provider MACs are omitted (they can't be matched to
+// a group selector). Used by the DLP/WAF sync worker to resolve group→sensor
+// bindings (NET-43) against the pods this agent taps.
+func (m *tapManager) podMeta() []PodTapMeta {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]PodTapMeta, 0, len(m.current))
+	for _, t := range m.current {
+		if t.EPMAC == "" || (t.Namespace == "" && t.PodName == "" && len(t.Labels) == 0) {
+			continue
+		}
+		out = append(out, PodTapMeta{
+			MAC:       t.EPMAC,
+			Namespace: t.Namespace,
+			PodName:   t.PodName,
+			Labels:    t.Labels,
+		})
+	}
+	return out
 }
 
 // teardown removes every current tap. Best-effort, errors swallowed —

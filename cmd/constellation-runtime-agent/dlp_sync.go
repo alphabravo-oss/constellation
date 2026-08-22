@@ -33,8 +33,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/alphabravocompany/constellation/internal/handler/runtime"
 	"github.com/alphabravocompany/constellation/internal/runtime/dp"
+	"github.com/alphabravocompany/constellation/pkg/group"
 )
 
 // DLPSyncConfig — knobs for the worker.
@@ -80,6 +83,19 @@ type dlpRuleWire struct {
 
 type dlpListResponse struct {
 	Rules []dlpRuleWire `json:"rules"`
+	// NET-43: group→sensor bindings + each bound group's selector, delivered so
+	// the agent can scope the DLP/WAF push to a bound group's member pods. Older
+	// servers omit both → nil → no group-scoped DPI (the label opt-in still works).
+	Bindings []runtime.GroupSensorBinding `json:"dpi_group_bindings"`
+	Groups   []runtime.BoundGroupDef      `json:"dpi_groups"`
+}
+
+// dlpBundle is the parsed agent bundle: the authoritative rule set plus the
+// NET-43 group→sensor binding metadata the agent resolves locally.
+type dlpBundle struct {
+	rules    []dlpRuleWire
+	bindings []runtime.GroupSensorBinding
+	groups   []runtime.BoundGroupDef
 }
 
 // DLPSyncWorker periodically pulls runtime_dlp_rules and pushes diffs to
@@ -204,12 +220,13 @@ func (w *DLPSyncWorker) SyncOnce(ctx context.Context) {
 	if skip {
 		return
 	}
-	rules, err := w.fetch(ctx)
+	bundle, err := w.fetch(ctx)
 	if err != nil {
 		w.errors.Add(1)
 		w.cfg.Logger.Warn("dlp sync: fetch failed", slog.String("err", err.Error()))
 		return
 	}
+	rules := bundle.rules
 	macs := w.cfg.DPSup.TapMACs()
 	// Inline-only enforce workloads are skipped by the tap reconciler, so their
 	// veths never appear in TapMACs(); their per-workload DPI opt-in rides the
@@ -239,6 +256,22 @@ func (w *DLPSyncWorker) SyncOnce(ctx context.Context) {
 	}
 	if dlpOpt == nil {
 		dlpOpt = map[string]bool{}
+	}
+
+	// NET-43: group→sensor bindings. Match this node's tapped pods against each
+	// bound group's selector and opt the matched pods' MACs into WAF/DLP by sensor
+	// kind. Additive to the pod-label opt-in above — a workload can be scoped by
+	// label OR by group binding. Folded into wafOpt/dlpOpt so it flows through the
+	// change signature (a pod entering/leaving a bound group re-pushes) and the
+	// enforce union below, exactly like the label opt-in.
+	if len(bundle.bindings) > 0 && len(bundle.groups) > 0 {
+		gWaf, gDlp := groupBindingScopeMACs(bundle.bindings, bundle.groups, w.cfg.DPSup.TapPodMeta(), w.cfg.ClusterID)
+		for m := range gWaf {
+			wafOpt[m] = true
+		}
+		for m := range gDlp {
+			dlpOpt[m] = true
+		}
 	}
 
 	// Bind DPI to the inline enforce (NFQUEUE) datapath so ENFORCE can actually
@@ -568,27 +601,86 @@ func dlpSyncSignature(rules []dlpRuleWire, tapMACs []string, enforceEnabled bool
 	return strings.Join(parts, "|")
 }
 
-// fetch issues the GET. Returns parsed rules slice.
-func (w *DLPSyncWorker) fetch(ctx context.Context) ([]dlpRuleWire, error) {
+// fetch issues the GET. Returns the parsed bundle (rules + NET-43 binding
+// metadata).
+func (w *DLPSyncWorker) fetch(ctx context.Context) (dlpBundle, error) {
 	url := strings.TrimRight(w.cfg.APIBaseURL, "/") + "/api/v1/runtime/dlp-rules:bundle?cluster_id=" + w.cfg.ClusterID
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		return nil, err
+		return dlpBundle{}, err
 	}
 	req.Header.Set("Authorization", "Bearer "+w.cfg.Token)
 	resp, err := w.cfg.HTTPClient.Do(req)
 	if err != nil {
-		return nil, err
+		return dlpBundle{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("server %d", resp.StatusCode)
+		return dlpBundle{}, fmt.Errorf("server %d", resp.StatusCode)
 	}
 	var out dlpListResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, fmt.Errorf("decode: %w", err)
+		return dlpBundle{}, fmt.Errorf("decode: %w", err)
 	}
-	return out.Rules, nil
+	return dlpBundle{rules: out.Rules, bindings: out.Bindings, groups: out.Groups}, nil
+}
+
+// groupBindingScopeMACs resolves NET-43 group→sensor bindings against the pods
+// this agent taps, returning the WAF-opted and DLP-opted MAC sets the bindings
+// contribute. A tapped pod matches a bound group when it satisfies the group's
+// selector (pkg/group Group.Matches on namespace + labels + cluster); its MAC
+// then joins the sensor's opt-in set by kind. Membership + MACs are fed through
+// the tested runtime.ResolveSensorMACs core so binding logic stays in one place.
+//
+// The workload key is the pod's namespace/name — an opaque, per-pod-unique id
+// that only has to agree between the membership map and the MAC map, which it
+// does here (both are built from the same local pod list).
+func groupBindingScopeMACs(bindings []runtime.GroupSensorBinding, groups []runtime.BoundGroupDef, pods []dp.PodTapMeta, cluster string) (wafMACs, dlpMACs map[string]bool) {
+	wafMACs = map[string]bool{}
+	dlpMACs = map[string]bool{}
+	if len(bindings) == 0 || len(groups) == 0 || len(pods) == 0 {
+		return wafMACs, dlpMACs
+	}
+	groupMembers := map[uuid.UUID][]string{}
+	workloadMACs := map[string][]string{}
+	for _, def := range groups {
+		g := group.Group{Name: def.Name, Criteria: def.Criteria}
+		for _, p := range pods {
+			wl := group.Workload{
+				ID:        podWorkloadKey(p),
+				Cluster:   cluster,
+				Namespace: p.Namespace,
+				Labels:    p.Labels,
+			}
+			if !g.Matches(&wl) {
+				continue
+			}
+			groupMembers[def.ID] = append(groupMembers[def.ID], wl.ID)
+			workloadMACs[wl.ID] = append(workloadMACs[wl.ID], p.MAC)
+		}
+	}
+	resolved := runtime.ResolveSensorMACs(bindings, groupMembers, workloadMACs)
+	for key, macs := range resolved {
+		for _, m := range macs {
+			switch key.Kind {
+			case runtime.SensorKindWAF:
+				wafMACs[m] = true
+			case runtime.SensorKindDLP:
+				dlpMACs[m] = true
+			}
+		}
+	}
+	return wafMACs, dlpMACs
+}
+
+// podWorkloadKey is a per-pod-unique id for the membership/MAC maps: namespace/name
+// when available, else the MAC (always unique). It never has to line up with the
+// server's deployment-level workload ids — it only keys agent-local resolution.
+func podWorkloadKey(p dp.PodTapMeta) string {
+	if p.PodName != "" {
+		return p.Namespace + "/" + p.PodName
+	}
+	return p.MAC
 }
 
 // DLPSyncStats — telemetry exposed via /metrics.

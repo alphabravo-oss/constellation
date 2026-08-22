@@ -222,6 +222,17 @@ func (s *Supervisor) DPIScopeMACs() (wafMACs, dlpMACs map[string]bool) {
 	return s.taps.dpiScopeMACs()
 }
 
+// TapPodMeta returns the pod identity (namespace, name, labels) of every MAC the
+// agent currently taps that carries one. The DLP/WAF sync worker uses it to match
+// local pods against group→sensor bindings (NET-43) — the agent is the only place
+// that knows a MAC's pod labels. Nil before the tap manager has started.
+func (s *Supervisor) TapPodMeta() []PodTapMeta {
+	if s == nil || s.taps == nil {
+		return nil
+	}
+	return s.taps.podMeta()
+}
+
 // EnforceDPIScopeMACs returns the inline NFQUEUE enforce-mode ep MACs opted into
 // WAF and into DLP respectively (the verdict-capable datapath), the enforce-path
 // analogue of DPIScopeMACs's tap MACs. The DLP/WAF sync worker unions these into

@@ -505,7 +505,31 @@ func (h *RuntimeDLPHTTP) AgentBundle(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"rules": rows})
+	// NET-43: also deliver the org's group→sensor bindings and each bound group's
+	// SELECTOR so the agent can scope the DLP/WAF push to a bound group's member
+	// pods. The agent matches its LOCAL pods (namespace + labels) against these
+	// selectors — deployments carry no MAC server-side, so resolution has to
+	// happen where a MAC's pod labels are known (the agent). Best-effort: a load
+	// error must not deny the (authoritative) rule bundle, so we log-and-continue
+	// with empty binding metadata rather than 500 the whole poll.
+	bindingStore := NewGroupSensorBindingStore(h.store.db)
+	bindings, berr := bindingStore.ListForOrg(r.Context(), tok.OrgID)
+	if berr != nil {
+		slog.Default().Warn("dlp bundle: load group bindings failed",
+			slog.String("org", tok.OrgID.String()), slog.String("err", berr.Error()))
+		bindings = nil
+	}
+	groupDefs, gerr := bindingStore.BoundGroupDefs(r.Context(), tok.OrgID)
+	if gerr != nil {
+		slog.Default().Warn("dlp bundle: load bound group defs failed",
+			slog.String("org", tok.OrgID.String()), slog.String("err", gerr.Error()))
+		groupDefs = nil
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"rules":              rows,
+		"dpi_group_bindings": bindings,
+		"dpi_groups":         groupDefs,
+	})
 }
 
 func (h *RuntimeDLPHTTP) Get(w http.ResponseWriter, r *http.Request) {

@@ -1466,6 +1466,10 @@ func crictlContainerLister(enforceActive bool) dp.ContainerLister {
 			out = append(out, dp.RunningContainer{
 				ID: c.ID, PodName: c.PodName, PID: c.PID,
 				WAF: waf, DLP: dlp,
+				// Pod identity for group→sensor binding resolution (NET-43): the
+				// namespace + user labels the group selectors match on.
+				Namespace: c.PodNS,
+				Labels:    c.PodLabels,
 				// Inline enforcement activates ONLY under the agent gate
 				// (enforceActive = CONSTELLATION_DP_ENFORCE + NFQUEUE-safe CNI);
 				// the pod's enforce label alone is inert. This keeps the Enforce

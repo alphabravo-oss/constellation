@@ -23,6 +23,12 @@ type RunningContainer struct {
 	ID      string
 	PodName string
 	PID     int
+	// Namespace + Labels are the pod's Kubernetes identity (namespace + user
+	// labels from the sandbox), carried so the tap it produces can be matched
+	// against group→sensor bindings (NET-43). Empty when the lister can't read
+	// them; the workload then falls back to the label DPI opt-in only.
+	Namespace string
+	Labels    map[string]string
 	// WAF/DLP are the per-workload DPI opt-in decisions (derived from pod labels
 	// by the lister). Default false — DPI binds only to opted-in workloads.
 	WAF bool
@@ -163,6 +169,13 @@ func (p *ContainerTapProvider) Desired(ctx context.Context) ([]TapTarget, error)
 			WAF:     c.WAF,
 			DLP:     c.DLP,
 			Enforce: c.Enforce,
+			// Pod identity for group→sensor binding resolution (NET-43). Carried
+			// only on the eth0 tap (the pod's workload MAC); the lo/proxymesh tap
+			// below keeps no identity — it shares the pod but is keyed by a
+			// synthetic MAC dp uses only for loopback attribution.
+			Namespace: c.Namespace,
+			PodName:   c.PodName,
+			Labels:    c.Labels,
 			// Pod IPs, carried so the enforce (NFQUEUE) provider can hand them to
 			// dp via AddMAC: on the inline path dp needs ep->pips to determine
 			// packet direction (faked L2 mac) -> L7 recruit -> DLP/WAF. Unused by

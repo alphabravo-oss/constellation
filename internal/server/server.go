@@ -736,6 +736,12 @@ func (s *Server) buildRouter() chi.Router {
 			r.Post("/runtime-dlp-rules/{id}/demote", s.requireVerb(rbac.VerbManagePolicies, rtDLP.Demote))
 			r.Post("/runtime-dlp-rules/{id}/disable", s.requireVerb(rbac.VerbManagePolicies, rtDLP.Disable))
 			r.Delete("/runtime-dlp-rules/{id}", s.requireVerb(rbac.VerbManagePolicies, rtDLP.Delete))
+			// NET-43: group→sensor DPI bindings — bind a DLP/WAF detector to a group so its
+			// member workloads inherit DPI (agent resolves pods→MACs from the group selector).
+			bindingsHTTP := runtime.NewGroupSensorBindingsHTTP(s.db, s.auditLog)
+			r.Get("/runtime/dpi-sensor-bindings", s.requireVerb(rbac.VerbReadFindings, bindingsHTTP.List))
+			r.Post("/runtime/dpi-sensor-bindings", s.requireVerb(rbac.VerbManagePolicies, bindingsHTTP.Bind))
+			r.Delete("/runtime/dpi-sensor-bindings/{id}", s.requireVerb(rbac.VerbManagePolicies, bindingsHTTP.Unbind))
 
 			// Wave D4: custom DPI signatures. Same backing table as DLP
 			// rules but filtered/stamped to category='signature'. Distinct
