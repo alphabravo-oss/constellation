@@ -42,6 +42,44 @@ func recordFedBaseline(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID,
 	handler.LogFedRevision(ctx, pool, orgID, handler.FedKindHostProcessProfile, row.WorkloadID, row)
 }
 
+// recordFedDLPRule authors (or tombstones) a federated DLP/WAF rule on a master
+// mutation. Best-effort and a no-op unless the org is in the master federation
+// state — LogFedRevision guards on that. Keyed by the rule id so the joint can
+// replace/drop exactly this row. A disabled rule is tombstoned rather than
+// authored, so the fed template mirrors the enabled-only cluster bundle
+// (ListForCluster excludes mode='disabled').
+func recordFedDLPRule(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, row *DLPRule) {
+	if row == nil {
+		return
+	}
+	if row.Mode == DLPModeDisabled {
+		recordFedDLPRuleDelete(ctx, pool, orgID, row.ID)
+		return
+	}
+	handler.LogFedRevision(ctx, pool, orgID, handler.FedKindRuntimeDLP, row.ID.String(), row)
+}
+
+// recordFedDLPRuleDelete tombstones a federated DLP/WAF rule on a master delete.
+func recordFedDLPRuleDelete(ctx context.Context, pool *pgxpool.Pool, orgID, ruleID uuid.UUID) {
+	handler.LogFedRevision(ctx, pool, orgID, handler.FedKindRuntimeDLP+"_delete",
+		ruleID.String(), map[string]string{"id": ruleID.String()})
+}
+
+// appendFedDLPRows decodes each replicated fed payload into a DLP rule and
+// appends it to the cluster-scoped rows an agent already receives. Malformed
+// payloads are skipped so one bad fed row can never break a bundle. Pure — unit
+// tested without a DB.
+func appendFedDLPRows(rows []*DLPRule, payloads [][]byte) []*DLPRule {
+	for _, raw := range payloads {
+		var r DLPRule
+		if err := json.Unmarshal(raw, &r); err != nil {
+			continue
+		}
+		rows = append(rows, &r)
+	}
+	return rows
+}
+
 // fetchFedRuntimeProfilePayloads returns every replicated fed row payload for the
 // given org and kind, oldest-key first for a stable bundle order. On a master or
 // standalone controller the table is empty, so this is a no-op there.

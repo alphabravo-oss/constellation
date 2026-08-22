@@ -10,6 +10,7 @@ func TestFedProfileKind(t *testing.T) {
 	profile := []string{
 		"file_profile", "file_profile_delete",
 		"host_process_profile", "host_process_profile_delete",
+		"runtime_dlp", "runtime_dlp_delete",
 	}
 	for _, k := range profile {
 		if !fedProfileKind(k) {
@@ -31,7 +32,7 @@ func TestFedProfileKind(t *testing.T) {
 
 	// The exported author-side constants must stay aligned with the kinds the
 	// joint-side apply switch recognizes.
-	for _, k := range []string{FedKindFileProfile, FedKindHostProcessProfile} {
+	for _, k := range []string{FedKindFileProfile, FedKindHostProcessProfile, FedKindRuntimeDLP} {
 		if !fedProfileKind(k) {
 			t.Errorf("exported kind %q not recognized by fedProfileKind", k)
 		}

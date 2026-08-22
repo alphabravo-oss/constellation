@@ -103,6 +103,14 @@ var errFedReadOnly = errors.New("rule is federated (read-only); change it on the
 const (
 	fedKindFileProfile        = "file_profile"
 	fedKindHostProcessProfile = "host_process_profile"
+	// fedKindRuntimeDLP federates user-authored DLP + WAF rules (both live in
+	// runtime_dlp_rules, distinguished by category). Like the other two runtime
+	// kinds it exposes a runtime-agent pull bundle (runtime-dlp-rules:bundle) and
+	// its live table is per-cluster STATE keyed by a NOT NULL cluster_id, so a
+	// joint has no cluster to bind a master row to — it lands in the generic
+	// fed_runtime_profiles table as a fleet-wide template and the joint's DLP
+	// bundle merges it read-only across every cluster.
+	fedKindRuntimeDLP = "runtime_dlp"
 )
 
 // fedProfileKind reports whether kind is one of the P2-3 runtime-profile kinds
@@ -111,7 +119,8 @@ const (
 func fedProfileKind(kind string) bool {
 	switch kind {
 	case fedKindFileProfile, fedKindFileProfile + "_delete",
-		fedKindHostProcessProfile, fedKindHostProcessProfile + "_delete":
+		fedKindHostProcessProfile, fedKindHostProcessProfile + "_delete",
+		fedKindRuntimeDLP, fedKindRuntimeDLP + "_delete":
 		return true
 	default:
 		return false
@@ -421,7 +430,7 @@ ON CONFLICT (org_id, rule_id) DO UPDATE SET
 		_, err := pool.Exec(ctx,
 			`DELETE FROM response_rule_overrides WHERE org_id=$1 AND rule_id=$2 AND cfg_type='fed'`, orgID, p.ID)
 		return err
-	case fedKindFileProfile, fedKindHostProcessProfile:
+	case fedKindFileProfile, fedKindHostProcessProfile, fedKindRuntimeDLP:
 		// P2-3 runtime profiles: file-monitor and host-process profiles federate as
 		// fleet-wide templates. The master ships the agent-bundle row verbatim; the
 		// joint stores it opaquely in the generic fed_runtime_profiles table keyed by
@@ -439,7 +448,7 @@ ON CONFLICT (org_id, rule_kind, rule_key) DO UPDATE SET
     payload=EXCLUDED.payload, cfg_type='fed', updated_at=NOW()`,
 			orgID, rev.Kind, rev.RuleID, []byte(payload))
 		return err
-	case fedKindFileProfile + "_delete", fedKindHostProcessProfile + "_delete":
+	case fedKindFileProfile + "_delete", fedKindHostProcessProfile + "_delete", fedKindRuntimeDLP + "_delete":
 		// Tombstone: the master removed this runtime profile. Drop the joint's fed
 		// copy. The `_delete` suffix is trimmed to recover the base rule_kind the
 		// live row was stored under. Scoped to cfg_type='fed'.
@@ -521,6 +530,10 @@ func LogFedRevision(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, ki
 const (
 	FedKindFileProfile        = fedKindFileProfile
 	FedKindHostProcessProfile = fedKindHostProcessProfile
+	// FedKindRuntimeDLP is the revision kind the runtime-DLP handler authors on a
+	// master mutation (and FedKindRuntimeDLP+"_delete" on removal), and that the
+	// DLP agent-bundle serving path reads back via fetchFedRuntimeProfilePayloads.
+	FedKindRuntimeDLP = fedKindRuntimeDLP
 )
 
 // PurgeFedRows deletes every master-authored (cfg_type='fed') row this org
