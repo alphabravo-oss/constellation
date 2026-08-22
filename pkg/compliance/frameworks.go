@@ -6,7 +6,7 @@
 //
 //	CIS Kubernetes (1.9), CIS Docker, NIST 800-53 rev5, NIST 800-190,
 //	NSA-CISA K8s Hardening, PCI-DSS 4.0, HIPAA, SOC 2, STIG, FedRAMP Moderate,
-//	NIS2 (EU), DORA (EU finance), ISO 27001/27017/27018, CSA CCM.
+//	NIS2 (EU), DORA (EU finance), ISO 27001/27017/27018, CSA CCM, GDPR (EU Art. 32).
 //
 // Each framework lists its control IDs and provides a Mapping table from internal check
 // IDs to control IDs. The same internal check often maps to multiple frameworks (e.g.,
@@ -35,6 +35,7 @@ const (
 	FrameworkISO27017   = "iso-27017"
 	FrameworkISO27018   = "iso-27018"
 	FrameworkCSACCM     = "csa-ccm"
+	FrameworkGDPR       = "gdpr-eu"
 )
 
 // AllFrameworks returns the canonical framework list for the /compliance/frameworks
@@ -58,6 +59,7 @@ func AllFrameworks() []Framework {
 		{ID: FrameworkISO27017, Name: "ISO 27017 (Cloud)", Category: "international"},
 		{ID: FrameworkISO27018, Name: "ISO 27018 (Cloud PII)", Category: "international"},
 		{ID: FrameworkCSACCM, Name: "CSA Cloud Controls Matrix", Category: "cloud"},
+		{ID: FrameworkGDPR, Name: "GDPR (EU) — Art. 32 Security of Processing", Category: "regulatory-eu"},
 	}
 }
 
@@ -102,6 +104,7 @@ var CoreMappings = []Mapping{
 			FrameworkCISK8s:    "1.2.22",
 			FrameworkNSACISA:   "Logging.AuditLog",
 			FrameworkNIST80053: "AU-2",
+			FrameworkGDPR:      "Art.32",
 			FrameworkPCIDSS4:   "10.2",
 			FrameworkSOC2:      "CC7.2",
 			FrameworkFedRAMP:   "AU-2",
@@ -116,6 +119,7 @@ var CoreMappings = []Mapping{
 			FrameworkCISK8s:    "1.2.1",
 			FrameworkNSACISA:   "Authentication.AnonymousDisabled",
 			FrameworkNIST80053: "AC-3",
+			FrameworkGDPR:      "Art.32",
 			FrameworkPCIDSS4:   "8.2",
 			FrameworkFedRAMP:   "AC-3",
 		},
@@ -160,6 +164,7 @@ var CoreMappings = []Mapping{
 		Controls: map[string]string{
 			FrameworkCISK8s:    "1.2.31",
 			FrameworkNIST80053: "SC-28",
+			FrameworkGDPR:      "Art.32",
 			FrameworkPCIDSS4:   "3.4",
 			FrameworkHIPAA:     "§164.312(a)(2)(iv)",
 			FrameworkSOC2:      "CC6.7",
@@ -175,6 +180,7 @@ var CoreMappings = []Mapping{
 			FrameworkCISK8s:    "5.1.3",
 			FrameworkNSACISA:   "Authorization.LeastPrivilege",
 			FrameworkNIST80053: "AC-6",
+			FrameworkGDPR:      "Art.32",
 			FrameworkPCIDSS4:   "7.1",
 		},
 	},
@@ -209,6 +215,7 @@ var CoreMappings = []Mapping{
 			FrameworkNIST800190: "4.2.4",
 			FrameworkNSACISA:    "SupplyChain.Secrets",
 			FrameworkNIST80053:  "SI-7",
+			FrameworkGDPR:       "Art.32",
 			FrameworkPCIDSS4:    "6.2.4",
 			FrameworkSOC2:       "CC6.1",
 			FrameworkFedRAMP:    "SI-7",
@@ -223,6 +230,7 @@ var CoreMappings = []Mapping{
 			FrameworkNIST800190: "4.2.4",
 			FrameworkNSACISA:    "SupplyChain.Hardening",
 			FrameworkNIST80053:  "CM-7",
+			FrameworkGDPR:       "Art.32",
 			FrameworkPCIDSS4:    "2.2.5",
 			FrameworkSOC2:       "CC6.8",
 			FrameworkFedRAMP:    "CM-7",
@@ -247,6 +255,7 @@ var CoreMappings = []Mapping{
 		Controls: map[string]string{
 			FrameworkCISLinux:  "1.1.1.1",
 			FrameworkNIST80053: "CM-7",
+			FrameworkGDPR:      "Art.32",
 			FrameworkPCIDSS4:   "2.2.5",
 		},
 	},
@@ -257,6 +266,7 @@ var CoreMappings = []Mapping{
 		Controls: map[string]string{
 			FrameworkCISLinux:  "1.1.1.2",
 			FrameworkNIST80053: "CM-7",
+			FrameworkGDPR:      "Art.32",
 			FrameworkPCIDSS4:   "2.2.5",
 		},
 	},
@@ -267,6 +277,7 @@ var CoreMappings = []Mapping{
 		Controls: map[string]string{
 			FrameworkCISLinux:  "3.2.1",
 			FrameworkNIST80053: "SC-7",
+			FrameworkGDPR:      "Art.32",
 			FrameworkPCIDSS4:   "1.2.1",
 		},
 	},
@@ -277,6 +288,7 @@ var CoreMappings = []Mapping{
 		Controls: map[string]string{
 			FrameworkCISLinux:  "3.2.2",
 			FrameworkNIST80053: "SC-7",
+			FrameworkGDPR:      "Art.32",
 			FrameworkPCIDSS4:   "1.2.1",
 		},
 	},
@@ -287,6 +299,7 @@ var CoreMappings = []Mapping{
 		Controls: map[string]string{
 			FrameworkCISLinux:  "3.3.1",
 			FrameworkNIST80053: "SC-5",
+			FrameworkGDPR:      "Art.32",
 		},
 	},
 	{
@@ -296,6 +309,7 @@ var CoreMappings = []Mapping{
 		Controls: map[string]string{
 			FrameworkCISLinux:  "5.1.2",
 			FrameworkNIST80053: "AC-6",
+			FrameworkGDPR:      "Art.32",
 			FrameworkPCIDSS4:   "7.2.5",
 		},
 	},
@@ -306,6 +320,7 @@ var CoreMappings = []Mapping{
 		Controls: map[string]string{
 			FrameworkCISLinux:  "5.1.3",
 			FrameworkNIST80053: "AC-6",
+			FrameworkGDPR:      "Art.32",
 			FrameworkPCIDSS4:   "7.2.5",
 		},
 	},
@@ -316,6 +331,7 @@ var CoreMappings = []Mapping{
 		Controls: map[string]string{
 			FrameworkCISLinux:  "5.2.5",
 			FrameworkNIST80053: "AC-2",
+			FrameworkGDPR:      "Art.32",
 			FrameworkPCIDSS4:   "8.2.2",
 		},
 	},
@@ -326,6 +342,7 @@ var CoreMappings = []Mapping{
 		Controls: map[string]string{
 			FrameworkCISLinux:  "5.2.10",
 			FrameworkNIST80053: "IA-5",
+			FrameworkGDPR:      "Art.32",
 			FrameworkPCIDSS4:   "8.3.1",
 		},
 	},
@@ -336,6 +353,7 @@ var CoreMappings = []Mapping{
 		Controls: map[string]string{
 			FrameworkCISLinux:  "6.1.2",
 			FrameworkNIST80053: "AC-6",
+			FrameworkGDPR:      "Art.32",
 		},
 	},
 	{
@@ -346,6 +364,7 @@ var CoreMappings = []Mapping{
 			FrameworkCISK8s:    "1.2.6",
 			FrameworkNSACISA:   "Authentication.KubeletCA",
 			FrameworkNIST80053: "SC-8",
+			FrameworkGDPR:      "Art.32",
 			FrameworkPCIDSS4:   "4.2.1",
 			FrameworkFedRAMP:   "SC-8",
 		},
@@ -367,6 +386,7 @@ var CoreMappings = []Mapping{
 		Controls: map[string]string{
 			FrameworkCISK8s:    "1.2.13",
 			FrameworkNIST80053: "CM-7",
+			FrameworkGDPR:      "Art.32",
 		},
 	},
 	{
@@ -376,6 +396,7 @@ var CoreMappings = []Mapping{
 		Controls: map[string]string{
 			FrameworkCISK8s:    "1.3.2",
 			FrameworkNIST80053: "CM-7",
+			FrameworkGDPR:      "Art.32",
 			FrameworkPCIDSS4:   "2.2.5",
 		},
 	},
@@ -386,6 +407,7 @@ var CoreMappings = []Mapping{
 		Controls: map[string]string{
 			FrameworkCISK8s:    "1.4.1",
 			FrameworkNIST80053: "CM-7",
+			FrameworkGDPR:      "Art.32",
 			FrameworkPCIDSS4:   "2.2.5",
 		},
 	},
@@ -396,6 +418,7 @@ var CoreMappings = []Mapping{
 		Controls: map[string]string{
 			FrameworkCISK8s:    "2.2",
 			FrameworkNIST80053: "IA-2",
+			FrameworkGDPR:      "Art.32",
 			FrameworkPCIDSS4:   "8.2",
 			FrameworkSOC2:      "CC6.1",
 			FrameworkFedRAMP:   "IA-2",
@@ -408,6 +431,7 @@ var CoreMappings = []Mapping{
 		Controls: map[string]string{
 			FrameworkCISK8s:    "2.5",
 			FrameworkNIST80053: "SC-8",
+			FrameworkGDPR:      "Art.32",
 			FrameworkPCIDSS4:   "4.2.1",
 			FrameworkFedRAMP:   "SC-8",
 		},
@@ -420,6 +444,7 @@ var CoreMappings = []Mapping{
 			FrameworkCISK8s:    "5.1.5",
 			FrameworkNSACISA:   "Authorization.LeastPrivilege",
 			FrameworkNIST80053: "AC-6",
+			FrameworkGDPR:      "Art.32",
 			FrameworkPCIDSS4:   "7.1",
 		},
 	},
@@ -431,6 +456,7 @@ var CoreMappings = []Mapping{
 			FrameworkCISK8s:    "5.1.6",
 			FrameworkNSACISA:   "Authorization.LeastPrivilege",
 			FrameworkNIST80053: "AC-6",
+			FrameworkGDPR:      "Art.32",
 		},
 	},
 	{
@@ -495,6 +521,7 @@ var CoreMappings = []Mapping{
 			FrameworkCISK8s:    "5.3.1",
 			FrameworkNSACISA:   "Network.Segmentation",
 			FrameworkNIST80053: "AC-4",
+			FrameworkGDPR:      "Art.32",
 			FrameworkPCIDSS4:   "1.3.1",
 			FrameworkSOC2:      "CC6.6",
 		},
@@ -506,6 +533,7 @@ var CoreMappings = []Mapping{
 		Controls: map[string]string{
 			FrameworkCISK8s:    "5.4.1",
 			FrameworkNIST80053: "SC-28",
+			FrameworkGDPR:      "Art.32",
 			FrameworkPCIDSS4:   "3.4",
 		},
 	},
@@ -517,6 +545,7 @@ var CoreMappings = []Mapping{
 			FrameworkCISK8s:    "5.7.1",
 			FrameworkNSACISA:   "PodSecurity.Namespaces",
 			FrameworkNIST80053: "CM-7",
+			FrameworkGDPR:      "Art.32",
 		},
 	},
 	{
@@ -547,6 +576,7 @@ var CoreMappings = []Mapping{
 			FrameworkCISK8s:    "5.3.2",
 			FrameworkNSACISA:   "Network.Segmentation",
 			FrameworkNIST80053: "AC-4",
+			FrameworkGDPR:      "Art.32",
 			FrameworkPCIDSS4:   "1.3.1",
 			FrameworkSOC2:      "CC6.6",
 		},
@@ -570,6 +600,7 @@ var CoreMappings = []Mapping{
 			FrameworkCSACCM:    "DSP-03",
 			FrameworkISO27017:  "CLD.6.3",
 			FrameworkNIST80053: "CA-7",
+			FrameworkGDPR:      "Art.32",
 			FrameworkSOC2:      "CC7.1",
 		},
 	},
