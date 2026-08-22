@@ -10,6 +10,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Save, Trash2, X } from "lucide-react";
 
 import { useCluster } from "@/hooks/useCluster";
+import { PageHeader } from "@/components/ui/page";
 
 export interface CrudAPI<T extends { id: string }, TBody> {
   list:   (params?: { cluster_id?: string }) => Promise<{ items: T[] }>;
@@ -97,22 +98,22 @@ export function CrudPage<T extends { id: string }, TBody>({
 
   return (
     <div className="space-y-4" data-testid={`${queryKey}-page`} data-cluster-id={clusterId ?? ""}>
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold">{title}</h1>
-          <p className="text-sm text-muted-foreground">{description}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          {headerActions}
-          <button
-            type="button"
-            onClick={openCreate}
-            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
-          >
-            <Plus className="h-3.5 w-3.5" /> New
-          </button>
-        </div>
-      </header>
+      <PageHeader
+        title={title}
+        description={description}
+        actions={
+          <div className="flex items-center gap-2">
+            {headerActions}
+            <button
+              type="button"
+              onClick={openCreate}
+              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
+            >
+              <Plus className="h-3.5 w-3.5" /> New
+            </button>
+          </div>
+        }
+      />
 
       <section className="rounded-lg border border-border bg-card">
         <table className="w-full text-sm">

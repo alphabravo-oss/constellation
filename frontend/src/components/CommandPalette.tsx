@@ -24,6 +24,9 @@ import {
   Settings,
   Clock,
   PackageSearch,
+  Layers,
+  CloudCog,
+  GitBranch,
   ScanSearch,
   ClipboardCheck,
   RadioTower,
@@ -35,7 +38,7 @@ import {
 
 import { useHotkey, HOTKEY_CATALOG } from "@/lib/hotkeys";
 import { useTheme } from "@/contexts/ThemeContext";
-import { findings, assets, imageScanResults, nodes as nodesApi, policies } from "@/api/client";
+import { findings, assets, imageScanResults, nodes as nodesApi, policies, deployments as deploymentsApi, serverlessFunctions, repositoryScans } from "@/api/client";
 import { Kbd } from "@/components/ui/kbd";
 
 const RECENT_KEY = "constellation.cmdk.recent.v1";
@@ -115,6 +118,25 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
     enabled: open,
     staleTime: 60_000,
   });
+  // M6: live-search workloads / serverless / repositories from the palette.
+  const workloadsQ = useQuery({
+    queryKey: ["cmdk-workloads", clusterId],
+    queryFn: () => deploymentsApi.list({ limit: 100, cluster_id: clusterId ?? undefined }),
+    enabled: open && !!clusterId,
+    staleTime: 60_000,
+  });
+  const serverlessQ = useQuery({
+    queryKey: ["cmdk-serverless"],
+    queryFn: () => serverlessFunctions.list({ limit: 100 }),
+    enabled: open,
+    staleTime: 60_000,
+  });
+  const reposQ = useQuery({
+    queryKey: ["cmdk-repos"],
+    queryFn: () => repositoryScans.list({ limit: 100 }),
+    enabled: open,
+    staleTime: 60_000,
+  });
 
   const recent = useMemo(loadRecent, [open]);
 
@@ -141,7 +163,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
         >
           <Dialog.Title className="sr-only">Command palette</Dialog.Title>
           <Dialog.Description className="sr-only">
-            Type to search pages, findings, assets, policies, or run a quick action.
+            Type to search pages, findings, assets, workloads, serverless, repos, or run a quick action.
           </Dialog.Description>
           <Command shouldFilter loop className="flex flex-col">
             <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
@@ -150,7 +172,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
                 ref={inputRef}
                 value={query}
                 onValueChange={setQuery}
-                placeholder="Search pages, findings, CVEs, nodes, assets..."
+                placeholder="Search pages, findings, CVEs, nodes, assets, workloads..."
                 className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/70"
               />
               <Kbd combo="Escape" />
@@ -250,6 +272,38 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
                     <Item key={p.id} icon={<FileText />} onSelect={() => go(resolveHref("/policies"), p.name, p.id)}>
                       <span className="flex-1 truncate">{p.name}</span>
                       <span className="ml-2 text-[10px] text-mono text-muted-foreground">{p.mode}</span>
+                    </Item>
+                  ))}
+                </Group>
+              )}
+
+              {workloadsQ.data?.deployments && workloadsQ.data.deployments.length > 0 && clusterId && (
+                <Group heading="Workloads">
+                  {workloadsQ.data.deployments.slice(0, 6).map((d) => (
+                    <Item key={d.id} icon={<Layers />} onSelect={() => go(`/clusters/${clusterId}/deployments/${d.id}`, d.name, d.id)}>
+                      <span className="flex-1 truncate">{d.name}</span>
+                      <span className="ml-2 text-[10px] text-mono text-muted-foreground">{d.namespace}</span>
+                    </Item>
+                  ))}
+                </Group>
+              )}
+
+              {serverlessQ.data?.serverless_functions && serverlessQ.data.serverless_functions.length > 0 && clusterId && (
+                <Group heading="Serverless">
+                  {serverlessQ.data.serverless_functions.slice(0, 6).map((fn) => (
+                    <Item key={fn.id} icon={<CloudCog />} onSelect={() => go(`/clusters/${clusterId}/serverless/${fn.id}`, fn.function_name || fn.id, fn.id)}>
+                      <span className="flex-1 truncate">{fn.function_name || fn.id}</span>
+                      {fn.provider && <span className="ml-2 text-[10px] text-mono text-muted-foreground">{fn.provider}</span>}
+                    </Item>
+                  ))}
+                </Group>
+              )}
+
+              {reposQ.data?.repository_scans && reposQ.data.repository_scans.length > 0 && clusterId && (
+                <Group heading="Repositories">
+                  {reposQ.data.repository_scans.slice(0, 6).map((rp) => (
+                    <Item key={rp.id} icon={<GitBranch />} onSelect={() => go(`/clusters/${clusterId}/repositories`, rp.repository_ref, rp.id)}>
+                      <span className="flex-1 truncate">{rp.repository_ref}</span>
                     </Item>
                   ))}
                 </Group>

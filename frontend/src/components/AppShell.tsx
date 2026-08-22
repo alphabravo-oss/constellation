@@ -57,7 +57,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { cn } from "@/lib/cn";
 import { CommandPaletteProvider, HotkeysHelp } from "@/components/CommandPalette";
 import { Kbd } from "@/components/ui/kbd";
-import { findings as findingsApi, clusters as clustersApi } from "@/api/client";
+import { findings as findingsApi, clusters as clustersApi, runtimeThreats as runtimeThreatsApi } from "@/api/client";
 import { fmtRelative } from "@/lib/format";
 import { SeverityBadge } from "@/components/ui/severity-badge";
 import { ClusterSwitcher } from "@/components/ClusterSwitcher";
@@ -640,6 +640,14 @@ function NotificationBell({ onNavigate }: { onNavigate: (to: string) => void }) 
     staleTime: 30_000,
     refetchInterval: 60_000,
   });
+  // Runtime threats (DLP/WAF/IPS) so the bell isn't findings-only — surface recent
+  // high-severity runtime detections alongside vuln findings.
+  const rtQ = useQuery({
+    queryKey: ["bell-runtime"],
+    queryFn: () => runtimeThreatsApi.list({ hours: 24, severity_min: 4 }),
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  });
   const items = useMemo(() => {
     const all = q.data?.findings ?? [];
     return all
@@ -647,7 +655,13 @@ function NotificationBell({ onNavigate }: { onNavigate: (to: string) => void }) 
       .sort((a, b) => +new Date(b.last_seen_at) - +new Date(a.last_seen_at))
       .slice(0, 10);
   }, [q.data]);
-  const count = items.length;
+  const rtItems = useMemo(() => {
+    return (rtQ.data ?? [])
+      .slice()
+      .sort((a, b) => +new Date(b.reported_at) - +new Date(a.reported_at))
+      .slice(0, 6);
+  }, [rtQ.data]);
+  const count = items.length + rtItems.length;
 
   return (
     <DropdownMenu.Root>
@@ -672,7 +686,7 @@ function NotificationBell({ onNavigate }: { onNavigate: (to: string) => void }) 
           className="z-50 w-80 rounded-lg border border-border bg-popover shadow-xl overflow-hidden"
         >
           <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-            <h4 className="text-sm font-medium text-foreground">Critical &amp; High</h4>
+            <h4 className="text-sm font-medium text-foreground">Attention needed</h4>
             <button
               type="button"
               onClick={() => onNavigate("/clusters")}
@@ -681,8 +695,29 @@ function NotificationBell({ onNavigate }: { onNavigate: (to: string) => void }) 
               view all
             </button>
           </div>
-          {items.length === 0 && (
-            <div className="px-4 py-6 text-center text-xs text-muted-foreground">All clear. No critical or high findings.</div>
+          {items.length === 0 && rtItems.length === 0 && (
+            <div className="px-4 py-6 text-center text-xs text-muted-foreground">All clear. No high-severity findings or runtime threats.</div>
+          )}
+          {rtItems.length > 0 && (
+            <ul className="max-h-40 overflow-auto border-b border-border">
+              {rtItems.map((t) => (
+                <li key={t.id}>
+                  <button
+                    type="button"
+                    onClick={() => onNavigate(t.cluster_id ? `/clusters/${t.cluster_id}/runtime` : "/clusters")}
+                    className="w-full text-left flex items-start gap-3 px-4 py-3 border-b border-border last:border-0 hover:bg-accent/50 transition-colors"
+                  >
+                    <span className="mt-0.5 rounded bg-[color-mix(in_oklab,var(--color-severity-high)_18%,transparent)] px-1 text-[9px] uppercase text-[color:var(--color-severity-high)]">runtime</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm truncate text-foreground">{t.threat_name || `Threat ${t.threat_id}`}</div>
+                      <div className="text-xs text-muted-foreground font-mono">
+                        {(t.workload_id || t.pod_name || t.namespace || "").toString().slice(0, 28)} · {fmtRelative(t.reported_at)}
+                      </div>
+                    </div>
+                  </button>
+                </li>
+              ))}
+            </ul>
           )}
           <ul className="max-h-80 overflow-auto">
             {items.map((f) => (
