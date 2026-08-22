@@ -572,13 +572,21 @@ SELECT c.id, c.org_id, st.id, c.lease_expires_at,
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	httpx.WriteJSON(w, 200, map[string]any{
+	resp := map[string]any{
 		"id": id, "org_id": orgID, "target_id": targetID, "platform": platform,
 		"target_type": targetType, "target_ref": targetRef, "target_cluster_id": targetClusterID,
 		"source_type": sourceType, "source_ref": sourceRef, "image_digest": imageDigest, "inventory_hash": inventoryHash,
 		"evidence_id": evidenceID, "lease_expires_at": leaseExpiresAt,
 		"attempt_count": attemptCount, "max_attempts": maxAttempts,
-	})
+	}
+	// SIG-ROOTS-38: ride this org's DB-managed sigstore roots-of-trust on the job envelope so the
+	// scanner (which has no DB pool) can union them onto its static --signature-roots for THIS job
+	// only. Marshals to the same RootOfTrust wire shape the scanner parses for --signature-roots.
+	// Best-effort: a lookup error must not fail the claim, and only non-empty root sets are sent.
+	if sigRoots, err := handler.RootsForOrg(r.Context(), h.db.Pool(), token.OrgID); err == nil && len(sigRoots) > 0 {
+		resp["signature_roots"] = sigRoots
+	}
+	httpx.WriteJSON(w, 200, resp)
 }
 
 // RenewLease extends the lease for a running job owned by this scanner instance.

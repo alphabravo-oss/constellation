@@ -350,6 +350,10 @@ type scanJob struct {
 	LeaseExpiresAt  string  `json:"lease_expires_at,omitempty"`
 	AttemptCount    int     `json:"attempt_count,omitempty"`
 	MaxAttempts     int     `json:"max_attempts,omitempty"`
+	// SignatureRoots are this job's org's DB-managed sigstore roots-of-trust, delivered on the
+	// job envelope by the server (handler.RootsForOrg). They are unioned onto the static
+	// flag-configured roots for THIS job only, so org A's roots never leak into org B's scans.
+	SignatureRoots []sigverify.RootOfTrust `json:"signature_roots,omitempty"`
 }
 
 type scanEvidence struct {
@@ -659,7 +663,7 @@ func (w *worker) executeJob(ctx context.Context, j *scanJob) {
 	}
 	imageRef, imageDigest := scanResultIdentity(j, res)
 	if w.signatureEnabled && j.TargetType == "image" {
-		res.Signature = verifyImageSignature(ctx, imageRef, w.cosignBin, w.signatureRoots)
+		res.Signature = verifyImageSignature(ctx, imageRef, w.cosignBin, signatureRootsForJob(w.signatureRoots, j.SignatureRoots))
 	}
 	if j.TargetType == "image" {
 		res.Layers = inspectImageLayers(ctx, imageRef, j.Platform)
@@ -845,6 +849,21 @@ func buildSignatureRoots(policy sigverify.TrustPolicy, rootsConfig string) (sigv
 		return nil, fmt.Errorf("parse signature-roots config: %w", err)
 	}
 	return append(roots, extra...), nil
+}
+
+// signatureRootsForJob unions the per-job org's DB-managed roots onto the static
+// flag-configured roots, returning a fresh slice so the static roots are never mutated and one
+// org's roots never leak into another org's scan. Verification trusts an image if ANY root
+// verifies it, so appending the job roots is purely additive. With no job roots the static
+// roots are returned unchanged (legacy behaviour).
+func signatureRootsForJob(static sigverify.RootsOfTrust, jobRoots []sigverify.RootOfTrust) sigverify.RootsOfTrust {
+	if len(jobRoots) == 0 {
+		return static
+	}
+	out := make(sigverify.RootsOfTrust, 0, len(static)+len(jobRoots))
+	out = append(out, static...)
+	out = append(out, jobRoots...)
+	return out
 }
 
 func verifyImageSignature(ctx context.Context, imageRef, cosignBin string, roots sigverify.RootsOfTrust) *scanner.SignatureResult {
