@@ -3,9 +3,11 @@ package network
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -13,49 +15,50 @@ import (
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
+	"github.com/alphabravocompany/constellation/pkg/audit"
 )
 
 // sessionIngestRow is the wire shape the runtime-agent POSTs to /network-sessions:bulk.
 // One row per live dp session (NV RESTSession). Field tags match the agent's dp_session.go.
 type sessionIngestRow struct {
-	ID           int64  `json:"id"`
-	Node         string `json:"node,omitempty"`
-	EPMAC        string `json:"ep_mac,omitempty"`
-	WorkloadID   string `json:"workload_id,omitempty"`
-	EtherType    int    `json:"ether_type,omitempty"`
-	IPProto      int    `json:"ip_proto,omitempty"`
-	Application  int    `json:"application,omitempty"`
-	ClientMAC    string `json:"client_mac,omitempty"`
-	ServerMAC    string `json:"server_mac,omitempty"`
-	ClientIP     string `json:"client_ip,omitempty"`
-	ServerIP     string `json:"server_ip,omitempty"`
-	ClientPort   int    `json:"client_port,omitempty"`
-	ServerPort   int    `json:"server_port,omitempty"`
-	ICMPCode     int    `json:"icmp_code,omitempty"`
-	ICMPType     int    `json:"icmp_type,omitempty"`
-	ClientPkts   int64  `json:"client_pkts,omitempty"`
-	ServerPkts   int64  `json:"server_pkts,omitempty"`
-	ClientBytes  int64  `json:"client_bytes,omitempty"`
-	ServerBytes  int64  `json:"server_bytes,omitempty"`
-	ClientAsmPkts  int64 `json:"client_asm_pkts,omitempty"`
-	ServerAsmPkts  int64 `json:"server_asm_pkts,omitempty"`
-	ClientAsmBytes int64 `json:"client_asm_bytes,omitempty"`
-	ServerAsmBytes int64 `json:"server_asm_bytes,omitempty"`
-	ClientState  int    `json:"client_state,omitempty"`
-	ServerState  int    `json:"server_state,omitempty"`
-	Idle         int    `json:"idle,omitempty"`
-	Age          int    `json:"age,omitempty"`
-	Life         int    `json:"life,omitempty"`
-	ThreatID     int64  `json:"threat_id,omitempty"`
-	PolicyID     int64  `json:"policy_id,omitempty"`
-	PolicyAction int    `json:"policy_action,omitempty"`
-	Severity     int    `json:"severity,omitempty"`
-	Ingress      bool   `json:"ingress,omitempty"`
-	Tap          bool   `json:"tap,omitempty"`
-	MidStream    bool   `json:"mid_stream,omitempty"`
-	XffIP        string `json:"xff_ip,omitempty"`
-	XffApp       int    `json:"xff_app,omitempty"`
-	XffPort      int    `json:"xff_port,omitempty"`
+	ID             int64  `json:"id"`
+	Node           string `json:"node,omitempty"`
+	EPMAC          string `json:"ep_mac,omitempty"`
+	WorkloadID     string `json:"workload_id,omitempty"`
+	EtherType      int    `json:"ether_type,omitempty"`
+	IPProto        int    `json:"ip_proto,omitempty"`
+	Application    int    `json:"application,omitempty"`
+	ClientMAC      string `json:"client_mac,omitempty"`
+	ServerMAC      string `json:"server_mac,omitempty"`
+	ClientIP       string `json:"client_ip,omitempty"`
+	ServerIP       string `json:"server_ip,omitempty"`
+	ClientPort     int    `json:"client_port,omitempty"`
+	ServerPort     int    `json:"server_port,omitempty"`
+	ICMPCode       int    `json:"icmp_code,omitempty"`
+	ICMPType       int    `json:"icmp_type,omitempty"`
+	ClientPkts     int64  `json:"client_pkts,omitempty"`
+	ServerPkts     int64  `json:"server_pkts,omitempty"`
+	ClientBytes    int64  `json:"client_bytes,omitempty"`
+	ServerBytes    int64  `json:"server_bytes,omitempty"`
+	ClientAsmPkts  int64  `json:"client_asm_pkts,omitempty"`
+	ServerAsmPkts  int64  `json:"server_asm_pkts,omitempty"`
+	ClientAsmBytes int64  `json:"client_asm_bytes,omitempty"`
+	ServerAsmBytes int64  `json:"server_asm_bytes,omitempty"`
+	ClientState    int    `json:"client_state,omitempty"`
+	ServerState    int    `json:"server_state,omitempty"`
+	Idle           int    `json:"idle,omitempty"`
+	Age            int    `json:"age,omitempty"`
+	Life           int    `json:"life,omitempty"`
+	ThreatID       int64  `json:"threat_id,omitempty"`
+	PolicyID       int64  `json:"policy_id,omitempty"`
+	PolicyAction   int    `json:"policy_action,omitempty"`
+	Severity       int    `json:"severity,omitempty"`
+	Ingress        bool   `json:"ingress,omitempty"`
+	Tap            bool   `json:"tap,omitempty"`
+	MidStream      bool   `json:"mid_stream,omitempty"`
+	XffIP          string `json:"xff_ip,omitempty"`
+	XffApp         int    `json:"xff_app,omitempty"`
+	XffPort        int    `json:"xff_port,omitempty"`
 }
 
 const maxSessionBatchSize = 5000
@@ -164,6 +167,32 @@ ON CONFLICT (org_id, cluster_id, node, id) DO UPDATE SET
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"accepted": accepted, "kill": kills, "weak_tls": weakTLS})
 }
 
+type sessionKillTarget struct {
+	WorkloadID  string `json:"workload_id,omitempty"`
+	Application string `json:"application,omitempty"`
+	IPProto     string `json:"ip_proto,omitempty"`
+	ClientIP    string `json:"client_ip,omitempty"`
+	ClientPort  int    `json:"client_port,omitempty"`
+	ServerIP    string `json:"server_ip,omitempty"`
+	ServerPort  int    `json:"server_port,omitempty"`
+	Ingress     bool   `json:"ingress"`
+	Severity    int    `json:"severity,omitempty"`
+	ThreatID    int64  `json:"threat_id,omitempty"`
+}
+
+type sessionFilters struct {
+	Protocol     *int
+	Application  string
+	Port         *int
+	Peer         string
+	Workload     string
+	Node         string
+	Group        string
+	GroupName    string
+	GroupActive  bool
+	GroupMembers []string
+}
+
 // KillSession queues a request to terminate one live session (NV DELETE /v1/session).
 // The runtime-agent picks it up on its next snapshot upload and issues dp
 // ctrl_clear_session. DELETE /network/sessions/{id}?node=&cluster_id=
@@ -180,15 +209,184 @@ func (h *Network) KillSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	node := strings.TrimSpace(r.URL.Query().Get("node"))
+	requestedAt := time.Now().UTC()
+	target, _ := h.sessionKillTarget(r, subj.OrgID, *clusterID, node, id)
 	if _, err := h.db.Pool().Exec(r.Context(), `
 INSERT INTO network_session_kills (org_id, cluster_id, node, session_id, requested_by, requested_at)
-VALUES ($1,$2,$3,$4,$5,NOW())
-ON CONFLICT (org_id, cluster_id, node, session_id) DO UPDATE SET requested_by = EXCLUDED.requested_by, requested_at = NOW()`,
-		subj.OrgID, *clusterID, node, id, subj.UserID); err != nil {
+VALUES ($1,$2,$3,$4,$5,$6)
+ON CONFLICT (org_id, cluster_id, node, session_id) DO UPDATE SET requested_by = EXCLUDED.requested_by, requested_at = EXCLUDED.requested_at`,
+		subj.OrgID, *clusterID, node, id, subj.UserID, requestedAt); err != nil {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "queued": true, "session_id": id})
+	response := map[string]any{
+		"ok":           true,
+		"queued":       true,
+		"session_id":   id,
+		"node":         node,
+		"cluster_id":   clusterID.String(),
+		"requested_at": requestedAt,
+	}
+	if target != nil {
+		response["target"] = target
+	}
+	if h.audit != nil {
+		auditID, _, err := h.audit.Log(r.Context(), audit.Event{
+			OrgID:      &subj.OrgID,
+			ActorID:    &subj.UserID,
+			ActorIP:    networkActorIP(r),
+			Action:     "network.session.kill.queued",
+			TargetKind: "network_session",
+			TargetID:   fmt.Sprintf("%s/%s/%d", clusterID.String(), node, id),
+			After: map[string]any{
+				"queued":       true,
+				"cluster_id":   clusterID.String(),
+				"node":         node,
+				"session_id":   id,
+				"requested_at": requestedAt,
+				"target":       target,
+			},
+		})
+		if err == nil {
+			response["audit_id"] = auditID
+		}
+	}
+	httpx.WriteJSON(w, http.StatusOK, response)
+}
+
+func (h *Network) sessionKillTarget(r *http.Request, orgID uuid.UUID, clusterID uuid.UUID, node string, id int64) (*sessionKillTarget, error) {
+	var (
+		target sessionKillTarget
+		proto  int
+		app    int
+	)
+	err := h.db.Pool().QueryRow(r.Context(), `
+SELECT workload_id, application, ip_proto,
+       client_ip, client_port, server_ip, server_port, ingress, severity, threat_id
+  FROM network_sessions
+ WHERE org_id = $1 AND cluster_id = $2 AND node = $3 AND id = $4
+   AND updated_at > NOW() - INTERVAL '5 minutes'`,
+		orgID, clusterID, node, id).Scan(
+		&target.WorkloadID, &app, &proto,
+		&target.ClientIP, &target.ClientPort, &target.ServerIP, &target.ServerPort,
+		&target.Ingress, &target.Severity, &target.ThreatID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	target.IPProto = ipProtoName(proto)
+	target.Application = appLabel(proto, target.ServerPort)
+	return &target, nil
+}
+
+func networkActorIP(r *http.Request) net.IP {
+	actorIP := net.ParseIP(r.RemoteAddr)
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		actorIP = net.ParseIP(host)
+	}
+	return actorIP
+}
+
+func parseSessionFilters(r *http.Request) (sessionFilters, error) {
+	q := r.URL.Query()
+	var filters sessionFilters
+	if raw := strings.TrimSpace(q.Get("protocol")); raw != "" {
+		proto, err := sessionProtocolNumber(raw)
+		if err != nil {
+			return filters, err
+		}
+		filters.Protocol = &proto
+	}
+	if raw := strings.TrimSpace(q.Get("port")); raw != "" {
+		port, err := strconv.Atoi(raw)
+		if err != nil || port <= 0 || port > 65535 {
+			return filters, fmt.Errorf("invalid port")
+		}
+		filters.Port = &port
+	}
+	filters.Application = strings.ToLower(strings.TrimSpace(q.Get("application")))
+	filters.Peer = strings.ToLower(strings.TrimSpace(q.Get("peer")))
+	filters.Workload = strings.ToLower(strings.TrimSpace(q.Get("workload")))
+	filters.Node = strings.ToLower(strings.TrimSpace(q.Get("node")))
+	filters.Group = strings.TrimSpace(q.Get("group"))
+	return filters, nil
+}
+
+func sessionProtocolNumber(raw string) (int, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "tcp", "6":
+		return 6, nil
+	case "udp", "17":
+		return 17, nil
+	case "icmp", "1":
+		return 1, nil
+	case "icmpv6", "58":
+		return 58, nil
+	}
+	if strings.HasPrefix(strings.ToLower(raw), "proto-") {
+		n, err := strconv.Atoi(strings.TrimPrefix(strings.ToLower(raw), "proto-"))
+		if err == nil && n > 0 && n <= 255 {
+			return n, nil
+		}
+	}
+	return 0, fmt.Errorf("invalid protocol")
+}
+
+func (f sessionFilters) applySessionWhere(where []string, args []any) ([]string, []any) {
+	add := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+	if f.Protocol != nil {
+		where = append(where, "ip_proto = "+add(*f.Protocol))
+	}
+	if f.Application != "" {
+		if ports := appFilterPorts(f.Application); len(ports) > 0 {
+			where = append(where, "server_port = ANY("+add(ports)+"::int[])")
+		} else if id, err := strconv.Atoi(f.Application); err == nil {
+			where = append(where, "application = "+add(id))
+		} else {
+			where = append(where, "FALSE")
+		}
+	}
+	if f.Port != nil {
+		p := add(*f.Port)
+		where = append(where, "(client_port = "+p+" OR server_port = "+p+")")
+	}
+	if f.Peer != "" {
+		p := add("%" + f.Peer + "%")
+		where = append(where, "(LOWER(client_ip) LIKE "+p+" OR LOWER(server_ip) LIKE "+p+")")
+	}
+	if f.Workload != "" {
+		p := add("%" + f.Workload + "%")
+		where = append(where, "LOWER(workload_id) LIKE "+p)
+	}
+	if f.Node != "" {
+		p := add("%" + f.Node + "%")
+		where = append(where, "LOWER(node) LIKE "+p)
+	}
+	if f.GroupActive {
+		p := add(f.GroupMembers)
+		where = append(where, "workload_id = ANY("+p+"::text[])")
+	}
+	return where, args
+}
+
+func appFilterPorts(raw string) []int {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "http":
+		return []int{80, 8080, 8000}
+	case "https", "tls":
+		return []int{443, 8443}
+	case "dns":
+		return []int{53}
+	case "ssh":
+		return []int{22}
+	case "mysql":
+		return []int{3306}
+	default:
+		return nil
+	}
 }
 
 // sessionDTO is one live connection returned to the UI (NV RESTSession).
@@ -229,17 +427,43 @@ func (h *Network) Sessions(w http.ResponseWriter, r *http.Request) {
 	if limit <= 0 || limit > 2000 {
 		limit = 500
 	}
-	rows, err := h.db.Pool().Query(r.Context(), `
+	filters, err := parseSessionFilters(r)
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	groupMembers, groupName, groupActive, err := handler.ResolveGroupFilterMembers(r.Context(), h.db.Pool(), subj.OrgID, clusterID, filters.Group)
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	filters.GroupMembers = groupMembers
+	filters.GroupName = groupName
+	filters.GroupActive = groupActive
+	where := []string{
+		"org_id = $1",
+		"($2::uuid IS NULL OR cluster_id = $2)",
+		"updated_at > NOW() - INTERVAL '5 minutes'",
+	}
+	args := []any{subj.OrgID, clusterID}
+	where, args = filters.applySessionWhere(where, args)
+	whereSQL := strings.Join(where, " AND ")
+	total := 0
+	_ = h.db.Pool().QueryRow(r.Context(), fmt.Sprintf(`
+SELECT COUNT(*)::int
+  FROM network_sessions
+ WHERE %s`, whereSQL), args...).Scan(&total)
+	listArgs := append(append([]any{}, args...), limit)
+	rows, err := h.db.Pool().Query(r.Context(), fmt.Sprintf(`
 SELECT id, node, workload_id, application, ip_proto,
        client_ip, client_port, server_ip, server_port, client_state, server_state,
        client_bytes, server_bytes, client_pkts, server_pkts, age, idle, ingress, severity, threat_id
   FROM network_sessions
- WHERE org_id = $1 AND ($2::uuid IS NULL OR cluster_id = $2)
-   AND updated_at > NOW() - INTERVAL '5 minutes'
+ WHERE %s
  ORDER BY (client_bytes + server_bytes) DESC, age DESC
- LIMIT $3`, subj.OrgID, clusterID, limit)
+ LIMIT $%d`, whereSQL, len(listArgs)), listArgs...)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusOK, map[string]any{"sessions": []sessionDTO{}})
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"sessions": []sessionDTO{}, "total": 0, "limit": limit, "has_more": false})
 		return
 	}
 	defer rows.Close()
@@ -258,7 +482,20 @@ SELECT id, node, workload_id, application, ip_proto,
 		s.ServerState = tcpStateName(sstate)
 		out = append(out, s)
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"sessions": out})
+	response := map[string]any{
+		"sessions": out,
+		"total":    total,
+		"limit":    limit,
+		"has_more": total > len(out),
+	}
+	if clusterID != nil {
+		response["cluster_id"] = clusterID.String()
+	}
+	if filters.GroupActive {
+		response["selected_group"] = filters.GroupName
+		response["selected_group_members"] = len(filters.GroupMembers)
+	}
+	httpx.WriteJSON(w, http.StatusOK, response)
 }
 
 // SessionsSummary returns live-session counts (NV RESTSessionSummary): total + by IP proto.

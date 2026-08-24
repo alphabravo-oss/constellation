@@ -29,6 +29,9 @@ import { ImportExportButtons } from "@/components/ImportExportButtons";
 import { StatCard } from "@/components/ui/stat-card";
 import { StatusPill } from "@/components/ui/status-pill";
 import { LoadingState, ErrorState, EmptyState } from "@/components/ui/states";
+import { DPIGroupBindingsPanel } from "@/components/DPIGroupBindingsPanel";
+import { NeuVectorCompatibilityChips } from "@/components/NeuVectorCompatibilityChips";
+import { runtimeRuleOrigin } from "@/lib/runtime-rule-provenance";
 
 import {
   runtimeDLP,
@@ -76,6 +79,19 @@ export function RuntimeDLPPage() {
       sort: (a, b) => a.mode.localeCompare(b.mode),
     },
     {
+      id: "origin",
+      header: "Origin",
+      cell: (r) => {
+        const origin = runtimeRuleOrigin(r);
+        return (
+          <span title={r.source_path || r.source || r.cfg_type}>
+            <StatusPill label={origin.label} tone={origin.tone} />
+          </span>
+        );
+      },
+      sort: (a, b) => runtimeRuleOrigin(a).label.localeCompare(runtimeRuleOrigin(b).label),
+    },
+    {
       id: "patterns",
       header: "Patterns",
       numeric: true,
@@ -113,11 +129,28 @@ export function RuntimeDLPPage() {
         }
       />
 
+      <NeuVectorCompatibilityChips
+        testId="runtime-dlp-nv-compatibility"
+        items={[
+          { label: "NV DLP Sensors -> DLP Rules" },
+          { label: "NV dlp_group -> DLP group scope" },
+          { label: "Migration Imports", to: "/settings/migration" },
+        ]}
+      />
+
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <StatCard label="Total rules" value={rules.length} icon={<ListChecks className="h-3.5 w-3.5" />} />
         <StatCard label="Monitoring" value={monitorCount} icon={<ShieldAlert className="h-3.5 w-3.5" />} />
         <StatCard label="Enforcing" value={enforceCount} icon={<ShieldCheck className="h-3.5 w-3.5" />} tone={enforceCount > 0 ? "accent" : "neutral"} />
       </section>
+
+      <DPIGroupBindingsPanel
+        clusterId={clusterID}
+        kind="dlp"
+        title="DLP group scope"
+        description="Groups opted into the shared DLP/DPI detector. Matching workloads receive DLP rules and DPI signature inspection."
+        testId="dlp-group-bindings"
+      />
 
       <div className="overflow-x-auto rounded-lg border border-border bg-card" data-testid="runtime-dlp-list">
         {q.isLoading && <LoadingState />}

@@ -19,7 +19,7 @@ test("Cluster health page (deep route) renders sensor bundle", async ({ page }) 
   const id = await firstCard.getAttribute("data-cluster-id");
   expect(id).toBeTruthy();
   await page.goto(`/clusters/${id}/health`);
-  await expect(page.getByTestId("cluster-components-table")).toContainText("admission-controller");
+  await expect(page.getByTestId("cluster-components-table")).toContainText("admission");
   await expect(page.getByTestId("cluster-health-gate").first()).toBeVisible();
-  await expect(page.getByText("helm upgrade --install constellation-agent")).toBeVisible();
+  await expect(page.getByText("helm upgrade --install constellation deploy/charts/constellation")).toBeVisible();
 });

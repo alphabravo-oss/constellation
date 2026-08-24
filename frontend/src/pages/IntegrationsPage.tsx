@@ -33,7 +33,15 @@ import {
   X,
 } from "lucide-react";
 
-import { receivers as receiversApi, routing as routingApi, systemConfigApi, type Receiver, type ReceiverDelivery } from "@/api/client";
+import {
+  integrationDeliveries,
+  receivers as receiversApi,
+  routing as routingApi,
+  systemConfigApi,
+  type IntegrationDeliveryOverview,
+  type Receiver,
+  type ReceiverDelivery,
+} from "@/api/client";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { StatCard } from "@/components/ui/stat-card";
@@ -48,6 +56,7 @@ export function IntegrationsPage() {
   const items = [
     { value: "receivers", label: "Receivers", content: <ReceiversTab /> },
     { value: "routes", label: "Routes", content: <RoutesTab /> },
+    { value: "operations", label: "Operations", content: <OperationsTab /> },
   ];
   return (
     <div className="space-y-6">
@@ -59,6 +68,191 @@ export function IntegrationsPage() {
       <Tabs value={tab} onValueChange={setTab} items={items} />
     </div>
   );
+}
+
+// ----------------------------- Delivery operations ------------------------------------
+
+function OperationsTab() {
+  const q = useQuery({
+    queryKey: ["integration-delivery-overview"],
+    queryFn: integrationDeliveries.overview,
+  });
+  const instances = useMemo(() => q.data?.integration_instances ?? [], [q.data?.integration_instances]);
+  const [previewID, setPreviewID] = useState("");
+  useEffect(() => {
+    if (!previewID && instances.length > 0) {
+      setPreviewID(instances[0].id);
+    }
+  }, [instances, previewID]);
+  const preview = useMutation({
+    mutationFn: (id: string) => integrationDeliveries.testPreview(id),
+  });
+
+  if (q.isPending) {
+    return <p className="text-sm text-muted-foreground">Loading integration delivery operations...</p>;
+  }
+  const overview = q.data;
+  const selectedID = previewID || instances[0]?.id || "";
+
+  return (
+    <div className="space-y-6">
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatCard label="Integrations" value={overview?.summary.integration_instances_total ?? 0} />
+        <StatCard label="Healthy" value={overview?.summary.healthy_receivers ?? 0} tone="accent" />
+        <StatCard label="Degraded" value={overview?.summary.degraded_receivers ?? 0} tone={(overview?.summary.degraded_receivers ?? 0) > 0 ? "medium" : "neutral"} />
+        <StatCard label="DLQ" value={overview?.summary.dead_letters_open ?? 0} tone={(overview?.summary.dead_letters_open ?? 0) > 0 ? "high" : "neutral"} />
+      </section>
+
+      <section className="grid gap-3 lg:grid-cols-3" data-testid="integration-connectors">
+        {instances.length === 0 && <p className="text-xs text-muted-foreground">No integration receivers configured.</p>}
+        {instances.map((instance) => {
+          const health = receiverHealth(overview, instance.id);
+          return (
+            <article key={instance.id} className="rounded-lg border border-border bg-card p-4 text-xs">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold">{instance.name}</h3>
+                  <p className="mt-1 text-muted-foreground">{instance.type} · {instance.environment}</p>
+                </div>
+                <Status value={health?.status || instance.status} />
+              </div>
+              <dl className="mt-3 grid grid-cols-2 gap-2">
+                <Info label="Owner" value={instance.owner || "-"} />
+                <Info label="Events" value={instance.supported_events.join(", ") || "(all)"} />
+                <Info label="p95" value={health?.p95_latency_ms ? `${health.p95_latency_ms}ms` : "-"} />
+                <Info label="Success" value={health ? `${health.success_rate_24h}%` : "-"} />
+              </dl>
+              <p className="mt-3 truncate text-muted-foreground" title={instance.endpoint}>{instance.endpoint}</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setPreviewID(instance.id);
+                  preview.mutate(instance.id);
+                }}
+                data-testid={`integration-preview-${instance.id}`}
+                className="mt-3 inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 hover:bg-accent"
+              >
+                <Send className="h-3.5 w-3.5" aria-hidden />
+                Preview routing
+              </button>
+            </article>
+          );
+        })}
+      </section>
+
+      <section className="rounded-lg border border-border bg-card p-4" data-testid="routing-preview">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold">Read-only routing preview</h3>
+            <p className="mt-1 text-xs text-muted-foreground">Preview handlers do not call receivers, persist deliveries, enqueue retries, or rotate secrets.</p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!selectedID || preview.isPending}
+            onClick={() => selectedID && preview.mutate(selectedID)}
+          >
+            <Send className="h-3.5 w-3.5" aria-hidden />
+            Preview routing
+          </Button>
+        </div>
+        {preview.data ? (
+          <div className="mt-3 rounded-md bg-muted p-3 text-xs">
+            <div className="font-medium">{preview.data.integration_instance.name}</div>
+            <p className="mt-1 text-muted-foreground">{preview.data.message}</p>
+            <div className="mt-2 flex flex-wrap gap-1">
+              <Badge>sends: {preview.data.sends_notification ? "yes" : "no"}</Badge>
+              <Badge>persists: {preview.data.persists_delivery ? "yes" : "no"}</Badge>
+              <Badge>{preview.data.action.label}</Badge>
+            </div>
+          </div>
+        ) : (
+          <p className="mt-3 text-xs text-muted-foreground">Choose Preview routing on a receiver card.</p>
+        )}
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-2">
+        <OperationsList title="Routing rules" testID="routing-rules">
+          {(overview?.routing_rules ?? []).map((rule) => (
+            <article key={rule.id} className="rounded-md bg-muted p-3 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium">{rule.name}</span>
+                <Status value={rule.enabled ? "active" : "disabled"} />
+              </div>
+              <div className="mt-1 text-muted-foreground">
+                {rule.receiver_ids.join(", ") || "no receivers"} · {rule.throttle} · {rule.dedupe_window}
+              </div>
+            </article>
+          ))}
+        </OperationsList>
+
+        <OperationsList title="Delivery history" testID="delivery-history">
+          {(overview?.delivery_history ?? []).slice(0, 8).map((delivery) => (
+            <article key={delivery.id} className="rounded-md bg-muted p-3 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-mono">{delivery.event_type}</span>
+                <Status value={delivery.status} />
+              </div>
+              <div className="mt-1 text-muted-foreground">
+                {receiverName(overview, delivery.receiver_id)} · {delivery.attempts} attempt{delivery.attempts === 1 ? "" : "s"}
+                {delivery.error ? ` · ${delivery.error}` : ""}
+              </div>
+            </article>
+          ))}
+        </OperationsList>
+
+        <OperationsList title="Retry queue" testID="retry-queue">
+          {(overview?.retry_stats ?? []).map((retry) => (
+            <article key={retry.receiver_id} className="rounded-md bg-muted p-3 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span>
+                  <span className="font-medium">{receiverName(overview, retry.receiver_id)}</span>
+                  <span className="ml-2 font-mono text-[10px] text-muted-foreground">{receiverRoutingKey(overview, retry.receiver_id)}</span>
+                </span>
+                <Badge>{retry.queued_retries} queued</Badge>
+              </div>
+              <div className="mt-1 text-muted-foreground">
+                {retry.retry_rate_24h} retry rate · {retry.dead_letters_open} DLQ · {retry.backoff_policy}
+              </div>
+            </article>
+          ))}
+        </OperationsList>
+
+        <OperationsList title="Guardrails" testID="integration-guardrails">
+          {(overview?.guardrails ?? []).map((guardrail) => (
+            <article key={guardrail.id} className="rounded-md bg-muted p-3 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium">{guardrail.name}</span>
+                <Status value={guardrail.enforced ? "enforced" : "monitor"} />
+              </div>
+              <p className="mt-1 text-muted-foreground">{guardrail.description}</p>
+            </article>
+          ))}
+        </OperationsList>
+      </section>
+    </div>
+  );
+}
+
+function OperationsList({ title, testID, children }: { title: string; testID: string; children: ReactNode }) {
+  return (
+    <section className="space-y-2" data-testid={testID}>
+      <h3 className="text-sm font-semibold">{title}</h3>
+      {children}
+    </section>
+  );
+}
+
+function receiverName(overview: IntegrationDeliveryOverview | undefined, receiverID: string) {
+  return overview?.integration_instances.find((instance) => instance.id === receiverID)?.name ?? receiverID;
+}
+
+function receiverRoutingKey(overview: IntegrationDeliveryOverview | undefined, receiverID: string) {
+  return overview?.delivery_history.find((delivery) => delivery.receiver_id === receiverID)?.routing_rule_id || receiverID;
+}
+
+function receiverHealth(overview: IntegrationDeliveryOverview | undefined, receiverID: string) {
+  return overview?.receiver_health.find((health) => health.receiver_id === receiverID);
 }
 
 // --------------------------------- Receivers tab --------------------------------------

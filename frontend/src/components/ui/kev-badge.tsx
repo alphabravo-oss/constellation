@@ -13,6 +13,7 @@ export function KevBadge({ className }: { className?: string }) {
         "bg-[color-mix(in_oklab,var(--color-severity-critical)_22%,transparent)] text-[color:var(--color-severity-critical)] ring-1 ring-inset ring-[color-mix(in_oklab,var(--color-severity-critical)_48%,transparent)]",
         className,
       )}
+      data-testid="kev-badge"
       title="CISA Known-Exploited Vulnerability"
     >
       <Crown className="h-2.5 w-2.5 fill-current" /> KEV

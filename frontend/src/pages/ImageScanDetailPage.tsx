@@ -557,7 +557,13 @@ function BundlePanel({ result }: { result: ImageScanResult }) {
         <Field label="Records" value={metadata?.record_count != null ? `${metadata.record_count}` : "-"} />
         <Field label="Last scanned" value={formatDate(result.last_scanned_at)} />
       </dl>
-      <div className="mt-3 grid gap-2 sm:grid-cols-3 xl:grid-cols-7">
+      <div className="mt-3 grid gap-2 sm:grid-cols-3 xl:grid-cols-4">
+        <ArtifactButton
+          icon={ShieldAlert}
+          label="Findings CSV"
+          disabled={downloading !== null}
+          onClick={() => void download("findings-csv", () => imageScanResults.downloadFindingsCSV(result.id))}
+        />
         <ArtifactButton
           icon={Database}
           label="Inventory"

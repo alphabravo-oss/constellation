@@ -33,6 +33,7 @@ import { DataTable, type Column, type Density } from "@/components/ui/data-table
 import { PageHeader } from "@/components/ui/page";
 import { StatusPill } from "@/components/ui/status-pill";
 import { cn } from "@/lib/cn";
+import { sortClustersByActivity } from "@/lib/clusters";
 
 // --- types -----------------------------------------------------------------
 
@@ -152,7 +153,7 @@ export function CoveragePage() {
 
   // --- queries ---
   const qClusters = useQuery({ queryKey: ["clusters"], queryFn: () => clustersApi.list(), staleTime: 30_000 });
-  const clusterList = qClusters.data?.clusters ?? [];
+  const clusterList = useMemo(() => sortClustersByActivity(qClusters.data?.clusters ?? []), [qClusters.data?.clusters]);
   const clusterId = selectedCluster ?? clusterList[0]?.id;
   const clusterName = clusterList.find((c) => c.id === clusterId)?.name;
 
@@ -871,6 +872,7 @@ export function CoveragePage() {
           density={density}
           onDensityChange={setDensity}
           defaultSort={{ id: "status", dir: "asc" }}
+          rowTestId={() => "coverage-row"}
         />
       </div>
 

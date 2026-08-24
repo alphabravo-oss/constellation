@@ -14,20 +14,20 @@ import (
 func TestBuildMergedWorkloadPolicy(t *testing.T) {
 	policies := []runtimePolicyWire{
 		{
-			Workload: "default/api", Mode: "enforce", DPPolicyID: 11,
+			Workload: "default/api", Mode: "enforce", DPPolicyID: 11, DefAction: dp.PolicyActionDeny,
 			Rules: []*dp.PolicyRule{
 				{DstIP: net.ParseIP("10.0.0.1"), Port: 443, IPProto: 6, Action: dp.PolicyActionDeny},
 			},
 		},
 		{
-			Workload: "default/web", Mode: "monitor", DPPolicyID: 22,
+			Workload: "default/web", Mode: "monitor", DPPolicyID: 22, DefAction: dp.PolicyActionAllow,
 			Rules: []*dp.PolicyRule{
 				{DstIP: net.ParseIP("10.0.0.2"), Port: 80, IPProto: 6, Action: dp.PolicyActionDeny},
 				{Fqdn: "api.example.com", Action: dp.PolicyActionAllow},
 			},
 		},
 		{
-			Workload: "default/old", Mode: "disabled", DPPolicyID: 33,
+			Workload: "default/old", Mode: "disabled", DPPolicyID: 33, DefAction: dp.PolicyActionDeny,
 			Rules: []*dp.PolicyRule{
 				{DstIP: net.ParseIP("10.0.0.3"), Action: dp.PolicyActionDeny},
 			},
@@ -51,7 +51,7 @@ func TestBuildMergedWorkloadPolicy(t *testing.T) {
 	if merged.Rules[2].Action != dp.PolicyActionAllow || merged.Rules[2].Fqdn != "api.example.com" {
 		t.Fatalf("monitor allow rule = %+v", merged.Rules[2])
 	}
-	if merged.DefAction != dp.PolicyActionAllow || merged.ApplyDir != dp.ApplyDirBoth {
+	if merged.DefAction != dp.PolicyActionDeny || merged.ApplyDir != dp.ApplyDirBoth {
 		t.Fatalf("merged defaults = def %d dir %d", merged.DefAction, merged.ApplyDir)
 	}
 	// Source rules must not be mutated (we copy before mapping).
@@ -63,6 +63,50 @@ func TestBuildMergedWorkloadPolicy(t *testing.T) {
 	allow := dp.FqdnAllowSet(merged)
 	if len(allow) != 1 || allow[0] != "api.example.com" {
 		t.Fatalf("fqdn allow-set = %v", allow)
+	}
+}
+
+func TestMergedDefaultAction(t *testing.T) {
+	tests := []struct {
+		name     string
+		policies []runtimePolicyWire
+		want     uint8
+	}{
+		{
+			name:     "legacy omitted def_action is allow",
+			policies: []runtimePolicyWire{{Mode: "enforce"}},
+			want:     dp.PolicyActionAllow,
+		},
+		{
+			name:     "disabled deny ignored",
+			policies: []runtimePolicyWire{{Mode: "disabled", DefAction: dp.PolicyActionDeny}},
+			want:     dp.PolicyActionAllow,
+		},
+		{
+			name:     "monitor deny alerts without blocking",
+			policies: []runtimePolicyWire{{Mode: "monitor", DefAction: dp.PolicyActionDeny}},
+			want:     dp.PolicyActionViolate,
+		},
+		{
+			name: "enforce deny wins over monitor",
+			policies: []runtimePolicyWire{
+				{Mode: "monitor", DefAction: dp.PolicyActionDeny},
+				{Mode: "enforce", DefAction: dp.PolicyActionDeny},
+			},
+			want: dp.PolicyActionDeny,
+		},
+		{
+			name:     "learn preserved over allow",
+			policies: []runtimePolicyWire{{Mode: "enforce", DefAction: dp.PolicyActionLearn}},
+			want:     dp.PolicyActionLearn,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := mergedDefaultAction(tt.policies); got != tt.want {
+				t.Fatalf("mergedDefaultAction = %d, want %d", got, tt.want)
+			}
+		})
 	}
 }
 

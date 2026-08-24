@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/db"
+	handlerpkg "github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
 	"github.com/alphabravocompany/constellation/internal/handler/netutil"
@@ -152,6 +153,9 @@ func (h *NetworkPolicies) List(w http.ResponseWriter, r *http.Request) {
 	namespace := strings.TrimSpace(r.URL.Query().Get("namespace"))
 	items := []networkPolicyLifecycleDTO{}
 	var selectedCluster *networkPolicyCluster
+	var selectedGroup string
+	var selectedGroupMembers []string
+	groupActive := false
 	if h.db != nil {
 		subj, ok := authctx.SubjectFrom(r.Context())
 		if !ok {
@@ -160,6 +164,17 @@ func (h *NetworkPolicies) List(w http.ResponseWriter, r *http.Request) {
 		}
 		var err error
 		selectedCluster, err = h.resolvePolicyCluster(r, subj.OrgID.String())
+		if err != nil {
+			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		var clusterUUID *uuid.UUID
+		if selectedCluster != nil {
+			if parsed, err := uuid.Parse(selectedCluster.ID); err == nil {
+				clusterUUID = &parsed
+			}
+		}
+		selectedGroupMembers, selectedGroup, groupActive, err = handlerpkg.ResolveGroupFilterMembers(r.Context(), h.db.Pool(), subj.OrgID, clusterUUID, r.URL.Query().Get("group"))
 		if err != nil {
 			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
@@ -176,12 +191,22 @@ func (h *NetworkPolicies) List(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if namespace != "" {
+	if namespace != "" || groupActive {
+		groupSet := map[string]struct{}{}
+		for _, member := range selectedGroupMembers {
+			groupSet[member] = struct{}{}
+		}
 		filtered := make([]networkPolicyLifecycleDTO, 0, len(items))
 		for _, item := range items {
-			if item.Namespace == namespace {
-				filtered = append(filtered, item)
+			if namespace != "" && item.Namespace != namespace {
+				continue
 			}
+			if groupActive {
+				if _, ok := groupSet[item.Workload]; !ok {
+					continue
+				}
+			}
+			filtered = append(filtered, item)
 		}
 		items = filtered
 	}
@@ -197,6 +222,10 @@ func (h *NetworkPolicies) List(w http.ResponseWriter, r *http.Request) {
 	}
 	if selectedCluster != nil {
 		summary["selected_cluster_id"] = selectedCluster.ID
+	}
+	if groupActive {
+		summary["selected_group"] = selectedGroup
+		summary["selected_group_members"] = len(selectedGroupMembers)
 	}
 
 	// A7: dead-rule signal — rules that have had zero matches over the window.

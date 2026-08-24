@@ -67,6 +67,34 @@ func TestGroupSensorBindings_HTTP_RoundTrip(t *testing.T) {
 		t.Fatalf("Bind returned %+v", created)
 	}
 
+	// --- Bind (new UI path): sensor_id is optional and defaults to the
+	// stable per-kind "all current DLP rules" sentinel. ---
+	implicitGroupID := uuid.New()
+	implicitName := "net43-http-implicit-" + implicitGroupID.String()[:8]
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO groups (id, org_id, name, kind, criteria) VALUES ($1,$2,$3,'ground','[]'::jsonb)`,
+		implicitGroupID, orgID, implicitName); err != nil {
+		t.Fatalf("seed implicit group: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM group_dpi_sensor_bindings WHERE group_id=$1`, implicitGroupID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM groups WHERE id=$1`, implicitGroupID)
+	})
+	body, _ = json.Marshal(map[string]any{"group_id": implicitGroupID, "sensor_kind": SensorKindDLP})
+	rec = httptest.NewRecorder()
+	req = withUser(httptest.NewRequest(http.MethodPost, "/api/v1/runtime/dpi-sensor-bindings", bytes.NewReader(body)), orgID)
+	h.Bind(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("Bind implicit status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var implicitCreated GroupSensorBinding
+	if err := json.Unmarshal(rec.Body.Bytes(), &implicitCreated); err != nil {
+		t.Fatalf("decode implicit Bind: %v", err)
+	}
+	if implicitCreated.GroupID != implicitGroupID || implicitCreated.Kind != SensorKindDLP || implicitCreated.SensorID != defaultDPISensorID(SensorKindDLP) {
+		t.Fatalf("implicit Bind returned %+v", implicitCreated)
+	}
+
 	// --- List (owning org sees it) ---
 	rec = httptest.NewRecorder()
 	req = withUser(httptest.NewRequest(http.MethodGet, "/api/v1/runtime/dpi-sensor-bindings", nil), orgID)

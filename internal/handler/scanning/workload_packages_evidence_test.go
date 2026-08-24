@@ -44,6 +44,35 @@ func TestScannerPackagesFromWorkloadPackagesAddsImageHints(t *testing.T) {
 	}
 }
 
+func TestWorkloadContainerImageIdentityUsesBareCRIRefAsDigestOnly(t *testing.T) {
+	container := WorkloadPackageContainer{
+		Image:    "docker.io/constellation/api:0.1.0",
+		ImageRef: "sha256:eb15e83d7a4364dcf9711473e213136c997495c1e8e78f42a45e0ee3b9127244",
+	}
+	if got := workloadContainerImageRef(container); got != "docker.io/constellation/api:0.1.0" {
+		t.Fatalf("workloadContainerImageRef = %q", got)
+	}
+	if got := workloadContainerImageDigest(container); got != "sha256:eb15e83d7a4364dcf9711473e213136c997495c1e8e78f42a45e0ee3b9127244" {
+		t.Fatalf("workloadContainerImageDigest = %q", got)
+	}
+
+	digestOnly := WorkloadPackageContainer{ImageRef: "sha256:aaaaaaaa"}
+	if got := workloadContainerImageRef(digestOnly); got != "sha256:aaaaaaaa" {
+		t.Fatalf("digest-only image ref = %q", got)
+	}
+
+	pullable := WorkloadPackageContainer{
+		Image:    "example.test/api:dev",
+		ImageRef: "example.test/api@sha256:bbbbbbbb",
+	}
+	if got := workloadContainerImageRef(pullable); got != "example.test/api@sha256:bbbbbbbb" {
+		t.Fatalf("pullable image ref = %q", got)
+	}
+	if got := workloadContainerImageDigest(pullable); got != "sha256:bbbbbbbb" {
+		t.Fatalf("pullable image digest = %q", got)
+	}
+}
+
 func TestWorkloadPackagesReportQueuesScanEvidence(t *testing.T) {
 	d := openTestDB(t)
 	defer d.Close()
@@ -64,6 +93,24 @@ func TestWorkloadPackagesReportQueuesScanEvidence(t *testing.T) {
 	if _, err := pool.Exec(ctx, `
 INSERT INTO clusters (id, org_id, name, distro, state)
 VALUES ($1, $2, $3, 'k3s', 'connected')`, clusterID, orgID, clusterName); err != nil {
+		t.Fatal(err)
+	}
+	deploymentID := uuid.New()
+	if _, err := pool.Exec(ctx, `
+INSERT INTO deployments (id, org_id, cluster_id, namespace, name, kind, labels, image_refs, last_seen_at)
+VALUES ($1, $2, $3, 'payments', 'api', 'Deployment', '{}'::jsonb, $4, NOW())`,
+		deploymentID, orgID, clusterID, []string{"example.test/api:dev"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+INSERT INTO image_workload_links (
+    org_id, cluster_id, deployment_id, workload_id, namespace, name, kind,
+    image_ref, image_ref_normalized, image_repository, image_tag, image_digest
+) VALUES ($1, $2, $3, 'payments/api', 'payments', 'api', 'Deployment',
+          'example.test/api:dev', 'example.test/api:dev', 'example.test/api', 'dev', 'sha256:manifest'),
+         ($1, $2, $3, 'payments/api', 'payments', 'api', 'Deployment',
+          'sha256:aaaaaaaa', 'sha256:aaaaaaaa', NULL, NULL, 'sha256:aaaaaaaa')`,
+		orgID, clusterID, deploymentID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -90,8 +137,8 @@ VALUES ($1, $2, $3, 'k3s', 'connected')`, clusterID, orgID, clusterName); err !=
 		Containers: []WorkloadPackageContainer{{
 			ContainerID:   "container-1",
 			ContainerName: "api",
-			Image:         "example.test/api:dev",
-			ImageRef:      "example.test/api@sha256:aaaaaaaa",
+			Image:         "sha256:aaaaaaaa",
+			ImageRef:      "sha256:aaaaaaaa",
 			Distro:        "ubuntu",
 			DistroVersion: "24.04",
 			Source:        "dpkg",
@@ -130,7 +177,8 @@ VALUES ($1, $2, $3, 'k3s', 'connected')`, clusterID, orgID, clusterName); err !=
 	if len(report.ImageScanTargets) != 1 ||
 		report.ImageScanTargets[0].ScanTargetID == uuid.Nil ||
 		report.ImageScanTargets[0].ScanEvidenceID == uuid.Nil ||
-		report.ImageScanTargets[0].ImageRef != "example.test/api@sha256:aaaaaaaa" ||
+		report.ImageScanTargets[0].ImageRef != "example.test/api:dev" ||
+		report.ImageScanTargets[0].ImageDigest != "sha256:aaaaaaaa" ||
 		report.ImageScanTargets[0].PackageCount != 1 {
 		t.Fatalf("image scan targets = %+v", report.ImageScanTargets)
 	}
@@ -248,7 +296,7 @@ VALUES ($1, $2, $3, 'k3s', 'connected')`, clusterID, orgID, clusterName); err !=
 		t.Fatal(err)
 	}
 	if imageEvidenceRes.TargetType != "image" ||
-		imageEvidenceRes.TargetRef != "example.test/api@sha256:aaaaaaaa" ||
+		imageEvidenceRes.TargetRef != "example.test/api:dev" ||
 		imageEvidenceRes.SourceType != "runtime-agent" ||
 		imageEvidenceRes.SourceRef != "node-a" ||
 		imageEvidenceRes.WorkloadID != workloadID {

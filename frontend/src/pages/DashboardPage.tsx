@@ -27,10 +27,34 @@ import { Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis
 import {
   AlertOctagon, AlertTriangle, ShieldAlert, ShieldCheck, Activity,
   TrendingUp, ArrowUpRight, ExternalLink, Database, FileWarning,
-  ServerCog, PackageCheck, RefreshCw, ArrowUp,
+  ServerCog, PackageCheck, RefreshCw, ArrowUp, ScanSearch, GitBranch,
 } from "lucide-react";
 
-import { findings, cve, dashboard, clusters, compliance, enterprise, network, downloadAPIFile, groupsApi, policies, type Finding, type PlatformFactsResponse, type Severity } from "@/api/client";
+import {
+  findings,
+  cve,
+  dashboard,
+  clusters,
+  compliance,
+  enterprise,
+  federation,
+  network,
+  downloadAPIFile,
+  groupsApi,
+  policies,
+  scannerOperations,
+  systemHealth,
+  type CVEBundleStatus,
+  type FedMember,
+  type FedMembership,
+  type Finding,
+  type NetworkConversation,
+  type PlatformFactsResponse,
+  type ScanLifecycleStatus,
+  type ScannerWorker,
+  type Severity,
+  type SystemHealthHeartbeat,
+} from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { StatCard } from "@/components/ui/stat-card";
 import { SeverityBadge } from "@/components/ui/severity-badge";
@@ -40,7 +64,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
-import { fmtRelative } from "@/lib/format";
+import { fmtBytes, fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/cn";
 import { toast } from "sonner";
 
@@ -86,6 +110,36 @@ export function DashboardPage() {
     queryFn: () => clusters.platformFacts(clusterId!),
     enabled: !!clusterId,
     refetchInterval: 30_000,
+  });
+  const clusterHealth = useQuery({
+    queryKey: ["system-health", "cluster", clusterId],
+    queryFn: () => systemHealth.cluster(clusterId!),
+    enabled: !!clusterId,
+    staleTime: 30_000,
+    refetchInterval: 30_000,
+  });
+  const scanStatus = useQuery({
+    queryKey: ["scan-status", "dashboard"],
+    queryFn: scannerOperations.status,
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+  });
+  const scannerWorkers = useQuery({
+    queryKey: ["scan-scanner-workers", "dashboard"],
+    queryFn: scannerOperations.workers,
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+  });
+  const federationState = useQuery({
+    queryKey: ["fed-state", "dashboard"],
+    queryFn: federation.state,
+    staleTime: 60_000,
+  });
+  const federationMembers = useQuery({
+    queryKey: ["fed-members", "dashboard"],
+    queryFn: federation.members,
+    enabled: federationState.data?.state === "master",
+    staleTime: 60_000,
   });
   // Compliance posture (pass/fail across frameworks) + runtime threats in the
   // last 24h. Both feed the two posture tiles so the landing represents all
@@ -170,9 +224,31 @@ export function DashboardPage() {
     queryFn: () => network.exposure({ cluster_id: clusterId }),
     enabled: !!clusterId,
   });
+  const conversationsQ = useQuery({
+    queryKey: ["network-conversations", "dashboard-denies", clusterId],
+    queryFn: () => network.conversations({ hours: 24, cluster_id: clusterId }),
+    enabled: !!clusterId,
+    staleTime: 60_000,
+  });
   const trends = useMemo(() => fourteenDayBySeverity(allItems), [allItems]);
   const topActions = useMemo(() => prioritizeActionItems(openItems), [openItems]);
   const recent = sum.data?.recent_activity ?? [];
+  const componentHealth = useMemo(
+    () => summarizeComponentHealth(clusterHealth.data?.heartbeats ?? []),
+    [clusterHealth.data?.heartbeats],
+  );
+  const scannerFreshness = useMemo(
+    () => summarizeScannerFreshness(scanStatus.data, scannerWorkers.data ?? [], bundle.data),
+    [scanStatus.data, scannerWorkers.data, bundle.data],
+  );
+  const topNetworkDenies = useMemo(
+    () => topDeniedConversations(conversationsQ.data?.conversations ?? []),
+    [conversationsQ.data?.conversations],
+  );
+  const federationHealth = useMemo(
+    () => summarizeFederationHealth(federationState.data, federationMembers.data?.members ?? []),
+    [federationState.data, federationMembers.data?.members],
+  );
 
   // Compliance pass % aggregated across all reported frameworks.
   const compliancePosture = useMemo(() => {
@@ -212,6 +288,95 @@ export function DashboardPage() {
           </button>
         }
       />
+
+      {clusterId && (
+        <section className="c-rise c-rise-1 grid gap-3 xl:grid-cols-[minmax(0,1fr)_360px]" data-testid="dashboard-operator-strip">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5" data-testid="dashboard-component-health">
+            {COMPONENT_ROLES.map((role) => {
+              const health = componentHealth.roles[role.id];
+              return (
+                <div key={role.id} data-testid={`dashboard-component-link-${role.id}`}>
+                  <StatCard
+                    label={role.label}
+                    value={clusterHealth.isPending ? "..." : `${health.healthy}/${health.total}`}
+                    tone={componentRoleTone(health)}
+                    icon={role.icon}
+                    href={clusterPath(`/components?role=${role.id}`)}
+                    hint={componentRoleHint(health)}
+                  />
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="space-y-3">
+            <Link
+              to="/settings/scanner"
+              className="group block rounded-md border border-border bg-card p-3 transition-colors hover:border-[color-mix(in_oklab,var(--color-primary)_30%,var(--color-border))]"
+              data-testid="dashboard-scanner-freshness"
+            >
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                    <Database className="h-3 w-3" />
+                    Scanner DB
+                  </div>
+                  <div className="mt-1 truncate text-display text-xl font-semibold">
+                    {scanStatus.isPending && scannerWorkers.isPending ? "Loading..." : scannerFreshness.version || "Not reported"}
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <StatusChip value={scannerFreshness.status} />
+                  <ArrowUpRight className="h-3.5 w-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+                </div>
+              </div>
+              <dl className="space-y-2 text-xs">
+                <Row k="Freshness" v={<span className="text-mono text-muted-foreground">{scannerFreshness.freshnessLabel}</span>} />
+                <Row k="Workers" v={<span className="text-mono">{scannerFreshness.workersWithDb}/{scannerFreshness.workers}</span>} />
+                <Row k="Queue" v={<span className="text-mono text-muted-foreground">{scannerFreshness.scheduled.toLocaleString()} queued · {scannerFreshness.scanning.toLocaleString()} running</span>} />
+                <Row
+                  k="Failures"
+                  v={
+                    <span className={cn("text-mono", scannerFreshness.failed > 0 ? "text-[color:var(--color-severity-high)]" : "text-muted-foreground")}>
+                      {scannerFreshness.failed.toLocaleString()}
+                    </span>
+                  }
+                />
+              </dl>
+            </Link>
+
+            {federationHealth.participating && (
+              <Link
+                to="/federation"
+                className="group block rounded-md border border-border bg-card p-3 transition-colors hover:border-[color-mix(in_oklab,var(--color-primary)_30%,var(--color-border))]"
+                data-testid="dashboard-federation-health"
+              >
+                <div className="mb-3 flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                      <GitBranch className="h-3 w-3" />
+                      Federation
+                    </div>
+                    <div className="mt-1 truncate text-display text-xl font-semibold capitalize">
+                      {federationHealth.state}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <StatusChip value={federationHealth.status} />
+                    <ArrowUpRight className="h-3.5 w-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+                  </div>
+                </div>
+                <dl className="space-y-2 text-xs">
+                  <Row k="Members" v={<span className="text-mono">{federationHealth.activeMembers}/{federationHealth.members}</span>} />
+                  <Row k="Revision" v={<span className="text-mono text-muted-foreground">{federationHealth.revision}</span>} />
+                  <Row k="Stale" v={<span className={cn("text-mono", federationHealth.staleMembers > 0 ? "text-[color:var(--color-severity-high)]" : "text-muted-foreground")}>{federationHealth.staleMembers}</span>} />
+                  <Row k="Updated" v={<span className="text-mono text-muted-foreground">{federationHealth.updatedLabel}</span>} />
+                </dl>
+              </Link>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* Hero band — Security RISK Score (NV model: higher = worse) + its 6 weighted factors */}
       <section className="c-rise c-rise-1 grid grid-cols-1 gap-6 rounded-md border border-border bg-card p-5 star-field lg:grid-cols-[200px_1fr]">
@@ -272,18 +437,59 @@ export function DashboardPage() {
 
       {/* Exposed services (ingress/egress) + enforcement coverage — NV signature panels */}
       <section className="c-rise c-rise-2 grid grid-cols-1 gap-4 lg:grid-cols-[1fr_300px]">
-        <Panel title="Exposed Services" subtitle="Workloads talking to the outside world — correlated with their vulnerabilities" icon={<Activity className="h-3.5 w-3.5" />}>
-          {exposureQ.isPending ? (
-            <p className="p-3 text-xs text-muted-foreground">Loading exposure…</p>
-          ) : ((exposureQ.data?.ingress.length ?? 0) + (exposureQ.data?.egress.length ?? 0)) === 0 ? (
-            <EmptyState title="No external exposure observed" hint="No ingress/egress traffic to external endpoints in the last 7 days." />
-          ) : (
-            <div className="divide-y divide-border">
-              {(exposureQ.data?.ingress ?? []).map((s) => <ExposedRow key={"in" + s.workload} s={s} dir="ingress" clusterPath={clusterPath} />)}
-              {(exposureQ.data?.egress ?? []).map((s) => <ExposedRow key={"eg" + s.workload} s={s} dir="egress" clusterPath={clusterPath} />)}
+        <div className="space-y-4">
+          <Panel title="Exposed Services" subtitle="Workloads talking to the outside world — correlated with their vulnerabilities" icon={<Activity className="h-3.5 w-3.5" />}>
+            {exposureQ.isPending ? (
+              <p className="p-3 text-xs text-muted-foreground">Loading exposure…</p>
+            ) : ((exposureQ.data?.ingress.length ?? 0) + (exposureQ.data?.egress.length ?? 0)) === 0 ? (
+              <EmptyState title="No external exposure observed" hint="No ingress/egress traffic to external endpoints in the last 7 days." />
+            ) : (
+              <div className="divide-y divide-border">
+                {(exposureQ.data?.ingress ?? []).map((s) => <ExposedRow key={"in" + s.workload} s={s} dir="ingress" clusterPath={clusterPath} />)}
+                {(exposureQ.data?.egress ?? []).map((s) => <ExposedRow key={"eg" + s.workload} s={s} dir="egress" clusterPath={clusterPath} />)}
+              </div>
+            )}
+          </Panel>
+
+          <Panel
+            title="Top Network Denies"
+            subtitle="Blocked service pairs in the last 24h"
+            icon={<ShieldAlert className="h-3.5 w-3.5" />}
+            rightSlot={<Link to={clusterPath("/network?verdict=deny")} className="text-[11px] text-muted-foreground hover:text-foreground">open map <ArrowUpRight className="inline h-3 w-3" /></Link>}
+          >
+            <div data-testid="dashboard-network-denies">
+              {conversationsQ.isPending ? (
+                <p className="p-3 text-xs text-muted-foreground">Loading denied conversations...</p>
+              ) : topNetworkDenies.length === 0 ? (
+                <EmptyState title="No network denies observed" hint="Denied or blocked service pairs will rank here when enforcement drops traffic." />
+              ) : (
+                <ul className="divide-y divide-border">
+                  {topNetworkDenies.map((row, index) => (
+                    <li key={`${row.from}-${row.to}-${index}`}>
+                      <Link to={clusterPath(`/network?tab=conversations&workload=${encodeURIComponent(row.from)}`)} className="flex items-center gap-3 px-3 py-2 hover:bg-muted/40 transition-colors">
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-xs font-medium">
+                            <span className="font-mono">{row.from}</span>
+                            <span className="px-1.5 text-muted-foreground">→</span>
+                            <span className="font-mono">{row.to}</span>
+                          </div>
+                          <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
+                            {fmtBytes(row.bytes)} · {row.packets.toLocaleString()} packets
+                            {(row.apps?.length ?? 0) > 0 && ` · ${row.apps?.slice(0, 3).join(", ")}`}
+                            {row.last_seen && ` · ${fmtRelative(row.last_seen)}`}
+                          </div>
+                        </div>
+                        <span className="shrink-0 rounded bg-[color-mix(in_oklab,var(--color-status-error)_16%,transparent)] px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-[color:var(--color-status-error)]">
+                          {row.verdict || "deny"}
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
-          )}
-        </Panel>
+          </Panel>
+        </div>
         <div className="space-y-4">
         <Panel title="Policy Mode Maturity" subtitle="Advance groups Discover → Monitor → Protect" icon={<ShieldCheck className="h-3.5 w-3.5" />}>
           <div className="p-3 space-y-4">
@@ -594,6 +800,53 @@ const tooltipStyle = {
   fontSize: 11,
 };
 
+type ComponentRoleID = "controller" | "enforcer" | "scanner" | "admission" | "discoverer";
+
+interface ComponentRoleHealth {
+  total: number;
+  healthy: number;
+  degraded: number;
+  stale: number;
+  drift: number;
+  crashlooping: number;
+  unhealthy: number;
+  lastSeenAt?: string;
+}
+
+interface ComponentHealthSummary {
+  roles: Record<ComponentRoleID, ComponentRoleHealth>;
+}
+
+interface ScannerFreshnessSummary {
+  status: string;
+  version: string;
+  freshnessLabel: string;
+  workers: number;
+  workersWithDb: number;
+  scheduled: number;
+  scanning: number;
+  failed: number;
+}
+
+interface FederationHealthSummary {
+  participating: boolean;
+  state: string;
+  status: string;
+  revision: number;
+  members: number;
+  activeMembers: number;
+  staleMembers: number;
+  updatedLabel: string;
+}
+
+const COMPONENT_ROLES: Array<{ id: ComponentRoleID; label: string; icon: React.ReactNode }> = [
+  { id: "controller", label: "Controllers", icon: <ServerCog className="h-3 w-3" /> },
+  { id: "enforcer", label: "Enforcers", icon: <ShieldAlert className="h-3 w-3" /> },
+  { id: "scanner", label: "Scanners", icon: <ScanSearch className="h-3 w-3" /> },
+  { id: "admission", label: "Admission", icon: <ShieldCheck className="h-3 w-3" /> },
+  { id: "discoverer", label: "Import/Disc", icon: <PackageCheck className="h-3 w-3" /> },
+];
+
 
 function ExposedRow({ s, dir, clusterPath }: { s: import("@/api/client").ExposedService; dir: "ingress" | "egress"; clusterPath: (p: string) => string }) {
   return (
@@ -822,6 +1075,152 @@ function shortHash(value?: string) {
 
 // ─────────────────────────── pure helpers ───────────────────────────
 
+function summarizeComponentHealth(heartbeats: SystemHealthHeartbeat[]): ComponentHealthSummary {
+  const roles = Object.fromEntries(COMPONENT_ROLES.map((role) => [role.id, emptyComponentRoleHealth()])) as Record<ComponentRoleID, ComponentRoleHealth>;
+  for (const heartbeat of heartbeats) {
+    const role = componentRoleFromHeartbeat(heartbeat);
+    if (!role) continue;
+    const bucket = roles[role];
+    bucket.total++;
+    const status = String(heartbeat.status || "healthy").toLowerCase();
+    if (status === "healthy") {
+      bucket.healthy++;
+    } else {
+      bucket.unhealthy++;
+      if (status === "degraded") bucket.degraded++;
+      if (status === "stale") bucket.stale++;
+      if (status === "drift") bucket.drift++;
+      if (status === "crashlooping") bucket.crashlooping++;
+    }
+    bucket.lastSeenAt = newestISO(bucket.lastSeenAt, heartbeat.last_seen_at);
+  }
+  return { roles };
+}
+
+function emptyComponentRoleHealth(): ComponentRoleHealth {
+  return { total: 0, healthy: 0, degraded: 0, stale: 0, drift: 0, crashlooping: 0, unhealthy: 0 };
+}
+
+function componentRoleFromHeartbeat(heartbeat: SystemHealthHeartbeat): ComponentRoleID | null {
+  const text = [heartbeat.component, heartbeat.hostname, heartbeat.metadata?.vulndb ? "scanner" : ""].join(" ").toLowerCase();
+  if (/\b(scanner|scan-worker|vuln|cve)\b/.test(text)) return "scanner";
+  if (/\b(admission|webhook)\b/.test(text)) return "admission";
+  if (/\b(enforcer|runtime-agent|agent|sensor|node-agent)\b/.test(text)) return "enforcer";
+  if (/\b(discoverer|discovery|importer|collector|inventory)\b/.test(text)) return "discoverer";
+  if (/\b(controller|control-plane|api|server)\b/.test(text)) return "controller";
+  return null;
+}
+
+function componentRoleTone(health: ComponentRoleHealth): "neutral" | "critical" | "high" | "medium" | "low" | "accent" {
+  if (health.total === 0) return "neutral";
+  if (health.crashlooping > 0 || health.stale > 0) return "critical";
+  if (health.degraded > 0 || health.drift > 0 || health.unhealthy > 0) return "medium";
+  return "low";
+}
+
+function componentRoleHint(health: ComponentRoleHealth): string {
+  if (health.total === 0) return "not observed";
+  const parts: string[] = [];
+  if (health.unhealthy > 0) parts.push(`${health.unhealthy} need attention`);
+  if (health.stale > 0) parts.push(`${health.stale} stale`);
+  if (health.drift > 0) parts.push(`${health.drift} drift`);
+  if (parts.length === 0) parts.push("all healthy");
+  if (health.lastSeenAt) parts.push(fmtRelative(health.lastSeenAt));
+  return parts.join(" · ");
+}
+
+function summarizeScannerFreshness(
+  lifecycle: ScanLifecycleStatus | undefined,
+  workers: ScannerWorker[],
+  bundleStatus: CVEBundleStatus | undefined,
+): ScannerFreshnessSummary {
+  const workerWithDb = workers.find((worker) => worker.cvedb_version);
+  const workerWithDbTime = workers.find((worker) => worker.cvedb_create_time);
+  const version = lifecycle?.cvedb_version || workerWithDb?.cvedb_version || bundleStatus?.version || "";
+  const dbTime = lifecycle?.cvedb_create_time || workerWithDbTime?.cvedb_create_time || bundleStatus?.imported_at || bundleStatus?.published_at;
+  const workersWithDb = workers.filter((worker) => worker.cvedb_version).length;
+  const failed = lifecycle?.failed ?? 0;
+  let status = "ready";
+  if (!version) {
+    status = "missing";
+  } else if (failed > 0 || (workers.length > 0 && workersWithDb < workers.length)) {
+    status = "degraded";
+  }
+  const ageHours = hoursSince(dbTime);
+  if (version && ageHours != null) {
+    if (ageHours > 72) status = "stale";
+    else if (ageHours > 24 && status === "ready") status = "degraded";
+  }
+  return {
+    status,
+    version,
+    freshnessLabel: dbTime ? fmtRelative(dbTime) : "not reported",
+    workers: workers.length,
+    workersWithDb,
+    scheduled: lifecycle?.scheduled ?? 0,
+    scanning: lifecycle?.scanning ?? 0,
+    failed,
+  };
+}
+
+function summarizeFederationHealth(state: FedMembership | undefined, members: FedMember[]): FederationHealthSummary {
+  const fedState = state?.state ?? "standalone";
+  const activeMembers = members.filter((member) => member.status === "active").length;
+  const staleMembers = members.filter((member) => member.status !== "active").length;
+  let status = "ready";
+  if (fedState === "master" && staleMembers > 0) status = "degraded";
+  const ageHours = hoursSince(state?.updated_at);
+  if (fedState === "joint" && ageHours != null && ageHours > 24) status = "stale";
+  return {
+    participating: fedState !== "standalone",
+    state: fedState,
+    status,
+    revision: state?.revision ?? 0,
+    members: fedState === "master" ? members.length : state?.master_id ? 1 : 0,
+    activeMembers: fedState === "master" ? activeMembers : state?.master_id ? 1 : 0,
+    staleMembers,
+    updatedLabel: state?.updated_at ? fmtRelative(state.updated_at) : "not reported",
+  };
+}
+
+function hoursSince(iso?: string): number | null {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return null;
+  return (Date.now() - t) / 3_600_000;
+}
+
+function newestISO(a?: string, b?: string): string | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  const at = Date.parse(a);
+  const bt = Date.parse(b);
+  if (!Number.isFinite(at)) return b;
+  if (!Number.isFinite(bt)) return a;
+  return bt > at ? b : a;
+}
+
+function topDeniedConversations(conversations: NetworkConversation[]): NetworkConversation[] {
+  return conversations
+    .filter((row) => isDeniedVerdict(row.verdict))
+    .sort((a, b) => (
+      (b.severity ?? 0) - (a.severity ?? 0)
+      || b.bytes - a.bytes
+      || timeValue(b.last_seen) - timeValue(a.last_seen)
+    ))
+    .slice(0, 5);
+}
+
+function isDeniedVerdict(verdict?: string): boolean {
+  const v = String(verdict ?? "").toLowerCase();
+  return v === "deny" || v === "denied" || v === "block" || v === "blocked";
+}
+
+function timeValue(iso?: string): number {
+  const t = Date.parse(iso ?? "");
+  return Number.isFinite(t) ? t : 0;
+}
+
 function bucketByLifecycle(items: Finding[]) {
   const out = { total: 0, open: 0, critical: 0, high: 0, suppressed: 0, accepted: 0 };
   for (const f of items) {
@@ -880,4 +1279,3 @@ function fourteenDayBySeverity(items: Finding[]): SeverityTrend {
   }
   return { critical, high, open, openSeries: open };
 }
-

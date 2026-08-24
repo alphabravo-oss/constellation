@@ -5,6 +5,8 @@
 // without merging the two into one page.
 //
 //	GET    /api/v1/runtime-signatures               list (category='signature')
+//	GET    /api/v1/runtime-signatures:export        YAML bundle export
+//	POST   /api/v1/runtime-signatures:import        YAML bundle import
 //	GET    /api/v1/runtime-signatures/{id}          get one
 //	POST   /api/v1/runtime-signatures               create — stamps Category='signature'
 //	PUT    /api/v1/runtime-signatures/{id}          update
@@ -28,6 +30,7 @@ package runtime
 import (
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/google/uuid"
@@ -52,7 +55,9 @@ func NewRuntimeSignaturesHTTP(d *db.DB, auditLog *audit.Logger) *RuntimeSignatur
 	return &RuntimeSignaturesHTTP{store: NewRuntimeDLPStore(d, auditLog)}
 }
 
-// List returns only signature-category rows.
+// List returns custom DPI signatures plus imported WAF-category rows. The UI
+// presents this surface as "WAF / DPI Signatures"; Constellation-authored rows
+// are category=signature and NeuVector WAF imports are category=waf.
 func (h *RuntimeSignaturesHTTP) List(w http.ResponseWriter, r *http.Request) {
 	sub, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
@@ -69,11 +74,23 @@ func (h *RuntimeSignaturesHTTP) List(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	wafRows, err := h.store.ListForCluster(r.Context(), sub.OrgID, clusterID, CategoryWAF)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	rows = append(rows, wafRows...)
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].Category != rows[j].Category {
+			return rows[i].Category < rows[j].Category
+		}
+		return rows[i].Name < rows[j].Name
+	})
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"signatures": rows})
 }
 
 // Get fetches one — same as DLP's Get but returns 404 if the row exists
-// but its category is dlp (this surface only serves signature rows).
+// but its category is plain dlp (this surface serves signature + waf rows).
 func (h *RuntimeSignaturesHTTP) Get(w http.ResponseWriter, r *http.Request) {
 	sub, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
@@ -94,8 +111,8 @@ func (h *RuntimeSignaturesHTTP) Get(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if got.Category != CategorySignature {
-		// The row exists but it's a DLP rule, not a signature — surface
+	if got.Category != CategorySignature && got.Category != CategoryWAF {
+		// The row exists but it's a DLP rule, not a signature/WAF rule — surface
 		// as 404 from this endpoint so the UI doesn't get confused.
 		jsonError(w, http.StatusNotFound, "not found")
 		return
@@ -187,7 +204,8 @@ func (h *RuntimeSignaturesHTTP) Delete(w http.ResponseWriter, r *http.Request) {
 
 // requireSignatureRow checks the row's category before delegating to the
 // shared mutator. Without this, a /runtime-signatures/{id}/promote on a
-// DLP row would silently promote the DLP rule.
+// plain DLP row would silently promote the DLP rule. WAF rows are accepted
+// because this page is also the user-facing home for imported WAF sensors.
 func (h *RuntimeSignaturesHTTP) requireSignatureRow(w http.ResponseWriter, r *http.Request) bool {
 	sub, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
@@ -210,7 +228,7 @@ func (h *RuntimeSignaturesHTTP) requireSignatureRow(w http.ResponseWriter, r *ht
 		return false
 	}
 	got, err := h.store.Get(r.Context(), sub.OrgID, id)
-	if err != nil || got == nil || got.Category != CategorySignature {
+	if err != nil || got == nil || (got.Category != CategorySignature && got.Category != CategoryWAF) {
 		jsonError(w, http.StatusNotFound, "not found")
 		return false
 	}

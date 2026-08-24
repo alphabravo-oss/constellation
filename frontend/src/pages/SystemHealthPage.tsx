@@ -1,14 +1,18 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import {
   AlertTriangle,
   CheckCircle2,
   Clock,
+  Download,
   RefreshCcw,
   ShieldAlert,
   Sparkles,
 } from "lucide-react";
+import { toast } from "sonner";
 
 import {
+  supportBundles,
   systemHealth,
   type SystemHealthClusterDrift,
   type SystemHealthHeartbeat,
@@ -20,18 +24,39 @@ import { DataTable, type Column } from "@/components/ui/data-table";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { componentDiagnosticsHref, nvRoleAlias } from "@/lib/component-roles";
+import { downloadJson } from "@/lib/download";
 
 const heartbeatColumns: Column<SystemHealthHeartbeat>[] = [
-  { id: "component", header: "Component", className: "font-medium", cell: (hb) => hb.component },
-  { id: "version", header: "Version", className: "font-mono", cell: (hb) => hb.version },
-  { id: "commit", header: "Commit", className: "font-mono", cell: (hb) => <span title={hb.commit}>{hb.commit_short}</span> },
-  { id: "hostname", header: "Hostname", className: "font-mono", cell: (hb) => hb.hostname },
-  { id: "cluster", header: "Cluster", cell: (hb) => hb.cluster_name ?? <span className="text-muted-foreground">(control-plane)</span> },
-  { id: "uptime", header: "Uptime", cell: (hb) => formatUptime(hb.uptime_seconds) },
-  { id: "lastSeen", header: "Last seen", cell: (hb) => formatRelative(hb.last_seen_at) },
-  { id: "restarts", header: "Restarts", cell: (hb) => hb.restart_count },
-  { id: "details", header: "Details", cell: (hb) => <HeartbeatDetails hb={hb} /> },
-  { id: "status", header: "Status", cell: (hb) => <StatusPill status={hb.status} reason={hb.drift_reason} /> },
+  {
+    id: "component",
+    header: "Component",
+    className: "font-medium",
+    exportValue: (hb) => hb.component,
+    cell: (hb) => {
+      const role = nvRoleAlias({ component: hb.component });
+      return (
+        <Link
+          to={componentDiagnosticsHref({ clusterId: hb.cluster_id, component: hb.component, role: role.id })}
+          className="hover:text-[color:var(--color-primary)]"
+          data-testid={`system-health-component-link-${safeTestID(hb.component)}`}
+          title={`Open ${role.label.toLowerCase()} diagnostics`}
+        >
+          {hb.component}
+        </Link>
+      );
+    },
+  },
+  { id: "version", header: "Version", className: "font-mono", cell: (hb) => hb.version, exportValue: (hb) => hb.version },
+  { id: "commit", header: "Commit", className: "font-mono", cell: (hb) => <span title={hb.commit}>{hb.commit_short}</span>, exportValue: (hb) => hb.commit },
+  { id: "hostname", header: "Hostname", className: "font-mono", cell: (hb) => hb.hostname, exportValue: (hb) => hb.hostname },
+  { id: "cluster", header: "Cluster", cell: (hb) => hb.cluster_name ?? <span className="text-muted-foreground">(control-plane)</span>, exportValue: (hb) => hb.cluster_name ?? "control-plane" },
+  { id: "uptime", header: "Uptime", cell: (hb) => formatUptime(hb.uptime_seconds), exportValue: (hb) => formatUptime(hb.uptime_seconds) },
+  { id: "lastSeen", header: "Last seen", cell: (hb) => formatRelative(hb.last_seen_at), exportValue: (hb) => hb.last_seen_at },
+  { id: "restarts", header: "Restarts", cell: (hb) => hb.restart_count, exportValue: (hb) => hb.restart_count },
+  { id: "details", header: "Details", cell: (hb) => <HeartbeatDetails hb={hb} />, exportValue: (hb) => heartbeatDetailsText(hb) },
+  { id: "status", header: "Status", cell: (hb) => <StatusPill status={hb.status} reason={hb.drift_reason} />, exportValue: (hb) => hb.drift_reason ? `${hb.status}; ${hb.drift_reason}` : hb.status },
 ];
 
 /**
@@ -47,6 +72,14 @@ export function SystemHealthPage() {
     queryKey: ["system-health"],
     queryFn: () => systemHealth.overview(),
     refetchInterval: 30_000,
+  });
+  const supportBundle = useMutation({
+    mutationFn: supportBundles.download,
+    onSuccess: (bundle) => {
+      downloadJson(supportBundleFileName(bundle.generated_at), bundle);
+      toast.success("Support bundle downloaded");
+    },
+    onError: () => toast.error("Support bundle download failed"),
   });
 
   const [tab, setTab] = useTabParam("tab", "clusters");
@@ -103,6 +136,8 @@ export function SystemHealthPage() {
             rows={heartbeats}
             columns={heartbeatColumns}
             rowKey={(hb) => `${hb.cluster_id ?? "control"}-${hb.component}@${hb.hostname}`}
+            exportFileName="constellation-system-health-heartbeats"
+            testId="system-health-heartbeats-table"
             emptyState={
               <div className="px-3 py-6 text-center text-xs text-muted-foreground">
                 No heartbeats received yet. Components POST to <span className="font-mono">/api/v1/heartbeats</span> every 30s.
@@ -191,12 +226,26 @@ export function SystemHealthPage() {
         title="System Health"
         description="Fleet-wide build version, restart history, drift, and licensing for the control plane and every connected cluster."
         actions={
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Sparkles className="h-4 w-4" />
-            <span>License: <span className="font-medium text-foreground">{license?.kind ?? "unknown"}</span></span>
-            {license?.expires_at && (
-              <span className="ml-2">expires in <span className="font-medium text-foreground">{license.days_to_expiry}d</span></span>
-            )}
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => supportBundle.mutate()}
+              disabled={supportBundle.isPending}
+              data-testid="system-health-support-bundle"
+              title="Download redacted support bundle"
+            >
+              <Download className="h-3.5 w-3.5" aria-hidden />
+              Bundle
+            </Button>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Sparkles className="h-4 w-4" />
+              <span>License: <span className="font-medium text-foreground">{license?.kind ?? "unknown"}</span></span>
+              {license?.expires_at && (
+                <span className="ml-2">expires in <span className="font-medium text-foreground">{license.days_to_expiry}d</span></span>
+              )}
+            </div>
           </div>
         }
       />
@@ -255,6 +304,11 @@ export function SystemHealthPage() {
       <Tabs value={tab} onValueChange={setTab} items={tabs} />
     </div>
   );
+}
+
+function supportBundleFileName(generatedAt: string) {
+  const stamp = generatedAt ? generatedAt.replace(/[^0-9A-Za-z]/g, "-") : new Date().toISOString().replace(/[^0-9A-Za-z]/g, "-");
+  return `constellation-support-bundle-${stamp}.json`;
 }
 
 // -----------------------------------------------------------------------------
@@ -384,6 +438,27 @@ function HeartbeatDetails({ hb }: { hb: SystemHealthHeartbeat }) {
   );
 }
 
+function heartbeatDetailsText(hb: SystemHealthHeartbeat) {
+  if (hb.component !== "scanner" || !hb.metadata) {
+    return "";
+  }
+  const vulndb = hb.metadata.vulndb;
+  const cacheHealth = hb.metadata.cache_health ?? {};
+  const cacheBad = Object.entries(cacheHealth)
+    .filter(([, item]) => item.configured && item.writable === false)
+    .map(([name, item]) => `${name}:${item.status ?? "bad"}`);
+  const activeTargets = compactCountMap(hb.metadata.active_jobs_by_target_type);
+  const targetCapacity = compactCountMap(hb.metadata.target_capacity);
+  return [
+    `${hb.metadata.active_jobs ?? 0}/${hb.metadata.max_concurrent ?? "?"} busy`,
+    `idle ${hb.metadata.idle_capacity ?? 0}`,
+    activeTargets ? `active ${activeTargets}` : null,
+    targetCapacity ? `capacity ${targetCapacity}` : null,
+    vulndb ? `vulndb ${vulndb.status ?? (vulndb.ready ? "ready" : "unknown")}${vulndb.bundle_version ? ` ${vulndb.bundle_version}` : ""}` : null,
+    cacheBad.length > 0 ? `cache ${cacheBad.join(", ")}` : null,
+  ].filter((part): part is string => Boolean(part)).join("; ");
+}
+
 function compactCountMap(values?: Record<string, number>) {
   if (!values) return "";
   return Object.entries(values)
@@ -443,4 +518,8 @@ function formatRelative(iso: string): string {
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
   return `${Math.floor(diff / 86400)}d ago`;
+}
+
+function safeTestID(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "component";
 }

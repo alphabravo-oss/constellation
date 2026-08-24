@@ -74,6 +74,11 @@ INSERT INTO image_scan_artifacts (
 ) VALUES ($1, $2, 'sbom', 'spdx-2.3', '{}'::jsonb, 'sha256:sbom', 10)`, orgID, resultID); err != nil {
 		t.Fatalf("sbom: %v", err)
 	}
+	if _, err := pool.Exec(ctx, `
+INSERT INTO sbom_documents (asset_id, format, document, sha256)
+VALUES ($1, 'cyclonedx-1.6', '{}'::jsonb, 'sha256:legacy-sbom')`, assetID); err != nil {
+		t.Fatalf("legacy sbom: %v", err)
+	}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgID)
 	})
@@ -104,9 +109,21 @@ INSERT INTO image_scan_artifacts (
 	if got.ImageScanResult.ID != resultID || got.ImageScanResult.HighCount != 1 {
 		t.Fatalf("bad image scan result: %+v", got.ImageScanResult)
 	}
-	if len(got.Findings) != 1 || len(got.SBOMs) != 1 {
+	if len(got.Findings) != 1 || len(got.SBOMs) != 2 {
 		t.Fatalf("expected finding and sbom: %+v", got)
 	}
+	if !hasSBOMFormat(got.SBOMs, "spdx-2.3") || !hasSBOMFormat(got.SBOMs, "cyclonedx-1.6") {
+		t.Fatalf("missing merged sbom formats: %+v", got.SBOMs)
+	}
+}
+
+func hasSBOMFormat(sboms []map[string]any, format string) bool {
+	for _, sbom := range sboms {
+		if sbom["format"] == format {
+			return true
+		}
+	}
+	return false
 }
 
 func TestAssets_ListIncludesRiskAndSupplyChainRollups(t *testing.T) {

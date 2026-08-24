@@ -456,8 +456,10 @@ func componentDiagnosticsFor(component componentInstanceDTO, rawMetadata map[str
 		Counters:    componentDiagnosticCounters(component, rawMetadata),
 		Config:      componentDiagnosticConfigEntries(rawMetadata),
 		Debug: componentDiagnosticDebug{
+			SupportBundleEnabled: true,
 			Notes: []string{
-				"Derived from component heartbeats; live logs, profiling, and support bundles require explicit signed/redacted collection workflows.",
+				"Derived from component heartbeats; live logs and profiling require explicit collection workflows.",
+				"Support bundles are generated through the redacted support bundle endpoint.",
 				"Raw heartbeat metadata is intentionally not returned by diagnostics.",
 			},
 		},

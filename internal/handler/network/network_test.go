@@ -45,6 +45,12 @@ VALUES ($1, $2, 'default', 'api', 'Deployment', 80, 4),
 		t.Fatalf("deployments: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `
+INSERT INTO groups (org_id, cluster_id, name, kind, criteria, members, policy_mode, profile_mode)
+VALUES ($1, $2, 'payments-tier', 'ground', '[]'::jsonb, '["default/api"]'::jsonb, 'monitor', 'monitor')
+`, orgID, clusterID); err != nil {
+		t.Fatalf("group: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
 INSERT INTO network_flows (org_id, cluster_id, src_workload, dst_workload, src_addr, dst_addr, src_port, protocol, l7_protocol, dst_port, verdict, bytes, packets, at)
 VALUES ($1, $2, 'default/api', 'data/postgres', '10.42.0.8', '10.42.1.15', 41002, 'tcp', 'postgres', 5432, 'allow', 1000, 10, NOW()),
        ($1, $2, 'default/api', 'data/postgres', '10.42.0.8', '10.42.1.15', 41002, 'tcp', 'postgres', 5432, 'allow', 500, 5, NOW() - INTERVAL '5 minutes')
@@ -85,12 +91,14 @@ VALUES ($1, $2, 'default/api', 'data/postgres', '10.99.0.8', '10.99.1.15', 41002
 
 	var got struct {
 		Summary struct {
-			RecentFlows  int    `json:"recent_flows"`
-			TotalBytes   int64  `json:"total_bytes"`
-			TotalPackets int64  `json:"total_packets"`
-			Allowed      int    `json:"allowed"`
-			Selected     string `json:"selected_cluster_id"`
-			Clusters     []struct {
+			RecentFlows          int    `json:"recent_flows"`
+			TotalBytes           int64  `json:"total_bytes"`
+			TotalPackets         int64  `json:"total_packets"`
+			Allowed              int    `json:"allowed"`
+			Selected             string `json:"selected_cluster_id"`
+			SelectedGroup        string `json:"selected_group"`
+			SelectedGroupMembers int    `json:"selected_group_members"`
+			Clusters             []struct {
 				ID    string `json:"id"`
 				Name  string `json:"name"`
 				State string `json:"state"`
@@ -151,5 +159,32 @@ VALUES ($1, $2, 'default/api', 'data/postgres', '10.99.0.8', '10.99.1.15', 41002
 	}
 	if got.RecentFlows[0].SrcAddr != "10.42.0.8" || got.RecentFlows[0].DstAddr != "10.42.1.15" || got.RecentFlows[0].SrcPort != 41002 || got.RecentFlows[0].Scope != "cross-namespace" {
 		t.Fatalf("missing recent flow metadata: %+v", got.RecentFlows[0])
+	}
+
+	groupReq := httptest.NewRequest("GET", "/api/v1/network/map?hours=1&cluster_id="+clusterID.String()+"&group=payments-tier", nil)
+	groupReq = groupReq.WithContext(authctx.WithSubject(groupReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
+	groupRec := httptest.NewRecorder()
+	NewNetwork(d).Map(groupRec, groupReq)
+	if groupRec.Code != http.StatusOK {
+		t.Fatalf("group status: %d body: %s", groupRec.Code, groupRec.Body.String())
+	}
+	var grouped struct {
+		Summary struct {
+			SelectedGroup        string `json:"selected_group"`
+			SelectedGroupMembers int    `json:"selected_group_members"`
+		} `json:"summary"`
+		Flows []struct {
+			Src string `json:"src"`
+			Dst string `json:"dst"`
+		} `json:"flows"`
+	}
+	if err := json.NewDecoder(groupRec.Body).Decode(&grouped); err != nil {
+		t.Fatalf("decode grouped: %v", err)
+	}
+	if grouped.Summary.SelectedGroup != "payments-tier" || grouped.Summary.SelectedGroupMembers != 1 {
+		t.Fatalf("missing selected group metadata: %+v", grouped.Summary)
+	}
+	if len(grouped.Flows) != 1 || grouped.Flows[0].Src != "default/api" {
+		t.Fatalf("group filter should keep only member conversations, got %+v", grouped.Flows)
 	}
 }

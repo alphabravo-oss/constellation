@@ -60,24 +60,15 @@ test("Network map shows live flow telemetry and edge drill-down", async ({ page 
     });
   });
   await page.goto("/network");
-  await expect(page.getByRole("heading", { name: /Network — Traffic Map/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Network Activity/i })).toBeVisible();
   await expect(page.getByTestId("network-map")).toBeVisible();
-  await expect(page.getByText("Top talkers")).toBeVisible();
-  await expect(page.getByTestId("network-live-flow")).toContainText("default/frontend");
-  await page.getByTestId("network-top-talker-row").first().click();
-  await expect(page.getByTestId("network-flow-detail")).toContainText("Flow detail");
-  await expect(page.getByTestId("network-flow-route")).toContainText("default/frontend");
-  await expect(page.getByTestId("network-flow-metrics")).toContainText("10.42.0.10:41010");
-  await expect(page.getByTestId("network-flow-metrics")).toContainText("10.42.0.21:8443");
-  await expect(page.getByTestId("network-flow-policy-state")).toContainText("matches observed policy");
-
   const firstEdge = page.locator(".react-flow__edge").first();
   await expect(firstEdge).toBeVisible({ timeout: 10_000 });
   await firstEdge.click({ force: true });
-  await expect(page.getByRole("heading", { name: "Flow detail" })).toBeVisible();
-  await expect(page.getByText("Generated policy preview")).toBeVisible();
-  await expect(page.getByTestId("network-policy-lifecycle")).toBeVisible();
-  await expect(page.getByTestId("network-policy-dry-run-badge")).toContainText("preview only");
+  await expect(page.getByTestId("network-flow-inspector")).toBeVisible();
+  await expect(page.getByTestId("network-flow-inspector-title")).toContainText("frontend");
+  await page.getByTestId("network-flow-inspector-tab-policy").click();
+  await expect(page.getByTestId("network-policy-tab")).toContainText("Generated policy for");
 });
 
 test("Network policy lifecycle shows preview, diff, and action previews", async ({ page }) => {
@@ -188,22 +179,25 @@ test("Network policy lifecycle shows preview, diff, and action previews", async 
       }),
     });
   });
-  await page.route("**/api/v1/network/policies/**/rollback", async (route) => {
+  await page.route("**/api/v1/network/policies/**/rollback**", async (route) => {
     lifecyclePhase = "rolledback";
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ action: "rollback", action_id: "action-3", persists: true, applies_live: false, next_mode: "discover", rollback_ref: "rollback-frontend-monitor", rollback_refs: {} }) });
   });
-  await page.route("**/api/v1/network/policies/**/apply", async (route) => {
+  await page.route("**/api/v1/network/policies/**/apply**", async (route) => {
     sawApplyHash = (await route.request().postDataJSON()).candidate_hash === "candidate-frontend-v1";
     lifecyclePhase = "applied";
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ action: "apply", action_id: "action-2", persists: true, applies_live: false, next_mode: "monitor", rollback_ref: "rollback-frontend-monitor", rollback_refs: {} }) });
   });
-  await page.route("**/api/v1/network/policies/**/approve", async (route) => {
+  await page.route("**/api/v1/network/policies/**/approve**", async (route) => {
     sawApproveHash = (await route.request().postDataJSON()).candidate_hash === "candidate-frontend-v1";
     lifecyclePhase = "approved";
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ action: "approve", action_id: "action-1", persists: true, applies_live: false, next_mode: "monitor", rollback_refs: {} }) });
   });
 
   await page.goto("/network");
+  const frontendNode = page.locator(".react-flow__node").filter({ hasText: "frontend" }).first();
+  await expect(frontendNode).toBeVisible({ timeout: 10_000 });
+  await frontendNode.click();
   await expect(page.getByTestId("network-policy-lifecycle")).toBeVisible();
   await expect(page.getByTestId("network-policy-lifecycle").getByTestId("network-policy-mode").filter({ hasText: "discover" }).first()).toBeVisible();
   await expect(page.getByText("stable for 24h + sufficient traffic observed")).toBeVisible();
@@ -240,7 +234,7 @@ test("Network filters, refresh, live stream, and workload flow tabs are wired", 
   let sawFilteredRequest = false;
   await page.route("**/api/v1/network/map**", async (route) => {
     const url = new URL(route.request().url());
-    if (url.searchParams.get("hours") === "1" && url.searchParams.get("cluster_id") === "cluster-prod" && url.searchParams.get("namespace") === "default" && url.searchParams.get("verdict") === "block") {
+    if (url.searchParams.get("hours") === "1" && url.searchParams.get("cluster_id") && url.searchParams.get("namespace") === "default" && url.searchParams.get("verdict") === "block") {
       sawFilteredRequest = true;
     }
     await route.fulfill({
@@ -340,7 +334,6 @@ test("Network filters, refresh, live stream, and workload flow tabs are wired", 
 
   await page.goto("/network");
   await page.getByTestId("network-window-select").selectOption("1");
-  await page.getByTestId("network-cluster-select").selectOption("cluster-prod");
   await page.getByTestId("network-namespace-select").selectOption("default");
   await page.getByTestId("network-verdict-select").selectOption("block");
   await expect.poll(() => sawFilteredRequest).toBeTruthy();
@@ -348,13 +341,10 @@ test("Network filters, refresh, live stream, and workload flow tabs are wired", 
   await expect(page).toHaveURL(/namespace=default/);
   await expect(page).toHaveURL(/verdict=block/);
 
-  await expect(page.getByTestId("network-last-updated")).toContainText("updated");
-  await page.getByTestId("network-live-toggle").click();
-  await expect(page.getByTestId("network-live-toggle")).toContainText("Resume live");
-  await page.getByTestId("network-refresh").click();
-  await expect(page.getByTestId("network-live-flow-row").first()).toBeVisible();
-  await page.getByTestId("network-live-flow-row").filter({ hasText: "external/tracker.example" }).click();
-  await expect(page.getByTestId("network-flow-policy-state")).toContainText("blocked by runtime policy");
+  await expect(page.getByTestId("network-last-updated")).toBeVisible();
+  await page.getByRole("button", { name: "Pause" }).click();
+  await expect(page.getByRole("button", { name: "Resume" })).toBeVisible();
+  await page.getByRole("button", { name: "Refresh" }).click();
 
   await page.locator(".react-flow__node").filter({ hasText: "frontend" }).first().click();
   await expect(page.getByTestId("network-workload-detail")).toContainText("frontend");

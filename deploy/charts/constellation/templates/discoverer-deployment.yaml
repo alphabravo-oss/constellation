@@ -8,6 +8,7 @@ metadata:
   labels: {{- include "constellation.labels" . | nindent 4 }}
     app.kubernetes.io/component: discoverer
 spec:
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
   replicas: {{ .Values.discoverer.replicas }}
   selector:
     matchLabels:

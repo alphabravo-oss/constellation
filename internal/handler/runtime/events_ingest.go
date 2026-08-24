@@ -58,11 +58,20 @@ type EventsIngest struct {
 	// nil disables auto-response. Called best-effort/panic-isolated like the notify fan-out.
 	respond func(ctx context.Context, orgID, clusterID uuid.UUID, ev response.Event)
 
+	// decideResponseRules, when non-nil, evaluates response_rules_v2 without side effects
+	// before a HIGH/CRITICAL event is written. This is what lets v2 suppress-log actually
+	// suppress the runtime security-event row instead of firing after the log already exists.
+	decideResponseRules func(ctx context.Context, orgID, clusterID uuid.UUID, ev response.Event) ResponseRuleDecision
+
 	// baselineMode returns the pkg/runtime/baseline mode of a workload (learn/monitor/enforce)
 	// and the set of process basenames in its baseline. Injected so tests can drive the
 	// severity-promotion path without standing up an Engine. Nil = treat every workload as
 	// "learn" (never promotes to runtime.alert.*).
 	baselineMode func(orgID uuid.UUID, workloadID string) (mode baseline.Mode, processes map[string]struct{}, ok bool)
+
+	// clusterBaselineMode is the production runtime path. It scopes duplicate
+	// namespace/name workloads by the authenticated agent cluster before classifying drift.
+	clusterBaselineMode func(orgID, clusterID uuid.UUID, workloadID string) (mode baseline.Mode, processes map[string]struct{}, ok bool)
 
 	// procTree is the bounded, TTL'd cross-batch process-tree cache (RT-4) that lets the
 	// privilege-escalation detector correlate a root child against a non-root ancestor that
@@ -85,6 +94,10 @@ func NewEventsIngest(d *db.DB, a *audit.Logger, baselineFn func(uuid.UUID, strin
 	return &EventsIngest{db: d, audit: a, baselineMode: baselineFn, procTree: newProcTreeCache()}
 }
 
+func NewEventsIngestWithClusterBaseline(d *db.DB, a *audit.Logger, baselineFn func(uuid.UUID, uuid.UUID, string) (baseline.Mode, map[string]struct{}, bool)) *EventsIngest {
+	return &EventsIngest{db: d, audit: a, clusterBaselineMode: baselineFn, procTree: newProcTreeCache()}
+}
+
 // WithDispatcher attaches a notify Dispatcher so high-severity events get fanned out to
 // configured receivers. Returns the receiver for chaining.
 func (h *EventsIngest) WithDispatcher(d *notify.Dispatcher) *EventsIngest {
@@ -97,6 +110,13 @@ func (h *EventsIngest) WithDispatcher(d *notify.Dispatcher) *EventsIngest {
 // quarantine/isolate actions. Returns the receiver for chaining.
 func (h *EventsIngest) WithResponseEngine(respond func(ctx context.Context, orgID, clusterID uuid.UUID, ev response.Event)) *EventsIngest {
 	h.respond = respond
+	return h
+}
+
+// WithResponseDecision attaches the side-effect-free v2 response-rule evaluator used for
+// pre-insert suppress-log decisions. Returns the receiver for chaining.
+func (h *EventsIngest) WithResponseDecision(decide func(ctx context.Context, orgID, clusterID uuid.UUID, ev response.Event) ResponseRuleDecision) *EventsIngest {
+	h.decideResponseRules = decide
 	return h
 }
 
@@ -336,6 +356,7 @@ VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),'ebpf',$7,$8,$9,$10,$11,$12)`
 	// Both are computed BEFORE the events insert so a suppress_log action can actually skip the
 	// events row / audit / notify side-effects rather than firing after they were emitted.
 	ruleActions := make([][]responserule.Action, len(events))
+	v2Decisions := make([]ResponseRuleDecision, len(events))
 	suppressed := make([]bool, len(events))
 	for i := range events {
 		ev := &events[i]
@@ -350,7 +371,7 @@ VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),'ebpf',$7,$8,$9,$10,$11,$12)`
 		// child. The cache strictly augments the batch path; the original path keeps working.
 		privEsc := privEscFromBatch(ev, uidByPID) ||
 			h.procTree.privEscWithCache(ev, clusterID, uidByPID, now)
-		cls := h.classifyEvent(tok.OrgID, ev, fileRules, privEsc)
+		cls := h.classifyEvent(tok.OrgID, clusterID, ev, fileRules, privEsc)
 		classifications[i] = cls
 
 		// E1 declarative response rules fire on HIGH/CRITICAL events (the same scope that gets
@@ -364,9 +385,18 @@ VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),'ebpf',$7,$8,$9,$10,$11,$12)`
 			ruleActions[i] = h.evalResponseRulesSafe(r.Context(), tok.OrgID, ev, cls)
 			suppressed[i] = responseRulesSuppressLog(ruleActions[i])
 		}
+		// v2 response_rules_v2 suppress-log is evaluated side-effect-free before the insert.
+		// The explicit rule actions still run post-commit via h.respond; this decision only
+		// gates the security-event row and generic runtime.alert/notify fan-out.
+		if (cls.Severity == "high" || cls.Severity == "critical") && h.decideResponseRules != nil {
+			v2Decisions[i] = h.responseDecisionSafe(r.Context(), tok.OrgID, clusterID, ev, cls)
+			if v2Decisions[i].SuppressLog {
+				suppressed[i] = true
+			}
+		}
 		// suppress_log: drop the events row entirely for this detection (NeuVector parity —
 		// suppress_log suppresses the security-event log). Enforcement actions on the same
-		// rule (quarantine/tag) are still applied in the post-commit loop.
+		// rule (quarantine/tag/v2 explicit response actions) are still applied post-commit.
 		if suppressed[i] {
 			continue
 		}
@@ -473,10 +503,15 @@ VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),'ebpf',$7,$8,$9,$10,$11,$12)`
 				})
 			}
 		}
+		// If a v2 suppress-log action gated the row/audit/notify side-effects, record the
+		// suppression itself so the absence of the runtime event is explainable.
+		if v2Decisions[i].SuppressLog {
+			h.auditResponseV2SuppressLog(r.Context(), orgID, clusterID, ev, v2Decisions[i])
+		}
 		// Close the detection->response loop on HIGH/CRITICAL (RT-2). Best-effort and
 		// panic-isolated, exactly like the notify fan-out above: a misbehaving rule or
-		// runtime bridge must never roll back or 500 the ingest. This is a separate engine
-		// (response_rules_v2) and is intentionally NOT gated by the E1 suppress_log action.
+		// runtime bridge must never roll back or 500 the ingest. v2 suppress-log only gates
+		// the generic log/alert side-effects; explicit v2 actions still dispatch here.
 		if h.respond != nil {
 			h.dispatchResponse(r.Context(), orgID, clusterID, ev, cls, techniques)
 		}
@@ -499,14 +534,26 @@ func (h *EventsIngest) dispatchResponse(ctx context.Context, orgID, clusterID uu
 			slog.Default().Error("response dispatch panic", slog.Any("recover", rec))
 		}
 	}()
+	revt := responseEventForIngest(clusterID, ev, cls)
+	h.respond(ctx, orgID, clusterID, revt)
+}
+
+func responseEventForIngest(clusterID uuid.UUID, ev *IngestEvent, cls eventClassification) response.Event {
 	revt := response.Event{
-		ID:          uuid.NewString(),
-		Name:        ev.Kind,
-		Type:        response.EventRuntime,
-		Severity:    cls.Severity,
-		Cluster:     clusterID.String(),
-		Namespace:   ev.Namespace,
-		Workload:    ev.WorkloadID,
+		ID:        uuid.NewString(),
+		Name:      ev.Kind,
+		Type:      response.EventRuntime,
+		Severity:  cls.Severity,
+		Cluster:   clusterID.String(),
+		Namespace: ev.Namespace,
+		Workload:  ev.WorkloadID,
+		Labels: map[string]string{
+			"event_kind":  ev.Kind,
+			"node":        ev.Node,
+			"namespace":   ev.Namespace,
+			"pod":         ev.Pod,
+			"workload_id": ev.WorkloadID,
+		},
 		ProcessName: commBasename(ev.Comm, ev.Filename),
 		Title:       fmt.Sprintf("runtime.alert.%s on %s/%s", auditSubKind(ev.Kind), ev.Namespace, ev.Pod),
 		URL:         "/runtime/events",
@@ -514,7 +561,54 @@ func (h *EventsIngest) dispatchResponse(ctx context.Context, orgID, clusterID uu
 	if cls.Reason != "" {
 		revt.Name = cls.Reason
 	}
-	h.respond(ctx, orgID, clusterID, revt)
+	return revt
+}
+
+func (h *EventsIngest) responseDecisionSafe(ctx context.Context, orgID, clusterID uuid.UUID, ev *IngestEvent, cls eventClassification) (decision ResponseRuleDecision) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			slog.Default().Error("response v2 decision panic", slog.Any("recover", rec))
+			decision = ResponseRuleDecision{}
+		}
+	}()
+	return h.decideResponseRules(ctx, orgID, clusterID, responseEventForIngest(clusterID, ev, cls))
+}
+
+func (h *EventsIngest) auditResponseV2SuppressLog(ctx context.Context, orgID, clusterID uuid.UUID, ev *IngestEvent, decision ResponseRuleDecision) {
+	if h.audit == nil || !decision.SuppressLog {
+		return
+	}
+	for _, match := range decision.Matches {
+		for i, act := range match.Actions {
+			if !response.IsSuppressLogAction(act.Kind) {
+				continue
+			}
+			oid := orgID
+			after := map[string]any{
+				"action":      string(response.ActionSuppressLog),
+				"order":       i,
+				"rule_id":     match.RuleID,
+				"rule_name":   match.RuleName,
+				"event_kind":  ev.Kind,
+				"namespace":   ev.Namespace,
+				"pod":         ev.Pod,
+				"workload_id": ev.WorkloadID,
+				"cluster_id":  clusterID.String(),
+				"enforced":    "suppressed_log",
+			}
+			for k, v := range act.Params {
+				after["param_"+k] = v
+			}
+			_, _, _ = h.audit.Log(ctx, audit.Event{
+				OrgID:      &oid,
+				Action:     "response_rule_v2.action.suppress_log",
+				TargetKind: "workload",
+				TargetID:   ev.WorkloadID,
+				After:      after,
+				At:         ev.At,
+			})
+		}
+	}
 }
 
 // evalResponseRulesSafe folds a classified HIGH/CRITICAL event down to a responserule.Event
@@ -1116,12 +1210,12 @@ func (h *EventsIngest) classify(orgID uuid.UUID, ev *IngestEvent) (severity, ver
 }
 
 func (h *EventsIngest) classifyWithFileRules(orgID uuid.UUID, ev *IngestEvent, fileRules *fileProfileRuleSet) eventClassification {
-	return h.classifyEvent(orgID, ev, fileRules, false)
+	return h.classifyEvent(orgID, uuid.Nil, ev, fileRules, false)
 }
 
 // classifyEvent is the full classifier. privEsc is precomputed by the caller (Bulk)
 // from within-batch PID/PPID UID correlation; tests can drive it directly.
-func (h *EventsIngest) classifyEvent(orgID uuid.UUID, ev *IngestEvent, fileRules *fileProfileRuleSet, privEsc bool) eventClassification {
+func (h *EventsIngest) classifyEvent(orgID, clusterID uuid.UUID, ev *IngestEvent, fileRules *fileProfileRuleSet, privEsc bool) eventClassification {
 	cls := eventClassification{Severity: "info", Verdict: "observed"}
 	if ev.Kind == "file_open" {
 		return h.classifyFileOpen(ev, fileRules, cls)
@@ -1140,7 +1234,7 @@ func (h *EventsIngest) classifyEvent(orgID uuid.UUID, ev *IngestEvent, fileRules
 	if ev.Kind != "process_exec" {
 		return cls
 	}
-	return h.classifyProcess(orgID, ev, cls, privEsc)
+	return h.classifyProcess(orgID, clusterID, ev, cls, privEsc)
 }
 
 // classifyFileOpen handles file_open events: explicit operator file-profile rules take
@@ -1183,7 +1277,7 @@ func (h *EventsIngest) classifyFileOpen(ev *IngestEvent, fileRules *fileProfileR
 
 // classifyProcess handles process_exec events with the broadened detections (provenance
 // drift, suspicious binaries, privilege escalation) layered over the shell heuristic.
-func (h *EventsIngest) classifyProcess(orgID uuid.UUID, ev *IngestEvent, cls eventClassification, privEsc bool) eventClassification {
+func (h *EventsIngest) classifyProcess(orgID, clusterID uuid.UUID, ev *IngestEvent, cls eventClassification, privEsc bool) eventClassification {
 	bin := commBasename(ev.Comm, ev.Filename)
 	_, isShell := shellBinaries[bin]
 
@@ -1192,7 +1286,13 @@ func (h *EventsIngest) classifyProcess(orgID uuid.UUID, ev *IngestEvent, cls eve
 		inBaseline   bool
 		haveBaseline bool
 	)
-	if h.baselineMode != nil && ev.WorkloadID != "" {
+	if h.clusterBaselineMode != nil && ev.WorkloadID != "" && clusterID != uuid.Nil {
+		if m, procs, ok := h.clusterBaselineMode(orgID, clusterID, ev.WorkloadID); ok {
+			mode = m
+			haveBaseline = true
+			_, inBaseline = procs[bin]
+		}
+	} else if h.baselineMode != nil && ev.WorkloadID != "" {
 		if m, procs, ok := h.baselineMode(orgID, ev.WorkloadID); ok {
 			mode = m
 			haveBaseline = true

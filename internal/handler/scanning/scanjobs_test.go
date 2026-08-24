@@ -3,6 +3,7 @@ package scanning
 import (
 	"bytes"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -714,6 +715,17 @@ func TestScanJobs_RetryBackoffAndMaxAttempts(t *testing.T) {
 	if status != "pending" || storedWorker != nil || nextAttemptAt == nil || !nextAttemptAt.After(time.Now().UTC()) {
 		t.Fatalf("retry scheduled row = status=%s worker=%v next=%v", status, storedWorker, nextAttemptAt)
 	}
+	var attemptStatus, attemptError string
+	var attemptFinishedAt, attemptNextAt *time.Time
+	if err := pool.QueryRow(ctx, `
+SELECT status, COALESCE(error, ''), finished_at, next_attempt_at
+  FROM scan_job_attempts
+ WHERE job_id = $1 AND attempt_number = 1`, jobID).Scan(&attemptStatus, &attemptError, &attemptFinishedAt, &attemptNextAt); err != nil {
+		t.Fatalf("query retry attempt: %v", err)
+	}
+	if attemptStatus != "retry_scheduled" || attemptError != "registry timeout" || attemptFinishedAt == nil || attemptNextAt == nil {
+		t.Fatalf("retry attempt = status=%s error=%q finished=%v next=%v", attemptStatus, attemptError, attemptFinishedAt, attemptNextAt)
+	}
 
 	claimReq := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/claim", nil)
 	claimReq.Header.Set("Authorization", "Bearer "+rawToken)
@@ -745,6 +757,37 @@ func TestScanJobs_RetryBackoffAndMaxAttempts(t *testing.T) {
 	if claimRes.ID != jobID || claimRes.AttemptCount != 2 {
 		t.Fatalf("retry claim = %+v, want job=%s attempt=2", claimRes, jobID)
 	}
+	var attemptWorker string
+	var attemptLease *time.Time
+	if err := pool.QueryRow(ctx, `
+SELECT status, COALESCE(worker_id, ''), lease_expires_at
+  FROM scan_job_attempts
+ WHERE job_id = $1 AND attempt_number = 2`, jobID).Scan(&attemptStatus, &attemptWorker, &attemptLease); err != nil {
+		t.Fatalf("query second attempt: %v", err)
+	}
+	if attemptStatus != "running" || attemptWorker != workerID || attemptLease == nil {
+		t.Fatalf("second attempt = status=%s worker=%q lease=%v", attemptStatus, attemptWorker, attemptLease)
+	}
+
+	attemptReq := httptest.NewRequest(http.MethodGet, "/api/v1/scan-jobs/"+jobID.String()+"/attempts", nil)
+	attemptReq = attemptReq.WithContext(authctx.WithSubject(attemptReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
+	rctx = chi.NewRouteContext()
+	rctx.URLParams.Add("id", jobID.String())
+	attemptReq = attemptReq.WithContext(context.WithValue(attemptReq.Context(), chi.RouteCtxKey, rctx))
+	attemptRec := httptest.NewRecorder()
+	h.Attempts(attemptRec, attemptReq)
+	if attemptRec.Code != http.StatusOK {
+		t.Fatalf("attempt history status: %d body: %s", attemptRec.Code, attemptRec.Body.String())
+	}
+	var attemptRes struct {
+		Attempts []AttemptView `json:"attempts"`
+	}
+	if err := json.NewDecoder(attemptRec.Body).Decode(&attemptRes); err != nil {
+		t.Fatal(err)
+	}
+	if len(attemptRes.Attempts) != 2 || attemptRes.Attempts[0].Status != "retry_scheduled" || attemptRes.Attempts[1].Status != "running" {
+		t.Fatalf("attempt history = %+v, want retry_scheduled then running", attemptRes.Attempts)
+	}
 
 	failReq = httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/"+terminalJobID.String()+"/fail", bytes.NewBufferString(`{"error":"registry timeout","retryable":true}`))
 	failReq.Header.Set("Authorization", "Bearer "+rawToken)
@@ -763,6 +806,15 @@ func TestScanJobs_RetryBackoffAndMaxAttempts(t *testing.T) {
 	}
 	if status != "failed" || nextAttemptAt != nil {
 		t.Fatalf("max attempts row = status=%s next=%v", status, nextAttemptAt)
+	}
+	if err := pool.QueryRow(ctx, `
+SELECT status, COALESCE(error, ''), finished_at
+  FROM scan_job_attempts
+ WHERE job_id = $1 AND attempt_number = 3`, terminalJobID).Scan(&attemptStatus, &attemptError, &attemptFinishedAt); err != nil {
+		t.Fatalf("query terminal attempt: %v", err)
+	}
+	if attemptStatus != "failed" || attemptError != "registry timeout" || attemptFinishedAt == nil {
+		t.Fatalf("terminal attempt = status=%s error=%q finished=%v", attemptStatus, attemptError, attemptFinishedAt)
 	}
 
 	retryReq := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/"+terminalJobID.String()+"/retry", nil)
@@ -1031,6 +1083,32 @@ SELECT COUNT(DISTINCT r.id)::int, COUNT(f.id)::int, MIN(r.id::text)
 	if len(resultDetail.ImpactedWorkloads) != 1 || resultDetail.ImpactedWorkloads[0].ClusterID != clusterID {
 		t.Fatalf("impacted workloads = %+v", resultDetail.ImpactedWorkloads)
 	}
+
+	csvReq := httptest.NewRequest(http.MethodGet, "/api/v1/image-scan-results/"+resultID.String()+"/findings.csv", nil)
+	csvReq = csvReq.WithContext(authctx.WithSubject(csvReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
+	csvCtx := chi.NewRouteContext()
+	csvCtx.URLParams.Add("id", resultID.String())
+	csvReq = csvReq.WithContext(context.WithValue(csvReq.Context(), chi.RouteCtxKey, csvCtx))
+	csvRec := httptest.NewRecorder()
+	imageResults.FindingsCSV(csvRec, csvReq)
+	if csvRec.Code != http.StatusOK {
+		t.Fatalf("findings csv status: %d body: %s", csvRec.Code, csvRec.Body.String())
+	}
+	if ct := csvRec.Header().Get("Content-Type"); !strings.Contains(ct, "text/csv") {
+		t.Fatalf("findings csv content-type = %q", ct)
+	}
+	records, err := csv.NewReader(strings.NewReader(csvRec.Body.String())).ReadAll()
+	if err != nil {
+		t.Fatalf("findings csv decode: %v\n%s", err, csvRec.Body.String())
+	}
+	if len(records) != 2 {
+		t.Fatalf("findings csv records = %+v", records)
+	}
+	row := records[1]
+	if row[0] != resultID.String() || row[1] != imageRef || row[2] != imageDigest || row[4] != vulnID ||
+		row[5] != "high" || row[9] != "openssl" || row[17] != "vulndb" {
+		t.Fatalf("findings csv row = %+v", row)
+	}
 }
 
 func TestScanJobs_CompleteWritesImageScanArtifacts(t *testing.T) {
@@ -1085,6 +1163,17 @@ SELECT EXISTS (
 	       AND contype = 'c'
 	       AND pg_get_constraintdef(oid) LIKE '%constellation-image-file-risk-v1%'
 	)`).Scan(&fileRiskArtifactsEnabled); err != nil {
+		t.Fatal(err)
+	}
+	var configCheckArtifactsEnabled bool
+	if err := pool.QueryRow(ctx, `
+	SELECT EXISTS (
+	    SELECT 1
+	      FROM pg_constraint
+	     WHERE conrelid = 'image_scan_artifacts'::regclass
+	       AND contype = 'c'
+	       AND pg_get_constraintdef(oid) LIKE '%constellation-image-config-checks-v1%'
+	)`).Scan(&configCheckArtifactsEnabled); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1213,6 +1302,19 @@ SELECT EXISTS (
 			},
 		}
 	}
+	if configCheckArtifactsEnabled {
+		completePayload["config_checks"] = &scanner.ImageConfigCheckReport{
+			ImageRef:  imageRef,
+			Platform:  "linux/amd64",
+			Status:    "ok",
+			PassCount: 1,
+			FailCount: 1,
+			Checks: []scanner.ImageConfigCheck{
+				{ID: "image.user.non-root", Title: "Container runs as non-root", Status: "pass", Severity: "medium"},
+				{ID: "image.healthcheck.present", Title: "Healthcheck is configured", Status: "fail", Severity: "low", Remediation: "Add a HEALTHCHECK instruction"},
+			},
+		}
+	}
 	completeBody, _ := json.Marshal(completePayload)
 	completeReq := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/"+enqRes.ID.String()+"/complete", bytes.NewReader(completeBody))
 	completeReq.Header.Set("Authorization", "Bearer "+rawToken)
@@ -1249,6 +1351,9 @@ SELECT COUNT(*)::int
 		expectedArtifacts++
 	}
 	if fileRiskArtifactsEnabled {
+		expectedArtifacts++
+	}
+	if configCheckArtifactsEnabled {
 		expectedArtifacts++
 	}
 	if artifactCount != expectedArtifacts {
@@ -1445,6 +1550,32 @@ SELECT package_count, payload
 		}
 		if fileRiskCount != 2 || fileRiskReport.FileRiskCount != 2 || fileRiskReport.ImageDigest != imageDigest || fileRiskReport.Status != "observed" || len(fileRiskReport.Findings) != 2 {
 			t.Fatalf("file risk report = %+v fileRiskCount=%d", fileRiskReport, fileRiskCount)
+		}
+	}
+	if configCheckArtifactsEnabled {
+		var checkCount int
+		var configChecksRaw []byte
+		if err := pool.QueryRow(ctx, `
+SELECT package_count, payload
+  FROM image_scan_artifacts
+ WHERE org_id = $1
+   AND image_scan_result_id = $2
+   AND artifact_type = 'config-checks'
+   AND format = 'constellation-image-config-checks-v1'`, orgID, completeRes.ImageScanResultID).Scan(&checkCount, &configChecksRaw); err != nil {
+			t.Fatal(err)
+		}
+		var configCheckReport struct {
+			ImageDigest string                     `json:"image_digest"`
+			Status      string                     `json:"status"`
+			PassCount   int                        `json:"pass_count"`
+			FailCount   int                        `json:"fail_count"`
+			Checks      []scanner.ImageConfigCheck `json:"checks"`
+		}
+		if err := json.Unmarshal(configChecksRaw, &configCheckReport); err != nil {
+			t.Fatal(err)
+		}
+		if checkCount != 2 || configCheckReport.ImageDigest != imageDigest || configCheckReport.Status != "ok" || configCheckReport.PassCount != 1 || configCheckReport.FailCount != 1 || len(configCheckReport.Checks) != 2 {
+			t.Fatalf("config-check report = %+v checkCount=%d", configCheckReport, checkCount)
 		}
 	}
 
@@ -2766,10 +2897,20 @@ func TestResolveEvidenceImageName(t *testing.T) {
 	ref := repo + ":v1.2.3"
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM image_workload_links WHERE org_id=$1 AND image_digest=$2`, orgID, digest)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM deployments WHERE id=$1`, deploymentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM clusters WHERE id=$1`, clusterID)
 	})
+	if _, err := pool.Exec(ctx, `INSERT INTO clusters (id, org_id, name, distro, state)
+VALUES ($1, $2, $3, 'kubernetes', 'connected')`, clusterID, orgID, "evidence-image-"+clusterID.String()); err != nil {
+		t.Fatalf("cluster insert: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO deployments (id, org_id, cluster_id, namespace, name, kind, image_refs)
+VALUES ($1, $2, $3, 'team', 'widget', 'Deployment', $4)`, deploymentID, orgID, clusterID, []string{ref}); err != nil {
+		t.Fatalf("deployment insert: %v", err)
+	}
 	if _, err := pool.Exec(ctx, `
-INSERT INTO image_workload_links (org_id, cluster_id, deployment_id, workload_id, namespace, name, kind,
-    image_ref, image_ref_normalized, image_repository, image_tag, image_digest)
+	INSERT INTO image_workload_links (org_id, cluster_id, deployment_id, workload_id, namespace, name, kind,
+	    image_ref, image_ref_normalized, image_repository, image_tag, image_digest)
 VALUES ($1,$2,$3,'team/widget','team','widget','Deployment',$4,$4,$5,'v1.2.3',$6)`,
 		orgID, clusterID, deploymentID, ref, repo, digest); err != nil {
 		t.Fatalf("link insert: %v", err)

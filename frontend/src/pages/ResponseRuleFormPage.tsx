@@ -4,7 +4,7 @@
 // Dedicated form page (the Astronomer add/edit-as-a-page pattern, replacing the
 // old drawer). Guided builder for a response rule: match incoming events to
 // automatic actions (notify / ticket / quarantine / isolate).
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Save, Trash2 } from "lucide-react";
@@ -17,27 +17,53 @@ import {
   type RRV2CondType,
   type RRV2ActionKind,
   type RRV2EventType,
+  type RRV2CatalogItem,
 } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { PageHeader } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
+import { GroupPicker } from "@/components/GroupPicker";
 
-const COND_TYPES: { id: RRV2CondType; label: string; help: string }[] = [
+const FALLBACK_COND_TYPES: Array<RRV2CatalogItem & { id: RRV2CondType }> = [
   { id: "name", label: "Event name", help: "Regex against event name or title" },
   { id: "level", label: "Severity ≥", help: "info | low | medium | high | critical" },
   { id: "cve_critical", label: "CVE critical + score floor", help: "Matches when any CVE is critical AND base score ≥ value" },
+  { id: "cve_critical_count", label: "Critical CVE count ≥", help: "Integer count" },
+  { id: "cve_high_count", label: "High+ CVE count ≥", help: "Integer count" },
+  { id: "cve_with_fix_count", label: "Fixable CVE count ≥", help: "Integer count" },
+  { id: "cve_max_age_days", label: "Fixable CVE age >", help: "Days" },
   { id: "proc", label: "Process name", help: "Regex against process basename" },
-  { id: "event_type", label: "Event type", help: "admission | runtime | scan | compliance" },
+  { id: "event_type", label: "Event type", help: "Event type or alias" },
 ];
 
-const ACTION_KINDS: { id: RRV2ActionKind; label: string; help: string }[] = [
+const FALLBACK_ACTION_KINDS: Array<RRV2CatalogItem & { id: RRV2ActionKind }> = [
   { id: "notify", label: "Notify receiver", help: "Send via pkg/notify (slack/jira/pagerduty/etc)" },
+  { id: "webhook", label: "Webhook receiver", help: "NeuVector-compatible receiver action" },
   { id: "ticket", label: "Open ticket", help: "Notify via ITSM destination (Jira/SNOW)" },
+  { id: "suppress-log", label: "Suppress log", help: "Suppress matching runtime security-event logs" },
   { id: "quarantine", label: "Quarantine workload", help: "Runtime action (requires data plane)" },
   { id: "isolate", label: "Network isolate", help: "NetworkPolicy isolation" },
+  { id: "kill", label: "Kill process", help: "Runtime kill action when supported" },
 ];
 
-const EVENT_TYPES: RRV2EventType[] = ["admission", "runtime", "scan", "compliance", "*"];
+const FALLBACK_EVENT_TYPES: Array<{ id: RRV2EventType; label: string; conditions: RRV2CondType[]; actions: RRV2ActionKind[] }> = [
+  { id: "*", label: "All events", conditions: FALLBACK_COND_TYPES.map((c) => c.id), actions: FALLBACK_ACTION_KINDS.map((a) => a.id) },
+  { id: "security-event", label: "Security event", conditions: ["name", "level", "proc", "event_type"], actions: FALLBACK_ACTION_KINDS.map((a) => a.id) },
+  { id: "threat", label: "Threat", conditions: ["name", "level", "proc", "event_type"], actions: FALLBACK_ACTION_KINDS.map((a) => a.id) },
+  { id: "cve-report", label: "CVE report", conditions: ["name", "level", "cve_critical", "cve_critical_count", "cve_high_count", "cve_with_fix_count", "cve_max_age_days", "event_type"], actions: FALLBACK_ACTION_KINDS.map((a) => a.id) },
+  { id: "admission-control", label: "Admission control", conditions: ["name", "level", "event_type"], actions: FALLBACK_ACTION_KINDS.map((a) => a.id) },
+  { id: "compliance", label: "Compliance", conditions: ["name", "level", "event_type"], actions: FALLBACK_ACTION_KINDS.map((a) => a.id) },
+  { id: "runtime", label: "Runtime", conditions: ["name", "level", "proc", "event_type"], actions: FALLBACK_ACTION_KINDS.map((a) => a.id) },
+  { id: "scan", label: "Scan", conditions: ["name", "level", "cve_critical", "cve_critical_count", "cve_high_count", "cve_with_fix_count", "cve_max_age_days", "event_type"], actions: FALLBACK_ACTION_KINDS.map((a) => a.id) },
+  { id: "admission", label: "Admission", conditions: ["name", "level", "event_type"], actions: FALLBACK_ACTION_KINDS.map((a) => a.id) },
+  { id: "event", label: "Event", conditions: ["name", "level", "event_type"], actions: FALLBACK_ACTION_KINDS.map((a) => a.id) },
+  { id: "activity", label: "Activity", conditions: ["name", "level", "event_type"], actions: FALLBACK_ACTION_KINDS.map((a) => a.id) },
+  { id: "incident", label: "Incident", conditions: ["name", "level", "proc", "event_type"], actions: FALLBACK_ACTION_KINDS.map((a) => a.id) },
+  { id: "violation", label: "Violation", conditions: ["name", "level", "event_type"], actions: FALLBACK_ACTION_KINDS.map((a) => a.id) },
+  { id: "dlp", label: "DLP", conditions: ["name", "level", "proc", "event_type"], actions: FALLBACK_ACTION_KINDS.map((a) => a.id) },
+  { id: "waf", label: "WAF", conditions: ["name", "level", "proc", "event_type"], actions: FALLBACK_ACTION_KINDS.map((a) => a.id) },
+  { id: "serverless", label: "Serverless", conditions: ["name", "level", "event_type"], actions: FALLBACK_ACTION_KINDS.map((a) => a.id) },
+];
 
 type RuleDraft = Omit<ResponseRuleV2, "id" | "priority" | "created_at" | "updated_at"> & { id?: string };
 
@@ -51,6 +77,23 @@ function emptyRule(): RuleDraft {
     actions: [{ kind: "notify", target: "slack" }],
     workload_match: {},
   };
+}
+
+function cleanSelector(selector: RuleDraft["workload_match"]): RuleDraft["workload_match"] {
+  const next: RuleDraft["workload_match"] = {};
+  const cluster = selector.cluster?.trim();
+  const namespace = selector.namespace?.trim();
+  const group = selector.group?.trim();
+  if (cluster) next.cluster = cluster;
+  if (namespace) next.namespace = namespace;
+  if (group) next.group = group;
+  const labels = Object.fromEntries(
+    Object.entries(selector.labels ?? {})
+      .map(([key, value]) => [key.trim(), value.trim()])
+      .filter(([key, value]) => key && value),
+  );
+  if (Object.keys(labels).length > 0) next.labels = labels;
+  return next;
 }
 
 export function ResponseRuleFormPage() {
@@ -73,6 +116,25 @@ export function ResponseRuleFormPage() {
     enabled: isEdit,
   });
   const loaded = q.data?.rules.find((r) => r.id === ruleId) ?? null;
+  const optionsQ = useQuery({
+    queryKey: ["response-rules-v2-options"],
+    queryFn: () => responseRulesV2.options(),
+  });
+  const eventTypes = optionsQ.data?.event_types?.length ? optionsQ.data.event_types : FALLBACK_EVENT_TYPES;
+  const conditionCatalog = optionsQ.data?.condition_types?.length ? optionsQ.data.condition_types : FALLBACK_COND_TYPES;
+  const actionCatalog = optionsQ.data?.action_kinds?.length ? optionsQ.data.action_kinds : FALLBACK_ACTION_KINDS;
+  const receiverOptions = optionsQ.data?.receivers ?? [];
+  const selectedEvent = eventTypes.find((ev) => ev.id === rule.event_type);
+  const conditionOptions = useMemo(() => {
+    const allowed = new Set<RRV2CondType>(selectedEvent?.conditions ?? FALLBACK_COND_TYPES.map((c) => c.id));
+    const current = new Set(rule.conditions.map((c) => c.type));
+    return conditionCatalog.filter((ct) => allowed.has(ct.id as RRV2CondType) || current.has(ct.id as RRV2CondType));
+  }, [conditionCatalog, rule.conditions, selectedEvent?.conditions]);
+  const actionOptions = useMemo(() => {
+    const allowed = new Set<RRV2ActionKind>(selectedEvent?.actions ?? FALLBACK_ACTION_KINDS.map((a) => a.id));
+    const current = new Set(rule.actions.map((a) => a.kind));
+    return actionCatalog.filter((ak) => allowed.has(ak.id as RRV2ActionKind) || current.has(ak.id as RRV2ActionKind));
+  }, [actionCatalog, rule.actions, selectedEvent?.actions]);
 
   useEffect(() => {
     if (isEdit && loaded) setRule({ ...loaded });
@@ -81,7 +143,7 @@ export function ResponseRuleFormPage() {
   const saveMut = useMutation({
     mutationFn: async () => {
       setError(null);
-      const body = { ...rule };
+      const body = { ...rule, workload_match: cleanSelector(rule.workload_match) };
       delete (body as { id?: string }).id;
       if (ruleId) {
         await responseRulesV2.update(ruleId, body);
@@ -106,6 +168,15 @@ export function ResponseRuleFormPage() {
     const next = [...rule.actions];
     next[idx] = a;
     onChange({ ...rule, actions: next });
+  };
+  const setSelectorField = (key: "cluster" | "namespace" | "group", value: string) => {
+    const next = { ...rule.workload_match };
+    if (value.trim()) {
+      next[key] = value;
+    } else {
+      delete next[key];
+    }
+    onChange({ ...rule, workload_match: next });
   };
 
   const notFound = isEdit && !clusterLoading && !q.isLoading && !q.error && !loaded;
@@ -158,8 +229,8 @@ export function ResponseRuleFormPage() {
                   value={rule.event_type}
                   onChange={(e) => onChange({ ...rule, event_type: e.target.value as RRV2EventType })}
                 >
-                  {EVENT_TYPES.map((t) => (
-                    <option key={t} value={t}>{t}</option>
+                  {eventTypes.map((t) => (
+                    <option key={t.id} value={t.id}>{t.label}</option>
                   ))}
                 </select>
               </label>
@@ -191,14 +262,14 @@ export function ResponseRuleFormPage() {
                     value={c.type}
                     onChange={(e) => setCond(i, { ...c, type: e.target.value as RRV2CondType })}
                   >
-                    {COND_TYPES.map((ct) => (
+                    {conditionOptions.map((ct) => (
                       <option key={ct.id} value={ct.id}>{ct.label}</option>
                     ))}
                   </select>
                   <input
                     className="flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-xs font-mono"
                     value={c.value}
-                    placeholder={COND_TYPES.find((ct) => ct.id === c.type)?.help}
+                    placeholder={conditionCatalog.find((ct) => ct.id === c.type)?.help}
                     onChange={(e) => setCond(i, { ...c, value: e.target.value })}
                   />
                   <button
@@ -229,17 +300,33 @@ export function ResponseRuleFormPage() {
                     value={a.kind}
                     onChange={(e) => setAct(i, { ...a, kind: e.target.value as RRV2ActionKind })}
                   >
-                    {ACTION_KINDS.map((ak) => (
+                    {actionOptions.map((ak) => (
                       <option key={ak.id} value={ak.id}>{ak.label}</option>
                     ))}
                   </select>
-                  {(a.kind === "notify" || a.kind === "ticket") && (
+                  {(a.kind === "notify" || a.kind === "ticket" || a.kind === "webhook") && (
+                    receiverOptions.length > 0 ? (
+                      <select
+                        className="flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-xs"
+                        value={a.target ?? ""}
+                        onChange={(e) => setAct(i, { ...a, target: e.target.value })}
+                      >
+                        {!a.target && <option value="">Select receiver</option>}
+                        {a.target && !receiverOptions.some((r) => r.name === a.target || r.id === a.target) && (
+                          <option value={a.target}>{a.target}</option>
+                        )}
+                        {receiverOptions.map((r) => (
+                          <option key={r.id} value={r.name}>{r.name} ({r.kind})</option>
+                        ))}
+                      </select>
+                    ) : (
                     <input
                       className="flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-xs"
                       placeholder="receiver name (e.g. slack, pagerduty, jira)"
                       value={a.target ?? ""}
                       onChange={(e) => setAct(i, { ...a, target: e.target.value })}
                     />
+                    )
                   )}
                   <button
                     type="button"
@@ -253,7 +340,7 @@ export function ResponseRuleFormPage() {
               ))}
               <button
                 type="button"
-                onClick={() => onChange({ ...rule, actions: [...rule.actions, { kind: "notify", target: "slack" }] })}
+                onClick={() => onChange({ ...rule, actions: [...rule.actions, { kind: "notify", target: receiverOptions[0]?.name ?? "" }] })}
                 className="text-xs text-primary hover:underline"
               >
                 + Add action
@@ -263,18 +350,35 @@ export function ResponseRuleFormPage() {
             <fieldset className="space-y-2 rounded-md border border-border p-3">
               <legend className="px-1 text-xs font-medium uppercase text-muted-foreground">Workload selector</legend>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <input
-                  className="rounded-md border border-border bg-background px-2 py-1.5 text-xs"
-                  placeholder="cluster (optional)"
-                  value={rule.workload_match.cluster ?? ""}
-                  onChange={(e) => onChange({ ...rule, workload_match: { ...rule.workload_match, cluster: e.target.value } })}
-                />
-                <input
-                  className="rounded-md border border-border bg-background px-2 py-1.5 text-xs"
-                  placeholder="namespace (optional)"
-                  value={rule.workload_match.namespace ?? ""}
-                  onChange={(e) => onChange({ ...rule, workload_match: { ...rule.workload_match, namespace: e.target.value } })}
-                />
+                <label className="text-xs">
+                  <div className="mb-1 text-muted-foreground">Group</div>
+                  <GroupPicker
+                    clusterId={clusterId}
+                    value={rule.workload_match.group ?? ""}
+                    onChange={(value) => setSelectorField("group", value)}
+                    allowExternal={false}
+                    placeholder="Any group"
+                    testId="response-rule-group-picker"
+                  />
+                </label>
+                <label className="text-xs">
+                  <div className="mb-1 text-muted-foreground">Namespace</div>
+                  <input
+                    className="h-9 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs"
+                    placeholder="Any namespace"
+                    value={rule.workload_match.namespace ?? ""}
+                    onChange={(e) => setSelectorField("namespace", e.target.value)}
+                  />
+                </label>
+                <label className="text-xs">
+                  <div className="mb-1 text-muted-foreground">Cluster</div>
+                  <input
+                    className="h-9 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs"
+                    placeholder="Route cluster"
+                    value={rule.workload_match.cluster ?? ""}
+                    onChange={(e) => setSelectorField("cluster", e.target.value)}
+                  />
+                </label>
               </div>
             </fieldset>
 

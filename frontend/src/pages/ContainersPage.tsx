@@ -24,7 +24,7 @@ export function ContainersPage() {
     queryFn: () => containers.list(clusterId!),
     enabled: !!clusterId,
   });
-  const items = q.data?.items ?? [];
+  const items = useMemo(() => q.data?.items ?? [], [q.data?.items]);
   const summary = q.data?.summary ?? { total: 0, running: 0, privileged: 0, run_as_root: 0 };
   const rows = useMemo(() => {
     const n = search.trim().toLowerCase();

@@ -2,29 +2,14 @@ import { test, expect } from "@playwright/test";
 
 /**
  * elite-screens — captures dashboard / findings / risk / network / cve screenshots
- * for the elite UX overhaul. Uses the running dev server at :5173 directly so it
- * doesn't depend on Playwright's webServer (port 5179) and won't interfere with
- * test DB reseeding.
+ * for the elite UX overhaul.
  */
+import { login } from "./utils";
 
-const BASE = "http://localhost:5173";
-const API  = process.env.VITE_API_URL ?? "http://localhost:18080";
-
-const CREDS = {
-  email: "admin@dev",
-  password: "devpass123",
-};
-
-test.use({ baseURL: BASE, viewport: { width: 1440, height: 900 } });
+test.use({ viewport: { width: 1440, height: 900 } });
 
 test.beforeEach(async ({ page }) => {
-  const resp = await page.request.post(`${API}/api/v1/auth/login`, { data: CREDS });
-  if (!resp.ok()) throw new Error(`login failed: ${resp.status()}`);
-  const { token } = await resp.json();
-  await page.addInitScript((t) => {
-    localStorage.setItem("constellation.token", t);
-    localStorage.setItem("constellation.theme", "dark");
-  }, token);
+  await login(page, { theme: "dark" });
 });
 
 const pages: Array<{ name: string; path: string; waitFor?: string }> = [

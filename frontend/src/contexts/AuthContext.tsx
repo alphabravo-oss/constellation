@@ -48,6 +48,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return <AuthCtx.Provider value={{ me, loading, login, logout }}>{children}</AuthCtx.Provider>;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth(): AuthState {
   const v = useContext(AuthCtx);
   if (!v) throw new Error("useAuth must be inside AuthProvider");

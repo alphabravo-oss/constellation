@@ -275,6 +275,33 @@
             }
           }
         }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "description": "Standard JSON error envelope returned by API handlers.",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error response",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
       }
     }
   },
@@ -289,11 +316,27 @@
         "summary": "Access control users, roles, bindings, providers, tokens, permissions, and guardrails"
       }
     },
+    "/api/v1/access-control/local-users": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Create local-users"
+      }
+    },
     "/api/v1/access-control/role-bindings": {
       "post": {
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create role-bindings"
@@ -304,6 +347,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Delete role-bindings"
@@ -314,6 +360,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create service-accounts"
@@ -329,6 +378,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get backups"
@@ -339,6 +391,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get mttr"
@@ -349,6 +404,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get trend"
@@ -359,6 +417,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get api-tokens"
@@ -367,6 +428,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create api-tokens"
@@ -377,6 +441,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Delete api-tokens"
@@ -385,6 +452,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get api-tokens"
@@ -395,6 +465,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create rotate"
@@ -428,6 +501,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get vulnerabilities"
@@ -623,11 +699,51 @@
         }
       }
     },
+    "/api/v1/auth-servers/{id}/scoped-mappings": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get scoped-mappings"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Create scoped-mappings"
+      }
+    },
+    "/api/v1/auth-servers/{id}/scoped-mappings/{mid}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Delete scoped-mappings"
+      }
+    },
     "/api/v1/auth/change-password": {
       "post": {
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create change-password"
@@ -638,6 +754,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "security": [],
@@ -677,10 +796,51 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "security": [],
         "summary": "Create acs"
+      }
+    },
+    "/api/v1/auth/saml/login": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [],
+        "summary": "Get login"
+      }
+    },
+    "/api/v1/auth/security-policy": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get security-policy"
+      },
+      "put": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Replace security-policy"
       }
     },
     "/api/v1/backups": {
@@ -688,6 +848,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get backups"
@@ -696,6 +859,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create backups"
@@ -706,6 +872,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create restore"
@@ -716,6 +885,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get schedule"
@@ -724,6 +896,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create schedule"
@@ -734,6 +909,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create verify"
@@ -744,6 +922,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get backups"
@@ -754,6 +935,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get download"
@@ -764,6 +948,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get cluster-init-bundles"
@@ -772,6 +959,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create cluster-init-bundles"
@@ -782,6 +972,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Delete cluster-init-bundles"
@@ -790,6 +983,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get cluster-init-bundles"
@@ -800,6 +996,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create rotate"
@@ -815,11 +1014,27 @@
         "summary": "Get one registered cluster"
       }
     },
+    "/api/v1/clusters/{id}/containers": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get containers"
+      }
+    },
     "/api/v1/clusters/{id}/cross-scan": {
       "post": {
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create cross-scan"
@@ -828,6 +1043,180 @@
     "/api/v1/clusters/{id}/health": {
       "get": {
         "summary": "Cluster sensor health, registration commands, and health gates"
+      }
+    },
+    "/api/v1/clusters/{id}/network-rules": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Delete network-rules"
+      },
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get network-rules"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Create network-rules"
+      },
+      "put": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Replace network-rules"
+      }
+    },
+    "/api/v1/clusters/{id}/network-rules:export": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authored network rules and learned overrides as a YAML bundle.",
+            "content": {
+              "application/x-yaml": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Export network rules"
+      }
+    },
+    "/api/v1/clusters/{id}/network-rules:import": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-yaml": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Network rule import summary.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "created",
+                    "updated",
+                    "results"
+                  ],
+                  "properties": {
+                    "created": {
+                      "type": "integer"
+                    },
+                    "updated": {
+                      "type": "integer"
+                    },
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "from",
+                          "to",
+                          "status"
+                        ],
+                        "properties": {
+                          "from": {
+                            "type": "string"
+                          },
+                          "to": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "created",
+                              "updated",
+                              "error"
+                            ]
+                          },
+                          "error": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Import network rules"
+      }
+    },
+    "/api/v1/clusters/{id}/network-rules:move-top": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Create network-rules:move-top"
       }
     },
     "/api/v1/clusters/{id}/nodes": {
@@ -845,6 +1234,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get platform-facts"
@@ -855,9 +1247,38 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create platform-scan"
+      }
+    },
+    "/api/v1/compliance/bench/claim": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Create claim"
+      }
+    },
+    "/api/v1/compliance/bench/run": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Create run"
       }
     },
     "/api/v1/compliance/checks": {
@@ -865,6 +1286,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get checks"
@@ -875,6 +1299,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get cloud"
@@ -885,9 +1312,49 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get control-mappings"
+      }
+    },
+    "/api/v1/compliance/custom-checks": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get custom-checks"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Create custom-checks"
+      }
+    },
+    "/api/v1/compliance/custom-checks/{id}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Delete custom-checks"
       }
     },
     "/api/v1/compliance/custom-frameworks": {
@@ -895,6 +1362,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get custom-frameworks"
@@ -903,6 +1373,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create custom-frameworks"
@@ -913,6 +1386,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Delete custom-frameworks"
@@ -923,6 +1399,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get evidence"
@@ -946,6 +1425,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get frameworks"
@@ -956,6 +1438,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create ingest"
@@ -966,6 +1451,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get kubernetes"
@@ -976,6 +1464,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get nodes"
@@ -986,6 +1477,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get primitives"
@@ -996,6 +1490,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get artifact"
@@ -1009,6 +1506,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create schedules"
@@ -1019,6 +1519,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Delete schedules"
@@ -1027,6 +1530,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get schedules"
@@ -1035,6 +1541,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Update schedules"
@@ -1050,6 +1559,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get runs"
@@ -1060,6 +1572,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get summary"
@@ -1070,6 +1585,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get workloads"
@@ -1116,6 +1634,43 @@
             "description": "The configuration could not be assembled or serialized."
           }
         }
+      }
+    },
+    "/api/v1/config/git-connector": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get git-connector"
+      },
+      "put": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Replace git-connector"
+      }
+    },
+    "/api/v1/config/git-connector/push": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Create push"
       }
     },
     "/api/v1/config/import": {
@@ -1215,6 +1770,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get custom-roles"
@@ -1223,6 +1781,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create custom-roles"
@@ -1233,6 +1794,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Delete custom-roles"
@@ -1241,6 +1805,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Replace custom-roles"
@@ -1261,6 +1828,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get stats"
@@ -1276,11 +1846,27 @@
         "summary": "List canonical image scan and workload exposure for one CVE"
       }
     },
+    "/api/v1/dashboard/events-timeline": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get events-timeline"
+      }
+    },
     "/api/v1/dashboard/summary": {
       "get": {
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get summary"
@@ -1291,6 +1877,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get deployments"
@@ -1301,45 +1890,12 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get deployments"
-      }
-    },
-    "/api/v1/dlp/sensors": {
-      "get": {
-        "responses": {
-          "200": {
-            "description": "ok"
-          }
-        },
-        "summary": "Get sensors"
-      },
-      "post": {
-        "responses": {
-          "200": {
-            "description": "ok"
-          }
-        },
-        "summary": "Create sensors"
-      }
-    },
-    "/api/v1/dlp/sensors/{id}": {
-      "delete": {
-        "responses": {
-          "200": {
-            "description": "ok"
-          }
-        },
-        "summary": "Delete sensors"
-      },
-      "put": {
-        "responses": {
-          "200": {
-            "description": "ok"
-          }
-        },
-        "summary": "Replace sensors"
       }
     },
     "/api/v1/events": {
@@ -1347,6 +1903,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get events"
@@ -1357,6 +1916,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create events:bulk"
@@ -1367,6 +1929,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get events:export"
@@ -1381,7 +1946,7 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard \u2014 the target host is never caller-supplied).",
+            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard — the target host is never caller-supplied).",
             "schema": {
               "type": "string"
             }
@@ -1422,7 +1987,7 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard \u2014 the target host is never caller-supplied).",
+            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard — the target host is never caller-supplied).",
             "schema": {
               "type": "string"
             }
@@ -1463,7 +2028,7 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard \u2014 the target host is never caller-supplied).",
+            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard — the target host is never caller-supplied).",
             "schema": {
               "type": "string"
             }
@@ -1515,7 +2080,7 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard \u2014 the target host is never caller-supplied).",
+            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard — the target host is never caller-supplied).",
             "schema": {
               "type": "string"
             }
@@ -1567,7 +2132,7 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard \u2014 the target host is never caller-supplied).",
+            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard — the target host is never caller-supplied).",
             "schema": {
               "type": "string"
             }
@@ -1615,7 +2180,7 @@
     "/api/v1/federation/join": {
       "post": {
         "summary": "Exchange a federation join token for a per-cluster sync secret",
-        "description": "Anonymous exchange endpoint (D1/D2). A joining cluster presents a join token (a signed, master-minted token or the pre-shared fixed GitOps token) plus its cluster id/name and receives a per-cluster signed sync ticket it then presents on every /federation/sync poll. Only the sha256 of the ticket is persisted by the master (like api_tokens). Authenticated by the join token itself, so it carries no bearer security. When per-joint mTLS (D2) is enabled the response also includes a per-joint client certificate, its private key (shown once), and the master CA: the joint presents the client cert on every /sync poll and the master verifies it against the CA, so a leaked bearer ticket alone \u2014 without the matching client key \u2014 is rejected.",
+        "description": "Anonymous exchange endpoint (D1/D2). A joining cluster presents a join token (a signed, master-minted token or the pre-shared fixed GitOps token) plus its cluster id/name and receives a per-cluster signed sync ticket it then presents on every /federation/sync poll. Only the sha256 of the ticket is persisted by the master (like api_tokens). Authenticated by the join token itself, so it carries no bearer security. When per-joint mTLS (D2) is enabled the response also includes a per-joint client certificate, its private key (shown once), and the master CA: the joint presents the client cert on every /sync poll and the master verifies it against the CA, so a leaked bearer ticket alone — without the matching client key — is rejected.",
         "security": [],
         "requestBody": {
           "required": true,
@@ -1699,6 +2264,19 @@
         }
       }
     },
+    "/api/v1/federation/join-remote": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Create join-remote"
+      }
+    },
     "/api/v1/federation/join-tokens": {
       "post": {
         "summary": "Mint a short-lived signed federation join token",
@@ -1753,6 +2331,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get members"
@@ -1761,6 +2342,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create members"
@@ -1771,6 +2355,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Delete members"
@@ -1781,6 +2368,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get state"
@@ -1789,6 +2379,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create state"
@@ -1859,9 +2452,25 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get findings.csv"
+      }
+    },
+    "/api/v1/findings/by-cve": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get by-cve"
       }
     },
     "/api/v1/findings/{id}": {
@@ -1879,6 +2488,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get comments"
@@ -1887,6 +2499,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create comments"
@@ -1897,6 +2512,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create reachability"
@@ -1917,6 +2535,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get forensics"
@@ -1927,6 +2548,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get groups"
@@ -1935,6 +2559,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create groups"
@@ -1945,6 +2572,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Delete groups"
@@ -1953,9 +2583,297 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Replace groups"
+      }
+    },
+    "/api/v1/groups/{id}/usage": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Group usage map",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "group_id",
+                    "group_name",
+                    "summary",
+                    "references",
+                    "coverage"
+                  ],
+                  "properties": {
+                    "group_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "group_name": {
+                      "type": "string"
+                    },
+                    "summary": {
+                      "type": "object",
+                      "required": [
+                        "total_references",
+                        "blocking_references",
+                        "network_rules",
+                        "dpi_sensor_bindings",
+                        "process_profiles",
+                        "file_profiles",
+                        "derived_references",
+                        "member_targets",
+                        "delete_blocked"
+                      ],
+                      "properties": {
+                        "total_references": {
+                          "type": "integer"
+                        },
+                        "blocking_references": {
+                          "type": "integer"
+                        },
+                        "network_rules": {
+                          "type": "integer"
+                        },
+                        "dpi_sensor_bindings": {
+                          "type": "integer"
+                        },
+                        "process_profiles": {
+                          "type": "integer"
+                        },
+                        "file_profiles": {
+                          "type": "integer"
+                        },
+                        "derived_references": {
+                          "type": "integer"
+                        },
+                        "member_targets": {
+                          "type": "integer"
+                        },
+                        "delete_blocked": {
+                          "type": "boolean"
+                        }
+                      }
+                    },
+                    "references": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "family",
+                          "kind",
+                          "name",
+                          "blocking"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "family": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "role": {
+                            "type": "string"
+                          },
+                          "mode": {
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "route": {
+                            "type": "string"
+                          },
+                          "cluster_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "blocking": {
+                            "type": "boolean"
+                          },
+                          "last_modified": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "coverage": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "family",
+                          "status",
+                          "detail"
+                        ],
+                        "properties": {
+                          "family": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "covered",
+                              "derived",
+                              "not_modeled"
+                            ]
+                          },
+                          "detail": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get group usage"
+      }
+    },
+    "/api/v1/groups:export": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get groups:export"
+      }
+    },
+    "/api/v1/groups:import": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Create groups:import"
+      }
+    },
+    "/api/v1/groups:promote": {
+      "post": {
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "dimension",
+                  "from"
+                ],
+                "properties": {
+                  "dimension": {
+                    "type": "string",
+                    "enum": [
+                      "policy",
+                      "profile"
+                    ]
+                  },
+                  "from": {
+                    "type": "string",
+                    "enum": [
+                      "discover",
+                      "monitor",
+                      "protect"
+                    ]
+                  },
+                  "to": {
+                    "type": "string",
+                    "enum": [
+                      "discover",
+                      "monitor",
+                      "protect"
+                    ],
+                    "description": "Optional explicit target mode. When omitted, discover advances to monitor and monitor advances to protect."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Bulk group mode change summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "dimension",
+                    "from",
+                    "to",
+                    "changed",
+                    "promoted"
+                  ],
+                  "properties": {
+                    "dimension": {
+                      "type": "string"
+                    },
+                    "from": {
+                      "type": "string"
+                    },
+                    "to": {
+                      "type": "string"
+                    },
+                    "changed": {
+                      "type": "integer"
+                    },
+                    "promoted": {
+                      "type": "integer",
+                      "description": "Backward-compatible alias for changed."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Bulk change group policy/profile modes"
       }
     },
     "/api/v1/heartbeats": {
@@ -1963,6 +2881,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create heartbeats"
@@ -1973,6 +2894,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get host-cis"
@@ -1983,6 +2907,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get host-cis"
@@ -1993,6 +2920,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create host-cis:report"
@@ -2003,6 +2933,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get host-containers"
@@ -2013,6 +2946,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get host-containers"
@@ -2023,6 +2959,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create host-containers:report"
@@ -2033,6 +2972,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get host-facts"
@@ -2043,6 +2985,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get host-facts"
@@ -2053,6 +2998,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create host-facts:report"
@@ -2063,6 +3011,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get host-packages"
@@ -2073,6 +3024,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get host-packages"
@@ -2083,6 +3037,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create host-packages:report"
@@ -2093,6 +3050,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get host-processes"
@@ -2103,6 +3063,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get host-processes"
@@ -2113,6 +3076,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create host-processes:report"
@@ -2123,6 +3089,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get host-vulnerabilities"
@@ -2133,6 +3102,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get host-vulnerabilities"
@@ -2158,14 +3130,62 @@
         "summary": "List provenance attestations linked to one canonical image scan result"
       }
     },
+    "/api/v1/image-scan-results/{id}/config-checks": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get config-checks"
+      }
+    },
     "/api/v1/image-scan-results/{id}/file-risks": {
       "get": {
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get file-risks"
+      }
+    },
+    "/api/v1/image-scan-results/{id}/findings.csv": {
+      "get": {
+        "description": "Download one canonical image scan result's vulnerability findings as CSV for report handoff and NeuVector-style image report exports.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "CSV image vulnerability findings report"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Download image scan findings CSV"
       }
     },
     "/api/v1/image-scan-results/{id}/layers": {
@@ -2173,6 +3193,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get layers"
@@ -2183,6 +3206,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get packages"
@@ -2193,6 +3219,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get cyclonedx"
@@ -2203,6 +3232,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get spdx"
@@ -2213,6 +3245,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get secrets"
@@ -2223,9 +3258,25 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get signature"
+      }
+    },
+    "/api/v1/import/{filename}": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get import"
       }
     },
     "/api/v1/integration-deliveries": {
@@ -2248,6 +3299,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get receivers"
@@ -2256,6 +3310,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create receivers"
@@ -2266,6 +3323,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Delete receivers"
@@ -2274,6 +3334,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Update receivers"
@@ -2284,6 +3347,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get deliveries"
@@ -2294,6 +3360,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create pause"
@@ -2304,6 +3373,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create rotate-secret"
@@ -2314,6 +3386,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create test-fire"
@@ -2324,9 +3399,360 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create unpause"
+      }
+    },
+    "/api/v1/k8s-audit": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get k8s-audit"
+      }
+    },
+    "/api/v1/k8s-audit:bulk": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Create k8s-audit:bulk"
+      }
+    },
+    "/api/v1/migration/imports": {
+      "get": {
+        "description": "Returns the most recent persisted migration previews and their apply/rollback state for the authenticated organization.",
+        "responses": {
+          "200": {
+            "description": "Migration import history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "imports"
+                  ],
+                  "properties": {
+                    "imports": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "source",
+                          "status",
+                          "summary",
+                          "created_at"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "source": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "previewed",
+                              "applied",
+                              "partial_applied",
+                              "rolled_back",
+                              "failed"
+                            ]
+                          },
+                          "summary": {
+                            "type": "object",
+                            "additionalProperties": true
+                          },
+                          "applied_summary": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "integer"
+                            }
+                          },
+                          "unsupported": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "additionalProperties": true
+                            }
+                          },
+                          "error": {
+                            "type": "string"
+                          },
+                          "created_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "applied_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "rolled_back_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "List persisted migration imports"
+      }
+    },
+    "/api/v1/migration/imports/{id}/rollback-bundle": {
+      "get": {
+        "description": "Downloads the persisted rollback snapshot captured during migration apply. The bundle is available only after an import reaches applied, partial_applied, or rolled_back state.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Persisted migration rollback bundle",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "source",
+                    "generated_at"
+                  ],
+                  "properties": {
+                    "source": {
+                      "type": "string"
+                    },
+                    "generated_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "policies": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    },
+                    "groups": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    },
+                    "file_profiles": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    },
+                    "process_profiles": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    },
+                    "network_rules": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    },
+                    "dpi_rules": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    },
+                    "dpi_bindings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Download migration rollback bundle"
+      }
+    },
+    "/api/v1/migration/imports/{id}:apply": {
+      "post": {
+        "description": "Applies the converted policies from a saved migration preview, records rollback snapshots, and returns partial_applied when converted file-profile items still require workload mapping.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Migration import apply result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "status"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "applied",
+                        "partial_applied"
+                      ]
+                    },
+                    "already_applied": {
+                      "type": "boolean"
+                    },
+                    "applied": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "integer"
+                      }
+                    },
+                    "unsupported": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Apply a persisted migration import"
+      }
+    },
+    "/api/v1/migration/imports/{id}:rollback": {
+      "post": {
+        "description": "Rolls back a previously applied or partially applied migration import by deleting created policies and restoring updated policy snapshots.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Migration rollback result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "status",
+                    "restored",
+                    "deleted"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "status": {
+                      "type": "string",
+                      "const": "rolled_back"
+                    },
+                    "restored": {
+                      "type": "integer"
+                    },
+                    "deleted": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Roll back a migration import"
       }
     },
     "/api/v1/migration/preview": {
@@ -2344,9 +3770,25 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create network-flows:bulk"
+      }
+    },
+    "/api/v1/network-sessions:bulk": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Create network-sessions:bulk"
       }
     },
     "/api/v1/network/conversations": {
@@ -2354,9 +3796,75 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get conversations"
+      }
+    },
+    "/api/v1/network/conversations/entries": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get entries"
+      }
+    },
+    "/api/v1/network/enforcement": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get enforcement"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Create enforcement"
+      }
+    },
+    "/api/v1/network/enforcement/{id}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Delete enforcement"
+      }
+    },
+    "/api/v1/network/exposure": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get exposure"
       }
     },
     "/api/v1/network/map": {
@@ -2364,9 +3872,46 @@
         "summary": "Cluster-scoped Network Traffic Map workloads and observed flow edges"
       }
     },
+    "/api/v1/network/peers": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get peers"
+      }
+    },
     "/api/v1/network/policies/lifecycle": {
       "get": {
         "summary": "Cluster-scoped network policy lifecycle preview, diff, approval, and rollback state"
+      }
+    },
+    "/api/v1/network/policies/nbe": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get nbe"
+      },
+      "put": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Replace nbe"
       }
     },
     "/api/v1/network/policies/{workload}/rollback": {
@@ -2379,6 +3924,45 @@
         "summary": "Persist idempotent approve/apply/demote network policy lifecycle state with hash-chained audit evidence and deterministic native/Cilium/Calico manifest artifacts; live cluster apply remains gated"
       }
     },
+    "/api/v1/network/sessions": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get sessions"
+      }
+    },
+    "/api/v1/network/sessions/summary": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get summary"
+      }
+    },
+    "/api/v1/network/sessions/{id}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Delete sessions"
+      }
+    },
     "/api/v1/onboarding": {
       "get": {
         "summary": "Cluster onboarding methods and health gates"
@@ -2389,6 +3973,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create platform-facts:report"
@@ -2417,6 +4004,185 @@
         "summary": "Import or dry-run an admission profile bundle into policy rows"
       }
     },
+    "/api/v1/policies/admission/dry-runs": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Optional cluster UUID to clear retained dry-run history for one cluster.",
+            "in": "query",
+            "name": "cluster_id",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "cleared"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Clear retained admission dry-run history"
+      },
+      "get": {
+        "parameters": [
+          {
+            "description": "Optional cluster UUID to list retained dry-run history for one cluster.",
+            "in": "query",
+            "name": "cluster_id",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum rows to return, capped at 200.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "retained admission dry-run history"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "List retained admission dry-run history"
+      }
+    },
+    "/api/v1/policies/admission/options": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get options"
+      }
+    },
+    "/api/v1/policies/admission/rules": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get rules"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Create rules"
+      }
+    },
+    "/api/v1/policies/admission/state": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get state"
+      },
+      "patch": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Update state"
+      }
+    },
+    "/api/v1/policies/assess": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Create assess"
+      }
+    },
+    "/api/v1/policies/dpi-threats": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get dpi-threats"
+      },
+      "patch": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Update dpi-threats"
+      }
+    },
+    "/api/v1/policies/service-mode-defaults": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get service-mode-defaults"
+      },
+      "patch": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Update service-mode-defaults"
+      }
+    },
     "/api/v1/policies/simulate": {
       "post": {
         "summary": "Dry-run admission policy simulation against a pasted manifest and persisted policy catalog"
@@ -2427,6 +4193,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Delete policies"
@@ -2440,6 +4209,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create policies:bulk"
@@ -2450,6 +4222,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get fields"
@@ -2460,6 +4235,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get quarantine"
@@ -2468,6 +4246,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create quarantine"
@@ -2478,6 +4259,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get quarantine"
@@ -2488,6 +4272,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create lift"
@@ -2498,6 +4285,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get verbs"
@@ -2508,6 +4298,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get registries"
@@ -2516,6 +4309,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create registries"
@@ -2526,6 +4322,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Delete registries"
@@ -2534,6 +4333,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get registries"
@@ -2542,9 +4344,76 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Update registries"
+      }
+    },
+    "/api/v1/registries/{id}/cancel-scans": {
+      "post": {
+        "summary": "Cancel active registry scan jobs",
+        "description": "Cancels all pending, paused, and running scan jobs whose scan target belongs to the registry in the caller's organization. Terminal completed, failed, and already-canceled jobs are left unchanged. Requires the manage_registries verb.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Container registry id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The registry scan cancellation summary.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "registry_id",
+                    "canceled",
+                    "active_remaining"
+                  ],
+                  "properties": {
+                    "registry_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "canceled": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "active_remaining": {
+                      "type": "integer",
+                      "format": "int64"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/api/v1/registries/{id}/images": {
@@ -2552,6 +4421,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get images"
@@ -2562,6 +4434,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create sync-now"
@@ -2572,6 +4447,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create test"
@@ -2582,6 +4460,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get compliance.html"
@@ -2592,6 +4473,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get compliance.pdf"
@@ -2602,6 +4486,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get executive.html"
@@ -2612,6 +4499,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get executive.pdf"
@@ -2622,6 +4512,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create repository-packages:report"
@@ -2819,6 +4712,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get response-rules-v2"
@@ -2827,9 +4723,26 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create response-rules-v2"
+      }
+    },
+    "/api/v1/response-rules-v2/options": {
+      "get": {
+        "description": "Returns the server-driven NeuVector-compatible response-rule builder catalog, including event types, condition types, action kinds, receiver targets, webhook names, and NV-style response_rule_options keyed by event.",
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get response-rules-v2 options"
       }
     },
     "/api/v1/response-rules-v2/{id}": {
@@ -2837,6 +4750,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Delete response-rules-v2"
@@ -2845,9 +4761,25 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Replace response-rules-v2"
+      }
+    },
+    "/api/v1/response-rules-v2:reorder": {
+      "patch": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Update response-rules-v2:reorder"
       }
     },
     "/api/v1/response-rules/{id}": {
@@ -2865,6 +4797,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get routing.yaml"
@@ -2873,6 +4808,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create routing.yaml"
@@ -2883,6 +4821,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get runtime-dlp-rules"
@@ -2891,6 +4832,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create runtime-dlp-rules"
@@ -2901,6 +4845,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Delete runtime-dlp-rules"
@@ -2909,6 +4856,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get runtime-dlp-rules"
@@ -2917,6 +4867,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Replace runtime-dlp-rules"
@@ -2927,6 +4880,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create demote"
@@ -2937,6 +4893,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create disable"
@@ -2947,9 +4906,38 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create promote"
+      }
+    },
+    "/api/v1/runtime-dlp-rules:export": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get runtime-dlp-rules:export"
+      }
+    },
+    "/api/v1/runtime-dlp-rules:import": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Create runtime-dlp-rules:import"
       }
     },
     "/api/v1/runtime-pcap": {
@@ -2957,6 +4945,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get runtime-pcap"
@@ -2967,6 +4958,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get claim"
@@ -2977,6 +4971,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create start"
@@ -2987,6 +4984,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Delete runtime-pcap"
@@ -2995,6 +4995,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get runtime-pcap"
@@ -3005,6 +5008,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get download"
@@ -3015,6 +5021,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create status"
@@ -3025,6 +5034,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create upload"
@@ -3035,6 +5047,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get runtime-policies"
@@ -3043,6 +5058,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create runtime-policies"
@@ -3053,6 +5071,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Delete runtime-policies"
@@ -3061,6 +5082,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get runtime-policies"
@@ -3069,6 +5093,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Replace runtime-policies"
@@ -3079,6 +5106,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create demote"
@@ -3089,6 +5119,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create disable"
@@ -3099,6 +5132,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get export"
@@ -3109,6 +5145,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get match-stats"
@@ -3119,6 +5158,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create promote"
@@ -3129,6 +5171,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create simulate"
@@ -3139,6 +5184,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create runtime-policies:apply-generated"
@@ -3149,6 +5197,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create runtime-policies:generate"
@@ -3159,6 +5210,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get runtime-signatures"
@@ -3167,6 +5221,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create runtime-signatures"
@@ -3177,6 +5234,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Delete runtime-signatures"
@@ -3185,6 +5245,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get runtime-signatures"
@@ -3193,6 +5256,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Replace runtime-signatures"
@@ -3203,6 +5269,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create demote"
@@ -3213,6 +5282,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create disable"
@@ -3223,9 +5295,38 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create promote"
+      }
+    },
+    "/api/v1/runtime-signatures:export": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get runtime-signatures:export"
+      }
+    },
+    "/api/v1/runtime-signatures:import": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Create runtime-signatures:import"
       }
     },
     "/api/v1/runtime-threats": {
@@ -3233,6 +5334,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get runtime-threats"
@@ -3243,6 +5347,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get runtime-threats"
@@ -3253,6 +5360,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create runtime-threats:bulk"
@@ -3263,6 +5373,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get baselines"
@@ -3273,6 +5386,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get baselines"
@@ -3283,9 +5399,60 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create mode"
+      }
+    },
+    "/api/v1/runtime/baselines/{workload_id}/rules": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get rules"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Create rules"
+      }
+    },
+    "/api/v1/runtime/baselines/{workload_id}/rules/{rule_id}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Delete rules"
+      },
+      "put": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Replace rules"
       }
     },
     "/api/v1/runtime/dlp-rules:bundle": {
@@ -3293,9 +5460,49 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get dlp-rules:bundle"
+      }
+    },
+    "/api/v1/runtime/dpi-sensor-bindings": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get dpi-sensor-bindings"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Create dpi-sensor-bindings"
+      }
+    },
+    "/api/v1/runtime/dpi-sensor-bindings/{id}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Delete dpi-sensor-bindings"
       }
     },
     "/api/v1/runtime/file-profile-rules:bundle": {
@@ -3303,6 +5510,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get file-profile-rules:bundle"
@@ -3313,6 +5523,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create file-profile-watches:report"
@@ -3323,6 +5536,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get file-profiles"
@@ -3333,6 +5549,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get file-profiles"
@@ -3343,6 +5562,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create exceptions"
@@ -3353,6 +5575,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Delete exceptions"
@@ -3361,6 +5586,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Replace exceptions"
@@ -3371,6 +5599,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get export"
@@ -3381,6 +5612,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create mode"
@@ -3391,6 +5625,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create rules"
@@ -3401,6 +5638,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Delete rules"
@@ -3409,6 +5649,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Replace rules"
@@ -3419,6 +5662,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create file-profiles"
@@ -3505,9 +5751,38 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get process-baselines:bundle"
+      }
+    },
+    "/api/v1/runtime/response-actions:pending": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get response-actions:pending"
+      }
+    },
+    "/api/v1/runtime/response-actions:result": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Create response-actions:result"
       }
     },
     "/api/v1/runtime/response-rules:sync": {
@@ -3548,6 +5823,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get cyclonedx"
@@ -3558,6 +5836,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get mbom"
@@ -3568,6 +5849,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get spdx"
@@ -3589,6 +5873,98 @@
     "/api/v1/scan-jobs/claim": {
       "post": {
         "summary": "Scanner worker claims the next pending scan job"
+      }
+    },
+    "/api/v1/scan-jobs/{id}/attempts": {
+      "get": {
+        "summary": "List scan job attempt history",
+        "description": "Returns the persisted per-attempt ledger for a scan job in the caller's organization.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Scan job id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Attempt history ordered by attempt number.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "attempts"
+                  ],
+                  "properties": {
+                    "attempts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "job_id",
+                          "attempt_number",
+                          "status",
+                          "started_at"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "job_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "attempt_number": {
+                            "type": "integer"
+                          },
+                          "worker_id": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "error": {
+                            "type": "string"
+                          },
+                          "started_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "finished_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "next_attempt_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "lease_expires_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/api/v1/scan-jobs/{id}/cancel": {
@@ -3690,11 +6066,53 @@
         "summary": "Scanner cache statistics with cluster and per-cache status"
       }
     },
+    "/api/v1/scanner/config": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get config"
+      }
+    },
+    "/api/v1/scanner/refresh": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Create refresh"
+      }
+    },
+    "/api/v1/scanner/registry-credentials": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get registry-credentials"
+      }
+    },
     "/api/v1/search": {
       "get": {
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get search"
@@ -3705,9 +6123,219 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get findings"
+      }
+    },
+    "/api/v1/security/score/predict": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Create predict"
+      }
+    },
+    "/api/v1/security/timeline": {
+      "get": {
+        "summary": "Unified security timeline",
+        "description": "Returns a merged, time-ordered timeline across DPI threats, runtime events, network violations, and audit rows. Supports NeuVector-style category filtering through source, severity, time-window, text, namespace, workload, and reference filters.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Optional cluster scope. Audit rows are org-level and omitted when this is set."
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated timeline sources: dpi_threat,runtime_event,network_violation,audit."
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated normalized severities: critical,high,medium,low,info."
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Inclusive lower RFC3339 time bound. Defaults to seven days before now."
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Exclusive upper RFC3339 time bound. Defaults to now plus one minute."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Free-text match against normalized title, id, workload, namespace, and reference fields."
+          },
+          {
+            "name": "namespace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Namespace substring filter."
+          },
+          {
+            "name": "workload",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Workload substring filter."
+          },
+          {
+            "name": "ref",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Source reference substring filter, such as threat id, verdict, policy, or audit target kind."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Timeline page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items",
+                    "limit",
+                    "offset",
+                    "has_more",
+                    "from",
+                    "to"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "source": {
+                            "type": "string",
+                            "enum": [
+                              "dpi_threat",
+                              "runtime_event",
+                              "network_violation",
+                              "audit"
+                            ]
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "severity": {
+                            "type": "string",
+                            "enum": [
+                              "critical",
+                              "high",
+                              "medium",
+                              "low",
+                              "info"
+                            ]
+                          },
+                          "at": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "workload_id": {
+                            "type": "string"
+                          },
+                          "namespace": {
+                            "type": "string"
+                          },
+                          "cluster_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "ref": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "limit": {
+                      "type": "integer"
+                    },
+                    "offset": {
+                      "type": "integer"
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    },
+                    "from": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "to": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/api/v1/serverless-functions": {
@@ -3715,6 +6343,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get serverless-functions"
@@ -3725,6 +6356,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get serverless-functions"
@@ -3735,6 +6369,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create serverless-packages:report"
@@ -3745,6 +6382,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get org"
@@ -3753,6 +6393,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Update org"
@@ -3763,6 +6406,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get user"
@@ -3771,9 +6417,147 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Update user"
+      }
+    },
+    "/api/v1/sigstore-roots": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get sigstore-roots"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Create sigstore-roots"
+      }
+    },
+    "/api/v1/sigstore-roots/{id}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Delete sigstore-roots"
+      }
+    },
+    "/api/v1/support/bundle": {
+      "get": {
+        "summary": "Download redacted support bundle",
+        "description": "Returns a redacted JSON diagnostics bundle for support handoff. The bundle includes runtime system configuration with secrets masked, system health, component inventory, scanner queue/capacity state, policy summaries, recent audit metadata, and a SHA-256 integrity hash over the redacted sections. Requires the manage_system_config verb and writes a support.bundle.download audit event.",
+        "responses": {
+          "200": {
+            "description": "The redacted support bundle.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "schema_version",
+                    "bundle_id",
+                    "generated_at",
+                    "org_id",
+                    "format",
+                    "redaction",
+                    "integrity",
+                    "sections"
+                  ],
+                  "properties": {
+                    "schema_version": {
+                      "type": "string",
+                      "example": "constellation.support_bundle.v1"
+                    },
+                    "bundle_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "generated_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "org_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "format": {
+                      "type": "string",
+                      "example": "json"
+                    },
+                    "redaction": {
+                      "type": "object",
+                      "properties": {
+                        "applied": {
+                          "type": "boolean"
+                        },
+                        "marker": {
+                          "type": "string",
+                          "example": "***REDACTED***"
+                        },
+                        "rules": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "integrity": {
+                      "type": "object",
+                      "properties": {
+                        "algorithm": {
+                          "type": "string",
+                          "example": "sha256"
+                        },
+                        "scope": {
+                          "type": "string",
+                          "example": "sections"
+                        },
+                        "sha256": {
+                          "type": "string"
+                        },
+                        "signed": {
+                          "type": "boolean",
+                          "description": "False until a deployment support-bundle signing key is configured."
+                        },
+                        "note": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "sections": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/api/v1/system-health": {
@@ -3786,6 +6570,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get clusters"
@@ -3814,6 +6601,25 @@
                     "revision": {
                       "type": "integer",
                       "format": "int64"
+                    },
+                    "source": {
+                      "type": "string",
+                      "description": "Effective source for the returned config: system_config when persisted, default when no row exists."
+                    },
+                    "updated_at": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "Last persisted update timestamp for the system_config row."
+                    },
+                    "updated_by": {
+                      "type": "string",
+                      "format": "uuid",
+                      "description": "User ID that last updated the system_config row, when recorded."
+                    },
+                    "updated_by_email": {
+                      "type": "string",
+                      "format": "email",
+                      "description": "Email for the user that last updated the system_config row, when available."
                     }
                   }
                 }
@@ -3876,14 +6682,41 @@
         }
       }
     },
+    "/api/v1/users": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Create users"
+      }
+    },
     "/api/v1/users/{id}": {
       "delete": {
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Delete users"
+      },
+      "put": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Replace users"
       }
     },
     "/api/v1/users/{id}/disable": {
@@ -3891,6 +6724,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create disable"
@@ -3901,9 +6737,25 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create force-password-reset"
+      }
+    },
+    "/api/v1/users/{id}/unlock": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Create unlock"
       }
     },
     "/api/v1/version": {
@@ -3911,9 +6763,38 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get version"
+      }
+    },
+    "/api/v1/vex/cyclonedx/{asset_id}": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get cyclonedx"
+      }
+    },
+    "/api/v1/vex/openvex/{asset_id}": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get openvex"
       }
     },
     "/api/v1/violations": {
@@ -3921,6 +6802,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get violations"
@@ -3931,6 +6815,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get vuln-profiles"
@@ -3939,6 +6826,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create vuln-profiles"
@@ -3949,6 +6839,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Delete vuln-profiles"
@@ -3957,34 +6850,38 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Replace vuln-profiles"
       }
     },
-    "/api/v1/vulndb/status": {
+    "/api/v1/vuln-profiles:export": {
       "get": {
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Get status"
+        "summary": "Get vuln-profiles:export"
       }
     },
-    "/api/v1/vulndb:import": {
+    "/api/v1/vuln-profiles:import": {
       "post": {
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Create vulndb:import"
-      }
-    },
-    "/api/v1/vulndb:rescan": {
-      "post": {
-        "summary": "Queue evidence-backed target rescans for the current VulnDB bundle"
+        "summary": "Create vuln-profiles:import"
       }
     },
     "/api/v1/vulnerability-exceptions": {
@@ -4003,6 +6900,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "security": []
@@ -4014,6 +6914,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "security": []
@@ -4024,6 +6927,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "security": [],
@@ -4049,6 +6955,9 @@
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "security": [],

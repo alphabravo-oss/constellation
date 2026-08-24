@@ -1,6 +1,42 @@
 import { test, expect } from "@playwright/test";
 import { login } from "./utils";
 
+const NEUVECTOR_EXPORT = `admission:
+  rules:
+    - id: 1001
+      desc: Block latest tag
+      criteria:
+        - key: image_name
+          op: regex
+          value: latest
+      action: deny
+response:
+  rules:
+    - id: 2001
+      event: process
+      conditions: [process_baseline]
+      actions: [alert, quarantine]
+`;
+
+const STACKROX_EXPORT = JSON.stringify({
+  policies: [
+    {
+      id: "p-001",
+      name: "Privileged Container",
+      description: "Block privileged containers at deploy.",
+      categories: ["Security Best Practices"],
+      lifecycleStages: ["DEPLOY"],
+      severity: "HIGH_SEVERITY",
+      disabled: false,
+      enforcementActions: ["SCALE_TO_ZERO_ENFORCEMENT"],
+      policySections: [{
+        sectionName: "container",
+        policyGroups: [{ fieldName: "Privileged", booleanOperator: "OR", values: [{ value: "true" }] }],
+      }],
+    },
+  ],
+}, null, 2);
+
 test.beforeEach(async ({ page }) => {
   await login(page);
 });
@@ -28,18 +64,26 @@ test("Runtime page shows subsystem and rule readiness", async ({ page }) => {
 
 test("Settings exposes onboarding, integrations, migration, and AI controls", async ({ page }) => {
   await page.goto("/settings");
-  await expect(page.getByTestId("onboarding-panel")).toContainText("Helm");
-  await expect(page.getByTestId("integrations-panel")).toContainText("PagerDuty");
-  await expect(page.getByTestId("migration-panel")).toContainText("StackRox");
-  await expect(page.getByTestId("migration-panel")).toContainText("NeuVector");
-  await expect(page.getByTestId("migration-preview-wizard")).toContainText("Preview Import");
+  await expect(page.getByRole("link", { name: /Connect a cluster/i })).toContainText("Register a Kubernetes cluster");
+  await expect(page.getByRole("link", { name: /Integrations & Routing/i })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Migration Imports/i })).toBeVisible();
+
+  await page.goto("/settings/integrations?tab=operations");
+  await expect(page.getByTestId("integration-connectors")).toContainText("Critical PagerDuty service");
+
+  await page.goto("/settings/migration");
+  await expect(page.getByTestId("migration-preview-wizard")).toContainText("Preview import");
+  await page.getByTestId("migration-export-input").fill(NEUVECTOR_EXPORT);
   await page.getByTestId("migration-preview-submit").click();
   await expect(page.getByTestId("migration-preview-result")).toContainText("Read-only preview");
-  await expect(page.getByTestId("migration-preview-policy").filter({ hasText: "nv-block-latest-tag" })).toBeVisible();
-  await expect(page.getByTestId("migration-preview-yaml")).toContainText("ClusterPolicy");
+  await expect(page.getByTestId("migration-preview-policy").filter({ hasText: "nv-1001-block-latest-tag" })).toBeVisible();
+  await expect(page.getByTestId("migration-preview-yaml")).toContainText("AdmissionRule");
   await expect(page.getByTestId("migration-rollback-bundle")).toContainText("restore previous policy versions");
   await page.getByTestId("migration-source-select").selectOption("stackrox");
+  await page.getByTestId("migration-export-input").fill(STACKROX_EXPORT);
   await page.getByTestId("migration-preview-submit").click();
   await expect(page.getByTestId("migration-preview-policy").filter({ hasText: "privileged-container" })).toBeVisible();
-  await expect(page.getByTestId("ai-residency-panel")).toContainText("Non-AI fallback");
+
+  await page.goto("/posture");
+  await expect(page.getByRole("row", { name: /AI\/ML Workload Tagging/i })).toBeVisible();
 });

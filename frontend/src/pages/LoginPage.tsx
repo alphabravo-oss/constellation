@@ -10,7 +10,7 @@ function BrandMark({ compact = false }: { compact?: boolean }) {
   return (
     <div className="flex items-center gap-3">
       <img
-        src="/constellation-mark.svg?v=2"
+        src="/constellation-mark.svg?v=4"
         alt=""
         aria-hidden="true"
         className={`${compact ? "h-10 w-10" : "h-11 w-11"} shrink-0`}

@@ -428,16 +428,37 @@ func (h *Federation) authenticateJoinToken(raw string) (joinAuth, bool) {
 		}
 		return a, true
 	}
-	// Fixed/pre-shared token: resolve the master org from federation_state.
+	// Fixed/pre-shared token: resolve the single master org from federation_state.
+	// The token itself carries no org claim, so accepting it when multiple master
+	// orgs exist would bind the join to an arbitrary tenant.
 	if fixed := strings.TrimSpace(h.joinCfg.FixedToken); fixed != "" && subtleConstantEq(raw, fixed) {
-		var orgID uuid.UUID
-		if err := h.db.Pool().QueryRow(context.Background(),
-			`SELECT org_id FROM federation_state WHERE state=$1 ORDER BY updated_at LIMIT 1`,
-			string(federation.StateMaster)).Scan(&orgID); err == nil {
+		if orgID, ok := h.fixedTokenMasterOrg(); ok {
 			return joinAuth{orgID: orgID}, true
 		}
 	}
 	return joinAuth{}, false
+}
+
+func (h *Federation) fixedTokenMasterOrg() (uuid.UUID, bool) {
+	rows, err := h.db.Pool().Query(context.Background(),
+		`SELECT org_id FROM federation_state WHERE state=$1 ORDER BY updated_at, org_id LIMIT 2`,
+		string(federation.StateMaster))
+	if err != nil {
+		return uuid.Nil, false
+	}
+	defer rows.Close()
+	var out []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return uuid.Nil, false
+		}
+		out = append(out, id)
+	}
+	if rows.Err() != nil || len(out) != 1 {
+		return uuid.Nil, false
+	}
+	return out[0], true
 }
 
 // consumeJoinToken atomically marks a minted join token's jti consumed. It returns

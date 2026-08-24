@@ -36,7 +36,7 @@ func TestSetuidWithoutExec(t *testing.T) {
 // privilege-escalation alert through the full classifier entry point.
 func TestClassifyEventSetuid(t *testing.T) {
 	h := &EventsIngest{}
-	cls := h.classifyEvent(uuid.Nil, &IngestEvent{Kind: "uid_change", UID: 0, PrevUID: 1000}, &fileProfileRuleSet{}, false)
+	cls := h.classifyEvent(uuid.Nil, uuid.Nil, &IngestEvent{Kind: "uid_change", UID: 0, PrevUID: 1000}, &fileProfileRuleSet{}, false)
 	if cls.Severity != "high" || cls.Verdict != "alert" {
 		t.Fatalf("uid_change escalation: got (%s,%s) want (high,alert)", cls.Severity, cls.Verdict)
 	}

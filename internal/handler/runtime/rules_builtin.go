@@ -219,8 +219,8 @@ func (s *RuntimeDLPStore) EnsureBuiltins(ctx context.Context, orgID, clusterID u
 		}
 		tag, err := s.db.Pool().Exec(ctx, `
 INSERT INTO runtime_dlp_rules
-  (org_id, cluster_id, name, category, apply_dir, severity, mode, patterns, description)
-VALUES ($1,$2,$3,$4,$5,$6,'monitor',$7::jsonb,$8)
+  (org_id, cluster_id, name, category, apply_dir, severity, mode, patterns, description, source, cfg_type)
+VALUES ($1,$2,$3,$4,$5,$6,'monitor',$7::jsonb,$8,'builtin','predefined')
 ON CONFLICT (org_id, cluster_id, name) DO NOTHING`,
 			orgID, clusterID, p.Name, string(p.Category), p.ApplyDir, p.Severity,
 			string(patterns), p.Description)

@@ -155,6 +155,9 @@ function ConnectorFormInner({
           data-testid="connector-config-editor"
           onSubmit={(event) => { event.preventDefault(); if (canSave && !save.isPending) save.mutate(); }}
         >
+          <p className="rounded-md border border-border bg-muted px-3 py-2 text-xs text-muted-foreground">
+            Raw credentials are never accepted. Store secrets in an external vault and save only the reference here.
+          </p>
           <Field label={connectorType === "registry" ? "Registry" : "Cloud account"}>
             <Select
               value={form.connector_id}

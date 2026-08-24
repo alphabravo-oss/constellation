@@ -62,7 +62,7 @@ SELECT count(*) FROM (
      AND external_id LIKE 'CVE-%'
      AND ($2::text = '' OR lifecycle = $2)
      AND ($3::uuid IS NULL OR cluster_id = $3)
-     AND target_type <> 'workload'
+     AND COALESCE(target_type, '') <> 'workload'
      AND ($4::text = '' OR external_id ILIKE '%'||$4||'%' OR detail_json->>'package_name' ILIKE '%'||$4||'%')
    GROUP BY external_id
   HAVING ($5::bool IS NOT TRUE OR bool_or(COALESCE(detail_json->>'fixed', detail_json->>'fixed_version','') NOT IN ('','false')))
@@ -82,8 +82,19 @@ SELECT external_id,
        count(DISTINCT cluster_id) FILTER (WHERE cluster_id IS NOT NULL)               AS affected_clusters,
        (array_agg(DISTINCT target_ref))[1:25]                                         AS images,
        max(last_seen_at)                                                              AS last_seen_at,
-       max(NULLIF(detail_json->>'cvss_base','')::float8)                              AS cvss,
-       bool_or((detail_json->>'kev')::bool)                                           AS kev,
+       max(CASE
+             WHEN COALESCE(detail_json->>'cvss_base', '') ~ '^[0-9]+(\.[0-9]+)?$'
+             THEN (detail_json->>'cvss_base')::float8
+           END)                                                                        AS cvss,
+       (array_agg(NULLIF(detail_json->>'cvss_vector','')
+          ORDER BY
+            CASE
+              WHEN COALESCE(detail_json->>'cvss_base', '') ~ '^[0-9]+(\.[0-9]+)?$'
+              THEN (detail_json->>'cvss_base')::float8
+            END DESC NULLS LAST,
+            risk_score DESC)
+          FILTER (WHERE COALESCE(detail_json->>'cvss_vector','') <> ''))[1]            AS cvss_vector,
+       bool_or(lower(COALESCE(detail_json->>'kev','')) IN ('true','t','1','yes'))      AS kev,
        bool_or(COALESCE(detail_json->>'fixed', detail_json->>'fixed_version','') NOT IN ('','false')) AS has_fix
   FROM findings
  WHERE org_id = $1
@@ -93,7 +104,7 @@ SELECT external_id,
    AND ($3::uuid IS NULL OR cluster_id = $3)
    -- Canonical: count image-workload instances only, not the redundant runtime-agent
    -- 'workload' pod-scan copies (see findings.go) which would inflate instance/image counts.
-   AND target_type <> 'workload'
+   AND COALESCE(target_type, '') <> 'workload'
    AND ($7::text = '' OR external_id ILIKE '%'||$7||'%' OR detail_json->>'package_name' ILIKE '%'||$7||'%')
  GROUP BY external_id
  HAVING ($6::bool IS NOT TRUE OR bool_or(COALESCE(detail_json->>'fixed', detail_json->>'fixed_version','') NOT IN ('','false')))
@@ -117,6 +128,8 @@ SELECT external_id,
 		Images           []string `json:"images"`
 		LastSeenAt       string   `json:"last_seen_at"`
 		CVSS             float64  `json:"cvss,omitempty"`
+		CVSSBase         float64  `json:"cvss_base,omitempty"`
+		CVSSVector       string   `json:"cvss_vector,omitempty"`
 		KEV              bool     `json:"kev"`
 		HasFix           bool     `json:"has_fix"`
 	}
@@ -125,16 +138,21 @@ SELECT external_id,
 		var c cveRollup
 		var pkg, fixed *string
 		var cvss *float64
+		var cvssVector *string
 		var kev, hasFix *bool
 		var lastSeen time.Time
 		if err := rows.Scan(&c.CVE, &c.Severity, &c.RiskScore, &pkg, &fixed,
 			&c.Instances, &c.AffectedImages, &c.AffectedClusters, &c.Images, &lastSeen,
-			&cvss, &kev, &hasFix); err != nil {
+			&cvss, &cvssVector, &kev, &hasFix); err != nil {
 			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
 		if cvss != nil {
 			c.CVSS = *cvss
+			c.CVSSBase = *cvss
+		}
+		if cvssVector != nil {
+			c.CVSSVector = *cvssVector
 		}
 		c.KEV = kev != nil && *kev
 		c.HasFix = hasFix != nil && *hasFix

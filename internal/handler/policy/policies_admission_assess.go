@@ -31,6 +31,10 @@ type admissionAssessResponseDTO struct {
 	Namespace       string                        `json:"namespace"`
 	Decision        string                        `json:"decision"`
 	EnforcementMode string                        `json:"enforcement_mode"`
+	DryRunID        string                        `json:"dry_run_id,omitempty"`
+	AssessedAt      string                        `json:"assessed_at,omitempty"`
+	CurrentOutcome  string                        `json:"current_outcome,omitempty"`
+	ProtectOutcome  string                        `json:"protect_outcome,omitempty"`
 	Matches         []admissionSimulationMatchDTO `json:"matches"`
 }
 
@@ -68,26 +72,36 @@ func (p *Policies) Assess(w http.ResponseWriter, r *http.Request) {
 	if p.db != nil {
 		evidence = admissionevidence.New(p.db.Pool(), subj.OrgID)
 	}
-	matches, err := assessImageMatches(r.Context(), image, namespace, req.Labels, policies, evidence, clusterArg)
+	groupResolver, err := p.admissionGroupResolver(r.Context(), subj.OrgID, clusterArg)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	matches, err := assessImageMatches(r.Context(), image, namespace, req.Labels, policies, evidence, groupResolver, clusterArg)
 	if err != nil {
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	decision, mode := admissionDecision(matches)
-	httpx.WriteJSON(w, http.StatusOK, admissionAssessResponseDTO{
+	resp := admissionAssessResponseDTO{
 		Image:           image,
 		Namespace:       namespace,
 		Decision:        decision,
 		EnforcementMode: mode,
 		Matches:         matches,
-	})
+	}
+	if err := p.recordAdmissionDryRun(r, subj, clusterArg, req, &resp); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, resp)
 }
 
 // assessImageMatches synthesizes a minimal single-container Pod for the image and
 // runs it through the existing admission matcher (evaluateAdmissionPolicies), so
 // assess and the live webhook share one evaluation path. Factored out of the
 // handler so it can be exercised without a DB by injecting a fake evidence source.
-func assessImageMatches(ctx context.Context, image, namespace string, labels map[string]string, policies []policyDTO, evidence constadmission.EvidenceSource, clusterArg any) ([]admissionSimulationMatchDTO, error) {
+func assessImageMatches(ctx context.Context, image, namespace string, labels map[string]string, policies []policyDTO, evidence constadmission.EvidenceSource, groupResolver constadmission.GroupResolver, clusterArg any) ([]admissionSimulationMatchDTO, error) {
 	manifest, err := assessPodManifest(image, namespace, labels)
 	if err != nil {
 		return nil, err
@@ -96,7 +110,7 @@ func assessImageMatches(ctx context.Context, image, namespace string, labels map
 	if err != nil {
 		return nil, err
 	}
-	return evaluateAdmissionPolicies(ctx, workload, manifest, policies, evidence, clusterArg), nil
+	return evaluateAdmissionPolicies(ctx, workload, manifest, policies, evidence, groupResolver, clusterArg), nil
 }
 
 // assessPodManifest builds a JSON Pod manifest wrapping a single container that

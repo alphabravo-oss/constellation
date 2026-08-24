@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -72,7 +73,7 @@ func (q *quarantineRuntime) Isolate(ctx context.Context, workload, reason string
 // workload onto runtime_response_actions. The runtime-agent responder pulls pending rows
 // for its node (GET /runtime/response-actions:pending), SIGKILLs the resolved pid, and
 // POSTs the outcome back to the :result sink. Best-effort and node-agnostic: the row is
-// left node='' so it's offered to every agent in the cluster; each agent's
+// left node=” so it's offered to every agent in the cluster; each agent's
 // killProcessDecision guards against killing the wrong process (comm/container/pid checks),
 // so an empty-target row is harmless where the workload isn't present.
 //
@@ -199,6 +200,7 @@ func NewResponseDispatch(database *db.DB, dispatcher *notify.Dispatcher) func(ct
 		if err != nil || len(rules) == 0 {
 			return
 		}
+		ev = annotateResponseRuleGroups(ctx, database, orgID, clusterID, ev, rules)
 		receivers := buildReceiverMap(ctx, database, dispatcher, orgID, rules)
 		eng := response.NewEngine(receivers, &quarantineRuntime{db: database, orgID: orgID, clusterID: clusterID}, nil)
 		eng.SetRules(rules)
@@ -214,6 +216,259 @@ func NewResponseDispatch(database *db.DB, dispatcher *notify.Dispatcher) func(ct
 			}
 		}
 	}
+}
+
+// ResponseRuleDecision is the side-effect-free v2 response-rule result used by ingest
+// handlers before they write a security-event row. SuppressLog means at least one matching
+// rule contains suppress-log; explicit rule actions are still dispatched later by
+// NewResponseDispatch so suppression does not turn quarantine/webhook/ticket into no-ops.
+type ResponseRuleDecision struct {
+	Matches     []response.MatchedRule
+	SuppressLog bool
+}
+
+// NewResponseDecision builds a side-effect-free v2 response-rule evaluator. It intentionally
+// shares loadResponseRulesV2 with NewResponseDispatch so the same ordered, cluster-scoped
+// rules drive both "should this log be suppressed?" and the actual post-commit actions.
+func NewResponseDecision(database *db.DB) func(ctx context.Context, orgID, clusterID uuid.UUID, ev response.Event) ResponseRuleDecision {
+	return func(ctx context.Context, orgID, clusterID uuid.UUID, ev response.Event) ResponseRuleDecision {
+		if database == nil {
+			return ResponseRuleDecision{}
+		}
+		rules, err := loadResponseRulesV2(ctx, database, orgID, clusterID)
+		if err != nil || len(rules) == 0 {
+			if err != nil {
+				slog.Default().Warn("response: evaluate rules for suppress-log",
+					slog.String("org_id", orgID.String()),
+					slog.String("err", err.Error()))
+			}
+			return ResponseRuleDecision{}
+		}
+		ev = annotateResponseRuleGroups(ctx, database, orgID, clusterID, ev, rules)
+		eng := response.NewEngine(nil, nil, nil)
+		eng.SetRules(rules)
+		matches := eng.MatchRules(&ev)
+		return ResponseRuleDecision{Matches: matches, SuppressLog: response.SuppressesLog(matches)}
+	}
+}
+
+func annotateResponseRuleGroups(ctx context.Context, database *db.DB, orgID, clusterID uuid.UUID, ev response.Event, rules []response.Rule) response.Event {
+	if database == nil || !rulesNeedGroups(rules) {
+		return ev
+	}
+	selectors := responseRuleGroupSelectors(rules)
+	if len(selectors) == 0 {
+		return ev
+	}
+	candidates := responseEventWorkloadCandidates(ev)
+	if len(candidates) == 0 {
+		return ev
+	}
+	if expanded, err := expandResponseEventWorkloadCandidates(ctx, database, orgID, clusterID, candidates); err == nil {
+		for candidate := range expanded {
+			candidates[candidate] = struct{}{}
+		}
+	} else {
+		slog.Default().Warn("response: expand workload candidates for group selector",
+			slog.String("org_id", orgID.String()),
+			slog.String("cluster_id", clusterID.String()),
+			slog.String("err", err.Error()))
+	}
+	matched, err := responseRuleMatchingGroups(ctx, database, orgID, clusterID, selectors, candidates)
+	if err != nil {
+		slog.Default().Warn("response: resolve group selector",
+			slog.String("org_id", orgID.String()),
+			slog.String("cluster_id", clusterID.String()),
+			slog.String("err", err.Error()))
+		return ev
+	}
+	if len(matched) == 0 {
+		return ev
+	}
+	labels := cloneLabels(ev.Labels)
+	ids := make([]string, 0, len(matched))
+	names := make([]string, 0, len(matched))
+	for _, group := range matched {
+		ids = append(ids, group.id)
+		names = append(names, group.name)
+	}
+	sort.Strings(ids)
+	sort.Strings(names)
+	labels["group_ids"] = strings.Join(ids, ",")
+	labels["group_names"] = strings.Join(names, ",")
+	labels["groups"] = labels["group_names"]
+	if labels["group_id"] == "" && len(ids) > 0 {
+		labels["group_id"] = ids[0]
+	}
+	if labels["group_name"] == "" && len(names) > 0 {
+		labels["group_name"] = names[0]
+	}
+	if labels["group"] == "" && len(names) > 0 {
+		labels["group"] = names[0]
+	}
+	ev.Labels = labels
+	return ev
+}
+
+func rulesNeedGroups(rules []response.Rule) bool {
+	for i := range rules {
+		if strings.TrimSpace(rules[i].Selector.Group) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func responseRuleGroupSelectors(rules []response.Rule) []string {
+	seen := map[string]struct{}{}
+	out := []string{}
+	for i := range rules {
+		group := strings.TrimSpace(rules[i].Selector.Group)
+		if group == "" {
+			continue
+		}
+		if _, ok := seen[group]; ok {
+			continue
+		}
+		seen[group] = struct{}{}
+		out = append(out, group)
+	}
+	return out
+}
+
+func responseEventWorkloadCandidates(ev response.Event) map[string]struct{} {
+	out := map[string]struct{}{}
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			out[value] = struct{}{}
+		}
+	}
+	add(ev.Workload)
+	for _, key := range []string{"workload_id", "pod_workload_id", "owner_workload_id", "deployment", "pod"} {
+		add(ev.Labels[key])
+	}
+	pod := strings.TrimSpace(ev.Labels["pod"])
+	if ev.Namespace != "" && pod != "" {
+		add(ev.Namespace + "/pod/" + pod)
+		add(ev.Namespace + "/" + pod)
+	}
+	if ns, rest, ok := splitNamespacedWorkload(ev.Workload); ok {
+		if strings.HasPrefix(rest, "pod/") {
+			add(ns + "/" + strings.TrimPrefix(rest, "pod/"))
+		}
+	}
+	return out
+}
+
+func expandResponseEventWorkloadCandidates(ctx context.Context, database *db.DB, orgID, clusterID uuid.UUID, candidates map[string]struct{}) (map[string]struct{}, error) {
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+	values := make([]string, 0, len(candidates))
+	for candidate := range candidates {
+		values = append(values, candidate)
+	}
+	rows, err := database.Pool().Query(ctx, `
+SELECT DISTINCT owner_workload_id
+  FROM pod_workload_links
+ WHERE org_id = $1
+   AND cluster_id = $2
+   AND pod_workload_id = ANY($3::text[])
+   AND owner_workload_id <> ''
+UNION
+SELECT DISTINCT namespace || '/' || COALESCE(NULLIF(deployment, ''), pod_name)
+  FROM pod_ips
+ WHERE org_id = $1
+   AND cluster_id = $2
+   AND (workload_id = ANY($3::text[]) OR namespace || '/pod/' || pod_name = ANY($3::text[]))`,
+		orgID, clusterID, values)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]struct{}{}
+	for rows.Next() {
+		var workloadID string
+		if err := rows.Scan(&workloadID); err != nil {
+			return nil, err
+		}
+		workloadID = strings.TrimSpace(workloadID)
+		if workloadID != "" {
+			out[workloadID] = struct{}{}
+		}
+	}
+	return out, rows.Err()
+}
+
+type responseRuleGroupMatch struct {
+	id   string
+	name string
+}
+
+func responseRuleMatchingGroups(ctx context.Context, database *db.DB, orgID, clusterID uuid.UUID, selectors []string, candidates map[string]struct{}) ([]responseRuleGroupMatch, error) {
+	rows, err := database.Pool().Query(ctx, `
+SELECT id::text, name, COALESCE(members, '[]'::jsonb)
+  FROM groups
+ WHERE org_id = $1
+   AND ($2::uuid IS NULL OR cluster_id IS NULL OR cluster_id = $2)
+   AND (id::text = ANY($3::text[]) OR name = ANY($3::text[]))
+ ORDER BY name`, orgID, clusterID, selectors)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []responseRuleGroupMatch{}
+	for rows.Next() {
+		var (
+			id, name string
+			raw      []byte
+		)
+		if err := rows.Scan(&id, &name, &raw); err != nil {
+			return nil, err
+		}
+		var members []string
+		if err := json.Unmarshal(raw, &members); err != nil {
+			return nil, err
+		}
+		if groupMembersContain(members, candidates) {
+			out = append(out, responseRuleGroupMatch{id: id, name: name})
+		}
+	}
+	return out, rows.Err()
+}
+
+func groupMembersContain(members []string, candidates map[string]struct{}) bool {
+	for _, member := range members {
+		member = strings.TrimSpace(member)
+		if member == "" {
+			continue
+		}
+		if _, ok := candidates[member]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func cloneLabels(in map[string]string) map[string]string {
+	out := make(map[string]string, len(in)+6)
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func splitNamespacedWorkload(value string) (namespace, name string, ok bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", "", false
+	}
+	parts := strings.SplitN(value, "/", 2)
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
 }
 
 // buildReceiverMap returns the engine's name/id -> notify.Receiver map for the org, but only
@@ -257,7 +512,7 @@ func buildReceiverMap(ctx context.Context, database *db.DB, dispatcher *notify.D
 func rulesNeedReceivers(rules []response.Rule) bool {
 	for i := range rules {
 		for _, a := range rules[i].Actions {
-			if a.Kind == response.ActionNotify || a.Kind == response.ActionTicket {
+			if a.Kind == response.ActionNotify || a.Kind == response.ActionTicket || a.Kind == response.ActionWebhook {
 				return true
 			}
 		}

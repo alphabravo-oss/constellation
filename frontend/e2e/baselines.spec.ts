@@ -1,35 +1,16 @@
 // Wave L4 — screenshot the Process Baselines kanban + the card-detail drawer.
 //
-// Uses the running dev server at :5173 (matches e2e/elite-screens.spec.ts pattern).
 import { test, expect } from "@playwright/test";
+import { login } from "./utils";
 
-const BASE = "http://localhost:5173";
-const API  = process.env.VITE_API_URL ?? "http://localhost:18080";
-
-const CREDS = {
-  email: "admin@dev",
-  password: "devpass123",
-};
-
-test.use({ baseURL: BASE, viewport: { width: 1600, height: 1000 } });
+test.use({ viewport: { width: 1600, height: 1000 } });
 
 test.beforeEach(async ({ page }) => {
-  const resp = await page.request.post(`${API}/api/v1/auth/login`, { data: CREDS });
-  if (!resp.ok()) throw new Error(`login failed: ${resp.status()}`);
-  const { token } = await resp.json();
-  await page.addInitScript((t) => {
-    localStorage.setItem("constellation.token", t);
-    localStorage.setItem("constellation.theme", "dark");
-  }, token);
+  await login(page, { theme: "dark" });
 });
 
 test("baselines page · main kanban + drawer", async ({ page }) => {
-  // Resolve the constellation cluster id (deterministic in dev seed).
-  const clustersResp = await page.request.get(`${API}/api/v1/clusters`, {
-    headers: { Authorization: `Bearer ${(await page.request.post(`${API}/api/v1/auth/login`, { data: CREDS })).json().then((d: any) => d.token)}` },
-  }).catch(() => null);
-
-  // simpler: login and call clusters via fetch in-page
+  // Resolve the first demo cluster id through the cluster picker.
   await page.goto("/clusters");
   await page.waitForLoadState("networkidle", { timeout: 12_000 }).catch(() => undefined);
   // Pick the first cluster card — it's "constellation" in the dev seed sort order.

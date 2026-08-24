@@ -13,6 +13,7 @@ metadata:
   labels: {{- include "constellation.labels" . | nindent 4 }}
     app.kubernetes.io/component: scanner
 spec:
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
   {{- if not .Values.scanner.autoscaling.enabled }}
   replicas: {{ .Values.scanner.replicas }}
   {{- end }}
@@ -44,9 +45,7 @@ spec:
             - "--listen=:8090"
             - "--control-plane=http://{{ include "constellation.fullname" . }}-api:{{ .Values.api.service.port }}"
             - "--lease-renew-interval={{ .Values.scanner.leaseRenewInterval }}"
-            {{- if gt (int .Values.scanner.maxConcurrent) 0 }}
             - "--max-concurrent={{ .Values.scanner.maxConcurrent }}"
-            {{- end }}
             {{- if .Values.scanner.targetCapacity }}
             - "--target-capacity={{ .Values.scanner.targetCapacity }}"
             {{- end }}

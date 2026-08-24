@@ -59,7 +59,7 @@ func (p *Policies) Delete(w http.ResponseWriter, r *http.Request) {
 			TargetKind: "policy", TargetID: id.String(),
 		})
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 type bulkPolicyOp struct {

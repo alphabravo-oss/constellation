@@ -238,6 +238,47 @@ func TestBaselineModeDriftWiring(t *testing.T) {
 	}
 }
 
+func TestBaselineModeForClusterScopesDuplicateWorkloads(t *testing.T) {
+	orgID := uuid.New()
+	clusterA := uuid.New()
+	clusterB := uuid.New()
+	b := NewBaselines(nil, nil)
+
+	b.state[clusterA.String()+"::default/api"] = &baselineState{
+		OrgID:      orgID,
+		ClusterID:  clusterA.String(),
+		WorkloadID: "default/api",
+		Mode:       baseline.ModeEnforce,
+		Processes:  []processObservation{{Name: "nginx"}},
+	}
+	b.state[clusterB.String()+"::default/api"] = &baselineState{
+		OrgID:      orgID,
+		ClusterID:  clusterB.String(),
+		WorkloadID: "default/api",
+		Mode:       baseline.ModeLearn,
+		Processes:  []processObservation{{Name: "curl"}},
+	}
+
+	mode, set, ok := b.BaselineModeForCluster(orgID, clusterA, "default/api")
+	if !ok || mode != baseline.ModeEnforce {
+		t.Fatalf("cluster A mode = %q ok=%v", mode, ok)
+	}
+	if _, has := set["nginx"]; !has {
+		t.Fatalf("cluster A set = %v, expected nginx", set)
+	}
+	if _, has := set["curl"]; has {
+		t.Fatalf("cluster A leaked cluster B process: %v", set)
+	}
+
+	mode, set, ok = b.BaselineModeForCluster(orgID, clusterB, "default/api")
+	if !ok || mode != baseline.ModeLearn {
+		t.Fatalf("cluster B mode = %q ok=%v", mode, ok)
+	}
+	if _, has := set["curl"]; !has {
+		t.Fatalf("cluster B set = %v, expected curl", set)
+	}
+}
+
 func baselineRequest(method, target, workloadID string, body *bytes.Reader, orgID, userID uuid.UUID) *http.Request {
 	var req *http.Request
 	if body == nil {

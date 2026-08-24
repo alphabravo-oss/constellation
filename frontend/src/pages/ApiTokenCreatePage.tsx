@@ -49,8 +49,7 @@ export function ApiTokenCreatePage() {
   const [attachedTo, setAttachedTo] = useState<string>("user");
   const [revealed, setRevealed] = useState<ApiTokenCreateResponse | null>(null);
 
-  const verbs = verbsQ.data ?? [];
-  const grantable = useMemo(() => verbs.filter((v) => v.user_grantable), [verbs]);
+  const grantable = useMemo(() => (verbsQ.data ?? []).filter((v) => v.user_grantable), [verbsQ.data]);
   const groups = useMemo(() => {
     const out = new Map<string, VerbInfo[]>();
     for (const v of grantable) {

@@ -170,6 +170,12 @@ func TestSystemConfig_PatchHotReloadGetRedactAndRBAC(t *testing.T) {
 	if v, _ := cfg["tls_verify"].(bool); !v {
 		t.Fatalf("seeded tls_verify = %v, want true (default)", cfg["tls_verify"])
 	}
+	if got, _ := body["source"].(string); got != "system_config" {
+		t.Fatalf("GET source = %q, want system_config", got)
+	}
+	if got, _ := body["updated_at"].(string); got == "" {
+		t.Fatalf("GET missing updated_at metadata: %+v", body)
+	}
 
 	caPEM := testCAPEM(t)
 
@@ -197,6 +203,9 @@ func TestSystemConfig_PatchHotReloadGetRedactAndRBAC(t *testing.T) {
 	}
 	if got, _ := cfg["ca_bundle_pem"].(string); got == "" || got == caPEM {
 		t.Fatalf("GET ca_bundle_pem = %q, want redacted marker (set-but-masked)", got)
+	}
+	if got, _ := body["updated_by"].(string); got == "" {
+		t.Fatalf("GET missing updated_by metadata after PATCH: %+v", body)
 	}
 
 	// In-process accessor on the running Server reflects the change WITHOUT a restart

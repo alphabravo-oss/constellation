@@ -94,6 +94,28 @@ func TestRule_Match_SelectorAndProc(t *testing.T) {
 	}
 }
 
+func TestRule_Match_GroupSelector(t *testing.T) {
+	r := Rule{
+		Enabled:   true,
+		EventType: EventRuntime,
+		Selector:  WorkloadSelector{Group: "nv.payments"},
+	}
+	matching := &Event{Type: EventRuntime, Labels: map[string]string{"group_names": "nv.api,nv.payments"}}
+	if !r.Match(matching) {
+		t.Fatal("expected group selector to match group_names list")
+	}
+	byID := &Event{Type: EventRuntime, Labels: map[string]string{"group_ids": "7c03d68b-bad0-4a29-99d8-b8a2a45c030b"}}
+	r.Selector.Group = "7c03d68b-bad0-4a29-99d8-b8a2a45c030b"
+	if !r.Match(byID) {
+		t.Fatal("expected group selector to match group_ids list")
+	}
+	nonMatching := &Event{Type: EventRuntime, Labels: map[string]string{"group_names": "nv.worker"}}
+	r.Selector.Group = "nv.payments"
+	if r.Match(nonMatching) {
+		t.Fatal("expected no match outside selected group")
+	}
+}
+
 func TestEngine_Dispatch_NotifyAndQuarantine(t *testing.T) {
 	slack := &fakeReceiver{name: "slack"}
 	rt := &fakeRuntime{}
@@ -115,6 +137,59 @@ func TestEngine_Dispatch_NotifyAndQuarantine(t *testing.T) {
 	}
 	if len(rt.quarantined) != 1 {
 		t.Fatalf("expected runtime quarantine to fire")
+	}
+}
+
+func TestEngine_Dispatch_WebhookAlias(t *testing.T) {
+	hook := &fakeReceiver{name: "hook"}
+	eng := NewEngine(map[string]notify.Receiver{"hook": hook}, nil, nil)
+	eng.SetRules([]Rule{{
+		ID:         "r1",
+		Name:       "nv-webhook",
+		Enabled:    true,
+		EventType:  EventSecurity,
+		Conditions: []Condition{{Type: CondName, Value: ".*"}},
+		Actions:    []Action{{Kind: ActionWebhook, Target: "hook"}},
+	}})
+	got := eng.Dispatch(context.Background(), &Event{ID: "e1", Name: "threat", Type: EventThreat, Severity: "high"})
+	if len(got) != 1 || len(got[0].Actions) != 1 || got[0].Actions[0] != "webhook:hook" {
+		t.Fatalf("expected webhook alias to dispatch through receiver, got %+v", got)
+	}
+	if len(hook.got) != 1 || hook.got[0].Kind != string(EventThreat) {
+		t.Fatalf("unexpected webhook receiver alerts: %+v", hook.got)
+	}
+}
+
+func TestEngine_MatchRules_SuppressLog(t *testing.T) {
+	eng := NewEngine(nil, nil, nil)
+	eng.SetRules([]Rule{
+		{
+			ID:         "low",
+			Name:       "low",
+			Enabled:    true,
+			EventType:  EventThreat,
+			Conditions: []Condition{{Type: CondLevel, Value: "critical"}},
+			Actions:    []Action{{Kind: ActionSuppressLog}},
+		},
+		{
+			ID:         "match",
+			Name:       "match",
+			Enabled:    true,
+			EventType:  EventSecurity,
+			Conditions: []Condition{{Type: CondLevel, Value: "high"}},
+			Actions:    []Action{{Kind: ActionSuppressLog}},
+		},
+	})
+	matches := eng.MatchRules(&Event{Type: EventThreat, Severity: "high"})
+	if len(matches) != 1 || matches[0].RuleID != "match" {
+		t.Fatalf("unexpected matches: %+v", matches)
+	}
+	if !SuppressesLog(matches) {
+		t.Fatalf("expected suppress-log match: %+v", matches)
+	}
+	got := eng.Dispatch(context.Background(), &Event{Type: EventThreat, Severity: "high"})
+	if len(got) != 1 || len(got[0].Actions) != 1 || got[0].Actions[0] != "suppress-log" {
+		t.Fatalf("dispatch should record suppress-log action without side effects, got %+v", got)
 	}
 }
 
@@ -158,6 +233,9 @@ func TestRule_Validate(t *testing.T) {
 		{Rule{Name: "n", EventType: EventRuntime, Conditions: []Condition{{Type: CondName, Value: "[bad"}}}, true},
 		{Rule{Name: "n", EventType: EventRuntime, Actions: []Action{{Kind: "wat"}}}, true},
 		{Rule{Name: "ok", EventType: EventRuntime, Conditions: []Condition{{Type: CondName, Value: ".*"}}, Actions: []Action{{Kind: ActionNotify, Target: "slack"}}}, false},
+		{Rule{Name: "threat-ok", EventType: EventThreat, Actions: []Action{{Kind: ActionWebhook, Target: "hook"}}}, false},
+		{Rule{Name: "suppress-ok", EventType: EventThreat, Actions: []Action{{Kind: ActionSuppressLog}}}, false},
+		{Rule{Name: "suppress-legacy-ok", EventType: EventThreat, Actions: []Action{{Kind: ActionSuppressLogLegacy}}}, false},
 		{Rule{Name: "kill-ok", EventType: EventRuntime, Actions: []Action{{Kind: ActionKill}}}, false},
 	}
 	for i, c := range cases {
@@ -167,6 +245,38 @@ func TestRule_Validate(t *testing.T) {
 		}
 	}
 	_ = errors.New
+}
+
+func TestRule_Match_EventAliases(t *testing.T) {
+	cases := []struct {
+		name  string
+		rule  EventType
+		event EventType
+		want  bool
+	}{
+		{"legacy runtime catches threat", EventRuntime, EventThreat, true},
+		{"nv security-event catches runtime", EventSecurity, EventRuntime, true},
+		{"threat is specific", EventThreat, EventWAF, false},
+		{"scan catches cve-report", EventScan, EventCVEReport, true},
+		{"cve-report catches scan", EventCVEReport, EventScan, true},
+		{"admission catches admission-control", EventAdmission, EventAdmissionControl, true},
+		{"admission-control catches admission", EventAdmissionControl, EventAdmission, true},
+		{"compliance does not catch scan", EventCompliance, EventScan, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := Rule{Name: "r", Enabled: true, EventType: c.rule, Actions: []Action{{Kind: ActionNotify, Target: "noop"}}}
+			got := r.Match(&Event{Type: c.event})
+			if got != c.want {
+				t.Fatalf("Match(rule=%q,event=%q)=%v want %v", c.rule, c.event, got, c.want)
+			}
+			cond := Rule{Name: "cond", Enabled: true, EventType: "*", Conditions: []Condition{{Type: CondEventType, Value: string(c.rule)}}}
+			got = cond.Match(&Event{Type: c.event})
+			if got != c.want {
+				t.Fatalf("CondEventType(rule=%q,event=%q)=%v want %v", c.rule, c.event, got, c.want)
+			}
+		})
+	}
 }
 
 // RSP-CVE-52 — count/age-based CVE conditions.

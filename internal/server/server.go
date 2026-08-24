@@ -658,7 +658,7 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/deployments/{id}", s.requireVerb(rbac.VerbReadFindings, deps.Get))
 			r.Get("/violations", s.requireVerb(rbac.VerbReadFindings, deps.Violations))
 
-			networkMap := network.NewNetwork(s.db)
+			networkMap := network.NewNetwork(s.db).WithAudit(s.auditLog)
 			r.Get("/network/map", s.requireVerb(rbac.VerbReadFindings, networkMap.Map))
 			r.Get("/network/exposure", s.requireVerb(rbac.VerbReadFindings, networkMap.Exposure))
 			r.Get("/network/peers", s.requireVerb(rbac.VerbReadFindings, networkMap.Peers))
@@ -673,6 +673,8 @@ func (s *Server) buildRouter() chi.Router {
 			r.Put("/clusters/{id}/network-rules", s.requireVerb(rbac.VerbManagePolicies, networkMap.UpsertNetworkRule))
 			r.Delete("/clusters/{id}/network-rules", s.requireVerb(rbac.VerbManagePolicies, networkMap.DeleteNetworkRule))
 			r.Post("/clusters/{id}/network-rules:move-top", s.requireVerb(rbac.VerbManagePolicies, networkMap.MoveNetworkRuleToTop))
+			r.Get("/clusters/{id}/network-rules:export", s.requireVerb(rbac.VerbReadFindings, networkMap.ExportNetworkRules))
+			r.Post("/clusters/{id}/network-rules:import", s.requireVerb(rbac.VerbManagePolicies, networkMap.ImportNetworkRules))
 
 			// Wave 5: user-facing list of DPI threats. Same auth as findings.
 			runtimeThreats := runtime.NewRuntimeThreats(s.db)
@@ -748,6 +750,8 @@ func (s *Server) buildRouter() chi.Router {
 			// HTTP surface so the UI can keep them as separate concepts.
 			rtSigs := runtime.NewRuntimeSignaturesHTTP(s.db, s.auditLog)
 			r.Get("/runtime-signatures", s.requireVerb(rbac.VerbReadFindings, rtSigs.List))
+			r.Get("/runtime-signatures:export", s.requireVerb(rbac.VerbReadFindings, rtSigs.Export))
+			r.Post("/runtime-signatures:import", s.requireVerb(rbac.VerbManagePolicies, rtSigs.Import))
 			r.Get("/runtime-signatures/{id}", s.requireVerb(rbac.VerbReadFindings, rtSigs.Get))
 			r.Post("/runtime-signatures", s.requireVerb(rbac.VerbManagePolicies, rtSigs.Create))
 			r.Put("/runtime-signatures/{id}", s.requireVerb(rbac.VerbManagePolicies, rtSigs.Update))
@@ -800,7 +804,7 @@ func (s *Server) buildRouter() chi.Router {
 			coverage := compliance.NewCoverage()
 			r.Get("/coverage", s.requireVerb(rbac.VerbReadFindings, coverage.List))
 
-			enterprise := handler.NewEnterprise(s.db)
+			enterprise := handler.NewEnterprise(s.db).WithAudit(s.auditLog).WithCustomRoles(s.customRoles)
 			r.Get("/runtime/overview", s.requireVerb(rbac.VerbReadFindings, enterprise.RuntimeOverview))
 
 			// Process Baseline lifecycle (Wave L4). Backed by pkg/runtime/baseline; profiles
@@ -828,6 +832,10 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/integrations", s.requireVerb(rbac.VerbReadFindings, enterprise.Integrations))
 			r.Get("/migration/sources", s.requireVerb(rbac.VerbReadFindings, enterprise.MigrationSources))
 			r.Post("/migration/preview", s.requireVerb(rbac.VerbManagePolicies, enterprise.MigrationPreview))
+			r.Get("/migration/imports", s.requireVerb(rbac.VerbManagePolicies, enterprise.MigrationImports))
+			r.Get("/migration/imports/{id}/rollback-bundle", s.requireVerb(rbac.VerbManagePolicies, enterprise.MigrationRollbackBundle))
+			r.Post("/migration/imports/{id}:apply", s.requireVerb(rbac.VerbManagePolicies, enterprise.MigrationApply))
+			r.Post("/migration/imports/{id}:rollback", s.requireVerb(rbac.VerbManagePolicies, enterprise.MigrationRollback))
 			r.Get("/onboarding", s.requireVerb(rbac.VerbReadFindings, enterprise.Onboarding))
 
 			responseRules := policy.NewResponseRules(s.db, s.auditLog)
@@ -839,6 +847,7 @@ func (s *Server) buildRouter() chi.Router {
 			// above which mutates a hardcoded catalog via override rows.
 			rrv2 := policy.NewResponseRulesV2(s.db, s.auditLog)
 			r.Get("/response-rules-v2", s.requireVerb(rbac.VerbReadFindings, rrv2.List))
+			r.Get("/response-rules-v2/options", s.requireVerb(rbac.VerbReadFindings, rrv2.Options))
 			r.Post("/response-rules-v2", s.requireVerb(rbac.VerbManageRuntimeRules, rrv2.Create))
 			r.Patch("/response-rules-v2:reorder", s.requireVerb(rbac.VerbManageRuntimeRules, rrv2.Reorder))
 			r.Put("/response-rules-v2/{id}", s.requireVerb(rbac.VerbManageRuntimeRules, rrv2.Update))
@@ -866,6 +875,7 @@ func (s *Server) buildRouter() chi.Router {
 			groupsHandler := handler.NewGroups(s.db, s.auditLog)
 			r.Get("/groups", s.requireVerb(rbac.VerbReadFindings, groupsHandler.List))
 			r.Get("/groups:export", s.requireVerb(rbac.VerbReadFindings, groupsHandler.Export))
+			r.Get("/groups/{id}/usage", s.requireVerb(rbac.VerbReadFindings, groupsHandler.Usage))
 			r.Post("/groups:import", s.requireVerb(rbac.VerbManagePolicies, groupsHandler.Import))
 			r.Post("/groups:promote", s.requireVerb(rbac.VerbManagePolicies, groupsHandler.Promote))
 			r.Post("/groups", s.requireVerb(rbac.VerbManagePolicies, groupsHandler.Create))
@@ -970,6 +980,8 @@ func (s *Server) buildRouter() chi.Router {
 			r.Patch("/system/config", s.requireVerb(rbac.VerbManageSystemConfig, sysConfig.Patch))
 			// Force an immediate scanner DB refresh across connected scanners.
 			r.Post("/scanner/refresh", s.requireVerb(rbac.VerbManageSystemConfig, sysConfig.RefreshScanner))
+			supportBundle := handler.NewSupportBundle(s.db, s.auditLog)
+			r.Get("/support/bundle", s.requireVerb(rbac.VerbManageSystemConfig, supportBundle.Download))
 
 			// B4: DB-backed auth-provider (IdP) CRUD. GET redacts provider secrets; a mutation
 			// hot-reloads the live verifier set the login endpoints read through. All routes are
@@ -1123,6 +1135,8 @@ func (s *Server) buildRouter() chi.Router {
 			r.Post("/policies:bulk", s.requireVerb(rbac.VerbManagePolicies, policies.Bulk))
 			r.Post("/policies/simulate", s.requireVerb(rbac.VerbReadFindings, policies.Simulate))
 			r.Post("/policies/assess", s.requireVerb(rbac.VerbReadFindings, policies.Assess))
+			r.Get("/policies/admission/dry-runs", s.requireVerb(rbac.VerbReadFindings, policies.AdmissionDryRunHistory))
+			r.Delete("/policies/admission/dry-runs", s.requireVerb(rbac.VerbManagePolicies, policies.ClearAdmissionDryRunHistory))
 			r.Get("/policies/admission/state", s.requireVerb(rbac.VerbReadFindings, policies.AdmissionState))
 			r.Patch("/policies/admission/state", s.requireVerb(rbac.VerbManagePolicies, policies.UpdateAdmissionState))
 			r.Get("/policies/admission/rules", s.requireVerb(rbac.VerbReadFindings, policies.AdmissionRules))
@@ -1250,6 +1264,7 @@ func (s *Server) buildRouter() chi.Router {
 			r.Delete("/registries/{id}", s.requireVerb(rbac.VerbManageRegistries, registries.Delete))
 			r.Post("/registries/{id}/test", s.requireVerb(rbac.VerbManageRegistries, registries.Test))
 			r.Post("/registries/{id}/sync-now", s.requireVerb(rbac.VerbManageRegistries, registries.SyncNow))
+			r.Post("/registries/{id}/cancel-scans", s.requireVerb(rbac.VerbManageRegistries, registries.CancelActiveScans))
 			r.Get("/registries/{id}/images", s.requireVerb(rbac.VerbReadFindings, registries.Images))
 
 			// User-facing scan-job endpoints.
@@ -1262,6 +1277,7 @@ func (s *Server) buildRouter() chi.Router {
 			// trigger routes below. A read-only auditor must not be able to drive it.
 			r.Post("/scan-jobs", s.requireVerb(rbac.VerbManagePolicies, jobs.Enqueue))
 			r.Get("/scan-jobs", s.requireVerb(rbac.VerbReadFindings, jobs.List))
+			r.Get("/scan-jobs/{id}/attempts", s.requireVerb(rbac.VerbReadFindings, jobs.Attempts))
 			r.Get("/scan-targets/{id}/impacted-workloads", s.requireVerb(rbac.VerbReadFindings, jobs.ImpactedWorkloads))
 			r.Get("/scan/status", s.requireVerb(rbac.VerbReadFindings, jobs.Status))
 			r.Post("/scan/workload/{id}", s.requireVerb(rbac.VerbManagePolicies, jobs.TriggerWorkload))
@@ -1278,6 +1294,7 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/scanner-cache/{scanner_id}/data", s.requireVerb(rbac.VerbReadFindings, scannerCache.Data))
 			r.Get("/image-scan-results", s.requireVerb(rbac.VerbReadFindings, imageScanResults.List))
 			r.Get("/image-scan-results/{id}", s.requireVerb(rbac.VerbReadFindings, imageScanResults.Get))
+			r.Get("/image-scan-results/{id}/findings.csv", s.requireVerb(rbac.VerbReadFindings, imageScanResults.FindingsCSV))
 			r.Get("/image-scan-results/{id}/packages", s.requireVerb(rbac.VerbReadFindings, imageScanResults.Packages))
 			r.Get("/image-scan-results/{id}/layers", s.requireVerb(rbac.VerbReadFindings, imageScanResults.Layers))
 			r.Get("/image-scan-results/{id}/secrets", s.requireVerb(rbac.VerbReadFindings, imageScanResults.Secrets))
@@ -1382,9 +1399,10 @@ func (s *Server) buildRouter() chi.Router {
 			// here so the headline E1 acceptance ("a rule fires on a matching runtime event")
 			// is met server-side on the live ingest path.
 			e1RuleDefs := policy.NewResponseRuleDefs(s.db, s.auditLog).WithDispatcher(s.dispatcher)
-			eventsIngest := runtime.NewEventsIngest(s.db, s.auditLog, baselines.BaselineMode).
+			eventsIngest := runtime.NewEventsIngestWithClusterBaseline(s.db, s.auditLog, baselines.BaselineModeForCluster).
 				WithDispatcher(s.dispatcher).
 				WithResponseEngine(runtime.NewResponseDispatch(s.db, s.dispatcher)).
+				WithResponseDecision(runtime.NewResponseDecision(s.db)).
 				WithResponseRuleEngine(e1RuleDefs.Evaluate)
 			r.Post("/events:bulk", eventsIngest.Bulk)
 
@@ -1432,7 +1450,8 @@ func (s *Server) buildRouter() chi.Router {
 			// instead of waiting for a poll. Flood dedup is in-memory.
 			threatsIngest := runtime.NewRuntimeThreats(s.db).
 				WithAlerting(s.auditLog, s.dispatcher,
-					runtime.NewResponseDispatch(s.db, s.dispatcher), e1RuleDefs.Evaluate)
+					runtime.NewResponseDispatch(s.db, s.dispatcher), e1RuleDefs.Evaluate).
+				WithResponseDecision(runtime.NewResponseDecision(s.db))
 			r.Post("/runtime-threats:bulk", threatsIngest.Bulk)
 
 			// Live-session snapshot ingest (NV RESTSession). The agent uploads its dp

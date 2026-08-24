@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -322,7 +323,10 @@ SELECT user_id, role FROM role_assignments WHERE scope_org_id = $1`, orgID)
 		if err := roleRows.Scan(&uid, &role); err != nil {
 			return out, fmt.Errorf("scan role_assignment: %w", err)
 		}
-		rolesByUser[uid.String()] = append(rolesByUser[uid.String()], role)
+		key := uid.String()
+		if !slices.Contains(rolesByUser[key], role) {
+			rolesByUser[key] = append(rolesByUser[key], role)
+		}
 	}
 	for i := range out.Users {
 		if rs, ok := rolesByUser[out.Users[i].ID]; ok {

@@ -10,10 +10,13 @@ import (
 	"time"
 
 	"github.com/alphabravocompany/constellation/internal/db"
+	"github.com/alphabravocompany/constellation/pkg/audit"
 )
 
 type Enterprise struct {
-	db *db.DB
+	db          *db.DB
+	audit       *audit.Logger
+	customRoles *CustomRoles
 }
 
 func NewEnterprise(database ...*db.DB) *Enterprise {
@@ -22,6 +25,16 @@ func NewEnterprise(database ...*db.DB) *Enterprise {
 		d = database[0]
 	}
 	return &Enterprise{db: d}
+}
+
+func (h *Enterprise) WithAudit(a *audit.Logger) *Enterprise {
+	h.audit = a
+	return h
+}
+
+func (h *Enterprise) WithCustomRoles(customRoles *CustomRoles) *Enterprise {
+	h.customRoles = customRoles
+	return h
 }
 
 type runtimeEventEvidenceDTO struct {
@@ -353,7 +366,7 @@ func defaultMigrationSources() map[string]any {
 	return map[string]any{
 		"sources": []map[string]any{
 			{"id": "stackrox", "name": "StackRox / RHACS", "status": "converter-ready", "imports": []string{"policies", "exceptions", "runtime rules"}},
-			{"id": "neuvector", "name": "NeuVector", "status": "converter-ready", "imports": []string{"admission rules", "response rules", "quarantine actions", "file monitor profiles"}},
+			{"id": "neuvector", "name": "NeuVector", "status": "converter-ready", "imports": []string{"admission rules", "response rules", "groups", "network allow rules", "process profiles", "DLP/WAF rules", "DLP/WAF group scopes", "file monitor profiles"}},
 			{"id": "aqua", "name": "Aqua Security", "status": "converter-ready", "imports": []string{"image assurance policies", "CI gates"}},
 			{"id": "prisma", "name": "Prisma Cloud", "status": "converter-ready", "imports": []string{"config policies", "compliance mappings"}},
 		},

@@ -44,7 +44,7 @@ export function BaselinesPage() {
     enabled: !!clusterId,
   });
 
-  const profiles = listQ.data?.profiles ?? [];
+  const profiles = useMemo(() => listQ.data?.profiles ?? [], [listQ.data?.profiles]);
   const summary = listQ.data?.summary;
   const byMode = useMemo(() => {
     const groups: Record<BaselineMode, BaselineSummary[]> = { learn: [], monitor: [], enforce: [] };

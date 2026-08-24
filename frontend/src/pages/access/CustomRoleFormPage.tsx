@@ -28,7 +28,7 @@ export function CustomRoleFormPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const catalog = useQuery({ queryKey: ["custom-roles"], queryFn: () => customRoles.list() });
-  const verbs = catalog.data?.grantable_verbs ?? [];
+  const verbs = useMemo(() => catalog.data?.grantable_verbs ?? [], [catalog.data?.grantable_verbs]);
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -44,7 +44,15 @@ export function CustomRoleFormPage() {
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [verbs]);
 
-  const toggle = (v: string) => setSelected((s) => { const n = new Set(s); n.has(v) ? n.delete(v) : n.add(v); return n; });
+  const toggle = (v: string) => setSelected((s) => {
+    const n = new Set(s);
+    if (n.has(v)) {
+      n.delete(v);
+    } else {
+      n.add(v);
+    }
+    return n;
+  });
   const toggleDomain = (domainVerbs: string[]) => setSelected((s) => {
     const n = new Set(s);
     const allOn = domainVerbs.every((v) => n.has(v));

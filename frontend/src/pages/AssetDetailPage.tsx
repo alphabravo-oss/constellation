@@ -5,10 +5,13 @@ import { Boxes, FileJson, ShieldAlert, ShieldCheck, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { assets, sbom, type ImageAcceptance } from "@/api/client";
+import { dateInputDaysFromNow, dateInputEndOfDayWithinDays } from "@/lib/format";
 import { useCluster } from "@/hooks/useCluster";
 import { PageHeader, PageContainer } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { StatCard } from "@/components/ui/stat-card";
+
+const ACCEPT_RISK_MAX_DAYS = 30;
 
 export function AssetDetailPage() {
   const { aid } = useParams<{ aid: string }>();
@@ -16,7 +19,7 @@ export function AssetDetailPage() {
   const qc = useQueryClient();
   const [rationale, setRationale] = useState("");
   const [acceptedUntil, setAcceptedUntil] = useState(
-    () => new Date(Date.now() + 14 * 86400 * 1000).toISOString().slice(0, 10),
+    () => dateInputDaysFromNow(14),
   );
   const q = useQuery({
     queryKey: ["asset", aid],
@@ -27,7 +30,7 @@ export function AssetDetailPage() {
     mutationFn: () =>
       assets.createImageAcceptance(aid!, {
         rationale,
-        accepted_until: new Date(`${acceptedUntil}T23:59:59Z`).toISOString(),
+        accepted_until: dateInputEndOfDayWithinDays(acceptedUntil, ACCEPT_RISK_MAX_DAYS),
       }),
     onSuccess: () => {
       toast.success("Image risk accepted");
@@ -146,6 +149,7 @@ export function AssetDetailPage() {
                     <input
                       type="date"
                       value={acceptedUntil}
+                      max={dateInputDaysFromNow(ACCEPT_RISK_MAX_DAYS)}
                       onChange={(e) => setAcceptedUntil(e.target.value)}
                       disabled={!image || createAcceptance.isPending}
                       className="mt-1 block rounded-md border border-border bg-background p-2 text-sm"

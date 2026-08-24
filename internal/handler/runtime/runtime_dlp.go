@@ -99,6 +99,9 @@ type DLPRule struct {
 	// member MACs before they reach here.
 	ScopeMACs   []string   `json:"scope_macs,omitempty"`
 	Description string     `json:"description,omitempty"`
+	Source      string     `json:"source"`
+	CfgType     string     `json:"cfg_type"`
+	SourcePath  string     `json:"source_path,omitempty"`
 	Version     int64      `json:"version"`
 	CreatedBy   *uuid.UUID `json:"created_by,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
@@ -163,7 +166,8 @@ func snapshotDLP(r *DLPRule) audit.PolicySnapshot {
 const dlpSelectCols = `
   id, dp_rule_id, org_id, cluster_id, name, category, apply_dir, severity, mode,
   patterns, COALESCE(scope_macs::text,''), COALESCE(description,''), version,
-  created_by, created_at, updated_by, updated_at`
+  created_by, created_at, updated_by, updated_at,
+  COALESCE(source,'user'), COALESCE(cfg_type,'user_created'), COALESCE(source_path,'')`
 
 // Insert persists a new rule. Always starts in monitor mode (the safety
 // contract that runtime_policies has).
@@ -207,6 +211,21 @@ func (s *RuntimeDLPStore) Insert(ctx context.Context, r *DLPRule, requestID stri
 	if r.ApplyDir < 1 || r.ApplyDir > 3 {
 		return uuid.Nil, errors.New("apply_dir must be 1 (egress), 2 (ingress), or 3 (both)")
 	}
+	if strings.TrimSpace(r.Source) == "" {
+		r.Source = "user"
+	}
+	if strings.TrimSpace(r.CfgType) == "" {
+		r.CfgType = "user_created"
+	}
+	r.Source = strings.TrimSpace(r.Source)
+	r.CfgType = strings.TrimSpace(r.CfgType)
+	r.SourcePath = strings.TrimSpace(r.SourcePath)
+	if !validDLPRuleSource(r.Source) {
+		return uuid.Nil, fmt.Errorf("invalid source %q", r.Source)
+	}
+	if !validDLPRuleCfgType(r.CfgType) {
+		return uuid.Nil, fmt.Errorf("invalid cfg_type %q", r.CfgType)
+	}
 	if len(r.Patterns) > 0 && !json.Valid(r.Patterns) {
 		return uuid.Nil, errors.New("patterns is not valid JSON")
 	}
@@ -228,11 +247,12 @@ func (s *RuntimeDLPStore) Insert(ctx context.Context, r *DLPRule, requestID stri
 	err = s.db.Pool().QueryRow(ctx, `
 INSERT INTO runtime_dlp_rules
   (org_id, cluster_id, name, category, apply_dir, severity, mode, patterns,
-   scope_macs, description, created_by, updated_by)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10,$11,$11)
+   scope_macs, description, created_by, updated_by, source, cfg_type, source_path)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10,$11,$11,$12,$13,$14)
 RETURNING id, dp_rule_id`,
 		r.OrgID, r.ClusterID, r.Name, string(r.Category), r.ApplyDir, r.Severity,
-		string(r.Mode), string(r.Patterns), scopeArg, r.Description, r.CreatedBy).Scan(&id, &dpRuleID)
+		string(r.Mode), string(r.Patterns), scopeArg, r.Description, r.CreatedBy,
+		r.Source, r.CfgType, r.SourcePath).Scan(&id, &dpRuleID)
 	if err != nil {
 		return uuid.Nil, err
 	}
@@ -249,6 +269,24 @@ RETURNING id, dp_rule_id`,
 		recordFedDLPRule(ctx, s.db.Pool(), r.OrgID, full)
 	}
 	return id, nil
+}
+
+func validDLPRuleSource(source string) bool {
+	switch source {
+	case "user", "neuvector", "import", "builtin", "federation":
+		return true
+	default:
+		return false
+	}
+}
+
+func validDLPRuleCfgType(cfgType string) bool {
+	switch cfgType {
+	case "user_created", "imported", "learned", "federated", "predefined":
+		return true
+	default:
+		return false
+	}
 }
 
 // ensureBuiltinsOnce seeds built-ins for a cluster at most once per process,
@@ -310,6 +348,7 @@ func scanDLP(s rowScanner) (*DLPRule, error) {
 		&r.ID, &r.DPRuleID, &r.OrgID, &r.ClusterID, &r.Name, &category, &r.ApplyDir, &r.Severity, &mode,
 		&patternsText, &scopeText, &r.Description, &r.Version,
 		&r.CreatedBy, &r.CreatedAt, &r.UpdatedBy, &r.UpdatedAt,
+		&r.Source, &r.CfgType, &r.SourcePath,
 	); err != nil {
 		return nil, err
 	}

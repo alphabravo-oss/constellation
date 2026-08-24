@@ -18,6 +18,16 @@ func (f fakeNamespaceLabeler) NamespaceLabels(_ context.Context, ns string) (map
 	return f.labels[ns], nil
 }
 
+type fakeGroupResolver map[string]bool
+
+func (f fakeGroupResolver) PodMatchesGroup(_ context.Context, group string, pod *corev1.Pod) (bool, error) {
+	ns := pod.Namespace
+	if ns == "" {
+		ns = "default"
+	}
+	return f[group+"\x00"+ns+"/"+pod.Name], nil
+}
+
 func scopedPrivilegedPod(name, namespace string) *corev1.Pod {
 	tr := true
 	return &corev1.Pod{
@@ -85,6 +95,33 @@ func TestEvaluate_PerRuleNamespaceSelector(t *testing.T) {
 	}
 }
 
+func TestEvaluate_PerRuleGroupScoping(t *testing.T) {
+	tr := true
+	rule := Rule{
+		ID: "block-privileged-payments", Mode: "enforce", Kinds: []string{"Pod"},
+		Groups:     []string{"payments"},
+		Conditions: RuleConditions{Privileged: &tr},
+	}
+	engine := &PolicyEngine{
+		Rules: []Rule{rule},
+		GroupResolver: fakeGroupResolver{
+			"payments\x00prod/api": true,
+		},
+	}
+
+	if resp := engine.Evaluate(context.Background(), reviewFor(scopedPrivilegedPod("api", "prod"))); resp.Allowed {
+		t.Fatal("privileged pod in a targeted group should be denied")
+	}
+	if resp := engine.Evaluate(context.Background(), reviewFor(scopedPrivilegedPod("worker", "prod"))); !resp.Allowed {
+		t.Fatalf("privileged pod outside the targeted group must be admitted: %+v", resp.Result)
+	}
+
+	unwired := &PolicyEngine{Rules: []Rule{rule}}
+	if resp := unwired.Evaluate(context.Background(), reviewFor(scopedPrivilegedPod("api", "prod"))); !resp.Allowed {
+		t.Fatal("group-scoped rule must not fire without a group resolver")
+	}
+}
+
 // TestRuleFromYAMLParsesNamedCVEGraceAndNamespaceScoping covers the A3/A4/A5
 // spec surface: deniedCVEs, cveGraceDays, match.namespaces and
 // match.namespaceSelector.
@@ -126,5 +163,28 @@ spec:
 	}
 	if gate.CVEGraceDays == nil || *gate.CVEGraceDays != 14 {
 		t.Fatalf("cveGraceDays = %v", gate.CVEGraceDays)
+	}
+}
+
+func TestRuleFromYAMLParsesGroupScoping(t *testing.T) {
+	rule, supported, err := RuleFromYAML("group-scope", "group-scope", "", "enforce", `apiVersion: constellation.alphabravo.io/v1alpha1
+kind: AdmissionRule
+metadata:
+  name: group-scope
+spec:
+  match:
+    kinds: [Pod]
+    groups: [payments, payments, "  "]
+  conditions:
+    any:
+      - field: spec.containers[*].securityContext.privileged
+        equals: true
+  action: deny
+`)
+	if err != nil || !supported {
+		t.Fatalf("supported=%v err=%v", supported, err)
+	}
+	if len(rule.Groups) != 1 || rule.Groups[0] != "payments" {
+		t.Fatalf("groups = %#v", rule.Groups)
 	}
 }

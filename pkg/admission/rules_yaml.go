@@ -28,6 +28,9 @@ type admissionRuleSpec struct {
 		// NamespaceSelector scopes the rule to namespaces carrying all of these
 		// labels (matchLabels). Requires a namespace label resolver on the engine.
 		NamespaceSelector map[string]string `yaml:"namespaceSelector"`
+		// Groups scopes the rule to pods that belong to at least one
+		// Constellation group by id or name.
+		Groups []string `yaml:"groups"`
 	} `yaml:"match"`
 	Conditions struct {
 		Any []admissionRuleCondition `yaml:"any"`
@@ -207,6 +210,9 @@ func RuleFromYAML(id, title, description, mode, specYAML string) (rule Rule, sup
 		if len(selector) > 0 {
 			rule.NamespaceSelector = selector
 		}
+	}
+	if len(doc.Spec.Match.Groups) > 0 {
+		rule.Groups = normalizeMatchList(doc.Spec.Match.Groups)
 	}
 
 	var conditions RuleConditions
@@ -568,6 +574,23 @@ func normalizeCVEList(values []string) []string {
 	seen := map[string]struct{}{}
 	for _, value := range values {
 		value = strings.ToUpper(strings.TrimSpace(value))
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func normalizeMatchList(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
 		if value == "" {
 			continue
 		}

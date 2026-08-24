@@ -2,6 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 
 const PORT = 5179;
 const API = process.env.VITE_API_URL ?? "http://localhost:18080";
+const chromiumExecutablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
+const recordVideo = process.env.CI || process.env.PLAYWRIGHT_RECORD_VIDEO === "1";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -15,10 +17,16 @@ export default defineConfig({
     baseURL: `http://localhost:${PORT}`,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
-    video: "retain-on-failure",
+    video: recordVideo ? "retain-on-failure" : "off",
   },
   projects: [
-    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    {
+      name: "chromium",
+      use: {
+        ...devices["Desktop Chrome"],
+        ...(chromiumExecutablePath ? { launchOptions: { executablePath: chromiumExecutablePath } } : {}),
+      },
+    },
   ],
   webServer: {
     command: `npm run dev -- --port ${PORT} --strictPort`,

@@ -30,9 +30,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
+import { ImportExportButtons } from "@/components/ImportExportButtons";
 import { StatCard } from "@/components/ui/stat-card";
 import { StatusPill } from "@/components/ui/status-pill";
 import { LoadingState, ErrorState, EmptyState } from "@/components/ui/states";
+import { DPIGroupBindingsPanel } from "@/components/DPIGroupBindingsPanel";
+import { NeuVectorCompatibilityChips } from "@/components/NeuVectorCompatibilityChips";
+import { runtimeRuleOrigin } from "@/lib/runtime-rule-provenance";
 
 import {
   runtimeSignatures,
@@ -57,6 +61,7 @@ export function RuntimeSignaturesPage() {
   const { id: pathClusterID } = useParams();
   const clusterID = pathClusterID ?? search.get("cluster_id") ?? "";
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const q = useQuery({
     queryKey: ["runtime-signatures", clusterID],
@@ -70,6 +75,12 @@ export function RuntimeSignaturesPage() {
 
   const columns: Column<DLPRule>[] = [
     { id: "name", header: "Name", cell: (r) => <span className="font-mono">{r.name}</span>, sort: (a, b) => a.name.localeCompare(b.name) },
+    {
+      id: "category",
+      header: "Type",
+      cell: (r) => <StatusPill label={r.category === "waf" ? "WAF" : "DPI"} tone={r.category === "waf" ? "accent" : "info"} />,
+      sort: (a, b) => a.category.localeCompare(b.category),
+    },
     { id: "severity", header: "Sev", numeric: true, cell: (r) => r.severity, sort: (a, b) => a.severity - b.severity },
     {
       id: "direction",
@@ -85,6 +96,19 @@ export function RuntimeSignaturesPage() {
         return <StatusPill label={badge.label} tone={badge.tone} />;
       },
       sort: (a, b) => a.mode.localeCompare(b.mode),
+    },
+    {
+      id: "origin",
+      header: "Origin",
+      cell: (r) => {
+        const origin = runtimeRuleOrigin(r);
+        return (
+          <span title={r.source_path || r.source || r.cfg_type}>
+            <StatusPill label={origin.label} tone={origin.tone} />
+          </span>
+        );
+      },
+      sort: (a, b) => runtimeRuleOrigin(a).label.localeCompare(runtimeRuleOrigin(b).label),
     },
     {
       id: "patterns",
@@ -109,10 +133,28 @@ export function RuntimeSignaturesPage() {
         title="DPI Signatures"
         description="Attack-pattern PCRE rules dp matches against packet payloads (bidirectional by default). New signatures start in monitor mode; promote one to enforce to start blocking."
         actions={
-          <Button size="sm" variant="outline" onClick={() => navigate("new")} data-testid="runtime-signatures-new">
-            <Plus className="mr-1 h-3.5 w-3.5" /> New signature
-          </Button>
+          <div className="flex items-center gap-2">
+            <ImportExportButtons
+              filename="constellation-dpi-signatures.yaml"
+              label="WAF/DPI signatures"
+              exportYaml={() => runtimeSignatures.exportYaml(clusterID)}
+              importYaml={(text) => runtimeSignatures.importYaml(clusterID, text)}
+              onImported={() => void queryClient.invalidateQueries({ queryKey: ["runtime-signatures", clusterID] })}
+            />
+            <Button size="sm" variant="outline" onClick={() => navigate("new")} data-testid="runtime-signatures-new">
+              <Plus className="mr-1 h-3.5 w-3.5" /> New signature
+            </Button>
+          </div>
         }
+      />
+
+      <NeuVectorCompatibilityChips
+        testId="runtime-signatures-nv-compatibility"
+        items={[
+          { label: "NV WAF Sensors -> WAF/DPI Signatures" },
+          { label: "NV waf_group -> WAF/DPI group scope" },
+          { label: "Migration Imports", to: "/settings/migration" },
+        ]}
       />
 
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -120,6 +162,14 @@ export function RuntimeSignaturesPage() {
         <StatCard label="Monitoring" value={monitorCount} icon={<ShieldAlert className="h-3.5 w-3.5" />} />
         <StatCard label="Enforcing" value={enforceCount} icon={<ShieldCheck className="h-3.5 w-3.5" />} tone={enforceCount > 0 ? "accent" : "neutral"} />
       </section>
+
+      <DPIGroupBindingsPanel
+        clusterId={clusterID}
+        kind="waf"
+        title="WAF/DPI signature group scope"
+        description="Groups opted into the shared detector used by custom DPI signatures and imported NeuVector WAF rules."
+        testId="signature-group-bindings"
+      />
 
       <div className="overflow-x-auto rounded-lg border border-border bg-card" data-testid="runtime-signatures-list">
         {q.isLoading && <LoadingState />}
@@ -181,4 +231,3 @@ function SignatureActions({ r, onEdit }: { r: DLPRule; onEdit: () => void }) {
     </div>
   );
 }
-

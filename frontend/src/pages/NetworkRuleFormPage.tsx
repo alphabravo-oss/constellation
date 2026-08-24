@@ -13,6 +13,7 @@ import { PageHeader } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Field, TextInput, Select } from "@/components/ui/form";
+import { GroupPicker } from "@/components/GroupPicker";
 
 export function NetworkRuleFormPage() {
   const { clusterId } = useCluster();
@@ -58,26 +59,45 @@ export function NetworkRuleFormPage() {
           onSubmit={(e) => { e.preventDefault(); save.mutate(); }}
         >
           <div className="grid gap-5 sm:grid-cols-2">
-            <Field label="From (source)" required>
-              <TextInput autoFocus placeholder="prod/frontend or external" value={from} onChange={(e) => setFrom(e.target.value)} required disabled={editing} />
+            <Field label="From (source)" htmlFor="network-rule-from" required>
+              <GroupPicker
+                clusterId={clusterId}
+                value={from}
+                onChange={setFrom}
+                autoFocus
+                required
+                disabled={editing}
+                placeholder="prod/frontend or external"
+                inputId="network-rule-from"
+                testId="network-rule-from-group"
+              />
             </Field>
-            <Field label="To (destination)" required>
-              <TextInput placeholder="prod/api or external" value={to} onChange={(e) => setTo(e.target.value)} required disabled={editing} />
+            <Field label="To (destination)" htmlFor="network-rule-to" required>
+              <GroupPicker
+                clusterId={clusterId}
+                value={to}
+                onChange={setTo}
+                required
+                disabled={editing}
+                placeholder="prod/api or external"
+                inputId="network-rule-to"
+                testId="network-rule-to-group"
+              />
             </Field>
-            <Field label="Applications" hint="Comma-separated (e.g. HTTP, gRPC). Blank = any.">
-              <TextInput placeholder="HTTP, gRPC" value={apps} onChange={(e) => setApps(e.target.value)} />
+            <Field label="Applications" htmlFor="network-rule-applications" hint="Comma-separated (e.g. HTTP, gRPC). Blank = any.">
+              <TextInput id="network-rule-applications" placeholder="HTTP, gRPC" value={apps} onChange={(e) => setApps(e.target.value)} />
             </Field>
-            <Field label="Ports" hint="Comma-separated, or 'any'.">
-              <TextInput placeholder="443, 8080" value={ports} onChange={(e) => setPorts(e.target.value)} />
+            <Field label="Ports" htmlFor="network-rule-ports" hint="Comma-separated, or 'any'.">
+              <TextInput id="network-rule-ports" placeholder="443, 8080" value={ports} onChange={(e) => setPorts(e.target.value)} />
             </Field>
-            <Field label="Action" required>
-              <Select value={action} onChange={(e) => setAction(e.target.value as "allow" | "deny")}>
+            <Field label="Action" htmlFor="network-rule-action" required>
+              <Select id="network-rule-action" value={action} onChange={(e) => setAction(e.target.value as "allow" | "deny")}>
                 <option value="allow">Allow</option>
                 <option value="deny">Deny</option>
               </Select>
             </Field>
-            <Field label="Comment">
-              <TextInput placeholder="why this rule exists" value={comment} onChange={(e) => setComment(e.target.value)} />
+            <Field label="Comment" htmlFor="network-rule-comment">
+              <TextInput id="network-rule-comment" placeholder="why this rule exists" value={comment} onChange={(e) => setComment(e.target.value)} />
             </Field>
           </div>
           {save.isError && <p className="text-sm text-status-error">{(save.error as Error).message}</p>}

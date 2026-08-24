@@ -11,18 +11,10 @@
 // it pins the *contract*: under /clusters/:id/* the server is asked for, and
 // returns, cluster-scoped data. Visual / count-based asserts are intentionally
 // avoided so the spec doesn't go stale as the discoverer ingests new findings.
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect } from "@playwright/test";
+import { login } from "./utils";
 
 const API = process.env.VITE_API_URL ?? "http://localhost:18080";
-const CREDS = { email: "admin@dev", password: "devpass123" };
-
-async function login(page: Page) {
-  const resp = await page.request.post(`${API}/api/v1/auth/login`, { data: CREDS });
-  if (!resp.ok()) throw new Error(`login failed: ${resp.status()}`);
-  const { token } = await resp.json();
-  await page.addInitScript((t) => localStorage.setItem("constellation.token", t), token);
-  return token as string;
-}
 
 interface PageProbe {
   /** path fragment under /clusters/:id/ */

@@ -13,8 +13,9 @@ test("Findings list renders seeded rows sorted by risk score", async ({ page }) 
   await expect(page.getByTestId("finding-state-tabs")).toContainText("Suppressed");
   const rows = page.locator("tbody tr");
   await expect(rows.first()).toBeVisible();
-  // Highest-risk seed: glibc heap overflow (KEV-listed, score 100).
-  await expect(rows.first()).toContainText("glibc heap overflow");
+  // Default view is the NeuVector-style CVE rollup, sorted by Constellation risk.
+  await expect(rows.first()).toContainText("CVE-2024-0001");
+  await expect(rows.first()).toContainText("glibc");
 });
 
 test("Filter by kind narrows the list", async ({ page }) => {
@@ -33,6 +34,7 @@ test("Filter by kind narrows the list", async ({ page }) => {
 
 test("Row drawer opens with triage actions", async ({ page }) => {
   await page.goto("/findings");
+  await page.getByTestId("findings-view-instances").click();
   await expect(page.locator("tbody tr").first()).toBeVisible();
   // Title cell is a button in the redesigned table.
   await page.locator("tbody tr").first().getByRole("button", { name: /glibc heap overflow/i }).click();
@@ -43,6 +45,7 @@ test("Row drawer opens with triage actions", async ({ page }) => {
 
 test("Query input supports DSL chips", async ({ page }) => {
   await page.goto("/findings");
+  await page.getByTestId("findings-view-instances").click();
   await expect(page.locator("tbody tr").first()).toBeVisible();
   const queryBox = page.locator("input[placeholder*='severity:']");
   await queryBox.fill("severity:critical");

@@ -74,6 +74,17 @@ func (h *ScanJobs) transitionLifecycle(w http.ResponseWriter, r *http.Request, n
 		jsonError(w, http.StatusConflict, "no transition: job not in eligible state")
 		return
 	}
+	if action == "scan-job.cancel" {
+		_, _ = h.db.Pool().Exec(r.Context(), `
+UPDATE scan_job_attempts
+   SET status = 'canceled',
+       finished_at = NOW(),
+       lease_expires_at = NULL,
+       next_attempt_at = NULL
+ WHERE job_id = $1
+   AND org_id = $2
+   AND status = 'running'`, id, subj.OrgID)
+	}
 	uid, oid := subj.UserID, subj.OrgID
 	if h.audit != nil {
 		_, _, _ = h.audit.Log(r.Context(), audit.Event{

@@ -39,11 +39,12 @@ import { RiskScore } from "@/components/ui/risk-score";
 import { EmptyState } from "@/components/ui/empty-state";
 import { fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/cn";
+import { sortClustersByActivity } from "@/lib/clusters";
 import { ClusterInitBundleWizard } from "@/pages/ClusterInitBundleWizard";
 
 export function ClustersLandingPage() {
   const list = useQuery({ queryKey: ["clusters"], queryFn: () => clusters.list(), staleTime: 30_000 });
-  const data = useMemo(() => list.data?.clusters ?? [], [list.data?.clusters]);
+  const data = useMemo(() => sortClustersByActivity(list.data?.clusters ?? []), [list.data?.clusters]);
   const [wizardOpen, setWizardOpen] = useState(false);
 
   return (

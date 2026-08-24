@@ -98,8 +98,11 @@ export interface Finding {
   affected_range?: AffectedRange;
   vulndb_bundle?: VulnDBBundleMetadata;
   cvss?: number;
+  cvss_base?: number;
+  cvss_vector?: string;
   kev?: boolean;
   epss?: number;
+  risk_inputs?: unknown;
 }
 
 export interface EngineProvenance {
@@ -157,6 +160,8 @@ export interface CVERollup {
   images: string[];
   last_seen_at: string;
   cvss?: number;
+  cvss_base?: number;
+  cvss_vector?: string;
   kev?: boolean;
   has_fix?: boolean;
 }
@@ -421,6 +426,15 @@ export const networkRules = {
     api.delete(`/clusters/${encodeURIComponent(clusterID)}/network-rules?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`).then((r) => r.data),
   moveTop: (clusterID: string, from: string, to: string) =>
     api.post<{ ok: boolean; priority: number }>(`/clusters/${encodeURIComponent(clusterID)}/network-rules:move-top`, { from, to }).then((r) => r.data),
+  exportYaml: (clusterID: string) =>
+    api.get<string>(`/clusters/${encodeURIComponent(clusterID)}/network-rules:export`, { responseType: "text", headers: { Accept: "application/x-yaml" } }).then((r) => r.data),
+  importYaml: (clusterID: string, yaml: string) =>
+    api.post<{ created: number; updated: number; results: Array<{ from: string; to: string; status: string; error?: string }> }>(
+      `/clusters/${encodeURIComponent(clusterID)}/network-rules:import`, yaml, { headers: { "Content-Type": "application/x-yaml" } },
+    ).then((r) => ({
+      ...r.data,
+      results: r.data.results.map((item) => ({ name: `${item.from} -> ${item.to}`, status: item.status, error: item.error })),
+    })),
 };
 
 export const nodes = {
@@ -1672,6 +1686,31 @@ export const systemHealth = {
     }>(`/system-health/clusters/${clusterId}`).then((r) => r.data),
 };
 
+export interface SupportBundle {
+  schema_version: string;
+  bundle_id: string;
+  generated_at: string;
+  org_id: string;
+  format: "json" | string;
+  redaction: {
+    applied: boolean;
+    marker: string;
+    rules: string[];
+  };
+  integrity: {
+    algorithm: string;
+    scope: string;
+    sha256: string;
+    signed: boolean;
+    note?: string;
+  };
+  sections: Record<string, unknown>;
+}
+
+export const supportBundles = {
+  download: () => api.get<SupportBundle>("/support/bundle").then((r) => r.data),
+};
+
 export interface ComponentInventorySummary {
   generated_at: string;
   components: number;
@@ -1905,6 +1944,52 @@ export interface NetworkSession {
   threat_id?: number;
 }
 
+export interface NetworkSessionKillTarget {
+  workload_id?: string;
+  application?: string;
+  ip_proto?: string;
+  client_ip?: string;
+  client_port?: number;
+  server_ip?: string;
+  server_port?: number;
+  ingress?: boolean;
+  severity?: number;
+  threat_id?: number;
+}
+
+export interface NetworkSessionKillResponse {
+  ok: boolean;
+  queued: boolean;
+  session_id: number;
+  node: string;
+  cluster_id?: string;
+  requested_at?: string;
+  audit_id?: number;
+  target?: NetworkSessionKillTarget;
+}
+
+export interface NetworkSessionsResponse {
+  sessions: NetworkSession[];
+  total: number;
+  limit: number;
+  has_more: boolean;
+  cluster_id?: string;
+  selected_group?: string;
+  selected_group_members?: number;
+}
+
+export interface NetworkSessionFilters {
+  cluster_id?: string;
+  limit?: number;
+  group?: string;
+  protocol?: string;
+  application?: string;
+  port?: number;
+  peer?: string;
+  workload?: string;
+  node?: string;
+}
+
 export interface NetworkFlow {
   id: string;
   cluster_id?: string;
@@ -2025,6 +2110,8 @@ export interface NetworkMap {
     /** Whether the cluster's CNI (Cilium/Calico) can enforce a per-IP deny.
      *  false on flannel/native → the UI hides "Block IP". */
     deny_capable_cni?: boolean;
+    selected_group?: string;
+    selected_group_members?: number;
   };
   workloads: NetworkWorkload[];
   flows: NetworkFlow[];
@@ -2072,6 +2159,8 @@ export interface NetworkConversations {
   edges: NetworkConversationEdge[];
   window_hours: number;
   source?: "live";
+  selected_group?: string;
+  selected_group_members?: number;
 }
 
 /** One live flow pushed over the /network/flows:stream SSE channel. Matches
@@ -2185,15 +2274,17 @@ export interface NetworkPolicyLifecycleResponse {
     rollback_ready: number;
     pending_approval: number;
     selected_cluster_id?: string;
+    selected_group?: string;
+    selected_group_members?: number;
   };
 }
 
 export const network = {
-  map: (params: { hours?: number; namespace?: string; verdict?: string; cluster_id?: string } = {}) =>
+  map: (params: { hours?: number; namespace?: string; group?: string; verdict?: string; cluster_id?: string } = {}) =>
     api.get<NetworkMap>("/network/map", { params }).then((r) => r.data),
   exposure: (params: { hours?: number; cluster_id?: string } = {}) =>
     api.get<ExposureResponse>("/network/exposure", { params }).then((r) => r.data),
-  conversations: (params: { hours?: number; cluster_id?: string } = {}) =>
+  conversations: (params: { hours?: number; cluster_id?: string; namespace?: string; verdict?: string; group?: string } = {}) =>
     api.get<NetworkConversations>("/network/conversations", { params }).then((r) => r.data),
   // NV per-conversation drill-down: every protocol/port/app stream between from→to,
   // with directional (in/out) bytes + session counts.
@@ -2203,13 +2294,21 @@ export const network = {
   conversationEntries: (params: { from: string; to: string; hours?: number; cluster_id?: string }) =>
     api.get<ConversationEntries>("/network/conversations/entries", { params }).then((r) => r.data),
   // NV RESTSession: the live per-connection table (dp ctrl_list_session snapshot).
-  sessions: (params: { cluster_id?: string; limit?: number } = {}) =>
-    api.get<{ sessions: NetworkSession[] }>("/network/sessions", { params }).then((r) => r.data.sessions),
+  sessions: (params: NetworkSessionFilters = {}) =>
+    api.get<Partial<NetworkSessionsResponse> & { sessions: NetworkSession[] }>("/network/sessions", { params }).then((r) => ({
+      sessions: r.data.sessions ?? [],
+      total: r.data.total ?? r.data.sessions?.length ?? 0,
+      limit: r.data.limit ?? params.limit ?? r.data.sessions?.length ?? 0,
+      has_more: r.data.has_more ?? false,
+      cluster_id: r.data.cluster_id,
+      selected_group: r.data.selected_group,
+      selected_group_members: r.data.selected_group_members,
+    })),
   sessionsSummary: (params: { cluster_id?: string } = {}) =>
     api.get<Record<string, number>>("/network/sessions/summary", { params }).then((r) => r.data),
   // NV session-kill: queue a dp ctrl_clear_session for one live connection.
   killSession: (id: number, params: { cluster_id?: string; node?: string }) =>
-    api.delete<{ ok: boolean; queued: boolean }>(`/network/sessions/${id}`, { params }).then((r) => r.data),
+    api.delete<NetworkSessionKillResponse>(`/network/sessions/${id}`, { params }).then((r) => r.data),
   // Phase-1 CNI enforcement (Tier 1, no dp inline): isolate a workload (native
   // default-deny NetworkPolicy) or block a workload's traffic to one IP (Cilium
   // egress/ingress deny). The network-policy-applier reconciles these to the cluster.
@@ -2283,7 +2382,7 @@ export const network = {
     })();
     return () => controller.abort();
   },
-  lifecycle: (params: { hours?: number; namespace?: string; verdict?: string; cluster_id?: string } = {}) =>
+  lifecycle: (params: { hours?: number; namespace?: string; group?: string; verdict?: string; cluster_id?: string } = {}) =>
     api.get<NetworkPolicyLifecycleResponse>("/network/policies/lifecycle", { params }).then((r) => r.data),
   policyAction: (workload: string, action: "approve" | "apply" | "demote", body: { reason?: string; idempotency_key?: string; candidate_hash?: string } = {}, params: { cluster_id?: string } = {}) =>
     api.post<NetworkPolicyActionResponse>(`/network/policies/${encodeURIComponent(workload)}/${action}`, body, { params }).then((r) => r.data),
@@ -2337,6 +2436,10 @@ export interface PcapCapture {
   dst_ip?: string;
   dst_port?: number;
   protocol?: string;
+  bpf_filter?: string;
+  interface?: string;
+  file_count?: number;
+  file_size_mb?: number;
   status: PcapCaptureStatus;
   claimed_by_node?: string;
   claimed_at?: string;
@@ -2358,8 +2461,21 @@ export const runtimePcap = {
     dst_ip?: string;
     dst_port?: number;
     protocol?: string;
+    bpf_filter?: string;
+    interface?: string;
+    file_count?: number;
+    file_size_mb?: number;
   }) => api.post<PcapCapture>("/runtime-pcap/start", body).then((r) => r.data),
-  list: (params: { cluster_id?: string; workload?: string; status?: PcapCaptureStatus } = {}) =>
+  list: (params: {
+    cluster_id?: string;
+    workload?: string;
+    group?: string;
+    status?: PcapCaptureStatus;
+    protocol?: string;
+    src_ip?: string;
+    dst_ip?: string;
+    dst_port?: number;
+  } = {}) =>
     api.get<{ captures: PcapCapture[] }>("/runtime-pcap", { params }).then((r) => r.data.captures),
   get: (id: string) =>
     api.get<PcapCapture>(`/runtime-pcap/${encodeURIComponent(id)}`).then((r) => r.data),
@@ -2374,7 +2490,13 @@ export const runtimePcap = {
 /** Wave C4: DLP regex rules — user-authored PCRE patterns dp scans payloads for. */
 export type DLPMode = "monitor" | "enforce" | "disabled";
 
-export type DLPCategory = "dlp" | "signature";
+export type DLPCategory = "dlp" | "signature" | "waf";
+
+export interface DLPPatternSpec {
+  pattern: string;
+  op?: string;
+  context?: string;
+}
 
 export interface DLPRule {
   id: string;
@@ -2389,22 +2511,25 @@ export interface DLPRule {
   apply_dir: number; // 1=egress, 2=ingress, 3=both
   severity: number; // 1..9
   mode: DLPMode;
-  patterns: string[];
+  patterns: Array<string | DLPPatternSpec>;
   description?: string;
+  source?: string;
+  cfg_type?: string;
+  source_path?: string;
   version: number;
   created_at: string;
   updated_at: string;
 }
 
 export const runtimeDLP = {
-  list: (cluster_id: string) =>
-    api.get<{ rules: DLPRule[] }>("/runtime-dlp-rules", { params: { cluster_id } })
+  list: (cluster_id: string, category: DLPCategory | "all" = "dlp") =>
+    api.get<{ rules: DLPRule[] }>("/runtime-dlp-rules", { params: { cluster_id, ...(category === "all" ? {} : { category }) } })
       .then((r) => r.data.rules),
   get: (id: string) =>
     api.get<DLPRule>(`/runtime-dlp-rules/${encodeURIComponent(id)}`).then((r) => r.data),
-  create: (body: { cluster_id: string; name: string; severity: number; mode?: DLPMode; patterns: string[]; description?: string }) =>
+  create: (body: { cluster_id: string; name: string; severity: number; mode?: DLPMode; patterns: Array<string | DLPPatternSpec>; description?: string }) =>
     api.post<DLPRule>("/runtime-dlp-rules", body).then((r) => r.data),
-  update: (id: string, body: { patterns?: string[]; severity?: number; description?: string }) =>
+  update: (id: string, body: { patterns?: Array<string | DLPPatternSpec>; severity?: number; description?: string }) =>
     api.put<DLPRule>(`/runtime-dlp-rules/${encodeURIComponent(id)}`, body).then((r) => r.data),
   promote: (id: string) =>
     api.post<DLPRule>(`/runtime-dlp-rules/${encodeURIComponent(id)}/promote`).then((r) => r.data),
@@ -2430,9 +2555,9 @@ export const runtimeSignatures = {
       .then((r) => r.data.signatures),
   get: (id: string) =>
     api.get<DLPRule>(`/runtime-signatures/${encodeURIComponent(id)}`).then((r) => r.data),
-  create: (body: { cluster_id: string; name: string; severity: number; mode?: DLPMode; patterns: string[]; description?: string; apply_dir?: number }) =>
+  create: (body: { cluster_id: string; name: string; severity: number; mode?: DLPMode; patterns: Array<string | DLPPatternSpec>; description?: string; apply_dir?: number }) =>
     api.post<DLPRule>("/runtime-signatures", body).then((r) => r.data),
-  update: (id: string, body: { patterns?: string[]; severity?: number; description?: string }) =>
+  update: (id: string, body: { patterns?: Array<string | DLPPatternSpec>; severity?: number; description?: string }) =>
     api.put<DLPRule>(`/runtime-signatures/${encodeURIComponent(id)}`, body).then((r) => r.data),
   promote: (id: string) =>
     api.post<DLPRule>(`/runtime-signatures/${encodeURIComponent(id)}/promote`).then((r) => r.data),
@@ -2442,6 +2567,31 @@ export const runtimeSignatures = {
     api.post<DLPRule>(`/runtime-signatures/${encodeURIComponent(id)}/disable`).then((r) => r.data),
   remove: (id: string) =>
     api.delete<{ deleted: string }>(`/runtime-signatures/${encodeURIComponent(id)}`).then((r) => r.data),
+  exportYaml: (cluster_id: string) =>
+    api.get<string>("/runtime-signatures:export", { params: { cluster_id }, responseType: "text", headers: { Accept: "application/x-yaml" } }).then((r) => r.data),
+  importYaml: (cluster_id: string, yaml: string) =>
+    api.post<{ created: number; updated: number; results: Array<{ name: string; status: string; error?: string }> }>(
+      "/runtime-signatures:import", yaml, { params: { cluster_id }, headers: { "Content-Type": "application/x-yaml" } },
+    ).then((r) => r.data),
+};
+
+export type DPISensorKind = "dlp" | "waf";
+
+export interface DPIGroupBinding {
+  id: string;
+  org_id: string;
+  group_id: string;
+  sensor_kind: DPISensorKind;
+  sensor_id: string;
+}
+
+export const dpiGroupBindings = {
+  list: () =>
+    api.get<{ bindings: DPIGroupBinding[] }>("/runtime/dpi-sensor-bindings").then((r) => r.data.bindings),
+  bind: (body: { group_id: string; sensor_kind: DPISensorKind; sensor_id?: string }) =>
+    api.post<DPIGroupBinding>("/runtime/dpi-sensor-bindings", body).then((r) => r.data),
+  unbind: (id: string) =>
+    api.delete<{ deleted: string }>(`/runtime/dpi-sensor-bindings/${encodeURIComponent(id)}`).then((r) => r.data),
 };
 
 /** Wave B1: runtime_policies — per-workload dp policy bundles. */
@@ -2563,7 +2713,7 @@ export interface GeneratePolicyResponse {
 
 /** Wave 5: DPI threats from the NeuVector dp data-plane. */
 export const runtimeThreats = {
-  list: (params: { hours?: number; severity_min?: number; cluster_id?: string; workload_id?: string; category?: "dlp" | "waf" } = {}) =>
+  list: (params: { hours?: number; severity_min?: number; cluster_id?: string; workload_id?: string; group?: string; category?: "dlp" | "waf" | "ips" } = {}) =>
     api.get<{ threats: RuntimeThreat[] }>("/runtime-threats", { params }).then((r) => r.data.threats),
   get: (id: string) =>
     api.get<RuntimeThreatDetail>(`/runtime-threats/${encodeURIComponent(id)}`).then((r) => r.data),
@@ -2601,6 +2751,10 @@ export const securityTimeline = {
       severity?: string; // comma list of Severity
       from?: string;
       to?: string;
+      q?: string;
+      namespace?: string;
+      workload?: string;
+      ref?: string;
       limit?: number;
       offset?: number;
       cluster_id?: string;
@@ -2698,16 +2852,34 @@ export interface MigrationOverview {
   workflow: Array<{ step: number; name: string; state: string }>;
 }
 
+export interface MigrationUnsupported {
+  kind: string;
+  name: string;
+  reason: string;
+  suggestion?: string;
+  source?: Record<string, unknown>;
+}
+
 export interface MigrationPreview {
+  import_id?: string;
   summary: {
     source: string;
     total: number;
+    source_total?: number;
+    source_counts?: Record<string, number>;
+    unaccounted_source?: number;
     create: number;
     update: number;
     enforce: number;
     monitor: number;
     enabled: number;
     file_profiles: number;
+    process_profiles: number;
+    groups: number;
+    dpi_rules: number;
+    dpi_bindings: number;
+    network_rules: number;
+    unsupported: number;
     engines: Record<string, number>;
     categories: Record<string, number>;
     read_only: boolean;
@@ -2726,6 +2898,9 @@ export interface MigrationPreview {
   }>;
   file_profiles: Array<{
     group: string;
+    cluster_id?: string;
+    target_group_name?: string;
+    target_workloads?: string[];
     mode: string;
     cfg_type?: string;
     description?: string;
@@ -2733,8 +2908,115 @@ export interface MigrationPreview {
     imported_from?: Record<string, string>;
     diff_action: "create" | "update";
   }>;
+  process_profiles: Array<{
+    group: string;
+    cluster_id?: string;
+    target_group_name?: string;
+    target_workloads?: string[];
+    mode: string;
+    baseline?: string;
+    cfg_type?: string;
+    description?: string;
+    rules: Array<{
+      name: string;
+      path: string;
+      user?: string;
+      sha256?: string;
+      parent_name?: string;
+      action: string;
+      cfg_type?: string;
+      uuid?: string;
+      allow_update: boolean;
+      enabled: boolean;
+      description?: string;
+    }>;
+    imported_from?: Record<string, string>;
+    diff_action: "create" | "update";
+  }>;
+  groups: Array<{
+    name: string;
+    cluster_id?: string;
+    kind: "learned" | "ground" | "federated" | string;
+    comment?: string;
+    cfg_type?: string;
+    policy_mode?: string;
+    profile_mode?: string;
+    criteria: Array<{ key: string; op: string; value: string }>;
+    imported_from?: Record<string, string>;
+    diff_action: "create" | "update";
+  }>;
+  dpi_rules: Array<{
+    name: string;
+    cluster_id?: string;
+    category: "dlp" | "waf" | "signature" | string;
+    apply_dir: number;
+    severity: number;
+    mode: string;
+    patterns: DLPPatternSpec[];
+    description?: string;
+    source_sensor?: string;
+    source_groups?: string[];
+    source_path?: string;
+    source_cfg_type?: string;
+    source_rule_cfg_type?: string;
+    federated?: boolean;
+    imported_from?: Record<string, string>;
+    diff_action: "create" | "update";
+  }>;
+  dpi_bindings: Array<{
+    source_group: string;
+    target_group_id: string;
+    target_group_name: string;
+    sensor_kind: "dlp" | "waf" | string;
+    source_sensors?: string[];
+    imported_from?: Record<string, string>;
+    diff_action: "create" | "update";
+  }>;
+  network_rules: Array<{
+    name: string;
+    cluster_id?: string;
+    from_group: string;
+    to_group: string;
+    ports: Array<{ protocol: string; port: number }>;
+    mode: string;
+    comment?: string;
+    priority: number;
+    imported_from?: Record<string, string>;
+    diff_action: "create" | "update";
+  }>;
+  unsupported?: MigrationUnsupported[];
   rollback_bundle: string;
 }
+
+export interface MigrationImportListItem {
+  id: string;
+  source: string;
+  status: "previewed" | "applied" | "partial_applied" | "rolled_back" | "failed" | string;
+  summary: MigrationPreview["summary"];
+  applied_summary?: Record<string, number>;
+  unsupported?: MigrationUnsupported[];
+  error?: string;
+  created_at: string;
+  applied_at?: string;
+  rolled_back_at?: string;
+}
+
+export interface MigrationApplyResponse {
+  id: string;
+  status: string;
+  already_applied?: boolean;
+  applied?: Record<string, number>;
+  unsupported?: MigrationUnsupported[];
+}
+
+export interface MigrationRollbackResponse {
+  id: string;
+  status: "rolled_back" | string;
+  restored: number;
+  deleted: number;
+}
+
+export type MigrationRollbackBundle = Record<string, unknown>;
 
 export interface OnboardingOverview {
   install_methods: Array<{ id: string; name: string; status: string; command: string }>;
@@ -2745,8 +3027,16 @@ export const enterprise = {
   runtime: (params: { hours?: number; cluster_id?: string } = {}) => api.get<RuntimeOverview>("/runtime/overview", { params }).then((r) => r.data),
   integrations: () => api.get<IntegrationsOverview>("/integrations").then((r) => r.data),
   migration: () => api.get<MigrationOverview>("/migration/sources").then((r) => r.data),
-  migrationPreview: (body: { source: string; export: string }) =>
+  migrationPreview: (body: { source: string; export: string; cluster_id?: string }) =>
     api.post<MigrationPreview>("/migration/preview", body).then((r) => r.data),
+  migrationImports: () =>
+    api.get<{ imports: MigrationImportListItem[] }>("/migration/imports").then((r) => r.data.imports),
+  migrationApply: (id: string) =>
+    api.post<MigrationApplyResponse>(`/migration/imports/${id}:apply`).then((r) => r.data),
+  migrationRollback: (id: string) =>
+    api.post<MigrationRollbackResponse>(`/migration/imports/${id}:rollback`).then((r) => r.data),
+  migrationRollbackBundle: (id: string) =>
+    api.get<MigrationRollbackBundle>(`/migration/imports/${id}/rollback-bundle`).then((r) => r.data),
   onboarding: () => api.get<OnboardingOverview>("/onboarding").then((r) => r.data),
 };
 
@@ -3247,6 +3537,7 @@ export interface ScanJob {
   platform?: string;
   registry_id?: string;
   image_digest?: string;
+  metadata?: unknown;
   enqueue_reason?: string;
   registry_policy_hash?: string;
   vulndb_bundle_version?: string;
@@ -3267,6 +3558,19 @@ export interface ScanJob {
   finished_at?: string;
 }
 
+export interface ScanJobAttempt {
+  id: string;
+  job_id: string;
+  attempt_number: number;
+  worker_id?: string;
+  status: string;
+  error?: string;
+  started_at: string;
+  finished_at?: string;
+  next_attempt_at?: string;
+  lease_expires_at?: string;
+}
+
 export interface ScanQueueMetric {
   target_type: string;
   pending: number;
@@ -3279,6 +3583,30 @@ export interface ScanQueueMetric {
   failed: number;
   completed_last_hour: number;
   oldest_pending_seconds: number;
+}
+
+export interface ScanLifecycleStatus {
+  scanned: number;
+  scheduled: number;
+  scanning: number;
+  failed: number;
+  paused?: number;
+  canceled?: number;
+  cvedb_version?: string;
+  cvedb_create_time?: string;
+}
+
+export interface ScannerWorker {
+  id: string;
+  cvedb_version?: string;
+  cvedb_create_time?: string;
+  joined_timestamp: number;
+  server: string;
+  port: number;
+  scanned_containers: number;
+  scanned_hosts: number;
+  scanned_images: number;
+  scanned_serverless: number;
 }
 
 export interface ImpactedWorkload {
@@ -3888,6 +4216,17 @@ export const scanJobs = {
     api.get<{ jobs: ScanJob[]; queue_metrics?: ScanQueueMetric[] }>("/scan-jobs", { params }).then((r) => r.data),
   enqueue: (body: { target_type: string; target_ref: string; platform?: string; target_cluster_id?: string; source_type?: string; source_ref?: string; max_attempts?: number }) =>
     api.post<{ id: string; status: string }>("/scan-jobs", body).then((r) => r.data),
+  attempts: (id: string) =>
+    api.get<{ attempts: ScanJobAttempt[] }>(`/scan-jobs/${id}/attempts`).then((r) => r.data.attempts),
+};
+
+export const scannerOperations = {
+  status: () => api.get<ScanLifecycleStatus>("/scan/status").then((r) => r.data),
+  workers: () => api.get<{ scanners: ScannerWorker[] }>("/scan/scanner").then((r) => r.data.scanners),
+  cacheStat: (scannerId: string) =>
+    api.get<ScannerCacheStat>(`/scanner-cache/${encodeURIComponent(scannerId)}/stat`).then((r) => r.data),
+  cacheData: (scannerId: string) =>
+    api.get<ScannerCacheData>(`/scanner-cache/${encodeURIComponent(scannerId)}/data`).then((r) => r.data),
 };
 
 export const scanTargets = {
@@ -3914,6 +4253,8 @@ export const imageScanResults = {
     api.get<ImageSignatureResponse>(`/image-scan-results/${encodeURIComponent(id)}/signature`).then((r) => r.data),
   affectedWorkloads: (id: string) =>
     api.get<ImageScanAffectedWorkloads>(`/image-scan-results/${encodeURIComponent(id)}/affected-workloads`).then((r) => r.data),
+  downloadFindingsCSV: (id: string) =>
+    downloadAPIFile(`/image-scan-results/${encodeURIComponent(id)}/findings.csv`, `constellation-image-${id}-findings.csv`),
   downloadPackages: (id: string) =>
     downloadAPIFile(`/image-scan-results/${encodeURIComponent(id)}/packages`, `constellation-image-${id}-packages.json`),
   downloadLayers: (id: string) =>
@@ -4141,7 +4482,7 @@ export const policies = {
   create: (body: Partial<Policy>) =>
     api.post<Policy>("/policies", body).then((r) => r.data),
   delete: (id: string) =>
-    api.delete<{ status: string }>(`/policies/${id}`).then((r) => r.data),
+    api.delete<void>(`/policies/${id}`).then((r) => r.data),
   bulk: (operations: Array<{ op: string; id?: string; body?: unknown }>) =>
     api.post<{ results: Array<{ op: string; id?: string; status: string; error?: string }> }>(
       "/policies:bulk",
@@ -4155,11 +4496,15 @@ export const policies = {
     api.patch<AdmissionState>("/policies/admission/state", body, { params }).then((r) => r.data),
   assess: (body: { image: string; namespace?: string; labels?: Record<string, string> }, params: { cluster_id?: string } = {}) =>
     api.post<AdmissionAssessResult>("/policies/assess", body, { params }).then((r) => r.data),
+  admissionDryRunHistory: (params: { cluster_id?: string; limit?: number } = {}) =>
+    api.get<{ history: AdmissionDryRunHistoryRow[]; total: number }>("/policies/admission/dry-runs", { params }).then((r) => r.data),
+  clearAdmissionDryRunHistory: (params: { cluster_id?: string } = {}) =>
+    api.delete<{ deleted: number }>("/policies/admission/dry-runs", { params }).then((r) => r.data),
   admissionRules: (params: { cluster_id?: string } = {}) =>
     api.get<{ rules: AdmissionRuleRow[]; total: number }>("/policies/admission/rules", { params }).then((r) => r.data),
   admissionOptions: () =>
     api.get<AdmissionOptions>("/policies/admission/options").then((r) => r.data),
-  createAdmissionRule: (body: { name: string; mode: string; criteria: Array<{ key: string; value: string }> }, params: { cluster_id?: string } = {}) =>
+  createAdmissionRule: (body: { name: string; mode: string; group?: string; criteria: Array<{ key: string; value: string }> }, params: { cluster_id?: string } = {}) =>
     api.post<{ id: string; spec_yaml: string }>("/policies/admission/rules", body, { params }).then((r) => r.data),
   // DPI signature toggles (weak-TLS version detection). Applied live by the runtime-agent.
   dpiThreatSettings: (params: { cluster_id?: string } = {}) =>
@@ -4194,6 +4539,7 @@ export interface AdmissionRuleRow {
   mode: string;
   action: string;
   category: string;
+  group?: string;
   criteria: string[];
 }
 
@@ -4216,7 +4562,24 @@ export interface AdmissionAssessResult {
   namespace: string;
   decision: string;
   enforcement_mode: string;
+  dry_run_id?: string;
+  assessed_at?: string;
+  current_outcome?: string;
+  protect_outcome?: string;
   matches: Array<{ rule_id?: string; policy_name?: string; action?: string; reason?: string; [k: string]: unknown }>;
+}
+export interface AdmissionDryRunHistoryRow {
+  id: string;
+  assessed_at: string;
+  cluster_id?: string;
+  actor_id?: string;
+  image: string;
+  namespace: string;
+  decision: string;
+  enforcement_mode: string;
+  current_outcome?: string;
+  protect_outcome?: string;
+  matches: number;
 }
 
 // ---------- New endpoints (Wave B) ----------
@@ -4284,11 +4647,20 @@ export const settingsApi = {
     api.patch<{ settings: Record<string, unknown> }>("/settings/user", patch).then((r) => r.data),
 };
 
+export interface SystemConfigResponse {
+  config: Record<string, unknown>;
+  revision: number;
+  source?: "default" | "system_config" | string;
+  updated_at?: string;
+  updated_by?: string;
+  updated_by_email?: string;
+}
+
 export const systemConfigApi = {
   get: () =>
-    api.get<{ config: Record<string, unknown>; revision: number }>("/system/config").then((r) => r.data),
+    api.get<SystemConfigResponse>("/system/config").then((r) => r.data),
   patch: (body: Record<string, unknown>) =>
-    api.patch<{ config: Record<string, unknown>; revision: number }>("/system/config", body).then((r) => r.data),
+    api.patch<SystemConfigResponse>("/system/config", body).then((r) => r.data),
   refreshScanner: () =>
     api.post<{ refresh_now: number; revision: number }>("/scanner/refresh", {}).then((r) => r.data),
 };
@@ -4623,13 +4995,38 @@ export const cve = {
 
 // ----- Wave D: Response Rules V2 (NeuVector-style condition catalog) ------
 
-export type RRV2EventType = "admission" | "runtime" | "scan" | "compliance" | "*";
-export type RRV2CondType = "name" | "level" | "cve_critical" | "proc" | "event_type";
-export type RRV2ActionKind = "notify" | "quarantine" | "isolate" | "ticket";
+export type RRV2EventType =
+  | "security-event"
+  | "event"
+  | "activity"
+  | "cve-report"
+  | "threat"
+  | "incident"
+  | "violation"
+  | "compliance"
+  | "admission-control"
+  | "dlp"
+  | "serverless"
+  | "waf"
+  | "runtime"
+  | "scan"
+  | "admission"
+  | "*";
+export type RRV2CondType =
+  | "name"
+  | "level"
+  | "cve_critical"
+  | "cve_critical_count"
+  | "cve_high_count"
+  | "cve_with_fix_count"
+  | "cve_max_age_days"
+  | "proc"
+  | "event_type";
+export type RRV2ActionKind = "notify" | "webhook" | "suppress-log" | "quarantine" | "isolate" | "kill" | "ticket";
 
 export interface RRV2Condition { type: RRV2CondType; op?: string; value: string; }
 export interface RRV2Action { kind: RRV2ActionKind; target?: string; params?: Record<string,string>; }
-export interface RRV2Selector { cluster?: string; namespace?: string; labels?: Record<string,string>; }
+export interface RRV2Selector { cluster?: string; namespace?: string; group?: string; labels?: Record<string,string>; }
 
 export interface ResponseRuleV2 {
   id: string;
@@ -4645,16 +5042,48 @@ export interface ResponseRuleV2 {
   updated_at?: string;
 }
 
+export interface RRV2CatalogItem {
+  id: string;
+  label: string;
+  help?: string;
+  values?: string[];
+}
+
+export interface RRV2EventOption {
+  id: RRV2EventType;
+  label: string;
+  conditions: RRV2CondType[];
+  actions: RRV2ActionKind[];
+  legacy?: boolean;
+}
+
+export interface RRV2ReceiverOption {
+  id: string;
+  name: string;
+  kind: string;
+  status: string;
+}
+
+export interface ResponseRulesV2Options {
+  event_types: RRV2EventOption[];
+  condition_types: RRV2CatalogItem[];
+  action_kinds: RRV2CatalogItem[];
+  receivers: RRV2ReceiverOption[];
+  webhooks: string[];
+  response_rule_options: Record<string, { types: string[]; name?: string[]; level?: string[] }>;
+}
+
 export const responseRulesV2 = {
   list:   (params: { cluster_id?: string } = {}) =>
     api.get<{ rules: ResponseRuleV2[] }>("/response-rules-v2", { params }).then((r) => r.data),
+  options: () => api.get<ResponseRulesV2Options>("/response-rules-v2/options").then((r) => r.data),
   create: (body: Omit<ResponseRuleV2, "id"|"priority"|"created_at"|"updated_at">, params: { cluster_id?: string } = {}) =>
     api.post<{ id: string }>("/response-rules-v2", body, { params }).then((r) => r.data),
   update: (id: string, body: Omit<ResponseRuleV2, "id"|"priority"|"created_at"|"updated_at">) =>
     api.put<{ id: string }>(`/response-rules-v2/${id}`, body).then((r) => r.data),
   delete: (id: string) => api.delete(`/response-rules-v2/${id}`).then((r) => r.data),
-  reorder: (orderedIds: string[]) =>
-    api.patch<{ ok: boolean; count: number }>("/response-rules-v2:reorder", { ordered_ids: orderedIds }).then((r) => r.data),
+  reorder: (orderedIds: string[], params: { cluster_id?: string } = {}) =>
+    api.patch<{ ok: boolean; count: number }>("/response-rules-v2:reorder", { ordered_ids: orderedIds }, { params }).then((r) => r.data),
 };
 
 // ----- Wave D: Vulnerability Profiles ------
@@ -4721,11 +5150,61 @@ export interface Group {
   profile_mode: GroupMode;
   created_at?: string;
   updated_at?: string;
+  membership?: {
+    criteria_count: number;
+    member_count: number;
+    policy_mode: GroupMode;
+    profile_mode: GroupMode;
+    last_matched_at?: string;
+    last_matched_member?: string;
+  };
+}
+
+export interface GroupUsageReference {
+  id: string;
+  family: "network" | "dpi" | string;
+  kind: string;
+  name: string;
+  role?: string;
+  mode?: string;
+  detail?: string;
+  route?: string;
+  cluster_id?: string;
+  blocking: boolean;
+  last_modified?: string;
+}
+
+export interface GroupUsageCoverage {
+  family: string;
+  status: "covered" | "derived" | "not_modeled" | string;
+  detail: string;
+}
+
+export interface GroupUsage {
+  group_id: string;
+  group_name: string;
+  summary: {
+    total_references: number;
+    blocking_references: number;
+    network_rules: number;
+    dpi_sensor_bindings: number;
+    process_profiles: number;
+    file_profiles: number;
+    response_rules: number;
+    admission_rules: number;
+    derived_references: number;
+    member_targets: number;
+    delete_blocked: boolean;
+  };
+  references: GroupUsageReference[];
+  coverage: GroupUsageCoverage[];
 }
 
 export const groupsApi = {
   list:   (params: { cluster_id?: string } = {}) =>
     api.get<{ groups: Group[] }>("/groups", { params }).then((r) => r.data),
+  usage: (id: string, params: { cluster_id?: string } = {}) =>
+    api.get<GroupUsage>(`/groups/${id}/usage`, { params }).then((r) => r.data),
   create: (body: Omit<Group, "id"|"created_at"|"updated_at">, params: { cluster_id?: string } = {}) =>
     api.post<{ id: string }>("/groups", body, { params }).then((r) => r.data),
   update: (id: string, body: Omit<Group, "id"|"created_at"|"updated_at">) =>
@@ -4737,9 +5216,9 @@ export const groupsApi = {
     api.post<{ created: number; updated: number; results: Array<{ name: string; status: string; error?: string }> }>(
       "/groups:import", yaml, { params, headers: { "Content-Type": "application/x-yaml" } },
     ).then((r) => r.data),
-  // Bulk mode promotion (NV Discover→Monitor→Protect). dimension: policy (network) | profile (process/file).
-  promote: (body: { dimension: "policy" | "profile"; from: "discover" | "monitor" }, params: { cluster_id?: string } = {}) =>
-    api.post<{ dimension: string; from: string; to: string; promoted: number }>("/groups:promote", body, { params }).then((r) => r.data),
+  // Bulk mode promotion/demotion (NV Discover→Monitor→Protect). dimension: policy (network) | profile (process/file).
+  promote: (body: { dimension: "policy" | "profile"; from: GroupMode; to?: GroupMode }, params: { cluster_id?: string } = {}) =>
+    api.post<{ dimension: string; from: string; to: string; changed: number; promoted: number }>("/groups:promote", body, { params }).then((r) => r.data),
 };
 
 // ----- Wave D: Federation ------
@@ -4869,7 +5348,7 @@ export type RegistryKind =
 export type RegistryAuthKind =
   | "static" | "aws-iam-role" | "gcp-service-account" | "azure-managed-id" | "none";
 
-export type RegistryCadence = "manual" | "hourly" | "6h" | "daily" | "weekly";
+export type RegistryCadence = string;
 
 export type RegistrySyncStatus = "ok" | "failed" | "partial" | "";
 
@@ -4879,6 +5358,13 @@ export interface RegistryScanPolicy {
   tag_selection: "all" | "latest";
   max_age?: string;
   rescan_interval?: string;
+  rescan_after_db_update?: boolean;
+  repo_limit?: number;
+  tag_limit?: number;
+  custom_interval?: string;
+  cron?: string;
+  ignore_proxy?: boolean;
+  scan_layers?: boolean;
   block_promotion_threshold: string;
 }
 
@@ -4930,6 +5416,12 @@ export interface RegistrySyncResult {
   error?: string;
 }
 
+export interface RegistryCancelScansResult {
+  registry_id: string;
+  canceled: number;
+  active_remaining: number;
+}
+
 export interface RegistryCreateBody {
   name: string;
   kind: RegistryKind;
@@ -4961,6 +5453,8 @@ export const registries = {
   remove: (id: string) => api.delete<void>(`/registries/${id}`).then((r) => r.data),
   test:   (id: string) => api.post<RegistryTestResult>(`/registries/${id}/test`).then((r) => r.data),
   syncNow:(id: string) => api.post<RegistrySyncResult>(`/registries/${id}/sync-now`).then((r) => r.data),
+  cancelScans: (id: string) =>
+    api.post<RegistryCancelScansResult>(`/registries/${id}/cancel-scans`).then((r) => r.data),
   images: (id: string, params: { q?: string; limit?: number; offset?: number } = {}) =>
     api.get<{ images: RegistryImageRow[]; total: number; limit: number; offset: number }>(`/registries/${id}/images`, { params: { ...params, q: params.q || undefined } }).then((r) => r.data),
 };

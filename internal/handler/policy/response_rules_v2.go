@@ -52,6 +52,154 @@ type responseRuleV2Body struct {
 	WorkloadMatch response.WorkloadSelector `json:"workload_match"`
 }
 
+type responseRuleV2CatalogItem struct {
+	ID     string   `json:"id"`
+	Label  string   `json:"label"`
+	Help   string   `json:"help,omitempty"`
+	Values []string `json:"values,omitempty"`
+}
+
+type responseRuleV2EventOption struct {
+	ID         string   `json:"id"`
+	Label      string   `json:"label"`
+	Conditions []string `json:"conditions"`
+	Actions    []string `json:"actions"`
+	Legacy     bool     `json:"legacy,omitempty"`
+}
+
+type responseRuleV2ReceiverOption struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Kind   string `json:"kind"`
+	Status string `json:"status"`
+}
+
+type responseRuleV2NVEventOptions struct {
+	Types []string `json:"types"`
+	Name  []string `json:"name,omitempty"`
+	Level []string `json:"level,omitempty"`
+}
+
+type responseRuleV2OptionsDTO struct {
+	EventTypes          []responseRuleV2EventOption             `json:"event_types"`
+	ConditionTypes      []responseRuleV2CatalogItem             `json:"condition_types"`
+	ActionKinds         []responseRuleV2CatalogItem             `json:"action_kinds"`
+	Receivers           []responseRuleV2ReceiverOption          `json:"receivers"`
+	Webhooks            []string                                `json:"webhooks"`
+	ResponseRuleOptions map[string]responseRuleV2NVEventOptions `json:"response_rule_options"`
+}
+
+func (h *ResponseRulesV2) Options(w http.ResponseWriter, r *http.Request) {
+	receivers, webhooks, err := h.loadReceiverOptions(r)
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	out := responseRuleV2OptionsDTO{
+		EventTypes:          responseRuleV2EventTypes(),
+		ConditionTypes:      responseRuleV2ConditionTypes(),
+		ActionKinds:         responseRuleV2ActionKinds(),
+		Receivers:           receivers,
+		Webhooks:            webhooks,
+		ResponseRuleOptions: responseRuleV2NVOptions(),
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+func (h *ResponseRulesV2) loadReceiverOptions(r *http.Request) ([]responseRuleV2ReceiverOption, []string, error) {
+	subj, _ := authctx.SubjectFrom(r.Context())
+	rows, err := h.db.Pool().Query(r.Context(), `
+SELECT id, name, kind, status
+  FROM receivers
+ WHERE org_id = $1
+ ORDER BY name`, subj.OrgID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	receivers := []responseRuleV2ReceiverOption{}
+	webhooks := []string{}
+	for rows.Next() {
+		var opt responseRuleV2ReceiverOption
+		if err := rows.Scan(&opt.ID, &opt.Name, &opt.Kind, &opt.Status); err != nil {
+			return nil, nil, err
+		}
+		receivers = append(receivers, opt)
+		if strings.EqualFold(opt.Kind, "webhook") {
+			webhooks = append(webhooks, opt.Name)
+		}
+	}
+	return receivers, webhooks, rows.Err()
+}
+
+func responseRuleV2EventTypes() []responseRuleV2EventOption {
+	allActions := []string{"notify", "ticket", "webhook", "suppress-log", "quarantine", "isolate", "kill"}
+	cveConds := []string{
+		"name", "level", "cve_critical", "cve_critical_count", "cve_high_count",
+		"cve_with_fix_count", "cve_max_age_days", "event_type",
+	}
+	securityConds := []string{"name", "level", "proc", "event_type"}
+	options := []responseRuleV2EventOption{
+		{ID: "*", Label: "All events", Conditions: []string{"name", "level", "cve_critical", "cve_critical_count", "cve_high_count", "cve_with_fix_count", "cve_max_age_days", "proc", "event_type"}, Actions: allActions},
+		{ID: string(response.EventSecurity), Label: "Security event", Conditions: securityConds, Actions: allActions},
+		{ID: string(response.EventThreat), Label: "Threat", Conditions: securityConds, Actions: allActions},
+		{ID: string(response.EventIncident), Label: "Incident", Conditions: securityConds, Actions: allActions},
+		{ID: string(response.EventViolation), Label: "Violation", Conditions: []string{"name", "level", "event_type"}, Actions: allActions},
+		{ID: string(response.EventDLP), Label: "DLP", Conditions: securityConds, Actions: allActions},
+		{ID: string(response.EventWAF), Label: "WAF", Conditions: securityConds, Actions: allActions},
+		{ID: string(response.EventCVEReport), Label: "CVE report", Conditions: cveConds, Actions: allActions},
+		{ID: string(response.EventScan), Label: "Scan", Conditions: cveConds, Actions: allActions, Legacy: true},
+		{ID: string(response.EventCompliance), Label: "Compliance", Conditions: []string{"name", "level", "event_type"}, Actions: allActions},
+		{ID: string(response.EventAdmissionControl), Label: "Admission control", Conditions: []string{"name", "level", "event_type"}, Actions: allActions},
+		{ID: string(response.EventAdmission), Label: "Admission", Conditions: []string{"name", "level", "event_type"}, Actions: allActions, Legacy: true},
+		{ID: string(response.EventEvent), Label: "Event", Conditions: []string{"name", "level", "event_type"}, Actions: allActions},
+		{ID: string(response.EventActivity), Label: "Activity", Conditions: []string{"name", "level", "event_type"}, Actions: allActions},
+		{ID: string(response.EventServerless), Label: "Serverless", Conditions: []string{"name", "level", "event_type"}, Actions: allActions},
+		{ID: string(response.EventRuntime), Label: "Runtime", Conditions: securityConds, Actions: allActions, Legacy: true},
+	}
+	return options
+}
+
+func responseRuleV2ConditionTypes() []responseRuleV2CatalogItem {
+	return []responseRuleV2CatalogItem{
+		{ID: "name", Label: "Event name", Help: "Regex against event name or title"},
+		{ID: "level", Label: "Severity >=", Help: "Severity threshold", Values: []string{"info", "low", "medium", "high", "critical"}},
+		{ID: "cve_critical", Label: "Critical CVE score >=", Help: "Any critical CVE with CVSS base score at or above this value"},
+		{ID: "cve_critical_count", Label: "Critical CVE count >=", Help: "At least this many critical CVEs"},
+		{ID: "cve_high_count", Label: "High+ CVE count >=", Help: "At least this many high or critical CVEs"},
+		{ID: "cve_with_fix_count", Label: "Fixable CVE count >=", Help: "At least this many CVEs with a fix available"},
+		{ID: "cve_max_age_days", Label: "Fixable CVE age >", Help: "A fixable CVE older than this many days"},
+		{ID: "proc", Label: "Process name", Help: "Regex against process basename"},
+		{ID: "event_type", Label: "Event type", Help: "Event type or alias"},
+	}
+}
+
+func responseRuleV2ActionKinds() []responseRuleV2CatalogItem {
+	return []responseRuleV2CatalogItem{
+		{ID: "notify", Label: "Notify receiver", Help: "Send to a configured receiver"},
+		{ID: "webhook", Label: "Webhook receiver", Help: "NeuVector-compatible alias for notifying a receiver"},
+		{ID: "ticket", Label: "Open ticket", Help: "Send to an ITSM receiver such as Jira or ServiceNow"},
+		{ID: "suppress-log", Label: "Suppress log", Help: "Suppress the matching runtime security-event log while still applying explicit rule actions"},
+		{ID: "quarantine", Label: "Quarantine workload", Help: "Runtime quarantine action"},
+		{ID: "isolate", Label: "Network isolate", Help: "Apply network isolation"},
+		{ID: "kill", Label: "Kill process", Help: "Queue a runtime kill action when the data plane supports it"},
+	}
+}
+
+func responseRuleV2NVOptions() map[string]responseRuleV2NVEventOptions {
+	out := map[string]responseRuleV2NVEventOptions{}
+	for _, ev := range responseRuleV2EventTypes() {
+		if ev.ID == "*" {
+			continue
+		}
+		out[ev.ID] = responseRuleV2NVEventOptions{
+			Types: ev.Conditions,
+			Level: []string{"critical", "high", "medium", "low", "info"},
+		}
+	}
+	return out
+}
+
 func (h *ResponseRulesV2) List(w http.ResponseWriter, r *http.Request) {
 	subj, _ := authctx.SubjectFrom(r.Context())
 	clusterArg, err := sqlx.ParseClusterIDParam(r)
@@ -115,12 +263,15 @@ func (h *ResponseRulesV2) Create(w http.ResponseWriter, r *http.Request) {
 	acts, _ := json.Marshal(body.Actions)
 	sel, _ := json.Marshal(body.WorkloadMatch)
 	var id uuid.UUID
-	// New rules append to the end of the evaluation order (lowest precedence) so adding
-	// a rule never silently reshuffles existing precedence.
+	// New rules append to the end of the current evaluation scope (lowest precedence) so
+	// adding a cluster-scoped rule never silently reshuffles existing precedence.
 	if err := h.db.Pool().QueryRow(r.Context(), `
 INSERT INTO response_rules_v2 (org_id, cluster_id, name, description, enabled, priority, event_type, conditions, actions, workload_match, created_by)
 VALUES ($1,$2,$3,$4,$5,
-        (SELECT COALESCE(MAX(priority),0)+10 FROM response_rules_v2 WHERE org_id=$1),
+        (SELECT COALESCE(MAX(priority),0)+10
+           FROM response_rules_v2
+          WHERE org_id=$1
+            AND ($2::uuid IS NULL OR cluster_id IS NULL OR cluster_id=$2)),
         $6,$7,$8,$9,$10) RETURNING id`,
 		subj.OrgID, clusterArg, rule.Name, body.Description, body.Enabled, body.EventType, conds, acts, sel, subj.UserID).Scan(&id); err != nil {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -200,9 +351,14 @@ type reorderBody struct {
 // Reorder sets the evaluation precedence of the org's response rules from a client-supplied
 // ordered id list (top = evaluated first). NeuVector's insert-before/after/first/last, done
 // as a whole-list reorder: the UI moves a row up/down and sends the new order. Priorities are
-// reassigned 10,20,30… so later single-position inserts have room. PATCH /response-rules-v2:reorder
+// reassigned 10,20,30... so later single-position inserts have room. PATCH /response-rules-v2:reorder
 func (h *ResponseRulesV2) Reorder(w http.ResponseWriter, r *http.Request) {
 	subj, _ := authctx.SubjectFrom(r.Context())
+	clusterArg, err := sqlx.ParseClusterIDParam(r)
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
 	var body reorderBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.OrderedIDs) == 0 {
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "ordered_ids required"})
@@ -217,14 +373,59 @@ func (h *ResponseRulesV2) Reorder(w http.ResponseWriter, r *http.Request) {
 		}
 		ids = append(ids, id)
 	}
+
+	seen := make(map[uuid.UUID]struct{}, len(ids))
+	for _, id := range ids {
+		if _, ok := seen[id]; ok {
+			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "ordered_ids contains duplicate ids"})
+			return
+		}
+		seen[id] = struct{}{}
+	}
+
 	tx, err := h.db.Pool().Begin(r.Context())
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
+
+	rows, err := tx.Query(r.Context(), `
+SELECT id
+  FROM response_rules_v2
+ WHERE org_id=$1
+   AND ($2::uuid IS NULL OR cluster_id IS NULL OR cluster_id=$2)
+ ORDER BY priority, name
+ FOR UPDATE`, subj.OrgID, clusterArg)
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	scopeIDs := make(map[uuid.UUID]struct{}, len(ids))
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		scopeIDs[id] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	rows.Close()
+	if len(ids) != len(scopeIDs) {
+		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "ordered_ids must include every response rule in scope"})
+		return
+	}
 	for i, id := range ids {
-		// org-scoped so a caller can only reorder their own rules; unknown ids no-op.
+		if _, ok := scopeIDs[id]; !ok {
+			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "ordered_ids contains a rule outside this scope"})
+			return
+		}
 		if _, err := tx.Exec(r.Context(),
 			`UPDATE response_rules_v2 SET priority=$1, updated_at=NOW() WHERE id=$2 AND org_id=$3`,
 			(i+1)*10, id, subj.OrgID); err != nil {

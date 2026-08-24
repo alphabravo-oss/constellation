@@ -340,12 +340,23 @@ type PolicyEngine struct {
 	// TODO(matrix): install a client-go namespace lister backed resolver in the
 	// webhook cmd so label-selected per-rule scoping is enforced live.
 	NamespaceLabeler NamespaceLabelResolver
+
+	// GroupResolver resolves Constellation group selectors for per-rule
+	// match.groups scoping. nil means group-scoped rules safely never fire,
+	// preventing an unresolvable group reference from broadening into a
+	// cluster-wide deny.
+	GroupResolver GroupResolver
 }
 
 // NamespaceLabelResolver resolves the labels of a namespace by name, used by the
 // per-rule namespaceSelector (A5).
 type NamespaceLabelResolver interface {
 	NamespaceLabels(ctx context.Context, namespace string) (map[string]string, error)
+}
+
+// GroupResolver resolves Constellation group membership for pod admission.
+type GroupResolver interface {
+	PodMatchesGroup(ctx context.Context, group string, pod *corev1.Pod) (bool, error)
 }
 
 // SetRBAC attaches the RBAC resolver used by the saBindRiskyRole criterion.
@@ -362,6 +373,14 @@ func (e *PolicyEngine) SetNamespaceLabeler(r NamespaceLabelResolver) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.NamespaceLabeler = r
+}
+
+// SetGroupResolver attaches the group resolver used by per-rule match.groups
+// scoping. Safe to call on a running engine.
+func (e *PolicyEngine) SetGroupResolver(r GroupResolver) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.GroupResolver = r
 }
 
 // SetQuarantine attaches the runtime quarantine source. Safe to call on a
@@ -417,6 +436,9 @@ type Rule struct {
 	// Namespaces and NamespaceSelector are OR-combined: a request in a listed
 	// namespace OR a namespace whose labels match fires the rule.
 	NamespaceSelector map[string]string
+	// Groups, when non-empty, scopes the rule to pods that resolve into at
+	// least one Constellation group by id or name. Empty = all groups.
+	Groups []string
 
 	Conditions RuleConditions
 }
@@ -618,6 +640,7 @@ func (e *PolicyEngine) Evaluate(ctx context.Context, req *admissionv1.AdmissionR
 	onDeny := e.OnDeny
 	rbac := e.RBAC
 	labeler := e.NamespaceLabeler
+	groupResolver := e.GroupResolver
 	e.mu.RUnlock()
 
 	// Per-rule namespace targeting (A5). Resolved once per request; the matcher
@@ -643,6 +666,7 @@ func (e *PolicyEngine) Evaluate(ctx context.Context, req *admissionv1.AdmissionR
 		resp.Result = &metav1.Status{Message: "admission: decode " + req.Kind.Kind + ": " + err.Error()}
 		return resp
 	}
+	matchesGroup := groupMatcher(ctx, groupResolver, pod)
 
 	// Quarantine check first — runtime-driven, no monitor-mode override.
 	// If the snapshot match returns a hit, deny immediately and emit a
@@ -681,7 +705,7 @@ func (e *PolicyEngine) Evaluate(ctx context.Context, req *admissionv1.AdmissionR
 	// record a warning and let deny evaluation proceed, so a seeded carve-out
 	// never silently widens admission until an operator flips it to enforce.
 	for _, rule := range rules {
-		if !rule.isAllow() || !matchesKind(rule.Kinds, req.Kind.Kind) || !matchesNamespace(rule) {
+		if !rule.isAllow() || !matchesKind(rule.Kinds, req.Kind.Kind) || !matchesNamespace(rule) || !matchesGroup(rule) {
 			continue
 		}
 		reason, hit, _ := evalPodRule(ctx, rule, pod, evidence)
@@ -702,7 +726,7 @@ func (e *PolicyEngine) Evaluate(ctx context.Context, req *admissionv1.AdmissionR
 		if rule.isAllow() {
 			continue // allow rules were handled in the precedence pass above
 		}
-		if !matchesKind(rule.Kinds, req.Kind.Kind) || !matchesNamespace(rule) {
+		if !matchesKind(rule.Kinds, req.Kind.Kind) || !matchesNamespace(rule) || !matchesGroup(rule) {
 			continue
 		}
 		reason, hit, details := evalPodRule(ctx, rule, pod, evidence)
@@ -779,7 +803,7 @@ func (e *PolicyEngine) evaluatePVC(ctx context.Context, req *admissionv1.Admissi
 			// skip them here so a carve-out is never mistaken for a PVC deny.
 			continue
 		}
-		if !matchesKind(rule.Kinds, "PersistentVolumeClaim") || !matchesNamespace(rule) {
+		if !matchesKind(rule.Kinds, "PersistentVolumeClaim") || !matchesNamespace(rule) || len(rule.Groups) > 0 {
 			continue
 		}
 		allowed := rule.Conditions.AllowedStorageClasses
@@ -1227,6 +1251,32 @@ func podEnvVarSecret(pod *corev1.Pod) (string, bool) {
 func requestNamespace(req *admissionv1.AdmissionRequest) string {
 	ns, _ := denyTargetFromRequest(req)
 	return ns
+}
+
+// groupMatcher returns a per-rule predicate for match.groups. A group-scoped
+// rule requires any configured group selector to match the extracted pod. If no
+// resolver is wired, or if resolution errors, the rule is skipped instead of
+// broadening into an unscoped deny.
+func groupMatcher(ctx context.Context, resolver GroupResolver, pod *corev1.Pod) func(Rule) bool {
+	return func(r Rule) bool {
+		if len(r.Groups) == 0 {
+			return true
+		}
+		if resolver == nil || pod == nil {
+			return false
+		}
+		for _, group := range r.Groups {
+			group = strings.TrimSpace(group)
+			if group == "" {
+				continue
+			}
+			matches, err := resolver.PodMatchesGroup(ctx, group, pod)
+			if err == nil && matches {
+				return true
+			}
+		}
+		return false
+	}
 }
 
 // namespaceMatcher returns a per-rule predicate for the per-rule namespace

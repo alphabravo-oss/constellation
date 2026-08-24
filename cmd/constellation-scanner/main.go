@@ -51,12 +51,14 @@ import (
 	"github.com/alphabravocompany/constellation/pkg/version"
 )
 
+const defaultWorkerMaxConcurrent = 1
+
 func main() {
 	var (
 		controlPlaneURL       = flag.String("control-plane", envOr("CONSTELLATION_CONTROL_PLANE_URL", ""), "Control-plane base URL")
 		token                 = flag.String("token", envOr("CONSTELLATION_SCANNER_TOKEN", ""), "Scanner service token (registered with the API)")
 		instanceID            = flag.String("instance-id", envOr("CONSTELLATION_SCANNER_INSTANCE_ID", ""), "Stable scanner instance ID for job lease ownership")
-		maxConcurrent         = flag.Int("max-concurrent", envInt("CONSTELLATION_SCANNER_MAX_CONCURRENT", runtime.NumCPU()), "Max concurrent scans per worker")
+		maxConcurrent         = flag.Int("max-concurrent", envInt("CONSTELLATION_SCANNER_MAX_CONCURRENT", defaultWorkerMaxConcurrent), "Max concurrent scans per worker; set 0 to auto-size from CPU count")
 		targetCapacity        = flag.String("target-capacity", envOr("CONSTELLATION_SCANNER_TARGET_CAPACITY", ""), "Comma-separated target-type scan credits, for example image=2,host=8,platform=4")
 		pollInterval          = flag.Duration("poll-interval", 15*time.Second, "How often to poll for new jobs")
 		jobTimeout            = flag.Duration("job-timeout", 15*time.Minute, "Per-job timeout")
@@ -191,9 +193,9 @@ func main() {
 			"grype": envOr("GRYPE_DB_CACHE_DIR", ""),
 			"trivy": envOr("TRIVY_CACHE_DIR", ""),
 		},
-		signatureEnabled: *verifySignatures,
-		cosignBin:        *cosignBin,
-		signatureRoots:   signatureRootsCfg,
+		signatureEnabled:      *verifySignatures,
+		cosignBin:             *cosignBin,
+		signatureRoots:        signatureRootsCfg,
 		fileRiskEnabled:       *fileRiskEnabled,
 		fileRiskMaxFindings:   *fileRiskMaxFindings,
 		iacEnabled:            *iacEnabled,
@@ -368,24 +370,24 @@ type scanEvidence struct {
 }
 
 type scanResultPayload struct {
-	JobID          string                       `json:"job_id"`
-	ImageRef       string                       `json:"image_ref"`
-	ImageDigest    string                       `json:"image_digest,omitempty"`
-	Platform       string                       `json:"platform,omitempty"`
-	ScannerProfile string                       `json:"scanner_profile,omitempty"`
-	PackageCount   int                          `json:"package_count"`
-	Packages       []scanner.Package            `json:"packages,omitempty"`
-	Secrets        []scanner.SecretFinding      `json:"secrets,omitempty"`
-	Misconfigs     []scanner.MisconfigFinding   `json:"misconfigs,omitempty"`
-	Signature      *scanner.SignatureResult     `json:"signature,omitempty"`
-	Layers         *scanner.ImageLayerMetadata  `json:"layers,omitempty"`
-	FileRisks      *scanner.ImageFileRiskReport `json:"file_risks,omitempty"`
+	JobID          string                          `json:"job_id"`
+	ImageRef       string                          `json:"image_ref"`
+	ImageDigest    string                          `json:"image_digest,omitempty"`
+	Platform       string                          `json:"platform,omitempty"`
+	ScannerProfile string                          `json:"scanner_profile,omitempty"`
+	PackageCount   int                             `json:"package_count"`
+	Packages       []scanner.Package               `json:"packages,omitempty"`
+	Secrets        []scanner.SecretFinding         `json:"secrets,omitempty"`
+	Misconfigs     []scanner.MisconfigFinding      `json:"misconfigs,omitempty"`
+	Signature      *scanner.SignatureResult        `json:"signature,omitempty"`
+	Layers         *scanner.ImageLayerMetadata     `json:"layers,omitempty"`
+	FileRisks      *scanner.ImageFileRiskReport    `json:"file_risks,omitempty"`
 	ConfigChecks   *scanner.ImageConfigCheckReport `json:"config_checks,omitempty"`
-	Findings       []scanner.Finding            `json:"findings"`
-	Engines        []engineSummary              `json:"engines"`
-	BundleMetadata *scanner.BundleMetadata      `json:"bundle_metadata,omitempty"`
-	StartedAt      time.Time                    `json:"started_at"`
-	EndedAt        time.Time                    `json:"ended_at"`
+	Findings       []scanner.Finding               `json:"findings"`
+	Engines        []engineSummary                 `json:"engines"`
+	BundleMetadata *scanner.BundleMetadata         `json:"bundle_metadata,omitempty"`
+	StartedAt      time.Time                       `json:"started_at"`
+	EndedAt        time.Time                       `json:"ended_at"`
 }
 
 type engineSummary struct {
@@ -698,6 +700,10 @@ func (w *worker) executeJob(ctx context.Context, j *scanJob) {
 	if err := w.reportSuccess(ctx, payload); err != nil {
 		w.logger.Error("report", "job_id", j.ID, "err", err)
 		w.setLastError(err.Error())
+		if failErr := w.reportFailure(ctx, j.ID, err.Error()); failErr != nil {
+			w.logger.Error("report failure after report error", "job_id", j.ID, "err", failErr)
+			w.setLastError(err.Error() + "; fail: " + failErr.Error())
+		}
 		return
 	}
 	w.setLastError("")

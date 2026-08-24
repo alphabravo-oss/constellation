@@ -31,6 +31,7 @@ type admissionRuleRowDTO struct {
 	Mode     string   `json:"mode"`
 	Action   string   `json:"action"`
 	Category string   `json:"category"`
+	Group    string   `json:"group,omitempty"`
 	Criteria []string `json:"criteria"`
 }
 
@@ -67,7 +68,7 @@ SELECT id, name, COALESCE(category,''), enabled, mode, COALESCE(spec_yaml,'')
 			return
 		}
 		d.ID = id.String()
-		d.Action, d.Criteria = summarizeAdmissionSpec(specYAML)
+		d.Action, d.Group, d.Criteria = summarizeAdmissionSpec(specYAML)
 		out = append(out, d)
 	}
 	if err := rows.Err(); err != nil {
@@ -84,6 +85,7 @@ SELECT id, name, COALESCE(category,''), enabled, mode, COALESCE(spec_yaml,'')
 type createAdmissionRuleBody struct {
 	Name     string `json:"name"`
 	Mode     string `json:"mode"` // monitor | enforce
+	Group    string `json:"group,omitempty"`
 	Criteria []struct {
 		Key   string `json:"key"`
 		Value string `json:"value"`
@@ -116,6 +118,18 @@ func (p *Policies) CreateAdmissionRule(w http.ResponseWriter, r *http.Request) {
 	if body.Mode != "enforce" {
 		body.Mode = "monitor"
 	}
+	body.Group = strings.TrimSpace(body.Group)
+	if body.Group != "" {
+		ok, err := p.admissionGroupExists(r.Context(), subj.OrgID, clusterArg, body.Group)
+		if err != nil {
+			jsonError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if !ok {
+			jsonError(w, http.StatusBadRequest, "group not found")
+			return
+		}
+	}
 	if len(body.Criteria) == 0 {
 		jsonError(w, http.StatusBadRequest, "at least one criterion is required")
 		return
@@ -147,7 +161,7 @@ VALUES ($1, $2, $3, '', 'constellation-admission', 'admission', $4, TRUE, $5) RE
 		_, _, _ = p.auditLog.Log(r.Context(), audit.Event{
 			OrgID: &oid, ActorID: &uid, Action: "admission.rule.create",
 			TargetKind: "admission-rule", TargetID: id.String(),
-			After: map[string]any{"name": body.Name, "mode": body.Mode},
+			After: map[string]any{"name": body.Name, "mode": body.Mode, "group": body.Group},
 		})
 	}
 	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"id": id.String(), "spec_yaml": specYAML})
@@ -163,6 +177,10 @@ func buildAdmissionSpecYAML(body createAdmissionRuleBody) (string, error) {
 	vuln := map[string]any{}
 	pod := map[string]any{}
 	var conditions []map[string]any
+
+	if group := strings.TrimSpace(body.Group); group != "" {
+		match["groups"] = []string{group}
+	}
 
 	csv := func(v string) []string {
 		out := []string{}
@@ -308,17 +326,18 @@ func buildAdmissionSpecYAML(body createAdmissionRuleBody) (string, error) {
 // summarizeAdmissionSpec turns a rule's YAML spec into a short, human criteria list so the
 // table reads like NeuVector's without the operator opening the YAML. Best-effort: an
 // unparseable spec yields an empty summary rather than an error.
-func summarizeAdmissionSpec(specYAML string) (action string, criteria []string) {
+func summarizeAdmissionSpec(specYAML string) (action string, group string, criteria []string) {
 	action = "deny"
 	criteria = []string{}
 	if strings.TrimSpace(specYAML) == "" {
-		return action, criteria
+		return action, group, criteria
 	}
 	var doc struct {
 		Spec struct {
 			Action string `yaml:"action"`
 			Match  struct {
 				Namespaces []string `yaml:"namespaces"`
+				Groups     []string `yaml:"groups"`
 			} `yaml:"match"`
 			Images struct {
 				DisallowLatestTag bool     `yaml:"disallowLatestTag"`
@@ -355,11 +374,23 @@ func summarizeAdmissionSpec(specYAML string) (action string, criteria []string) 
 		} `yaml:"spec"`
 	}
 	if err := yaml.Unmarshal([]byte(specYAML), &doc); err != nil {
-		return action, criteria
+		return action, group, criteria
 	}
 	s := doc.Spec
 	if strings.TrimSpace(s.Action) != "" {
 		action = strings.ToLower(s.Action)
+	}
+	if len(s.Match.Groups) > 0 {
+		groups := make([]string, 0, len(s.Match.Groups))
+		for _, value := range s.Match.Groups {
+			if value = strings.TrimSpace(value); value != "" {
+				groups = append(groups, value)
+			}
+		}
+		if len(groups) > 0 {
+			group = strings.Join(groups, ", ")
+			criteria = append(criteria, "group in "+group)
+		}
 	}
 	if len(s.Match.Namespaces) > 0 {
 		criteria = append(criteria, "namespace in "+strings.Join(s.Match.Namespaces, ", "))
@@ -413,5 +444,5 @@ func summarizeAdmissionSpec(specYAML string) (action string, criteria []string) 
 		criteria = append(criteria, "PSS "+strings.ToLower(s.PodSecurityStandard.Level))
 	}
 	sort.Strings(criteria)
-	return action, criteria
+	return action, group, criteria
 }

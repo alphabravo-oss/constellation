@@ -63,6 +63,29 @@ func TestBuildAdmissionSpecYAML_RejectsBadCVECount(t *testing.T) {
 	}
 }
 
+func TestBuildAdmissionSpecYAML_GroupRoundTrip(t *testing.T) {
+	body := bodyWith([2]string{"run_as_privileged", ""})
+	body.Group = "payments"
+	specYAML, err := buildAdmissionSpecYAML(body)
+	if err != nil {
+		t.Fatalf("buildAdmissionSpecYAML: %v", err)
+	}
+	rule, supported, err := admission.RuleFromYAML("t", "t", "", "enforce", specYAML)
+	if err != nil || !supported {
+		t.Fatalf("RuleFromYAML supported=%v err=%v\n%s", supported, err, specYAML)
+	}
+	if len(rule.Groups) != 1 || rule.Groups[0] != "payments" {
+		t.Fatalf("groups = %#v", rule.Groups)
+	}
+	action, groupName, criteria := summarizeAdmissionSpec(specYAML)
+	if action != "deny" || groupName != "payments" {
+		t.Fatalf("summary action=%q group=%q criteria=%v", action, groupName, criteria)
+	}
+	if !containsString(criteria, "group in payments") {
+		t.Fatalf("summary criteria missing group: %v", criteria)
+	}
+}
+
 // Every catalog key must have a builder case (the comment in admission_options.go
 // requires the two stay in lockstep).
 func TestAdmissionCatalogKeysHaveBuilderCases(t *testing.T) {
@@ -84,4 +107,13 @@ func TestAdmissionCatalogKeysHaveBuilderCases(t *testing.T) {
 			t.Errorf("catalog key %q has no builder case: %v", opt.Key, err)
 		}
 	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

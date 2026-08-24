@@ -11,6 +11,8 @@ import (
 
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
+	"github.com/alphabravocompany/constellation/pkg/audit"
+	"github.com/alphabravocompany/constellation/pkg/response"
 	"github.com/google/uuid"
 )
 
@@ -179,6 +181,102 @@ SELECT pkt_len FROM runtime_threats
 	}
 }
 
+func TestRuntimeThreats_V2SuppressLogSkipsThreatRow(t *testing.T) {
+	d := openTestDB(t)
+	defer d.Close()
+	ctx := context.Background()
+	pool := d.Pool()
+
+	var orgID uuid.UUID
+	if err := pool.QueryRow(ctx, `SELECT id FROM orgs ORDER BY created_at LIMIT 1`).Scan(&orgID); err != nil {
+		t.Skipf("no seed org: %v", err)
+	}
+	var clusterID uuid.UUID
+	_ = pool.QueryRow(ctx, `SELECT id FROM clusters WHERE org_id=$1 LIMIT 1`, orgID).Scan(&clusterID)
+	if clusterID == uuid.Nil {
+		t.Skip("no seed cluster")
+	}
+
+	tokenName := "threat-v2-suppress-" + uuid.New().String()
+	raw, _, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, tokenName, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workloadID := "payments/api-" + uuid.New().String()
+	ruleName := "threat-v2-suppress-" + uuid.New().String()
+	conds, _ := json.Marshal([]response.Condition{{Type: response.CondLevel, Value: "high"}})
+	acts, _ := json.Marshal([]response.Action{{Kind: response.ActionSuppressLog}})
+	sel, _ := json.Marshal(response.WorkloadSelector{})
+	var ruleID uuid.UUID
+	if err := pool.QueryRow(ctx, `
+INSERT INTO response_rules_v2 (org_id, name, description, enabled, event_type, conditions, actions, workload_match)
+VALUES ($1, $2, '', true, 'threat', $3, $4, $5) RETURNING id`,
+		orgID, ruleName, conds, acts, sel).Scan(&ruleID); err != nil {
+		t.Fatalf("insert response rule: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM runtime_agent_tokens WHERE name=$1`, tokenName)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM response_rules_v2 WHERE id=$1`, ruleID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM runtime_threats WHERE org_id=$1 AND workload_id=$2`, orgID, workloadID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM audit_events WHERE org_id=$1 AND target_id=$2`, orgID, workloadID)
+	})
+
+	body, _ := json.Marshal([]ThreatIngestRow{{
+		At:         time.Now().UTC(),
+		Node:       "threat-v2-suppress-node",
+		WorkloadID: workloadID,
+		Namespace:  "payments",
+		PodName:    "api",
+		ThreatID:   2022,
+		Severity:   4,
+		Msg:        "SQL injection pattern matched",
+		IPProto:    6,
+		SrcIP:      "10.42.0.5",
+		SrcPort:    49000,
+		DstIP:      "10.42.0.6",
+		DstPort:    8080,
+	}})
+
+	h := NewRuntimeThreats(d).
+		WithAudit(audit.New(pool)).
+		WithResponseEngine(NewResponseDispatch(d, nil)).
+		WithResponseDecision(NewResponseDecision(d))
+	req := httptest.NewRequest("POST", "/api/v1/runtime-threats:bulk", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+raw)
+	w := httptest.NewRecorder()
+	handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(h.Bulk)).ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	var res ThreatIngestResponse
+	_ = json.NewDecoder(w.Body).Decode(&res)
+	if res.Accepted != 0 || res.Alerts != 0 {
+		t.Fatalf("response accepted=%d alerts=%d, want 0/0 for suppressed threat", res.Accepted, res.Alerts)
+	}
+
+	var threatRows, alertRows int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM runtime_threats WHERE org_id=$1 AND workload_id=$2`, orgID, workloadID).Scan(&threatRows); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id=$1 AND target_id=$2 AND action='runtime.alert.dpi'`, orgID, workloadID).Scan(&alertRows); err != nil {
+		t.Fatal(err)
+	}
+	if threatRows != 0 || alertRows != 0 {
+		t.Fatalf("suppressed threat wrote runtime_threats=%d runtime_alert_audits=%d, want 0/0", threatRows, alertRows)
+	}
+	var enforced string
+	if err := pool.QueryRow(ctx, `
+SELECT COALESCE(after->>'enforced','')
+  FROM audit_events
+ WHERE org_id=$1 AND target_id=$2 AND action='response_rule_v2.action.suppress_log'`,
+		orgID, workloadID).Scan(&enforced); err != nil {
+		t.Fatalf("expected v2 suppress-log audit row: %v", err)
+	}
+	if enforced != "suppressed_log" {
+		t.Fatalf("v2 suppress-log enforced=%q want suppressed_log", enforced)
+	}
+}
+
 // TestThreatCategory pins the NeuVector-parity threat_id->category mapping that the
 // ?category= filter relies on: built-in IPS/IDS DPI signatures (incl. SQL_INJECTION 2022
 // and the flood detectors 1001-1003) are "ips" — NOT "waf"; DLP rules occupy [20000,40000)
@@ -295,6 +393,70 @@ func TestRuntimeThreats_CategoryFilter(t *testing.T) {
 	}
 	if got := listCategory("waf"); len(got) != 1 || got[0] != 40001 {
 		t.Errorf("category=waf returned %v, want [40001]", got)
+	}
+}
+
+func TestRuntimeThreats_GroupFilter(t *testing.T) {
+	d := openTestDB(t)
+	defer d.Close()
+	ctx := context.Background()
+	pool := d.Pool()
+
+	var orgID uuid.UUID
+	if err := pool.QueryRow(ctx, `SELECT id FROM orgs ORDER BY created_at LIMIT 1`).Scan(&orgID); err != nil {
+		t.Skipf("no seed org: %v", err)
+	}
+	var clusterID uuid.UUID
+	_ = pool.QueryRow(ctx, `SELECT id FROM clusters WHERE org_id=$1 LIMIT 1`, orgID).Scan(&clusterID)
+	if clusterID == uuid.Nil {
+		t.Skip("no seed cluster")
+	}
+
+	groupID := uuid.New()
+	groupName := "runtime-threats-" + uuid.New().String()
+	node := "group-threat-node-" + uuid.New().String()
+	memberWorkload := "payments/api-" + uuid.New().String()
+	otherWorkload := "inventory/api-" + uuid.New().String()
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM runtime_threats WHERE org_id=$1 AND node=$2`, orgID, node)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM groups WHERE id=$1`, groupID)
+	})
+	if _, err := pool.Exec(ctx, `
+INSERT INTO groups (id, org_id, cluster_id, name, kind, criteria, members, policy_mode, profile_mode)
+VALUES ($1, $2, $3, $4, 'ground', '[]'::jsonb, to_jsonb(ARRAY[$5::text]), 'monitor', 'monitor')`,
+		groupID, orgID, clusterID, groupName, memberWorkload); err != nil {
+		t.Fatalf("group: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+INSERT INTO runtime_threats
+  (org_id, cluster_id, node, workload_id, namespace, threat_id, severity, action, reported_at, at)
+VALUES
+  ($1, $2, $3, $4, 'payments', 2022, 7, 0, NOW(), NOW()),
+  ($1, $2, $3, $5, 'inventory', 2023, 6, 0, NOW(), NOW())`,
+		orgID, clusterID, node, memberWorkload, otherWorkload); err != nil {
+		t.Fatalf("threats: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/api/v1/runtime-threats?cluster_id="+clusterID.String()+"&group="+groupID.String(), nil)
+	req = req.WithContext(authctx.WithSubject(ctx, authctx.Subject{OrgID: orgID}))
+	rec := httptest.NewRecorder()
+	NewRuntimeThreats(d).List(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		Threats              []RuntimeThreatRow `json:"threats"`
+		SelectedGroup        string             `json:"selected_group"`
+		SelectedGroupMembers int                `json:"selected_group_members"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.SelectedGroup != groupName || got.SelectedGroupMembers != 1 {
+		t.Fatalf("selected group metadata = %+v", got)
+	}
+	if len(got.Threats) != 1 || got.Threats[0].WorkloadID != memberWorkload {
+		t.Fatalf("group-filtered threats = %+v", got.Threats)
 	}
 }
 

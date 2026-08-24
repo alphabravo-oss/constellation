@@ -10,6 +10,7 @@ import { Network as NetworkIcon, Check, Ban, Plus, Power, PowerOff, Trash2, Penc
 
 import { networkRules, type NetworkRule } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
+import { ImportExportButtons } from "@/components/ImportExportButtons";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { StatCard } from "@/components/ui/stat-card";
@@ -52,7 +53,7 @@ export function NetworkRulesPage() {
   });
   const editHref = (r: NetworkRule) =>
     `${clusterId ? `/clusters/${clusterId}` : ""}/network-rules/new?from=${encodeURIComponent(r.from)}&to=${encodeURIComponent(r.to)}&ports=${encodeURIComponent(r.ports)}&applications=${encodeURIComponent(r.applications.join(", "))}&action=${r.action}&comment=${encodeURIComponent(r.comment)}`;
-  const all = q.data?.rules ?? [];
+  const all = useMemo(() => q.data?.rules ?? [], [q.data?.rules]);
   const summary = q.data?.summary ?? { total: 0, allow: 0, deny: 0, learned: 0 };
   const rows = useMemo(() => {
     const n = search.trim().toLowerCase();
@@ -118,6 +119,15 @@ export function NetworkRulesPage() {
         description="The cluster's connectivity as an ordered allow/deny rule set, learned from observed conversations — NeuVector-style network policy."
         actions={
           <div className="flex items-center gap-2">
+            {clusterId ? (
+              <ImportExportButtons
+                filename="constellation-network-rules.yaml"
+                label="network rules"
+                exportYaml={() => networkRules.exportYaml(clusterId)}
+                importYaml={(text) => networkRules.importYaml(clusterId, text)}
+                onImported={() => void invalidate()}
+              />
+            ) : null}
             <button
               type="button"
               onClick={() => downloadCsv("constellation-network-rules", ["ID", "From", "To", "Applications", "Ports", "Action", "Type", "Matches"],

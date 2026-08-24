@@ -3,13 +3,16 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
+	"reflect"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler/netutil"
@@ -27,18 +30,28 @@ func NewGroups(d *db.DB, a *audit.Logger) *Groups {
 }
 
 type groupDTO struct {
-	ID          uuid.UUID         `json:"id"`
-	Name        string            `json:"name"`
-	Kind        group.Kind        `json:"kind"`
-	Comment     string            `json:"comment"`
-	Criteria    []group.Criterion `json:"criteria"`
-	Members     []string          `json:"members"`
-	LearnedFrom string            `json:"learned_from"`
-	CfgType     string            `json:"cfg_type"`
-	PolicyMode  group.Mode        `json:"policy_mode"`
-	ProfileMode group.Mode        `json:"profile_mode"`
-	CreatedAt   time.Time         `json:"created_at"`
-	UpdatedAt   time.Time         `json:"updated_at"`
+	ID          uuid.UUID          `json:"id"`
+	Name        string             `json:"name"`
+	Kind        group.Kind         `json:"kind"`
+	Comment     string             `json:"comment"`
+	Criteria    []group.Criterion  `json:"criteria"`
+	Members     []string           `json:"members"`
+	LearnedFrom string             `json:"learned_from"`
+	CfgType     string             `json:"cfg_type"`
+	PolicyMode  group.Mode         `json:"policy_mode"`
+	ProfileMode group.Mode         `json:"profile_mode"`
+	CreatedAt   time.Time          `json:"created_at"`
+	UpdatedAt   time.Time          `json:"updated_at"`
+	Membership  groupMembershipDTO `json:"membership"`
+}
+
+type groupMembershipDTO struct {
+	CriteriaCount     int        `json:"criteria_count"`
+	MemberCount       int        `json:"member_count"`
+	PolicyMode        group.Mode `json:"policy_mode"`
+	ProfileMode       group.Mode `json:"profile_mode"`
+	LastMatchedAt     *time.Time `json:"last_matched_at,omitempty"`
+	LastMatchedMember string     `json:"last_matched_member,omitempty"`
 }
 
 type groupBody struct {
@@ -171,9 +184,74 @@ SELECT id, name, kind, comment, criteria, members, learned_from, cfg_type, polic
 		}
 		_ = json.Unmarshal(criteria, &d.Criteria)
 		_ = json.Unmarshal(members, &d.Members)
+		d.Membership = groupMembershipDTO{
+			CriteriaCount: len(d.Criteria),
+			MemberCount:   len(d.Members),
+			PolicyMode:    d.PolicyMode,
+			ProfileMode:   d.ProfileMode,
+		}
 		out = append(out, d)
 	}
+	if err := h.attachMembershipPreviews(r.Context(), subj.OrgID, clusterArg, out); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"groups": out})
+}
+
+func (h *Groups) attachMembershipPreviews(ctx context.Context, orgID uuid.UUID, clusterArg any, groups []groupDTO) error {
+	if len(groups) == 0 {
+		return nil
+	}
+	rows, err := h.db.Pool().Query(ctx, `
+SELECT namespace, name, MAX(last_seen_at)
+  FROM deployments
+ WHERE org_id=$1 AND ($2::uuid IS NULL OR cluster_id = $2)
+ GROUP BY namespace, name`, orgID, clusterArg)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	type seen struct {
+		member string
+		at     time.Time
+	}
+	seenByMember := map[string]seen{}
+	for rows.Next() {
+		var namespace, name string
+		var lastSeen time.Time
+		if err := rows.Scan(&namespace, &name, &lastSeen); err != nil {
+			return err
+		}
+		member := namespace + "/" + name
+		seenByMember[member] = seen{member: member, at: lastSeen}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for i := range groups {
+		groups[i].Membership.CriteriaCount = len(groups[i].Criteria)
+		groups[i].Membership.MemberCount = len(groups[i].Members)
+		groups[i].Membership.PolicyMode = groups[i].PolicyMode
+		groups[i].Membership.ProfileMode = groups[i].ProfileMode
+		var latest *seen
+		for _, member := range groups[i].Members {
+			candidate, ok := seenByMember[member]
+			if !ok {
+				continue
+			}
+			if latest == nil || candidate.at.After(latest.at) {
+				next := candidate
+				latest = &next
+			}
+		}
+		if latest != nil {
+			at := latest.at
+			groups[i].Membership.LastMatchedAt = &at
+			groups[i].Membership.LastMatchedMember = latest.member
+		}
+	}
+	return nil
 }
 
 // serviceModeDefaults returns the cluster's configured new-service default modes (NV
@@ -261,7 +339,7 @@ func (h *Groups) Update(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
-	g := &group.Group{Name: body.Name, Kind: body.Kind, Comment: body.Comment,
+	g := &group.Group{Name: strings.TrimSpace(body.Name), Kind: body.Kind, Comment: body.Comment,
 		Criteria: body.Criteria, LearnedFrom: body.LearnedFrom, CfgType: body.CfgType,
 		PolicyMode: body.PolicyMode, ProfileMode: body.ProfileMode}
 	if err := g.Validate(); err != nil {
@@ -283,17 +361,59 @@ func (h *Groups) Update(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	memberIDs, err := h.computeMembers(r, subj.OrgID, clusterArg, g)
-	if err != nil {
+	var currentName, currentLearnedFrom, currentCfgType string
+	var currentKind group.Kind
+	var currentCriteriaRaw, currentMembersRaw []byte
+	if err := h.db.Pool().QueryRow(r.Context(), `
+SELECT name, kind, criteria, members, learned_from, cfg_type
+  FROM groups
+ WHERE id=$1
+   AND org_id=$2
+   AND ($3::uuid IS NULL OR cluster_id IS NULL OR cluster_id = $3)`,
+		id, subj.OrgID, clusterArg).Scan(&currentName, &currentKind, &currentCriteriaRaw, &currentMembersRaw, &currentLearnedFrom, &currentCfgType); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
+	}
+	var currentMembers []string
+	_ = json.Unmarshal(currentMembersRaw, &currentMembers)
+	memberIDs := normalizeGroupMembers(currentMembers)
+	changedFields := groupReferenceSensitiveChanges(currentName, currentKind, currentCriteriaRaw, currentLearnedFrom, currentCfgType, g)
+	if stringSetContains(changedFields, "criteria") {
+		memberIDs, err = h.computeMembers(r, subj.OrgID, clusterArg, g)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		memberIDs = normalizeGroupMembers(memberIDs)
+		if (&group.Group{Members: normalizeGroupMembers(currentMembers)}).MembersChanged(memberIDs) {
+			changedFields = append(changedFields, "members")
+		}
+	}
+	if len(changedFields) > 0 {
+		blockingRefs, err := h.groupBlockingReferenceCount(r.Context(), subj.OrgID, clusterArg, id, currentName)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if blockingRefs > 0 {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error":               "group has policy references",
+				"blocking_references": blockingRefs,
+				"changed_fields":      changedFields,
+			})
+			return
+		}
 	}
 	criteria, _ := json.Marshal(body.Criteria)
 	members, _ := json.Marshal(memberIDs)
 	tag, err := h.db.Pool().Exec(r.Context(), `
 UPDATE groups SET name=$1, kind=$2, comment=$3, criteria=$4, members=$5, learned_from=$6, cfg_type=$7, policy_mode=$8, profile_mode=$9, updated_at=NOW()
  WHERE id=$10 AND org_id=$11`,
-		body.Name, body.Kind, body.Comment, criteria, members, body.LearnedFrom, body.CfgType, g.PolicyMode, g.ProfileMode, id, subj.OrgID)
+		g.Name, body.Kind, body.Comment, criteria, members, body.LearnedFrom, body.CfgType, g.PolicyMode, g.ProfileMode, id, subj.OrgID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -308,8 +428,49 @@ UPDATE groups SET name=$1, kind=$2, comment=$3, criteria=$4, members=$5, learned
 	_, _, _ = h.auditLog.Log(r.Context(), audit.Event{OrgID: &oid, ActorID: &uid,
 		Action: "group.update", TargetKind: "group", TargetID: id.String()})
 	logFedRevision(r.Context(), h.db.Pool(), oid, "group", id.String(), fedSyncPayload{
-		OrgID: oid, Name: body.Name, Comment: body.Comment, Criteria: json.RawMessage(criteria)})
+		OrgID: oid, Name: g.Name, Comment: body.Comment, Criteria: json.RawMessage(criteria)})
 	writeJSON(w, http.StatusOK, map[string]any{"id": id})
+}
+
+func groupReferenceSensitiveChanges(currentName string, currentKind group.Kind, currentCriteriaRaw []byte, currentLearnedFrom, currentCfgType string, next *group.Group) []string {
+	changes := []string{}
+	if currentName != strings.TrimSpace(next.Name) {
+		changes = append(changes, "name")
+	}
+	if currentKind != next.Kind {
+		changes = append(changes, "kind")
+	}
+	if currentLearnedFrom != next.LearnedFrom {
+		changes = append(changes, "learned_from")
+	}
+	if currentCfgType != next.CfgType {
+		changes = append(changes, "cfg_type")
+	}
+	var currentCriteria []group.Criterion
+	if err := json.Unmarshal(currentCriteriaRaw, &currentCriteria); err != nil || !reflect.DeepEqual(normalizeGroupCriteria(currentCriteria), normalizeGroupCriteria(next.Criteria)) {
+		changes = append(changes, "criteria")
+	}
+	return changes
+}
+
+func stringSetContains(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeGroupCriteria(in []group.Criterion) []group.Criterion {
+	out := make([]group.Criterion, len(in))
+	copy(out, in)
+	for i := range out {
+		if out[i].Op == "" {
+			out[i].Op = group.OpEq
+		}
+	}
+	return out
 }
 
 func (h *Groups) Delete(w http.ResponseWriter, r *http.Request) {
@@ -330,6 +491,18 @@ func (h *Groups) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 	if cfgType == "fed" {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": errFedReadOnly.Error()})
+		return
+	}
+	blockingRefs, err := h.groupBlockingReferenceCount(r.Context(), subj.OrgID, nil, id, name)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if blockingRefs > 0 {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error":               "group has policy references",
+			"blocking_references": blockingRefs,
+		})
 		return
 	}
 	if _, err := h.db.Pool().Exec(r.Context(), `DELETE FROM groups WHERE id=$1 AND org_id=$2`, id, subj.OrgID); err != nil {

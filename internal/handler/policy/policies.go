@@ -408,7 +408,12 @@ func (p *Policies) Simulate(w http.ResponseWriter, r *http.Request) {
 	if p.db != nil {
 		evidence = admissionevidence.New(p.db.Pool(), subj.OrgID)
 	}
-	matches := evaluateAdmissionPolicies(r.Context(), workload, manifest, policies, evidence, clusterArg)
+	groupResolver, err := p.admissionGroupResolver(r.Context(), subj.OrgID, clusterArg)
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	matches := evaluateAdmissionPolicies(r.Context(), workload, manifest, policies, evidence, groupResolver, clusterArg)
 	decision, mode := admissionDecision(matches)
 	httpx.WriteJSON(w, http.StatusOK, admissionSimulationResponseDTO{
 		Decision:        decision,
@@ -672,7 +677,7 @@ func nestedMap(source map[string]any, path ...string) (map[string]any, bool) {
 	return current, true
 }
 
-func evaluateAdmissionPolicies(ctx context.Context, workload admissionSimulationWorkloadDTO, manifest string, policies []policyDTO, evidence constadmission.EvidenceSource, clusterArg any) []admissionSimulationMatchDTO {
+func evaluateAdmissionPolicies(ctx context.Context, workload admissionSimulationWorkloadDTO, manifest string, policies []policyDTO, evidence constadmission.EvidenceSource, groupResolver constadmission.GroupResolver, clusterArg any) []admissionSimulationMatchDTO {
 	pod, podSource, podErr := admissionSimulationPodFromManifest(manifest)
 	matches := []admissionSimulationMatchDTO{}
 	for _, policy := range policies {
@@ -692,6 +697,9 @@ func evaluateAdmissionPolicies(ctx context.Context, workload admissionSimulation
 		evidenceDetails := []admissionSimulationEvidenceDetailDTO{}
 		if podErr == nil {
 			engine := &constadmission.PolicyEngine{Rules: []constadmission.Rule{rule}, Evidence: evidence}
+			if groupResolver != nil {
+				engine.SetGroupResolver(groupResolver)
+			}
 			resp := engine.Evaluate(ctx, admissionSimulationReviewForPod(pod))
 			switch {
 			case !resp.Allowed:

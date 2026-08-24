@@ -30,7 +30,7 @@ func TestImageLinkFieldsForRefsPreservesOrder(t *testing.T) {
 	}
 }
 
-func TestPodStatusImageRefsIncludesRuntimeDigests(t *testing.T) {
+func TestPodStatusImageRefsExcludeRuntimeImageIDs(t *testing.T) {
 	pod := corev1.Pod{Status: corev1.PodStatus{
 		ContainerStatuses: []corev1.ContainerStatus{{
 			Image:   "ghcr.io/acme/api:dev",
@@ -43,9 +43,7 @@ func TestPodStatusImageRefsIncludesRuntimeDigests(t *testing.T) {
 	got := podStatusImageRefs(pod)
 	want := []string{
 		"ghcr.io/acme/api:dev",
-		"ghcr.io/acme/api@sha256:runtime",
 		"localhost/sidecar:dev",
-		"sha256:localonly",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("podStatusImageRefs = %#v, want %#v", got, want)

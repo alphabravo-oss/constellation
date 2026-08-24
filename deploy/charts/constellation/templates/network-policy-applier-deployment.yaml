@@ -12,6 +12,7 @@ metadata:
   labels: {{- include "constellation.labels" . | nindent 4 }}
     app.kubernetes.io/component: network-policy-applier
 spec:
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
   replicas: {{ .Values.networkPolicyApplier.replicas }}
   selector:
     matchLabels:

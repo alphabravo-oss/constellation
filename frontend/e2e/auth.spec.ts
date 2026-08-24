@@ -13,7 +13,7 @@ test.describe("Authentication", () => {
   test("rejects bad credentials", async ({ page }) => {
     await page.goto("/auth/login");
     await page.getByLabel("Email").fill(EMAIL);
-    await page.getByLabel("Password").fill("wrong-password");
+    await page.getByLabel("Password", { exact: true }).fill("wrong-password");
     await page.getByRole("button", { name: /^Sign in$/ }).click();
     await expect(page).toHaveURL(/\/auth\/login/);
     // Sonner toast appears with error
@@ -23,10 +23,11 @@ test.describe("Authentication", () => {
   test("local login lands on clusters", async ({ page }) => {
     await page.goto("/auth/login");
     await page.getByLabel("Email").fill(EMAIL);
-    await page.getByLabel("Password").fill(PASSWORD);
+    await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
     await page.getByRole("button", { name: /^Sign in$/ }).click();
     await expect(page).toHaveURL(/\/clusters/);
     await expect(page.getByRole("heading", { name: /^Clusters$/i })).toBeVisible();
+    await page.getByLabel("User menu").click();
     await expect(page.getByText(EMAIL)).toBeVisible();
     await expect(page.getByText(/GlobalAdmin/)).toBeVisible();
   });

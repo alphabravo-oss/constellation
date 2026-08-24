@@ -63,6 +63,8 @@ type findingDTO struct {
 	AffectedRange       *scanner.AffectedRange         `json:"affected_range,omitempty"`
 	VulnDBBundle        *scanner.BundleMetadata        `json:"vulndb_bundle,omitempty"`
 	CVSS                float64                        `json:"cvss,omitempty"`
+	CVSSBase            float64                        `json:"cvss_base,omitempty"`
+	CVSSVector          string                         `json:"cvss_vector,omitempty"`
 	KEV                 bool                           `json:"kev,omitempty"`
 	EPSS                float64                        `json:"epss,omitempty"`
 }
@@ -123,7 +125,7 @@ SELECT id, kind, external_id, title, severity, risk_score, lifecycle, asset_id, 
    -- deduped/named/cross-engine-merged representation. The 'workload' rows are a second
    -- copy of the same CVEs that only power the Deployment detail page; counting them here
    -- double-counted every vuln. See dashboard.go + findings_by_cve.go (same exclusion).
-   AND NOT (kind = 'vulnerability' AND target_type = 'workload')`+extraWhere+`
+   AND (kind <> 'vulnerability' OR COALESCE(target_type, '') <> 'workload')`+extraWhere+`
  ORDER BY risk_score DESC, last_seen_at DESC
  LIMIT $`+strconv.Itoa(len(args)-1)+` OFFSET $`+strconv.Itoa(len(args)), args...)
 	if err != nil {
@@ -156,7 +158,7 @@ SELECT lifecycle, count(*)
  WHERE org_id = $1
    AND ($2::text = '' OR kind = $2)
    AND ($3::uuid IS NULL OR cluster_id = $3)
-   AND NOT (kind = 'vulnerability' AND target_type = 'workload')
+   AND (kind <> 'vulnerability' OR COALESCE(target_type, '') <> 'workload')
  GROUP BY lifecycle`, subj.OrgID, kind, clusterArg)
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -256,7 +258,42 @@ SELECT id, kind, external_id, title, severity, risk_score, lifecycle, asset_id,
 	if d.VulnDBBundle != nil {
 		out["vulndb_bundle"] = d.VulnDBBundle
 	}
+	if d.CVSSBase > 0 {
+		out["cvss"] = d.CVSSBase
+		out["cvss_base"] = d.CVSSBase
+	}
+	if d.CVSSVector != "" {
+		out["cvss_vector"] = d.CVSSVector
+	}
+	if d.KEV {
+		out["kev"] = d.KEV
+	}
+	if d.EPSS > 0 {
+		out["epss"] = d.EPSS
+	}
 	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+type tolerantJSONFloat float64
+
+func (n *tolerantJSONFloat) UnmarshalJSON(b []byte) error {
+	s := strings.TrimSpace(string(b))
+	if s == "" || s == "null" || s == `""` {
+		return nil
+	}
+	if strings.HasPrefix(s, `"`) {
+		var text string
+		if err := json.Unmarshal(b, &text); err != nil {
+			return nil
+		}
+		s = strings.TrimSpace(text)
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return nil
+	}
+	*n = tolerantJSONFloat(v)
+	return nil
 }
 
 func hydrateFindingProvenance(d *findingDTO, enginesRaw, detailRaw []byte) {
@@ -270,7 +307,8 @@ func hydrateFindingProvenance(d *findingDTO, enginesRaw, detailRaw []byte) {
 		FixedVersion    string                         `json:"fixed"`
 		AffectedRange   *scanner.AffectedRange         `json:"affected_range"`
 		VulnDBBundle    *scanner.BundleMetadata        `json:"vulndb_bundle"`
-		CVSSBase        float64                        `json:"cvss_base"`
+		CVSSBase        tolerantJSONFloat              `json:"cvss_base"`
+		CVSSVector      string                         `json:"cvss_vector"`
 		KEV             bool                           `json:"kev"`
 		EPSS            float64                        `json:"epss"`
 	}
@@ -303,7 +341,9 @@ func hydrateFindingProvenance(d *findingDTO, enginesRaw, detailRaw []byte) {
 		}
 	}
 	d.VulnDBBundle = detail.VulnDBBundle
-	d.CVSS = detail.CVSSBase
+	d.CVSSBase = float64(detail.CVSSBase)
+	d.CVSS = d.CVSSBase
+	d.CVSSVector = detail.CVSSVector
 	d.KEV = detail.KEV
 	d.EPSS = detail.EPSS
 }

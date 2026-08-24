@@ -93,13 +93,22 @@ func (a *Assets) List(w http.ResponseWriter, r *http.Request) {
                JOIN image_scan_findings f ON f.image_scan_result_id = lir.id
               GROUP BY lir.asset_id
            ), sbom_rollup AS (
-             SELECT lir.asset_id, count(*)::int AS sbom_count
-               FROM latest_image_results lir
-               JOIN image_scan_artifacts a
-                 ON a.org_id = lir.org_id
-                AND a.image_scan_result_id = lir.id
-                AND a.artifact_type = 'sbom'
-              GROUP BY lir.asset_id
+             SELECT asset_id, count(DISTINCT format)::int AS sbom_count
+               FROM (
+                 SELECT lir.asset_id, a.format
+                   FROM latest_image_results lir
+                   JOIN image_scan_artifacts a
+                     ON a.org_id = lir.org_id
+                    AND a.image_scan_result_id = lir.id
+                    AND a.artifact_type = 'sbom'
+                 UNION ALL
+                 SELECT d.asset_id, d.format
+                   FROM sbom_documents d
+                   JOIN assets da ON da.id = d.asset_id
+                  WHERE da.org_id = $1
+                    AND ($2::uuid IS NULL OR da.cluster_id = $2)
+               ) sb
+              GROUP BY asset_id
            )
            SELECT a.id, a.kind, a.name, a.digest, a.labels, a.ai_workload, a.criticality,
                   COALESCE(fr.finding_count, 0), COALESCE(fr.critical_findings, 0),
@@ -216,28 +225,27 @@ SELECT id
 				}
 			}
 		}
-	} else {
-		rows, err := a.db.Pool().Query(r.Context(), `
+	}
+	rows, err := a.db.Pool().Query(r.Context(), `
 SELECT id, kind, external_id, title, severity, risk_score, lifecycle, last_seen_at
   FROM findings
  WHERE org_id = $1 AND asset_id = $2
  ORDER BY risk_score DESC, last_seen_at DESC
  LIMIT 100`, subj.OrgID, id)
-		if err == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var (
-					fid, kind, externalID, title, severity, lifecycle string
-					risk                                              int
-					lastSeen                                          time.Time
-				)
-				if err := rows.Scan(&fid, &kind, &externalID, &title, &severity, &risk, &lifecycle, &lastSeen); err == nil {
-					findings = append(findings, map[string]any{
-						"id": fid, "kind": kind, "external_id": externalID, "title": title,
-						"severity": severity, "risk_score": risk, "lifecycle": lifecycle,
-						"last_seen_at": lastSeen.UTC().Format(time.RFC3339),
-					})
-				}
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var (
+				fid, kind, externalID, title, severity, lifecycle string
+				risk                                              int
+				lastSeen                                          time.Time
+			)
+			if err := rows.Scan(&fid, &kind, &externalID, &title, &severity, &risk, &lifecycle, &lastSeen); err == nil {
+				findings = append(findings, map[string]any{
+					"id": fid, "kind": kind, "external_id": externalID, "title": title,
+					"severity": severity, "risk_score": risk, "lifecycle": lifecycle,
+					"last_seen_at": lastSeen.UTC().Format(time.RFC3339),
+				})
 			}
 		}
 	}
@@ -263,15 +271,29 @@ SELECT registry, repository, COALESCE(tag,''), digest, layers, architectures, si
 
 	sboms := []map[string]any{}
 	sbomRows, err := a.db.Pool().Query(r.Context(), `
-SELECT a.id, a.format, a.sha256, a.created_at
-  FROM image_scan_results r
-  JOIN image_scan_artifacts a
-    ON a.org_id = r.org_id
-   AND a.image_scan_result_id = r.id
- WHERE r.org_id = $1
-   AND r.asset_id = $2
-   AND a.artifact_type = 'sbom'
- ORDER BY r.last_scanned_at DESC, a.created_at DESC`, subj.OrgID, id)
+SELECT id, format, sha256, created_at
+  FROM (
+        SELECT DISTINCT ON (format)
+               id, format, sha256, created_at, source_priority
+          FROM (
+                SELECT a.id::text AS id, a.format, a.sha256, a.created_at, 0 AS source_priority
+                  FROM image_scan_results r
+                  JOIN image_scan_artifacts a
+                    ON a.org_id = r.org_id
+                   AND a.image_scan_result_id = r.id
+                 WHERE r.org_id = $1
+                   AND r.asset_id = $2
+                   AND a.artifact_type = 'sbom'
+                UNION ALL
+                SELECT d.id::text AS id, d.format, d.sha256, d.created_at, 1 AS source_priority
+                  FROM sbom_documents d
+                  JOIN assets da ON da.id = d.asset_id
+                 WHERE da.org_id = $1
+                   AND d.asset_id = $2
+               ) sb
+         ORDER BY format, source_priority, created_at DESC
+       ) latest_by_format
+ ORDER BY created_at DESC`, subj.OrgID, id)
 	if err == nil {
 		defer sbomRows.Close()
 		for sbomRows.Next() {

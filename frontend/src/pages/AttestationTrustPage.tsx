@@ -34,7 +34,7 @@ export function AttestationTrustPage() {
     queryKey: ["attestation-trust-policies"],
     queryFn: () => repositoryScanAttestationTrustPolicies.list(),
   });
-  const policies = policiesQ.data?.policies ?? [];
+  const policies = useMemo(() => policiesQ.data?.policies ?? [], [policiesQ.data?.policies]);
   const stats = useMemo(() => summarizePolicies(policies), [policies]);
 
   const quickUpdate = useMutation({
@@ -45,7 +45,7 @@ export function AttestationTrustPage() {
       void qc.invalidateQueries({ queryKey: ["attestation-trust-policies"] });
       void qc.invalidateQueries({ queryKey: ["repository-scans"] });
     },
-    onError: (err: any) => toast.error(`Update failed: ${errorMessage(err)}`),
+    onError: (err: unknown) => toast.error(`Update failed: ${errorMessage(err)}`),
   });
 
   const removePolicy = useMutation({
@@ -55,7 +55,7 @@ export function AttestationTrustPage() {
       void qc.invalidateQueries({ queryKey: ["attestation-trust-policies"] });
       void qc.invalidateQueries({ queryKey: ["repository-scans"] });
     },
-    onError: (err: any) => toast.error(`Delete failed: ${errorMessage(err)}`),
+    onError: (err: unknown) => toast.error(`Delete failed: ${errorMessage(err)}`),
   });
 
   const verifyPending = useMutation({
@@ -65,7 +65,7 @@ export function AttestationTrustPage() {
       void qc.invalidateQueries({ queryKey: ["attestation-trust-policies"] });
       void qc.invalidateQueries({ queryKey: ["repository-scans"] });
     },
-    onError: (err: any) => toast.error(`Verification failed: ${errorMessage(err)}`),
+    onError: (err: unknown) => toast.error(`Verification failed: ${errorMessage(err)}`),
   });
 
   const busy = quickUpdate.isPending || removePolicy.isPending || verifyPending.isPending;
@@ -360,6 +360,7 @@ function firstOrCount(values: string[]): string {
   return `${values[0]} +${values.length - 1}`;
 }
 
-function errorMessage(err: any): string {
-  return String(err?.response?.data ?? err?.message ?? err);
+function errorMessage(err: unknown): string {
+  const typed = err as { response?: { data?: unknown }; message?: string };
+  return String(typed.response?.data ?? typed.message ?? err);
 }

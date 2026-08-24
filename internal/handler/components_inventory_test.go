@@ -193,7 +193,7 @@ INSERT INTO component_heartbeats (
 	if config["vulndb.bundle_version"].Value != "fixture" {
 		t.Fatalf("diagnostic config = %+v", diag.Config)
 	}
-	if len(diag.Debug.Notes) == 0 || diag.Debug.ProfilingEnabled || diag.Debug.LiveLogsEnabled || diag.Debug.SupportBundleEnabled {
+	if len(diag.Debug.Notes) == 0 || diag.Debug.ProfilingEnabled || diag.Debug.LiveLogsEnabled || !diag.Debug.SupportBundleEnabled {
 		t.Fatalf("debug gates = %+v", diag.Debug)
 	}
 

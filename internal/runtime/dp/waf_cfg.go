@@ -43,7 +43,7 @@ const (
 // detection on the SESSION'S policy id (key.rid = sess->policy_desc.id), NOT on the
 // signature id — see dpi_search.c dpi_waf_ep_policy_check :777-785 / dpi_dlp_ep_policy_check
 // :844-852. Every default east-west session to a tapped workload (host->pod, pod->pod,
-// any tuple with no positive pushed rule; our merged policy DefAction=Allow) carries
+// any tuple with no positive pushed rule, regardless of the default action) carries
 // sess->policy_desc.id==0 (dpi_policy.c). We therefore run the cfg in OUTSIDE ruletype —
 // whose branch has NO east-west exclusion and scans iff rcu_map_lookup(rid_map,{rid:0})
 // hits — and bind exactly {0}. ctrl.c inserts key{rid:0} verbatim (0 is not skipped), so

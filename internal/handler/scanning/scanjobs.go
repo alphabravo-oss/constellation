@@ -122,6 +122,19 @@ type JobView struct {
 	FinishedAt          *time.Time              `json:"finished_at,omitempty"`
 }
 
+type AttemptView struct {
+	ID             uuid.UUID  `json:"id"`
+	JobID          uuid.UUID  `json:"job_id"`
+	AttemptNumber  int        `json:"attempt_number"`
+	WorkerID       string     `json:"worker_id,omitempty"`
+	Status         string     `json:"status"`
+	Error          string     `json:"error,omitempty"`
+	StartedAt      time.Time  `json:"started_at"`
+	FinishedAt     *time.Time `json:"finished_at,omitempty"`
+	NextAttemptAt  *time.Time `json:"next_attempt_at,omitempty"`
+	LeaseExpiresAt *time.Time `json:"lease_expires_at,omitempty"`
+}
+
 type scanStatusDTO struct {
 	Scanned         int    `json:"scanned"`
 	Scheduled       int    `json:"scheduled"`
@@ -134,20 +147,20 @@ type scanStatusDTO struct {
 }
 
 type completeScanRequest struct {
-	ImageRef       string                       `json:"image_ref,omitempty"`
-	ImageDigest    string                       `json:"image_digest,omitempty"`
-	Platform       string                       `json:"platform,omitempty"`
-	ScannerProfile string                       `json:"scanner_profile,omitempty"`
-	PackageCount   int                          `json:"package_count"`
-	Packages       []scanner.Package            `json:"packages,omitempty"`
-	Secrets        []scanner.SecretFinding      `json:"secrets,omitempty"`
-	Signature      *scanner.SignatureResult     `json:"signature,omitempty"`
-	Layers         *scanner.ImageLayerMetadata  `json:"layers,omitempty"`
-	FileRisks      *scanner.ImageFileRiskReport `json:"file_risks,omitempty"`
+	ImageRef       string                          `json:"image_ref,omitempty"`
+	ImageDigest    string                          `json:"image_digest,omitempty"`
+	Platform       string                          `json:"platform,omitempty"`
+	ScannerProfile string                          `json:"scanner_profile,omitempty"`
+	PackageCount   int                             `json:"package_count"`
+	Packages       []scanner.Package               `json:"packages,omitempty"`
+	Secrets        []scanner.SecretFinding         `json:"secrets,omitempty"`
+	Signature      *scanner.SignatureResult        `json:"signature,omitempty"`
+	Layers         *scanner.ImageLayerMetadata     `json:"layers,omitempty"`
+	FileRisks      *scanner.ImageFileRiskReport    `json:"file_risks,omitempty"`
 	ConfigChecks   *scanner.ImageConfigCheckReport `json:"config_checks,omitempty"`
-	Findings       []scanner.Finding            `json:"findings"`
-	Engines        []completeScanEngine         `json:"engines,omitempty"`
-	BundleMetadata *scanner.BundleMetadata      `json:"bundle_metadata,omitempty"`
+	Findings       []scanner.Finding               `json:"findings"`
+	Engines        []completeScanEngine            `json:"engines,omitempty"`
+	BundleMetadata *scanner.BundleMetadata         `json:"bundle_metadata,omitempty"`
 }
 
 type completeScanEngine struct {
@@ -420,6 +433,56 @@ SELECT sj.id, sj.org_id, st.id, st.type, st.ref, st.cluster_id,
 	httpx.WriteJSON(w, 200, map[string]any{"jobs": out, "queue_metrics": metrics})
 }
 
+// Attempts returns the persisted per-attempt ledger for one scan job.
+func (h *ScanJobs) Attempts(w http.ResponseWriter, r *http.Request) {
+	subj, ok := authctx.SubjectFrom(r.Context())
+	if !ok {
+		jsonError(w, http.StatusUnauthorized, "no subject")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, "invalid job id")
+		return
+	}
+	var exists bool
+	if err := h.db.Pool().QueryRow(r.Context(), `
+SELECT EXISTS (SELECT 1 FROM scan_jobs WHERE id = $1 AND org_id = $2)`, id, subj.OrgID).Scan(&exists); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !exists {
+		jsonError(w, http.StatusNotFound, "job not found")
+		return
+	}
+	rows, err := h.db.Pool().Query(r.Context(), `
+SELECT id, job_id, attempt_number, COALESCE(worker_id, ''), status, COALESCE(error, ''),
+       started_at, finished_at, next_attempt_at, lease_expires_at
+  FROM scan_job_attempts
+ WHERE org_id = $1 AND job_id = $2
+ ORDER BY attempt_number ASC`, subj.OrgID, id)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer rows.Close()
+	out := []AttemptView{}
+	for rows.Next() {
+		var attempt AttemptView
+		if err := rows.Scan(&attempt.ID, &attempt.JobID, &attempt.AttemptNumber, &attempt.WorkerID, &attempt.Status, &attempt.Error,
+			&attempt.StartedAt, &attempt.FinishedAt, &attempt.NextAttemptAt, &attempt.LeaseExpiresAt); err != nil {
+			jsonError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		out = append(out, attempt)
+	}
+	if err := rows.Err(); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"attempts": out})
+}
+
 // Status returns NeuVector-style aggregate scan lifecycle status for the caller's org.
 func (h *ScanJobs) Status(w http.ResponseWriter, r *http.Request) {
 	subj, ok := authctx.SubjectFrom(r.Context())
@@ -531,6 +594,21 @@ UPDATE scan_jobs sj
     LIMIT 1
  )
  RETURNING sj.*
+),
+attempt AS (
+ INSERT INTO scan_job_attempts (org_id, job_id, attempt_number, worker_id, status, started_at, lease_expires_at)
+ SELECT c.org_id, c.id, COALESCE(c.attempt_count, 0), COALESCE(c.worker_id, ''), 'running',
+        COALESCE(c.claimed_at, NOW()), c.lease_expires_at
+   FROM claimed c
+ ON CONFLICT (job_id, attempt_number) DO UPDATE
+    SET worker_id = EXCLUDED.worker_id,
+        status = 'running',
+        error = NULL,
+        started_at = EXCLUDED.started_at,
+        finished_at = NULL,
+        next_attempt_at = NULL,
+        lease_expires_at = EXCLUDED.lease_expires_at
+ RETURNING job_id
 )
 SELECT c.id, c.org_id, st.id, c.lease_expires_at,
        COALESCE(c.attempt_count, 0), COALESCE(c.max_attempts, 3),
@@ -539,6 +617,7 @@ SELECT c.id, c.org_id, st.id, c.lease_expires_at,
        st.source_type, COALESCE(st.source_ref, ''), COALESCE(st.image_digest, ''), COALESCE(st.inventory_hash, ''),
        ev.id
   FROM claimed c
+  JOIN attempt a ON a.job_id = c.id
   JOIN scan_targets st ON st.id = c.target_id
   LEFT JOIN LATERAL (
       SELECT id
@@ -673,6 +752,8 @@ func (h *ScanJobs) Complete(w http.ResponseWriter, r *http.Request) {
 		orgID                  uuid.UUID
 		status                 string
 		workerID               string
+		attemptCount           int
+		claimedAt              *time.Time
 		jobVulnDBBundleVersion string
 		target                 handler.ScanTarget
 	)
@@ -680,6 +761,8 @@ func (h *ScanJobs) Complete(w http.ResponseWriter, r *http.Request) {
 		`SELECT sj.org_id,
 		        sj.status,
 		        COALESCE(sj.worker_id, ''),
+		        COALESCE(sj.attempt_count, 0),
+		        sj.claimed_at,
 		        COALESCE(sj.vulndb_bundle_version, ''),
 		        st.id, st.org_id, st.cluster_id, st.type, st.ref, st.source_type,
 		        COALESCE(st.source_ref, ''), COALESCE(st.image_ref, ''),
@@ -690,7 +773,7 @@ func (h *ScanJobs) Complete(w http.ResponseWriter, r *http.Request) {
 		   JOIN scan_targets st ON st.id = sj.target_id
 		  WHERE sj.id = $1
 		  FOR UPDATE OF sj`, id,
-	).Scan(&orgID, &status, &workerID, &jobVulnDBBundleVersion,
+	).Scan(&orgID, &status, &workerID, &attemptCount, &claimedAt, &jobVulnDBBundleVersion,
 		&target.ID, &target.OrgID, &target.ClusterID, &target.Type, &target.Ref, &target.SourceType,
 		&target.SourceRef, &target.ImageRef, &target.ImageDigest, &target.RegistryID, &target.Platform, &target.InventoryHash); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -926,6 +1009,28 @@ UPDATE scan_targets
 	       finished_at      = NOW(),
 	       lease_expires_at = NULL
 	 WHERE id = $4`, body.PackageCount, len(body.Findings), bundleMetadataJSON, id); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	startedAt := time.Now().UTC()
+	if claimedAt != nil {
+		startedAt = *claimedAt
+	}
+	if attemptCount <= 0 {
+		attemptCount = 1
+	}
+	if _, err := tx.Exec(r.Context(), `
+INSERT INTO scan_job_attempts (org_id, job_id, attempt_number, worker_id, status, started_at, finished_at)
+VALUES ($1, $2, $3, $4, 'completed', $5, NOW())
+ON CONFLICT (job_id, attempt_number) DO UPDATE
+   SET worker_id = EXCLUDED.worker_id,
+       status = 'completed',
+       error = NULL,
+       finished_at = NOW(),
+       next_attempt_at = NULL,
+       lease_expires_at = NULL`,
+		orgID, id, attemptCount, workerID, startedAt); err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -2144,7 +2249,7 @@ func (h *ScanJobs) Fail(w http.ResponseWriter, r *http.Request) {
 	)
 	if err := h.db.Pool().QueryRow(r.Context(), `
 WITH current_job AS (
-	SELECT id, COALESCE(attempt_count, 0) AS attempt_count, COALESCE(max_attempts, 3) AS max_attempts
+	SELECT id, claimed_at, COALESCE(attempt_count, 0) AS attempt_count, COALESCE(max_attempts, 3) AS max_attempts
 	  FROM scan_jobs
 	 WHERE id = $2
 	   AND org_id = $3
@@ -2172,9 +2277,26 @@ updated AS (
 	  FROM current_job
 	 WHERE scan_jobs.id = current_job.id
 	 RETURNING scan_jobs.id, scan_jobs.status, scan_jobs.attempt_count, scan_jobs.max_attempts, scan_jobs.next_attempt_at
+),
+attempt AS (
+	INSERT INTO scan_job_attempts (org_id, job_id, attempt_number, worker_id, status, error, started_at, finished_at, next_attempt_at)
+	SELECT $3, updated.id, updated.attempt_count, $4,
+	       CASE WHEN updated.status = 'pending' THEN 'retry_scheduled' ELSE 'failed' END,
+	       $1, COALESCE(current_job.claimed_at, NOW()), NOW(), updated.next_attempt_at
+	  FROM updated
+	  JOIN current_job ON current_job.id = updated.id
+	ON CONFLICT (job_id, attempt_number) DO UPDATE
+	   SET worker_id = EXCLUDED.worker_id,
+	       status = EXCLUDED.status,
+	       error = EXCLUDED.error,
+	       finished_at = NOW(),
+	       next_attempt_at = EXCLUDED.next_attempt_at,
+	       lease_expires_at = NULL
+	RETURNING job_id
 )
 SELECT id, status, attempt_count, max_attempts, next_attempt_at
-  FROM updated`, body.Error, id, token.OrgID, workerID, body.Retryable, int(scannerJobBaseRetryDelay/time.Second), int(scannerJobMaxRetryDelay/time.Second)).Scan(&updatedID, &status, &attemptCount, &maxAttempts, &nextAttemptAt); err != nil {
+  FROM updated
+  JOIN attempt ON attempt.job_id = updated.id`, body.Error, id, token.OrgID, workerID, body.Retryable, int(scannerJobBaseRetryDelay/time.Second), int(scannerJobMaxRetryDelay/time.Second)).Scan(&updatedID, &status, &attemptCount, &maxAttempts, &nextAttemptAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			if scanJobWasCanceledByOperator(r.Context(), h.db.Pool(), id, token.OrgID, workerID) {
 				httpx.WriteJSON(w, 200, map[string]any{

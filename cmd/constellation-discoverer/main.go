@@ -688,9 +688,6 @@ func podStatusImageRefs(pod corev1.Pod) []string {
 		if status.Image != "" {
 			out = append(out, status.Image)
 		}
-		if ref := normalizeKubeImageID(status.ImageID); ref != "" {
-			out = append(out, ref)
-		}
 	}
 	return mergeImageRefs(nil, out...)
 }

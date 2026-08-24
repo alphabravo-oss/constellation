@@ -88,7 +88,7 @@ SELECT COALESCE(external_id, ''), lifecycle, COALESCE(description, ''), COALESCE
    AND asset_id = $2
    AND kind = 'vulnerability'
    AND COALESCE(external_id, '') <> ''
-   AND NOT (kind = 'vulnerability' AND target_type = 'workload')
+	   AND COALESCE(target_type, '') <> 'workload'
  ORDER BY external_id`, subj.OrgID, assetID)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())

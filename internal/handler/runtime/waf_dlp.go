@@ -203,6 +203,25 @@ const (
 
 func (k SensorKind) Valid() bool { return k == SensorKindDLP || k == SensorKindWAF }
 
+var (
+	defaultDLPSensorID = uuid.MustParse("00000000-0000-4000-8000-0000000000d1")
+	defaultWAFSensorID = uuid.MustParse("00000000-0000-4000-8000-0000000000af")
+)
+
+// defaultDPISensorID is the stable "all current rules of this kind" sentinel.
+// The current agent consumes binding kind, not a legacy dlp_sensors/waf_groups
+// row, so new callers may omit sensor_id and still get deterministic idempotency.
+func defaultDPISensorID(kind SensorKind) uuid.UUID {
+	switch kind {
+	case SensorKindDLP:
+		return defaultDLPSensorID
+	case SensorKindWAF:
+		return defaultWAFSensorID
+	default:
+		return uuid.Nil
+	}
+}
+
 // GroupSensorBinding is one row of group_dpi_sensor_bindings: sensor SensorID
 // (of kind Kind) attached to group GroupID.
 type GroupSensorBinding struct {
@@ -395,11 +414,13 @@ const (
 	bindActionDelete = "runtime.dpi_sensor_binding.delete"
 )
 
-// BindRequest is the POST body: attach sensor SensorID (kind SensorKind) to GroupID.
+// BindRequest is the POST body: opt GroupID into DLP/WAF detection. Legacy
+// clients may still send SensorID; new clients can omit it and use the stable
+// per-kind "all current rules" sentinel.
 type BindRequest struct {
 	GroupID    uuid.UUID  `json:"group_id"`
 	SensorKind SensorKind `json:"sensor_kind"`
-	SensorID   uuid.UUID  `json:"sensor_id"`
+	SensorID   uuid.UUID  `json:"sensor_id,omitempty"`
 }
 
 // Bind handles POST /runtime/dpi-sensor-bindings.
@@ -419,13 +440,12 @@ func (h *GroupSensorBindingsHTTP) Bind(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "group_id is required")
 		return
 	}
-	if req.SensorID == uuid.Nil {
-		jsonError(w, http.StatusBadRequest, "sensor_id is required")
-		return
-	}
 	if !req.SensorKind.Valid() {
 		jsonError(w, http.StatusBadRequest, "sensor_kind must be 'dlp' or 'waf'")
 		return
+	}
+	if req.SensorID == uuid.Nil {
+		req.SensorID = defaultDPISensorID(req.SensorKind)
 	}
 	id, err := h.store.Bind(r.Context(), sub.OrgID, req.GroupID, req.SensorKind, req.SensorID, &sub.UserID)
 	if err != nil {

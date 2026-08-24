@@ -18,6 +18,7 @@ import {
   runtimeDLP,
   type DLPRule,
 } from "@/api/client";
+import { patternLines, patternsFromText } from "@/lib/dlp-patterns";
 
 export function RuntimeDLPFormPage() {
   const navigate = useNavigate();
@@ -45,7 +46,7 @@ export function RuntimeDLPFormPage() {
       setName(existing.data.name);
       setSeverity(existing.data.severity);
       setDescription(existing.data.description ?? "");
-      setPatternsText((existing.data.patterns ?? []).join("\n"));
+      setPatternsText(patternLines(existing.data.patterns));
     } else if (!ruleID) {
       setName("");
       setSeverity(5);
@@ -57,8 +58,7 @@ export function RuntimeDLPFormPage() {
   const backTo = { pathname: "..", search: search.toString() };
   const goBack = () => navigate(backTo);
 
-  const parsedPatterns = (): string[] =>
-    patternsText.split("\n").map((s) => s.trim()).filter(Boolean);
+  const parsedPatterns = () => patternsFromText(patternsText, existing.data?.patterns);
 
   const save = useMutation({
     mutationFn: async (): Promise<DLPRule> => {

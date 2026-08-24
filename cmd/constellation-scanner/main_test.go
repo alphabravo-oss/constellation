@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -75,6 +76,15 @@ func TestParseTargetCapacities(t *testing.T) {
 	}
 	if parseTargetCapacities("", 4) != nil {
 		t.Fatal("empty target capacity should leave scheduler unfiltered")
+	}
+}
+
+func TestNormalizeMaxConcurrent(t *testing.T) {
+	if got := normalizeMaxConcurrent(1); got != 1 {
+		t.Fatalf("normalizeMaxConcurrent(1) = %d, want 1", got)
+	}
+	if got := normalizeMaxConcurrent(0); got != runtime.NumCPU() {
+		t.Fatalf("normalizeMaxConcurrent(0) = %d, want runtime.NumCPU()", got)
 	}
 }
 

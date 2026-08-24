@@ -28,7 +28,7 @@ export function ResponseRulesPage() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["response-rules-v2", clusterId] }),
   });
   const reorderMut = useMutation({
-    mutationFn: (orderedIds: string[]) => responseRulesV2.reorder(orderedIds),
+    mutationFn: (orderedIds: string[]) => responseRulesV2.reorder(orderedIds, { cluster_id: clusterId }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["response-rules-v2", clusterId] }),
   });
   // Move a rule one slot up/down in the evaluation order and persist the new order.

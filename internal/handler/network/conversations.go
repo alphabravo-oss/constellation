@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/alphabravocompany/constellation/internal/db"
+	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
 	"github.com/alphabravocompany/constellation/pkg/graph"
@@ -104,20 +105,25 @@ func (h *NetworkConversations) List(w http.ResponseWriter, r *http.Request) {
 	// Namespace + verdict filters (previously accepted by the UI but silently ignored).
 	namespace := strings.TrimSpace(r.URL.Query().Get("namespace"))
 	verdict := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("verdict")))
+	var clusterUUID *uuid.UUID
+	if clusterID != "" {
+		if u, err := uuid.Parse(clusterID); err == nil {
+			clusterUUID = &u
+		}
+	}
+	groupMembers, groupName, groupActive, err := handler.ResolveGroupFilterMembers(r.Context(), h.db.Pool(), subj.OrgID, clusterUUID, r.URL.Query().Get("group"))
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
 
 	// Plan B5: serve from the hot in-memory graph when enabled. The cache only
 	// holds the recent TTL window, so it's used as a low-latency accelerator;
 	// when it has nothing for this org we fall through to the durable SQL path.
 	// The in-memory graph can't apply namespace/verdict filters, so skip it when
 	// either is set and serve the filterable SQL path instead.
-	if h.live != nil && namespace == "" && verdict == "" {
-		var cid *uuid.UUID
-		if clusterID != "" {
-			if u, err := uuid.Parse(clusterID); err == nil {
-				cid = &u
-			}
-		}
-		g := h.live.Snapshot(subj.OrgID, cid)
+	if h.live != nil && namespace == "" && verdict == "" && !groupActive {
+		g := h.live.Snapshot(subj.OrgID, clusterUUID)
 		if n, _ := g.Len(); n > 0 {
 			nodes := g.Nodes()
 			httpx.WriteJSON(w, http.StatusOK, map[string]any{
@@ -147,9 +153,10 @@ SELECT src_workload, dst_workload, protocol, dst_port,
    AND bucket >= date_trunc('hour', NOW() - ($3::int * INTERVAL '1 hour'))
    AND ($4::text = '' OR verdict = $4)
    AND ($5::text = '' OR src_workload LIKE $5 || '/%' OR dst_workload LIKE $5 || '/%')
+   AND (NOT $6::boolean OR src_workload = ANY($7::text[]) OR dst_workload = ANY($7::text[]))
  GROUP BY src_workload, dst_workload, protocol, dst_port, l7_protocol, verdict
  ORDER BY SUM(sum_bytes) DESC
- LIMIT 5000`, subj.OrgID, clusterID, hours, verdict, namespace)
+ LIMIT 5000`, subj.OrgID, clusterID, hours, verdict, namespace, groupActive, groupMembers)
 	if err != nil {
 		// network_flows table may be absent in non-runtime envs; degrade to empty graph.
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{
@@ -177,13 +184,18 @@ SELECT src_workload, dst_workload, protocol, dst_port,
 		})
 	}
 	nodes := g.Nodes()
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+	response := map[string]any{
 		"conversations": g.Conversations(),
 		"nodes":         nodes,
 		"node_kinds":    nodeKinds(nodes),
 		"edges":         g.Edges(),
 		"window_hours":  hours,
-	})
+	}
+	if groupActive {
+		response["selected_group"] = groupName
+		response["selected_group_members"] = len(groupMembers)
+	}
+	httpx.WriteJSON(w, http.StatusOK, response)
 }
 
 // conversationEntryDTO is one protocol/port/app stream between a from→to pair — NV's

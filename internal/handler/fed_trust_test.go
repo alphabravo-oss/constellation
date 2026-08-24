@@ -42,7 +42,7 @@ func fedTrustPreflight(t *testing.T, ctx context.Context, pool *pgxpool.Pool) (u
 	cleanup := func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM fed_credentials WHERE org_id=$1`, orgID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM fed_members WHERE org_id=$1 AND cluster_id LIKE 'd1-%'`, orgID)
-		_, _ = pool.Exec(context.Background(), `UPDATE federation_state SET state='standalone' WHERE org_id=$1`, orgID)
+		_, _ = pool.Exec(context.Background(), `UPDATE federation_state SET state='standalone'`)
 	}
 	cleanup()
 	t.Cleanup(cleanup)

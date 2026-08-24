@@ -239,6 +239,17 @@ export function CVEPage() {
         />
       </section>
 
+      {bundle.data?.available && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs">
+          <span className="text-muted-foreground">Bundle</span>
+          <span className="font-mono" data-testid="bundle-version">{bundleVersion}</span>
+          <span className="text-muted-foreground">·</span>
+          <span data-testid="bundle-signed">
+            {bundle.data.signed ? `signed${bundle.data.signer_identity ? ` by ${bundle.data.signer_identity}` : ""}` : "unsigned"}
+          </span>
+        </div>
+      )}
+
       {/* Search input */}
       <div className="space-y-2">
         <div className="relative">
@@ -329,6 +340,7 @@ export function CVEPage() {
           onRowClick={(r) => navigate(`/cve/${r.cve_id}`)}
           defaultSort={{ id: "cvss", dir: "desc" }}
           onSortChange={(s) => setSort(s ?? { id: "cvss", dir: "desc" })}
+          rowTestId={(r) => `cve-row-${r.cve_id}`}
           emptyState={
             search.isLoading ? (
               <div className="px-6 py-10 text-center text-xs text-muted-foreground">Loading…</div>

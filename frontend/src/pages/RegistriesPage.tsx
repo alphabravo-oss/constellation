@@ -9,23 +9,27 @@ import * as Dialog from "@radix-ui/react-dialog";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Plus, RotateCw, Trash2, Beaker, PlayCircle, MoreHorizontal, X,
+  AlertTriangle, Boxes, Clock, Database, Plus, RotateCw, Trash2, Beaker, PlayCircle, MoreHorizontal, X, StopCircle,
 } from "lucide-react";
 
 import {
   registries as registriesApi,
+  scanJobs,
   type RegistryDTO,
   type RegistryKind,
   type RegistryAuthKind,
   type RegistryCadence,
   type RegistryCreateBody,
   type RegistryScanPolicy,
+  type RegistryCancelScansResult,
   type RegistrySyncResult,
   type RegistryTestResult,
+  type ScanJob,
 } from "@/api/client";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { StatusPill } from "@/components/ui/status-pill";
+import { StatCard } from "@/components/ui/stat-card";
 import { useCluster } from "@/hooks/useCluster";
 
 // Closed catalogue of supported registry kinds with display labels + creds
@@ -89,13 +93,15 @@ const KINDS: Array<{
 ];
 
 const AUTH_KINDS: RegistryAuthKind[] = ["static", "aws-iam-role", "gcp-service-account", "azure-managed-id", "none"];
-const CADENCES: RegistryCadence[] = ["manual", "hourly", "6h", "daily", "weekly"];
+const CADENCES = ["manual", "auto", "hourly", "6h", "daily", "weekly", "custom", "cron"] as const;
 const PROMOTION_THRESHOLDS = ["critical", "high", "medium", "low", "none"];
+type RegistryScheduleMode = typeof CADENCES[number];
 
 export function RegistriesPage() {
   const { clusterId } = useCluster();
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["registries"], queryFn: () => registriesApi.list() });
+  const scanQueue = useQuery({ queryKey: ["scan-jobs", "registries"], queryFn: () => scanJobs.list({ target_type: "image" }) });
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<RegistryDTO | null>(null);
@@ -117,11 +123,24 @@ export function RegistriesPage() {
     mutationFn: (id: string) => registriesApi.syncNow(id),
     onSuccess: (r: RegistrySyncResult) => {
       qc.invalidateQueries({ queryKey: ["registries"] });
+      qc.invalidateQueries({ queryKey: ["scan-jobs", "registries"] });
       setActionMsg(`Sync ${r.registry_id.slice(0, 8)}: ${r.status} — ${r.images_seen} images, ${r.scan_jobs_enqueued} jobs queued${r.error ? ` (${r.error})` : ""}`);
     },
   });
+  const cancelScans = useMutation({
+    mutationFn: (id: string) => registriesApi.cancelScans(id),
+    onSuccess: (r: RegistryCancelScansResult) => {
+      qc.invalidateQueries({ queryKey: ["registries"] });
+      qc.invalidateQueries({ queryKey: ["scan-jobs", "registries"] });
+      const remaining = r.active_remaining > 0 ? `, ${r.active_remaining} still active` : "";
+      setActionMsg(`Stopped scans for ${r.registry_id.slice(0, 8)}: ${r.canceled} canceled${remaining}`);
+    },
+  });
 
-  const rows = q.data ?? [];
+  const rows = useMemo(() => q.data ?? [], [q.data]);
+  const registryJobs = useMemo(() => (scanQueue.data?.jobs ?? []).filter((job) => !!job.registry_id), [scanQueue.data?.jobs]);
+  const registryJobCounts = useMemo(() => buildRegistryJobCounts(registryJobs), [registryJobs]);
+  const summary = useMemo(() => summarizeRegistries(rows, registryJobs), [rows, registryJobs]);
 
   const columns = useMemo<Column<RegistryDTO>[]>(() => [
     { id: "name", header: "Name", cell: (r) => <span className="font-medium">{r.name}</span>, sort: (a, b) => a.name.localeCompare(b.name) },
@@ -129,6 +148,13 @@ export function RegistriesPage() {
     { id: "endpoint", header: "Endpoint", cell: (r) => <span className="text-mono text-xs text-muted-foreground">{r.endpoint}</span> },
     { id: "cadence", header: "Cadence", cell: (r) => r.scan_cadence },
     { id: "status", header: "Last sync", cell: (r) => <SyncPill row={r} />, sort: (a, b) => (a.last_sync_at ?? "").localeCompare(b.last_sync_at ?? "") },
+    {
+      id: "scan-jobs",
+      header: "Scan jobs",
+      width: "150px",
+      cell: (r) => <RegistryJobPills counts={registryJobCounts.get(r.id)} />,
+      sort: (a, b) => (registryJobCounts.get(a.id)?.active ?? 0) - (registryJobCounts.get(b.id)?.active ?? 0),
+    },
     { id: "images", header: "Images", numeric: true, sort: (a, b) => a.images_seen - b.images_seen,
       cell: (r) => (
         <Link to={clusterId ? `/clusters/${clusterId}/registries/${r.id}` : `/registries/${r.id}`} className="text-mono text-[color:var(--color-primary)] hover:underline" onClick={(e) => e.stopPropagation()}>
@@ -138,43 +164,58 @@ export function RegistriesPage() {
     {
       id: "actions",
       header: "",
-      cell: (r) => (
-        <DropdownMenu.Root>
-          <DropdownMenu.Trigger asChild>
-            <button
-              type="button"
-              className="rounded-md p-1 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
-              aria-label={`Actions for ${r.name}`}
-              data-testid={`registry-actions-${r.id}`}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <MoreHorizontal className="h-4 w-4" />
-            </button>
-          </DropdownMenu.Trigger>
-          <DropdownMenu.Portal>
-            <DropdownMenu.Content
-              align="end"
-              sideOffset={4}
-              className="z-50 min-w-[180px] rounded-md border border-border bg-popover p-1 shadow-[var(--elev-popover)]"
-            >
-              <Item icon={<Beaker className="h-3.5 w-3.5" />} onSelect={() => test.mutate(r.id)}>Test</Item>
-              <Item icon={<PlayCircle className="h-3.5 w-3.5" />} onSelect={() => sync.mutate(r.id)}>Sync now</Item>
-              <Item icon={<RotateCw className="h-3.5 w-3.5" />} onSelect={() => setEditing(r)}>Edit</Item>
-              <DropdownMenu.Separator className="my-1 h-px bg-border" />
-              <Item
-                icon={<Trash2 className="h-3.5 w-3.5" />}
-                destructive
-                onSelect={() => { if (window.confirm(`Delete registry ${r.name}?`)) remove.mutate(r.id); }}
+      cell: (r) => {
+        const activeJobs = registryJobCounts.get(r.id)?.active ?? 0;
+        return (
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger asChild>
+              <button
+                type="button"
+                className="rounded-md p-1 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                aria-label={`Actions for ${r.name}`}
+                data-testid={`registry-actions-${r.id}`}
+                onClick={(e) => e.stopPropagation()}
               >
-                Delete
-              </Item>
-            </DropdownMenu.Content>
-          </DropdownMenu.Portal>
-        </DropdownMenu.Root>
-      ),
+                <MoreHorizontal className="h-4 w-4" />
+              </button>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Portal>
+              <DropdownMenu.Content
+                align="end"
+                sideOffset={4}
+                className="z-50 min-w-[180px] rounded-md border border-border bg-popover p-1 shadow-[var(--elev-popover)]"
+              >
+                <Item icon={<Beaker className="h-3.5 w-3.5" />} onSelect={() => test.mutate(r.id)}>Test</Item>
+                <Item icon={<PlayCircle className="h-3.5 w-3.5" />} onSelect={() => sync.mutate(r.id)}>Sync now</Item>
+                <Item
+                  icon={<StopCircle className="h-3.5 w-3.5" />}
+                  destructive
+                  disabled={activeJobs === 0 || cancelScans.isPending}
+                  onSelect={() => {
+                    if (window.confirm(`Stop ${activeJobs} active scan job${activeJobs === 1 ? "" : "s"} for ${r.name}?`)) {
+                      cancelScans.mutate(r.id);
+                    }
+                  }}
+                >
+                  Stop active scans
+                </Item>
+                <Item icon={<RotateCw className="h-3.5 w-3.5" />} onSelect={() => setEditing(r)}>Edit</Item>
+                <DropdownMenu.Separator className="my-1 h-px bg-border" />
+                <Item
+                  icon={<Trash2 className="h-3.5 w-3.5" />}
+                  destructive
+                  onSelect={() => { if (window.confirm(`Delete registry ${r.name}?`)) remove.mutate(r.id); }}
+                >
+                  Delete
+                </Item>
+              </DropdownMenu.Content>
+            </DropdownMenu.Portal>
+          </DropdownMenu.Root>
+        );
+      },
       width: "40px",
     },
-  ], [test, sync, remove]);
+  ], [clusterId, registryJobCounts, test, sync, cancelScans, remove]);
 
   return (
     <div className="space-y-4" data-testid="registries-page">
@@ -204,6 +245,14 @@ export function RegistriesPage() {
           </button>
         </div>
       )}
+
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" data-testid="registry-operator-summary">
+        <StatCard label="Registries" value={summary.total.toLocaleString()} icon={<Database className="h-3.5 w-3.5" />} />
+        <StatCard label="Healthy Sync" value={summary.healthy.toLocaleString()} icon={<PlayCircle className="h-3.5 w-3.5" />} tone={summary.failedSync > 0 ? "medium" : "accent"} hint={`${summary.failedSync} failed`} />
+        <StatCard label="Images Seen" value={summary.images.toLocaleString()} icon={<Boxes className="h-3.5 w-3.5" />} />
+        <StatCard label="Active Jobs" value={summary.activeJobs.toLocaleString()} icon={<Clock className="h-3.5 w-3.5" />} tone={summary.activeJobs > 0 ? "low" : "neutral"} hint={`${summary.pendingJobs} pending`} />
+        <StatCard label="Failed Jobs" value={summary.failedJobs.toLocaleString()} icon={<AlertTriangle className="h-3.5 w-3.5" />} tone={summary.failedJobs > 0 ? "high" : "neutral"} />
+      </section>
 
       <DataTable<RegistryDTO>
         rows={rows}
@@ -264,12 +313,115 @@ function SyncPill({ row }: { row: RegistryDTO }) {
   );
 }
 
+type RegistryJobCounts = {
+  active: number;
+  pending: number;
+  running: number;
+  paused: number;
+  failed: number;
+  completed: number;
+  canceled: number;
+};
+
+function RegistryJobPills({ counts }: { counts?: RegistryJobCounts }) {
+  if (!counts || (counts.active === 0 && counts.failed === 0)) {
+    return <span className="text-[10px] text-muted-foreground">idle</span>;
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {counts.active > 0 ? <StatusPill label={`${counts.active} active`} tone="pending" /> : null}
+      {counts.failed > 0 ? <StatusPill label={`${counts.failed} failed`} tone="error" /> : null}
+    </div>
+  );
+}
+
+function buildRegistryJobCounts(jobs: ScanJob[]) {
+  const out = new Map<string, RegistryJobCounts>();
+  for (const job of jobs) {
+    if (!job.registry_id) continue;
+    const counts = out.get(job.registry_id) ?? {
+      active: 0,
+      pending: 0,
+      running: 0,
+      paused: 0,
+      failed: 0,
+      completed: 0,
+      canceled: 0,
+    };
+    switch (job.status) {
+      case "pending":
+        counts.pending += 1;
+        counts.active += 1;
+        break;
+      case "running":
+        counts.running += 1;
+        counts.active += 1;
+        break;
+      case "paused":
+        counts.paused += 1;
+        counts.active += 1;
+        break;
+      case "failed":
+        counts.failed += 1;
+        break;
+      case "completed":
+        counts.completed += 1;
+        break;
+      case "canceled":
+        counts.canceled += 1;
+        break;
+    }
+    out.set(job.registry_id, counts);
+  }
+  return out;
+}
+
+function summarizeRegistries(rows: RegistryDTO[], jobs: ScanJob[]) {
+  let healthy = 0;
+  let failedSync = 0;
+  let images = 0;
+  for (const row of rows) {
+    if (row.last_sync_status === "ok") healthy += 1;
+    if (row.last_sync_status === "failed" || row.last_sync_status === "partial") failedSync += 1;
+    images += row.images_seen;
+  }
+  let activeJobs = 0;
+  let pendingJobs = 0;
+  let failedJobs = 0;
+  for (const job of jobs) {
+    if (job.status === "pending") {
+      activeJobs += 1;
+      pendingJobs += 1;
+    } else if (job.status === "running" || job.status === "paused") {
+      activeJobs += 1;
+    } else if (job.status === "failed") {
+      failedJobs += 1;
+    }
+  }
+  return {
+    total: rows.length,
+    healthy,
+    failedSync,
+    images,
+    activeJobs,
+    pendingJobs,
+    failedJobs,
+  };
+}
+
 function buildScanPolicy(
   includeRepos: string[],
   excludeReposRaw: string,
   tagSelection: RegistryScanPolicy["tag_selection"],
   maxAge: string,
   rescanInterval: string,
+  rescanAfterDBUpdate: boolean,
+  repoLimit: string,
+  tagLimit: string,
+  customInterval: string,
+  cron: string,
+  ignoreProxy: boolean,
+  scanLayers: boolean,
   blockPromotionThreshold: string,
 ): RegistryScanPolicy {
   const excludeRepos = excludeReposRaw.split(/\n+/).map((s) => s.trim()).filter(Boolean);
@@ -279,8 +431,41 @@ function buildScanPolicy(
     tag_selection: tagSelection,
     max_age: maxAge.trim(),
     rescan_interval: rescanInterval.trim(),
+    rescan_after_db_update: rescanAfterDBUpdate,
+    repo_limit: parsePositiveInt(repoLimit),
+    tag_limit: parsePositiveInt(tagLimit),
+    custom_interval: customInterval.trim(),
+    cron: cron.trim(),
+    ignore_proxy: ignoreProxy,
+    scan_layers: scanLayers,
     block_promotion_threshold: blockPromotionThreshold,
   };
+}
+
+function parsePositiveInt(value: string) {
+  const n = Number.parseInt(value.trim(), 10);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function scheduleFromRegistry(row: RegistryDTO | null): {
+  mode: RegistryScheduleMode;
+  customInterval: string;
+  cron: string;
+} {
+  const cadence = row?.scan_cadence?.trim() || "manual";
+  if (cadence.startsWith("cron:")) {
+    return { mode: "cron", customInterval: "", cron: cadence.slice("cron:".length).trim() };
+  }
+  if ((CADENCES as readonly string[]).includes(cadence) && cadence !== "custom" && cadence !== "cron") {
+    return { mode: cadence as RegistryScheduleMode, customInterval: "", cron: "" };
+  }
+  return { mode: "custom", customInterval: row?.scan_policy?.custom_interval || cadence, cron: "" };
+}
+
+function buildScanCadence(mode: RegistryScheduleMode, customInterval: string, cron: string): RegistryCadence {
+  if (mode === "custom") return customInterval.trim() || "custom";
+  if (mode === "cron") return `cron:${cron.trim()}`;
+  return mode;
 }
 
 function EmptyState({ onAdd }: { onAdd: () => void }) {
@@ -299,18 +484,20 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
 }
 
 function Item({
-  icon, children, onSelect, destructive,
+  icon, children, onSelect, destructive, disabled,
 }: {
   icon: React.ReactNode;
   children: React.ReactNode;
   onSelect: () => void;
   destructive?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <DropdownMenu.Item
+      disabled={disabled}
       onSelect={onSelect}
       className={
-        "flex items-center gap-2 rounded px-2 py-1.5 text-xs cursor-pointer outline-none data-[highlighted]:bg-accent " +
+        "flex items-center gap-2 rounded px-2 py-1.5 text-xs cursor-pointer outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[highlighted]:bg-accent " +
         (destructive ? "text-[color:var(--color-destructive)]" : "")
       }
     >
@@ -340,12 +527,20 @@ function CreateOrEditDialog({
   const [kind, setKind] = useState<RegistryKind>(editing?.kind ?? "docker-hub");
   const [endpoint, setEndpoint] = useState(editing?.endpoint ?? "");
   const [authKind, setAuthKind] = useState<RegistryAuthKind>(editing?.auth_kind ?? "static");
-  const [cadence, setCadence] = useState<RegistryCadence>(editing?.scan_cadence ?? "manual");
+  const initialSchedule = scheduleFromRegistry(editing);
+  const [scheduleMode, setScheduleMode] = useState<RegistryScheduleMode>(initialSchedule.mode);
+  const [customInterval, setCustomInterval] = useState(initialSchedule.customInterval);
+  const [cron, setCron] = useState(initialSchedule.cron);
   const [globs, setGlobs] = useState<string>(editing?.image_globs?.join("\n") ?? "");
   const [excludeGlobs, setExcludeGlobs] = useState<string>(editing?.scan_policy?.exclude_repos?.join("\n") ?? "");
   const [tagSelection, setTagSelection] = useState<RegistryScanPolicy["tag_selection"]>(editing?.scan_policy?.tag_selection ?? "all");
   const [maxAge, setMaxAge] = useState(editing?.scan_policy?.max_age ?? "");
   const [rescanInterval, setRescanInterval] = useState(editing?.scan_policy?.rescan_interval ?? "");
+  const [rescanAfterDBUpdate, setRescanAfterDBUpdate] = useState(editing?.scan_policy?.rescan_after_db_update ?? true);
+  const [repoLimit, setRepoLimit] = useState(String(editing?.scan_policy?.repo_limit || ""));
+  const [tagLimit, setTagLimit] = useState(String(editing?.scan_policy?.tag_limit || ""));
+  const [ignoreProxy, setIgnoreProxy] = useState(editing?.scan_policy?.ignore_proxy ?? false);
+  const [scanLayers, setScanLayers] = useState(editing?.scan_policy?.scan_layers ?? true);
   const [promotionThreshold, setPromotionThreshold] = useState(editing?.scan_policy?.block_promotion_threshold ?? "critical");
   const [creds, setCreds] = useState<Record<string, string>>({});
   const [testResult, setTestResult] = useState<RegistryTestResult | null>(null);
@@ -357,12 +552,20 @@ function CreateOrEditDialog({
       setKind(editing?.kind ?? "docker-hub");
       setEndpoint(editing?.endpoint ?? "");
       setAuthKind(editing?.auth_kind ?? "static");
-      setCadence(editing?.scan_cadence ?? "manual");
+      const nextSchedule = scheduleFromRegistry(editing);
+      setScheduleMode(nextSchedule.mode);
+      setCustomInterval(nextSchedule.customInterval);
+      setCron(nextSchedule.cron);
       setGlobs(editing?.image_globs?.join("\n") ?? "");
       setExcludeGlobs(editing?.scan_policy?.exclude_repos?.join("\n") ?? "");
       setTagSelection(editing?.scan_policy?.tag_selection ?? "all");
       setMaxAge(editing?.scan_policy?.max_age ?? "");
       setRescanInterval(editing?.scan_policy?.rescan_interval ?? "");
+      setRescanAfterDBUpdate(editing?.scan_policy?.rescan_after_db_update ?? true);
+      setRepoLimit(String(editing?.scan_policy?.repo_limit || ""));
+      setTagLimit(String(editing?.scan_policy?.tag_limit || ""));
+      setIgnoreProxy(editing?.scan_policy?.ignore_proxy ?? false);
+      setScanLayers(editing?.scan_policy?.scan_layers ?? true);
       setPromotionThreshold(editing?.scan_policy?.block_promotion_threshold ?? "critical");
       setCreds({});
       setTestResult(null);
@@ -374,14 +577,29 @@ function CreateOrEditDialog({
   const save = useMutation({
     mutationFn: async () => {
       const parsedGlobs = globs.split(/\n+/).map((s) => s.trim()).filter(Boolean);
-      const scanPolicy = buildScanPolicy(parsedGlobs, excludeGlobs, tagSelection, maxAge, rescanInterval, promotionThreshold);
+      const scanPolicy = buildScanPolicy(
+        parsedGlobs,
+        excludeGlobs,
+        tagSelection,
+        maxAge,
+        rescanInterval,
+        rescanAfterDBUpdate,
+        repoLimit,
+        tagLimit,
+        scheduleMode === "custom" ? customInterval : "",
+        scheduleMode === "cron" ? cron : "",
+        ignoreProxy,
+        scanLayers,
+        promotionThreshold,
+      );
+      const resolvedCadence = buildScanCadence(scheduleMode, customInterval, cron);
       const body: RegistryCreateBody = {
         name,
         kind,
         endpoint,
         auth_kind: authKind,
         credentials: authKind === "none" ? undefined : creds,
-        scan_cadence: cadence,
+        scan_cadence: resolvedCadence,
         image_globs: parsedGlobs,
         scan_policy: scanPolicy,
       };
@@ -391,7 +609,7 @@ function CreateOrEditDialog({
           endpoint,
           auth_kind: authKind,
           credentials: Object.keys(creds).length > 0 ? creds : undefined,
-          scan_cadence: cadence,
+          scan_cadence: resolvedCadence,
           image_globs: parsedGlobs,
           scan_policy: scanPolicy,
         });
@@ -412,20 +630,35 @@ function CreateOrEditDialog({
       // save first, test, then leave the row in place — same behavior as the
       // common pattern in other receivers UIs.
       const parsedGlobs = globs.split(/\n+/).map((s) => s.trim()).filter(Boolean);
-      const scanPolicy = buildScanPolicy(parsedGlobs, excludeGlobs, tagSelection, maxAge, rescanInterval, promotionThreshold);
+      const scanPolicy = buildScanPolicy(
+        parsedGlobs,
+        excludeGlobs,
+        tagSelection,
+        maxAge,
+        rescanInterval,
+        rescanAfterDBUpdate,
+        repoLimit,
+        tagLimit,
+        scheduleMode === "custom" ? customInterval : "",
+        scheduleMode === "cron" ? cron : "",
+        ignoreProxy,
+        scanLayers,
+        promotionThreshold,
+      );
+      const resolvedCadence = buildScanCadence(scheduleMode, customInterval, cron);
       let id = editing?.id;
       if (!id) {
         const r = await registriesApi.create({
           name, kind, endpoint, auth_kind: authKind,
           credentials: authKind === "none" ? undefined : creds,
-          scan_cadence: cadence, image_globs: parsedGlobs, scan_policy: scanPolicy,
+          scan_cadence: resolvedCadence, image_globs: parsedGlobs, scan_policy: scanPolicy,
         });
         id = r.id;
       } else {
         await registriesApi.update(id, {
           name, endpoint, auth_kind: authKind,
           credentials: Object.keys(creds).length > 0 ? creds : undefined,
-          scan_cadence: cadence, image_globs: parsedGlobs, scan_policy: scanPolicy,
+          scan_cadence: resolvedCadence, image_globs: parsedGlobs, scan_policy: scanPolicy,
         });
       }
       return registriesApi.test(id);
@@ -524,12 +757,38 @@ function CreateOrEditDialog({
             <Row label="Scan cadence">
               <select
                 className="block w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
-                value={cadence}
-                onChange={(e) => setCadence(e.target.value as RegistryCadence)}
+                value={scheduleMode}
+                onChange={(e) => setScheduleMode(e.target.value as RegistryScheduleMode)}
               >
-                {CADENCES.map((c) => <option key={c} value={c}>{c}</option>)}
+                {CADENCES.map((c) => (
+                  <option key={c} value={c}>
+                    {c === "custom" ? "custom interval" : c === "cron" ? "cron schedule" : c}
+                  </option>
+                ))}
               </select>
             </Row>
+
+            {scheduleMode === "custom" && (
+              <Row label="Custom interval">
+                <input
+                  className="block w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
+                  value={customInterval}
+                  onChange={(e) => setCustomInterval(e.target.value)}
+                  placeholder="12h"
+                />
+              </Row>
+            )}
+
+            {scheduleMode === "cron" && (
+              <Row label="Cron">
+                <input
+                  className="block w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
+                  value={cron}
+                  onChange={(e) => setCron(e.target.value)}
+                  placeholder="0 2 * * *"
+                />
+              </Row>
+            )}
 
             <Row label="Image globs (one per line)">
               <textarea
@@ -575,6 +834,24 @@ function CreateOrEditDialog({
                   placeholder="168h"
                 />
               </Row>
+              <Row label="Repo limit">
+                <input
+                  className="block w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
+                  value={repoLimit}
+                  onChange={(e) => setRepoLimit(e.target.value)}
+                  inputMode="numeric"
+                  placeholder="unlimited"
+                />
+              </Row>
+              <Row label="Tag limit">
+                <input
+                  className="block w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
+                  value={tagLimit}
+                  onChange={(e) => setTagLimit(e.target.value)}
+                  inputMode="numeric"
+                  placeholder="unlimited"
+                />
+              </Row>
               <Row label="Promotion threshold">
                 <select
                   className="block w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
@@ -586,6 +863,30 @@ function CreateOrEditDialog({
                   ))}
                 </select>
               </Row>
+              <label className="flex min-h-[54px] items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5 text-xs">
+                <input
+                  type="checkbox"
+                  checked={rescanAfterDBUpdate}
+                  onChange={(e) => setRescanAfterDBUpdate(e.target.checked)}
+                />
+                <span>Rescan after DB update</span>
+              </label>
+              <label className="flex min-h-[54px] items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5 text-xs">
+                <input
+                  type="checkbox"
+                  checked={ignoreProxy}
+                  onChange={(e) => setIgnoreProxy(e.target.checked)}
+                />
+                <span>Ignore proxy</span>
+              </label>
+              <label className="flex min-h-[54px] items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5 text-xs">
+                <input
+                  type="checkbox"
+                  checked={scanLayers}
+                  onChange={(e) => setScanLayers(e.target.checked)}
+                />
+                <span>Scan layers</span>
+              </label>
             </div>
 
             {testResult && (

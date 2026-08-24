@@ -122,6 +122,7 @@ SELECT org_id, cluster_id::text, workload_id, COALESCE(namespace,''), COALESCE(n
 			continue
 		}
 		st := &baselineState{
+			OrgID:          hr.orgID,
 			WorkloadID:     hr.workloadID,
 			ClusterID:      hr.clusterID,
 			Namespace:      hr.namespace,
@@ -161,6 +162,7 @@ func (h *Baselines) cacheState(st *baselineState) {
 // baselineState is the per-workload bookkeeping that lives alongside the engine
 // (which only stores the learned process *set*; the UI needs counts + timestamps).
 type baselineState struct {
+	OrgID            uuid.UUID
 	WorkloadID       string
 	ClusterID        string
 	Namespace        string
@@ -448,11 +450,23 @@ func (h *Baselines) SetMode(w http.ResponseWriter, r *http.Request) {
 // the classifier derives `bin` from): the process basename. We also add the
 // basename of the recorded path defensively in case the two ever diverge.
 func (h *Baselines) BaselineMode(orgID uuid.UUID, workloadID string) (baseline.Mode, map[string]struct{}, bool) {
+	return h.BaselineModeForCluster(orgID, uuid.Nil, workloadID)
+}
+
+func (h *Baselines) BaselineModeForCluster(orgID, clusterID uuid.UUID, workloadID string) (baseline.Mode, map[string]struct{}, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	clusterKey := ""
+	if clusterID != uuid.Nil {
+		clusterKey = clusterID.String()
+		if st, ok := h.state[clusterKey+"::"+workloadID]; ok && sameBaselineScope(st, orgID, clusterKey, workloadID) {
+			return baselineModeSet(st)
+		}
+		return "", nil, false
+	}
 	var match *baselineState
 	for _, st := range h.state {
-		if st != nil && st.WorkloadID == workloadID {
+		if sameBaselineScope(st, orgID, "", workloadID) {
 			match = st
 			break
 		}
@@ -460,8 +474,22 @@ func (h *Baselines) BaselineMode(orgID uuid.UUID, workloadID string) (baseline.M
 	if match == nil {
 		return "", nil, false
 	}
-	set := make(map[string]struct{}, len(match.Processes))
-	for _, p := range match.Processes {
+	return baselineModeSet(match)
+}
+
+func sameBaselineScope(st *baselineState, orgID uuid.UUID, clusterID, workloadID string) bool {
+	if st == nil || st.WorkloadID != workloadID {
+		return false
+	}
+	if st.OrgID != uuid.Nil && st.OrgID != orgID {
+		return false
+	}
+	return clusterID == "" || st.ClusterID == clusterID
+}
+
+func baselineModeSet(st *baselineState) (baseline.Mode, map[string]struct{}, bool) {
+	set := make(map[string]struct{}, len(st.Processes))
+	for _, p := range st.Processes {
 		if name := strings.TrimSpace(p.Name); name != "" {
 			set[name] = struct{}{}
 		}
@@ -469,7 +497,7 @@ func (h *Baselines) BaselineMode(orgID uuid.UUID, workloadID string) (baseline.M
 			set[base] = struct{}{}
 		}
 	}
-	return match.Mode, set, true
+	return st.Mode, set, true
 }
 
 func pathBasename(path string) string {
@@ -486,6 +514,7 @@ func pathBasename(path string) string {
 // ----- helpers --------------------------------------------------------------
 
 type observedWorkload struct {
+	OrgID      uuid.UUID
 	WorkloadID string
 	ClusterID  string
 	Namespace  string
@@ -523,6 +552,7 @@ SELECT COALESCE(cluster_id::text, ''), namespace, name, COALESCE(labels,'{}'::js
 			_ = json.Unmarshal(labelsRaw, &labels)
 		}
 		out = append(out, observedWorkload{
+			OrgID:      orgID,
 			WorkloadID: ns + "/" + name,
 			ClusterID:  clusterID,
 			Namespace:  ns,
@@ -578,6 +608,7 @@ RETURNING workload_id, cluster_id::text, namespace, name, mode,
 	if enforceAt != nil {
 		state.EnforceStartedAt = *enforceAt
 	}
+	state.OrgID = orgID
 	if err != nil {
 		if strings.Contains(err.Error(), "process_baseline_states") {
 			return h.ensureMemoryState(wl, now), nil
@@ -620,6 +651,40 @@ func (h *Baselines) ensureMemoryState(wl observedWorkload, now time.Time) *basel
 }
 
 func (h *Baselines) processObservations(ctx context.Context, orgID, clusterID uuid.UUID, workloadID string) ([]processObservation, int, int, time.Time, error) {
+	workloadRefs := []string{workloadID}
+	seenWorkloadRefs := map[string]struct{}{workloadID: {}}
+	linkRows, err := h.db.Pool().Query(ctx, `
+SELECT pod_workload_id
+  FROM pod_workload_links
+ WHERE org_id = $1
+   AND cluster_id = $2
+   AND owner_workload_id = $3
+   AND pod_workload_id <> ''`, orgID, clusterID, workloadID)
+	if err != nil {
+		return nil, 0, 0, time.Time{}, err
+	}
+	for linkRows.Next() {
+		var podWorkloadID string
+		if err := linkRows.Scan(&podWorkloadID); err != nil {
+			linkRows.Close()
+			return nil, 0, 0, time.Time{}, err
+		}
+		podWorkloadID = strings.TrimSpace(podWorkloadID)
+		if podWorkloadID == "" {
+			continue
+		}
+		if _, ok := seenWorkloadRefs[podWorkloadID]; ok {
+			continue
+		}
+		seenWorkloadRefs[podWorkloadID] = struct{}{}
+		workloadRefs = append(workloadRefs, podWorkloadID)
+	}
+	if err := linkRows.Err(); err != nil {
+		linkRows.Close()
+		return nil, 0, 0, time.Time{}, err
+	}
+	linkRows.Close()
+
 	rows, err := h.db.Pool().Query(ctx, `
 SELECT severity,
        verdict,
@@ -629,18 +694,9 @@ SELECT severity,
  WHERE org_id = $1
    AND cluster_id = $2
    AND kind = 'process_exec'
-   AND (
-        workload_id = $3
-     OR workload_id IN (
-        SELECT pod_workload_id
-          FROM pod_workload_links
-         WHERE org_id = $1
-           AND cluster_id = $2
-           AND owner_workload_id = $3
-     )
-   )
+   AND workload_id = ANY($3::text[])
  ORDER BY at DESC
- LIMIT 1000`, orgID, clusterID, workloadID)
+ LIMIT 1000`, orgID, clusterID, workloadRefs)
 	if err != nil {
 		return nil, 0, 0, time.Time{}, err
 	}
@@ -817,6 +873,7 @@ func applyBaselineTransition(state *baselineState, actor string, from, to baseli
 // fabricate process observations or lifecycle transitions.
 func synthesizeState(wl observedWorkload, now time.Time) *baselineState {
 	return &baselineState{
+		OrgID:            wl.OrgID,
 		WorkloadID:       wl.WorkloadID,
 		ClusterID:        wl.ClusterID,
 		Namespace:        wl.Namespace,

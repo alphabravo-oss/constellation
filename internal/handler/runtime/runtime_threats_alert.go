@@ -53,6 +53,7 @@ type pendingThreatAlert struct {
 	workloadID string
 	namespace  string
 	podName    string
+	v2Decision ResponseRuleDecision
 }
 
 // --- configuration (env, safe defaults, evaluated once at init) ------------
@@ -108,6 +109,13 @@ func (h *RuntimeThreats) WithDispatcher(d *notify.Dispatcher) *RuntimeThreats {
 // receiver for chaining.
 func (h *RuntimeThreats) WithResponseEngine(respond func(ctx context.Context, orgID, clusterID uuid.UUID, ev response.Event)) *RuntimeThreats {
 	h.respond = respond
+	return h
+}
+
+// WithResponseDecision attaches the side-effect-free v2 response-rule evaluator used for
+// pre-insert suppress-log decisions. Returns the receiver for chaining.
+func (h *RuntimeThreats) WithResponseDecision(decide func(ctx context.Context, orgID, clusterID uuid.UUID, ev response.Event) ResponseRuleDecision) *RuntimeThreats {
+	h.decideResponseRules = decide
 	return h
 }
 
@@ -237,7 +245,7 @@ func (h *RuntimeThreats) fanOutOneThreat(ctx context.Context, orgID uuid.UUID, p
 	if h.evalResponseRules != nil {
 		ruleActions = h.evalThreatRulesSafe(ctx, orgID, p, sev, name, category)
 	}
-	suppressed := responseRulesSuppressLog(ruleActions)
+	suppressed := responseRulesSuppressLog(ruleActions) || p.v2Decision.SuppressLog
 
 	if !suppressed {
 		title := fmt.Sprintf("%s (%s) %s -> %s", name, sev, srcHostPort(row.SrcIP, row.SrcPort), srcHostPort(row.DstIP, row.DstPort))
@@ -296,21 +304,14 @@ func (h *RuntimeThreats) fanOutOneThreat(ctx context.Context, orgID uuid.UUID, p
 		}
 		alerted = true
 	}
+	if p.v2Decision.SuppressLog {
+		h.auditThreatResponseV2SuppressLog(ctx, orgID, p)
+	}
 
 	// RT-2 response engine (response_rules_v2). Independent of E1 suppress_log,
 	// mirroring the events path; seeded rules are MONITOR-mode.
 	if h.respond != nil {
-		h.respond(ctx, orgID, p.clusterID, response.Event{
-			ID:        uuid.NewString(),
-			Name:      name,
-			Type:      response.EventRuntime,
-			Severity:  sev,
-			Cluster:   p.clusterID.String(),
-			Namespace: p.namespace,
-			Workload:  p.workloadID,
-			Title:     fmt.Sprintf("%s on %s/%s", action, p.namespace, p.podName),
-			URL:       "/runtime/threats",
-		})
+		h.respond(ctx, orgID, p.clusterID, responseEventForThreat(p, sev, name, action))
 	}
 
 	// E1: enforce the matched actions (quarantine/tag), priority-ordered.
@@ -318,6 +319,83 @@ func (h *RuntimeThreats) fanOutOneThreat(ctx context.Context, orgID uuid.UUID, p
 		h.applyThreatResponseRuleActions(ctx, orgID, p, ruleActions)
 	}
 	return alerted
+}
+
+func responseEventForThreat(p *pendingThreatAlert, sev, name, action string) response.Event {
+	return response.Event{
+		ID:        uuid.NewString(),
+		Name:      name,
+		Type:      response.EventThreat,
+		Severity:  sev,
+		Cluster:   p.clusterID.String(),
+		Namespace: p.namespace,
+		Workload:  p.workloadID,
+		Labels: map[string]string{
+			"event_kind":  "dpi_threat",
+			"namespace":   p.namespace,
+			"pod":         p.podName,
+			"workload_id": p.workloadID,
+			"threat_id":   fmt.Sprint(p.row.ThreatID),
+		},
+		Title: fmt.Sprintf("%s on %s/%s", action, p.namespace, p.podName),
+		URL:   "/runtime/threats",
+	}
+}
+
+func (h *RuntimeThreats) threatResponseDecisionSafe(ctx context.Context, orgID uuid.UUID, p *pendingThreatAlert) (decision ResponseRuleDecision) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			slog.Default().Error("runtime threat v2 decision panic", slog.Any("recover", rec))
+			decision = ResponseRuleDecision{}
+		}
+	}()
+	sev := threatSeverityLabel(p.row.Severity)
+	name := handler.NeuVectorThreatName(p.row.ThreatID)
+	return h.decideResponseRules(ctx, orgID, p.clusterID, responseEventForThreat(p, sev, name, "runtime.alert.dpi"))
+}
+
+func (h *RuntimeThreats) auditThreatResponseV2SuppressLog(ctx context.Context, orgID uuid.UUID, p *pendingThreatAlert) {
+	if h.audit == nil || !p.v2Decision.SuppressLog {
+		return
+	}
+	row := p.row
+	for _, match := range p.v2Decision.Matches {
+		for i, act := range match.Actions {
+			if !response.IsSuppressLogAction(act.Kind) {
+				continue
+			}
+			oid := orgID
+			after := map[string]any{
+				"action":      string(response.ActionSuppressLog),
+				"order":       i,
+				"rule_id":     match.RuleID,
+				"rule_name":   match.RuleName,
+				"event_kind":  "dpi_threat",
+				"threat_id":   row.ThreatID,
+				"threat_name": handler.NeuVectorThreatName(row.ThreatID),
+				"namespace":   p.namespace,
+				"pod":         p.podName,
+				"workload_id": p.workloadID,
+				"cluster_id":  p.clusterID.String(),
+				"src_ip":      strings.TrimSpace(row.SrcIP),
+				"src_port":    row.SrcPort,
+				"dst_ip":      strings.TrimSpace(row.DstIP),
+				"dst_port":    row.DstPort,
+				"enforced":    "suppressed_log",
+			}
+			for k, v := range act.Params {
+				after["param_"+k] = v
+			}
+			_, _, _ = h.audit.Log(ctx, audit.Event{
+				OrgID:      &oid,
+				Action:     "response_rule_v2.action.suppress_log",
+				TargetKind: "workload",
+				TargetID:   p.workloadID,
+				After:      after,
+				At:         row.At,
+			})
+		}
+	}
 }
 
 // evalThreatRulesSafe folds a threat down to a responserule.Event (network

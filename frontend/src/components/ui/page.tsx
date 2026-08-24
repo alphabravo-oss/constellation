@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { HTMLAttributes, ReactNode } from "react";
 import { cn } from "@/lib/cn";
 
 /**
@@ -18,11 +18,12 @@ import { cn } from "@/lib/cn";
 export function PageContainer({
   children,
   className,
+  ...rest
 }: {
   children: ReactNode;
   className?: string;
-}) {
-  return <div className={cn("space-y-6", className)}>{children}</div>;
+} & HTMLAttributes<HTMLDivElement>) {
+  return <div className={cn("space-y-6", className)} {...rest}>{children}</div>;
 }
 
 export function PageHeader({

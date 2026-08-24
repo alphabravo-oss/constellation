@@ -6,6 +6,7 @@ metadata:
   labels: {{- include "constellation.labels" . | nindent 4 }}
     app.kubernetes.io/component: operator
 spec:
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
   replicas: {{ .Values.operator.replicas }}
   selector:
     matchLabels:

@@ -4,6 +4,8 @@
  */
 import { formatDistanceToNowStrict } from "date-fns";
 
+const DAY_MS = 86_400_000;
+
 export function fmtNum(n: number | undefined | null): string {
   if (n == null || Number.isNaN(n)) return "—";
   return n.toLocaleString();
@@ -43,6 +45,16 @@ export function fmtPct(n: number | undefined, digits = 0): string {
 
 export function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
+}
+
+export function dateInputDaysFromNow(days: number): string {
+  return new Date(Date.now() + days * DAY_MS).toISOString().slice(0, 10);
+}
+
+export function dateInputEndOfDayWithinDays(value: string, maxDays: number): string {
+  const selected = new Date(`${value}T23:59:59Z`).getTime();
+  const max = Date.now() + maxDays * DAY_MS;
+  return new Date(Number.isFinite(selected) ? Math.min(selected, max) : max).toISOString();
 }
 
 export function truncate(s: string | undefined, n = 60): string {

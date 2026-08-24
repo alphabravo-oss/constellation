@@ -15,6 +15,7 @@ import { PageHeader } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
+import { patternLines, patternsFromText } from "@/lib/dlp-patterns";
 
 export function RuntimeSignatureFormPage() {
   const navigate = useNavigate();
@@ -48,7 +49,7 @@ export function RuntimeSignatureFormPage() {
       setSeverity(existing.data.severity);
       setApplyDir(existing.data.apply_dir || 3);
       setDescription(existing.data.description ?? "");
-      setPatternsText((existing.data.patterns ?? []).join("\n"));
+      setPatternsText(patternLines(existing.data.patterns));
     } else if (!ruleID) {
       setName("");
       setSeverity(5);
@@ -61,7 +62,7 @@ export function RuntimeSignatureFormPage() {
   const save = useMutation({
     mutationFn: async (): Promise<DLPRule> => {
       setErr(null);
-      const patterns = patternsText.split("\n").map((s) => s.trim()).filter(Boolean);
+      const patterns = patternsFromText(patternsText, existing.data?.patterns);
       if (patterns.length === 0) throw new Error("at least one pattern is required");
       if (ruleID) {
         return runtimeSignatures.update(ruleID, { patterns, severity, description });

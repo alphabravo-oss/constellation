@@ -10,10 +10,10 @@ import (
 	"github.com/alphabravocompany/constellation/pkg/group"
 )
 
-// Mode promotion — advance policy maturity across groups (NeuVector's Discover→Monitor→Protect
-// workflow). Operators learn in Discover, watch in Monitor, then Protect. This bulk-promotes
-// every eligible group one step up a chosen dimension (network policy_mode or process/file
-// profile_mode), matching NV's "switch mode" action. POST /api/v1/groups:promote
+// Mode promotion — adjust policy maturity across groups (NeuVector's Discover→Monitor→Protect
+// workflow). Operators learn in Discover, watch in Monitor, then Protect; incident response
+// also needs safe demotion back to Monitor/Discover. POST /api/v1/groups:promote keeps the
+// original one-step promote body working while accepting an explicit "to" for bulk mode changes.
 
 // nextMode returns the mode one step up the maturity ladder, or "" if already at the top.
 func nextMode(m group.Mode) group.Mode {
@@ -37,15 +37,31 @@ func (h *Groups) Promote(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Dimension string `json:"dimension"` // policy | profile
 		From      string `json:"from"`      // discover | monitor
+		To        string `json:"to"`        // optional; defaults to the next maturity mode
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}
 	from := group.Mode(body.From)
-	to := nextMode(from)
-	if to == "" || (from != group.ModeDiscover && from != group.ModeMonitor) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "from must be discover or monitor"})
+	if !validGroupMode(from) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "from must be discover, monitor, or protect"})
+		return
+	}
+	to := group.Mode(body.To)
+	if to == "" {
+		to = nextMode(from)
+		if to == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "from must be discover or monitor when to is omitted"})
+			return
+		}
+	}
+	if !validGroupMode(to) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "to must be discover, monitor, or protect"})
+		return
+	}
+	if from == to {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "from and to must differ"})
 		return
 	}
 	if body.Dimension != "policy" && body.Dimension != "profile" {
@@ -53,9 +69,9 @@ func (h *Groups) Promote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Only advance user-authored (ground/learned-promoted) groups; leave raw learned groups
-	// in discover so re-learning isn't clobbered. cfg_type <> 'learned' is the guard.
-	var promoted int
+	// Only adjust user-authored (ground/learned-promoted) groups; leave raw learned groups
+	// under the learner's control so re-learning isn't clobbered. cfg_type <> 'learned' is the guard.
+	var changed int
 	if body.Dimension == "policy" {
 		// Network mode: no member propagation (network rules are learned separately).
 		tag, err := h.db.Pool().Exec(r.Context(), `
@@ -69,9 +85,9 @@ UPDATE groups
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		promoted = int(tag.RowsAffected())
+		changed = int(tag.RowsAffected())
 	} else {
-		// Profile mode: promote each affected group AND push the new baseline mode down to
+		// Profile mode: change each affected group AND push the new baseline mode down to
 		// its member workloads (matching the per-group Update propagation).
 		rows, err := h.db.Pool().Query(r.Context(), `
 SELECT id, cluster_id, members
@@ -99,6 +115,7 @@ SELECT id, cluster_id, members
 				return
 			}
 			_ = json.Unmarshal(membersRaw, &a.members)
+			a.members = normalizeGroupMembers(a.members)
 			groups = append(groups, a)
 		}
 		rows.Close()
@@ -112,13 +129,17 @@ SELECT id, cluster_id, members
 			if a.clusterID != nil {
 				_ = h.propagateGroupProfileMode(r.Context(), subj.OrgID, *a.clusterID, a.members, to)
 			}
-			promoted++
+			changed++
 		}
 	}
 
 	oid, uid := subj.OrgID, subj.UserID
 	_, _, _ = h.auditLog.Log(r.Context(), audit.Event{OrgID: &oid, ActorID: &uid,
-		Action: "group.promote", TargetKind: "group", TargetID: "",
-		After: map[string]any{"dimension": body.Dimension, "from": string(from), "to": string(to), "promoted": promoted}})
-	writeJSON(w, http.StatusOK, map[string]any{"dimension": body.Dimension, "from": string(from), "to": string(to), "promoted": promoted})
+		Action: "group.mode.bulk", TargetKind: "group", TargetID: "",
+		After: map[string]any{"dimension": body.Dimension, "from": string(from), "to": string(to), "changed": changed}})
+	writeJSON(w, http.StatusOK, map[string]any{"dimension": body.Dimension, "from": string(from), "to": string(to), "changed": changed, "promoted": changed})
+}
+
+func validGroupMode(m group.Mode) bool {
+	return m == group.ModeDiscover || m == group.ModeMonitor || m == group.ModeProtect
 }

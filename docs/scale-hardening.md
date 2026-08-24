@@ -20,7 +20,7 @@ Constellation's design target is **mid-market self-hosted** (100 clusters, 10k n
 - Scale on **queue depth**, not CPU. Operator HPA watches `scan_jobs.pending` via the Prometheus adapter.
 - ~1 GB RAM during Trivy DB load + ~500 MB during scan. Default `1 CPU / 2 GiB`.
 - Trivy DB pre-warmed at image-build (in `Dockerfile.scanner`).
-- Cap `CONSTELLATION_SCANNER_MAX_CONCURRENT = NumCPU - 1`; Trivy is single-threaded per scan.
+- Start with `CONSTELLATION_SCANNER_MAX_CONCURRENT=1` for Syft+Trivy+Grype deployments. Raise it only with matching memory headroom, or set `0` to auto-size from CPU count on dedicated scanner nodes.
 
 ## API
 

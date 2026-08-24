@@ -8,34 +8,13 @@
 //      via the data-cluster-id attribute on the page and via API echo).
 //   4. The ClusterSwitcher pill swaps clusters and the URL + page data update.
 //   5. /cve remains org-scoped (no cluster context, no switcher).
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect } from "@playwright/test";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { login } from "./utils";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SCREENS = path.resolve(here, "screens-cluster-flow");
-
-// Cluster-flow targets the dev GlobalAdmin account that owns the seeded clusters
-// (constellation, constellation-edge, k3s-local). The shared e2e/utils.ts login
-// helper uses the demo admin creds, so this spec keeps its own login helper.
-const API = process.env.VITE_API_URL ?? "http://localhost:18080";
-const CREDS = { email: "admin@dev", password: "devpass123" };
-
-async function login(page: Page) {
-  const resp = await page.request.post(`${API}/api/v1/auth/login`, { data: CREDS });
-  if (!resp.ok()) {
-    // Fall back to the demo admin for environments where dev isn't seeded.
-    const fallback = await page.request.post(`${API}/api/v1/auth/login`, {
-      data: { email: "admin@demo.test", password: "Constellation!1" },
-    });
-    if (!fallback.ok()) throw new Error(`login failed: ${resp.status()}`);
-    const { token } = await fallback.json();
-    await page.addInitScript((t) => localStorage.setItem("constellation.token", t), token);
-    return;
-  }
-  const { token } = await resp.json();
-  await page.addInitScript((t) => localStorage.setItem("constellation.token", t), token);
-}
 
 test.beforeEach(async ({ page }) => {
   await login(page);

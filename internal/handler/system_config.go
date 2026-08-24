@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/syscfg"
@@ -48,10 +50,33 @@ func (h *SystemConfig) Get(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"config":   cfg.Redacted(),
 		"revision": rev,
-	})
+		"source":   "default",
+	}
+	var updatedAt time.Time
+	var updatedBy sql.NullString
+	var updatedByEmail sql.NullString
+	err = h.db.Pool().QueryRow(r.Context(), `
+SELECT sc.updated_at, sc.updated_by::text, u.email
+  FROM system_config sc
+  LEFT JOIN users u ON u.id = sc.updated_by
+ WHERE sc.org_id = $1`, subj.OrgID).Scan(&updatedAt, &updatedBy, &updatedByEmail)
+	if err == nil {
+		resp["source"] = "system_config"
+		resp["updated_at"] = updatedAt
+		if updatedBy.Valid {
+			resp["updated_by"] = updatedBy.String
+		}
+		if updatedByEmail.Valid {
+			resp["updated_by_email"] = updatedByEmail.String
+		}
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // Patch applies a partial, validated update and persists it, bumping the revision. The

@@ -28,12 +28,12 @@ test("Policies page renders the catalog rail", async ({ page }) => {
   await page.goto("/policies");
   // The seed has 1 policy; the rail should render it.
   await expect(page.getByTestId("policy-rail")).toBeVisible();
-  // At minimum the Monaco editor pane is mounted (placeholder while empty is acceptable).
-  await expect(page.getByTestId("policy-editor")).toBeVisible();
+  await expect(page.getByTestId("policy-row-block-unsigned-images")).toBeVisible();
 });
 
 test("Policies page dry-runs admission decisions before enforcement", async ({ page }) => {
   await page.goto("/policies");
+  await page.getByRole("tab", { name: /Admission simulator/i }).click();
 
   await expect(page.getByTestId("policy-simulator")).toBeVisible();
   await page.getByTestId("policy-simulator-run").click();

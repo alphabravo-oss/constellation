@@ -449,7 +449,7 @@ spec:
   action: deny
 `,
 		},
-	}, nil, nil)
+	}, nil, nil, nil)
 	decision, mode := admissionDecision(matches)
 	if decision != "deny" || mode != "enforce" || len(matches) != 2 {
 		t.Fatalf("unexpected explicit policy result: decision=%s mode=%s matches=%+v", decision, mode, matches)

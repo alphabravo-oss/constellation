@@ -138,7 +138,7 @@ All env files live under `/etc/constellation/` (mode 0640, owner root, group `co
 |---|---|---|---|
 | `CONSTELLATION_CONTROL_PLANE_URL` | yes | – | Where the API is. |
 | `CONSTELLATION_SCANNER_TOKEN` | yes | – | Bearer token registered with the API. |
-| `CONSTELLATION_SCANNER_MAX_CONCURRENT` | no | `NumCPU` | Concurrent scans cap. |
+| `CONSTELLATION_SCANNER_MAX_CONCURRENT` | no | `1` | Concurrent scans cap; set `0` to auto-size from CPU count after memory is sized. |
 | `XDG_CACHE_HOME`, `TRIVY_CACHE_DIR`, `GRYPE_DB_CACHE_DIR` | no | `/var/lib/constellation/.cache/...` | Persist scanner DBs across restarts. |
 
 ### `runtime-agent.env` — `constellation-runtime-agent.service`

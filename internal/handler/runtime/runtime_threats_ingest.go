@@ -46,10 +46,11 @@ type RuntimeThreats struct {
 	// EventsIngest fan-out (audit + notify + response engines). When a hook is
 	// nil that leg is skipped; a bare NewRuntimeThreats still only INSERTs, so
 	// existing call sites keep working. See WithAlerting / With* below.
-	audit             *audit.Logger
-	dispatcher        *notify.Dispatcher
-	respond           func(ctx context.Context, orgID, clusterID uuid.UUID, ev response.Event)
-	evalResponseRules func(ctx context.Context, orgID uuid.UUID, ev *responserule.Event) ([]responserule.Action, error)
+	audit               *audit.Logger
+	dispatcher          *notify.Dispatcher
+	respond             func(ctx context.Context, orgID, clusterID uuid.UUID, ev response.Event)
+	decideResponseRules func(ctx context.Context, orgID, clusterID uuid.UUID, ev response.Event) ResponseRuleDecision
+	evalResponseRules   func(ctx context.Context, orgID uuid.UUID, ev *responserule.Event) ([]responserule.Action, error)
 
 	// dedup collapses a flood of identical threats (same threat_id + src/dst +
 	// port) into a single alert per window. Always non-nil (set by the
@@ -220,6 +221,20 @@ VALUES ($1,$2, NULLIF($3,''), NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), NULLI
 			continue
 		}
 		workloadID, namespace, podName := runtimeThreatAttribution(row, ipResolver)
+		pendingAlert := pendingThreatAlert{
+			row:        row,
+			clusterID:  cid,
+			workloadID: workloadID,
+			namespace:  namespace,
+			podName:    podName,
+		}
+		if row.Severity >= threatAlertSeverityMin && h.decideResponseRules != nil {
+			pendingAlert.v2Decision = h.threatResponseDecisionSafe(r.Context(), tok.OrgID, &pendingAlert)
+			if pendingAlert.v2Decision.SuppressLog {
+				pending = append(pending, pendingAlert)
+				continue
+			}
+		}
 		if _, err := tx.Exec(r.Context(), insertSQL,
 			tok.OrgID, cid, strings.TrimSpace(row.Node), strings.ToLower(strings.TrimSpace(row.EPMAC)),
 			workloadID, namespace, podName,
@@ -236,13 +251,7 @@ VALUES ($1,$2, NULLIF($3,''), NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), NULLI
 			return
 		}
 		accepted++
-		pending = append(pending, pendingThreatAlert{
-			row:        row,
-			clusterID:  cid,
-			workloadID: workloadID,
-			namespace:  namespace,
-			podName:    podName,
-		})
+		pending = append(pending, pendingAlert)
 	}
 
 	if err := tx.Commit(r.Context()); err != nil {
@@ -363,7 +372,8 @@ type RuntimeThreatRow struct {
 }
 
 // List returns recent threats. Filters: ?hours= (default 24, max 720),
-// ?severity_min= (1..9), ?cluster_id=, ?workload_id=, ?category=dlp|waf.
+// ?severity_min= (1..9), ?cluster_id=, ?workload_id=, ?category=dlp|waf,
+// ?group= group id or name.
 func (h *RuntimeThreats) List(w http.ResponseWriter, r *http.Request) {
 	sub, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
@@ -377,6 +387,17 @@ func (h *RuntimeThreats) List(w http.ResponseWriter, r *http.Request) {
 	categoryFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("category")))
 	if categoryFilter != "" && categoryFilter != "dlp" && categoryFilter != "waf" && categoryFilter != "ips" {
 		jsonError(w, http.StatusBadRequest, "category must be dlp, waf, or ips")
+		return
+	}
+	var clusterUUID *uuid.UUID
+	if clusterID != "" {
+		if parsed, err := uuid.Parse(clusterID); err == nil {
+			clusterUUID = &parsed
+		}
+	}
+	groupMembers, groupName, groupActive, err := handler.ResolveGroupFilterMembers(r.Context(), h.db.Pool(), sub.OrgID, clusterUUID, r.URL.Query().Get("group"))
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -396,15 +417,16 @@ SELECT id::text, org_id::text, cluster_id::text,
    AND at >= NOW() - ($2::text || ' hours')::interval
    AND ($3::text = '' OR cluster_id::text = $3)
    AND severity >= $4::smallint
-   AND ($5::text = '' OR workload_id = $5)
-   AND ($6::text = '' OR (CASE
-            WHEN threat_id >= 40000 AND threat_id < 50000 THEN 'waf'
-            WHEN threat_id >= 20000 AND threat_id < 40000 THEN 'dlp'
-            ELSE 'ips'
-        END) = $6)
- ORDER BY at DESC
- LIMIT 500`,
-		sub.OrgID, fmt.Sprintf("%d", hours), clusterID, int16(sevMin), workloadIDFilter, categoryFilter)
+	   AND ($5::text = '' OR workload_id = $5)
+	   AND ($6::text = '' OR (CASE
+	            WHEN threat_id >= 40000 AND threat_id < 50000 THEN 'waf'
+	            WHEN threat_id >= 20000 AND threat_id < 40000 THEN 'dlp'
+	            ELSE 'ips'
+	        END) = $6)
+	   AND (NOT $7::boolean OR workload_id = ANY($8::text[]))
+	 ORDER BY at DESC
+	 LIMIT 500`,
+		sub.OrgID, fmt.Sprintf("%d", hours), clusterID, int16(sevMin), workloadIDFilter, categoryFilter, groupActive, groupMembers)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -433,7 +455,12 @@ SELECT id::text, org_id::text, cluster_id::text,
 		t.Category = threatCategory(t.ThreatID)
 		out = append(out, t)
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"threats": out})
+	response := map[string]any{"threats": out}
+	if groupActive {
+		response["selected_group"] = groupName
+		response["selected_group_members"] = len(groupMembers)
+	}
+	httpx.WriteJSON(w, http.StatusOK, response)
 }
 
 // VerbList is the rbac verb gate for List.

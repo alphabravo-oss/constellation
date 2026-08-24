@@ -7,21 +7,21 @@ test.beforeEach(async ({ page }) => {
 
 test("Settings links to integration delivery operations", async ({ page }) => {
   await page.goto("/settings");
-  await expect(page.getByTestId("integrations-panel")).toContainText("PagerDuty");
+  await expect(page.getByRole("link", { name: /Integrations & Routing/i })).toBeVisible();
 
-  await page.getByRole("link", { name: /open delivery operations/i }).click();
+  await page.getByRole("link", { name: /Integrations & Routing/i }).click();
   await expect(page).toHaveURL(/\/settings\/integrations$/);
-  await expect(page.getByRole("heading", { name: "Integration Delivery" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Notifier Integrations" })).toBeVisible();
 });
 
 test("Integration delivery page shows enterprise connector operations", async ({ page }) => {
-  await page.goto("/settings/integrations");
+  await page.goto("/settings/integrations?tab=operations");
 
   await expect(page.getByTestId("integration-connectors")).toContainText("Critical PagerDuty service");
   await expect(page.getByTestId("integration-connectors")).toContainText("SecOps Slack");
   await expect(page.getByTestId("integration-connectors")).toContainText("ServiceNow security queue");
 
-  await expect(page.getByTestId("routing-rules")).toContainText("Critical production findings page");
+  await expect(page.getByTestId("routing-rules")).toContainText("Saved notification routing tree");
   await expect(page.getByTestId("routing-rules")).toContainText("pagerduty-critical");
   await expect(page.getByTestId("delivery-history")).toContainText("finding.escalated");
   await expect(page.getByTestId("delivery-history")).toContainText("retrying");
@@ -31,9 +31,9 @@ test("Integration delivery page shows enterprise connector operations", async ({
 });
 
 test("Integration test preview is read-only and does not send external traffic", async ({ page }) => {
-  await page.goto("/settings/integrations");
+  await page.goto("/settings/integrations?tab=operations");
 
-  await page.getByRole("button", { name: /preview routing/i }).click();
+  await page.getByTestId("integration-connectors").getByRole("button", { name: /preview routing/i }).first().click();
   await expect(page.getByTestId("routing-preview")).toContainText("Critical PagerDuty service");
   await expect(page.getByTestId("routing-preview")).toContainText("no receiver call");
   await expect(page.getByTestId("routing-preview")).toContainText("sends: no");

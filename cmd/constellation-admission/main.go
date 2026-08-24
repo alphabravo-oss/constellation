@@ -27,6 +27,7 @@ import (
 	admissionv1 "k8s.io/api/admission/v1"
 
 	"github.com/alphabravocompany/constellation/internal/admissionevidence"
+	"github.com/alphabravocompany/constellation/internal/admissiongroups"
 	rtquar "github.com/alphabravocompany/constellation/internal/runtime/quarantine"
 	"github.com/alphabravocompany/constellation/pkg/admission"
 	"github.com/alphabravocompany/constellation/pkg/observability"
@@ -119,6 +120,7 @@ func main() {
 			"cluster_id", clusterID, "refresh", *quarantineRefresh)
 	}
 
+	groupResolverOn := false
 	if *policyDSN != "" {
 		if *policyCluster == "" {
 			_, _ = os.Stderr.WriteString("--policy-cluster-id is required when --policy-dsn is set\n")
@@ -142,6 +144,14 @@ func main() {
 		}
 		evidence := admissionevidence.New(pool, orgID)
 		engine.SetEvidenceSource(evidence)
+		groupResolver := admissiongroups.New(pool, orgID, clusterID, *policyRefresh)
+		if err := groupResolver.Refresh(ctx); err != nil {
+			tel.Logger.Warn("admission group resolver initial refresh failed; group-scoped rules will retry on demand",
+				"err", err)
+		}
+		engine.SetGroupResolver(groupResolver)
+		go groupResolver.Run(ctx, *policyRefresh, tel.Logger)
+		groupResolverOn = true
 		if n, err := refreshAdmissionPolicies(ctx, chain, pool, clusterID, tel.Logger); err != nil {
 			tel.Logger.Warn("admission policy initial refresh failed; serving built-in rules",
 				"err", err)
@@ -252,12 +262,13 @@ func main() {
 		Logger:       tel.Logger,
 		MetadataFn: func() any {
 			return map[string]any{
-				"tls_enabled":           !*insecure,
-				"quarantine_enabled":    qsrc != nil,
-				"policy_source_enabled": strings.TrimSpace(*policyDSN) != "",
-				"audit_enabled":         strings.TrimSpace(*auditDSN) != "",
-				"rbac_enabled":          rbacOn,
-				"nslabels_enabled":      nsLabelsOn,
+				"tls_enabled":            !*insecure,
+				"quarantine_enabled":     qsrc != nil,
+				"policy_source_enabled":  strings.TrimSpace(*policyDSN) != "",
+				"audit_enabled":          strings.TrimSpace(*auditDSN) != "",
+				"group_resolver_enabled": groupResolverOn,
+				"rbac_enabled":           rbacOn,
+				"nslabels_enabled":       nsLabelsOn,
 			}
 		},
 	}))

@@ -18,7 +18,7 @@ test("Risk Dashboard ranks deployments by risk score", async ({ page }) => {
 
 test("Drill into a deployment shows violation timeline", async ({ page }) => {
   await page.goto("/deployments");
-  await page.locator('[data-testid="deployment-row"]').first().getByRole("link").click();
+  await page.locator('[data-testid="deployment-row"]').first().getByRole("link", { name: "default/api-service" }).click();
   await expect(page.getByRole("heading", { name: /default\/api-service/i })).toBeVisible();
   await expect(page.getByTestId("deployment-action-controls")).toBeVisible();
   await expect(page.getByTestId("deployment-policy-actions")).toBeVisible();

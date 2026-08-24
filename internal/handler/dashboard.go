@@ -23,23 +23,23 @@ type Dashboard struct {
 func NewDashboard(d *db.DB) *Dashboard { return &Dashboard{db: d} }
 
 type dashboardSummaryDTO struct {
-	GeneratedAt     string             `json:"generated_at"`
-	FindingsByLevel map[string]int     `json:"findings_by_severity"`
-	FindingsTotal   int                `json:"findings_total"`
-	OpenFindings    int                `json:"open_findings"`
-	AcceptedRisks   int                `json:"accepted_risks"`
-	HighestRisk     float64            `json:"highest_risk"`
-	AssetsTotal     int                `json:"assets_total"`
-	ScanQueueDepth  int                `json:"scan_queue_depth"`
-	RecentActivity  []dashboardEventDT `json:"recent_activity"`
+	GeneratedAt     string              `json:"generated_at"`
+	FindingsByLevel map[string]int      `json:"findings_by_severity"`
+	FindingsTotal   int                 `json:"findings_total"`
+	OpenFindings    int                 `json:"open_findings"`
+	AcceptedRisks   int                 `json:"accepted_risks"`
+	HighestRisk     float64             `json:"highest_risk"`
+	AssetsTotal     int                 `json:"assets_total"`
+	ScanQueueDepth  int                 `json:"scan_queue_depth"`
+	RecentActivity  []dashboardEventDT  `json:"recent_activity"`
 	Posture         dashboardPostureDTO `json:"posture"`
 }
 
 // eventsTimelineDT is one day's bucket of alerting security events (severity high/critical),
 // powering NV's dashboard Security-Events timeline chart.
 type eventsTimelineDT struct {
-	Date     string `json:"date"`     // YYYY-MM-DD
-	Total    int    `json:"total"`    // high + critical alerts that day
+	Date     string `json:"date"`  // YYYY-MM-DD
+	Total    int    `json:"total"` // high + critical alerts that day
 	Critical int    `json:"critical"`
 }
 
@@ -48,17 +48,17 @@ type eventsTimelineDT struct {
 // hardening + exposure). Lets the dashboard answer "how secure is this cluster" beyond
 // a raw finding count.
 type dashboardPostureDTO struct {
-	SecurityScore   int            `json:"security_score"`   // 0-100, higher = safer
-	ScoreBreakdown  map[string]int `json:"score_breakdown"`  // per-factor deductions from 100
-	VulnsByLocation map[string]int `json:"vulns_by_location"`// image / host / platform finding counts
-	VulnSignals     map[string]int `json:"vuln_signals"`     // kev / fixable / high_epss / corroborated
-	Hardening       map[string]int `json:"hardening"`        // workloads + privileged / host_network / run_as_root / exposed
-	Enforcement     map[string]int `json:"enforcement"`      // groups + discover / monitor / protect (NV service-mode coverage)
-	CvesByMode      map[string]int `json:"cves_by_mode"`     // NV RESTRiskScoreMetricsCVE: distinct CVEs on workloads by group mode + platform/host
-	ExposedByMode   map[string]int `json:"exposed_by_mode"`  // NV exposed-endpoint policy_mode: net-exposed workloads by group mode
-	NewServicePolicyMode  string   `json:"new_service_policy_mode"`  // NV NewServiceMode: default network mode for new groups
-	NewServiceProfileMode string   `json:"new_service_profile_mode"` // NV NewServiceProfileMode
-	TopVulnerable   []topVulnerableWorkloadDTO `json:"top_vulnerable"` // NV "Top Vulnerable Assets"
+	SecurityScore         int                        `json:"security_score"`           // 0-100, higher = safer
+	ScoreBreakdown        map[string]int             `json:"score_breakdown"`          // per-factor deductions from 100
+	VulnsByLocation       map[string]int             `json:"vulns_by_location"`        // image / host / platform finding counts
+	VulnSignals           map[string]int             `json:"vuln_signals"`             // kev / fixable / high_epss / corroborated
+	Hardening             map[string]int             `json:"hardening"`                // workloads + privileged / host_network / run_as_root / exposed
+	Enforcement           map[string]int             `json:"enforcement"`              // groups + discover / monitor / protect (NV service-mode coverage)
+	CvesByMode            map[string]int             `json:"cves_by_mode"`             // NV RESTRiskScoreMetricsCVE: distinct CVEs on workloads by group mode + platform/host
+	ExposedByMode         map[string]int             `json:"exposed_by_mode"`          // NV exposed-endpoint policy_mode: net-exposed workloads by group mode
+	NewServicePolicyMode  string                     `json:"new_service_policy_mode"`  // NV NewServiceMode: default network mode for new groups
+	NewServiceProfileMode string                     `json:"new_service_profile_mode"` // NV NewServiceProfileMode
+	TopVulnerable         []topVulnerableWorkloadDTO `json:"top_vulnerable"`           // NV "Top Vulnerable Assets"
 }
 
 type topVulnerableWorkloadDTO struct {
@@ -160,7 +160,7 @@ SELECT severity, COUNT(*)::int FROM findings
    AND ($2::uuid IS NULL OR cluster_id = $2)
    -- Canonical vuln count: exclude the runtime-agent 'workload' pod-scan duplicate of
    -- the 'image-workload' image scan (see findings.go) so vulns aren't double-counted.
-   AND NOT (kind = 'vulnerability' AND target_type = 'workload')
+	   AND (kind <> 'vulnerability' OR COALESCE(target_type, '') <> 'workload')
  GROUP BY severity`, orgID, clusterArg)
 	if err != nil {
 		return out, fmt.Errorf("severity rollup: %w", err)
@@ -184,7 +184,7 @@ SELECT COUNT(*) FILTER (WHERE lifecycle = 'open')::int,
   FROM findings
  WHERE org_id = $1
    AND ($2::uuid IS NULL OR cluster_id = $2)
-   AND NOT (kind = 'vulnerability' AND target_type = 'workload')`, orgID, clusterArg).
+	   AND (kind <> 'vulnerability' OR COALESCE(target_type, '') <> 'workload')`, orgID, clusterArg).
 		Scan(&out.OpenFindings, &out.AcceptedRisks, &out.HighestRisk); err != nil {
 		return out, fmt.Errorf("lifecycle: %w", err)
 	}
@@ -274,7 +274,7 @@ SELECT
  WHERE org_id = $1
    AND kind = 'vulnerability'
    AND lifecycle = 'open'
-   AND target_type <> 'workload'
+	   AND COALESCE(target_type, '') <> 'workload'
    AND ($2::uuid IS NULL OR cluster_id = $2)`, orgID, clusterArg).
 		Scan(&vImage, &vHost, &vPlatform, &sKev, &sFix, &sEpss, &sCorr, &critical, &high); err != nil {
 		return fmt.Errorf("vuln rollup: %w", err)

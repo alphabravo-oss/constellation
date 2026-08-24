@@ -107,7 +107,7 @@ export function AttestationPolicyFormPage() {
       void qc.invalidateQueries({ queryKey: ["repository-scans"] });
       navigate(BACK_LINK);
     },
-    onError: (err: any) => toast.error(`Save failed: ${errorMessage(err)}`),
+    onError: (err: unknown) => toast.error(`Save failed: ${errorMessage(err)}`),
   });
 
   const set = <K extends keyof PolicyFormState>(key: K, value: PolicyFormState[K]) =>
@@ -359,6 +359,7 @@ function uniqueList(values: string[]): string[] {
   return out;
 }
 
-function errorMessage(err: any): string {
-  return String(err?.response?.data ?? err?.message ?? err);
+function errorMessage(err: unknown): string {
+  const typed = err as { response?: { data?: unknown }; message?: string };
+  return String(typed.response?.data ?? typed.message ?? err);
 }

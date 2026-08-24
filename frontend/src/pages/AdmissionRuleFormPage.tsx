@@ -5,7 +5,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, Plus, X } from "lucide-react";
+import { ArrowLeft, Plus, ShieldAlert, X } from "lucide-react";
 
 import { policies as policiesApi, type AdmissionCriterionOption } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
@@ -13,6 +13,12 @@ import { PageHeader } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Field, TextInput, Select } from "@/components/ui/form";
+import { GroupPicker } from "@/components/GroupPicker";
+import {
+  ADMISSION_RISK_SHORTCUTS,
+  admissionShortcutAvailable,
+  admissionShortcutPayload,
+} from "@/lib/admission-rule-shortcuts";
 
 interface Row { key: string; value: string }
 
@@ -29,16 +35,31 @@ export function AdmissionRuleFormPage() {
 
   const [name, setName] = useState("");
   const [mode, setMode] = useState("monitor");
+  const [group, setGroup] = useState("");
   const [rows, setRows] = useState<Row[]>([{ key: "", value: "" }]);
 
   const setRow = (i: number, patch: Partial<Row>) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   const addRow = () => setRows((rs) => [...rs, { key: "", value: "" }]);
   const removeRow = (i: number) => setRows((rs) => rs.filter((_, j) => j !== i));
+  const applyShortcut = (id: string) => {
+    const shortcut = ADMISSION_RISK_SHORTCUTS.find((item) => item.id === id);
+    if (!shortcut) return;
+    const payload = admissionShortcutPayload(shortcut, catalog);
+    if (payload.rows.length === 0) return;
+    setName(payload.name);
+    setMode(payload.mode);
+    setRows(payload.rows);
+  };
 
   const save = useMutation({
     mutationFn: () =>
       policiesApi.createAdmissionRule(
-        { name: name.trim(), mode, criteria: rows.filter((r) => r.key).map((r) => ({ key: r.key, value: r.value.trim() })) },
+        {
+          name: name.trim(),
+          mode,
+          group: group.trim() || undefined,
+          criteria: rows.filter((r) => r.key).map((r) => ({ key: r.key, value: r.value.trim() })),
+        },
         { cluster_id: clusterId },
       ),
     onSuccess: () => {
@@ -82,7 +103,32 @@ export function AdmissionRuleFormPage() {
       />
       <Card title="Rule" description="A workload is denied when it matches all of the criteria below.">
         <form className="space-y-5" onSubmit={(e) => { e.preventDefault(); if (canSave) save.mutate(); }}>
-          <div className="grid gap-5 sm:grid-cols-2">
+          <section className="space-y-2" data-testid="admission-risk-shortcuts">
+            <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+              <ShieldAlert className="h-3.5 w-3.5 text-[color:var(--color-severity-high)]" />
+              Risk shortcuts
+            </div>
+            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+              {ADMISSION_RISK_SHORTCUTS.map((shortcut) => {
+                const available = admissionShortcutAvailable(shortcut, catalog);
+                return (
+                  <button
+                    key={shortcut.id}
+                    type="button"
+                    disabled={!available}
+                    onClick={() => applyShortcut(shortcut.id)}
+                    className="rounded-md border border-border bg-background px-3 py-2 text-left transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                    data-testid={`admission-risk-shortcut-${shortcut.id}`}
+                  >
+                    <span className="block text-xs font-medium text-foreground">{shortcut.name}</span>
+                    <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">{shortcut.description}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_160px_minmax(220px,0.9fr)]">
             <Field label="Rule name" required>
               <TextInput autoFocus placeholder="block-privileged-prod" value={name} onChange={(e) => setName(e.target.value)} required />
             </Field>
@@ -90,6 +136,16 @@ export function AdmissionRuleFormPage() {
               <Select value={mode} onChange={(e) => setMode(e.target.value)}>
                 {(options?.rule_modes ?? ["monitor", "enforce"]).map((m) => <option key={m} value={m}>{m}</option>)}
               </Select>
+            </Field>
+            <Field label="Group" hint="Optional workload group scope.">
+              <GroupPicker
+                clusterId={clusterId}
+                value={group}
+                onChange={setGroup}
+                allowExternal={false}
+                placeholder="Any group"
+                testId="admission-rule-group-picker"
+              />
             </Field>
           </div>
 

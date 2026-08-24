@@ -22,8 +22,10 @@
 //	r.Get("/scanner/registry-credentials", handler.NewRegistryCredentials(s.db, s.auditLog).Get)
 //
 // Full route: method GET, path /api/v1/scanner/registry-credentials
-//             (base "/api/v1" is applied by the enclosing router), query param
-//             registry_id=<uuid>, auth = scanner-token (group middleware).
+//
+//	(base "/api/v1" is applied by the enclosing router), query param
+//	registry_id=<uuid>, auth = scanner-token (group middleware).
+//
 // ─────────────────────────────────────────────────────────────────────────────
 package handler
 
@@ -91,7 +93,7 @@ func (h *RegistryCredentials) Get(w http.ResponseWriter, r *http.Request) {
 	// org-scoped: a scanner token can only read credentials for registries in
 	// its own org. A registry belonging to another org returns 404, identical
 	// to a registry that does not exist — no cross-org existence oracle.
-	kind, endpoint, authKind, sealed, err := loadRegistryRow(r.Context(), h.db.Pool(), tok.OrgID, id)
+	kind, endpoint, authKind, sealed, _, err := loadRegistryRow(r.Context(), h.db.Pool(), tok.OrgID, id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			jsonError(w, http.StatusNotFound, "registry not found")

@@ -49,6 +49,7 @@ function readStorage(): Scope | null {
   }
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useScope(): [Scope, (next: Scope) => void] {
   const [sp, setSp] = useSearchParams();
   const initial = useMemo(() => {

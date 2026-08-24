@@ -8,6 +8,7 @@ import { cn } from "@/lib/cn";
  * A user can link straight to a tab, and back/forward navigates tabs. Drop-in for
  * useState: `const [tab, setTab] = useTabParam("tab", "overview")`.
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function useTabParam(key: string, defaultValue: string): [string, (v: string) => void] {
   const [params, setParams] = useSearchParams();
   const value = params.get(key) ?? defaultValue;

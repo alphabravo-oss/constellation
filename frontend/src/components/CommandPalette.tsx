@@ -21,6 +21,7 @@ import {
   Compass,
   Bug,
   Server,
+  ServerCog,
   Settings,
   Clock,
   PackageSearch,
@@ -34,6 +35,8 @@ import {
   KeyRound,
   BadgeCheck,
   Plug,
+  ArrowLeftRight,
+  SlidersHorizontal,
 } from "lucide-react";
 
 import { useHotkey, HOTKEY_CATALOG } from "@/lib/hotkeys";
@@ -204,7 +207,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
 
               <Group heading="Navigate">
                 {NAV_ITEMS.map((n) => (
-                  <Item key={n.href} icon={n.icon} onSelect={() => go(resolveHref(n.href), n.label)} shortcut={n.shortcut}>
+                  <Item key={`${n.href}:${n.label}`} icon={n.icon} onSelect={() => go(resolveHref(n.href), n.label)} shortcut={n.shortcut} value={navItemSearchValue(n)}>
                     <span>{n.label}</span>
                   </Item>
                 ))}
@@ -280,7 +283,12 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
               {workloadsQ.data?.deployments && workloadsQ.data.deployments.length > 0 && clusterId && (
                 <Group heading="Workloads">
                   {workloadsQ.data.deployments.slice(0, 6).map((d) => (
-                    <Item key={d.id} icon={<Layers />} onSelect={() => go(`/clusters/${clusterId}/deployments/${d.id}`, d.name, d.id)}>
+                    <Item
+                      key={d.id}
+                      icon={<Layers />}
+                      onSelect={() => go(`/clusters/${clusterId}/deployments/${d.id}`, d.name, d.id)}
+                      value={`workload service deployment pod application ${d.name} ${d.namespace}`}
+                    >
                       <span className="flex-1 truncate">{d.name}</span>
                       <span className="ml-2 text-[10px] text-mono text-muted-foreground">{d.namespace}</span>
                     </Item>
@@ -346,14 +354,17 @@ function Item({
   children,
   onSelect,
   shortcut,
+  value,
 }: {
   icon: React.ReactNode;
   children: React.ReactNode;
   onSelect: () => void;
   shortcut?: string;
+  value?: string;
 }) {
   return (
     <Command.Item
+      value={value}
       onSelect={onSelect}
       className="
         flex items-center gap-2 px-2 py-1.5 rounded text-sm text-foreground cursor-pointer
@@ -368,34 +379,61 @@ function Item({
   );
 }
 
-const NAV_ITEMS: Array<{ icon: React.ReactNode; label: string; href: string; shortcut?: string }> = [
-  { icon: <LayoutDashboard />, label: "Dashboard",   href: "/dashboard",  shortcut: "g d" },
-  { icon: <AlertTriangle />,   label: "Findings",    href: "/findings",   shortcut: "g f" },
-  { icon: <Server />,          label: "Nodes",       href: "/nodes",      shortcut: "g h" },
-  { icon: <PackageSearch />,   label: "Images",      href: "/images",     shortcut: "g i" },
-  { icon: <Boxes />,           label: "Assets",      href: "/assets",     shortcut: "g a" },
-  { icon: <ShieldCheck />,     label: "Compliance",  href: "/compliance", shortcut: "g c" },
-  { icon: <Network />,         label: "Network Map", href: "/network",    shortcut: "g n" },
-  { icon: <FileText />,        label: "Policies",    href: "/policies",   shortcut: "g p" },
-  { icon: <ScrollText />,      label: "Runtime Policies", href: "/runtime-policies" },
-  { icon: <RadioTower />,      label: "Response Catalog", href: "/response" },
-  { icon: <Activity />,        label: "Runtime",     href: "/runtime",    shortcut: "g r" },
-  { icon: <Database />,        label: "CVE Database", href: "/cve",       shortcut: "g v" },
-  { icon: <ScanSearch />,      label: "Scanner & CVE Sources", href: "/settings/scanner" },
-  { icon: <KeyRound />,        label: "API Tokens",  href: "/settings/api-tokens" },
-  { icon: <BadgeCheck />,      label: "Attestation Trust", href: "/settings/attestation-trust" },
-  { icon: <Plug />,            label: "Connectors",  href: "/settings/connectors" },
-  { icon: <Server />,          label: "System Health", href: "/settings/health" },
-  { icon: <ClipboardCheck />,  label: "Posture",     href: "/posture" },
-  { icon: <Sparkles />,        label: "Federation",  href: "/federation" },
-  { icon: <Settings />,        label: "Settings",    href: "/settings" },
+interface NavSearchItem {
+  icon: React.ReactNode;
+  label: string;
+  href: string;
+  shortcut?: string;
+  keywords?: string[];
+}
+
+const NAV_ITEMS: NavSearchItem[] = [
+  { icon: <LayoutDashboard />, label: "Dashboard",   href: "/dashboard",  shortcut: "g d", keywords: ["home", "overview", "risk"] },
+  { icon: <ArrowLeftRight />,  label: "NeuVector Switchboard", href: "/neuvector", keywords: ["nv", "migration", "switch", "map", "compatibility"] },
+  { icon: <AlertTriangle />,   label: "Findings",    href: "/findings",   shortcut: "g f", keywords: ["security risks", "vulnerabilities", "violations", "cve", "risk"] },
+  { icon: <Server />,          label: "Nodes",       href: "/nodes",      shortcut: "g h", keywords: ["hosts", "host", "node", "agent", "enforcer"] },
+  { icon: <Server />,          label: "Hosts (NeuVector)", href: "/nodes", keywords: ["nodes", "host", "node", "agent", "enforcer"] },
+  { icon: <PackageSearch />,   label: "Images",      href: "/images",     shortcut: "g i", keywords: ["registry images", "containers", "image scan", "vulnerability"] },
+  { icon: <Boxes />,           label: "Assets",      href: "/assets",     shortcut: "g a", keywords: ["inventory", "services", "workloads", "containers"] },
+  { icon: <Layers />,          label: "Services / Workloads", href: "/deployments", keywords: ["deployment", "deployments", "pod", "pods", "application", "containers"] },
+  { icon: <ShieldCheck />,     label: "Compliance",  href: "/compliance", shortcut: "g c", keywords: ["cis", "benchmark", "compliance profile", "audit"] },
+  { icon: <Network />,         label: "Network Map", href: "/network",    shortcut: "g n", keywords: ["network activity", "conversations", "sessions", "pcap", "sniffer", "connections"] },
+  { icon: <Activity />,        label: "Security Events", href: "/timeline", keywords: ["events", "activity", "audit", "incidents", "threats", "violations", "logs"] },
+  { icon: <FileText />,        label: "Policy Center", href: "/policy", keywords: ["rules", "groups", "discover", "monitor", "protect", "learn", "enforce"] },
+  { icon: <FileText />,        label: "Policies",    href: "/policies",   shortcut: "g p", keywords: ["network policy", "rules", "discover", "monitor", "protect"] },
+  { icon: <ScrollText />,      label: "Runtime Policies", href: "/runtime-policies", keywords: ["process rules", "runtime rules", "process profile", "behavior"] },
+  { icon: <RadioTower />,      label: "Response Catalog", href: "/response", keywords: ["response rules", "notifications", "webhook", "quarantine", "isolate"] },
+  { icon: <Activity />,        label: "Runtime",     href: "/runtime",    shortcut: "g r", keywords: ["process", "behavior", "threat", "waf", "dlp", "agent", "enforcer"] },
+  { icon: <ServerCog />,       label: "Controllers / Enforcers / Scanners", href: "/components", keywords: ["components", "controller", "enforcer", "agent", "sensor", "scanner"] },
+  { icon: <ServerCog />,       label: "Controllers (NeuVector)", href: "/components?role=controller", keywords: ["api", "control plane", "manager"] },
+  { icon: <ShieldCheck />,     label: "Enforcers (NeuVector)", href: "/components?role=enforcer", keywords: ["agent", "runtime agent", "sensor", "node agent", "daemonset"] },
+  { icon: <ScanSearch />,      label: "Scanners (NeuVector)", href: "/components?role=scanner", keywords: ["scan worker", "vulnerability scanner", "cve scanner"] },
+  { icon: <Database />,        label: "CVE Database", href: "/cve",       shortcut: "g v", keywords: ["vulnerability database", "vulndb", "nvd", "kev"] },
+  { icon: <ScanSearch />,      label: "Scanner & CVE Sources", href: "/settings/scanner", keywords: ["vulndb", "vulnerability database", "nvd", "feed", "scanner pool", "cache"] },
+  { icon: <SlidersHorizontal />, label: "Effective Config", href: "/settings/effective-config", keywords: ["system config", "sysconfig", "configuration", "applied revision", "settings"] },
+  { icon: <KeyRound />,        label: "API Tokens",  href: "/settings/api-tokens", keywords: ["tokens", "service account", "automation", "keys"] },
+  { icon: <BadgeCheck />,      label: "Attestation Trust", href: "/settings/attestation-trust", keywords: ["admission trust", "signatures", "cosign", "provenance"] },
+  { icon: <Plug />,            label: "Connectors",  href: "/settings/connectors", keywords: ["registry", "cloud account", "scanner pool", "integrations"] },
+  { icon: <Server />,          label: "System Health", href: "/settings/health", keywords: ["controllers", "enforcers", "scanners", "components", "license", "heartbeat"] },
+  { icon: <ClipboardCheck />,  label: "Posture",     href: "/posture", keywords: ["coverage", "configuration posture", "security posture"] },
+  { icon: <Sparkles />,        label: "Federation",  href: "/federation", keywords: ["multi cluster", "fed", "remote cluster"] },
+  { icon: <Settings />,        label: "Settings",    href: "/settings", keywords: ["system", "configuration", "admin"] },
 ];
 
-const CLUSTER_HREFS = new Set(["/dashboard", "/findings", "/nodes", "/images", "/assets", "/compliance", "/network", "/policies", "/runtime", "/runtime-policies", "/response"]);
+function navItemSearchValue(item: NavSearchItem) {
+  return [item.label, item.href, ...(item.keywords ?? [])].join(" ");
+}
+
+const CLUSTER_HREFS = new Set([
+  "/dashboard", "/neuvector", "/findings", "/nodes", "/images", "/assets",
+  "/deployments", "/compliance", "/network", "/network-rules", "/timeline",
+  "/policy", "/policies", "/runtime", "/runtime-policies", "/response", "/components",
+]);
 const CLUSTER_HREF_PREFIXES = ["/findings/", "/nodes/", "/images/", "/assets/", "/deployments/", "/risk/"];
 
 function isClusterHref(href: string): boolean {
-  return CLUSTER_HREFS.has(href) || CLUSTER_HREF_PREFIXES.some((prefix) => href.startsWith(prefix));
+  const path = href.split(/[?#]/, 1)[0];
+  return CLUSTER_HREFS.has(path) || CLUSTER_HREF_PREFIXES.some((prefix) => path.startsWith(prefix));
 }
 
 function clusterIDFromPath(pathname: string): string | null {

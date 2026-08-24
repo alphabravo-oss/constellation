@@ -1,17 +1,20 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { Activity, Boxes, KeyRound, PackageCheck, ShieldCheck, UploadCloud } from "lucide-react";
 
 import { clusters } from "@/api/client";
 import { PageHeader, PageContainer } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { StatCard } from "@/components/ui/stat-card";
+import { sortClustersByActivity } from "@/lib/clusters";
+import { componentDiagnosticsHref, nvRoleAlias } from "@/lib/component-roles";
 
 type HealthComponent = Awaited<ReturnType<typeof clusters.health>>["components"][number];
 
 export function ClusterHealthPage() {
   const list = useQuery({ queryKey: ["clusters"], queryFn: () => clusters.list() });
-  const clusterList = useMemo(() => list.data?.clusters ?? [], [list.data?.clusters]);
+  const clusterList = useMemo(() => sortClustersByActivity(list.data?.clusters ?? []), [list.data?.clusters]);
   const [selectedID, setSelectedID] = useState<string | null>(null);
   const selected = useMemo(
     () => clusterList.find((cluster) => cluster.id === (selectedID ?? clusterList[0]?.id)),
@@ -32,11 +35,28 @@ export function ClusterHealthPage() {
   if (list.isPending) return <p className="text-sm text-muted-foreground">Loading clusters...</p>;
 
   const componentColumns: Column<HealthComponent>[] = [
-    { id: "name", header: "Component", cell: (c) => <span className="font-medium">{c.name}</span> },
-    { id: "kind", header: "Kind", cell: (c) => <span className="text-xs text-muted-foreground">{c.kind}</span> },
-    { id: "version", header: "Version", cell: (c) => <span className="font-mono text-xs">{c.version}</span> },
-    { id: "ready", header: "Ready", cell: (c) => <span className="text-xs">{c.ready}/{c.desired}</span> },
-    { id: "status", header: "Status", cell: (c) => <Status value={c.status} /> },
+    {
+      id: "name",
+      header: "Component",
+      exportValue: (c) => c.name,
+      cell: (c) => {
+        const role = nvRoleAlias({ name: c.name, kind: c.kind });
+        return (
+          <Link
+            to={componentDiagnosticsHref({ clusterId: selected?.id, component: c.name, role: role.id })}
+            className="font-medium hover:text-[color:var(--color-primary)]"
+            data-testid={`cluster-health-component-link-${safeTestID(c.name)}`}
+            title={`Open ${role.label.toLowerCase()} diagnostics`}
+          >
+            {c.name}
+          </Link>
+        );
+      },
+    },
+    { id: "kind", header: "Kind", cell: (c) => <span className="text-xs text-muted-foreground">{c.kind}</span>, exportValue: (c) => c.kind },
+    { id: "version", header: "Version", cell: (c) => <span className="font-mono text-xs">{c.version}</span>, exportValue: (c) => c.version },
+    { id: "ready", header: "Ready", cell: (c) => <span className="text-xs">{c.ready}/{c.desired}</span>, exportValue: (c) => `${c.ready}/${c.desired}` },
+    { id: "status", header: "Status", cell: (c) => <Status value={c.status} />, exportValue: (c) => c.status },
   ];
 
   return (
@@ -63,6 +83,7 @@ export function ClusterHealthPage() {
                 selected?.id === cluster.id ? "border-foreground bg-accent" : "border-border bg-card hover:bg-accent/50"
               }`}
               data-testid="cluster-card"
+              data-cluster-id={cluster.id}
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -135,6 +156,8 @@ export function ClusterHealthPage() {
                     rows={health.data?.components ?? []}
                     columns={componentColumns}
                     rowKey={(c) => c.name}
+                    exportFileName={`constellation-${selected.id}-components`}
+                    testId="cluster-components-data-table"
                   />
                 </div>
 
@@ -193,4 +216,8 @@ function Status({ value }: { value: string }) {
 function formatDate(value?: string) {
   if (!value) return "not yet";
   return new Date(value).toLocaleString();
+}
+
+function safeTestID(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "component";
 }

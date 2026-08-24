@@ -1,28 +1,42 @@
 import { test, expect, type Page } from "@playwright/test";
+import { getAuthToken, login } from "./utils";
 
-const CLUSTER_ID = "51ad38e9-2302-49b4-90b5-52f99ac5dd92";
-const NET_PATH = `/clusters/${CLUSTER_ID}/network?cluster_id=${CLUSTER_ID}`;
-const API = "http://localhost:18080";
+const API = process.env.VITE_API_URL ?? "http://localhost:18080";
 
-async function devLogin(page: Page) {
-  // Standalone login against the running dev API; bypasses global-setup which
-  // expects a separate go-seeded test DB.
-  const resp = await page.request.post(`${API}/api/v1/auth/login`, {
-    data: { email: "admin@dev", password: "devpass123" },
+async function networkClusterID(page: Page) {
+  const token = await getAuthToken(page);
+  const resp = await page.request.get(`${API}/api/v1/clusters`, {
+    headers: { Authorization: `Bearer ${token}` },
   });
-  if (!resp.ok()) throw new Error(`login failed: ${resp.status()}`);
-  const { token } = await resp.json();
-  await page.addInitScript((t) => {
-    localStorage.setItem("constellation.token", t);
-  }, token);
+  expect(resp.ok()).toBeTruthy();
+  const body = await resp.json();
+  const candidates = [
+    ...(body.clusters?.filter((cluster: { name?: string }) => cluster.name === "prod-east") ?? []),
+    ...(body.clusters?.filter((cluster: { name?: string }) => cluster.name !== "prod-east") ?? []),
+  ];
+  for (const cluster of candidates as Array<{ id?: string }>) {
+    if (!cluster.id) continue;
+    const mapResp = await page.request.get(`${API}/api/v1/network/map?hours=24&cluster_id=${cluster.id}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!mapResp.ok()) continue;
+    const mapBody = await mapResp.json();
+    if ((mapBody.summary?.flows ?? 0) > 0 || (mapBody.flows?.length ?? 0) > 0) {
+      return cluster.id;
+    }
+  }
+  const clusterID = body.clusters?.[0]?.id;
+  expect(clusterID).toBeTruthy();
+  return clusterID as string;
 }
 
 test.beforeEach(async ({ page }) => {
-  await devLogin(page);
+  await login(page);
 });
 
 test("L2 network map · overview screenshot", async ({ page }) => {
-  await page.goto(NET_PATH);
+  const clusterID = await networkClusterID(page);
+  await page.goto(`/clusters/${clusterID}/network?cluster_id=${clusterID}`);
   await expect(page.getByTestId("network-map")).toBeVisible({ timeout: 15_000 });
   await expect(page.locator(".react-flow__edge").first()).toBeVisible({ timeout: 15_000 });
   await expect(page.getByTestId("network-verdict-legend")).toBeVisible();
@@ -33,7 +47,8 @@ test("L2 network map · overview screenshot", async ({ page }) => {
 });
 
 test("L2 network map · edge click opens inspector popover", async ({ page }) => {
-  await page.goto(NET_PATH);
+  const clusterID = await networkClusterID(page);
+  await page.goto(`/clusters/${clusterID}/network?cluster_id=${clusterID}`);
   await expect(page.getByTestId("network-map")).toBeVisible({ timeout: 15_000 });
   const firstEdge = page.locator(".react-flow__edge").first();
   await expect(firstEdge).toBeVisible({ timeout: 15_000 });
@@ -43,15 +58,16 @@ test("L2 network map · edge click opens inspector popover", async ({ page }) =>
   await expect(page.getByTestId("network-flow-inspector-tabs")).toBeVisible();
   await page.screenshot({ path: "e2e/screens-netmap/edge-popover.png", fullPage: true });
 
-  // Sanity check all four tabs render.
-  for (const t of ["attack", "policy", "history", "flow"]) {
+  // Sanity check the primary inspector tabs render.
+  for (const t of ["threat", "policy", "history", "flow"]) {
     await page.getByTestId(`network-flow-inspector-tab-${t}`).click();
     await page.waitForTimeout(120);
   }
 });
 
 test("L2 network map · filter chips applied", async ({ page }) => {
-  await page.goto(NET_PATH);
+  const clusterID = await networkClusterID(page);
+  await page.goto(`/clusters/${clusterID}/network?cluster_id=${clusterID}`);
   await expect(page.getByTestId("network-filter-bar")).toBeVisible({ timeout: 15_000 });
   // Toggle "Allow" chip off to leave only alert/block edges, then flip the
   // scope segmented to External.

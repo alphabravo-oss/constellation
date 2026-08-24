@@ -5,7 +5,7 @@
 //   - Saved Views dropdown (localStorage-backed) on the right
 //   - State tabs: Observed · Accepted · Suppressed
 //   - Group-by toggle: none / severity / kind / asset
-//   - DataTable with sticky header, density toggle, sortable columns, bulk-select
+//   - DataTable with sticky header, column chooser, density toggle, sortable columns, bulk-select
 //   - ActionBar slides up when rows are selected (Triage / Suppress / Accept / Comment)
 //   - Right Drawer opens on row click with full detail + inline triage
 //
@@ -36,15 +36,13 @@ import { Button } from "@/components/ui/button";
 import { ActionBar } from "@/components/ui/action-bar";
 import { EmptyState } from "@/components/ui/empty-state";
 import { fmtRelative } from "@/lib/format";
-import { downloadCsv } from "@/lib/csv";
 import { SEVERITY_RANK } from "@/lib/severity";
 import { cn } from "@/lib/cn";
 import { Pager } from "@/components/ui/pager";
 import { useDebounced } from "@/hooks/useDebounced";
+import { useSavedViews, type SavedViewBase } from "@/hooks/useSavedViews";
 
-interface SavedView {
-  id: string;
-  name: string;
+interface SavedView extends SavedViewBase {
   kind: FindingKind | "";
   lifecycle: Lifecycle | "";
   query: string;
@@ -52,6 +50,8 @@ interface SavedView {
 
 const SAVED_VIEWS_KEY = "constellation.findings.views.v1";
 const DENSITY_KEY     = "constellation.findings.density";
+const INSTANCE_TABLE_KEY = "findings.instances";
+const CVE_TABLE_KEY = "findings.cve-rollup";
 
 const STATE_TABS: Array<{ label: string; lifecycle: Lifecycle; description: string }> = [
   { label: "Observed",   lifecycle: "open",       description: "open · in-flight" },
@@ -72,6 +72,16 @@ const QUERY_HINTS: Array<{ label: string; value: string; example: string }> = [
 
 type GroupBy = "none" | "severity" | "kind" | "asset";
 
+function cvssScore(row: Pick<Finding | CVERollup, "cvss" | "cvss_base">) {
+  return row.cvss_base ?? row.cvss;
+}
+
+function cvssColor(score = 0) {
+  if (score >= 9) return "var(--color-severity-critical)";
+  if (score >= 7) return "var(--color-severity-high)";
+  return "var(--color-foreground)";
+}
+
 export function FindingsPage() {
   const qc = useQueryClient();
   // Cluster scope: when mounted under /clusters/:id/findings, all queries are
@@ -89,17 +99,18 @@ export function FindingsPage() {
   const [density, setDensity] = useState<Density>(() => (localStorage.getItem(DENSITY_KEY) as Density) || "cozy");
   useEffect(() => { localStorage.setItem(DENSITY_KEY, density); }, [density]);
 
-  // Saved views
-  const [views, setViews] = useState<SavedView[]>(() => {
-    try { return JSON.parse(localStorage.getItem(SAVED_VIEWS_KEY) ?? "[]"); } catch { return []; }
-  });
-  useEffect(() => { localStorage.setItem(SAVED_VIEWS_KEY, JSON.stringify(views)); }, [views]);
+  const { views, saveView: saveStoredView, deleteView } = useSavedViews<SavedView>(SAVED_VIEWS_KEY);
 
   // Selection + view mode (instance rows vs NeuVector-style CVE rollup)
   const [selected, setSelected] = useState<Set<React.Key>>(new Set());
   // CVE-first by default, matching NeuVector's vulnerability view (one row per CVE +
   // blast radius). "Instances" (one row per CVE×workload) stays one click away.
   const [view, setView] = useState<"instances" | "cve">("cve");
+  useEffect(() => {
+    if (kind && kind !== "vulnerability" && view === "cve") {
+      setView("instances");
+    }
+  }, [kind, view]);
   const navigate = useNavigate();
   const openFinding = (f: Finding) => navigate(`/clusters/${clusterId}/findings/${f.id}`);
 
@@ -158,7 +169,7 @@ export function FindingsPage() {
   function saveView() {
     const name = prompt("Name this view");
     if (!name) return;
-    setViews((v) => [...v, { id: crypto.randomUUID(), name, kind, lifecycle, query }]);
+    saveStoredView(name, { kind, lifecycle, query });
   }
   function applyView(v: SavedView) {
     setKind(v.kind);
@@ -171,6 +182,7 @@ export function FindingsPage() {
       id: "severity",
       header: "Severity",
       cell: (f) => <SeverityBadge severity={f.severity} kev={isKev(f)} />,
+      exportValue: (f) => f.severity,
       sort: (a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity],
       width: "108px",
     },
@@ -185,6 +197,7 @@ export function FindingsPage() {
           {f.kev && <span className="rounded px-1 py-px text-[9px] font-semibold text-white" style={{ background: "var(--color-severity-critical)" }} title="CISA Known-Exploited">KEV</span>}
         </span>
       ),
+      exportValue: (f) => f.external_id ?? f.id,
       sort: (a, b) => (a.external_id ?? "").localeCompare(b.external_id ?? ""),
       width: "170px",
     },
@@ -193,8 +206,24 @@ export function FindingsPage() {
       header: "CVSS",
       numeric: true,
       width: "70px",
-      cell: (f) => <span className="text-mono text-xs" style={{ color: (f.cvss ?? 0) >= 9 ? "var(--color-severity-critical)" : (f.cvss ?? 0) >= 7 ? "var(--color-severity-high)" : "var(--color-foreground)" }}>{f.cvss ? f.cvss.toFixed(1) : "—"}</span>,
-      sort: (a, b) => (a.cvss ?? 0) - (b.cvss ?? 0),
+      cell: (f) => {
+        const score = cvssScore(f);
+        return <span className="text-mono text-xs" style={{ color: cvssColor(score) }}>{score ? score.toFixed(1) : "—"}</span>;
+      },
+      exportValue: (f) => cvssScore(f) ?? "",
+      sort: (a, b) => (cvssScore(a) ?? 0) - (cvssScore(b) ?? 0),
+    },
+    {
+      id: "cvss_vector",
+      header: "Vector",
+      width: "230px",
+      cell: (f) => (
+        <span className="block max-w-[220px] truncate text-mono text-[10px] text-muted-foreground" title={f.cvss_vector || undefined}>
+          {f.cvss_vector || "—"}
+        </span>
+      ),
+      exportValue: (f) => f.cvss_vector ?? "",
+      sort: (a, b) => (a.cvss_vector ?? "").localeCompare(b.cvss_vector ?? ""),
     },
     {
       id: "title",
@@ -209,7 +238,24 @@ export function FindingsPage() {
           {f.title}
         </button>
       ),
+      exportValue: (f) => f.title,
       sort: (a, b) => a.title.localeCompare(b.title),
+    },
+    {
+      id: "package",
+      header: "Package",
+      cell: (f) => <span className="text-mono text-xs">{f.package_name || "—"}</span>,
+      exportValue: (f) => f.package_name ?? "",
+      sort: (a, b) => (a.package_name ?? "").localeCompare(b.package_name ?? ""),
+      width: "150px",
+    },
+    {
+      id: "fixed",
+      header: "Fixed in",
+      cell: (f) => <span className="text-mono text-xs text-muted-foreground">{f.fixed_version || "—"}</span>,
+      exportValue: (f) => f.fixed_version ?? "",
+      sort: (a, b) => (a.fixed_version ?? "").localeCompare(b.fixed_version ?? ""),
+      width: "130px",
     },
     {
       id: "asset",
@@ -219,6 +265,7 @@ export function FindingsPage() {
           {f.asset_id.slice(0, 14)}
         </Link>
       ),
+      exportValue: (f) => f.asset_id,
       sort: (a, b) => a.asset_id.localeCompare(b.asset_id),
       width: "150px",
     },
@@ -227,6 +274,7 @@ export function FindingsPage() {
       header: "Risk",
       numeric: true,
       cell: (f) => <RiskScore score={f.risk_score} />,
+      exportValue: (f) => f.risk_score,
       sort: (a, b) => a.risk_score - b.risk_score,
       width: "80px",
     },
@@ -234,6 +282,7 @@ export function FindingsPage() {
       id: "lifecycle",
       header: "Lifecycle",
       cell: (f) => <LifecycleBadge lifecycle={f.lifecycle} />,
+      exportValue: (f) => f.lifecycle,
       sort: (a, b) => a.lifecycle.localeCompare(b.lifecycle),
       width: "118px",
     },
@@ -241,6 +290,7 @@ export function FindingsPage() {
       id: "kind",
       header: "Kind",
       cell: (f) => <span className="text-[10px] text-mono text-muted-foreground">{f.kind}</span>,
+      exportValue: (f) => f.kind,
       sort: (a, b) => a.kind.localeCompare(b.kind),
       width: "108px",
     },
@@ -249,6 +299,7 @@ export function FindingsPage() {
       header: "Age",
       numeric: true,
       cell: (f) => <span className="text-[10px] text-muted-foreground">{fmtRelative(f.last_seen_at)}</span>,
+      exportValue: (f) => f.last_seen_at,
       sort: (a, b) => +new Date(a.last_seen_at) - +new Date(b.last_seen_at),
       width: "120px",
     },
@@ -290,7 +341,7 @@ export function FindingsPage() {
         actions={
           <>
             {views.length > 0 && (
-              <SavedViewsMenu views={views} onApply={applyView} onDelete={(id) => setViews(views.filter((v) => v.id !== id))} />
+              <SavedViewsMenu views={views} onApply={applyView} onDelete={deleteView} />
             )}
             <Button size="sm" variant="outline" onClick={saveView}>
               <Save className="h-3.5 w-3.5" /> Save view
@@ -308,7 +359,7 @@ export function FindingsPage() {
             onChange={(e) => startTransition(() => setQuery(e.target.value))}
             onClear={() => setQuery("")}
           />
-          <Select value={kind} onChange={(v) => setKind(v as FindingKind | "")}
+          <Select label="Kind" value={kind} onChange={(v) => setKind(v as FindingKind | "")}
             options={[["", "any kind"], ["vulnerability","vulnerability"], ["iac","iac"], ["license","license"],
                       ["cloud-config","cloud-config"], ["drift","drift"], ["signature","signature"],
                       ["ml-model","ml-model"], ["compliance","compliance"], ["runtime","runtime"]]} />
@@ -375,6 +426,7 @@ export function FindingsPage() {
             key={v}
             type="button"
             onClick={() => setView(v)}
+            data-testid={`findings-view-${v}`}
             className={cn(
               "rounded h-6 px-2 text-[11px] border transition-colors",
               view === v
@@ -398,12 +450,9 @@ export function FindingsPage() {
           title="Hide vulnerabilities with no available fix (won't-fix / not-fixed)"
         >{fixableOnly ? "✓ " : ""}Fixable only</button>
         {view === "cve" && (
-          <button
-            type="button"
-            onClick={() => exportCveCsv(cveRows)}
-            className="rounded h-6 px-2 text-[11px] border border-border bg-card hover:bg-accent transition-colors"
-            title="Export the current CVE list as CSV"
-          >Export CSV</button>
+          <span className="rounded h-6 px-2 text-[11px] border border-border bg-card text-muted-foreground">
+            {cveRows.length} of {cveTotal} CVEs
+          </span>
         )}
       </div>
 
@@ -426,16 +475,7 @@ export function FindingsPage() {
             )}
           >{l}</button>
         ))}
-        <div className="ml-auto flex items-center gap-2">
-          <span className="text-[11px] text-muted-foreground text-mono">{rows.length} match{rows.length === 1 ? "" : "es"}</span>
-          <button
-            type="button"
-            onClick={() => downloadCsv("constellation-findings", ["CVE/ID", "Severity", "CVSS", "KEV", "Title", "Package", "Fixed", "Risk", "Lifecycle", "LastSeen"],
-              rows.map((f) => [f.external_id ?? f.id, f.severity, f.cvss ?? "", f.kev ? "yes" : "", f.title, f.package_name ?? "", f.fixed_version ?? "", f.risk_score, f.lifecycle, f.last_seen_at]))}
-            className="rounded h-6 px-2 text-[11px] border border-border bg-card hover:bg-accent transition-colors"
-            title="Export the current findings list as CSV"
-          >Export CSV</button>
-        </div>
+        <span className="ml-auto text-[11px] text-muted-foreground text-mono">{rows.length} match{rows.length === 1 ? "" : "es"}</span>
       </div>
       )}
 
@@ -457,6 +497,10 @@ export function FindingsPage() {
           onSelectedChange={setSelected}
           onRowClick={(f) => openFinding(f)}
           defaultSort={{ id: "risk", dir: "desc" }}
+          preferencesKey={INSTANCE_TABLE_KEY}
+          defaultHiddenColumnIds={["package", "fixed"]}
+          exportFileName="constellation-findings"
+          testId="findings-table"
           emptyState={
             <EmptyState
               title="No findings match"
@@ -488,6 +532,10 @@ export function FindingsPage() {
                 onSelectedChange={setSelected}
                 onRowClick={(f) => openFinding(f)}
                 showDensityToggle={false}
+                showColumnChooser={false}
+                preferencesKey={INSTANCE_TABLE_KEY}
+                defaultHiddenColumnIds={["package", "fixed"]}
+                exportFileName={`constellation-findings-${safeFilename(g.label)}`}
                 className="rounded-none border-0"
               />
             </details>
@@ -507,27 +555,11 @@ export function FindingsPage() {
 
 // CVETable — the NeuVector-style rollup: one row per CVE with its blast radius
 // (how many images / clusters it hits and total instances), sorted by risk.
-// exportCveCsv downloads the current CVE rollup as CSV (client-side). Addresses the
-// NeuVector-parity gap where nearly every table lacks ad-hoc export.
-function exportCveCsv(rows: CVERollup[]) {
-  const header = ["CVE", "Severity", "CVSS", "KEV", "Package", "FixedVersion", "AffectedImages", "AffectedClusters", "Instances", "Risk", "LastSeen"];
-  const esc = (v: unknown) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-  const lines = [header.join(",")];
-  for (const c of rows) {
-    lines.push([c.cve, c.severity, c.cvss ?? "", c.kev ? "yes" : "", c.package ?? "", c.fixed_version ?? "", c.affected_images, c.affected_clusters, c.instances, c.risk_score, c.last_seen_at].map(esc).join(","));
-  }
-  const blob = new Blob([lines.join("\n")], { type: "text/csv" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = `constellation-cves-${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
 function CVETable({ rows, loading, clusterId }: { rows: CVERollup[]; loading: boolean; clusterId?: string }) {
   const columns: Column<CVERollup>[] = [
     { id: "severity", header: "Severity", width: "108px",
       cell: (c) => <SeverityBadge severity={c.severity} />,
+      exportValue: (c) => c.severity,
       sort: (a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] },
     { id: "cve", header: "CVE", width: "190px",
       cell: (c) => (
@@ -536,14 +568,29 @@ function CVETable({ rows, loading, clusterId }: { rows: CVERollup[]; loading: bo
           {c.kev && <span className="rounded px-1 py-px text-[9px] font-semibold text-white" style={{ background: "var(--color-severity-critical)" }} title="CISA Known-Exploited">KEV</span>}
         </span>
       ),
+      exportValue: (c) => c.kev ? `${c.cve} KEV` : c.cve,
       sort: (a, b) => a.cve.localeCompare(b.cve) },
     { id: "cvss", header: "CVSS", numeric: true, width: "72px",
-      cell: (c) => <span className="text-mono text-xs" style={{ color: (c.cvss ?? 0) >= 9 ? "var(--color-severity-critical)" : (c.cvss ?? 0) >= 7 ? "var(--color-severity-high)" : "var(--color-foreground)" }}>{c.cvss ? c.cvss.toFixed(1) : "—"}</span>,
-      sort: (a, b) => (a.cvss ?? 0) - (b.cvss ?? 0) },
+      cell: (c) => {
+        const score = cvssScore(c);
+        return <span className="text-mono text-xs" style={{ color: cvssColor(score) }}>{score ? score.toFixed(1) : "—"}</span>;
+      },
+      exportValue: (c) => cvssScore(c) ?? "",
+      sort: (a, b) => (cvssScore(a) ?? 0) - (cvssScore(b) ?? 0) },
+    { id: "cvss_vector", header: "Vector", width: "230px",
+      cell: (c) => (
+        <span className="block max-w-[220px] truncate text-mono text-[10px] text-muted-foreground" title={c.cvss_vector || undefined}>
+          {c.cvss_vector || "—"}
+        </span>
+      ),
+      exportValue: (c) => c.cvss_vector ?? "",
+      sort: (a, b) => (a.cvss_vector ?? "").localeCompare(b.cvss_vector ?? "") },
     { id: "package", header: "Package",
-      cell: (c) => <span className="text-mono text-xs">{c.package || "—"}</span> },
+      cell: (c) => <span className="text-mono text-xs">{c.package || "—"}</span>,
+      exportValue: (c) => c.package ?? "" },
     { id: "fixed", header: "Fixed in",
-      cell: (c) => <span className="text-mono text-xs text-muted-foreground">{c.fixed_version || "—"}</span> },
+      cell: (c) => <span className="text-mono text-xs text-muted-foreground">{c.fixed_version || "—"}</span>,
+      exportValue: (c) => c.fixed_version ?? "" },
     { id: "affected", header: "Affected", numeric: true,
       cell: (c) => (
         <span className="text-xs" title={c.images.join("\n")}>
@@ -551,15 +598,19 @@ function CVETable({ rows, loading, clusterId }: { rows: CVERollup[]; loading: bo
           {c.affected_clusters > 1 ? ` · ${c.affected_clusters} clusters` : ""}
         </span>
       ),
+      exportValue: (c) => `${c.affected_images} images; ${c.affected_clusters} clusters`,
       sort: (a, b) => a.affected_images - b.affected_images },
     { id: "instances", header: "Instances", numeric: true, width: "96px",
       cell: (c) => <span className="text-mono text-xs">{c.instances}</span>,
+      exportValue: (c) => c.instances,
       sort: (a, b) => a.instances - b.instances },
     { id: "risk", header: "Risk", numeric: true, width: "80px",
       cell: (c) => <RiskScore score={c.risk_score} />,
+      exportValue: (c) => c.risk_score,
       sort: (a, b) => a.risk_score - b.risk_score },
     { id: "age", header: "Age", numeric: true,
       cell: (c) => <span className="text-[10px] text-muted-foreground">{fmtRelative(c.last_seen_at)}</span>,
+      exportValue: (c) => c.last_seen_at,
       sort: (a, b) => +new Date(a.last_seen_at) - +new Date(b.last_seen_at) },
   ];
   if (loading) return <p className="text-sm text-muted-foreground">Loading CVE rollup…</p>;
@@ -569,6 +620,9 @@ function CVETable({ rows, loading, clusterId }: { rows: CVERollup[]; loading: bo
       columns={columns}
       rowKey={(c) => c.cve}
       defaultSort={{ id: "risk", dir: "desc" }}
+      preferencesKey={CVE_TABLE_KEY}
+      exportFileName="constellation-cves"
+      testId="findings-cve-table"
       emptyState={<EmptyState title="No open CVEs" hint="No open vulnerabilities on this cluster." icon={<Tag className="h-8 w-8" />} />}
     />
   );
@@ -619,14 +673,16 @@ function SavedViewsMenu({ views, onApply, onDelete }: { views: SavedView[]; onAp
 }
 
 function Select({
-  value, onChange, options,
+  label, value, onChange, options,
 }: {
+  label: string;
   value: string;
   onChange: (v: string) => void;
   options: [string, string][];
 }) {
   return (
     <select
+      aria-label={label}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       className="h-9 rounded-md border border-input bg-card px-2.5 text-xs text-mono outline-none focus:border-[color:var(--color-primary)]"
@@ -680,8 +736,9 @@ function matchToken(f: Finding, tok: string): boolean {
 }
 
 function isKev(f: Finding): boolean {
-  // Backend hasn't surfaced KEV yet on findings; mark critical+vulnerability
-  // pairs with high risk as proxy KEV until field is added.
+  if (f.kev) return true;
+  // Older fixtures may not surface KEV directly; keep the prior critical-risk
+  // proxy so legacy seeded data still highlights likely exploited vulns.
   return f.severity === "critical" && f.kind === "vulnerability" && f.risk_score >= 88;
 }
 
@@ -709,4 +766,8 @@ function groupRows(rows: Finding[], by: GroupBy): Array<{ label: string; items: 
     entries.sort((a, b) => b[1].length - a[1].length);
   }
   return entries.map(([label, items]) => ({ label, items }));
+}
+
+function safeFilename(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "group";
 }

@@ -17,6 +17,7 @@ func TestRepositoryScanRetentionPrunesOldRepositoryTarget(t *testing.T) {
 
 	ctx := context.Background()
 	pool := d.Pool()
+	resetRepositoryRetentionState(t, pool)
 	orgID := createRepositoryRetentionOrg(t, pool, "prune")
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgID)
@@ -46,6 +47,7 @@ func TestRepositoryScanRetentionSkipsActiveJobs(t *testing.T) {
 
 	ctx := context.Background()
 	pool := d.Pool()
+	resetRepositoryRetentionState(t, pool)
 	orgID := createRepositoryRetentionOrg(t, pool, "active")
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgID)
@@ -75,6 +77,7 @@ func TestRepositoryScanRetentionSkipsAttestationVerificationHistory(t *testing.T
 
 	ctx := context.Background()
 	pool := d.Pool()
+	resetRepositoryRetentionState(t, pool)
 	orgID := createRepositoryRetentionOrg(t, pool, "verified")
 
 	now := time.Date(2000, 1, 4, 12, 0, 0, 0, time.UTC)
@@ -137,6 +140,36 @@ func requireRepositoryRetentionSchema(t *testing.T, pool *pgxpool.Pool) {
 		if err := pool.QueryRow(context.Background(), `SELECT COALESCE(to_regclass('public.' || $1)::text, '')`, table).Scan(&regclass); err != nil || regclass == "" {
 			t.Skipf("skipping: %s migration not applied (%v)", table, err)
 		}
+	}
+}
+
+func resetRepositoryRetentionState(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `
+DELETE FROM findings
+ WHERE target_type = 'repository'
+    OR scan_target_id IN (SELECT id FROM scan_targets WHERE type = 'repository')`); err != nil {
+		t.Fatalf("reset repository findings: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+DELETE FROM assets
+ WHERE kind = 'repository'
+   AND (digest LIKE 'scan-target:%' OR labels->>'target_type' = 'repository')`); err != nil {
+		t.Fatalf("reset repository assets: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+DELETE FROM scan_targets st
+ WHERE st.type = 'repository'
+   AND NOT EXISTS (
+        SELECT 1
+          FROM scan_result_attestations sra
+          JOIN scan_attestation_verifications sav
+            ON sav.org_id = sra.org_id
+           AND sav.attestation_id = sra.id
+         WHERE sra.scan_target_id = st.id
+   )`); err != nil {
+		t.Fatalf("reset repository targets: %v", err)
 	}
 }
 

@@ -19,17 +19,16 @@
 //     names some active rule references.
 //
 // SCOPE NOTE (documented residual): dp matches packets to workloads by MAC,
-// then walks that MAC's rule table. The agent does not yet expose a
-// per-workload MAC map (the tap layer keys interfaces, not pods), so every
-// policy's rules are merged into one node-level table scoped to the node's
-// currently-tapped MACs (Supervisor.TapMACs) — the same node-wide scoping the
-// DLP sync worker uses. Rules remain constrained by their own src/dst IP, port
-// and FQDN selectors, so a rule only matches the traffic it targets; what is
-// lost is per-pod isolation of the *table*. Pushing each policy separately is
-// NOT an option here: PushPolicy(CmdModify) replaces the table for its MAC set,
-// so two policies sharing the node MACs would clobber each other — merging is
-// the correct behavior given node-wide scoping. Per-workload scoping needs a
-// workload→MAC resolver wired through the tap providers (follow-up).
+// then walks that MAC's rule table. The agent does not yet expose a stable
+// policy-workload→MAC map (the local tap/enforce layers know pod MACs, not the
+// stored deployment/workload selector), so every policy's rules are merged into
+// one node-level table scoped to this node's active dp MACs. Rules remain
+// constrained by their own src/dst IP, port and FQDN selectors, so a rule only
+// matches the traffic it targets; what is lost is per-pod isolation of the
+// *table*. Pushing each policy separately is not safe until policies can be
+// scoped to disjoint MAC sets: PushPolicy(CmdModify) replaces the table for its
+// MAC set, so two policies sharing a MAC would clobber each other. Per-workload
+// scoping needs a workload→MAC resolver wired through the tap/enforce providers.
 package main
 
 import (
@@ -318,7 +317,7 @@ func buildMergedWorkloadPolicy(policies []runtimePolicyWire, macs []string) *dp.
 	out := &dp.WorkloadPolicy{
 		WorkloadID: "node",
 		Mode:       "enforce",
-		DefAction:  dp.PolicyActionAllow,
+		DefAction:  mergedDefaultAction(policies),
 		ApplyDir:   dp.ApplyDirBoth,
 		MACs:       macs,
 	}
@@ -346,6 +345,46 @@ func buildMergedWorkloadPolicy(policies []runtimePolicyWire, macs []string) *dp.
 		}
 	}
 	return out
+}
+
+func mergedDefaultAction(policies []runtimePolicyWire) uint8 {
+	out := uint8(dp.PolicyActionAllow)
+	for _, p := range policies {
+		if p.Mode == "disabled" {
+			continue
+		}
+		act := policyDefaultAction(p)
+		if policyActionRank(act) > policyActionRank(out) {
+			out = act
+		}
+	}
+	return out
+}
+
+func policyDefaultAction(p runtimePolicyWire) uint8 {
+	act := p.DefAction
+	if act == 0 {
+		// Older test fixtures and early agents omitted def_action. Treat the zero
+		// wire value as the historic allow default instead of sending OPEN by accident.
+		act = dp.PolicyActionAllow
+	}
+	if p.Mode == "monitor" && act == dp.PolicyActionDeny {
+		return dp.PolicyActionViolate
+	}
+	return act
+}
+
+func policyActionRank(action uint8) int {
+	switch action {
+	case dp.PolicyActionDeny:
+		return 3
+	case dp.PolicyActionViolate:
+		return 2
+	case dp.PolicyActionLearn:
+		return 1
+	default:
+		return 0
+	}
 }
 
 // fingerprintWorkloadPolicy is a stable hash of the parts that, if changed,

@@ -120,8 +120,14 @@ func (t *SecurityTimeline) List(w http.ResponseWriter, r *http.Request) {
 	// Fetch one extra row to learn whether a next page exists (cursor has_more paging).
 	fetch := limit + 1
 
+	qFilter := strings.TrimSpace(r.URL.Query().Get("q"))
+	namespaceFilter := strings.TrimSpace(r.URL.Query().Get("namespace"))
+	workloadFilter := strings.TrimSpace(r.URL.Query().Get("workload"))
+	refFilter := strings.TrimSpace(r.URL.Query().Get("ref"))
+
 	// $1 org, $2 cluster (nullable uuid), $3 from, $4 to, $5 severity text[]
-	// (nullable), $6 limit, $7 offset, $8..$11 per-source include flags.
+	// (nullable), $6 limit, $7 offset, $8..$11 per-source include flags,
+	// $12..$15 normalized text filters.
 	//
 	// runtime_threats.severity is NeuVector's 1..9 scale — mapped to text
 	// via CASE. events/violations already carry text severity; audit rows
@@ -167,12 +173,21 @@ SELECT source, id, severity, at, title, workload_id, namespace, cluster_id, ref
        AND a.at >= $3 AND a.at < $4
   ) t
  WHERE ($5::text[] IS NULL OR severity = ANY($5))
+   AND ($12 = '' OR title ILIKE '%' || $12 || '%'
+        OR workload_id ILIKE '%' || $12 || '%'
+        OR namespace ILIKE '%' || $12 || '%'
+        OR ref ILIKE '%' || $12 || '%'
+        OR id ILIKE '%' || $12 || '%')
+   AND ($13 = '' OR namespace ILIKE '%' || $13 || '%')
+   AND ($14 = '' OR workload_id ILIKE '%' || $14 || '%')
+   AND ($15 = '' OR ref ILIKE '%' || $15 || '%')
  ORDER BY at DESC
  LIMIT $6 OFFSET $7`
 
 	rows, err := t.db.Pool().Query(r.Context(), q,
 		subj.OrgID, clusterArg, from, to, sevArr, fetch, offset,
-		inclThreat, inclEvent, inclViolation, inclAudit)
+		inclThreat, inclEvent, inclViolation, inclAudit,
+		qFilter, namespaceFilter, workloadFilter, refFilter)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return

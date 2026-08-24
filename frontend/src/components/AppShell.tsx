@@ -72,12 +72,14 @@ type NavItem = {
 type NavGroup = { id: string; label: string; items: NavItem[] };
 
 // Cluster-scoped sidebar groups — every link is resolved against the active :id.
+// eslint-disable-next-line react-refresh/only-export-components
 export const CLUSTER_NAV: NavGroup[] = [
   {
     id: "dashboard",
     label: "Dashboard",
     items: [
       { path: "dashboard",     icon: LayoutDashboard, label: "Dashboard", exact: true },
+      { path: "neuvector",     icon: Compass,         label: "NeuVector Switchboard" },
     ],
   },
   {
@@ -128,6 +130,7 @@ export const CLUSTER_NAV: NavGroup[] = [
     id: "policy",
     label: "Policy",
     items: [
+      { path: "policy",        icon: FileText,        label: "Policy Center" },
       { path: "admission",     icon: ShieldCheck,     label: "Admission Control" },
       { path: "policies",      icon: FileText,        label: "Policies" },
       { path: "runtime-policies", icon: ScrollText,   label: "Runtime Policies" },
@@ -245,6 +248,9 @@ export function AppShell() {
 
   // Collapsible groups (all open by default; active group always stays open).
   const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set(navGroups.map((g) => g.id)));
+  useEffect(() => {
+    setOpenGroups(new Set(navGroups.map((g) => g.id)));
+  }, [inClusterMode, navGroups]);
   useEffect(() => {
     // Ensure the group containing the active route is open after navigation.
     const active = navGroups.find((g) => g.items.some((it) => isItemActive(it, pathname, clusterId)));
@@ -389,7 +395,7 @@ export function AppShell() {
 
 function BrandMark() {
   // Official Constellation mark (public/constellation-mark.svg).
-  return <img src="/constellation-mark.svg?v=2" alt="Constellation" className="w-7 h-7 flex-shrink-0" />;
+  return <img src="/constellation-mark.svg?v=4" alt="Constellation" className="w-7 h-7 flex-shrink-0" />;
 }
 
 function SidebarGroup({
@@ -469,7 +475,7 @@ function SidebarRow({
   return (
     <NavLink
       to={to}
-      data-testid={`nav-${item.path.replace(/[\/]/g, "-")}`}
+      data-testid={`nav-${item.path.replace(/\//g, "-")}`}
       className={cn(
         "group flex items-center gap-2 px-3 py-1.5 mx-1 rounded-md text-sm transition-colors",
         active
@@ -570,7 +576,8 @@ function TopHeader({
           <DropdownMenu.Trigger asChild>
             <button
               type="button"
-              aria-label="User menu"
+              aria-label={userEmail ? `User menu ${userEmail}` : "User menu"}
+              data-testid="user-menu-trigger"
               className="flex items-center gap-2 h-8 pl-1 pr-2 rounded-md hover:bg-accent transition-colors"
             >
               <span className="grid h-6 w-6 place-items-center rounded-full bg-gradient-to-br from-zinc-600 to-zinc-800">
@@ -586,8 +593,8 @@ function TopHeader({
               className="z-50 w-56 rounded-lg border border-border bg-popover shadow-xl overflow-hidden"
             >
               <div className="px-3 py-2.5 border-b border-border">
-                <p className="text-sm font-medium text-foreground truncate">{userEmail ?? "Anonymous"}</p>
-                <p className="text-xs text-muted-foreground truncate">{userRole ?? "unauthenticated"}</p>
+                <p className="text-sm font-medium text-foreground truncate" data-testid="identity-email">{userEmail ?? "Anonymous"}</p>
+                <p className="text-xs text-muted-foreground truncate" data-testid="identity-roles">{userRole ?? "unauthenticated"}</p>
               </div>
               <div className="p-1">
                 <MenuItem onSelect={() => onNavigate("/settings")} icon={<Settings className="h-4 w-4" />}>Settings</MenuItem>

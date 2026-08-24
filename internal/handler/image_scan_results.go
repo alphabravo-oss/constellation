@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -440,6 +441,89 @@ func (h *ImageScanResults) Get(w http.ResponseWriter, r *http.Request) {
 		"findings":           findings,
 		"impacted_workloads": impacts,
 	})
+}
+
+// FindingsCSV streams an image scan's vulnerability findings as a NeuVector-style
+// report export while preserving Constellation-specific triage fields.
+func (h *ImageScanResults) FindingsCSV(w http.ResponseWriter, r *http.Request) {
+	subj, _ := SubjectFrom(r.Context())
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	result, err := h.getResult(r, subj.OrgID, id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	findings, err := h.getFindings(r, subj.OrgID, id)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="image-scan-`+id.String()+`-findings.csv"`)
+	cw := csv.NewWriter(w)
+	defer cw.Flush()
+
+	if err := cw.Write([]string{
+		"image_scan_result_id",
+		"image_ref",
+		"image_digest",
+		"finding_id",
+		"external_id",
+		"severity",
+		"risk_score",
+		"title",
+		"package_ecosystem",
+		"package_name",
+		"package_version",
+		"package_purl",
+		"fixed_version",
+		"cvss_base",
+		"cvss_vector",
+		"epss_probability",
+		"kev_listed",
+		"canonical_engine",
+		"reconciliation_count",
+		"first_seen_at",
+		"last_seen_at",
+		"aliases",
+		"references",
+	}); err != nil {
+		return
+	}
+	for _, finding := range findings {
+		if err := cw.Write([]string{
+			result.ID.String(),
+			result.ImageRef,
+			result.ImageDigest,
+			finding.ID.String(),
+			finding.ExternalID,
+			finding.Severity,
+			strconv.Itoa(finding.RiskScore),
+			finding.Title,
+			finding.PackageEcosystem,
+			finding.PackageName,
+			finding.PackageVersion,
+			finding.PackagePURL,
+			finding.FixedVersion,
+			strconv.FormatFloat(finding.CVSSBase, 'f', -1, 64),
+			finding.CVSSVector,
+			strconv.FormatFloat(finding.EPSSProbability, 'f', -1, 64),
+			strconv.FormatBool(finding.KEVListed),
+			finding.CanonicalEngine,
+			strconv.Itoa(finding.ReconciliationCount),
+			finding.FirstSeenAt.UTC().Format(time.RFC3339),
+			finding.LastSeenAt.UTC().Format(time.RFC3339),
+			strings.Join(finding.Aliases, ";"),
+			strings.Join(finding.References, ";"),
+		}); err != nil {
+			return
+		}
+	}
 }
 
 func (h *ImageScanResults) writeSBOMArtifact(w http.ResponseWriter, r *http.Request, format, filename string) {

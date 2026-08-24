@@ -6,6 +6,7 @@ metadata:
   labels: {{- include "constellation.labels" . | nindent 4 }}
     app.kubernetes.io/component: runtime-agent
 spec:
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "constellation.name" . }}

@@ -115,7 +115,7 @@ func TestOpenAPICompleteness(t *testing.T) {
 // would push the count above the baseline), and backfilling docs lowers it. When
 // you replace stubs with real documentation, ratchet this DOWN to lock the gain
 // in. It must never be raised.
-const maxOpenAPIStubs = 230
+const maxOpenAPIStubs = 0
 
 // TestOpenAPINoNewStubs enforces the stub ratchet. A presence-only stub (summary
 // + a lone 200 response, no requestBody/parameters/error responses/schemas) does

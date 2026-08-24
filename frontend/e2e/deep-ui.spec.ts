@@ -7,12 +7,11 @@
 import { test, expect, type Page, type ConsoleMessage, type Request, type Response } from "@playwright/test";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { getAuthToken, login } from "./utils";
 
-const API = "http://127.0.0.1:18080";
+const API = process.env.VITE_API_URL ?? "http://localhost:18080";
 const SCREENS_DIR = path.resolve(process.cwd(), "e2e/screens");
 const DIAG_PATH = path.resolve(process.cwd(), "e2e/diagnostics.md");
-
-const CREDS = { email: "admin@dev", password: "devpass123" };
 
 interface PageDiag {
   page: string;
@@ -27,12 +26,7 @@ interface PageDiag {
 const diagnostics: PageDiag[] = [];
 
 async function programmaticLogin(page: Page) {
-  const resp = await page.request.post(`${API}/api/v1/auth/login`, { data: CREDS });
-  if (!resp.ok()) throw new Error(`login failed: ${resp.status()}`);
-  const { token } = await resp.json();
-  await page.addInitScript((t) => {
-    localStorage.setItem("constellation.token", t);
-  }, token);
+  await login(page);
 }
 
 function attachDiagnostics(page: Page, diag: PageDiag) {
@@ -232,8 +226,7 @@ test("wave-c: RiskDetail tabs all render", async ({ page }) => {
   // Pull an asset id to feed risk page (login + fetch via request context, no DOM access).
   // NB: the underlying risk/OverviewTab only knows entityType=asset|finding — passing
   // 'deployment' would 404 against /assets/<deployment-uuid>.
-  const login = await page.request.post(`${API}/api/v1/auth/login`, { data: CREDS });
-  const { token } = await login.json();
+  const token = await getAuthToken(page);
   const list = await page.request.get(`${API}/api/v1/assets`, {
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -262,14 +255,14 @@ test("wave-c: CVEDetail page", async ({ page }) => {
 });
 
 test("wave-c: ScopeBar persists a filter", async ({ page }) => {
-  const diag = newDiag("ScopeBar", "/dashboard");
+  const diag = newDiag("ScopeBar", "/timeline");
   attachDiagnostics(page, diag);
-  await page.goto("/dashboard");
+  await page.goto("/timeline");
   await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
   const scopeBar = page.getByTestId("scope-bar");
   await expect(scopeBar).toBeVisible();
   // Click "Cluster" chip
-  await scopeBar.getByRole("button", { name: /Cluster:/ }).click();
+  await scopeBar.getByRole("button", { name: /Cluster/ }).click();
   await scopeBar.locator("input[placeholder='all clusters']").fill("prod-us-east-1");
   await scopeBar.locator("input[placeholder='all clusters']").press("Enter");
   await page.waitForTimeout(300);
@@ -294,20 +287,13 @@ test("wave-d: ResponseRules guided create", async ({ page }) => {
   await page.getByRole("button", { name: /New rule/i }).click();
   // Use a unique name based on timestamp
   const name = `e2e-rule-${Date.now()}`;
-  await page.locator("input").filter({ hasText: "" }).first().waitFor();
-  // The first input in the editor section is "Name"
-  const editor = page.locator("section").filter({ hasText: /New rule|Edit rule/ });
-  await editor.locator("input").first().fill(name);
+  await expect(page.getByRole("heading", { name: "New rule" })).toBeVisible();
+  await page.getByLabel("Name").fill(name);
+  await page.getByLabel("Description").fill("Created by the deep-ui smoke test");
   await page.screenshot({ path: path.join(SCREENS_DIR, "rrv2-builder.png"), fullPage: true });
-  await editor.getByRole("button", { name: /Save/ }).click();
-  // Wait for editor to close on success
-  await page.waitForTimeout(1500);
-  const html = await page.content();
-  if (html.includes(name)) {
-    diag.data = "yes";
-  } else {
-    diag.notes.push(`rule "${name}" not found in list after save`);
-  }
+  await page.getByRole("button", { name: /Save/ }).click();
+  await expect(page.getByTestId("response-rules-page")).toContainText(name, { timeout: 5000 });
+  diag.data = "yes";
   diag.mounted = true;
 });
 

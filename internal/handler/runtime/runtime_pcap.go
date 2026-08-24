@@ -27,13 +27,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -57,14 +57,22 @@ const (
 )
 
 const (
+	// minPcapDuration avoids effectively-empty captures while still letting
+	// threat drilldowns request short samples.
+	minPcapDuration = 5
 	// maxPcapDuration is the cap on a single capture's tcpdump runtime.
-	// 60s mirrors NeuVector's default and matches typical operator
-	// intent ("grab a sample of what's happening NOW"). Longer windows
-	// belong in a separate long-running-collector design.
-	maxPcapDuration = 60
+	// 300s exposes the agent's existing rolling/sniffer capability without
+	// turning the worker into a long-running packet collector.
+	maxPcapDuration = 300
 	// maxPcapBytes caps the uploaded file. 100 MB is generous for 60s of
 	// a busy pod's traffic; oversize uploads return 413.
 	maxPcapBytes = 100 << 20
+	// maxPcapFiles and maxPcapFileSizeMB mirror the runtime-agent's rolling
+	// capture guardrails so queued requests reflect what the agent can run.
+	maxPcapFiles        = 20
+	maxPcapFileSizeMB   = 100
+	defaultPcapFileMB   = 10
+	maxPcapBPFFilterLen = 1024
 )
 
 // PcapCapture is one row in runtime_pcap_captures.
@@ -81,6 +89,10 @@ type PcapCapture struct {
 	DstIP         string            `json:"dst_ip,omitempty"`
 	DstPort       int               `json:"dst_port,omitempty"`
 	Protocol      string            `json:"protocol,omitempty"`
+	BPFFilter     string            `json:"bpf_filter,omitempty"`
+	Interface     string            `json:"interface,omitempty"`
+	FileCount     int               `json:"file_count,omitempty"`
+	FileSizeMB    int               `json:"file_size_mb,omitempty"`
 	Status        PcapCaptureStatus `json:"status"`
 	ClaimedByNode string            `json:"claimed_by_node,omitempty"`
 	ClaimedAt     *time.Time        `json:"claimed_at,omitempty"`
@@ -119,14 +131,18 @@ func NewPcapHTTP(d *db.DB) *PcapHTTP { return &PcapHTTP{db: d} }
 // optional — leave them empty for a "capture everything on the workload's
 // veth for N seconds" sample.
 type StartCaptureRequest struct {
-	ClusterID uuid.UUID `json:"cluster_id"`
-	Workload  string    `json:"workload"`
-	Namespace string    `json:"namespace,omitempty"`
-	DurationS int       `json:"duration_s,omitempty"`
-	SrcIP     string    `json:"src_ip,omitempty"`
-	DstIP     string    `json:"dst_ip,omitempty"`
-	DstPort   int       `json:"dst_port,omitempty"`
-	Protocol  string    `json:"protocol,omitempty"`
+	ClusterID  uuid.UUID `json:"cluster_id"`
+	Workload   string    `json:"workload"`
+	Namespace  string    `json:"namespace,omitempty"`
+	DurationS  int       `json:"duration_s,omitempty"`
+	SrcIP      string    `json:"src_ip,omitempty"`
+	DstIP      string    `json:"dst_ip,omitempty"`
+	DstPort    int       `json:"dst_port,omitempty"`
+	Protocol   string    `json:"protocol,omitempty"`
+	BPFFilter  string    `json:"bpf_filter,omitempty"`
+	Interface  string    `json:"interface,omitempty"`
+	FileCount  int       `json:"file_count,omitempty"`
+	FileSizeMB int       `json:"file_size_mb,omitempty"`
 }
 
 // Start handles POST /api/v1/runtime-pcap/start.
@@ -142,31 +158,31 @@ func (h *PcapHTTP) Start(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "invalid body: "+err.Error())
 		return
 	}
+	req, err := normalizeStartCaptureRequest(req)
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if req.ClusterID == uuid.Nil || req.Workload == "" {
 		jsonError(w, http.StatusBadRequest, "cluster_id and workload are required")
 		return
-	}
-	dur := req.DurationS
-	if dur <= 0 {
-		dur = 30
-	}
-	if dur > maxPcapDuration {
-		dur = maxPcapDuration
 	}
 	ns := req.Namespace
 	if ns == "" {
 		ns = namespaceOf(req.Workload)
 	}
 	var id uuid.UUID
-	err := h.db.Pool().QueryRow(r.Context(), `
+	err = h.db.Pool().QueryRow(r.Context(), `
 INSERT INTO runtime_pcap_captures
   (org_id, cluster_id, workload, namespace, requested_by, duration_s,
-   src_ip, dst_ip, dst_port, protocol)
+   src_ip, dst_ip, dst_port, protocol, bpf_filter, capture_interface, file_count, file_size_mb)
 VALUES ($1,$2,$3,$4,$5,$6,
-        NULLIF($7,'')::inet, NULLIF($8,'')::inet, NULLIF($9,0), NULLIF($10,''))
+        NULLIF($7,'')::inet, NULLIF($8,'')::inet, NULLIF($9,0), NULLIF($10,''),
+        NULLIF($11,''), NULLIF($12,''), NULLIF($13,0), NULLIF($14,0))
 RETURNING id`,
-		sub.OrgID, req.ClusterID, req.Workload, ns, sub.UserID, int16(dur),
-		req.SrcIP, req.DstIP, req.DstPort, strings.ToLower(req.Protocol)).Scan(&id)
+		sub.OrgID, req.ClusterID, req.Workload, ns, sub.UserID, int16(req.DurationS),
+		req.SrcIP, req.DstIP, req.DstPort, req.Protocol,
+		req.BPFFilter, req.Interface, req.FileCount, req.FileSizeMB).Scan(&id)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -176,7 +192,8 @@ RETURNING id`,
 }
 
 // List handles GET /api/v1/runtime-pcap.
-// Filter by ?cluster_id=&workload=&status= (any field optional).
+// Filter by ?cluster_id=&workload=&group=&status=&protocol=&src_ip=&dst_ip=&dst_port=
+// (any field optional).
 func (h *PcapHTTP) List(w http.ResponseWriter, r *http.Request) {
 	sub, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
@@ -186,16 +203,56 @@ func (h *PcapHTTP) List(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	clusterID := strings.TrimSpace(q.Get("cluster_id"))
 	workload := strings.TrimSpace(q.Get("workload"))
-	status := strings.TrimSpace(q.Get("status"))
+	status, err := normalizePcapStatus(q.Get("status"))
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	protocol, err := normalizePcapProtocol(q.Get("protocol"))
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	srcIP, err := normalizeOptionalPcapIP("src_ip", q.Get("src_ip"))
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	dstIP, err := normalizeOptionalPcapIP("dst_ip", q.Get("dst_ip"))
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	dstPort, err := parsePcapPortQuery(q.Get("dst_port"))
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var clusterUUID *uuid.UUID
+	if clusterID != "" {
+		if parsed, err := uuid.Parse(clusterID); err == nil {
+			clusterUUID = &parsed
+		}
+	}
+	groupMembers, groupName, groupActive, err := handler.ResolveGroupFilterMembers(r.Context(), h.db.Pool(), sub.OrgID, clusterUUID, q.Get("group"))
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	rows, err := h.db.Pool().Query(r.Context(), `
 SELECT `+pcapCols+` FROM runtime_pcap_captures
  WHERE org_id = $1
    AND ($2::text = '' OR cluster_id::text = $2)
    AND ($3::text = '' OR workload = $3)
    AND ($4::text = '' OR status = $4)
+   AND ($5::text = '' OR protocol = $5)
+	   AND ($6::text = '' OR host(src_ip) = $6)
+	   AND ($7::text = '' OR host(dst_ip) = $7)
+	   AND ($8::int = 0 OR dst_port = $8)
+	   AND (NOT $9::boolean OR workload = ANY($10::text[]))
  ORDER BY requested_at DESC
  LIMIT 200`,
-		sub.OrgID, clusterID, workload, status)
+		sub.OrgID, clusterID, workload, status, protocol, srcIP, dstIP, dstPort, groupActive, groupMembers)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -210,7 +267,12 @@ SELECT `+pcapCols+` FROM runtime_pcap_captures
 		}
 		out = append(out, c)
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"captures": out})
+	response := map[string]any{"captures": out}
+	if groupActive {
+		response["selected_group"] = groupName
+		response["selected_group_members"] = len(groupMembers)
+	}
+	httpx.WriteJSON(w, http.StatusOK, response)
 }
 
 // Get handles GET /api/v1/runtime-pcap/{id}.
@@ -518,8 +580,10 @@ UPDATE runtime_pcap_captures
 
 const pcapCols = `id, org_id, cluster_id, workload, namespace, requested_by,
                   requested_at, duration_s,
-                  COALESCE(src_ip::text,''), COALESCE(dst_ip::text,''),
+                  COALESCE(host(src_ip),''), COALESCE(host(dst_ip),''),
                   COALESCE(dst_port,0), COALESCE(protocol,''),
+                  COALESCE(bpf_filter,''), COALESCE(capture_interface,''),
+                  COALESCE(file_count,0), COALESCE(file_size_mb,0),
                   status, COALESCE(claimed_by_node,''), claimed_at,
                   completed_at, COALESCE(error_message,''),
                   COALESCE(file_size_bytes,0), COALESCE(file_path,''),
@@ -533,6 +597,7 @@ func scanPcap(s rowScanner) (*PcapCapture, error) {
 		&c.ID, &c.OrgID, &c.ClusterID, &c.Workload, &c.Namespace, &c.RequestedBy,
 		&c.RequestedAt, &c.DurationS,
 		&c.SrcIP, &c.DstIP, &c.DstPort, &c.Protocol,
+		&c.BPFFilter, &c.Interface, &c.FileCount, &c.FileSizeMB,
 		&status, &c.ClaimedByNode, &c.ClaimedAt,
 		&c.CompletedAt, &c.ErrorMessage,
 		&c.FileSizeBytes, ignoreField(),
@@ -595,4 +660,153 @@ SELECT id FROM runtime_pcap_captures WHERE expires_at < NOW()`)
 	return len(ids), nil
 }
 
-var _ = errors.New // keep import for future error wrapping
+func normalizeStartCaptureRequest(req StartCaptureRequest) (StartCaptureRequest, error) {
+	req.Workload = strings.TrimSpace(req.Workload)
+	req.Namespace = strings.TrimSpace(req.Namespace)
+	if req.ClusterID == uuid.Nil || req.Workload == "" {
+		return req, nil
+	}
+	if req.DurationS <= 0 {
+		req.DurationS = 30
+	}
+	if req.DurationS < minPcapDuration {
+		req.DurationS = minPcapDuration
+	}
+	if req.DurationS > maxPcapDuration {
+		req.DurationS = maxPcapDuration
+	}
+	protocol, err := normalizePcapProtocol(req.Protocol)
+	if err != nil {
+		return req, err
+	}
+	req.Protocol = protocol
+	if req.SrcIP, err = normalizeOptionalPcapIP("src_ip", req.SrcIP); err != nil {
+		return req, err
+	}
+	if req.DstIP, err = normalizeOptionalPcapIP("dst_ip", req.DstIP); err != nil {
+		return req, err
+	}
+	if req.DstPort < 0 || req.DstPort > 65535 {
+		return req, fmt.Errorf("dst_port must be between 1 and 65535")
+	}
+	req.BPFFilter = strings.TrimSpace(req.BPFFilter)
+	if err := validatePcapBPFFilterForStorage(req.BPFFilter); err != nil {
+		return req, err
+	}
+	req.Interface = strings.TrimSpace(req.Interface)
+	if req.Interface != "" && !validPcapInterfaceName(req.Interface) {
+		return req, fmt.Errorf("interface must be a Linux interface name up to 15 characters")
+	}
+	if req.FileCount <= 0 {
+		req.FileCount = 1
+	}
+	if req.FileCount > maxPcapFiles {
+		req.FileCount = maxPcapFiles
+	}
+	if req.FileCount <= 1 {
+		req.FileCount = 1
+		req.FileSizeMB = 0
+		return req, nil
+	}
+	if req.FileSizeMB <= 0 {
+		req.FileSizeMB = defaultPcapFileMB
+	}
+	if req.FileSizeMB > maxPcapFileSizeMB {
+		req.FileSizeMB = maxPcapFileSizeMB
+	}
+	if req.FileSizeMB*req.FileCount > maxPcapFileSizeMB {
+		req.FileSizeMB = maxPcapFileSizeMB / req.FileCount
+		if req.FileSizeMB < 1 {
+			req.FileSizeMB = 1
+		}
+	}
+	return req, nil
+}
+
+func normalizePcapStatus(value string) (string, error) {
+	status := strings.TrimSpace(strings.ToLower(value))
+	switch PcapCaptureStatus(status) {
+	case "", PcapStatusPending, PcapStatusRunning, PcapStatusCompleted, PcapStatusFailed, PcapStatusExpired:
+		return status, nil
+	default:
+		return "", fmt.Errorf("status must be pending, running, completed, failed, or expired")
+	}
+}
+
+func normalizePcapProtocol(value string) (string, error) {
+	protocol := strings.TrimSpace(strings.ToLower(value))
+	switch protocol {
+	case "", "tcp", "udp", "icmp":
+		return protocol, nil
+	default:
+		return "", fmt.Errorf("protocol must be tcp, udp, or icmp")
+	}
+}
+
+func normalizeOptionalPcapIP(field, value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	normalized, ok := normalizeIP(value)
+	if !ok {
+		return "", fmt.Errorf("%s must be a valid IP address", field)
+	}
+	return normalized, nil
+}
+
+func parsePcapPortQuery(value string) (int, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, nil
+	}
+	port, err := strconv.Atoi(value)
+	if err != nil || port <= 0 || port > 65535 {
+		return 0, fmt.Errorf("dst_port must be between 1 and 65535")
+	}
+	return port, nil
+}
+
+func validatePcapBPFFilterForStorage(filter string) error {
+	if filter == "" {
+		return nil
+	}
+	if len(filter) > maxPcapBPFFilterLen {
+		return fmt.Errorf("bpf_filter is too long (%d bytes, max %d)", len(filter), maxPcapBPFFilterLen)
+	}
+	for _, r := range filter {
+		if !isPcapBPFRune(r) {
+			return fmt.Errorf("bpf_filter contains illegal character %q", r)
+		}
+	}
+	return nil
+}
+
+func isPcapBPFRune(r rune) bool {
+	switch {
+	case r >= 'a' && r <= 'z':
+		return true
+	case r >= 'A' && r <= 'Z':
+		return true
+	case r >= '0' && r <= '9':
+		return true
+	case r == ' ' || r == '\t':
+		return true
+	}
+	return strings.ContainsRune(".:/()[]<>=!&|+-*%", r)
+}
+
+func validPcapInterfaceName(name string) bool {
+	if name == "" || len(name) > 15 {
+		return false
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '.' || r == '-' || r == '_' || r == '@':
+		default:
+			return false
+		}
+	}
+	return true
+}

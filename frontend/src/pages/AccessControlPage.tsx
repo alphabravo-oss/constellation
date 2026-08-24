@@ -11,6 +11,7 @@ import {
   type AccessControlRole,
   type AccessControlUser,
   type AccessControlPermissionMatrixRow,
+  type AccessControlAPIToken,
 } from "@/api/client";
 import { PageHeader, PageContainer } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
@@ -73,6 +74,21 @@ const permissionColumns: Column<AccessControlPermissionMatrixRow>[] = [
   { id: "permissions", header: "Permissions", cell: (row) => row.permissions.join(", "), className: "font-mono text-xs" },
   { id: "roles", header: "Roles", cell: (row) => row.roles.join(", "), className: "text-xs" },
   { id: "notes", header: "Notes", cell: (row) => row.notes, className: "text-xs text-muted-foreground" },
+];
+
+const tokenColumns: Column<AccessControlAPIToken>[] = [
+  {
+    id: "token",
+    header: "Token",
+    cell: (token) => (
+      <div>
+        <div className="font-medium">{token.name}</div>
+        <div className="font-mono text-xs text-muted-foreground">{token.scopes.join(", ") || "no scopes"}</div>
+      </div>
+    ),
+  },
+  { id: "status", header: "Status", cell: (token) => <Status value={token.status} /> },
+  { id: "expires", header: "Expires", cell: (token) => formatDate(token.expires_at), className: "text-xs text-muted-foreground" },
 ];
 
 export function AccessControlPage() {
@@ -285,6 +301,10 @@ export function AccessControlPage() {
                 </div>
               </article>
             ))}
+            <div className="border-t border-border pt-3" data-testid="service-tokens">
+              <div className="mb-2 text-xs font-medium text-muted-foreground">API tokens</div>
+              <DataTable rows={data?.api_tokens ?? []} columns={tokenColumns} rowKey={(token) => token.id} />
+            </div>
           </div>
         </Card>
       ),

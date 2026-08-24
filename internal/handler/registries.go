@@ -11,6 +11,7 @@
 //	DELETE /api/v1/registries/{id}         — delete.
 //	POST   /api/v1/registries/{id}/test    — synchronous credential check.
 //	POST   /api/v1/registries/{id}/sync-now — trigger a manual walker pass right now.
+//	POST   /api/v1/registries/{id}/cancel-scans — cancel active scan jobs for this registry.
 //	GET    /api/v1/registries/{id}/images   — list discovered images for this registry.
 //
 // The walker daemon (cmd/constellation-registry-walker) consumes the same DB
@@ -87,6 +88,7 @@ var validAuthKinds = map[string]bool{
 // validCadences enumerates scan_cadence values.
 var validCadences = map[string]bool{
 	"manual": true,
+	"auto":   true,
 	"hourly": true,
 	"6h":     true,
 	"daily":  true,
@@ -115,7 +117,9 @@ func defaultRegistryScanPolicy(fallbackInclude []string) registryScanPolicy {
 		IncludeRepos:            include,
 		ExcludeRepos:            []string{},
 		TagSelection:            "all",
+		RescanAfterDBUpdate:     registryBoolPtr(true),
 		BlockPromotionThreshold: "critical",
+		ScanLayers:              true,
 	}
 }
 
@@ -137,6 +141,19 @@ func normalizeRegistryScanPolicy(in *registryScanPolicy, fallbackInclude []strin
 	if strings.TrimSpace(in.RescanInterval) != "" {
 		out.RescanInterval = strings.TrimSpace(in.RescanInterval)
 	}
+	if in.RescanAfterDBUpdate != nil {
+		out.RescanAfterDBUpdate = in.RescanAfterDBUpdate
+	}
+	out.RepoLimit = in.RepoLimit
+	out.TagLimit = in.TagLimit
+	if strings.TrimSpace(in.CustomInterval) != "" {
+		out.CustomInterval = strings.TrimSpace(in.CustomInterval)
+	}
+	if strings.TrimSpace(in.Cron) != "" {
+		out.Cron = strings.TrimSpace(in.Cron)
+	}
+	out.IgnoreProxy = in.IgnoreProxy
+	out.ScanLayers = in.ScanLayers
 	if strings.TrimSpace(in.BlockPromotionThreshold) != "" {
 		out.BlockPromotionThreshold = strings.TrimSpace(in.BlockPromotionThreshold)
 	}
@@ -179,7 +196,37 @@ func validateRegistryScanPolicy(policy registryScanPolicy) error {
 			return fmt.Errorf("scan_policy.rescan_interval must be a duration")
 		}
 	}
+	if policy.RepoLimit < 0 {
+		return fmt.Errorf("scan_policy.repo_limit must be >= 0")
+	}
+	if policy.TagLimit < 0 {
+		return fmt.Errorf("scan_policy.tag_limit must be >= 0")
+	}
+	if policy.CustomInterval != "" {
+		if d, err := time.ParseDuration(policy.CustomInterval); err != nil || d <= 0 {
+			return fmt.Errorf("scan_policy.custom_interval must be a positive duration")
+		}
+	}
+	if policy.Cron != "" {
+		if registry.ResolveSchedule("cron:"+policy.Cron).Mode != registry.ScheduleCron {
+			return fmt.Errorf("scan_policy.cron must be a valid 5-field cron expression")
+		}
+	}
+	if policy.CustomInterval != "" && policy.Cron != "" {
+		return fmt.Errorf("scan_policy.custom_interval and scan_policy.cron are mutually exclusive")
+	}
 	return nil
+}
+
+func validRegistryCadence(cadence string) bool {
+	c := strings.ToLower(strings.TrimSpace(cadence))
+	if validCadences[c] {
+		return true
+	}
+	if d, err := time.ParseDuration(c); err == nil && d > 0 {
+		return true
+	}
+	return strings.HasPrefix(c, "cron:") && registry.ResolveSchedule(c).Mode == registry.ScheduleCron
 }
 
 func registryPolicyHash(policy registryScanPolicy) string {
@@ -201,6 +248,14 @@ func compactStringSlice(values []string) []string {
 		out = append(out, value)
 	}
 	return out
+}
+
+func registryBoolPtr(value bool) *bool {
+	return &value
+}
+
+func registryPolicyRescanAfterDBUpdate(policy registryScanPolicy) bool {
+	return policy.RescanAfterDBUpdate == nil || *policy.RescanAfterDBUpdate
 }
 
 // CadenceToInterval returns the polling interval for the given cadence.
@@ -272,7 +327,20 @@ type registryScanPolicy struct {
 	TagSelection            string   `json:"tag_selection"`
 	MaxAge                  string   `json:"max_age"`
 	RescanInterval          string   `json:"rescan_interval"`
+	RescanAfterDBUpdate     *bool    `json:"rescan_after_db_update"`
+	RepoLimit               int      `json:"repo_limit"`
+	TagLimit                int      `json:"tag_limit"`
+	CustomInterval          string   `json:"custom_interval"`
+	Cron                    string   `json:"cron"`
+	IgnoreProxy             bool     `json:"ignore_proxy"`
+	ScanLayers              bool     `json:"scan_layers"`
 	BlockPromotionThreshold string   `json:"block_promotion_threshold"`
+}
+
+type registryCancelScansResponse struct {
+	RegistryID      string `json:"registry_id"`
+	Canceled        int64  `json:"canceled"`
+	ActiveRemaining int64  `json:"active_remaining"`
 }
 
 // List returns all registries for the calling org.
@@ -465,7 +533,7 @@ func (h *Registries) Patch(w http.ResponseWriter, r *http.Request) {
 		addArg("auth_kind", *req.AuthKind)
 	}
 	if req.ScanCadence != nil {
-		if !validCadences[*req.ScanCadence] {
+		if !validRegistryCadence(*req.ScanCadence) {
 			jsonError(w, http.StatusBadRequest, "invalid scan_cadence")
 			return
 		}
@@ -588,7 +656,7 @@ func (h *Registries) Test(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	kind, endpoint, authKind, sealed, err := loadRegistryRow(r.Context(), h.db.Pool(), subj.OrgID, id)
+	kind, endpoint, authKind, sealed, policy, err := loadRegistryRow(r.Context(), h.db.Pool(), subj.OrgID, id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			jsonError(w, http.StatusNotFound, "not found")
@@ -598,7 +666,9 @@ func (h *Registries) Test(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := BuildConnector(r.Context(), h.db.Pool(), subj.OrgID, kind, endpoint, authKind, sealed)
+	conn, err := BuildConnectorWithOptions(r.Context(), h.db.Pool(), subj.OrgID, kind, endpoint, authKind, sealed, RegistryConnectorOptions{
+		IgnoreProxy: policy.IgnoreProxy,
+	})
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
 		return
@@ -654,6 +724,105 @@ func (h *Registries) SyncNow(w http.ResponseWriter, r *http.Request) {
 			"scan_jobs_enqueued": res.JobsEnqueued,
 		},
 	})
+	writeJSON(w, http.StatusOK, res)
+}
+
+// CancelActiveScans cancels all pending, paused, and running scan jobs tied to
+// this registry through scan_targets.registry_id.
+func (h *Registries) CancelActiveScans(w http.ResponseWriter, r *http.Request) {
+	subj, ok := SubjectFrom(r.Context())
+	if !ok {
+		jsonError(w, http.StatusUnauthorized, "no subject")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	var registryName string
+	if err := h.db.Pool().QueryRow(r.Context(),
+		`SELECT name FROM registries WHERE id = $1 AND org_id = $2`, id, subj.OrgID).Scan(&registryName); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			jsonError(w, http.StatusNotFound, "not found")
+			return
+		}
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	tag, err := h.db.Pool().Exec(r.Context(), `
+UPDATE scan_jobs sj
+   SET status = 'canceled',
+       canceled_at = NOW(),
+       finished_at = NOW(),
+       lease_expires_at = NULL,
+       next_attempt_at = NULL
+  FROM scan_targets st
+ WHERE sj.target_id = st.id
+   AND sj.org_id = $1
+   AND st.org_id = $1
+   AND st.registry_id = $2
+   AND sj.status IN ('pending', 'paused', 'running')`,
+		subj.OrgID, id)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if tag.RowsAffected() > 0 {
+		if _, err := h.db.Pool().Exec(r.Context(), `
+UPDATE scan_job_attempts a
+   SET status = 'canceled',
+       finished_at = NOW(),
+       lease_expires_at = NULL,
+       next_attempt_at = NULL
+  FROM scan_jobs sj
+  JOIN scan_targets st ON st.id = sj.target_id
+ WHERE a.job_id = sj.id
+   AND a.org_id = $1
+   AND sj.org_id = $1
+   AND st.org_id = $1
+   AND st.registry_id = $2
+   AND a.status = 'running'`, subj.OrgID, id); err != nil {
+			jsonError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+
+	var activeRemaining int64
+	if err := h.db.Pool().QueryRow(r.Context(), `
+SELECT COUNT(*)::bigint
+  FROM scan_jobs sj
+  JOIN scan_targets st ON st.id = sj.target_id
+ WHERE sj.org_id = $1
+   AND st.org_id = $1
+   AND st.registry_id = $2
+   AND sj.status IN ('pending', 'paused', 'running')`,
+		subj.OrgID, id).Scan(&activeRemaining); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	res := registryCancelScansResponse{
+		RegistryID:      id.String(),
+		Canceled:        tag.RowsAffected(),
+		ActiveRemaining: activeRemaining,
+	}
+	if h.audit != nil {
+		_, _, _ = h.audit.Log(r.Context(), audit.Event{
+			OrgID:      &subj.OrgID,
+			ActorID:    &subj.UserID,
+			Action:     "registry.scans.cancel",
+			TargetKind: "registry",
+			TargetID:   id.String(),
+			After: map[string]any{
+				"registry_name":    registryName,
+				"canceled":         res.Canceled,
+				"active_remaining": res.ActiveRemaining,
+			},
+		})
+	}
 	writeJSON(w, http.StatusOK, res)
 }
 
@@ -772,7 +941,7 @@ func validateCreate(req *registryCreateRequest) error {
 	if !validAuthKinds[req.AuthKind] {
 		return errors.New("invalid auth_kind")
 	}
-	if req.ScanCadence != "" && !validCadences[req.ScanCadence] {
+	if req.ScanCadence != "" && !validRegistryCadence(req.ScanCadence) {
 		return errors.New("invalid scan_cadence")
 	}
 	if req.ScanPolicy != nil {
@@ -834,9 +1003,27 @@ func openCredentials(ctx context.Context, pool *pgxpool.Pool, sealed []byte) (ma
 // takes effect on the next registry walk or Test WITHOUT a restart — this is the B1
 // "shared outbound HTTP client" consumer (a) wired to a real caller.
 func BuildConnector(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, kind, endpoint, authKind string, sealedSecret []byte) (registry.Connector, error) {
+	return BuildConnectorWithOptions(ctx, pool, orgID, kind, endpoint, authKind, sealedSecret, RegistryConnectorOptions{})
+}
+
+// RegistryConnectorOptions carries per-registry transport controls that should not
+// change the persisted credential shape.
+type RegistryConnectorOptions struct {
+	IgnoreProxy bool
+}
+
+// BuildConnectorWithOptions is BuildConnector plus per-registry transport controls.
+func BuildConnectorWithOptions(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, kind, endpoint, authKind string, sealedSecret []byte, opts RegistryConnectorOptions) (registry.Connector, error) {
 	creds, err := openCredentials(ctx, pool, sealedSecret)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt creds: %w", err)
+	}
+	provider := syscfg.NewProvider(pool)
+	httpClient := provider.HTTPClient(ctx, orgID, 30*time.Second)
+	if opts.IgnoreProxy {
+		cfg := provider.Get(ctx, orgID)
+		cfg.EgressProxy = syscfg.EgressProxy{}
+		httpClient = cfg.HTTPClient(30 * time.Second)
 	}
 	cfg := registry.Config{
 		Username: creds["username"],
@@ -855,7 +1042,7 @@ func BuildConnector(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, ki
 		SecretAccessKey:    firstNonEmptyCred(creds, "secret_access_key", "aws_secret_access_key"),
 		SessionToken:       firstNonEmptyCred(creds, "session_token", "aws_session_token"),
 		// Live outbound client: honors the org's runtime egress-proxy / TLS knobs.
-		HTTPClient: syscfg.NewProvider(pool).HTTPClient(ctx, orgID, 30*time.Second),
+		HTTPClient: httpClient,
 	}
 	switch kind {
 	case "docker-hub":
@@ -934,11 +1121,13 @@ func firstNonEmptyCred(creds map[string]string, keys ...string) string {
 // -----------------------------------------------------------------------------
 
 func loadRegistryRow(ctx context.Context, pool *pgxpool.Pool, orgID, id uuid.UUID,
-) (kind, endpoint, authKind string, sealedSecret []byte, err error) {
+) (kind, endpoint, authKind string, sealedSecret []byte, policy registryScanPolicy, err error) {
+	var policyRaw []byte
 	err = pool.QueryRow(ctx, `
-SELECT kind, endpoint, auth_kind, auth_secret
+SELECT kind, endpoint, auth_kind, auth_secret, scan_policy
   FROM registries WHERE id = $1 AND org_id = $2`, id, orgID,
-	).Scan(&kind, &endpoint, &authKind, &sealedSecret)
+	).Scan(&kind, &endpoint, &authKind, &sealedSecret, &policyRaw)
+	policy = decodeRegistryScanPolicy(policyRaw, nil)
 	return
 }
 
@@ -1042,7 +1231,9 @@ SELECT name, kind, endpoint, auth_kind, auth_secret, image_globs, scan_policy
 		slog.String("kind", kind),
 		slog.String("endpoint", endpoint))
 
-	conn, err := BuildConnector(ctx, pool, orgID, kind, endpoint, authKind, sealed)
+	conn, err := BuildConnectorWithOptions(ctx, pool, orgID, kind, endpoint, authKind, sealed, RegistryConnectorOptions{
+		IgnoreProxy: policy.IgnoreProxy,
+	})
 	if err != nil {
 		recordSyncStatus(ctx, pool, registryID, "failed", err.Error(), 0)
 		result.Error = err.Error()
@@ -1164,7 +1355,11 @@ ON CONFLICT (registry_id, repository) DO UPDATE
 			if err != nil {
 				return jobsEnqueued, fmt.Errorf("scan target: %w", err)
 			}
-			enqueue, reason, err := shouldEnqueueRegistryScan(ctx, tx, orgID, target.ID, policyHash, bundleVersion, policy.RescanInterval)
+			dedupeBundleVersion := bundleVersion
+			if !registryPolicyRescanAfterDBUpdate(policy) {
+				dedupeBundleVersion = ""
+			}
+			enqueue, reason, err := shouldEnqueueRegistryScan(ctx, tx, orgID, target.ID, policyHash, dedupeBundleVersion, policy.RescanInterval)
 			if err != nil {
 				return jobsEnqueued, fmt.Errorf("scan dedupe: %w", err)
 			}
@@ -1175,7 +1370,7 @@ ON CONFLICT (registry_id, repository) DO UPDATE
 			if _, err := tx.Exec(ctx, `
 INSERT INTO scan_jobs (id, org_id, target_id, status, enqueue_reason, registry_policy_hash, vulndb_bundle_version)
 VALUES ($1, $2, $3, 'pending', $4, $5, NULLIF($6,''))`,
-				id, orgID, target.ID, reason, policyHash, bundleVersion); err != nil {
+				id, orgID, target.ID, reason, policyHash, dedupeBundleVersion); err != nil {
 				return jobsEnqueued, fmt.Errorf("enqueue scan_job: %w", err)
 			}
 			jobsEnqueued++
@@ -1221,6 +1416,12 @@ func filterImagesByScanPolicy(in []registry.Image, policy registryScanPolicy, no
 		}
 		out = append(out, im)
 	}
+	if policy.RepoLimit > 0 && len(out) > policy.RepoLimit {
+		sort.SliceStable(out, func(i, j int) bool {
+			return out[i].Repository < out[j].Repository
+		})
+		out = out[:policy.RepoLimit]
+	}
 	return out
 }
 
@@ -1231,6 +1432,9 @@ func selectRegistryTags(tags []string, policy registryScanPolicy) []string {
 	}
 	sort.Strings(tags)
 	if policy.TagSelection != "latest" {
+		if policy.TagLimit > 0 && len(tags) > policy.TagLimit {
+			return append([]string{}, tags[len(tags)-policy.TagLimit:]...)
+		}
 		return tags
 	}
 	for _, tag := range tags {

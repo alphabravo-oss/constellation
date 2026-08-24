@@ -134,14 +134,15 @@ func (h *WorkloadPackagesHandler) Report(w http.ResponseWriter, r *http.Request)
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
 
+	imageRef, imageDigest := firstResolvedWorkloadImageIdentity(r.Context(), tx, tok.OrgID, clusterID, body)
 	target, err := handler.UpsertScanTarget(r.Context(), nil, tx, tok.OrgID, handler.ScanTargetUpsert{
 		TargetType:      "workload",
 		TargetRef:       body.WorkloadID,
 		TargetClusterID: clusterID,
 		SourceType:      "runtime-agent",
 		SourceRef:       body.WorkloadID,
-		ImageRef:        firstWorkloadImageRef(body),
-		ImageDigest:     firstWorkloadImageDigest(body),
+		ImageRef:        imageRef,
+		ImageDigest:     imageDigest,
 		InventoryHash:   inventoryHash,
 		Metadata:        metadata,
 	})
@@ -242,8 +243,8 @@ type runtimeImageEvidenceReport struct {
 func upsertRuntimeImagePackageEvidence(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, clusterID *uuid.UUID, body WorkloadPackagesPayload) ([]runtimeImageEvidenceReport, error) {
 	out := []runtimeImageEvidenceReport{}
 	for _, container := range body.Containers {
-		imageRef := workloadContainerImageRef(container)
-		if imageRef == "" {
+		imageRef, imageDigest := resolvedWorkloadContainerImageIdentity(ctx, tx, orgID, clusterID, body.Namespace, container)
+		if imageRef == "" || isBareImageDigest(imageRef) {
 			continue
 		}
 		packages := scannerPackagesFromWorkloadContainer(container)
@@ -287,7 +288,7 @@ func upsertRuntimeImagePackageEvidence(ctx context.Context, tx pgx.Tx, orgID uui
 			SourceType:      "runtime-agent",
 			SourceRef:       body.Node,
 			ImageRef:        imageRef,
-			ImageDigest:     imageDigestFromRef(imageRef),
+			ImageDigest:     imageDigest,
 			InventoryHash:   inventoryHash,
 			Metadata:        metadata,
 		})
@@ -409,6 +410,16 @@ func firstWorkloadDistroSource(body WorkloadPackagesPayload) (distro, version, s
 	return distro, version, source
 }
 
+func firstResolvedWorkloadImageIdentity(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, clusterID *uuid.UUID, body WorkloadPackagesPayload) (string, string) {
+	for _, container := range body.Containers {
+		ref, digest := resolvedWorkloadContainerImageIdentity(ctx, tx, orgID, clusterID, body.Namespace, container)
+		if ref != "" || digest != "" {
+			return ref, digest
+		}
+	}
+	return "", ""
+}
+
 func firstWorkloadImageRef(body WorkloadPackagesPayload) string {
 	for _, container := range body.Containers {
 		if ref := workloadContainerImageRef(container); ref != "" {
@@ -419,25 +430,106 @@ func firstWorkloadImageRef(body WorkloadPackagesPayload) string {
 }
 
 func firstWorkloadImageDigest(body WorkloadPackagesPayload) string {
-	return imageDigestFromRef(firstWorkloadImageRef(body))
+	for _, container := range body.Containers {
+		if digest := workloadContainerImageDigest(container); digest != "" {
+			return digest
+		}
+	}
+	return ""
+}
+
+func resolvedWorkloadContainerImageIdentity(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, clusterID *uuid.UUID, namespace string, container WorkloadPackageContainer) (string, string) {
+	ref := workloadContainerImageRef(container)
+	digest := workloadContainerImageDigest(container)
+	if isBareImageDigest(ref) && digest != "" {
+		if named := resolveNamedImageRefForDigest(ctx, tx, orgID, clusterID, namespace, digest); named != "" {
+			ref = named
+		}
+	}
+	return ref, digest
+}
+
+func resolveNamedImageRefForDigest(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, clusterID *uuid.UUID, namespace, digest string) string {
+	digest = strings.TrimSpace(digest)
+	if digest == "" {
+		return ""
+	}
+	var named string
+	_ = tx.QueryRow(ctx, `
+WITH direct AS (
+    SELECT image_ref, last_seen_at
+      FROM image_workload_links
+     WHERE org_id = $1
+       AND ($2::uuid IS NULL OR cluster_id = $2)
+       AND ($3 = '' OR namespace = $3)
+       AND image_digest = $4
+       AND image_ref !~ '^sha256:'
+),
+sibling AS (
+    SELECT named.image_ref, named.last_seen_at
+      FROM image_workload_links bare
+      JOIN image_workload_links named
+        ON named.org_id = bare.org_id
+       AND named.cluster_id = bare.cluster_id
+       AND named.deployment_id = bare.deployment_id
+     WHERE bare.org_id = $1
+       AND ($2::uuid IS NULL OR bare.cluster_id = $2)
+       AND ($3 = '' OR bare.namespace = $3)
+       AND bare.image_digest = $4
+       AND bare.image_ref ~ '^sha256:'
+       AND named.image_ref !~ '^sha256:'
+)
+SELECT image_ref
+  FROM (
+        SELECT image_ref, last_seen_at FROM direct
+        UNION ALL
+        SELECT image_ref, last_seen_at FROM sibling
+       ) candidates
+ ORDER BY CASE WHEN image_ref LIKE 'docker.io/%' THEN 1 ELSE 0 END,
+          last_seen_at DESC,
+          length(image_ref),
+          image_ref
+ LIMIT 1`,
+		orgID, clusterID, strings.TrimSpace(namespace), digest).Scan(&named)
+	return strings.TrimSpace(named)
 }
 
 func workloadContainerImageRef(container WorkloadPackageContainer) string {
-	if ref := strings.TrimSpace(container.ImageRef); ref != "" {
-		return ref
+	imageRef := strings.TrimSpace(container.ImageRef)
+	image := strings.TrimSpace(container.Image)
+	if imageRef != "" && !isBareImageDigest(imageRef) {
+		return imageRef
 	}
-	return strings.TrimSpace(container.Image)
+	if image != "" {
+		return image
+	}
+	return imageRef
+}
+
+func workloadContainerImageDigest(container WorkloadPackageContainer) string {
+	for _, ref := range []string{container.ImageRef, container.Image} {
+		if digest := imageDigestFromRef(ref); digest != "" {
+			return digest
+		}
+	}
+	return ""
 }
 
 func imageDigestFromRef(ref string) string {
+	ref = strings.TrimSpace(ref)
 	if idx := strings.LastIndex(ref, "@"); idx >= 0 {
 		digest := strings.TrimSpace(ref[idx+1:])
 		if strings.HasPrefix(digest, "sha256:") {
 			return digest
 		}
 	}
-	if strings.HasPrefix(ref, "sha256:") {
-		return strings.TrimSpace(ref)
+	if isBareImageDigest(ref) {
+		return ref
 	}
 	return ""
+}
+
+func isBareImageDigest(ref string) bool {
+	ref = strings.TrimSpace(ref)
+	return strings.HasPrefix(ref, "sha256:") && ref != "sha256:"
 }

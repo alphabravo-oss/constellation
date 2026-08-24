@@ -24,6 +24,10 @@ image:
   pullSecrets: []
   # - name: ghcr-pull-secret
 
+# Keep rollout history short so repeated local/edge upgrades do not leave
+# zero-replica ReplicaSets pinned to stale role image tags.
+revisionHistoryLimit: 3
+
 # ---------------------------------------------------------------------------
 # Default pod/container security posture
 # ---------------------------------------------------------------------------
@@ -421,7 +425,10 @@ scanner:
   replicas: 2
   image: {}
   args: []
-  maxConcurrent: 0 # 0 lets the scanner default to runtime.NumCPU().
+  # Syft + Trivy + Grype are memory-heavy together; keep the out-of-box worker
+  # conservative and scale scanner replicas or raise this value once memory is sized.
+  # Set 0 to let a scanner auto-size from runtime.NumCPU().
+  maxConcurrent: 1
   targetCapacity: "" # e.g. "image=2,host=8,platform=4"; empty uses global concurrency for all target types.
   leaseRenewInterval: 5m
   readiness:

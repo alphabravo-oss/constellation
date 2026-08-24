@@ -4,12 +4,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { findings, type AffectedRange, type Finding } from "@/api/client";
+import { dateInputDaysFromNow, dateInputEndOfDayWithinDays } from "@/lib/format";
 import { severityBg } from "@/lib/severity";
 import { useCluster } from "@/hooks/useCluster";
 import { PageHeader, PageContainer } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
 
 type ReconSignal = NonNullable<Finding["reconciliation"]>[number];
+const ACCEPT_RISK_MAX_DAYS = 30;
 
 export function FindingDetailPage() {
   // Route param is :fid (see App.tsx). Alias to `id` for the queries below.
@@ -34,13 +36,13 @@ export function FindingDetailPage() {
   const [showAccept, setShowAccept] = useState(false);
   const [rationale, setRationale] = useState("");
   const [acceptedUntil, setAcceptedUntil] = useState(
-    () => new Date(Date.now() + 30 * 86400 * 1000).toISOString().slice(0, 10),
+    () => dateInputDaysFromNow(ACCEPT_RISK_MAX_DAYS),
   );
   const acceptRisk = useMutation({
     mutationFn: () =>
       findings.acceptRisk(id!, {
         reason: rationale,
-        accepted_until: new Date(acceptedUntil + "T23:59:59Z").toISOString(),
+        accepted_until: dateInputEndOfDayWithinDays(acceptedUntil, ACCEPT_RISK_MAX_DAYS),
       }),
     onSuccess: () => {
       toast.success("Risk accepted");
@@ -63,6 +65,9 @@ export function FindingDetailPage() {
   if (q.isPending) return <p className="text-sm text-muted-foreground">Loading…</p>;
   if (!q.data) return <p className="text-sm text-destructive">Not found.</p>;
   const f = q.data;
+  const score = cvssScore(f);
+  const hasVulnerabilityMetadata =
+    typeof score === "number" || Boolean(f.cvss_vector) || Boolean(f.kev) || typeof f.epss === "number";
 
   const reconColumns: Column<ReconSignal>[] = [
     { id: "engine", header: "Engine", cell: (s) => <span className="font-mono">{s.engine}</span> },
@@ -80,6 +85,7 @@ export function FindingDetailPage() {
           <span className="flex flex-wrap items-center gap-2 text-xs">
             <span className={`rounded-md px-2 py-0.5 ${severityBg[f.severity]}`}>{f.severity}</span>
             <span>risk {f.risk_score}</span>
+            {typeof score === "number" ? <span>· CVSS {score.toFixed(1)}</span> : null}
             <span>· {f.kind}</span>
             <span>· {f.lifecycle}</span>
             {isExceptionLifecycle(f.lifecycle) ? (
@@ -107,7 +113,7 @@ export function FindingDetailPage() {
               onClick={() => setShowAccept((s) => !s)}
               className="rounded-md border border-border bg-card px-3 py-1.5 text-sm hover:bg-accent"
             >
-              Accept Risk
+              Accept risk
             </button>
           </>
         }
@@ -162,6 +168,7 @@ export function FindingDetailPage() {
           <input
             type="date"
             value={acceptedUntil}
+            max={dateInputDaysFromNow(ACCEPT_RISK_MAX_DAYS)}
             onChange={(e) => setAcceptedUntil(e.target.value)}
             className="mb-3 rounded-md border border-border bg-background p-2 text-sm"
             data-testid="accept-risk-until"
@@ -203,10 +210,14 @@ export function FindingDetailPage() {
         </section>
       ) : null}
 
-      {(f.canonical_engine || f.engines?.length || f.vulndb_bundle || f.affected_range) ? (
+      {(f.canonical_engine || f.engines?.length || f.vulndb_bundle || f.affected_range || hasVulnerabilityMetadata) ? (
         <section className="rounded-lg border border-border bg-card p-4">
           <h2 className="mb-3 text-sm font-medium">Source Provenance</h2>
           <dl className="grid gap-3 text-xs sm:grid-cols-2">
+            <DetailField label="CVSS base" value={formatCVSS(f)} mono />
+            <DetailField label="CVSS vector" value={f.cvss_vector ?? "—"} mono wide />
+            <DetailField label="KEV" value={f.kev ? "yes" : "no"} />
+            <DetailField label="EPSS" value={formatEPSS(f.epss)} />
             <DetailField label="Canonical engine" value={f.canonical_engine ?? "—"} mono />
             <DetailField label="VulnDB bundle" value={f.vulndb_bundle?.bundle_version ?? "—"} mono />
             <DetailField label="Package" value={formatPackage(f)} mono />
@@ -253,7 +264,7 @@ export function FindingDetailPage() {
       <section className="rounded-lg border border-border bg-card p-4">
         <h2 className="mb-2 text-sm font-medium">Raw Risk Inputs</h2>
         <pre className="overflow-x-auto rounded-md bg-muted p-3 text-xs">
-{JSON.stringify((f as any).risk_inputs ?? {}, null, 2)}
+{JSON.stringify(f.risk_inputs ?? {}, null, 2)}
         </pre>
       </section>
 
@@ -331,6 +342,19 @@ function formatPackage(f: Finding) {
   const version = f.package_version ? `@${f.package_version}` : "";
   const ecosystem = f.package_ecosystem ? ` (${f.package_ecosystem})` : "";
   return `${name}${version}${ecosystem}`;
+}
+
+function cvssScore(f: Pick<Finding, "cvss" | "cvss_base">) {
+  return f.cvss_base ?? f.cvss;
+}
+
+function formatCVSS(f: Finding) {
+  const score = cvssScore(f);
+  return typeof score === "number" ? score.toFixed(1) : "—";
+}
+
+function formatEPSS(value?: number) {
+  return typeof value === "number" ? `${(value * 100).toFixed(1)}%` : "—";
 }
 
 function formatAffectedRange(range: AffectedRange) {

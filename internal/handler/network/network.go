@@ -15,13 +15,20 @@ import (
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
 	"github.com/alphabravocompany/constellation/internal/handler/netutil"
+	"github.com/alphabravocompany/constellation/pkg/audit"
 )
 
 type Network struct {
-	db *db.DB
+	db    *db.DB
+	audit *audit.Logger
 }
 
 func NewNetwork(d *db.DB) *Network { return &Network{db: d} }
+
+func (h *Network) WithAudit(a *audit.Logger) *Network {
+	h.audit = a
+	return h
+}
 
 // Map returns workloads plus observed network edges aggregated over a recent window.
 func (h *Network) Map(w http.ResponseWriter, r *http.Request) {
@@ -37,23 +44,28 @@ func (h *Network) Map(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	groupMembers, groupName, groupActive, err := handler.ResolveGroupFilterMembers(r.Context(), h.db.Pool(), subj.OrgID, clusterID, r.URL.Query().Get("group"))
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
 	clusters, err := h.networkClusters(r, subj.OrgID)
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 
-	workloads, err := h.workloads(r, subj.OrgID, clusterID, namespace)
+	workloads, err := h.workloads(r, subj.OrgID, clusterID, namespace, groupActive, groupMembers)
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	flows, err := h.flows(r, subj.OrgID, clusterID, hours, namespace, verdict)
+	flows, err := h.flows(r, subj.OrgID, clusterID, hours, namespace, verdict, groupActive, groupMembers)
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	recentFlows, err := h.recentFlows(r, subj.OrgID, clusterID, hours, namespace, verdict)
+	recentFlows, err := h.recentFlows(r, subj.OrgID, clusterID, hours, namespace, verdict, groupActive, groupMembers)
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -97,6 +109,10 @@ func (h *Network) Map(w http.ResponseWriter, r *http.Request) {
 	}
 	if clusterID != nil {
 		summary["selected_cluster_id"] = clusterID.String()
+	}
+	if groupActive {
+		summary["selected_group"] = groupName
+		summary["selected_group_members"] = len(groupMembers)
 	}
 	// Whether this cluster's CNI can enforce a per-IP deny (Cilium/Calico). The UI
 	// uses it to hide "Block IP" on native/flannel clusters where it can't apply.
@@ -160,7 +176,7 @@ SELECT id::text, name, state
 	return out, rows.Err()
 }
 
-func (h *Network) workloads(r *http.Request, orgID uuid.UUID, clusterID *uuid.UUID, namespace string) ([]map[string]any, error) {
+func (h *Network) workloads(r *http.Request, orgID uuid.UUID, clusterID *uuid.UUID, namespace string, groupActive bool, groupMembers []string) ([]map[string]any, error) {
 	// wl_mode: each workload's strongest group policy_mode (NV node badging — Discover/
 	// Monitor/Protect). A workload's mode is the max over the groups it belongs to; resolved
 	// via groups.members ("ns/name"), the same source the dashboard/exposure rollups use.
@@ -179,7 +195,8 @@ SELECT d.cluster_id::text, COALESCE(c.name, ''), d.namespace, d.name, d.kind, d.
  WHERE d.org_id = $1
    AND ($2::uuid IS NULL OR d.cluster_id = $2)
    AND ($3::text = '' OR d.namespace = $3)
- ORDER BY namespace, name`, orgID, clusterID, namespace)
+   AND (NOT $4::boolean OR (d.namespace || '/' || d.name) = ANY($5::text[]))
+ ORDER BY namespace, name`, orgID, clusterID, namespace, groupActive, groupMembers)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +219,7 @@ SELECT d.cluster_id::text, COALESCE(c.name, ''), d.namespace, d.name, d.kind, d.
 	return out, rows.Err()
 }
 
-func (h *Network) flows(r *http.Request, orgID uuid.UUID, clusterID *uuid.UUID, hours int, namespace, verdict string) ([]map[string]any, error) {
+func (h *Network) flows(r *http.Request, orgID uuid.UUID, clusterID *uuid.UUID, hours int, namespace, verdict string, groupActive bool, groupMembers []string) ([]map[string]any, error) {
 	// Source precedence (Wave 4 / NET-3): dp > hubble > bpf > declared >
 	// synthetic. dp rows carry real on-wire byte/session counts and L7 from
 	// DPI parsers; hubble rows (Cilium-eBPF clusters where dp is structurally
@@ -237,9 +254,10 @@ SELECT cluster_id::text, src_workload, dst_workload, protocol, l7_protocol, dst_
    AND bucket >= date_trunc('hour', NOW() - ($3::text || ' hours')::interval)
    AND ($4::text = '' OR src_workload LIKE $4 || '/%' OR dst_workload LIKE $4 || '/%')
    AND ($5::text = '' OR lower(verdict) = $5)
+   AND (NOT $6::boolean OR src_workload = ANY($7::text[]) OR dst_workload = ANY($7::text[]))
  GROUP BY cluster_id, src_workload, dst_workload, protocol, l7_protocol, dst_port, verdict
  ORDER BY MAX(max_at) DESC, SUM(sum_bytes) DESC
- LIMIT 300`, orgID, clusterID, fmt.Sprintf("%d", hours), namespace, verdict)
+ LIMIT 300`, orgID, clusterID, fmt.Sprintf("%d", hours), namespace, verdict, groupActive, groupMembers)
 	if err != nil {
 		return nil, err
 	}
@@ -331,7 +349,7 @@ func threatNameForFlow(id int32) string {
 	return fmt.Sprintf("signature %d", id)
 }
 
-func (h *Network) recentFlows(r *http.Request, orgID uuid.UUID, clusterID *uuid.UUID, hours int, namespace, verdict string) ([]map[string]any, error) {
+func (h *Network) recentFlows(r *http.Request, orgID uuid.UUID, clusterID *uuid.UUID, hours int, namespace, verdict string, groupActive bool, groupMembers []string) ([]map[string]any, error) {
 	rows, err := h.db.Pool().Query(r.Context(), `
 SELECT cluster_id::text, src_workload, dst_workload, protocol, COALESCE(l7_protocol,''), COALESCE(dst_port,0), verdict,
        COALESCE(src_addr, ''), COALESCE(dst_addr, ''), COALESCE(src_port, 0),
@@ -342,8 +360,9 @@ SELECT cluster_id::text, src_workload, dst_workload, protocol, COALESCE(l7_proto
    AND at >= NOW() - ($3::text || ' hours')::interval
    AND ($4::text = '' OR src_workload LIKE $4 || '/%' OR dst_workload LIKE $4 || '/%')
    AND ($5::text = '' OR lower(verdict) = $5)
+   AND (NOT $6::boolean OR src_workload = ANY($7::text[]) OR dst_workload = ANY($7::text[]))
  ORDER BY at DESC
- LIMIT 50`, orgID, clusterID, fmt.Sprintf("%d", hours), namespace, verdict)
+ LIMIT 50`, orgID, clusterID, fmt.Sprintf("%d", hours), namespace, verdict, groupActive, groupMembers)
 	if err != nil {
 		return nil, err
 	}

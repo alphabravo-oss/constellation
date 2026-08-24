@@ -28,7 +28,11 @@ export function WhatIfScore() {
   const toggle = (band: string) =>
     setResolve((prev) => {
       const next = new Set(prev);
-      next.has(band) ? next.delete(band) : next.add(band);
+      if (next.has(band)) {
+        next.delete(band);
+      } else {
+        next.add(band);
+      }
       return next;
     });
 
