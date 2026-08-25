@@ -772,7 +772,7 @@ postgres:
     # NOTES.txt emits an install-time WARNING when mode=cnpg and this value does
     # not look pgvector-enabled (no "pgvector" in the ref) — a heuristic guard,
     # not a hard gate. See examples/values-cnpg.yaml for a worked profile.
-    imageName: ghcr.io/alphabravo-oss/constellation/postgres:v0.2.0
+    imageName: ghcr.io/alphabravo-oss/constellation/postgres:16.10-v0.2.0
     storage: 20Gi
     storageClass: ""        # empty = cluster default
     resources:

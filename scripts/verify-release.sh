@@ -40,7 +40,11 @@ issuer="${COSIGN_OIDC_ISSUER:-https://token.actions.githubusercontent.com}"
 roles=(api scanner operator discoverer audit-archiver frontend runtime-agent admission migrate bootstrap postgres)
 
 for role in "${roles[@]}"; do
-  ref="$registry/$role:$release_tag"
+  image_tag="$release_tag"
+  if [[ "$role" == "postgres" ]]; then
+    image_tag="16.10-$release_tag"
+  fi
+  ref="$registry/$role:$image_tag"
   cosign verify "$ref" \
     --certificate-identity-regexp "$identity" \
     --certificate-oidc-issuer "$issuer" >/dev/null

@@ -17,6 +17,7 @@ grep -q 'constellation.dev.alphabravo.io' "$rendered"
 grep -q '^kind: Cluster$' "$rendered"
 grep -q 'instances: 3' "$rendered"
 grep -q 'storageClass: longhorn' "$rendered"
+grep -q 'imageName: ghcr.io/alphabravo-oss/constellation/postgres:16.10-v0.2.0' "$rendered"
 grep -q 'port: 8000' "$rendered"
 
 if helm template constellation "$chart" --set highAvailability.enabled=true >"$error_output" 2>&1; then

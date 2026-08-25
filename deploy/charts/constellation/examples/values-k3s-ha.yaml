@@ -63,7 +63,7 @@ postgres:
   cloudnativepg:
     enabled: true
     instances: 3
-    imageName: ghcr.io/alphabravo-oss/constellation/postgres:v0.2.0
+    imageName: ghcr.io/alphabravo-oss/constellation/postgres:16.10-v0.2.0
     storage: 50Gi
     storageClass: longhorn
     affinity:
