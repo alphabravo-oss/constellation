@@ -389,6 +389,23 @@ spec:
       ports:
         - protocol: TCP
           port: 5432
+    # CNPG's operator reaches every instance manager on its status port.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicies.cnpgOperator.namespace | quote }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicies.cnpgOperator.podLabels | nindent 14 }}
+{{ range .Values.networkPolicies.kubeAPI.cidrs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+{{ end }}
+      ports:
+        - protocol: TCP
+          port: 8000
+        - protocol: TCP
+          port: 5432
 {{ end }}
 {{ if .Values.api.enabled }}
     - from:
@@ -492,6 +509,9 @@ spec:
   egress:
 {{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
 {{ include "constellation.networkPolicyKubeAPIEgress" . | nindent 4 }}
+{{ if .Values.postgres.cloudnativepg.backup }}
+{{ include "constellation.networkPolicyExternalHTTPEgress" . | nindent 4 }}
+{{ end }}
     - to:
         - podSelector:
             matchLabels:

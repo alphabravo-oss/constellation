@@ -6,6 +6,28 @@ Common template helpers for the Constellation chart.
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
+{{/*
+Revision-aware node spreading for replicated application Deployments. The
+pod-template-hash matchLabelKey prevents an old ReplicaSet from masking an
+imbalanced new rollout.
+Args: dict of "ctx" (root) and "component".
+*/}}
+{{- define "constellation.haTopologySpread" -}}
+{{- $ctx := .ctx -}}
+{{- if $ctx.Values.highAvailability.enabled }}
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: {{ $ctx.Values.highAvailability.topologyKey | quote }}
+    whenUnsatisfiable: {{ $ctx.Values.highAvailability.whenUnsatisfiable }}
+    matchLabelKeys:
+      - pod-template-hash
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: {{ include "constellation.name" $ctx }}
+        app.kubernetes.io/component: {{ .component }}
+{{- end }}
+{{- end -}}
+
 {{- define "constellation.fullname" -}}
 {{- if .Values.fullnameOverride -}}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" -}}

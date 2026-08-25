@@ -1,0 +1,18 @@
+{{- if and .Values.highAvailability.enabled (lt (int .Values.api.replicas) 2) }}
+{{- fail "highAvailability.enabled=true requires api.replicas>=2" }}
+{{- end }}
+{{- if and .Values.highAvailability.enabled .Values.api.enabled (gt (int .Values.api.replicas) 1) (not .Values.api.leaderElection.enabled) }}
+{{- fail "HA API replicas require api.leaderElection.enabled=true" }}
+{{- end }}
+{{- if and .Values.highAvailability.enabled .Values.operator.enabled (gt (int .Values.operator.replicas) 1) (not .Values.operator.leaderElection.enabled) }}
+{{- fail "HA operator replicas require operator.leaderElection.enabled=true" }}
+{{- end }}
+{{- if and .Values.highAvailability.enabled (eq (include "constellation.postgresMode" .) "statefulset") }}
+{{- fail "highAvailability.enabled=true requires postgres.mode=cnpg or postgres.mode=external; embedded statefulset is single-instance" }}
+{{- end }}
+{{- if and .Values.highAvailability.enabled (eq (include "constellation.postgresMode" .) "cnpg") (lt (int .Values.postgres.cloudnativepg.instances) 3) }}
+{{- fail "HA CloudNativePG requires postgres.cloudnativepg.instances>=3" }}
+{{- end }}
+{{- if and .Values.gateway.enabled .Values.ingress.enabled }}
+{{- fail "enable only one of gateway.enabled or ingress.enabled" }}
+{{- end }}

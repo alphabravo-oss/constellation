@@ -1,0 +1,9 @@
+# CloudNativePG operand with the pgvector extension required by migrations.
+ARG CNPG_POSTGRES_IMAGE=ghcr.io/cloudnative-pg/postgresql:16.10-standard-bookworm@sha256:533e45e0a00c156bdab7c4d9a84fffa87259594725a3909c898e8645727d9555
+FROM ${CNPG_POSTGRES_IMAGE}
+
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-16-pgvector \
+    && rm -rf /var/lib/apt/lists/*
+USER 26

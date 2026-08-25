@@ -16,7 +16,7 @@
 image:
   registry: ghcr.io/alphabravo-oss/constellation
   pullPolicy: IfNotPresent
-  # Empty -> falls back to .Chart.appVersion (currently "0.1.0"). Use immutable
+  # Empty -> falls back to .Chart.appVersion (currently "0.2.0"). Use immutable
   # release tags or digest-qualified role overrides in production.
   tag: ""
   # Optional list of imagePullSecrets applied to every Deployment / DaemonSet /
@@ -27,6 +27,21 @@ image:
 # Keep rollout history short so repeated local/edge upgrades do not leave
 # zero-replica ReplicaSets pinned to stale role image tags.
 revisionHistoryLimit: 3
+
+# ---------------------------------------------------------------------------
+# High availability and disruption safety
+# ---------------------------------------------------------------------------
+# Enable for multi-node installations. Every replicated control-plane
+# Deployment is spread across nodes using pod-template-hash-aware constraints,
+# so a rollout cannot satisfy spreading with terminating pods from the old
+# revision. A maxUnavailable=1 PDB protects each enabled Deployment.
+highAvailability:
+  enabled: false
+  topologyKey: kubernetes.io/hostname
+  whenUnsatisfiable: DoNotSchedule
+  pdb:
+    enabled: true
+    maxUnavailable: 1
 
 # ---------------------------------------------------------------------------
 # Default pod/container security posture
@@ -74,6 +89,10 @@ networkPolicies:
   externalPostgres:
     cidrs: ["0.0.0.0/0"]
     ports: [5432]
+  cnpgOperator:
+    namespace: cnpg-system
+    podLabels:
+      app.kubernetes.io/name: cloudnative-pg
   frontendIngressCIDRs: ["0.0.0.0/0"]
   admissionIngressCIDRs: ["0.0.0.0/0"]
   apiIngressCIDRs: []
@@ -178,14 +197,13 @@ api:
   # JWT_KEYS is the intended RS256 DB-backed path. Set true only when you supply
   # jwtKeysSecret and want startup to hard-fail if it goes missing.
   requireJWTKeys: false
-  # D5: leader election for the singleton background loops (CVE reconcilers,
-  # fed-sync, rescan/retention monitors). OFF by default — the loops run on
-  # every replica exactly as before. Turn ON to run api with >1 replica safely:
-  # the loops then run on only the lease holder. Enabling it grants the api a
-  # ServiceAccount + a Lease Role and mounts the SA token (off-by-default keeps
-  # automountServiceAccountToken=false).
+  # D5: leader election for singleton background loops (CVE reconcilers,
+  # fed-sync, rescan/retention monitors). Enabled because the clean-install
+  # default has two API replicas; only the lease holder runs singleton work.
+  # Disable only when api.replicas=1 and avoiding an API ServiceAccount token is
+  # more important than seamless scale-out.
   leaderElection:
-    enabled: false
+    enabled: true
     # Lease name + namespace are derived from the release; override if needed.
     leaseName: ""
 
@@ -215,6 +233,8 @@ federation:
 operator:
   enabled: true
   replicas: 1
+  leaderElection:
+    enabled: false
   image: {}
   args: []
   resources:
@@ -652,6 +672,19 @@ ingress:
     enabled: false
     secretName: constellation-frontend-tls
 
+# Gateway API route for clusters with a shared platform Gateway. This is
+# independent of `ingress`; normally enable only one. With source
+# externalGateway, TLS terminates on the named Gateway listener and this chart
+# deliberately creates no Certificate or TLS Secret.
+gateway:
+  enabled: false
+  name: public
+  namespace: platform-gateway
+  sectionName: https
+  host: constellation.example.com
+  tls:
+    source: externalGateway # externalGateway is currently the supported mode
+
 # ---------------------------------------------------------------------------
 # Postgres (embedded pgvector or external DSN)
 # ---------------------------------------------------------------------------
@@ -739,13 +772,36 @@ postgres:
     # NOTES.txt emits an install-time WARNING when mode=cnpg and this value does
     # not look pgvector-enabled (no "pgvector" in the ref) — a heuristic guard,
     # not a hard gate. See examples/values-cnpg.yaml for a worked profile.
-    imageName: ghcr.io/cloudnative-pg/postgresql:16   # OVERRIDE with a pgvector build
+    imageName: ghcr.io/alphabravo-oss/constellation/postgres:v0.2.0
     storage: 20Gi
     storageClass: ""        # empty = cluster default
     resources:
       limits:   { cpu: 2,   memory: 2Gi }
       requests: { cpu: 200m, memory: 256Mi }
     primaryUpdateStrategy: unsupervised
+    # CNPG schedules the primary and replicas on separate nodes in HA mode.
+    affinity:
+      enabled: true
+      topologyKey: kubernetes.io/hostname
+      podAntiAffinityType: required
+    # Optional raw CNPG backup spec. Production should configure WAL archiving
+    # and object-store backups (or a CNPG backup plugin) and test PITR.
+    # Example:
+    # backup:
+    #   barmanObjectStore:
+    #     destinationPath: s3://constellation-postgres
+    #     endpointURL: https://s3.example.com
+    #     s3Credentials:
+    #       accessKeyId: { name: cnpg-backup, key: ACCESS_KEY_ID }
+    #       secretAccessKey: { name: cnpg-backup, key: SECRET_ACCESS_KEY }
+    #   retentionPolicy: "30d"
+    backup: {}
+    scheduledBackup:
+      enabled: false
+      # Six-field cron syntax used by CNPG (seconds first): daily at 02:00 UTC.
+      schedule: "0 0 2 * * *"
+      immediate: true
+      backupOwnerReference: self
     database: constellation
     username: constellation
     # Password generated at install time if blank (same idempotent logic as embedded).
@@ -764,6 +820,9 @@ tls:
     enabled: false
     issuer: ""              # name of an existing Issuer/ClusterIssuer
     issuerKind: ClusterIssuer
+    # Convenient and correct for the private admission Service certificate.
+    # Public ACME issuers cannot issue *.svc names.
+    createSelfSignedIssuer: false
   bootstrap:
     enabled: true
     # An image that has both /bin/sh AND kubectl in $PATH. bitnami/kubectl bundles

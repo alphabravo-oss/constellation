@@ -17,15 +17,12 @@ VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev
 # PLATFORMS is the buildx target list. The local `--load` image-* targets only
 # work with a SINGLE platform (docker can't load a manifest list), so for local
 # dev builds pass one arch, e.g. `make image-api PLATFORMS=linux/amd64`.
-# RELEASE_PLATFORMS (below) is the opt-in multi-arch list used for pushes.
-PLATFORMS ?= linux/amd64,linux/arm64
-# RELEASE_PLATFORMS — opt-in multi-arch matrix for release pushes. Adds
-# linux/s390x (IBM Z / LinuxONE) alongside amd64+arm64 to match the arches
-# NeuVector publishes. Building s390x/arm64 on an amd64 host needs a buildx
-# builder with QEMU binfmt registered (`docker run --privileged --rm
-# tonistiigi/binfmt --install all`). Use via `make release-images` or
-# `make images-push PLATFORMS="$(RELEASE_PLATFORMS)"`.
-RELEASE_PLATFORMS ?= linux/amd64,linux/arm64,linux/s390x
+# RELEASE_PLATFORMS (below) is the qualified platform list used for pushes.
+PLATFORMS ?= linux/amd64
+# Application and release images intentionally target the amd64 server fleet.
+# Add another architecture only after its runtime-agent/native dependencies are
+# separately qualified.
+RELEASE_PLATFORMS ?= linux/amd64
 # FIPS=true toggles GOFIPS140=v1.0.0 + -tags fips inside the relevant
 # Dockerfiles (currently runtime-agent; api/scanner/operator use the separate
 # Dockerfile.fips path). Default off — passing it through as a build-arg is
@@ -35,7 +32,7 @@ DOCKER_BUILD ?= docker buildx build --platform $(PLATFORMS) --build-arg VERSION=
 
 .PHONY: all build test lint migrate helm-lint helm-template-smoke frontend-build verify \
         deploy deploy-dryrun undeploy values-prod \
-        images images-push release-images image-api image-scanner image-operator image-discoverer image-audit-archiver image-frontend image-runtime-agent image-admission image-migrate image-bootstrap \
+        images images-push release-images image-api image-scanner image-operator image-discoverer image-audit-archiver image-frontend image-runtime-agent image-admission image-migrate image-bootstrap image-postgres release-check \
         dp dp-clean vendor-neuvector-diff vendor-neuvector-sync \
         compose-up compose-down compose-logs compose-images compose-images-core \
         compose-image-api compose-image-scanner compose-image-operator compose-image-frontend \
@@ -80,6 +77,8 @@ helm-template-smoke:
 	@helm template constellation deploy/charts/constellation/ --set fips.enabled=true > /dev/null
 	@echo ">> cert-manager TLS"
 	@helm template constellation deploy/charts/constellation/ --set tls.certManager.enabled=true --set tls.certManager.issuer=letsencrypt-prod > /dev/null
+	@echo ">> three-node k3s HA profile"
+	@./scripts/test-helm-ha.sh
 	@echo "helm-template-smoke: ok"
 
 # -----------------------------------------------------------------------------
@@ -125,7 +124,7 @@ verify: vet test lint helm-lint
 # Push:            make images-push REGISTRY=ghcr.io/your-org
 # -----------------------------------------------------------------------------
 
-images: image-api image-scanner image-operator image-discoverer image-audit-archiver image-frontend image-runtime-agent image-admission image-migrate image-bootstrap
+images: image-api image-scanner image-operator image-discoverer image-audit-archiver image-frontend image-runtime-agent image-admission image-migrate image-bootstrap image-postgres
 
 image-api:
 	$(DOCKER_BUILD) -f deploy/docker/Dockerfile.api      -t $(REGISTRY)/api:$(VERSION)      --load .
@@ -176,6 +175,9 @@ image-kube-bench-runner:
 # until someone provisions a user out of band.
 image-bootstrap:
 	$(DOCKER_BUILD) -f deploy/docker/Dockerfile.bootstrap -t $(REGISTRY)/bootstrap:$(VERSION) --load .
+
+image-postgres:
+	$(DOCKER_BUILD) -f deploy/docker/Dockerfile.postgres -t $(REGISTRY)/postgres:$(VERSION) --load .
 
 	# image-runtime-agent supports FIPS=true: the resulting image is tagged
 	# `:$(VERSION)-fips` so an environment that needs the FIPS build doesn't
@@ -237,13 +239,14 @@ images-push:
 	$(DOCKER_BUILD) -f deploy/docker/Dockerfile.migrate       -t $(REGISTRY)/migrate:$(VERSION)        --push .
 	$(DOCKER_BUILD) -f deploy/docker/Dockerfile.bootstrap     -t $(REGISTRY)/bootstrap:$(VERSION)      --push .
 	$(DOCKER_BUILD) -f deploy/docker/Dockerfile.runtime-agent -t $(REGISTRY)/runtime-agent:$(VERSION)  --push .
+	$(DOCKER_BUILD) -f deploy/docker/Dockerfile.postgres      -t $(REGISTRY)/postgres:$(VERSION)       --push .
 
-# release-images: multi-arch push (amd64 + arm64 + s390x). Thin wrapper over
-# images-push with the wider RELEASE_PLATFORMS list — opt-in so the default
-# dev/CI build stays fast and single-target-friendly. Requires a QEMU-enabled
-# buildx builder for the non-native arches (see RELEASE_PLATFORMS above).
+# release-images uses the explicitly qualified release platform set (amd64).
 release-images:
 	$(MAKE) images-push PLATFORMS="$(RELEASE_PLATFORMS)"
+
+release-check:
+	./scripts/verify-release.sh "$(VERSION)"
 
 compose-up:
 	docker compose up -d --build

@@ -11,7 +11,7 @@ builds:
     binary: constellationctl
     env: [CGO_ENABLED=0]
     goos: [linux, darwin, windows]
-    goarch: [amd64, arm64]
+    goarch: [amd64]
     ldflags:
       - -s -w -X main.version={{.Version}}
 
@@ -20,7 +20,7 @@ builds:
     binary: constellation-github-app
     env: [CGO_ENABLED=0]
     goos: [linux]
-    goarch: [amd64, arm64]
+    goarch: [amd64]
     ldflags:
       - -s -w -X main.version={{.Version}}
 
@@ -52,49 +52,18 @@ dockers:
     image_templates:
       - "ghcr.io/alphabravocompany/constellation-cli:{{ .Version }}-amd64"
       - "ghcr.io/alphabravocompany/constellation-cli:latest-amd64"
+      - "ghcr.io/alphabravocompany/constellation-cli:{{ .Version }}"
+      - "ghcr.io/alphabravocompany/constellation-cli:latest"
       - "constellation/cli:{{ .Version }}-amd64"
       - "constellation/cli:latest-amd64"
+      - "constellation/cli:{{ .Version }}"
+      - "constellation/cli:latest"
     dockerfile: Dockerfile.cli
     use: buildx
     goos: linux
     goarch: amd64
     build_flag_templates:
       - "--platform=linux/amd64"
-      - "--label=org.opencontainers.image.source=https://github.com/alphabravocompany/constellation"
+      - "--label=org.opencontainers.image.source=https://github.com/alphabravo-oss/constellation"
       - "--label=org.opencontainers.image.version={{.Version}}"
       - "--label=org.opencontainers.image.title=constellation-cli"
-
-  - id: cli-arm64
-    ids: [constellationctl]
-    image_templates:
-      - "ghcr.io/alphabravocompany/constellation-cli:{{ .Version }}-arm64"
-      - "ghcr.io/alphabravocompany/constellation-cli:latest-arm64"
-      - "constellation/cli:{{ .Version }}-arm64"
-      - "constellation/cli:latest-arm64"
-    dockerfile: Dockerfile.cli
-    use: buildx
-    goos: linux
-    goarch: arm64
-    build_flag_templates:
-      - "--platform=linux/arm64"
-      - "--label=org.opencontainers.image.source=https://github.com/alphabravocompany/constellation"
-      - "--label=org.opencontainers.image.version={{.Version}}"
-      - "--label=org.opencontainers.image.title=constellation-cli"
-
-docker_manifests:
-  - name_template: "ghcr.io/alphabravocompany/constellation-cli:{{ .Version }}"
-    image_templates:
-      - "ghcr.io/alphabravocompany/constellation-cli:{{ .Version }}-amd64"
-      - "ghcr.io/alphabravocompany/constellation-cli:{{ .Version }}-arm64"
-  - name_template: "ghcr.io/alphabravocompany/constellation-cli:latest"
-    image_templates:
-      - "ghcr.io/alphabravocompany/constellation-cli:latest-amd64"
-      - "ghcr.io/alphabravocompany/constellation-cli:latest-arm64"
-  - name_template: "constellation/cli:{{ .Version }}"
-    image_templates:
-      - "constellation/cli:{{ .Version }}-amd64"
-      - "constellation/cli:{{ .Version }}-arm64"
-  - name_template: "constellation/cli:latest"
-    image_templates:
-      - "constellation/cli:latest-amd64"
-      - "constellation/cli:latest-arm64"

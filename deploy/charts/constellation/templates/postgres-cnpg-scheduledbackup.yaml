@@ -1,0 +1,19 @@
+{{- if and (eq (include "constellation.postgresMode" .) "cnpg") .Values.postgres.cloudnativepg.scheduledBackup.enabled }}
+{{- if not .Values.postgres.cloudnativepg.backup }}
+{{- fail "postgres.cloudnativepg.scheduledBackup.enabled=true requires postgres.cloudnativepg.backup configuration" }}
+{{- end }}
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: {{ include "constellation.fullname" . }}-postgres
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  schedule: {{ .Values.postgres.cloudnativepg.scheduledBackup.schedule | quote }}
+  immediate: {{ .Values.postgres.cloudnativepg.scheduledBackup.immediate }}
+  backupOwnerReference: {{ .Values.postgres.cloudnativepg.scheduledBackup.backupOwnerReference }}
+  cluster:
+    name: {{ include "constellation.fullname" . }}-postgres
+{{- end }}

@@ -73,6 +73,7 @@ spec:
     spec:
       {{- include "constellation.pullSecrets" . | nindent 6 }}
       {{- include "constellation.podSecurityContext" . | nindent 6 }}
+      {{- include "constellation.haTopologySpread" (dict "ctx" . "component" "frontend") | nindent 6 }}
       automountServiceAccountToken: false
       initContainers:
         - name: prepare-nginx-state

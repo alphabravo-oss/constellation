@@ -35,6 +35,7 @@ spec:
     spec:
       {{- include "constellation.pullSecrets" . | nindent 6 }}
       {{- include "constellation.podSecurityContext" . | nindent 6 }}
+      {{- include "constellation.haTopologySpread" (dict "ctx" . "component" "scanner") | nindent 6 }}
       automountServiceAccountToken: false
       containers:
         - name: scanner

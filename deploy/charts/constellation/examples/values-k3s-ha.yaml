@@ -1,0 +1,84 @@
+# Three-node K3s HA profile for constellation.dev.alphabravo.io.
+# Prerequisites: Gateway API/controller, platform-gateway/public with an HTTPS
+# listener for this hostname, cert-manager, CloudNativePG, and Longhorn default.
+image:
+  tag: v0.2.0
+
+clusterRegistration:
+  name: astro-const-dev-k3s
+  distro: k3s
+  cloudProvider: hetzner
+
+highAvailability:
+  enabled: true
+
+api:
+  replicas: 3
+  leaderElection: { enabled: true }
+frontend: { replicas: 3 }
+admission: { replicas: 3 }
+
+scanner:
+  replicas: 3
+  cache:
+    persistent: false
+
+operator:
+  replicas: 2
+  leaderElection: { enabled: true }
+discoverer: { replicas: 2 }
+networkPolicyApplier: { replicas: 2 }
+
+gateway:
+  enabled: true
+  name: public
+  namespace: platform-gateway
+  sectionName: constellation-https
+  host: constellation.dev.alphabravo.io
+  tls: { source: externalGateway }
+
+networkPolicies:
+  enabled: true
+  kubeAPI:
+    cidrs: [10.43.0.1/32, 10.1.82.0/23]
+    ports: [443, 6443]
+  externalPostgres:
+    cidrs: [10.1.82.0/23]
+    ports: [5432]
+  frontendIngressCIDRs: [10.42.0.0/16, 10.1.82.0/23]
+  admissionIngressCIDRs: [10.1.82.0/23]
+
+tls:
+  certManager:
+    enabled: true
+    issuer: constellation-admission-selfsigned
+    issuerKind: Issuer
+    createSelfSignedIssuer: true
+  bootstrap:
+    enabled: false
+
+postgres:
+  mode: cnpg
+  embedded: false
+  cloudnativepg:
+    enabled: true
+    instances: 3
+    imageName: ghcr.io/alphabravo-oss/constellation/postgres:v0.2.0
+    storage: 50Gi
+    storageClass: longhorn
+    affinity:
+      enabled: true
+      topologyKey: kubernetes.io/hostname
+      podAntiAffinityType: required
+    # Backups remain disabled until S3 credentials and a bucket are supplied.
+    # Production readiness requires enabling ScheduledBackup and testing PITR.
+
+vulndb:
+  storage:
+    type: pvc
+    size: 20Gi
+    storageClassName: longhorn
+    accessModes: [ReadWriteMany]
+
+ingress:
+  enabled: false

@@ -2,14 +2,14 @@ apiVersion: v2
 name: constellation
 description: Constellation — Container & Kubernetes Security Platform
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.2.0
+appVersion: "0.2.0"
 kubeVersion: ">=1.27.0-0"
 maintainers:
   - name: Alpha Bravo Security
-home: https://github.com/alphabravocompany/constellation
+home: https://github.com/alphabravo-oss/constellation
 sources:
-  - https://github.com/alphabravocompany/constellation
+  - https://github.com/alphabravo-oss/constellation
 keywords:
   - security
   - vulnerability-management

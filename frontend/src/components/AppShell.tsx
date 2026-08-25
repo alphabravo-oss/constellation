@@ -185,7 +185,7 @@ const ORG_NAV: NavGroup[] = [
 ];
 
 const COLLAPSE_KEY = "constellation.sidebar.collapsed";
-const APP_VERSION = "0.1.0";
+const APP_VERSION = "0.2.0";
 
 function clusterIDFromPath(pathname: string): string | null {
   const m = pathname.match(/^\/clusters\/([^/]+)(\/|$)/);

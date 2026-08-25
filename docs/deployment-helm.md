@@ -32,6 +32,37 @@ The chart deploys:
 - bootstrap Jobs (TLS certs + service tokens)
 - optional namespace NetworkPolicies with default-deny and explicit flows
 
+## Three-node HA and shared Gateway
+
+`examples/values-k3s-ha.yaml` is the reference profile for the three-node K3s
+deployment at `constellation.dev.alphabravo.io`. It enables three API,
+frontend, scanner, and admission replicas; two leader-elected operator
+replicas; two discoverers and policy appliers; node-level, revision-aware
+topology spreading; and a `maxUnavailable: 1` PDB for every replicated
+Deployment. The runtime agent remains a per-node DaemonSet with its own PDB.
+
+The profile creates an HTTPRoute attached to the shared
+`platform-gateway/public` HTTPS listener. TLS for the public hostname belongs
+to that Gateway and is not duplicated by this chart. Admission-webhook TLS is
+a separate private certificate: the profile creates a namespaced self-signed
+cert-manager Issuer because a public ACME issuer cannot issue Kubernetes
+`.svc` names.
+
+PostgreSQL uses CloudNativePG. `instances: 1` is supported for small installs;
+HA mode fails Helm rendering unless it has at least three instances. The
+release includes a CNPG-compatible pgvector operand image. Before calling an
+installation production-ready, configure `postgres.cloudnativepg.backup`,
+enable `scheduledBackup`, and prove a point-in-time restore. Longhorn can be
+selected explicitly and remains the cluster-default CSI in the K3s profile.
+When NetworkPolicies are enabled, the chart also permits the documented CNPG
+operator-to-instance traffic on ports 8000 and 5432; change
+`networkPolicies.cnpgOperator` if the operator uses another namespace or label.
+
+Run `make release-check VERSION=v0.2.0` before publishing. After images are
+published, run the same command with `VERIFY_PUBLISHED=1`; it fails unless
+every role image has a trusted keyless signature and source-bound SLSA
+provenance.
+
 ---
 
 ## Building Images Locally

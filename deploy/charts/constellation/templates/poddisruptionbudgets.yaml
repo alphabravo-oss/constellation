@@ -1,0 +1,30 @@
+{{- if and .Values.highAvailability.enabled .Values.highAvailability.pdb.enabled }}
+{{- $root := . -}}
+{{- $components := list
+      (dict "name" "api" "enabled" .Values.api.enabled)
+      (dict "name" "frontend" "enabled" .Values.frontend.enabled)
+      (dict "name" "scanner" "enabled" .Values.scanner.enabled)
+      (dict "name" "admission" "enabled" .Values.admission.enabled)
+      (dict "name" "discoverer" "enabled" .Values.discoverer.enabled)
+      (dict "name" "operator" "enabled" .Values.operator.enabled)
+      (dict "name" "network-policy-applier" "enabled" .Values.networkPolicyApplier.enabled)
+-}}
+{{- range $component := $components }}
+{{- if $component.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "constellation.fullname" $root }}-{{ $component.name }}
+  labels:
+    {{- include "constellation.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $component.name }}
+spec:
+  maxUnavailable: {{ $root.Values.highAvailability.pdb.maxUnavailable }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" $root }}
+      app.kubernetes.io/component: {{ $component.name }}
+{{- end }}
+{{- end }}
+{{- end }}

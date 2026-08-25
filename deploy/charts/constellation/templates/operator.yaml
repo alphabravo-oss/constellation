@@ -20,15 +20,27 @@ spec:
     spec:
       {{- include "constellation.pullSecrets" . | nindent 6 }}
       {{- include "constellation.podSecurityContext" . | nindent 6 }}
+      {{- include "constellation.haTopologySpread" (dict "ctx" . "component" "operator") | nindent 6 }}
       serviceAccountName: {{ include "constellation.fullname" . }}-operator
       containers:
         - name: operator
           image: {{ include "constellation.roleImage" (dict "ctx" . "role" "operator") }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           {{- include "constellation.containerSecurityContext" . | nindent 10 }}
-          {{- with .Values.operator.args }}
-          args: {{- toYaml . | nindent 12 }}
+          {{- if or .Values.operator.leaderElection.enabled .Values.operator.args }}
+          args:
+            {{- if .Values.operator.leaderElection.enabled }}
+            - --leader-elect=true
+            {{- end }}
+            {{- with .Values.operator.args }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
+          ports:
+            - name: metrics
+              containerPort: 8081
+            - name: health
+              containerPort: 8082
           env:
             - name: OPERATOR_NAMESPACE
               value: {{ .Release.Namespace | quote }}
@@ -50,6 +62,10 @@ spec:
                   optional: true
             - name: RUNTIME_AGENT_TOKEN_FILE
               value: /var/run/constellation/runtime-agent-token/token
+          readinessProbe:
+            httpGet: { path: /readyz, port: health }
+          livenessProbe:
+            httpGet: { path: /healthz, port: health }
           volumeMounts:
             - name: tmp
               mountPath: /tmp

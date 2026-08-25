@@ -37,6 +37,11 @@ spec:
   instances: {{ $cfg.instances }}
   imageName: {{ $cfg.imageName }}
   primaryUpdateStrategy: {{ $cfg.primaryUpdateStrategy }}
+  {{- if $cfg.affinity.enabled }}
+  affinity:
+    topologyKey: {{ $cfg.affinity.topologyKey | quote }}
+    podAntiAffinityType: {{ $cfg.affinity.podAntiAffinityType }}
+  {{- end }}
   storage:
     size: {{ $cfg.storage }}
     {{- if $cfg.storageClass }}
@@ -44,6 +49,10 @@ spec:
     {{- end }}
   resources:
     {{- toYaml $cfg.resources | nindent 4 }}
+  {{- with $cfg.backup }}
+  backup:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   bootstrap:
     initdb:
       database: {{ $cfg.database }}

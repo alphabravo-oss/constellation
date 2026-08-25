@@ -26,6 +26,7 @@ spec:
     spec:
       {{- include "constellation.pullSecrets" . | nindent 6 }}
       {{- include "constellation.podSecurityContext" . | nindent 6 }}
+      {{- include "constellation.haTopologySpread" (dict "ctx" . "component" "network-policy-applier") | nindent 6 }}
       serviceAccountName: {{ include "constellation.fullname" . }}-network-policy-applier
       containers:
         - name: applier

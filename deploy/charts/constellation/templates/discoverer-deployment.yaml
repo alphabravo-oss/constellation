@@ -22,6 +22,7 @@ spec:
     spec:
       {{- include "constellation.pullSecrets" . | nindent 6 }}
       {{- include "constellation.podSecurityContext" . | nindent 6 }}
+      {{- include "constellation.haTopologySpread" (dict "ctx" . "component" "discoverer") | nindent 6 }}
       serviceAccountName: {{ include "constellation.fullname" . }}-discoverer
       containers:
         - name: discoverer

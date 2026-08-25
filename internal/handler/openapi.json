@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Constellation Control Plane API",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "description": "Phase 1 control-plane endpoints. Astronomer integration surfaces /api/v1/security/* alongside the standalone /api/v1/* routes."
   },
   "servers": [

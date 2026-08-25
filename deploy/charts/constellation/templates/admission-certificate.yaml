@@ -1,4 +1,18 @@
 {{- if and .Values.admission.enabled .Values.tls.certManager.enabled }}
+{{- if and .Values.tls.certManager.createSelfSignedIssuer (ne .Values.tls.certManager.issuerKind "Issuer") }}
+{{- fail "tls.certManager.createSelfSignedIssuer=true requires issuerKind=Issuer" }}
+{{- end }}
+{{- if .Values.tls.certManager.createSelfSignedIssuer }}
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ .Values.tls.certManager.issuer }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+---
+{{- end }}
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:

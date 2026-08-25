@@ -12,13 +12,23 @@ image:
 
 api:
   replicas: 3
+  leaderElection:
+    enabled: true
   requireJWTKeys: true
   resources:
     limits:   { cpu: 2, memory: 2Gi }
     requests: { cpu: 500m, memory: 512Mi }
 
 operator:
-  replicas: 1
+  replicas: 2
+  leaderElection:
+    enabled: true
+
+discoverer:
+  replicas: 2
+
+networkPolicyApplier:
+  replicas: 2
 
 admission:
   replicas: 3
@@ -43,7 +53,10 @@ scanner:
     targetCPUUtilizationPercentage: 70
 
 frontend:
-  replicas: 2
+  replicas: 3
+
+highAvailability:
+  enabled: true
 
 # Render namespace default-deny plus explicit Constellation flows. Tighten the
 # CIDRs to your VPC/node/control-plane/RDS ranges before applying.
@@ -62,16 +75,23 @@ networkPolicies:
 tls:
   certManager:
     enabled: true
-    issuer: letsencrypt-prod
-    issuerKind: ClusterIssuer
+    issuer: constellation-admission-selfsigned
+    issuerKind: Issuer
+    createSelfSignedIssuer: true
   bootstrap:
     enabled: false
 
-# External Postgres (RDS).
+# CloudNativePG with one primary and two replicas. Configure object-store
+# backup/WAL archiving and test PITR before production use. External managed
+# Postgres remains supported with mode=external + existingSecret.
 postgres:
+  mode: cnpg
   embedded: false
-  existingSecret: constellation-db-credentials
-  existingSecretKey: url
+  cloudnativepg:
+    enabled: true
+    instances: 3
+    imageName: ghcr.io/alphabravo-oss/constellation/postgres:v0.2.0
+    storage: 50Gi
 
 # Scheduled VulnDB consumption. Enable after publishing signed bundles and
 # mounting/creating the public-key Secret. Constellation consumes the artifact;
@@ -97,7 +117,7 @@ vulndbImporter:
     # Signed VulnDB artifact channel. Pin to a digest for exact replay/change-control.
     ref: ghcr.io/alphabravo-oss/constellation-vulndb-bundle:latest
 
-# Ingress with cert-manager TLS.
+# Public Ingress TLS is separate from the private admission certificate issuer.
 ingress:
   enabled: true
   className: alb

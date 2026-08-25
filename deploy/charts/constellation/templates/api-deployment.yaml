@@ -23,6 +23,7 @@ spec:
     spec:
       {{- include "constellation.pullSecrets" . | nindent 6 }}
       {{- include "constellation.podSecurityContext" . | nindent 6 }}
+      {{- include "constellation.haTopologySpread" (dict "ctx" . "component" "api") | nindent 6 }}
       {{- if .Values.api.leaderElection.enabled }}
       serviceAccountName: {{ include "constellation.fullname" . }}-api
       automountServiceAccountToken: true

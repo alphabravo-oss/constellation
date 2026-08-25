@@ -2,6 +2,14 @@ Constellation {{ .Chart.AppVersion }} installed as release "{{ .Release.Name }}"
 
 Postgres mode: {{ include "constellation.postgresMode" . }}
 
+{{- if .Values.gateway.enabled }}
+URL: https://{{ .Values.gateway.host }}
+TLS terminates at Gateway {{ .Values.gateway.namespace }}/{{ .Values.gateway.name }}
+on listener {{ .Values.gateway.sectionName }}.
+{{- else if .Values.ingress.enabled }}
+URL: {{ ternary "https" "http" .Values.ingress.tls.enabled }}://{{ .Values.ingress.host }}
+{{- end }}
+
 Retrieve the auto-generated admin password:
   kubectl -n {{ .Release.Namespace }} get secret {{ include "constellation.fullname" . }}-admin-credentials \
     -o jsonpath='{.data.password}' | base64 -d ; echo
