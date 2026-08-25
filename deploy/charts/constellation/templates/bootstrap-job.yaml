@@ -6,9 +6,8 @@ two competing token rows don't end up in the control-plane DB.
 */ -}}
 {{- if and .Values.bootstrap.enabled (not .Values.initBundle.secretName) }}
 {{- /*
-Token + org bootstrap. Runs as a post-install + post-upgrade hook so that:
-  - the database is reachable (api Deployment + Postgres StatefulSet already up)
-  - the schema migrations have run on the api Pods' first boot
+Token + org bootstrap. Runs as a regular revision-scoped release Job after
+waiting for the database and migrated schema.
 The Job is idempotent:
   - INSERT ... ON CONFLICT DO NOTHING for the default org
   - skips token regeneration when the target Secret already has a 'token' key
@@ -22,10 +21,6 @@ kind: ServiceAccount
 metadata:
   name: {{ include "constellation.fullname" . }}-bootstrap
   namespace: {{ .Release.Namespace }}
-  annotations:
-    "helm.sh/hook": post-install,post-upgrade
-    "helm.sh/hook-weight": "0"
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
   labels: {{- include "constellation.labels" . | nindent 4 }}
 ---
 # Namespaced Role for Secret writes (constellation-scanner-token + constellation-runtime-agent-token).
@@ -34,10 +29,6 @@ kind: Role
 metadata:
   name: {{ include "constellation.fullname" . }}-bootstrap
   namespace: {{ .Release.Namespace }}
-  annotations:
-    "helm.sh/hook": post-install,post-upgrade
-    "helm.sh/hook-weight": "0"
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 rules:
   - apiGroups: [""]
     resources: ["secrets"]
@@ -48,10 +39,6 @@ kind: RoleBinding
 metadata:
   name: {{ include "constellation.fullname" . }}-bootstrap
   namespace: {{ .Release.Namespace }}
-  annotations:
-    "helm.sh/hook": post-install,post-upgrade
-    "helm.sh/hook-weight": "0"
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -66,10 +53,6 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: {{ include "constellation.fullname" . }}-bootstrap-cluster
-  annotations:
-    "helm.sh/hook": post-install,post-upgrade
-    "helm.sh/hook-weight": "0"
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 rules:
   - apiGroups: ["constellation.alphabravo.io"]
     resources: ["constellationclusters"]
@@ -79,10 +62,6 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: {{ include "constellation.fullname" . }}-bootstrap-cluster
-  annotations:
-    "helm.sh/hook": post-install,post-upgrade
-    "helm.sh/hook-weight": "0"
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -97,10 +76,6 @@ kind: ConfigMap
 metadata:
   name: {{ include "constellation.fullname" . }}-bootstrap-scripts
   namespace: {{ .Release.Namespace }}
-  annotations:
-    "helm.sh/hook": post-install,post-upgrade
-    "helm.sh/hook-weight": "0"
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 data:
   run.sh: |
     #!/bin/sh
@@ -260,12 +235,8 @@ data:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ include "constellation.fullname" . }}-bootstrap
+  name: {{ include "constellation.fullname" . }}-bootstrap-{{ .Release.Revision }}
   namespace: {{ .Release.Namespace }}
-  annotations:
-    "helm.sh/hook": post-install,post-upgrade
-    "helm.sh/hook-weight": "5"
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
   labels: {{- include "constellation.labels" . | nindent 4 }}
 spec:
   backoffLimit: 5

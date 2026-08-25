@@ -59,4 +59,8 @@ spec:
       owner: {{ $cfg.username }}
       secret:
         name: {{ include "constellation.fullname" . }}-postgres
+      postInitApplicationSQL:
+        - CREATE EXTENSION IF NOT EXISTS pgcrypto
+        - CREATE EXTENSION IF NOT EXISTS pg_trgm
+        - CREATE EXTENSION IF NOT EXISTS vector
 {{- end }}

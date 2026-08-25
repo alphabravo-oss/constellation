@@ -150,8 +150,8 @@ discoverer:
 # ---------------------------------------------------------------------------
 # Schema migrations
 # ---------------------------------------------------------------------------
-# One-shot pre-install / pre-upgrade Job that runs `goose up` against the
-# configured DATABASE_URL. The image bundles every db/migrations/*.sql file.
+# One-shot revision-scoped Job that runs `goose up` against DATABASE_URL. API
+# init containers wait for its schema marker before starting.
 migrate:
   enabled: true
   # Postgres client image used by the wait-for-postgres init container.

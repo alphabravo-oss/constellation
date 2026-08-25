@@ -1,8 +1,8 @@
 {{- if .Values.migrate.enabled -}}
 {{- /*
-Schema migration Job. Runs goose up against the configured DATABASE_URL as a
-pre-install / pre-upgrade Helm hook so the api pod boots into a populated
-schema. Idempotent: goose is no-op on already-applied versions.
+Schema migration Job. It is a regular revision-scoped release resource so Helm
+creates it alongside Postgres and waits for it. API pods independently wait for
+the migrated schema, avoiding the post-install-hook/--wait deadlock.
 
 Image must bundle the migrations directory (deploy/docker/Dockerfile.migrate
 produces constellation/migrate:<tag> that does exactly that).
@@ -10,15 +10,8 @@ produces constellation/migrate:<tag> that does exactly that).
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ include "constellation.fullname" . }}-migrate
+  name: {{ include "constellation.fullname" . }}-migrate-{{ .Release.Revision }}
   namespace: {{ .Release.Namespace }}
-  annotations:
-    # Runs AFTER the StatefulSet has been created (postgres normally ready
-    # within ~10s on fresh installs). Weight -5 ensures we precede the
-    # bootstrap-job (weight 0) which depends on the schema being present.
-    "helm.sh/hook": post-install,post-upgrade
-    "helm.sh/hook-weight": "-5"
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
   labels: {{- include "constellation.labels" . | nindent 4 }}
     app.kubernetes.io/component: migrate
 spec:

@@ -30,6 +30,29 @@ spec:
       {{- else }}
       automountServiceAccountToken: false
       {{- end }}
+      initContainers:
+        - name: wait-for-migrations
+          image: {{ .Values.migrate.psqlImage }}
+          {{- include "constellation.helperContainerSecurityContext" . | nindent 10 }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              until psql "$DATABASE_URL" -Atc "select 1 from session_signing_keys limit 1" >/dev/null 2>&1; do
+                echo "waiting for database migrations"
+                sleep 2
+              done
+          env:
+            - name: HOME
+              value: /tmp
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "constellation.dsnSecret" . }}
+                  key: {{ include "constellation.dsnSecretKey" . }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
       containers:
         - name: api
           image: {{ include "constellation.roleImage" (dict "ctx" . "role" "api") }}
