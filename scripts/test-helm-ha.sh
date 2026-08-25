@@ -23,6 +23,7 @@ grep -q 'port: 8000' "$rendered"
 grep -q 'name: constellation-migrate-1' "$rendered"
 grep -q 'name: wait-for-migrations' "$rendered"
 grep -q 'name: constellation-bootstrap-1' "$rendered"
+grep -A12 'app.kubernetes.io/component: network-policy-applier' "$rendered" | grep -q 'port: 5432'
 
 if helm template constellation "$chart" --set highAvailability.enabled=true >"$error_output" 2>&1; then
   echo "unsafe HA values unexpectedly rendered" >&2

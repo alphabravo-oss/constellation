@@ -487,6 +487,16 @@ spec:
         - protocol: TCP
           port: 5432
 {{ end }}
+{{ if .Values.networkPolicyApplier.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: network-policy-applier
+      ports:
+        - protocol: TCP
+          port: 5432
+{{ end }}
 {{ end }}
 {{ if eq (include "constellation.postgresMode" .) "cnpg" }}
 ---
