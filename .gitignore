@@ -19,7 +19,6 @@ test-results/
 
 # eBPF build artifacts (built locally via `make -C internal/runtime/ebpf/bpf`)
 internal/runtime/ebpf/bpf/*.o
-internal/runtime/ebpf/bpf/vmlinux.h
 tools/vscode-extension/node_modules/
 tools/vscode-extension/out/
 
