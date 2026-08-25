@@ -136,14 +136,14 @@ RETURNING id`, orgName, orgDisplay).Scan(&orgID); err != nil {
 	// the existing-count check above should prevent ever hitting it, but
 	// belt-and-suspenders against a parallel run.
 	//
-	// must_change_password = TRUE (A4): the bootstrap password is generated into a
-	// Kubernetes Secret and is therefore known to anyone who can read the Secret, so the
-	// first interactive login is forced through a password change before the admin can do
-	// anything else (the auth middleware blocks all other routes until it clears).
+	// The bootstrap password remains usable after first login. The web client does not
+	// currently implement the forced-password-change flow; setting the flag here would
+	// make login succeed and then immediately fail on its /auth/me session probe. Operators
+	// can rotate the generated credential through the normal password-change flow.
 	var userID uuid.UUID
 	if err := pool.QueryRow(ctx, `
 INSERT INTO users (org_id, email, display_name, password_hash, must_change_password)
-VALUES ($1, $2, $3, $4, TRUE)
+VALUES ($1, $2, $3, $4, FALSE)
 ON CONFLICT (org_id, email) DO UPDATE SET password_hash = EXCLUDED.password_hash
 RETURNING id`, orgID, email, display, hash).Scan(&userID); err != nil {
 		logger.Error("upsert user", "err", err)
