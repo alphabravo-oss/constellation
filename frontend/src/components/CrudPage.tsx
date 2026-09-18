@@ -11,6 +11,7 @@ import { Plus, Save, Trash2, X } from "lucide-react";
 
 import { useCluster } from "@/hooks/useCluster";
 import { PageHeader } from "@/components/ui/page";
+import { DataTable, type Column } from "@/components/ui/data-table";
 
 export interface CrudAPI<T extends { id: string }, TBody> {
   list:   (params?: { cluster_id?: string }) => Promise<{ items: T[] }>;
@@ -26,7 +27,7 @@ export interface CrudPageProps<T extends { id: string }, TBody> {
   api: CrudAPI<T, TBody>;
   emptyBody: () => TBody;
   toBody: (row: T) => TBody;
-  columns: Array<{ header: string; render: (row: T) => React.ReactNode }>;
+  columns: Array<{ header: string; render: (row: T) => React.ReactNode; sort?: (a: T, b: T) => number }>;
   // Optional extra controls rendered in the page header (e.g. import/export).
   headerActions?: React.ReactNode;
 }
@@ -115,48 +116,39 @@ export function CrudPage<T extends { id: string }, TBody>({
         }
       />
 
-      <section className="rounded-lg border border-border bg-card">
-        <table className="w-full text-sm">
-          <thead className="border-b border-border bg-muted/40 text-xs text-muted-foreground">
-            <tr>
-              {columns.map((c) => (
-                <th key={c.header} className="px-3 py-2 text-left font-medium">{c.header}</th>
-              ))}
-              <th className="px-3 py-2"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 && !q.isPending && (
-              <tr>
-                <td colSpan={columns.length + 1} className="px-3 py-6 text-center text-xs text-muted-foreground">
-                  None yet.
-                </td>
-              </tr>
-            )}
-            {rows.map((row) => (
-              <tr key={row.id} className="border-b border-border last:border-b-0 hover:bg-accent/40">
-                {columns.map((c, i) => (
-                  <td key={i} className="px-3 py-2 align-top text-xs">{c.render(row)}</td>
-                ))}
-                <td className="px-3 py-2 text-right whitespace-nowrap">
-                  <button onClick={() => openEdit(row)} className="rounded-md px-2 py-1 text-xs hover:bg-accent">
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (window.confirm("Delete?")) delMut.mutate(row.id);
-                    }}
-                    className="rounded-md p-1 hover:bg-accent"
-                    aria-label="Delete"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
+      <DataTable
+        rows={rows}
+        columns={[
+          ...columns.map<Column<T>>((column, index) => ({
+            id: `column-${index}`,
+            header: column.header,
+            cell: column.render,
+            sort: column.sort,
+          })),
+          {
+            id: "actions",
+            header: "",
+            hideable: false,
+            cell: (row) => (
+              <div className="flex justify-end whitespace-nowrap">
+                <button onClick={() => openEdit(row)} className="rounded-md px-2 py-1 text-xs hover:bg-accent">Edit</button>
+                <button
+                  onClick={() => {
+                    if (window.confirm("Delete?")) delMut.mutate(row.id);
+                  }}
+                  className="rounded-md p-1 hover:bg-accent"
+                  aria-label="Delete"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ),
+          },
+        ]}
+        rowKey={(row) => row.id}
+        emptyState={<div className="px-3 py-6 text-center text-xs text-muted-foreground">{q.isPending ? "Loading…" : "None yet."}</div>}
+        preferencesKey={`crud-${queryKey}`}
+      />
 
       {editing && (
         <section className="rounded-lg border border-border bg-card p-4 space-y-3">

@@ -137,23 +137,6 @@ spec:
               value: "{{ .Values.astronomer.jwtAudience }}"
 {{- end }}
 {{- end }}
-            # Slice D.2: path to the constellation-vulndb bbolt store
-            # used by the host-package CVE matcher and VulnDB import path.
-            # The chart mounts this from the configured shared VulnDB volume.
-            - name: CONSTELLATION_VULNDB_PATH
-              value: {{ include "constellation.vulndbPath" . | quote }}
-            - name: CONSTELLATION_VULNDB_STATUS_PATH
-              value: {{ printf "%s/%s" .Values.vulndb.mountPath .Values.vulndb.statusFile | quote }}
-            - name: CONSTELLATION_VULNDB_MANUAL_UPLOAD_ENABLED
-              value: {{ .Values.vulndb.manualUpload.enabled | quote }}
-            - name: CONSTELLATION_VULNDB_READY_REQUIRED
-              value: {{ .Values.vulndb.readiness.requireBundle | quote }}
-{{- if .Values.vulndb.readiness.maxAge }}
-            - name: CONSTELLATION_VULNDB_READY_MAX_AGE
-              value: {{ .Values.vulndb.readiness.maxAge | quote }}
-{{- end }}
-            - name: CONSTELLATION_VULNDB_RESCAN_INTERVAL
-              value: {{ .Values.vulndb.rescan.interval | quote }}
             - name: CONSTELLATION_REPOSITORY_SCAN_RETENTION_ENABLED
               value: {{ .Values.repositoryScans.retention.enabled | quote }}
             - name: CONSTELLATION_REPOSITORY_SCAN_RETENTION_MAX_AGE
@@ -170,16 +153,12 @@ spec:
             httpGet: { path: /healthz, port: http }
           resources: {{- toYaml .Values.api.resources | nindent 12 }}
           volumeMounts:
-            - name: vulndb
-              mountPath: {{ .Values.vulndb.mountPath | quote }}
-              readOnly: {{ not .Values.vulndb.manualUpload.enabled }}
             - name: runtime-agent-token
               mountPath: /var/run/constellation/runtime-agent-token
               readOnly: true
             - name: tmp
               mountPath: /tmp
       volumes:
-        {{- include "constellation.vulndbVolume" . | nindent 8 }}
         - name: runtime-agent-token
           secret:
             secretName: {{ include "constellation.runtimeAgentTokenSecret" . }}

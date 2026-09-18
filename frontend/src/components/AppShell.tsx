@@ -246,25 +246,17 @@ export function AppShell() {
   const inClusterMode = clusterId !== null;
   const navGroups = inClusterMode ? CLUSTER_NAV : ORG_NAV;
 
-  // Collapsible groups (all open by default; active group always stays open).
-  const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set(navGroups.map((g) => g.id)));
-  useEffect(() => {
-    setOpenGroups(new Set(navGroups.map((g) => g.id)));
-  }, [inClusterMode, navGroups]);
-  useEffect(() => {
-    // Ensure the group containing the active route is open after navigation.
+  // Accordion navigation: keep only the active (or first) group expanded.
+  const [openGroups, setOpenGroups] = useState<Set<string>>(() => {
     const active = navGroups.find((g) => g.items.some((it) => isItemActive(it, pathname, clusterId)));
-    if (active && !openGroups.has(active.id)) {
-      setOpenGroups((s) => new Set(s).add(active.id));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname]);
+    return new Set(active ? [active.id] : navGroups[0] ? [navGroups[0].id] : []);
+  });
+  useEffect(() => {
+    const active = navGroups.find((g) => g.items.some((it) => isItemActive(it, pathname, clusterId)));
+    setOpenGroups(new Set(active ? [active.id] : navGroups[0] ? [navGroups[0].id] : []));
+  }, [clusterId, inClusterMode, navGroups, pathname]);
   function toggleGroup(id: string) {
-    setOpenGroups((s) => {
-      const next = new Set(s);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
+    setOpenGroups((s) => s.has(id) ? new Set() : new Set([id]));
   }
 
   return (
@@ -581,7 +573,7 @@ function TopHeader({
               className="flex items-center gap-2 h-8 pl-1 pr-2 rounded-md hover:bg-accent transition-colors"
             >
               <span className="grid h-6 w-6 place-items-center rounded-full bg-gradient-to-br from-zinc-600 to-zinc-800">
-                <User className="h-3 w-3 text-zinc-300" />
+                <User className="h-3 w-3 text-muted-foreground" />
               </span>
               <ChevronDown className="h-3 w-3 text-muted-foreground" />
             </button>

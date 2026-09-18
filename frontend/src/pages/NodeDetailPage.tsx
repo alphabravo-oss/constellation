@@ -69,11 +69,11 @@ export function NodeDetailPage() {
       />
 
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5" data-testid="node-stats">
-        <StatCard label="Open CVEs" value={node.open_vulns} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={node.open_vulns > 0 ? "high" : "neutral"} />
-        <StatCard label="Packages" value={node.package_count} icon={<Database className="h-3.5 w-3.5" />} />
-        <StatCard label="Containers" value={node.container_count} icon={<Layers className="h-3.5 w-3.5" />} />
-        <StatCard label="Processes" value={node.process_count} icon={<TerminalSquare className="h-3.5 w-3.5" />} />
-        <StatCard label="CIS Failed" value={node.cis_failed} icon={<ShieldCheck className="h-3.5 w-3.5" />} tone={node.cis_failed > 0 ? "critical" : "neutral"} />
+        <StatCard label="Open CVEs" value={node.last_scanned_at ? node.open_vulns : "Not scanned"} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={node.open_vulns > 0 ? "high" : "neutral"} />
+        <StatCard label="Packages" value={node.packages_observed_at ? node.package_count : "Not collected"} icon={<Database className="h-3.5 w-3.5" />} />
+        <StatCard label="Containers" value={node.containers_observed_at ? node.container_count : "Not collected"} icon={<Layers className="h-3.5 w-3.5" />} />
+        <StatCard label="Processes" value={node.processes_observed_at ? node.process_count : "Not collected"} icon={<TerminalSquare className="h-3.5 w-3.5" />} />
+        <StatCard label="CIS Failed" value={node.cis_observed_at ? node.cis_failed : "Not collected"} icon={<ShieldCheck className="h-3.5 w-3.5" />} tone={node.cis_failed > 0 ? "critical" : "neutral"} />
       </section>
 
       <div className="space-y-4">
@@ -211,7 +211,7 @@ function HostVulnerabilitiesTable({ vulnerabilities }: { vulnerabilities: HostVu
     <section className="space-y-2" data-testid="node-vulnerabilities">
       <div>
         <h2 className="text-sm font-semibold">Host vulnerabilities</h2>
-        <p className="mt-1 text-xs text-muted-foreground">VulnDB-backed package matches for this node inventory.</p>
+        <p className="mt-1 text-xs text-muted-foreground">Package vulnerabilities reported by configured Trivy or Grype scanners for this node inventory.</p>
       </div>
       <DataTable
         rows={vulnerabilities}

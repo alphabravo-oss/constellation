@@ -42,10 +42,6 @@ scanner:
   replicas: 4
   maxConcurrent: 4
   targetCapacity: "image=3,host=8,workload=8,platform=4,serverless=4"
-  readiness:
-    # false: image scans fall back to Trivy/Grype when the vulndb bundle is missing or
-    # stale instead of failing closed. Set true to hard-require a fresh bundle per scan.
-    requireVulnDB: false
   autoscaling:
     enabled: true
     minReplicas: 3
@@ -70,6 +66,8 @@ networkPolicies:
     ports: [5432]
   frontendIngressCIDRs: ["10.0.0.0/8"]
   admissionIngressCIDRs: ["10.0.0.0/8"]
+  # Narrow this to the node/private-network CIDRs used by hostNetwork agents.
+  apiIngressCIDRs: ["10.0.0.0/8"]
 
 # Use cert-manager for the admission webhook in prod.
 tls:
@@ -92,30 +90,6 @@ postgres:
     instances: 3
     imageName: ghcr.io/alphabravo-oss/constellation/postgres:v0.2.0
     storage: 50Gi
-
-# Scheduled VulnDB consumption. Enable after publishing signed bundles and
-# mounting/creating the public-key Secret. Constellation consumes the artifact;
-# constellation-vulndb remains the producer.
-vulndb:
-  manualUpload:
-    enabled: false
-  readiness:
-    requireBundle: true
-    maxAge: 168h
-  trust:
-    requireSignatures: true
-    publicKeySecret: constellation-vulndb-cosign-public-key
-    publicKeySecretKey: cosign.pub
-  freshness:
-    maxAge: 168h
-vulndbImporter:
-  enabled: true
-  installJob:
-    enabled: true
-  source:
-    kind: oci
-    # Signed VulnDB artifact channel. Pin to a digest for exact replay/change-control.
-    ref: ghcr.io/alphabravo-oss/constellation-vulndb-bundle:latest
 
 # Public Ingress TLS is separate from the private admission certificate issuer.
 ingress:

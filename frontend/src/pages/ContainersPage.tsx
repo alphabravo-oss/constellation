@@ -36,8 +36,8 @@ export function ContainersPage() {
     { id: "name", header: "Container", cell: (c) => (
         <div>
           <span className="text-xs font-medium">{c.name || "—"}</span>
-          {c.privileged && <span className="ml-1.5 rounded px-1 py-px text-[9px] font-semibold uppercase" style={{ background: "color-mix(in oklab, var(--color-severity-critical) 16%, transparent)", color: "var(--color-severity-critical)" }} title="privileged">priv</span>}
-          {c.run_as_root && <span className="ml-1 rounded px-1 py-px text-[9px] font-semibold uppercase" style={{ background: "color-mix(in oklab, var(--color-severity-high) 16%, transparent)", color: "var(--color-severity-high)" }} title="runs as root">root</span>}
+          {c.privileged && <span className="ml-1.5 rounded px-1 py-px text-[9px] font-semibold uppercase" style={{ background: "color-mix(in oklab, var(--color-severity-critical) 16%, transparent)", color: "var(--color-severity-critical)" }} title="Owning workload includes a privileged container">workload: priv</span>}
+          {c.run_as_root && <span className="ml-1 rounded px-1 py-px text-[9px] font-semibold uppercase" style={{ background: "color-mix(in oklab, var(--color-severity-high) 16%, transparent)", color: "var(--color-severity-high)" }} title="Owning workload includes a container configured to run as root">workload: root</span>}
         </div>
       ), sort: (a, b) => a.name.localeCompare(b.name) },
     { id: "pod", header: "Pod", cell: (c) => (
@@ -45,8 +45,8 @@ export function ContainersPage() {
           ? <Link to={`/clusters/${clusterId}/deployments?q=${encodeURIComponent(c.workload)}`} className="text-mono text-[11px] text-[color:var(--color-primary)] hover:underline" title={`${c.namespace}/${c.pod_name}`}>{c.namespace}/{c.pod_name}</Link>
           : <span className="text-mono text-[11px] text-muted-foreground">{c.namespace}/{c.pod_name}</span>
       ), sort: (a, b) => (a.namespace + a.pod_name).localeCompare(b.namespace + b.pod_name) },
-    { id: "image", header: "Image", cell: (c) => <span className="text-mono text-[11px] text-muted-foreground max-w-[280px] truncate block" title={c.image}>{c.image.replace("sha256:", "").slice(0, 26)}</span> },
-    { id: "node", header: "Node", cell: (c) => <span className="text-mono text-[11px] text-muted-foreground">{c.node}</span>, sort: (a, b) => a.node.localeCompare(b.node) },
+    { id: "image", header: "Image", cell: (c) => <span className="text-mono text-[11px] max-w-[280px] truncate block" title={c.image}>{displayImage(c.image)}</span>, sort: (a, b) => a.image.localeCompare(b.image) },
+    { id: "node", header: "Node", cell: (c) => clusterId ? <Link to={`/clusters/${clusterId}/nodes/${encodeURIComponent(c.node)}`} className="text-mono text-[11px] text-[color:var(--color-primary)] hover:underline">{c.node}</Link> : <span className="text-mono text-[11px]">{c.node || "Not reported"}</span>, sort: (a, b) => a.node.localeCompare(b.node) },
     { id: "risk", header: "Vulns", numeric: true, width: "110px", cell: (c) => (
         (c.critical + c.high) === 0
           ? <span className="text-[11px] text-muted-foreground">—</span>
@@ -78,8 +78,8 @@ export function ContainersPage() {
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard label="Containers" value={summary.total} icon={<Boxes className="h-3.5 w-3.5" />} hint={`${summary.running} running`} />
         <StatCard label="Running" value={summary.running} tone="low" />
-        <StatCard label="Privileged" value={summary.privileged} tone={summary.privileged > 0 ? "critical" : "neutral"} icon={<ShieldAlert className="h-3.5 w-3.5" />} />
-        <StatCard label="Run as root" value={summary.run_as_root} tone={summary.run_as_root > 0 ? "high" : "neutral"} />
+        <StatCard label="In privileged workloads" value={summary.privileged} tone={summary.privileged > 0 ? "critical" : "neutral"} icon={<ShieldAlert className="h-3.5 w-3.5" />} />
+        <StatCard label="In root workloads" value={summary.run_as_root} tone={summary.run_as_root > 0 ? "high" : "neutral"} />
       </section>
       <input
         value={search}
@@ -96,4 +96,10 @@ export function ContainersPage() {
       )}
     </div>
   );
+}
+
+function displayImage(value: string): string {
+  if (!value) return "Not reported";
+  if (value.startsWith("sha256:")) return `digest ${value.slice(7, 19)}`;
+  return value;
 }

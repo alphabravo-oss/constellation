@@ -47,7 +47,7 @@ spec:
           port: 8080
 {{ end }}
 {{ end }}
-{{ if and .Values.api.enabled (or .Values.frontend.enabled .Values.scanner.enabled .Values.runtimeAgent.enabled .Values.discoverer.enabled .Values.operator.enabled .Values.admission.enabled .Values.networkPolicyApplier.enabled .Values.kubernetesComplianceCollector.enabled .Values.vulndbImporter.enabled .Values.auditArchiver.enabled (gt (len .Values.networkPolicies.apiIngressCIDRs) 0)) }}
+{{ if and .Values.api.enabled (or .Values.frontend.enabled .Values.scanner.enabled .Values.runtimeAgent.enabled .Values.discoverer.enabled .Values.operator.enabled .Values.admission.enabled .Values.networkPolicyApplier.enabled .Values.kubernetesComplianceCollector.enabled .Values.auditArchiver.enabled (gt (len .Values.networkPolicies.apiIngressCIDRs) 0)) }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -143,16 +143,6 @@ spec:
         - protocol: TCP
           port: 8080
 {{ end }}
-{{ if .Values.vulndbImporter.enabled }}
-    - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: {{ include "constellation.name" . }}
-              app.kubernetes.io/component: vulndb-importer
-      ports:
-        - protocol: TCP
-          port: 8080
-{{ end }}
 {{ if .Values.auditArchiver.enabled }}
     - from:
         - podSelector:
@@ -191,6 +181,10 @@ spec:
 {{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
 {{ include "constellation.networkPolicyPostgresEgress" . | nindent 4 }}
 {{ include "constellation.networkPolicyExternalHTTPEgress" . | nindent 4 }}
+{{/* API replicas use a Kubernetes Lease to elect the singleton-worker leader.
+     Without API-server egress no leader is elected, which silently stops flow
+     rollups, auto-scans, learned groups, retention, and scheduled work. */}}
+{{ include "constellation.networkPolicyKubeAPIEgress" . | nindent 4 }}
 {{ end }}
 {{ if .Values.scanner.enabled }}
 ---
@@ -653,35 +647,6 @@ spec:
   egress:
 {{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
 {{ include "constellation.networkPolicyKubeAPIEgress" . | nindent 4 }}
-{{ end }}
-{{ if .Values.vulndbImporter.enabled }}
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: {{ include "constellation.fullname" . }}-vulndb-importer-egress
-  labels: {{- include "constellation.labels" . | nindent 4 }}
-    app.kubernetes.io/component: vulndb-importer
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: {{ include "constellation.name" . }}
-      app.kubernetes.io/component: vulndb-importer
-  policyTypes:
-    - Egress
-  egress:
-{{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
-{{ include "constellation.networkPolicyExternalHTTPEgress" . | nindent 4 }}
-{{ if .Values.api.enabled }}
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: {{ include "constellation.name" . }}
-              app.kubernetes.io/component: api
-      ports:
-        - protocol: TCP
-          port: 8080
-{{ end }}
 {{ end }}
 {{ if .Values.auditArchiver.enabled }}
 ---

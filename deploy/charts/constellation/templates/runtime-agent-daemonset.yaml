@@ -60,6 +60,11 @@ spec:
         # + the existing /sys mount already give natural-path access.
         - name: host-etc
           hostPath: { path: /etc, type: Directory }
+        # Native host package inventory reads dpkg/rpm databases below
+        # /var/lib. Without this mount Ubuntu/Debian nodes silently report no
+        # package evidence even though host facts and containers are healthy.
+        - name: host-var-lib
+          hostPath: { path: /var/lib, type: Directory }
         - name: host-lib-modules
           hostPath: { path: /lib/modules, type: DirectoryOrCreate }
         - name: host-run
@@ -229,8 +234,10 @@ spec:
             - { name: cni-conf-rke2,     mountPath: /var/lib/rancher/rke2/agent/etc/cni/net.d, readOnly: true }
             - { name: cni-conf-multus,   mountPath: /etc/cni/multus/net.d, readOnly: true }
             - { name: cni-conf-microk8s, mountPath: /var/snap/microk8s/current/args/cni-network, readOnly: true }
-            # Host-facts mounts (Slice A): /host/{etc,lib/modules,run,var/run}.
+            # Host inventory mounts. /var/lib is required for native package
+            # databases (notably /var/lib/dpkg/status on Debian/Ubuntu).
             - { name: host-etc,          mountPath: /host/etc,         readOnly: true }
+            - { name: host-var-lib,      mountPath: /host/var/lib,     readOnly: true }
             - { name: host-lib-modules,  mountPath: /host/lib/modules, readOnly: true }
             - { name: host-run,          mountPath: /host/run,         readOnly: true }
             - { name: host-var-run,      mountPath: /host/var/run,     readOnly: true }

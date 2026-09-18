@@ -1,0 +1,214 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Constellation configuration",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "highAvailability": {
+      "title": "High availability",
+      "description": "Spread replicated control-plane workloads across nodes and protect them with disruption budgets.",
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": { "type": "boolean", "title": "Enable high availability", "default": false },
+        "topologyKey": { "type": "string", "title": "Topology key", "default": "kubernetes.io/hostname" },
+        "whenUnsatisfiable": { "type": "string", "title": "Scheduling policy", "enum": ["DoNotSchedule", "ScheduleAnyway"], "default": "DoNotSchedule" }
+      }
+    },
+    "networkPolicies": {
+      "title": "Network policies",
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": { "type": "boolean", "title": "Enable namespace network policies", "default": false }
+      }
+    },
+    "api": {
+      "title": "API",
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "replicas": { "type": "integer", "title": "API replicas", "minimum": 1, "maximum": 20, "default": 2 },
+        "leaderElection": {
+          "type": "object",
+          "title": "Leader election",
+          "additionalProperties": true,
+          "properties": { "enabled": { "type": "boolean", "title": "Enable leader election", "default": true } }
+        }
+      }
+    },
+    "scanner": {
+      "title": "Image and SBOM scanning",
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": { "type": "boolean", "title": "Enable scanners", "default": true },
+        "replicas": { "type": "integer", "title": "Scanner replicas", "minimum": 1, "maximum": 50, "default": 2 },
+        "maxConcurrent": { "type": "integer", "title": "Concurrent scans per replica", "minimum": 0, "maximum": 64, "default": 1 },
+        "cache": {
+          "type": "object",
+          "title": "Scanner cache",
+          "additionalProperties": true,
+          "properties": {
+            "persistent": { "type": "boolean", "title": "Persist scanner caches", "default": true },
+            "size": { "type": "string", "title": "Cache volume size", "default": "8Gi", "pattern": "^[0-9]+(Mi|Gi|Ti)$" },
+            "storageClass": { "type": "string", "title": "Storage class", "default": "" }
+          }
+        },
+        "engines": {
+          "type": "object",
+          "title": "Scanning engines",
+          "additionalProperties": true,
+          "properties": {
+            "syft": { "type": "boolean", "title": "Syft SBOM inventory", "default": true },
+            "trivy": { "type": "boolean", "title": "Trivy analysis", "default": true },
+            "grype": { "type": "boolean", "title": "Grype analysis", "default": true }
+          }
+        }
+      }
+    },
+    "runtimeAgent": {
+      "title": "Runtime protection",
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": { "type": "boolean", "title": "Enable the runtime agent", "default": true },
+        "enforcement": {
+          "type": "object",
+          "title": "Enforcement",
+          "additionalProperties": true,
+          "properties": {
+            "mode": { "type": "string", "title": "Default mode", "enum": ["disabled", "monitor", "protect"], "default": "monitor" },
+            "process": { "type": "boolean", "title": "Process enforcement", "default": true },
+            "file": { "type": "boolean", "title": "File enforcement", "default": true },
+            "exec": { "type": "boolean", "title": "Executable integrity enforcement", "default": true },
+            "network": { "type": "boolean", "title": "Inline network enforcement", "description": "High-impact option. Only labeled workloads enter the fail-open NFQUEUE path.", "default": false },
+            "dpi": { "type": "boolean", "title": "Inline WAF/DLP enforcement", "description": "Requires protect mode and inline network enforcement.", "default": false }
+          }
+        }
+      }
+    },
+    "admission": {
+      "title": "Admission control",
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": { "type": "boolean", "title": "Enable admission service", "default": true },
+        "replicas": { "type": "integer", "title": "Admission replicas", "minimum": 1, "maximum": 20, "default": 2 },
+        "webhook": {
+          "type": "object",
+          "title": "Validating webhook",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": { "type": "boolean", "title": "Register validating webhook", "default": true },
+            "failurePolicy": { "type": "string", "title": "Failure policy", "enum": ["Ignore", "Fail"], "default": "Ignore" },
+            "timeoutSeconds": { "type": "integer", "title": "Timeout seconds", "minimum": 1, "maximum": 30, "default": 5 }
+          }
+        }
+      }
+    },
+    "frontend": {
+      "title": "Web console",
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "replicas": { "type": "integer", "title": "Frontend replicas", "minimum": 1, "maximum": 20, "default": 2 }
+      }
+    },
+    "ingress": {
+      "title": "Ingress",
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": { "type": "boolean", "title": "Create an Ingress", "default": false },
+        "className": { "type": "string", "title": "Ingress class", "default": "" },
+        "host": { "type": "string", "title": "Hostname", "default": "constellation.example.com" },
+        "tls": {
+          "type": "object",
+          "title": "Ingress TLS",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": { "type": "boolean", "title": "Enable TLS", "default": false },
+            "secretName": { "type": "string", "title": "TLS Secret", "default": "constellation-frontend-tls" }
+          }
+        }
+      }
+    },
+    "postgres": {
+      "title": "PostgreSQL",
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "mode": { "type": "string", "title": "Database mode", "enum": ["", "statefulset", "cnpg", "external"], "default": "" },
+        "dsn": { "type": "string", "title": "External database URL", "description": "Prefer an existing Secret for production credentials.", "default": "" },
+        "existingSecret": { "type": "string", "title": "External database Secret", "default": "" },
+        "embeddedConfig": {
+          "type": "object",
+          "title": "Single-node database",
+          "additionalProperties": true,
+          "properties": {
+            "storage": { "type": "string", "title": "Database volume size", "default": "20Gi", "pattern": "^[0-9]+(Mi|Gi|Ti)$" },
+            "storageClass": { "type": "string", "title": "Storage class", "default": "" }
+          }
+        },
+        "cloudnativepg": {
+          "type": "object",
+          "title": "CloudNativePG",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": { "type": "boolean", "title": "Enable CloudNativePG", "default": false },
+            "instances": { "type": "integer", "title": "PostgreSQL instances", "minimum": 1, "maximum": 9, "default": 3 },
+            "imageName": { "type": "string", "title": "pgvector-enabled operand image", "default": "ghcr.io/alphabravo-oss/constellation/postgres:16.10-v0.2.0" },
+            "storage": { "type": "string", "title": "Volume size per instance", "default": "20Gi", "pattern": "^[0-9]+(Mi|Gi|Ti)$" },
+            "storageClass": { "type": "string", "title": "Storage class", "default": "" },
+            "scheduledBackup": {
+              "type": "object",
+              "title": "Scheduled backup",
+              "additionalProperties": true,
+              "properties": {
+                "enabled": { "type": "boolean", "title": "Enable scheduled backups", "default": false },
+                "schedule": { "type": "string", "title": "CNPG six-field cron schedule", "default": "0 0 2 * * *" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "tls": {
+      "title": "Internal admission TLS",
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "certManager": {
+          "type": "object",
+          "title": "cert-manager",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": { "type": "boolean", "title": "Use cert-manager", "default": false },
+            "issuer": { "type": "string", "title": "Issuer name", "default": "" },
+            "issuerKind": { "type": "string", "title": "Issuer kind", "enum": ["Issuer", "ClusterIssuer"], "default": "ClusterIssuer" },
+            "createSelfSignedIssuer": { "type": "boolean", "title": "Create a private self-signed issuer", "default": false }
+          }
+        }
+      }
+    },
+    "bootstrap": {
+      "title": "Bootstrap administrator",
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "admin": {
+          "type": "object",
+          "title": "Initial administrator",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": { "type": "boolean", "title": "Create an administrator", "default": true },
+            "email": { "type": "string", "format": "email", "title": "Administrator email", "default": "admin@constellation.local" },
+            "displayName": { "type": "string", "title": "Display name", "default": "Constellation Admin" },
+            "forcePasswordChange": { "type": "boolean", "title": "Require password change on first login", "default": false }
+          }
+        }
+      }
+    }
+  }
+}

@@ -270,6 +270,121 @@
   .c-rise-6 { animation-delay: 200ms; }
 }
 
+@layer components {
+  .app-data-table {
+    --table-text-primary: var(--color-foreground);
+    --table-text-secondary: color-mix(in oklab, var(--color-foreground) 86%, var(--color-background));
+    --table-text-tertiary: color-mix(in oklab, var(--color-foreground) 68%, var(--color-background));
+    --table-header-bg: color-mix(in oklab, var(--color-muted) 72%, var(--color-card));
+    --table-row-hover: color-mix(in oklab, var(--color-accent) 58%, transparent);
+    --table-row-selected: color-mix(in oklab, var(--color-primary) 9%, transparent);
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    font-weight: 450;
+  }
+
+  .app-data-table thead {
+    background: var(--table-header-bg);
+    box-shadow: 0 1px 0 var(--color-border), 0 5px 12px color-mix(in oklab, var(--color-background) 22%, transparent);
+  }
+  .app-data-table thead th {
+    color: var(--table-text-secondary);
+    font-size: 0.75rem;
+    line-height: 1rem;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
+  .app-data-table tbody td { color: var(--color-foreground); }
+
+  .app-data-table tbody td .text-muted-foreground {
+    color: var(--table-text-secondary);
+  }
+
+  .app-table-primary { color: var(--table-text-primary); font-weight: 600; }
+  .app-table-secondary { color: var(--table-text-secondary); font-size: 0.8125rem; }
+  .app-table-tertiary { color: var(--table-text-tertiary); font-size: 0.75rem; }
+  .app-table-code { color: var(--table-text-secondary); font-family: var(--font-mono); font-size: 0.8125rem; }
+  .app-table-numeric { color: var(--table-text-primary); font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
+
+  .app-data-table tbody a,
+  .app-table-entity-link {
+    color: var(--color-primary);
+    font-weight: 550;
+    text-decoration-line: underline;
+    text-decoration-color: color-mix(in oklab, var(--color-primary) 48%, transparent);
+    text-underline-offset: 4px;
+    transition: color 120ms ease-out, text-decoration-color 120ms ease-out;
+  }
+
+  .app-data-table tbody a:hover,
+  .app-table-entity-link:hover {
+    color: color-mix(in oklab, var(--color-primary) 82%, var(--color-foreground));
+    text-decoration-color: currentColor;
+  }
+
+  .app-data-table tbody a:focus-visible,
+  .app-table-entity-link:focus-visible {
+    border-radius: 2px;
+    outline: 2px solid var(--color-primary);
+    outline-offset: 3px;
+  }
+
+  .app-data-table-row-clickable:hover,
+  .app-data-table-row-clickable:focus-visible {
+    box-shadow: inset 3px 0 0 var(--color-primary);
+    background: var(--table-row-hover);
+  }
+
+  .app-data-table tr[data-selected="true"] {
+    background: var(--table-row-selected);
+    box-shadow: inset 3px 0 0 var(--color-primary);
+  }
+
+  /* Compact read-only matrices share the canonical table treatment. Data
+     inventories still use the TanStack-powered .app-data-table component. */
+  .app-semantic-table {
+    width: 100%;
+    border-collapse: collapse;
+    color: var(--color-foreground);
+    font-size: 0.875rem;
+  }
+  .app-semantic-table thead {
+    border-bottom: 1px solid var(--color-border);
+    background: color-mix(in oklab, var(--color-muted) 35%, transparent);
+  }
+  .app-semantic-table th {
+    height: 2.25rem;
+    padding: 0 0.75rem;
+    text-align: left;
+    color: var(--color-foreground);
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+  .app-semantic-table tbody tr {
+    border-bottom: 1px solid var(--color-border);
+    transition: background-color 150ms var(--ease-out);
+  }
+  .app-semantic-table tbody tr:hover {
+    background: color-mix(in oklab, var(--color-accent) 25%, transparent);
+  }
+  .app-semantic-table td {
+    padding: 0.625rem 0.75rem;
+    color: var(--color-foreground);
+  }
+  .app-semantic-table td.text-muted-foreground {
+    color: var(--table-text-secondary);
+  }
+  .app-semantic-table a[href] {
+    color: var(--color-primary);
+    font-weight: 550;
+    text-decoration: underline;
+    text-decoration-color: color-mix(in oklab, var(--color-primary) 48%, transparent);
+    text-underline-offset: 4px;
+  }
+}
+
 /* React-Flow themed controls — repositioned to the right edge UNDER the
    Legend so they don't collide. Override colors so zoom/in/out/fit read
    clearly in our OKLCH dark palette. */

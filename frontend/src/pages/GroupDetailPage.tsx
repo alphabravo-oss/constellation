@@ -142,7 +142,7 @@ export function GroupDetailPage() {
         {(group.criteria?.length ?? 0) === 0 ? (
           <EmptyState title="No criteria" hint="This group has no membership selectors." />
         ) : (
-          <table className="w-full text-sm">
+          <table className="app-semantic-table w-full text-sm">
             <thead className="bg-muted text-xs uppercase text-muted-foreground"><tr><th className="px-3 py-2 text-left">Key</th><th className="px-3 py-2 text-left">Operator</th><th className="px-3 py-2 text-left">Value</th></tr></thead>
             <tbody>
               {group.criteria.map((c, i) => (

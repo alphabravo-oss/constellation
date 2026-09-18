@@ -585,6 +585,13 @@ function ReceiverDetail({
     refetchInterval: 5_000,
   });
   const live = deliveriesQ.data?.deliveries ?? deliveries;
+  const deliveryColumns = useMemo<Column<ReceiverDelivery>[]>(() => [
+    { id: "event", header: "Event", cell: (d) => <div><div className="font-mono">{d.event_type}</div><div className="text-[10px] text-muted-foreground">{d.severity}</div></div>, sort: (a, b) => a.event_type.localeCompare(b.event_type) },
+    { id: "state", header: "State", cell: (d) => <div><Status value={d.final_state || d.status} />{d.error && <div className="mt-1 max-w-[180px] truncate text-[10px] text-muted-foreground" title={d.error}>{d.error}</div>}</div>, sort: (a, b) => (a.final_state || a.status).localeCompare(b.final_state || b.status) },
+    { id: "attempts", header: "Attempts", cell: (d) => d.attempts, sort: (a, b) => a.attempts - b.attempts, numeric: true },
+    { id: "latency", header: "Latency", cell: (d) => d.latency_ms ? `${d.latency_ms}ms` : "-", sort: (a, b) => (a.latency_ms ?? 0) - (b.latency_ms ?? 0), numeric: true },
+    { id: "idempotency", header: "Idempotency", cell: (d) => <span className="font-mono text-[10px]">{d.idempotency_key?.slice(0, 8) ?? "-"}</span>, sort: (a, b) => (a.idempotency_key ?? "").localeCompare(b.idempotency_key ?? "") },
+  ], []);
 
   const testFire = useMutation({
     mutationFn: () => receiversApi.testFire(receiver.id),
@@ -701,40 +708,8 @@ function ReceiverDetail({
 
         <section className="space-y-2">
           <h3 className="text-xs font-semibold uppercase text-muted-foreground">Delivery history</h3>
-          <div className="max-h-72 overflow-y-auto rounded-md border border-border" data-testid="receiver-deliveries">
-            <table className="w-full text-xs">
-              <thead className="sticky top-0 bg-muted text-[10px] uppercase text-muted-foreground">
-                <tr>
-                  <th className="px-2 py-1 text-left">Event</th>
-                  <th className="px-2 py-1 text-left">State</th>
-                  <th className="px-2 py-1 text-left">Att</th>
-                  <th className="px-2 py-1 text-left">Latency</th>
-                  <th className="px-2 py-1 text-left">Idempotency</th>
-                </tr>
-              </thead>
-              <tbody>
-                {live.length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="px-2 py-6 text-center text-muted-foreground">No deliveries yet.</td>
-                  </tr>
-                )}
-                {live.map((d) => (
-                  <tr key={d.id} className="border-t border-border">
-                    <td className="px-2 py-1.5">
-                      <div className="font-mono">{d.event_type}</div>
-                      <div className="text-[10px] text-muted-foreground">{d.severity}</div>
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <Status value={d.final_state || d.status} />
-                      {d.error && <div className="mt-1 max-w-[180px] truncate text-[10px] text-muted-foreground" title={d.error}>{d.error}</div>}
-                    </td>
-                    <td className="px-2 py-1.5">{d.attempts}</td>
-                    <td className="px-2 py-1.5">{d.latency_ms ? `${d.latency_ms}ms` : "-"}</td>
-                    <td className="px-2 py-1.5 font-mono text-[10px]">{d.idempotency_key?.slice(0, 8) ?? "-"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="max-h-72 overflow-y-auto" data-testid="receiver-deliveries">
+            <DataTable rows={live} columns={deliveryColumns} rowKey={(delivery) => delivery.id} density="compact" showDensityToggle={false} emptyState={<div className="px-2 py-6 text-center text-xs text-muted-foreground">No deliveries yet.</div>} />
           </div>
         </section>
       </div>

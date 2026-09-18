@@ -196,7 +196,7 @@ export function EffectiveConfigPage() {
               <p className="mt-3 text-xs text-muted-foreground">No runtime-mutable config differs from the safe default baseline.</p>
             ) : (
               <div className="mt-3 overflow-x-auto">
-                <table className="min-w-full text-xs">
+                <table className="app-semantic-table min-w-full text-xs">
                   <thead className="text-left text-[10px] uppercase tracking-wider text-muted-foreground">
                     <tr>
                       <th className="px-2 py-1.5 font-medium">Key</th>
@@ -232,7 +232,7 @@ export function EffectiveConfigPage() {
             <p className="mt-3 text-xs text-muted-foreground">No component heartbeats are available yet.</p>
           ) : (
             <div className="mt-3 overflow-x-auto">
-              <table className="min-w-full text-xs">
+              <table className="app-semantic-table min-w-full text-xs">
                 <thead className="text-left text-[10px] uppercase tracking-wider text-muted-foreground">
                   <tr>
                     <th className="px-2 py-1.5 font-medium">Component</th>
@@ -650,8 +650,8 @@ function SourcePill({ source }: { source: ConfigSource }) {
   const label = source === "stored" ? "Stored" : source === "secret" ? "Redacted" : source === "disabled" ? "Off" : source === "managed" ? "Linked" : "Default";
   const cls =
     source === "stored" ? "border-primary/30 bg-primary/10 text-primary" :
-    source === "secret" ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300" :
-    source === "managed" ? "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300" :
+    source === "secret" ? "border-status-warning/30 bg-status-warning/10 text-status-warning" :
+    source === "managed" ? "border-status-info/30 bg-status-info/10 text-status-info" :
     source === "disabled" ? "border-border bg-muted text-muted-foreground" :
     "border-border bg-background text-muted-foreground";
   return <span className={`inline-flex rounded border px-1.5 py-0.5 text-[10px] font-medium ${cls}`}>{label}</span>;
@@ -660,8 +660,8 @@ function SourcePill({ source }: { source: ConfigSource }) {
 function AppliedStatusPill({ status }: { status: AppliedRevisionRow["status"] }) {
   const cls =
     status === "current" ? "border-primary/30 bg-primary/10 text-primary" :
-    status === "behind" ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300" :
-    status === "ahead" ? "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300" :
+    status === "behind" ? "border-status-warning/30 bg-status-warning/10 text-status-warning" :
+    status === "ahead" ? "border-status-info/30 bg-status-info/10 text-status-info" :
     "border-border bg-muted text-muted-foreground";
   const label = status === "current" ? "Current" : status === "behind" ? "Behind" : status === "ahead" ? "Ahead" : "Not reported";
   return <span className={`inline-flex rounded border px-1.5 py-0.5 text-[10px] font-medium ${cls}`}>{label}</span>;

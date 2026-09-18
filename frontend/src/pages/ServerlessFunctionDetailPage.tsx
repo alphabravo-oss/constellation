@@ -155,7 +155,7 @@ function PermissionPanel({ fn }: { fn: ServerlessFunction }) {
 
       {findings.length > 0 ? (
         <div className="mt-4 overflow-hidden rounded-md border border-border">
-          <table className="w-full text-sm">
+          <table className="app-semantic-table w-full text-sm">
             <thead className="bg-muted text-xs uppercase text-muted-foreground">
               <tr>
                 <th className="px-3 py-2 text-left">Issue</th>

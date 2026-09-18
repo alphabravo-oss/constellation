@@ -126,11 +126,17 @@ data:
     issue_token() {
       role_name="$1"
       secret_name="$2"
-      # Reuse existing token if Secret already populated.
+      # Reuse an existing token only when its hash is registered in Postgres.
+      # This handles a restored/stale Secret paired with a fresh database.
       raw=$(kubectl -n "$NS" get secret "$secret_name" -o jsonpath='{.data.token}' 2>/dev/null | base64 -d 2>/dev/null || true)
       if [ -n "$raw" ]; then
-        echo "$role_name token already exists; reusing"
-        return
+        hash=$(printf '%s' "$raw" | sha256sum | cut -d' ' -f1)
+        registered=$(psql "$DATABASE_URL" -tAc "SELECT 1 FROM $3 WHERE token_hash = '$hash' AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > NOW()) LIMIT 1" | tr -d '[:space:]')
+        if [ "$registered" = "1" ]; then
+          echo "$role_name token already exists and is registered; reusing"
+          return
+        fi
+        echo "$role_name Secret is stale; rotating and registering a new token"
       fi
       case "$role_name" in
         scanner) prefix="cst_" ;;
@@ -214,7 +220,7 @@ data:
 
     {{- if .Values.clusterRegistration.enabled }}
     # 2) Register the ConstellationCluster CR so the operator can reconcile
-    # the per-role workloads (audit-archiver CronJob, vulndb-importer, etc.).
+    # the per-role workloads (for example the audit-archiver CronJob).
     cat <<EOF | kubectl apply -f -
     apiVersion: constellation.alphabravo.io/v1alpha1
     kind: ConstellationCluster

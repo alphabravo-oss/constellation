@@ -66,6 +66,7 @@ import {
   type NetworkSavedViewSnapshot,
 } from "@/lib/network-saved-views";
 import { toast } from "sonner";
+import { DataTable, type Column } from "@/components/ui/data-table";
 
 import {
   groupsApi,
@@ -1384,6 +1385,16 @@ function NetworkConversationsWorkspaceTab({
     ),
     [rows],
   );
+  const columns = useMemo<Column<NetworkConversation>[]>(() => [
+    { id: "from", header: "From", cell: (row) => <span className="font-mono">{row.from}</span>, sort: (a, b) => a.from.localeCompare(b.from) },
+    { id: "to", header: "To", cell: (row) => <span className="font-mono">{row.to}</span>, sort: (a, b) => a.to.localeCompare(b.to) },
+    { id: "apps", header: "Apps", cell: (row) => <span className="text-muted-foreground">{(row.apps ?? []).slice(0, 4).join(", ") || "-"}</span>, sort: (a, b) => (a.apps ?? []).join(",").localeCompare((b.apps ?? []).join(",")) },
+    { id: "volume", header: "Volume", cell: (row) => <span className="font-mono">{formatBytes(row.bytes)}</span>, sort: (a, b) => a.bytes - b.bytes, numeric: true },
+    { id: "packets", header: "Packets", cell: (row) => <span className="font-mono">{row.packets.toLocaleString()}</span>, sort: (a, b) => a.packets - b.packets, numeric: true },
+    { id: "streams", header: "Streams", cell: (row) => <span className="font-mono">{row.edges.toLocaleString()}</span>, sort: (a, b) => a.edges - b.edges, numeric: true },
+    { id: "verdict", header: "Verdict", cell: (row) => <span className={cn("rounded px-1.5 py-0.5 text-[10px] uppercase", row.verdict === "deny" || row.verdict === "block" ? "bg-[color:var(--color-status-error)]/15 text-[color:var(--color-status-error)]" : "bg-muted text-muted-foreground")}>{row.verdict || "allow"}</span>, sort: (a, b) => (a.verdict ?? "allow").localeCompare(b.verdict ?? "allow") },
+    { id: "last_seen", header: "Last seen", cell: (row) => <button type="button" className="text-left text-muted-foreground hover:text-foreground" onClick={() => onSelect(row)} data-testid="network-conversation-open">{formatDateTime(row.last_seen)}</button>, sort: (a, b) => Date.parse(a.last_seen) - Date.parse(b.last_seen) },
+  ], [onSelect]);
   return (
     <section className="space-y-3" data-testid="network-conversations-tab">
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-card px-3 py-2">
@@ -1417,64 +1428,7 @@ function NetworkConversationsWorkspaceTab({
           CSV
         </Button>
       </div>
-      <div className="overflow-hidden rounded-md border border-border bg-card">
-        <table className="w-full text-xs" data-testid="network-conversations-table">
-          <thead className="bg-muted/50 text-left text-[10px] uppercase tracking-wider text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2 font-medium">From</th>
-              <th className="px-3 py-2 font-medium">To</th>
-              <th className="px-3 py-2 font-medium">Apps</th>
-              <th className="px-3 py-2 text-right font-medium">Volume</th>
-              <th className="px-3 py-2 text-right font-medium">Packets</th>
-              <th className="px-3 py-2 text-right font-medium">Streams</th>
-              <th className="px-3 py-2 font-medium">Verdict</th>
-              <th className="px-3 py-2 font-medium">Last seen</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && (
-              <tr>
-                <td colSpan={8} className="px-3 py-8 text-center text-muted-foreground">Loading conversations...</td>
-              </tr>
-            )}
-            {!loading && rows.length === 0 && (
-              <tr>
-                <td colSpan={8} className="px-3 py-8 text-center text-muted-foreground">No conversations in this window.</td>
-              </tr>
-            )}
-            {!loading && rows.map((row, index) => (
-              <tr key={`${row.from}-${row.to}-${index}`} className="border-t border-border/60 hover:bg-accent/50">
-                <td className="max-w-[260px] truncate px-3 py-2 font-mono">{row.from}</td>
-                <td className="max-w-[260px] truncate px-3 py-2 font-mono">{row.to}</td>
-                <td className="px-3 py-2 text-muted-foreground">{(row.apps ?? []).slice(0, 4).join(", ") || "-"}</td>
-                <td className="px-3 py-2 text-right font-mono">{formatBytes(row.bytes)}</td>
-                <td className="px-3 py-2 text-right font-mono">{row.packets.toLocaleString()}</td>
-                <td className="px-3 py-2 text-right font-mono">{row.edges.toLocaleString()}</td>
-                <td className="px-3 py-2">
-                  <span className={cn(
-                    "rounded px-1.5 py-0.5 text-[10px] uppercase",
-                    row.verdict === "deny" || row.verdict === "block"
-                      ? "bg-[color:var(--color-status-error)]/15 text-[color:var(--color-status-error)]"
-                      : "bg-muted text-muted-foreground",
-                  )}>
-                    {row.verdict || "allow"}
-                  </span>
-                </td>
-                <td className="px-3 py-2">
-                  <button
-                    type="button"
-                    className="text-left text-muted-foreground hover:text-foreground"
-                    onClick={() => onSelect(row)}
-                    data-testid="network-conversation-open"
-                  >
-                    {formatDateTime(row.last_seen)}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataTable rows={loading ? [] : rows} columns={columns} rowKey={(row) => `${row.from}-${row.to}`} defaultSort={{ id: "last_seen", dir: "desc" }} preferencesKey="network-conversations" exportFileName={`network-conversations-${hours}h`} testId="network-conversations-table" emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">{loading ? "Loading conversations..." : "No conversations in this window."}</div>} />
     </section>
   );
 }
@@ -1653,7 +1607,7 @@ function NetworkSessionsWorkspaceTab({
         </div>
       )}
       <div className="overflow-hidden rounded-md border border-border bg-card">
-        <table className="w-full text-xs" data-testid="network-sessions-table">
+        <table className="app-semantic-table w-full text-xs" data-testid="network-sessions-table">
           <thead className="bg-muted/50 text-left text-[10px] uppercase tracking-wider text-muted-foreground">
             <tr>
               <th className="px-3 py-2 font-medium">Client</th>
@@ -1980,7 +1934,7 @@ function PcapWorkspaceTab({
         </Button>
       </div>
       <div className="overflow-hidden rounded-md border border-border bg-card">
-        <table className="w-full text-xs" data-testid="network-pcap-table">
+        <table className="app-semantic-table w-full text-xs" data-testid="network-pcap-table">
           <thead className="bg-muted/50 text-left text-[10px] uppercase tracking-wider text-muted-foreground">
             <tr>
               <th className="px-3 py-2 font-medium">Workload</th>
@@ -2192,7 +2146,7 @@ function NetworkThreatsWorkspaceTab({
         </label>
       </div>
       <div className="overflow-hidden rounded-md border border-border bg-card">
-        <table className="w-full text-xs" data-testid="network-threats-table">
+        <table className="app-semantic-table w-full text-xs" data-testid="network-threats-table">
           <thead className="bg-muted/50 text-left text-[10px] uppercase tracking-wider text-muted-foreground">
             <tr>
               <th className="px-3 py-2 font-medium">Threat</th>
@@ -2844,7 +2798,7 @@ function StreamsTab({ flow, clusterID, hours, active }: { flow: NetworkFlow; clu
         <Field label="Packets" value={t.packets.toLocaleString()} />
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-[11px]">
+        <table className="app-semantic-table w-full text-[11px]">
           <thead>
             <tr className="text-left text-[10px] uppercase tracking-wider text-muted-foreground">
               <th className="py-1 pr-2 font-medium">Proto / App</th>
@@ -3987,7 +3941,7 @@ function LiveSessionsCard({
             </p>
           ) : (
             <div className="max-h-[300px] overflow-auto">
-              <table className="w-full text-[10px]">
+              <table className="app-semantic-table w-full text-[10px]">
                 <thead className="sticky top-0 bg-card">
                   <tr className="text-left uppercase tracking-wider text-muted-foreground">
                     <th className="py-1 pr-2 font-medium">Client</th>

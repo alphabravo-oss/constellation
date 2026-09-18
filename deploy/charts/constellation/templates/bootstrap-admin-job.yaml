@@ -129,6 +129,8 @@ spec:
                 secretKeyRef: { name: {{ $secretName }}, key: email }
             - name: BOOTSTRAP_DISPLAY
               value: {{ .Values.bootstrap.admin.displayName | quote }}
+            - name: BOOTSTRAP_FORCE_PASSWORD_CHANGE
+              value: {{ .Values.bootstrap.admin.forcePasswordChange | quote }}
             - name: BOOTSTRAP_PASSWORD
               valueFrom:
                 secretKeyRef: { name: {{ $secretName }}, key: password }

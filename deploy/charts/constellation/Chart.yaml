@@ -8,6 +8,7 @@ kubeVersion: ">=1.27.0-0"
 maintainers:
   - name: Alpha Bravo Security
 home: https://github.com/alphabravo-oss/constellation
+icon: https://raw.githubusercontent.com/alphabravo-oss/constellation/main/frontend/public/icon.svg
 sources:
   - https://github.com/alphabravo-oss/constellation
 keywords:

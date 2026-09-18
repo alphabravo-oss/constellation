@@ -31,6 +31,19 @@ afterEach(() => {
 });
 
 describe("DataTable preferences", () => {
+  it("applies global table styling and keyboard activation to clickable rows", () => {
+    const onRowClick = vi.fn();
+    render(
+      <DataTable rows={rows} columns={columns} rowKey={(row) => row.id} onRowClick={onRowClick} />,
+    );
+    const table = host?.querySelector(".app-data-table");
+    const row = host?.querySelector("tbody tr");
+    expect(table).not.toBeNull();
+    expect(row?.getAttribute("tabindex")).toBe("0");
+    act(() => row?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    expect(onRowClick).toHaveBeenCalledWith(rows[0]);
+  });
+
   it("restores hidden columns and density from the table preference key", () => {
     localStorage.setItem(
       "constellation.table.unit-findings.v1",

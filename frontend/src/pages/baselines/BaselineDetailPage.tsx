@@ -127,6 +127,13 @@ export function BaselineDetailPage() {
 
   const canPromote = nextPromoteMode(profile.mode);
   const canRollback = nextRollbackMode(profile.mode);
+  const ruleColumns: Column<ProcessRule>[] = [
+    { id: "process", header: "Process", cell: (rule) => <span className="font-mono text-xs">{rule.name || "—"}</span>, sort: (a, b) => a.name.localeCompare(b.name) },
+    { id: "path", header: "Path", cell: (rule) => <span className="font-mono text-xs text-muted-foreground">{rule.path || "any"}</span>, sort: (a, b) => a.path.localeCompare(b.path) },
+    { id: "user", header: "User", cell: (rule) => <span className="text-xs text-muted-foreground">{rule.user || "any"}</span>, sort: (a, b) => a.user.localeCompare(b.user) },
+    { id: "action", header: "Action", cell: (rule) => <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold" style={rule.action === "deny" ? { background: "color-mix(in oklab, var(--color-severity-critical) 16%, transparent)", color: "var(--color-severity-critical)" } : { background: "color-mix(in oklab, var(--color-severity-low) 16%, transparent)", color: "var(--color-severity-low)" }}>{rule.action === "deny" ? <Ban className="h-3 w-3" /> : <Check className="h-3 w-3" />}{rule.action}</span>, sort: (a, b) => a.action.localeCompare(b.action) },
+    { id: "actions", header: "", hideable: false, cell: (rule) => { const busy = updateRule.isPending || deleteRule.isPending; return <div className="flex items-center justify-end gap-1"><button type="button" title={rule.action === "deny" ? "Set to allow" : "Set to deny"} disabled={busy} onClick={() => updateRule.mutate({ r: rule, patch: { action: rule.action === "deny" ? "allow" : "deny" } })} className="rounded p-1 hover:bg-accent disabled:opacity-40">{rule.action === "deny" ? <Check className="h-3.5 w-3.5" /> : <Ban className="h-3.5 w-3.5" />}</button><button type="button" title={rule.enabled ? "Disable" : "Enable"} disabled={busy} onClick={() => updateRule.mutate({ r: rule, patch: { enabled: !rule.enabled } })} className="rounded p-1 hover:bg-accent disabled:opacity-40">{rule.enabled ? <PowerOff className="h-3.5 w-3.5" /> : <Power className="h-3.5 w-3.5" />}</button><button type="button" title="Delete" disabled={busy} onClick={() => deleteRule.mutate(rule.rule_id)} className="rounded p-1 text-status-error hover:bg-accent disabled:opacity-40"><Trash2 className="h-3.5 w-3.5" /></button></div>; } },
+  ];
 
   return (
     <div className="space-y-5" data-testid="baselines-drawer-body" data-cluster-id={clusterId ?? ""}>
@@ -181,61 +188,7 @@ export function BaselineDetailPage() {
             <Plus className="h-3.5 w-3.5" /> Add rule
           </Button>
         </form>
-        {profile.rules.length === 0 ? (
-          <div className="px-2 py-4 text-center text-xs text-muted-foreground">No process rules yet. Add one above to allow or deny a specific process.</div>
-        ) : (
-          <table className="w-full text-sm">
-            <thead className="text-[10px] uppercase tracking-wide text-muted-foreground">
-              <tr className="border-b border-border">
-                <th className="px-2 py-1.5 text-left">Process</th>
-                <th className="px-2 py-1.5 text-left">Path</th>
-                <th className="px-2 py-1.5 text-left">User</th>
-                <th className="px-2 py-1.5 text-left">Action</th>
-                <th className="px-2 py-1.5 text-right"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {profile.rules.map((rule) => {
-                const busy = updateRule.isPending || deleteRule.isPending;
-                return (
-                  <tr key={rule.rule_id} className={`border-b border-border/60 ${rule.enabled ? "" : "opacity-50"}`}>
-                    <td className="px-2 py-1.5 font-mono text-xs">{rule.name || "—"}</td>
-                    <td className="px-2 py-1.5 font-mono text-xs text-muted-foreground">{rule.path || "any"}</td>
-                    <td className="px-2 py-1.5 text-xs text-muted-foreground">{rule.user || "any"}</td>
-                    <td className="px-2 py-1.5">
-                      <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold" style={
-                        rule.action === "deny"
-                          ? { background: "color-mix(in oklab, var(--color-severity-critical) 16%, transparent)", color: "var(--color-severity-critical)" }
-                          : { background: "color-mix(in oklab, var(--color-severity-low) 16%, transparent)", color: "var(--color-severity-low)" }
-                      }>
-                        {rule.action === "deny" ? <Ban className="h-3 w-3" /> : <Check className="h-3 w-3" />}{rule.action}
-                      </span>
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <div className="flex items-center justify-end gap-1">
-                        <button type="button" title={rule.action === "deny" ? "Set to allow" : "Set to deny"} disabled={busy}
-                          onClick={() => updateRule.mutate({ r: rule, patch: { action: rule.action === "deny" ? "allow" : "deny" } })}
-                          className="rounded p-1 hover:bg-accent disabled:opacity-40">
-                          {rule.action === "deny" ? <Check className="h-3.5 w-3.5" /> : <Ban className="h-3.5 w-3.5" />}
-                        </button>
-                        <button type="button" title={rule.enabled ? "Disable" : "Enable"} disabled={busy}
-                          onClick={() => updateRule.mutate({ r: rule, patch: { enabled: !rule.enabled } })}
-                          className="rounded p-1 hover:bg-accent disabled:opacity-40">
-                          {rule.enabled ? <PowerOff className="h-3.5 w-3.5" /> : <Power className="h-3.5 w-3.5" />}
-                        </button>
-                        <button type="button" title="Delete" disabled={busy}
-                          onClick={() => deleteRule.mutate(rule.rule_id)}
-                          className="rounded p-1 text-status-error hover:bg-accent disabled:opacity-40">
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
+        <DataTable rows={profile.rules} columns={ruleColumns} rowKey={(rule) => rule.rule_id} density="compact" emptyState={<div className="px-2 py-4 text-center text-xs text-muted-foreground">No process rules yet. Add one above to allow or deny a specific process.</div>} />
       </Card>
 
       <Card title="Mode transitions" description="Audit trail of learn → monitor → enforce lifecycle changes.">

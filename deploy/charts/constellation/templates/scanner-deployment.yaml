@@ -50,9 +50,6 @@ spec:
             {{- if .Values.scanner.targetCapacity }}
             - "--target-capacity={{ .Values.scanner.targetCapacity }}"
             {{- end }}
-            {{- if .Values.scanner.readiness.requireVulnDB }}
-            - "--require-vulndb=true"
-            {{- end }}
             {{- with .Values.scanner.args }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -79,21 +76,15 @@ spec:
                 secretKeyRef:
                   name: {{ include "constellation.scannerTokenSecret" . }}
                   key: token
-                  optional: true
             - name: SCANNER_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ include "constellation.scannerTokenSecret" . }}
                   key: token
-                  optional: true
             - name: CONSTELLATION_SCANNER_TOKEN_FILE
               value: /var/run/constellation/scanner-token/token
-            - name: CONSTELLATION_VULNDB_PATH
-              value: {{ include "constellation.vulndbPath" . | quote }}
             - name: CONSTELLATION_SCANNER_SYFT_ENABLED
               value: {{ .Values.scanner.engines.syft | quote }}
-            - name: CONSTELLATION_SCANNER_VULNDB_ENABLED
-              value: {{ .Values.scanner.engines.vulndb | quote }}
             - name: CONSTELLATION_SCANNER_TRIVY_ENABLED
               value: {{ .Values.scanner.engines.trivy | quote }}
             - name: CONSTELLATION_SCANNER_GRYPE_ENABLED
@@ -133,8 +124,6 @@ spec:
               value: {{ .Values.scanner.fileRisks.maxFindings | quote }}
             - name: CONSTELLATION_SCANNER_TARGET_CAPACITY
               value: {{ .Values.scanner.targetCapacity | quote }}
-            - name: CONSTELLATION_SCANNER_REQUIRE_VULNDB
-              value: {{ .Values.scanner.readiness.requireVulnDB | quote }}
             - name: TMPDIR
               value: /tmp
             # Vuln-DB caches (grype/trivy/syft) live on a PERSISTENT volume so they
@@ -150,9 +139,6 @@ spec:
             - name: TRIVY_CACHE_DIR
               value: /var/lib/scanner-cache/trivy
           volumeMounts:
-            - name: vulndb
-              mountPath: {{ .Values.vulndb.mountPath | quote }}
-              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: scanner-cache
@@ -175,7 +161,6 @@ spec:
             periodSeconds: 10
           resources: {{- toYaml .Values.scanner.resources | nindent 12 }}
       volumes:
-        {{- include "constellation.vulndbVolume" . | nindent 8 }}
         - name: tmp
           emptyDir: {}
         - name: scanner-cache
@@ -189,7 +174,6 @@ spec:
         - name: scanner-token
           secret:
             secretName: {{ include "constellation.scannerTokenSecret" . }}
-            optional: true
         {{- if .Values.scanner.signatures.publicKeySecret }}
         - name: signature-trust
           secret:
