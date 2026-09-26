@@ -2,9 +2,11 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -715,10 +717,10 @@ func (s *Server) buildRouter() chi.Router {
 			// CiliumNetworkPolicy and applies it via kubectl.
 			r.Get("/runtime-policies/{id}/export", s.requireVerb(rbac.VerbReadFindings, rtPolicies.Export))
 			groupEdges := runtime.NewGroupEdgesHTTP(s.db, runtime.NewRuntimePolicyStore(s.db, s.auditLog), s.auditLog)
-			r.Get("/runtime-policies/group-edges", s.requireVerb(rbac.VerbReadFindings, groupEdges.List))
-			r.Post("/runtime-policies/group-edges", s.requireVerb(rbac.VerbManagePolicies, groupEdges.Create))
-			r.Post("/runtime-policies/group-edges/{id}/expand", s.requireVerb(rbac.VerbManagePolicies, groupEdges.Expand))
-			r.Delete("/runtime-policies/group-edges/{id}", s.requireVerb(rbac.VerbManagePolicies, groupEdges.Delete))
+			r.Get("/runtime-policies/group-edges", s.requireGroupEdgeVerb(rbac.VerbReadFindings, groupEdges.List))
+			r.Post("/runtime-policies/group-edges", s.requireGroupEdgeVerb(rbac.VerbManagePolicies, groupEdges.Create))
+			r.Post("/runtime-policies/group-edges/{id}/expand", s.requireGroupEdgeVerb(rbac.VerbManagePolicies, groupEdges.Expand))
+			r.Delete("/runtime-policies/group-edges/{id}", s.requireGroupEdgeVerb(rbac.VerbManagePolicies, groupEdges.Delete))
 
 			// Wave C4: DLP regex rules. Same mode vocabulary as runtime_policies
 			// (monitor / enforce / disabled) and same audit-action mapping.
@@ -1963,6 +1965,73 @@ func (s *Server) requireVerb(verb rbac.Verb, h http.HandlerFunc) http.HandlerFun
 			custom = s.customRoles.VerbsForOrg(r.Context(), subj.OrgID)
 		}
 		if err := rbac.AuthorizeWithCustom(subj.Assignments, verb, res, custom); err != nil {
+			writeError(w, http.StatusForbidden, "forbidden: "+string(verb))
+			return
+		}
+		h(w, r)
+	}
+}
+
+func (s *Server) requireGroupEdgeVerb(verb rbac.Verb, h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		subj, ok := authctx.SubjectFrom(r.Context())
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "no subject")
+			return
+		}
+		if !subj.HasTokenScope(verb) {
+			writeError(w, http.StatusForbidden, "forbidden: token lacks scope "+string(verb))
+			return
+		}
+		var clusterID uuid.UUID
+		if edgeID := chi.URLParam(r, "id"); edgeID != "" {
+			id, err := uuid.Parse(edgeID)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid id")
+				return
+			}
+			err = s.db.Pool().QueryRow(r.Context(), `SELECT cluster_id FROM group_rule_edges WHERE id=$1 AND org_id=$2`, id, subj.OrgID).Scan(&clusterID)
+			if errors.Is(err, pgx.ErrNoRows) {
+				writeError(w, http.StatusNotFound, "not found")
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to read edge")
+				return
+			}
+		} else if r.Method == http.MethodGet {
+			var err error
+			clusterID, err = uuid.Parse(strings.TrimSpace(r.URL.Query().Get("cluster_id")))
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "cluster_id is required")
+				return
+			}
+		} else {
+			body, err := io.ReadAll(io.LimitReader(r.Body, (1<<20)+1))
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid body")
+				return
+			}
+			if len(body) > 1<<20 {
+				writeError(w, http.StatusRequestEntityTooLarge, "body too large")
+				return
+			}
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			var request struct {
+				ClusterID uuid.UUID `json:"cluster_id"`
+			}
+			if err := json.Unmarshal(body, &request); err != nil || request.ClusterID == uuid.Nil {
+				writeError(w, http.StatusBadRequest, "cluster_id is required")
+				return
+			}
+			clusterID = request.ClusterID
+		}
+		resource := rbac.Resource{OrgID: subj.OrgID, ClusterID: &clusterID}
+		var custom map[string][]rbac.Verb
+		if s.customRoles != nil {
+			custom = s.customRoles.VerbsForOrg(r.Context(), subj.OrgID)
+		}
+		if err := rbac.AuthorizeWithCustom(subj.Assignments, verb, resource, custom); err != nil {
 			writeError(w, http.StatusForbidden, "forbidden: "+string(verb))
 			return
 		}

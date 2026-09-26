@@ -47,6 +47,22 @@ func TestGroupEdgesHTTPRoutesRBACScopeAndAudit(t *testing.T) {
 	if err := pool.QueryRow(ctx, `INSERT INTO group_rule_edges (org_id, cluster_id, from_group, to_group) VALUES ($1,$2,'external','nodes') RETURNING id`, otherOrgID, otherClusterID).Scan(&foreignEdgeID); err != nil {
 		t.Fatal(err)
 	}
+	scopedUserID := uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO users (id, org_id, email, display_name, session_epoch) VALUES ($1,$2,$3,'Scoped Edge',0)`, scopedUserID, orgID, "scoped-edge-"+scopedUserID.String()+"@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO role_assignments (user_id, role, scope_org_id, scope_cluster_id) VALUES ($1,'ClusterAdmin',$2,$3)`, scopedUserID, orgID, clusterID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM role_assignments WHERE user_id=$1`, scopedUserID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, scopedUserID)
+	})
+	scoped := issueFor(t, signer, scopedUserID, orgID, 0)
+	var siblingEdgeID uuid.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO group_rule_edges (org_id, cluster_id, from_group, to_group) VALUES ($1,$2,'external','nodes') RETURNING id`, orgID, siblingClusterID).Scan(&siblingEdgeID); err != nil {
+		t.Fatal(err)
+	}
 	call := func(method, path, token string, body any) (int, []byte) {
 		t.Helper()
 		var payload io.Reader
@@ -109,6 +125,46 @@ func TestGroupEdgesHTTPRoutesRBACScopeAndAudit(t *testing.T) {
 	}
 	if err := json.Unmarshal(body, &created); err != nil || created.Edge.ID == uuid.Nil {
 		t.Fatalf("create edge=%+v err=%v", created, err)
+	}
+	for _, test := range []struct {
+		name, method, path string
+		body               any
+		want               int
+	}{
+		{"scoped list", http.MethodGet, base + "?cluster_id=" + clusterID.String(), nil, http.StatusOK},
+		{"sibling list denied", http.MethodGet, base + "?cluster_id=" + siblingClusterID.String(), nil, http.StatusForbidden},
+		{"scoped create", http.MethodPost, base, map[string]any{"cluster_id": clusterID, "from_group": groupName, "to_group": "external"}, http.StatusCreated},
+		{"sibling create denied", http.MethodPost, base, map[string]any{"cluster_id": siblingClusterID, "from_group": siblingGroup, "to_group": "external"}, http.StatusForbidden},
+		{"scoped expand", http.MethodPost, base + "/" + created.Edge.ID.String() + "/expand", nil, http.StatusOK},
+		{"sibling expand denied", http.MethodPost, base + "/" + siblingEdgeID.String() + "/expand", nil, http.StatusForbidden},
+		{"sibling delete denied", http.MethodDelete, base + "/" + siblingEdgeID.String(), nil, http.StatusForbidden},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			status, response := call(test.method, test.path, scoped, test.body)
+			if status != test.want {
+				t.Fatalf("status=%d want=%d body=%s", status, test.want, response)
+			}
+		})
+	}
+	var unauthorizedWrites int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM group_rule_edges WHERE org_id=$1 AND cluster_id=$2 AND from_group=$3`, orgID, siblingClusterID, siblingGroup).Scan(&unauthorizedWrites); err != nil || unauthorizedWrites != 0 {
+		t.Fatalf("sibling edge writes=%d err=%v", unauthorizedWrites, err)
+	}
+	status, body = call(http.MethodPost, base, scoped, map[string]any{"cluster_id": clusterID, "from_group": "external", "to_group": groupName})
+	if status != http.StatusCreated {
+		t.Fatalf("scoped create for delete status=%d body=%s", status, body)
+	}
+	var scopedEdge struct {
+		Edge struct {
+			ID uuid.UUID `json:"id"`
+		} `json:"edge"`
+	}
+	if err := json.Unmarshal(body, &scopedEdge); err != nil || scopedEdge.Edge.ID == uuid.Nil {
+		t.Fatalf("scoped edge=%+v err=%v", scopedEdge, err)
+	}
+	status, body = call(http.MethodDelete, base+"/"+scopedEdge.Edge.ID.String(), scoped, nil)
+	if status != http.StatusNoContent {
+		t.Fatalf("scoped delete status=%d body=%s", status, body)
 	}
 	protect := map[string]any{"cluster_id": clusterID, "from_group": groupName, "to_group": destinationGroup, "mode": "protect", "expand": true}
 	status, body = call(http.MethodPost, base, admin, protect)

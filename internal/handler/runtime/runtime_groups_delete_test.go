@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
 
+	"github.com/alphabravocompany/constellation/internal/runtime/dp"
 	"github.com/alphabravocompany/constellation/pkg/netpolicy"
 )
 
@@ -232,26 +234,136 @@ func TestGroupEdgeDeleteRefusesAmbiguousLegacyPolicy(t *testing.T) {
 	}
 }
 
-func TestGroupEdgeUpsertRejectsStaleExpandedPolicyChanges(t *testing.T) {
-	store, orgID, clusterID, edge := edgeRetractionFixture(t)
-	ctx := context.Background()
-	for _, change := range []netpolicy.GroupEdge{
-		{FromGroup: edge.FromGroup, ToGroup: edge.ToGroup, Mode: "monitor", Ports: []netpolicy.PortSpec{{Protocol: "TCP", Port: 443}}},
-		{FromGroup: edge.FromGroup, ToGroup: edge.ToGroup, Mode: "protect", Ports: []netpolicy.PortSpec{{Protocol: "TCP", Port: 8443}}},
-	} {
-		if _, err := store.Upsert(ctx, orgID, clusterID, change, nil); !errors.Is(err, errEdgeExpandedMutation) {
-			t.Fatalf("stale edge edit accepted: %+v err=%v", change, err)
-		}
-		if _, _, err := store.UpsertAndExpand(ctx, orgID, clusterID, change, nil); !errors.Is(err, errEdgeExpandedMutation) {
-			t.Fatalf("stale edge edit with expansion accepted: %+v err=%v", change, err)
-		}
+func TestGroupEdgeExpandedEditsReplacePolicies(t *testing.T) {
+	for _, expand := range []bool{false, true} {
+		t.Run(fmt.Sprintf("expand=%v", expand), func(t *testing.T) {
+			store, orgID, clusterID, original := edgeRetractionFixture(t)
+			ctx := context.Background()
+			name := edgePolicyName(netpolicy.GroupEdge{FromGroup: original.FromGroup, ToGroup: original.ToGroup})
+			for _, change := range []struct {
+				mode string
+				port int
+			}{
+				{"monitor", 443},
+				{"monitor", 8443},
+				{"protect", 8443},
+			} {
+				requested := netpolicy.GroupEdge{FromGroup: original.FromGroup, ToGroup: original.ToGroup,
+					Mode: change.mode, Ports: []netpolicy.PortSpec{{Protocol: "TCP", Port: change.port}}}
+				var row GroupEdgeRow
+				var err error
+				if expand {
+					var result ExpandResult
+					row, result, err = store.UpsertAndExpand(ctx, orgID, clusterID, requested, nil)
+					if err == nil && len(result.Policies) != 3 {
+						t.Fatalf("expanded workloads = %v", result.Policies)
+					}
+				} else {
+					row, err = store.Upsert(ctx, orgID, clusterID, requested, nil)
+				}
+				if err != nil || row.ID != original.ID || row.Mode != change.mode || len(row.Ports) != 1 || row.Ports[0].Port != change.port {
+					t.Fatalf("edit row=%+v err=%v", row, err)
+				}
+				policies, err := store.db.Pool().Query(ctx, `SELECT rules, mode, def_action FROM runtime_policies WHERE org_id=$1 AND cluster_id=$2 AND name=$3`, orgID, clusterID, name)
+				if err != nil {
+					t.Fatal(err)
+				}
+				count := 0
+				for policies.Next() {
+					var raw json.RawMessage
+					var mode PolicyMode
+					var defaultAction uint8
+					if err := policies.Scan(&raw, &mode, &defaultAction); err != nil {
+						policies.Close()
+						t.Fatal(err)
+					}
+					if _, owned, err := splitEdgeRules(raw, original.ID); err != nil || !owned {
+						policies.Close()
+						t.Fatalf("policy ownership: owned=%v err=%v", owned, err)
+					}
+					var rules []struct {
+						Port int `json:"port"`
+					}
+					if err := json.Unmarshal(raw, &rules); err != nil {
+						policies.Close()
+						t.Fatal(err)
+					}
+					foundPort := false
+					for _, rule := range rules {
+						if rule.Port == change.port {
+							foundPort = true
+						}
+						if rule.Port == 443 && change.port != 443 {
+							policies.Close()
+							t.Fatal("stale port retained")
+						}
+					}
+					if !foundPort {
+						policies.Close()
+						t.Fatalf("new port %d missing: %s", change.port, raw)
+					}
+					wantMode, wantAction := PolicyModeMonitor, uint8(dp.PolicyActionAllow)
+					if change.mode == "protect" {
+						wantMode, wantAction = PolicyModeEnforce, dp.PolicyActionDeny
+					}
+					if mode != wantMode || defaultAction != wantAction {
+						policies.Close()
+						t.Fatalf("posture mode=%s action=%d", mode, defaultAction)
+					}
+					count++
+				}
+				err = policies.Err()
+				policies.Close()
+				if err != nil || count != 3 {
+					t.Fatalf("policies=%d err=%v", count, err)
+				}
+			}
+		})
 	}
-	unchanged := netpolicy.GroupEdge{FromGroup: edge.FromGroup, ToGroup: edge.ToGroup, Mode: "protect", Ports: []netpolicy.PortSpec{{Protocol: "TCP", Port: 443}}, Comment: "safe comment"}
-	if _, err := store.Upsert(ctx, orgID, clusterID, unchanged, nil); err != nil {
-		t.Fatalf("comment-only edit: %v", err)
-	}
-	var mode, comment string
-	if err := store.db.Pool().QueryRow(ctx, `SELECT mode, comment FROM group_rule_edges WHERE id=$1`, edge.ID).Scan(&mode, &comment); err != nil || mode != "protect" || comment != "safe comment" {
-		t.Fatalf("edge after edits: mode=%q comment=%q err=%v", mode, comment, err)
+}
+
+func TestGroupEdgeExpandedEditRefusesAmbiguousOwnership(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		t.Run(fmt.Sprintf("legacy=%v", legacy), func(t *testing.T) {
+			store, orgID, clusterID, edge := edgeRetractionFixture(t)
+			ctx := context.Background()
+			pool := store.db.Pool()
+			name := edgePolicyName(netpolicy.GroupEdge{FromGroup: edge.FromGroup, ToGroup: edge.ToGroup})
+			var before json.RawMessage
+			if legacy {
+				if _, err := pool.Exec(ctx, `INSERT INTO runtime_policies (org_id, cluster_id, workload, namespace, name, mode, rules)
+ VALUES ($1,$2,'default/legacy','default',$3,'enforce','[{"cfg":"learned","port":443}]'::jsonb)`, orgID, clusterID, name); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if _, err := pool.Exec(ctx, `UPDATE runtime_policies SET rules=rules || '[{"cfg":"user","port":80}]'::jsonb
+ WHERE org_id=$1 AND name=$2 AND workload='default/front-a'`, orgID, name); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := pool.QueryRow(ctx, `SELECT rules FROM runtime_policies WHERE org_id=$1 AND name=$2 AND workload='default/front-a'`, orgID, name).Scan(&before); err != nil {
+				t.Fatal(err)
+			}
+			change := netpolicy.GroupEdge{FromGroup: edge.FromGroup, ToGroup: edge.ToGroup, Mode: "monitor", Ports: []netpolicy.PortSpec{{Protocol: "TCP", Port: 8443}}}
+			for _, expand := range []bool{false, true} {
+				var err error
+				if expand {
+					_, _, err = store.UpsertAndExpand(ctx, orgID, clusterID, change, nil)
+				} else {
+					_, err = store.Upsert(ctx, orgID, clusterID, change, nil)
+				}
+				if !errors.Is(err, errEdgePolicyOwnership) {
+					t.Fatalf("ambiguous edit expand=%v err=%v", expand, err)
+				}
+			}
+			current, err := store.get(ctx, orgID, edge.ID)
+			if err != nil || current.Mode != "protect" || current.Ports[0].Port != 443 {
+				t.Fatalf("edge changed: %+v err=%v", current, err)
+			}
+			var after json.RawMessage
+			if err := pool.QueryRow(ctx, `SELECT rules FROM runtime_policies WHERE org_id=$1 AND name=$2 AND workload='default/front-a'`, orgID, name).Scan(&after); err != nil || string(after) != string(before) {
+				t.Fatalf("policy changed: before=%s after=%s err=%v", before, after, err)
+			}
+		})
 	}
 }

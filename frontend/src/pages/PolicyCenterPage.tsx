@@ -31,7 +31,6 @@ interface PolicyFamily {
   icon: ReactNode;
   mode?: "learn" | "monitor" | "enforce";
   ordered?: boolean;
-  importable?: boolean;
   portable?: "network-rules" | "dlp" | "signatures" | "groups" | "vuln-profiles";
 }
 
@@ -44,7 +43,6 @@ const policyFamilies: PolicyFamily[] = [
     icon: <Network className="h-4 w-4" aria-hidden />,
     mode: "monitor",
     ordered: true,
-    importable: true,
     portable: "network-rules",
   },
   {
@@ -55,7 +53,6 @@ const policyFamilies: PolicyFamily[] = [
     icon: <ShieldCheck className="h-4 w-4" aria-hidden />,
     mode: "enforce",
     ordered: true,
-    importable: true,
   },
   {
     title: "Runtime Policies",
@@ -64,7 +61,6 @@ const policyFamilies: PolicyFamily[] = [
     createRoute: "runtime-policies/new",
     icon: <ScrollText className="h-4 w-4" aria-hidden />,
     mode: "monitor",
-    importable: true,
   },
   {
     title: "Process Baselines",
@@ -80,7 +76,6 @@ const policyFamilies: PolicyFamily[] = [
     createRoute: "file-monitor/new",
     icon: <FileWarning className="h-4 w-4" aria-hidden />,
     mode: "monitor",
-    importable: true,
   },
   {
     title: "DLP Rules",
@@ -90,7 +85,6 @@ const policyFamilies: PolicyFamily[] = [
     createRoute: "runtime-dlp/new",
     icon: <ShieldCheck className="h-4 w-4" aria-hidden />,
     mode: "monitor",
-    importable: true,
     portable: "dlp",
   },
   {
@@ -101,7 +95,6 @@ const policyFamilies: PolicyFamily[] = [
     createRoute: "runtime-signatures/new",
     icon: <Activity className="h-4 w-4" aria-hidden />,
     mode: "monitor",
-    importable: true,
     portable: "signatures",
   },
   {
@@ -117,7 +110,6 @@ const policyFamilies: PolicyFamily[] = [
     nvName: "Vulnerability profile",
     route: "vuln-profiles",
     icon: <FileWarning className="h-4 w-4" aria-hidden />,
-    importable: true,
     portable: "vuln-profiles",
   },
   {
@@ -126,7 +118,6 @@ const policyFamilies: PolicyFamily[] = [
     route: "groups",
     icon: <UsersRound className="h-4 w-4" aria-hidden />,
     mode: "monitor",
-    importable: true,
     portable: "groups",
   },
   {
@@ -136,7 +127,6 @@ const policyFamilies: PolicyFamily[] = [
     createRoute: "policies/new",
     icon: <FileText className="h-4 w-4" aria-hidden />,
     mode: "monitor",
-    importable: true,
   },
   {
     title: "Response Catalog",
@@ -198,7 +188,6 @@ export function PolicyCenterPage() {
                       <span key={term} className="rounded border border-primary/20 bg-primary/5 px-2 py-1 text-primary">{term}</span>
                     ))}
                     {family.ordered ? <span className="rounded bg-muted px-2 py-1">ordered</span> : null}
-                    {family.importable ? <span className="rounded bg-muted px-2 py-1">importable</span> : null}
                     {family.portable ? <span className="rounded bg-muted px-2 py-1">yaml</span> : null}
                     <span className="rounded bg-muted px-2 py-1">cluster scoped</span>
                   </div>
@@ -215,10 +204,6 @@ export function PolicyCenterPage() {
                       <span className="contents" data-testid={`policy-family-${familySlug(family.route)}-portable`}>
                         <PolicyFamilyImportExport family={family.portable} clusterId={clusterId} queryClient={queryClient} />
                       </span>
-                    ) : family.importable ? (
-                      <Button asChild size="sm" variant="ghost">
-                        <Link to="/settings/migration" aria-label={`Import ${family.title}`}>Import</Link>
-                      </Button>
                     ) : null}
                   </div>
                 </div>

@@ -42,12 +42,28 @@ describe("PolicyCenterPage", () => {
     expect(text()).toContain("Protect");
     expect(text()).toContain("Enforce");
 
-    expect(portableText("network-rules")).toContain("Import");
-    expect(portableText("network-rules")).toContain("Export");
-    expect(portableText("runtime-dlp")).toContain("Import");
-    expect(portableText("runtime-dlp")).toContain("Export");
-    expect(portableText("runtime-signatures")).toContain("Import");
-    expect(portableText("runtime-signatures")).toContain("Export");
+    for (const slug of ["network-rules", "runtime-dlp", "runtime-signatures", "vuln-profiles", "groups"]) {
+      const family = familyElement(slug);
+      expect(family.textContent).toContain("yaml");
+      expect(portableText(slug)).toContain("Import");
+      expect(portableText(slug)).toContain("Export");
+      expect(family.querySelectorAll('input[type="file"]')).toHaveLength(1);
+    }
+  });
+
+  it("shows migration only as migration and omits unsupported family imports", () => {
+    render(<PolicyCenterPage />);
+
+    const migrationLinks = host?.querySelectorAll<HTMLAnchorElement>('a[href="/settings/migration"]');
+    expect(migrationLinks).toHaveLength(1);
+    expect(migrationLinks?.[0].textContent).toBe("Migration Imports");
+
+    for (const slug of ["admission", "runtime-policies", "runtime-baselines", "file-monitor", "response-rules", "policies", "response"]) {
+      const family = familyElement(slug);
+      expect(family.textContent).not.toContain("importable");
+      expect(family.textContent).not.toContain("Import");
+      expect(family.querySelector('[data-testid$="-portable"]')).toBeNull();
+    }
   });
 });
 
@@ -71,4 +87,10 @@ function text() {
 
 function portableText(slug: string) {
   return host?.querySelector(`[data-testid="policy-family-${slug}-portable"]`)?.textContent ?? "";
+}
+
+function familyElement(slug: string) {
+  const family = host?.querySelector<HTMLElement>(`[data-testid="policy-family-${slug}"]`);
+  if (!family) throw new Error(`Missing policy family ${slug}`);
+  return family;
 }

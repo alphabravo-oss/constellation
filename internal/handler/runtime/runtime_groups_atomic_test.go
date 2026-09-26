@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -126,5 +127,59 @@ func TestGroupEdgeUpsertAndExpandRollsBackEdgeAndPolicies(t *testing.T) {
 	row, result, err := store.UpsertAndExpand(ctx, orgID, clusterID, edge, nil)
 	if err != nil || row.ID != previous.ID || len(result.Policies) != 3 {
 		t.Fatalf("retry row=%+v result=%+v err=%v", row, result, err)
+	}
+}
+
+func TestGroupEdgeExpandedEditRollsBackRetractionOnExpansionFailure(t *testing.T) {
+	for _, expand := range []bool{false, true} {
+		t.Run(fmt.Sprintf("expand=%v", expand), func(t *testing.T) {
+			store, orgID, clusterID, edge := edgeRetractionFixture(t)
+			ctx := context.Background()
+			pool := store.db.Pool()
+			name := edgePolicyName(netpolicy.GroupEdge{FromGroup: edge.FromGroup, ToGroup: edge.ToGroup})
+			var before json.RawMessage
+			if err := pool.QueryRow(ctx, `SELECT jsonb_agg(to_jsonb(p) ORDER BY workload) FROM runtime_policies p
+ WHERE org_id=$1 AND cluster_id=$2 AND name=$3`, orgID, clusterID, name).Scan(&before); err != nil {
+				t.Fatal(err)
+			}
+			constraint := "edge_edit_atomic_" + orgID.String()[:8]
+			t.Cleanup(func() {
+				_, _ = pool.Exec(context.Background(), `ALTER TABLE runtime_policies DROP CONSTRAINT IF EXISTS `+constraint)
+			})
+			check := fmt.Sprintf(`ALTER TABLE runtime_policies ADD CONSTRAINT %s CHECK (NOT (org_id='%s'::uuid AND workload='default/front-b')) NOT VALID`, constraint, orgID)
+			if _, err := pool.Exec(ctx, check); err != nil {
+				t.Fatal(err)
+			}
+			change := netpolicy.GroupEdge{FromGroup: edge.FromGroup, ToGroup: edge.ToGroup, Mode: "monitor", Ports: []netpolicy.PortSpec{{Protocol: "TCP", Port: 8443}}, Comment: "changed"}
+			var err error
+			if expand {
+				_, _, err = store.UpsertAndExpand(ctx, orgID, clusterID, change, nil)
+			} else {
+				_, err = store.Upsert(ctx, orgID, clusterID, change, nil)
+			}
+			if err == nil {
+				t.Fatal("edit succeeded despite expansion failure")
+			}
+			current, err := store.get(ctx, orgID, edge.ID)
+			if err != nil || current.Mode != edge.Mode || current.Comment != edge.Comment || current.Ports[0].Port != edge.Ports[0].Port {
+				t.Fatalf("edge after rollback: %+v err=%v", current, err)
+			}
+			var after json.RawMessage
+			if err := pool.QueryRow(ctx, `SELECT jsonb_agg(to_jsonb(p) ORDER BY workload) FROM runtime_policies p
+ WHERE org_id=$1 AND cluster_id=$2 AND name=$3`, orgID, clusterID, name).Scan(&after); err != nil || string(after) != string(before) {
+				t.Fatalf("policies changed after rollback: before=%s after=%s err=%v", before, after, err)
+			}
+			if _, err := pool.Exec(ctx, `ALTER TABLE runtime_policies DROP CONSTRAINT `+constraint); err != nil {
+				t.Fatal(err)
+			}
+			if expand {
+				_, _, err = store.UpsertAndExpand(ctx, orgID, clusterID, change, nil)
+			} else {
+				_, err = store.Upsert(ctx, orgID, clusterID, change, nil)
+			}
+			if err != nil {
+				t.Fatalf("retry edit: %v", err)
+			}
+		})
 	}
 }
