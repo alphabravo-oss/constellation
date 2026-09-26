@@ -83,18 +83,36 @@ type platformConversation struct {
 }
 
 func (h *NetworkConversations) platformConversations(ctx context.Context, orgID uuid.UUID, clusterID *uuid.UUID, conversations []graph.Conversation) []platformConversation {
+	workloads := make([]string, 0, len(conversations)*2)
+	for _, conversation := range conversations {
+		workloads = append(workloads, conversation.From, conversation.To)
+	}
+	roles := h.conversationPlatformRoles(ctx, orgID, clusterID, workloads...)
+	out := make([]platformConversation, 0, len(conversations))
+	for _, conversation := range conversations {
+		out = append(out, platformConversation{
+			Conversation:     conversation,
+			FromPlatformRole: roles[conversation.From],
+			ToPlatformRole:   roles[conversation.To],
+		})
+	}
+	return out
+}
+
+func (h *NetworkConversations) conversationPlatformRoles(ctx context.Context, orgID uuid.UUID, clusterID *uuid.UUID, workloads ...string) map[string]string {
 	roles := make(map[string]string)
 	namespaces := make(map[string]struct{})
 	names := make(map[string]struct{})
-	for _, conversation := range conversations {
-		for _, workload := range []string{conversation.From, conversation.To} {
-			namespace, name := netutil.SplitWorkload(workload)
-			if role := handler.PlatformRole(namespace, nil); role != "" {
-				roles[workload] = role
-			} else if endpointKind(workload) == "workload" {
-				namespaces[namespace] = struct{}{}
-				names[name] = struct{}{}
-			}
+	for _, workload := range workloads {
+		if endpointKind(workload) != "workload" {
+			continue
+		}
+		namespace, name := netutil.SplitWorkload(workload)
+		if role := handler.PlatformRole(namespace, nil); role != "" {
+			roles[workload] = role
+		} else {
+			namespaces[namespace] = struct{}{}
+			names[name] = struct{}{}
 		}
 	}
 	if clusterID == nil && len(namespaces) > 0 {
@@ -140,15 +158,7 @@ SELECT namespace, name, labels FROM deployments
 			rows.Close()
 		}
 	}
-	out := make([]platformConversation, 0, len(conversations))
-	for _, conversation := range conversations {
-		out = append(out, platformConversation{
-			Conversation:     conversation,
-			FromPlatformRole: roles[conversation.From],
-			ToPlatformRole:   roles[conversation.To],
-		})
-	}
-	return out
+	return roles
 }
 
 // NetworkConversations is a slim wrapper that builds a pkg/graph.Graph from the
@@ -185,9 +195,12 @@ func (h *NetworkConversations) List(w http.ResponseWriter, r *http.Request) {
 	verdict := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("verdict")))
 	var clusterUUID *uuid.UUID
 	if clusterID != "" {
-		if u, err := uuid.Parse(clusterID); err == nil {
-			clusterUUID = &u
+		u, err := uuid.Parse(clusterID)
+		if err != nil {
+			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster_id"})
+			return
 		}
+		clusterUUID = &u
 	}
 	groupMembers, groupName, groupActive, err := handler.ResolveGroupFilterMembers(r.Context(), h.db.Pool(), subj.OrgID, clusterUUID, r.URL.Query().Get("group"))
 	if err != nil {
@@ -311,6 +324,15 @@ func (h *NetworkConversations) Detail(w http.ResponseWriter, r *http.Request) {
 		hours = 24
 	}
 	clusterID := strings.TrimSpace(r.URL.Query().Get("cluster_id"))
+	var clusterUUID *uuid.UUID
+	if clusterID != "" {
+		u, err := uuid.Parse(clusterID)
+		if err != nil {
+			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster_id"})
+			return
+		}
+		clusterUUID = &u
+	}
 	rows, err := h.db.Pool().Query(r.Context(), `
 SELECT protocol, COALESCE(l7_protocol,''), COALESCE(dst_port,0), verdict,
        SUM(sum_bytes)::bigint, SUM(sum_packets)::bigint,
@@ -351,12 +373,22 @@ SELECT protocol, COALESCE(l7_protocol,''), COALESCE(dst_port,0), verdict,
 		tPkts += e.Packets
 		tSess += e.Sessions
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+	response := map[string]any{
 		"from": from, "to": to, "window_hours": hours,
 		"entries": entries,
 		"totals": map[string]int64{
 			"bytes": tBytes, "client_bytes": tClient, "server_bytes": tServer,
 			"packets": tPkts, "sessions": tSess,
 		},
-	})
+	}
+	if len(entries) > 0 {
+		roles := h.conversationPlatformRoles(r.Context(), subj.OrgID, clusterUUID, from, to)
+		if role := roles[from]; role != "" {
+			response["from_platform_role"] = role
+		}
+		if role := roles[to]; role != "" {
+			response["to_platform_role"] = role
+		}
+	}
+	httpx.WriteJSON(w, http.StatusOK, response)
 }

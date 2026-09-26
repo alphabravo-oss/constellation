@@ -1,8 +1,8 @@
 // App.tsx — cluster-first IA.
 //
 // Routing structure:
-//   /login                          → LoginPage
-//   /auth/login                     → LoginPage alias
+//   /login                          → /auth/login alias
+//   /auth/login                     → LoginPage
 //   /                               → redirect to /clusters
 //   /clusters                       → ClustersLandingPage (picker, post-login landing)
 //   /clusters/:id/*                 → ClusterRouter (provides cluster context via useCluster)
@@ -13,7 +13,7 @@
 //   Org-level surfaces stay at root: /cve, /settings, /federation, /coverage,
 //     /system-health, /access-control, /integrations, /ai.
 import { lazy, Suspense } from "react";
-import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
 import { AppShell } from "./components/AppShell";
@@ -150,10 +150,23 @@ function LegacyClusterRedirect() {
   return <Navigate to={`/clusters/${activeCluster}/${legacyPath}${location.search}${location.hash}`} replace />;
 }
 
+function AliasRedirect({ to, cluster = false, from }: { to: string; cluster?: boolean; from?: string }) {
+  const location = useLocation();
+  const { id } = useParams();
+  const [targetPath, defaultSearch = ""] = to.split("?");
+  const pathname = cluster ? `/clusters/${id}/${targetPath}` : targetPath;
+  const aliasPath = from ? (cluster ? `/clusters/${id}/${from}` : `/${from}`) : "";
+  const suffix = from ? location.pathname.slice(aliasPath.length) : "";
+  const search = new URLSearchParams(location.search);
+  new URLSearchParams(defaultSearch).forEach((value, key) => search.set(key, value));
+
+  return <Navigate to={{ pathname: `${pathname}${suffix}`, search: search.size ? `?${search}` : "", hash: location.hash }} replace />;
+}
+
 export function App() {
   return (
     <Routes>
-      <Route path="/login" element={<LoginPage />} />
+      <Route path="/login" element={<AliasRedirect to="/auth/login" />} />
       <Route path="/auth/login" element={<LoginPage />} />
       <Route
         path="/"
@@ -230,7 +243,7 @@ export function App() {
           <Route path="findings/:fid" element={<SuspenseRoute><FindingDetailPage /></SuspenseRoute>} />
           <Route path="cve/:cveId"    element={<SuspenseRoute><CVEDetailPage /></SuspenseRoute>} />
           <Route path="nodes"         element={<SuspenseRoute><NodesPage /></SuspenseRoute>} />
-          <Route path="hosts"         element={<Navigate to="../nodes" replace />} />
+          <Route path="hosts/*"       element={<AliasRedirect to="nodes" cluster from="hosts" />} />
           <Route path="containers"    element={<SuspenseRoute><ContainersPage /></SuspenseRoute>} />
           <Route path="nodes/:nodeName" element={<SuspenseRoute><NodeDetailPage /></SuspenseRoute>} />
           <Route path="images"        element={<SuspenseRoute><ImageScansPage /></SuspenseRoute>} />
@@ -241,12 +254,12 @@ export function App() {
           <Route path="assets"        element={<SuspenseRoute><AssetsPage /></SuspenseRoute>} />
           <Route path="assets/:aid"   element={<SuspenseRoute><AssetDetailPage /></SuspenseRoute>} />
           <Route path="deployments"   element={<SuspenseRoute><DeploymentsPage /></SuspenseRoute>} />
-          <Route path="services"      element={<Navigate to="../deployments" replace />} />
-          <Route path="workloads"     element={<Navigate to="../deployments" replace />} />
+          <Route path="services/*"    element={<AliasRedirect to="deployments" cluster from="services" />} />
+          <Route path="workloads/*"   element={<AliasRedirect to="deployments" cluster from="workloads" />} />
           <Route path="deployments/:did" element={<SuspenseRoute><DeploymentDetailPage /></SuspenseRoute>} />
           <Route path="compliance"    element={<SuspenseRoute><CompliancePage /></SuspenseRoute>} />
           <Route path="registries"    element={<SuspenseRoute><RegistriesPage /></SuspenseRoute>} />
-          <Route path="registry"      element={<Navigate to="../registries" replace />} />
+          <Route path="registry/*"    element={<AliasRedirect to="registries" cluster from="registry" />} />
           <Route path="registries/:regId" element={<SuspenseRoute><RegistryImagesPage /></SuspenseRoute>} />
           <Route path="exceptions"    element={<SuspenseRoute><VulnerabilityExceptionsPage /></SuspenseRoute>} />
           <Route path="runtime"       element={<SuspenseRoute><RuntimePage /></SuspenseRoute>} />
@@ -257,25 +270,23 @@ export function App() {
           <Route path="response-rules/new"     element={<SuspenseRoute><ResponseRuleFormPage /></SuspenseRoute>} />
           <Route path="response-rules/:ruleId" element={<SuspenseRoute><ResponseRuleFormPage /></SuspenseRoute>} />
           <Route path="vuln-profiles" element={<SuspenseRoute><VulnProfilePage /></SuspenseRoute>} />
-          <Route path="vulnerability-profiles" element={<Navigate to="../vuln-profiles" replace />} />
+          <Route path="vulnerability-profiles" element={<AliasRedirect to="vuln-profiles" cluster />} />
           <Route path="groups"        element={<SuspenseRoute><GroupsPage /></SuspenseRoute>} />
           <Route path="groups/:groupId" element={<SuspenseRoute><GroupDetailPage /></SuspenseRoute>} />
           <Route path="file-monitor"  element={<SuspenseRoute><FileMonitorPage /></SuspenseRoute>} />
           <Route path="file-monitor/new"     element={<SuspenseRoute><FileMonitorFormPage /></SuspenseRoute>} />
           <Route path="file-monitor/:ruleId" element={<SuspenseRoute><FileMonitorFormPage /></SuspenseRoute>} />
           <Route path="timeline"      element={<SuspenseRoute><TimelinePage /></SuspenseRoute>} />
-          <Route path="events"        element={<Navigate to="../timeline" replace />} />
-          <Route path="activity"      element={<Navigate to="../timeline" replace />} />
-          <Route path="incidents"     element={<Navigate to="../timeline?tab=incident" replace />} />
-          <Route path="security-events" element={<Navigate to="../timeline" replace />} />
+          <Route path="events"        element={<AliasRedirect to="timeline" cluster />} />
+          <Route path="activity"      element={<AliasRedirect to="timeline" cluster />} />
+          <Route path="incidents"     element={<AliasRedirect to="timeline?tab=incident" cluster />} />
+          <Route path="security-events" element={<AliasRedirect to="timeline" cluster />} />
           <Route path="network"       element={<SuspenseRoute><NetworkMapPage /></SuspenseRoute>} />
-          <Route path="network-activity" element={<Navigate to="../network" replace />} />
+          <Route path="network-activity" element={<AliasRedirect to="network" cluster />} />
           <Route path="network-rules" element={<SuspenseRoute><NetworkRulesPage /></SuspenseRoute>} />
           <Route path="network-rules/new" element={<SuspenseRoute><NetworkRuleFormPage /></SuspenseRoute>} />
-          <Route path="waf"           element={<SuspenseRoute><RuntimeSignaturesPage /></SuspenseRoute>} />
-          <Route path="waf/*"         element={<Navigate to="../waf" replace />} />
-          <Route path="dlp"           element={<SuspenseRoute><RuntimeDLPPage /></SuspenseRoute>} />
-          <Route path="dlp/*"         element={<Navigate to="../dlp" replace />} />
+          <Route path="waf/*"         element={<AliasRedirect to="runtime-signatures" cluster from="waf" />} />
+          <Route path="dlp/*"         element={<AliasRedirect to="runtime-dlp" cluster from="dlp" />} />
           {/* Wave B1: runtime_policies CRUD UI. cluster_id from :id param. */}
           <Route path="runtime-policies" element={<SuspenseRoute><RuntimePoliciesPage /></SuspenseRoute>} />
           <Route path="runtime-policies/new"       element={<SuspenseRoute><RuntimePolicyFormPage /></SuspenseRoute>} />
@@ -289,25 +300,24 @@ export function App() {
           <Route path="runtime-signatures/new"   element={<SuspenseRoute><RuntimeSignatureFormPage /></SuspenseRoute>} />
           <Route path="runtime-signatures/:sigId" element={<SuspenseRoute><RuntimeSignatureFormPage /></SuspenseRoute>} />
           <Route path="admission"     element={<SuspenseRoute><AdmissionPage /></SuspenseRoute>} />
-          <Route path="admission-control" element={<Navigate to="../admission" replace />} />
-          <Route path="admission-control/*" element={<Navigate to="../admission" replace />} />
+          <Route path="admission-control/*" element={<AliasRedirect to="admission" cluster from="admission-control" />} />
           <Route path="admission/new" element={<SuspenseRoute><AdmissionRuleFormPage /></SuspenseRoute>} />
           <Route path="policy"        element={<SuspenseRoute><PolicyCenterPage /></SuspenseRoute>} />
           <Route path="policies"      element={<SuspenseRoute><PoliciesPage /></SuspenseRoute>} />
           <Route path="policies/new"  element={<SuspenseRoute><PolicyWizardPage /></SuspenseRoute>} />
           <Route path="policies/:policyId" element={<SuspenseRoute><PolicyFormPage /></SuspenseRoute>} />
           <Route path="audit"         element={<SuspenseRoute><AuditPage /></SuspenseRoute>} />
-          <Route path="audit-log"     element={<Navigate to="../audit" replace />} />
+          <Route path="audit-log"     element={<AliasRedirect to="audit" cluster />} />
           <Route path="components"    element={<SuspenseRoute><ComponentsPage /></SuspenseRoute>} />
-          <Route path="controllers"   element={<Navigate to="../components?role=controller" replace />} />
-          <Route path="enforcers"     element={<Navigate to="../components?role=enforcer" replace />} />
-          <Route path="agents"        element={<Navigate to="../components?role=enforcer" replace />} />
-          <Route path="scanners"      element={<Navigate to="../components?role=scanner" replace />} />
-          <Route path="vulndb"        element={<Navigate to="/settings/scanner" replace />} />
-          <Route path="cve-sources"   element={<Navigate to="/settings/scanner" replace />} />
-          <Route path="notifications" element={<Navigate to="/settings/integrations" replace />} />
-          <Route path="system-config" element={<Navigate to="/settings/effective-config" replace />} />
-          <Route path="sysconfig"     element={<Navigate to="/settings/effective-config" replace />} />
+          <Route path="controllers"   element={<AliasRedirect to="components?role=controller" cluster />} />
+          <Route path="enforcers"     element={<AliasRedirect to="components?role=enforcer" cluster />} />
+          <Route path="agents"        element={<AliasRedirect to="components?role=enforcer" cluster />} />
+          <Route path="scanners"      element={<AliasRedirect to="components?role=scanner" cluster />} />
+          <Route path="vulndb"        element={<AliasRedirect to="/settings/scanner" />} />
+          <Route path="cve-sources"   element={<AliasRedirect to="/settings/scanner" />} />
+          <Route path="notifications" element={<AliasRedirect to="/settings/integrations" />} />
+          <Route path="system-config" element={<AliasRedirect to="/settings/effective-config" />} />
+          <Route path="sysconfig"     element={<AliasRedirect to="/settings/effective-config" />} />
           <Route path="risk/:entityType/:entityId" element={<SuspenseRoute><RiskDetailPage /></SuspenseRoute>} />
           <Route path="health"        element={<SuspenseRoute><ClusterHealthPage /></SuspenseRoute>} />
         </Route>
@@ -321,15 +331,15 @@ export function App() {
 
         {/* Legacy redirects — old flat routes now live under the Settings shell
             or were renamed. Keep them so bookmarks/links don't break. */}
-        <Route path="coverage"        element={<Navigate to="/posture" replace />} />
-        <Route path="system-health"   element={<Navigate to="/settings/health" replace />} />
-        <Route path="access-control"  element={<Navigate to="/settings/access" replace />} />
-        <Route path="system-config"   element={<Navigate to="/settings/effective-config" replace />} />
-        <Route path="sysconfig"       element={<Navigate to="/settings/effective-config" replace />} />
-        <Route path="vulndb"          element={<Navigate to="/settings/scanner" replace />} />
-        <Route path="cve-sources"     element={<Navigate to="/settings/scanner" replace />} />
-        <Route path="notifications"   element={<Navigate to="/settings/integrations" replace />} />
-        <Route path="integrations"    element={<Navigate to="/settings/integrations" replace />} />
+        <Route path="coverage"        element={<AliasRedirect to="/posture" />} />
+        <Route path="system-health"   element={<AliasRedirect to="/settings/health" />} />
+        <Route path="access-control"  element={<AliasRedirect to="/settings/access" />} />
+        <Route path="system-config"   element={<AliasRedirect to="/settings/effective-config" />} />
+        <Route path="sysconfig"       element={<AliasRedirect to="/settings/effective-config" />} />
+        <Route path="vulndb"          element={<AliasRedirect to="/settings/scanner" />} />
+        <Route path="cve-sources"     element={<AliasRedirect to="/settings/scanner" />} />
+        <Route path="notifications"   element={<AliasRedirect to="/settings/integrations" />} />
+        <Route path="integrations"    element={<AliasRedirect to="/settings/integrations" />} />
 
         {/* Settings — one grouped shell, one home per feature (SettingsShell sub-nav). */}
         <Route path="settings" element={<SuspenseRoute><SettingsShell /></SuspenseRoute>}>
@@ -366,7 +376,7 @@ export function App() {
           <Route path="connectors/scan/new" element={<SuspenseRoute><QueueScanPage /></SuspenseRoute>} />
           <Route path="connectors/:id"     element={<SuspenseRoute><ConnectorFormPage /></SuspenseRoute>} />
           <Route path="migration"         element={<SuspenseRoute><MigrationPage /></SuspenseRoute>} />
-          <Route path="vulndb"            element={<Navigate to="/settings/scanner" replace />} />
+          <Route path="vulndb"            element={<AliasRedirect to="/settings/scanner" />} />
         </Route>
       </Route>
     </Routes>

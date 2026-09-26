@@ -127,10 +127,11 @@ coverage remain open.
 | UI-2 YAML contract discipline | The six enterprise-table YAML controls (network, DLP, signatures, response, groups, vulnerability profiles) each pair export with a registered import route and typed client call. Generated cluster-init and Kubernetes policy YAML are deployment artifacts, not table configuration imports. The response-rule control has deterministic production-browser coverage; the other families have existing import tests. This closes only the YAML discipline row, not shared-table completeness. |
 
 New bounded evidence without a checklist closure: network sessions and
-conversations now return tenant/cluster-scoped platform roles, and their CSV
-exports include those roles. Source race tests and deterministic browser tests
-cover a custom namespace; conversation detail, summaries, other exports and a
-live custom install remain open. Process anomalies, setuid and FIM now map to
+conversations now return tenant/cluster-scoped platform roles, conversation
+detail carries roles for matching flows, and session/conversation CSV exports
+include roles. Source race tests and deterministic browser tests cover a custom
+namespace; other exports and a live custom install remain open. Process
+anomalies, setuid and FIM now map to
 incident, file-profile hits/blocks to violation, and DPI threat IDs to DLP/WAF
 response categories. Focused race and PostgreSQL tests pass; other ingest
 sources, full rule-category behavior and deployed enforcement remain open.
@@ -138,6 +139,10 @@ Saved-provider probes now exercise public LDAPS TLS/optional bind, local SAML
 metadata parsing and public HTTPS OIDC discovery with scoped authorization,
 redacted responses and audit tests. Private/air-gapped IdPs and live SAML
 connectivity are not supported by these probes, so IAM-1 stays open.
+Legacy DLP/WAF and common feature aliases now redirect to canonical routes
+while preserving deep paths, filters and fragments; deterministic browser
+coverage exercises representative aliases. The remaining UI-1 route and entry-
+point audit stays open.
 
 | Slice | Current status | Evidence / remaining work |
 |---|---|---|
@@ -890,7 +895,9 @@ progressive disclosure, while retaining Constellation's security vocabulary.
 ### UI-1 Page and navigation contract
 
 - [ ] One canonical home per feature; aliases redirect instead of rendering a
-  duplicate surface.
+  duplicate surface. DLP/WAF legacy routes now redirect to their canonical
+  runtime pages and forms, and common aliases retain deep paths, filters and
+  fragments. Other duplicate feature routes still need audit.
 - [ ] Order scope consistently: Organization, Platform, Integrations, Cluster.
 - [ ] Resolve remaining duplicate health/settings/token/attestation entry points.
 - [ ] Every primary page opens with one verdict, no more than five KPIs, and one
@@ -924,8 +931,9 @@ progressive disclosure, while retaining Constellation's security vocabulary.
   remains a compatibility fallback. Deployment, container, network-map, exposure
   and policy-lifecycle APIs plus session/conversation responses and
   container/deployment/session/conversation CSV now carry the role. Multi-cluster
-  org-wide conversations omit ambiguous label-derived roles; conversation
-  detail/summaries, other exports and live-install proof remain open.
+  org-wide conversations omit ambiguous label-derived roles. Conversation
+  detail includes roles for matching flows; other exports and live-install
+  proof remain open.
 
 ### UI-4 Dashboard and operational posture
 
