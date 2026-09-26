@@ -70,6 +70,22 @@ func NewGroupEdgeStore(d *db.DB, pol *RuntimePolicyStore) *GroupEdgeStore {
 
 // Upsert validates and persists an edge (create or replace by natural key).
 func (s *GroupEdgeStore) Upsert(ctx context.Context, orgID, clusterID uuid.UUID, e netpolicy.GroupEdge, by *uuid.UUID) (GroupEdgeRow, error) {
+	tx, err := s.db.Pool().Begin(ctx)
+	if err != nil {
+		return GroupEdgeRow{}, err
+	}
+	defer tx.Rollback(ctx)
+	row, err := s.upsertTx(ctx, tx, orgID, clusterID, e, by)
+	if err != nil {
+		return GroupEdgeRow{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return GroupEdgeRow{}, err
+	}
+	return row, nil
+}
+
+func (s *GroupEdgeStore) upsertTx(ctx context.Context, tx pgx.Tx, orgID, clusterID uuid.UUID, e netpolicy.GroupEdge, by *uuid.UUID) (GroupEdgeRow, error) {
 	if err := e.Validate(); err != nil {
 		return GroupEdgeRow{}, err
 	}
@@ -77,11 +93,6 @@ func (s *GroupEdgeStore) Upsert(ctx context.Context, orgID, clusterID uuid.UUID,
 	if err != nil {
 		return GroupEdgeRow{}, err
 	}
-	tx, err := s.db.Pool().Begin(ctx)
-	if err != nil {
-		return GroupEdgeRow{}, err
-	}
-	defer tx.Rollback(ctx)
 	var lockedOrgID uuid.UUID
 	if err := tx.QueryRow(ctx, `SELECT id FROM orgs WHERE id=$1 FOR KEY SHARE`, orgID).Scan(&lockedOrgID); err != nil {
 		return GroupEdgeRow{}, err
@@ -130,10 +141,29 @@ SELECT id, cluster_id, from_group, to_group, ports, mode, comment, updated_at
 	if err != nil {
 		return GroupEdgeRow{}, err
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return GroupEdgeRow{}, err
-	}
 	return row, nil
+}
+
+func (s *GroupEdgeStore) UpsertAndExpand(ctx context.Context, orgID, clusterID uuid.UUID, edge netpolicy.GroupEdge, by *uuid.UUID) (GroupEdgeRow, ExpandResult, error) {
+	tx, err := s.db.Pool().Begin(ctx)
+	if err != nil {
+		return GroupEdgeRow{}, ExpandResult{}, err
+	}
+	defer tx.Rollback(ctx)
+	row, err := s.upsertTx(ctx, tx, orgID, clusterID, edge, by)
+	if err != nil {
+		return GroupEdgeRow{}, ExpandResult{}, err
+	}
+	edge.ID = row.ID.String()
+	result, createdPolicies, err := s.expandTx(ctx, tx, orgID, clusterID, edge, by)
+	if err != nil {
+		return GroupEdgeRow{}, ExpandResult{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return GroupEdgeRow{}, ExpandResult{}, err
+	}
+	s.auditCreatedPolicies(ctx, orgID, by, createdPolicies)
+	return row, result, nil
 }
 
 func (s *GroupEdgeStore) get(ctx context.Context, orgID, id uuid.UUID) (GroupEdgeRow, error) {
@@ -215,53 +245,65 @@ type ExpandResult struct {
 // discover/monitor => informational). Safe to re-run (idempotent via the provenance merge);
 // call it after group membership changes.
 func (s *GroupEdgeStore) Expand(ctx context.Context, orgID, clusterID uuid.UUID, e netpolicy.GroupEdge, by *uuid.UUID) (ExpandResult, error) {
-	if err := e.Validate(); err != nil {
-		return ExpandResult{}, err
-	}
 	tx, err := s.db.Pool().Begin(ctx)
 	if err != nil {
 		return ExpandResult{}, err
 	}
 	defer tx.Rollback(ctx)
+	result, createdPolicies, err := s.expandTx(ctx, tx, orgID, clusterID, e, by)
+	if err != nil {
+		return ExpandResult{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return ExpandResult{}, err
+	}
+	s.auditCreatedPolicies(ctx, orgID, by, createdPolicies)
+	return result, nil
+}
+
+func (s *GroupEdgeStore) expandTx(ctx context.Context, tx pgx.Tx, orgID, clusterID uuid.UUID, e netpolicy.GroupEdge, by *uuid.UUID) (ExpandResult, []*RuntimePolicy, error) {
+	if err := e.Validate(); err != nil {
+		return ExpandResult{}, nil, err
+	}
 	var lockedOrgID, lockedClusterID uuid.UUID
 	if err := tx.QueryRow(ctx, `SELECT id FROM orgs WHERE id=$1 FOR KEY SHARE`, orgID).Scan(&lockedOrgID); err != nil {
-		return ExpandResult{}, err
+		return ExpandResult{}, nil, err
 	}
 	if err := tx.QueryRow(ctx, `SELECT id FROM clusters WHERE id=$1 AND org_id=$2 FOR KEY SHARE`, clusterID, orgID).Scan(&lockedClusterID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return ExpandResult{}, errEdgeClusterNotFound
+			return ExpandResult{}, nil, errEdgeClusterNotFound
 		}
-		return ExpandResult{}, err
+		return ExpandResult{}, nil, err
 	}
 	if e.ID != "" {
 		edgeID, err := uuid.Parse(e.ID)
 		if err != nil {
-			return ExpandResult{}, err
+			return ExpandResult{}, nil, err
 		}
 		row, err := scanGroupEdge(tx.QueryRow(ctx, `
 SELECT id, cluster_id, from_group, to_group, ports, mode, comment, updated_at
   FROM group_rule_edges WHERE id=$1 AND org_id=$2 AND cluster_id=$3 FOR UPDATE`, edgeID, orgID, clusterID))
 		if errors.Is(err, pgx.ErrNoRows) {
-			return ExpandResult{}, errEdgeNotFound
+			return ExpandResult{}, nil, errEdgeNotFound
 		}
 		if err != nil {
-			return ExpandResult{}, err
+			return ExpandResult{}, nil, err
 		}
 		e = netpolicy.GroupEdge{ID: row.ID.String(), FromGroup: row.FromGroup, ToGroup: row.ToGroup,
 			Ports: row.Ports, Mode: row.Mode, Comment: row.Comment}
 	}
 	fromMembers, err := s.groupMembers(ctx, tx, orgID, clusterID, e.FromGroup)
 	if err != nil {
-		return ExpandResult{}, err
+		return ExpandResult{}, nil, err
 	}
 	toMembers, err := s.groupMembers(ctx, tx, orgID, clusterID, e.ToGroup)
 	if err != nil {
-		return ExpandResult{}, err
+		return ExpandResult{}, nil, err
 	}
 	flows := netpolicy.ExpandEdge(e, fromMembers, toMembers)
 	res := ExpandResult{FromMembers: len(fromMembers), ToMembers: len(toMembers), Flows: len(flows)}
 	if len(flows) == 0 {
-		return res, tx.Commit(ctx)
+		return res, nil, nil
 	}
 	// P0-07: honor the edge's authored mode instead of always emitting informational
 	// monitor policies. A 'protect' edge produces an ENFORCING policy with a default-deny
@@ -288,15 +330,16 @@ SELECT id, cluster_id, from_group, to_group, ports, mode, comment, updated_at
 			CreatedBy: by,
 		}
 		if _, created, err := s.pol.upsertLearnedPolicyTx(ctx, tx, policy, rules, by); err != nil {
-			return ExpandResult{}, err
+			return ExpandResult{}, nil, err
 		} else if created {
 			createdPolicies = append(createdPolicies, policy)
 		}
 		res.Policies = append(res.Policies, m)
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return ExpandResult{}, err
-	}
+	return res, createdPolicies, nil
+}
+
+func (s *GroupEdgeStore) auditCreatedPolicies(ctx context.Context, orgID uuid.UUID, by *uuid.UUID, createdPolicies []*RuntimePolicy) {
 	if s.pol.auditLog != nil {
 		for _, policy := range createdPolicies {
 			if err := s.pol.auditLog.LogPolicyCreate(ctx, orgID, by, snapshot(policy), ""); err != nil {
@@ -304,7 +347,6 @@ SELECT id, cluster_id, from_group, to_group, ports, mode, comment, updated_at
 			}
 		}
 	}
-	return res, nil
 }
 
 // edgePolicyPosture maps an edge's authored mode (discover|monitor|protect, already normalized
@@ -475,37 +517,38 @@ func (h *GroupEdgesHTTP) Create(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAuditAttempt(w, r, sub, "group_rule_edge.upsert", req.ClusterID.String()+"/"+edge.FromGroup+"/"+edge.ToGroup, nil, map[string]any{"cluster_id": req.ClusterID, "edge": edge, "expand": req.Expand}) {
 		return
 	}
-	row, err := h.store.Upsert(r.Context(), sub.OrgID, req.ClusterID, edge, &sub.UserID)
+	if req.Expand && !h.requireAuditAttempt(w, r, sub, "group_rule_edge.expand", req.ClusterID.String()+"/"+edge.FromGroup+"/"+edge.ToGroup, nil, map[string]any{"requested_by_create": true, "edge": edge}) {
+		return
+	}
+	var row GroupEdgeRow
+	var expansion ExpandResult
+	var err error
+	if req.Expand {
+		row, expansion, err = h.store.UpsertAndExpand(r.Context(), sub.OrgID, req.ClusterID, edge, &sub.UserID)
+	} else {
+		row, err = h.store.Upsert(r.Context(), sub.OrgID, req.ClusterID, edge, &sub.UserID)
+	}
 	if err != nil {
 		if errors.Is(err, errEdgeClusterNotFound) {
 			jsonError(w, http.StatusNotFound, "cluster not found")
 			return
 		}
 		if errors.Is(err, errEdgeGroupNotFound) {
-			jsonError(w, http.StatusBadRequest, err.Error())
+			code := http.StatusBadRequest
+			if req.Expand {
+				code = http.StatusConflict
+			}
+			jsonError(w, code, err.Error())
 			return
 		}
-		jsonError(w, http.StatusInternalServerError, "failed to save edge")
+		jsonError(w, http.StatusInternalServerError, "failed to save edge or expansion")
 		return
 	}
 	h.auditMutation(r, sub, "group_rule_edge.upsert", row, nil, row)
 	resp := map[string]any{"edge": row}
 	if req.Expand {
-		if !h.requireAuditAttempt(w, r, sub, "group_rule_edge.expand", row.ID.String(), row, map[string]any{"requested_by_create": true}) {
-			return
-		}
-		edge.ID = row.ID.String()
-		exp, err := h.store.Expand(r.Context(), sub.OrgID, req.ClusterID, edge, &sub.UserID)
-		if err != nil {
-			if errors.Is(err, errEdgeGroupNotFound) {
-				jsonError(w, http.StatusConflict, err.Error())
-				return
-			}
-			jsonError(w, http.StatusInternalServerError, "failed to expand edge")
-			return
-		}
-		h.auditMutation(r, sub, "group_rule_edge.expand", row, row, exp)
-		resp["expansion"] = exp
+		h.auditMutation(r, sub, "group_rule_edge.expand", row, row, expansion)
+		resp["expansion"] = expansion
 	}
 	httpx.WriteJSON(w, http.StatusCreated, resp)
 }

@@ -128,7 +128,7 @@ func TestGroupEdgesHTTPRoutesRBACScopeAndAudit(t *testing.T) {
 		t.Fatalf("protect edge=%+v err=%v", protectedEdge, err)
 	}
 	var expansionAttempts int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id=$1 AND actor_id=$2 AND action='group_rule_edge.expand_attempt' AND target_id=$3`, orgID, adminID, protectedEdge.Edge.ID.String()).Scan(&expansionAttempts); err != nil || expansionAttempts != 1 {
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id=$1 AND actor_id=$2 AND action='group_rule_edge.expand_attempt' AND target_id=$3`, orgID, adminID, clusterID.String()+"/"+groupName+"/"+destinationGroup).Scan(&expansionAttempts); err != nil || expansionAttempts != 1 {
 		t.Fatalf("protect expansion attempts=%d err=%v", expansionAttempts, err)
 	}
 	if _, err := pool.Exec(ctx, `DELETE FROM groups WHERE org_id=$1 AND name=$2`, orgID, destinationGroup); err != nil {

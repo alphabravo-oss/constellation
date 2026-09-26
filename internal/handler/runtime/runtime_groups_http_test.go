@@ -13,6 +13,7 @@ import (
 
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/pkg/audit"
+	"github.com/alphabravocompany/constellation/pkg/netpolicy"
 )
 
 func TestGroupEdgesAuditAttemptFailurePreventsMutation(t *testing.T) {
@@ -77,9 +78,38 @@ func TestGroupEdgesAuditAttemptFailurePreventsMutation(t *testing.T) {
 		t.Fatalf("create expansion audit failure status=%d", status)
 	}
 	var edgeID uuid.UUID
-	if err := pool.QueryRow(ctx, `SELECT id FROM group_rule_edges WHERE org_id=$1`, orgID).Scan(&edgeID); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM group_rule_edges WHERE org_id=$1`, orgID).Scan(&edges); err != nil || edges != 0 {
+		t.Fatalf("edges after failed expansion audit=%d err=%v", edges, err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE groups SET members='["default/front-a","default/front-b"]'::jsonb WHERE org_id=$1 AND name='source'`, orgID); err != nil {
 		t.Fatal(err)
 	}
+	constraint := "edge_http_atomic_" + orgID.String()[:8]
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `ALTER TABLE runtime_policies DROP CONSTRAINT IF EXISTS `+constraint)
+	})
+	if _, err := pool.Exec(ctx, `ALTER TABLE runtime_policies ADD CONSTRAINT `+constraint+` CHECK (NOT (org_id='`+orgID.String()+`'::uuid AND workload='default/front-b')) NOT VALID`); err != nil {
+		t.Fatal(err)
+	}
+	h.auditWriter = func(context.Context, audit.Event) error { return nil }
+	if status := call(http.MethodPost, base, request, h.Create); status != http.StatusInternalServerError {
+		t.Fatalf("create with policy insert failure status=%d", status)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM group_rule_edges WHERE org_id=$1`, orgID).Scan(&edges); err != nil || edges != 0 {
+		t.Fatalf("edges after policy insert failure=%d err=%v", edges, err)
+	}
+	var failedPolicies int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM runtime_policies WHERE org_id=$1`, orgID).Scan(&failedPolicies); err != nil || failedPolicies != 0 {
+		t.Fatalf("policies after policy insert failure=%d err=%v", failedPolicies, err)
+	}
+	if _, err := pool.Exec(ctx, `ALTER TABLE runtime_policies DROP CONSTRAINT `+constraint); err != nil {
+		t.Fatal(err)
+	}
+	row, err := h.store.Upsert(ctx, orgID, clusterID, netpolicy.GroupEdge{FromGroup: "source", ToGroup: "destination", Mode: "protect"}, &userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edgeID = row.ID
 	h.auditWriter = func(_ context.Context, event audit.Event) error { return errors.New("audit unavailable") }
 	if status := call(http.MethodPost, base+"/"+edgeID.String()+"/expand", nil, h.Expand); status != http.StatusServiceUnavailable {
 		t.Fatalf("explicit expand audit failure status=%d", status)
