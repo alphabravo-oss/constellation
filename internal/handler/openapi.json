@@ -33,6 +33,103 @@
       }
     },
     "schemas": {
+      "PortSpec": {
+        "type": "object",
+        "properties": {
+          "protocol": {
+            "type": "string",
+            "description": "L4 protocol; defaults to TCP when omitted or empty."
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 65535,
+            "description": "Port 0 means any port for the protocol."
+          }
+        }
+      },
+      "GroupEdgeRow": {
+        "type": "object",
+        "required": [
+          "id",
+          "cluster_id",
+          "from_group",
+          "to_group",
+          "ports",
+          "mode",
+          "updated_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "from_group": {
+            "type": "string"
+          },
+          "to_group": {
+            "type": "string"
+          },
+          "ports": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/PortSpec"
+            }
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "discover",
+              "monitor",
+              "protect"
+            ]
+          },
+          "comment": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ExpandResult": {
+        "type": "object",
+        "required": [
+          "from_members",
+          "to_members",
+          "flows",
+          "policies"
+        ],
+        "properties": {
+          "from_members": {
+            "type": "integer"
+          },
+          "to_members": {
+            "type": "integer"
+          },
+          "flows": {
+            "type": "integer"
+          },
+          "policies": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "description": "Affected workload names, not runtime policy IDs.",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "DPISensorBinding": {
         "type": "object",
         "required": [
@@ -6281,9 +6378,12 @@
                   ],
                   "properties": {
                     "edges": {
-                      "type": "array",
+                      "type": [
+                        "array",
+                        "null"
+                      ],
                       "items": {
-                        "type": "object"
+                        "$ref": "#/components/schemas/GroupEdgeRow"
                       }
                     }
                   }
@@ -6294,12 +6394,18 @@
           "400": {
             "$ref": "#/components/responses/Error"
           },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
           "404": {
             "$ref": "#/components/responses/Error"
           }
         },
         "summary": "List group-to-group network edges",
-        "description": "Requires read_findings. A foreign or missing cluster returns 404."
+        "description": "Requires read_findings for the requested cluster through an organization-wide or matching cluster grant. A foreign or missing cluster returns 404."
       },
       "post": {
         "requestBody": {
@@ -6326,12 +6432,14 @@
                   },
                   "ports": {
                     "type": "array",
+                    "description": "Empty or omitted ports mean all ports.",
                     "items": {
-                      "type": "object"
+                      "$ref": "#/components/schemas/PortSpec"
                     }
                   },
                   "mode": {
                     "type": "string",
+                    "description": "Defaults to monitor when omitted.",
                     "enum": [
                       "discover",
                       "monitor",
@@ -6361,41 +6469,10 @@
                   ],
                   "properties": {
                     "edge": {
-                      "type": "object",
-                      "required": [
-                        "id",
-                        "cluster_id",
-                        "from_group",
-                        "to_group",
-                        "mode",
-                        "updated_at"
-                      ],
-                      "properties": {
-                        "id": {
-                          "type": "string",
-                          "format": "uuid"
-                        },
-                        "cluster_id": {
-                          "type": "string",
-                          "format": "uuid"
-                        },
-                        "from_group": {
-                          "type": "string"
-                        },
-                        "to_group": {
-                          "type": "string"
-                        },
-                        "mode": {
-                          "type": "string"
-                        },
-                        "updated_at": {
-                          "type": "string",
-                          "format": "date-time"
-                        }
-                      }
+                      "$ref": "#/components/schemas/GroupEdgeRow"
                     },
                     "expansion": {
-                      "type": "object"
+                      "$ref": "#/components/schemas/ExpandResult"
                     }
                   }
                 }
@@ -6403,6 +6480,12 @@
             }
           },
           "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
             "$ref": "#/components/responses/Error"
           },
           "404": {
@@ -6416,7 +6499,7 @@
           }
         },
         "summary": "Upsert a group-to-group network edge",
-        "description": "Requires manage_policies. Durable audit attempts precede mutation. Create-with-expand commits the edge and its runtime policies together or rolls back both; expanded mode/port edits require an explicit policy transition."
+        "description": "Requires manage_policies for cluster_id through an organization-wide or matching cluster grant. Upserts by cluster, from_group, and to_group. Durable audit attempts precede mutation. With expand=true, the edge and its runtime policies commit or roll back together. Changing mode or ports on an already expanded edge retracts its owned policies and expands replacement policies in the same transaction, even when expand is omitted. Ambiguous policy ownership returns 409 without applying the change."
       }
     },
     "/api/v1/runtime-policies/group-edges/{id}": {
@@ -6436,6 +6519,15 @@
           "204": {
             "description": "Edge deleted with any fully edge-owned expanded runtime policies retracted."
           },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
           "404": {
             "$ref": "#/components/responses/Error"
           },
@@ -6447,7 +6539,7 @@
           }
         },
         "summary": "Delete a group-to-group edge",
-        "description": "Requires manage_policies and a durable audit attempt."
+        "description": "Requires manage_policies for the edge's cluster through an organization-wide or matching cluster grant. The edge ID is resolved within the caller's organization; a missing or foreign edge returns 404. A durable audit attempt precedes mutation. Edge deletion and retraction of fully edge-owned policies commit or roll back together; ambiguous policy ownership returns 409."
       }
     },
     "/api/v1/runtime-policies/group-edges/{id}/expand": {
@@ -6465,40 +6557,23 @@
         ],
         "responses": {
           "200": {
-            "description": "Current group members expanded into runtime policies.",
+            "description": "Current group members expanded into runtime policies; affected workload names are returned.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "required": [
-                    "from_members",
-                    "to_members",
-                    "flows",
-                    "policies"
-                  ],
-                  "properties": {
-                    "from_members": {
-                      "type": "integer"
-                    },
-                    "to_members": {
-                      "type": "integer"
-                    },
-                    "flows": {
-                      "type": "integer"
-                    },
-                    "policies": {
-                      "type": [
-                        "array",
-                        "null"
-                      ],
-                      "items": {
-                        "type": "string"
-                      }
-                    }
-                  }
+                  "$ref": "#/components/schemas/ExpandResult"
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
           },
           "404": {
             "$ref": "#/components/responses/Error"
@@ -6511,7 +6586,7 @@
           }
         },
         "summary": "Re-expand a group edge",
-        "description": "Requires manage_policies and a durable audit attempt. Does not roll back earlier policy writes if a later expansion write fails."
+        "description": "Requires manage_policies for the edge's cluster through an organization-wide or matching cluster grant. The edge ID is resolved within the caller's organization; a missing or foreign edge returns 404. A durable audit attempt precedes mutation. All expansion policy writes commit or roll back together; ambiguous policy ownership returns 409."
       }
     },
     "/api/v1/runtime-policies/{id}": {

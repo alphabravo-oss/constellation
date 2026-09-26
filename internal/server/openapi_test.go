@@ -248,6 +248,66 @@ func TestOpenAPIGroupUsageSchema(t *testing.T) {
 	}
 }
 
+func TestOpenAPIGroupEdgeContract(t *testing.T) {
+	basePath := "/api/v1/runtime-policies/group-edges"
+	row := openAPISchemaAt(t, "components", "schemas", "GroupEdgeRow")
+	assertOpenAPIFields(t, row,
+		[]string{"id", "cluster_id", "from_group", "to_group", "ports", "mode", "comment", "updated_at"},
+		[]string{"id", "cluster_id", "from_group", "to_group", "ports", "mode", "updated_at"})
+	ports := row["properties"].(map[string]any)["ports"].(map[string]any)
+	if !reflect.DeepEqual(ports["type"], []any{"array", "null"}) || ports["items"].(map[string]any)["$ref"] != "#/components/schemas/PortSpec" {
+		t.Errorf("edge ports schema = %v", ports)
+	}
+	portSpec := openAPISchemaAt(t, "components", "schemas", "PortSpec")
+	if portSpec["properties"].(map[string]any)["protocol"].(map[string]any)["type"] != "string" ||
+		portSpec["properties"].(map[string]any)["port"].(map[string]any)["maximum"] != float64(65535) {
+		t.Errorf("PortSpec schema = %v", portSpec)
+	}
+	result := openAPISchemaAt(t, "components", "schemas", "ExpandResult")
+	assertOpenAPIFields(t, result,
+		[]string{"from_members", "to_members", "flows", "policies"},
+		[]string{"from_members", "to_members", "flows", "policies"})
+	policies := result["properties"].(map[string]any)["policies"].(map[string]any)
+	if !reflect.DeepEqual(policies["type"], []any{"array", "null"}) || policies["items"].(map[string]any)["type"] != "string" {
+		t.Errorf("expansion policies schema = %v", policies)
+	}
+	list := openAPISchemaAt(t, "paths", basePath, "get", "responses", "200", "content", "application/json", "schema")
+	if list["properties"].(map[string]any)["edges"].(map[string]any)["items"].(map[string]any)["$ref"] != "#/components/schemas/GroupEdgeRow" {
+		t.Error("GET edges must use GroupEdgeRow")
+	}
+	create := openAPISchemaAt(t, "paths", basePath, "post")
+	request := openAPISchemaAt(t, "paths", basePath, "post", "requestBody", "content", "application/json", "schema")
+	if request["properties"].(map[string]any)["ports"].(map[string]any)["items"].(map[string]any)["$ref"] != "#/components/schemas/PortSpec" {
+		t.Error("POST ports must use PortSpec")
+	}
+	created := openAPISchemaAt(t, "paths", basePath, "post", "responses", "201", "content", "application/json", "schema")
+	createdProperties := created["properties"].(map[string]any)
+	if createdProperties["edge"].(map[string]any)["$ref"] != "#/components/schemas/GroupEdgeRow" ||
+		createdProperties["expansion"].(map[string]any)["$ref"] != "#/components/schemas/ExpandResult" {
+		t.Errorf("POST response schema = %v", created)
+	}
+	expanded := openAPISchemaAt(t, "paths", basePath+"/{id}/expand", "post", "responses", "200", "content", "application/json", "schema")
+	if expanded["$ref"] != "#/components/schemas/ExpandResult" {
+		t.Errorf("expand response schema = %v", expanded)
+	}
+	for _, operation := range []map[string]any{
+		openAPISchemaAt(t, "paths", basePath, "get"),
+		create,
+		openAPISchemaAt(t, "paths", basePath+"/{id}", "delete"),
+		openAPISchemaAt(t, "paths", basePath+"/{id}/expand", "post"),
+	} {
+		if !strings.Contains(operation["description"].(string), "cluster grant") {
+			t.Errorf("group edge operation omits cluster grant authorization: %v", operation["summary"])
+		}
+		if _, ok := operation["responses"].(map[string]any)["403"]; !ok {
+			t.Errorf("group edge operation omits 403: %v", operation["summary"])
+		}
+	}
+	if !strings.Contains(create["description"].(string), "same transaction, even when expand is omitted") {
+		t.Error("POST must document transactional replacement without expand")
+	}
+}
+
 func TestOpenAPIDPISensorBindingSchemas(t *testing.T) {
 	basePath := "/api/v1/runtime/dpi-sensor-bindings"
 	request := openAPISchemaAt(t, "components", "schemas", "CreateDPISensorBindingRequest")
