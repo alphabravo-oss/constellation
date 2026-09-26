@@ -87,22 +87,27 @@ Unchecked parent items remain open until **all** their acceptance requirements
 are met. Code present is not the same as verified or release-ready. The older
 deficiency ledger includes findings that already have fixes; do not use its
 historical counts as a count of currently open defects.
-Acceptance backlog: **102 open**. Since the `800b0ef` baseline of 107 open,
-**eight existing items closed** (four OPS-1 items, three SIEM-1 items and one
-POL-1 item), and three new items were added: vendor interoperability, legacy
+Acceptance backlog: **100 open**. Since the `800b0ef` baseline of 107 open,
+**ten existing items closed** (four OPS-1 items, three SIEM-1 items, one
+POL-1 item, one IAM-1 item and one UI-3 item), and three new items were added: vendor interoperability, legacy
 DPI binding tenant validation, and registration/proof of the unreachable
 group-edge HTTP workflow.
-The checklist contains **47 checked bounded rows** (39 at baseline). Recent
-rounds add bounded POL-1, POL-2 and API-1 fixes but close no additional parent
-acceptance item. This round also adds an eight-object cutover fixture and opt-in
-runner, network precedence guards, and YAML API contracts. The next round adds
+The checklist contains **49 checked bounded rows** (39 at baseline). Earlier
+rounds added bounded POL-1, POL-2 and API-1 fixes without closing their parent
+acceptance item. Those rounds added an eight-object cutover fixture and opt-in
+runner, network precedence guards, and YAML API contracts. A subsequent round added
 atomic network-import and response-reorder audit receipts, a tenant-safe
 snapshot history export, and DLP/WAF visibility browser fixtures. Source tests,
 deterministic browser tests, and a disposable local API/UI smoke are not a
-complete NeuVector fixture or deployed cutover.
+complete NeuVector fixture or deployed cutover. This round closes local-user
+recovery and backend platform-role classification, and adds bounded response-rule
+YAML portability without closing its composite POL-3 item.
 Partial scanner, registry and POL-1 fixes are recorded in the review table, not counted as
 closures. A checked child does not close its unchecked parent or replace live
 deployment evidence.
+Audited local-user recovery and backend platform-role classification now close
+their own bounded rows; IAM provider cutover and complete platform-role API/export
+coverage remain open.
 
 | Acceptance item closed since `800b0ef` | Closure evidence |
 |---|---|
@@ -110,6 +115,12 @@ deployment evidence.
 | OPS-1 role aliases, diagnostics and E2E filtering | DB-backed component tests cover controller, runtime-agent/enforcer and scanner role aliases, diagnostics status/checks, redaction and access failures. Existing frontend alias tests pass. A production-build Playwright browser run verifies URL role filters, matching rows, selection and role-specific diagnostics for all three roles using deterministic API fixtures; this closes the test item, not deployed component-health proof. |
 | OPS-1 signed support bundles | A Helm-deployed API on disposable k3d ran with a read-only Ed25519 PKCS#8 Secret mount and separate seeded PostgreSQL database. An authenticated admin downloaded a signed bundle (HTTP 200), and the standalone offline verifier accepted it against a fingerprint derived from the deployment key before reading the bundle. The verifier rejected a tampered copy. Source/API/chart tests and Helm rendering also pass. Persisted asynchronous jobs are closed separately below. |
 | OPS-1 asynchronous support-bundle jobs | Migration 164 persists queued/running/ready/failed/expired jobs, bounded cursor history, redacted payloads, seven-day expiry and audit links. Per-replica workers claim with `SKIP LOCKED`, recover stale leases and retry completion receipts. Source race tests cover transitions, isolation, audit failure, redaction, pagination and concurrency. A disposable k3d Helm install served API/frontend through nginx: an admin queued a job, observed ready status, downloaded a signed bundle, verified it offline against the independently derived key, and found create/ready/download events in audit history. Production-serving Playwright verified the operator queue, persisted history, ready download and audit drill-down. |
+| SIEM-1 syslog TLS with CA/client material | A Helm-deployed API delivered to a strict mTLS collector and rejected wrong-CA and missing-client configurations; source tests cover TLS and plaintext rejection. |
+| SIEM-1 wire formats and filters | The deployed collector captured RFC5424, JSON and CEF policy events and verified severity/category exclusions. |
+| SIEM-1 named receiver routing and receipts | A deployed API sent to only the selected SMTP receiver, surfaced a delivered receipt and audit link, and refused paused sends; source tests cover retries and isolation. |
+| POL-1 shared GroupPicker coverage | Editor audit and a response-rule save-path test prove shared group selection; full enforcement remains a separate open item. |
+| IAM-1 local-user recovery | PostgreSQL/router tests prove scoped unlock and force reset with atomic audit receipts; a deterministic production-browser test exercises the local-only operator controls. Other IAM-1 items remain open. |
+| UI-3 platform-role classification | Source API tests and a deterministic production-browser test prove custom-namespace `core` classification and visibility behavior. The complete API/export and live-install matrix remains open. |
 
 | Slice | Current status | Evidence / remaining work |
 |---|---|---|
@@ -152,6 +163,9 @@ deployment evidence.
 | POL-2 precedence entry points | Source/race, registered-route RBAC and deterministic browser tests verified; deployment open | Policy Center links to move-to-top and response up/down controls only for families with runtime ordering. The network table initially preserves server evaluation order, shows priority, and does not mistake the first filtered row for the global top. Network move-to-top verifies the owned cluster and existing rule, serializes concurrent moves, preserves negative priorities, and commits its completion receipt atomically; injected audit failure rolls the priority change back. Response reorder now verifies owned cluster scope, logs the before/after order, and commits its completion receipt atomically; injected audit failure leaves priorities unchanged. Registered-router tests verify network same/sibling-cluster grants and deny auditor mutations; the org-wide response route denies cluster-only grants. Focused PostgreSQL race/audit-chain tests, 108 frontend tests, production build and two Chromium tests with mocked APIs pass. Other network-rule writers do not share move serialization; live backend browser and deployed enforcement proof remain open. |
 | MIG-1 bounded cutover fixture | Eight-object PostgreSQL, mock and disposable local API smoke; complete canonical fixture open | A manifest enumerates two groups, one network edge, one vulnerability profile, one DLP rule, one WAF rule and two group bindings with source, converted, unsupported, applied and rolled-back counts. A fresh migration-166 PostgreSQL handler test verifies preview semantics, target rows, apply and rollback. The opt-in loopback-only runner refuses nonempty import history or preexisting targets, checks counts and HTML availability for Migration and Policy Center routes, and attempts rollback cleanup on failure; 11 mock tests pass. Against a disposable local API and separate production-build UI HTML server, preflight, eight-create preview, apply/target reads and eight-delete rollback all passed. A production-build Chromium case with deterministic API fixtures shows DLP/WAF preview/apply, Policy Center links and imported origin/group scope on DLP and WAF/DPI pages; it does not render against the real importing API. The local smoke used a seeded org rather than a genuine new-org cutover, and remaining families are absent, so neither the full fixture nor new-org cutover acceptance item is closed. |
 | POL-1 group workflow | API and production-browser control plane verified; enforcement open | A PostgreSQL-backed server test creates groups, previews/applies a NeuVector fixture containing a network edge and DLP/WAF bindings, checks usage and mode promotion, verifies RBAC/audit, and rejects unsafe delete without losing the group or references. A Chromium Playwright run against both an isolated production stack and a Helm-deployed API with a production frontend build creates a group, uses it in a network rule and DLP/WAF bindings, inspects usage, promotes mode, gets 409 on unsafe delete and cleans up. The UI-authored network rule is a network override, not a `group_rule_edges` row, so the usage blocker count is two (DLP/WAF). Live network and DPI enforcement remain unproven; the item stays open. |
+| IAM-1 local-user recovery | Closed bounded action; other IAM-1 items open | Unlock and force-password-reset routes require manage-users RBAC and scope the target to the caller org. Mutations and audit receipts commit together or roll back on audit failure. Access-control overview exposes local-password, lockout and reset-required state; production-build Chromium verifies local-only controls and the recovery route calls with deterministic API fixtures. Focused handler, router/RBAC, audit and OpenAPI tests pass. LDAP/SAML/OIDC connection tests, role previews, NeuVector identity import and namespace filtering remain open. |
+| UI-3 platform-role classification | Closed backend-classification row; API/export matrix open | Exact platform namespaces plus workload labels and Helm installation identity classify custom platform install namespaces as `core` in deployment list/detail, container inventory, network map, exposure and policy lifecycle. Frontend inventories and map prefer the backend role, retain exact-namespace fallback for legacy responses and include the role in container/deployment CSV. Source API tests, frontend helper tests and a deterministic production-browser inventory/export test pass. Live custom-install verification, session/conversation role coverage and the complete export surface remain open. |
+| POL-3 response-rule YAML portability | Bounded control-plane slice; composite POL-3 row open | Org-wide or exact-cluster YAML export/import validates version, scope, media type, size, selectors and conflict policy; import records an attempt before mutation and commits completion audit with successful rows. Unsupported action params fail closed, receiver IDs normalize to names on export, and import requires a matching target-org receiver name. OpenAPI, scoped RBAC, PostgreSQL/race and deterministic production-browser controls are covered. Non-threat event-category wiring plus deployed response-enforcement proof remain open. |
 
 | REG-1 kind validation | Source fix verified; connector matrix open | Registry create rejects unknown kinds with an explicit 400; PATCH rejects any supplied `kind` (including null/empty/non-string) rather than silently ignoring an attempted type change. Unit/HTTP tests cover all 13 accepted kinds, unknown create and immutable update. This does not prove per-kind discovery/auth against real registries or endpoint/credential validation. |
 | REG-1 scanner credential isolation | Bounded private-registry source tests verified; live connector proof open | Each scanner job uses a separate Docker config directory with 0700/0600 modes; tests cover simultaneous jobs and cleanup on success, failure and cancellation. Digest resolution, manifest inspection, config-history, file-risk and config-check reads use job credentials with HTTPS and authority checks. Configured-credential fetch, missing credentials, authority or isolated-config failures now fail the job before scanning rather than silently falling back to ambient auth; only explicit `auth_kind=none` is accepted without credentials. The credential endpoint now refuses to disclose a decrypted secret if its audit append fails; DB tests verify a redacted receipt and the no-secret fail path. An opt-in one-shot `--registry-id` path fetches configured credentials, fails before scanning on retrieval/validation errors and passes an isolated config to engines and image metadata reads; its legacy `--ref` path is unchanged. Isolated engine subprocesses drop inherited Trivy/Grype/Syft auth variables. Fake-registry tests cover authenticated metadata, wrong credentials despite ambient Docker config, TLS failure, platform selection and cross-authority blob, bearer-realm or plaintext non-forwarding. Credential issuance is still org-scoped rather than bound to a claimed job; legacy one-shot ambient auth, signature verification, other ambient cloud credentials, live private registries and end-to-end credential lifetime remain open. |
@@ -633,7 +647,9 @@ row saying `enforced`.
 - [ ] Add group-resolution and final mapped-role/scope previews.
 - [ ] Import NeuVector users, roles, mappings, and token metadata without
   privilege escalation; require token reissue.
-- [ ] Add audited local-user unlock and force-reset actions.
+- [x] Add audited local-user unlock and force-reset actions. The scoped routes
+  commit audit receipts with successful mutations, expose lock/reset state in
+  Access Control, and have focused source and deterministic browser tests.
 - [ ] Complete namespace-scoped row filtering where resources have a namespace.
 
 ### API-1 Runbook-compatible contracts
@@ -838,7 +854,10 @@ row saying `enforced`.
 - [ ] Include enforcing DLP/WAF policy in backup/restore and defined federation
   scope.
 - [ ] Add response-policy export/import and wire specific event categories for
-  non-threat ingest sources.
+  non-threat ingest sources. A bounded, versioned YAML export/import now covers
+  exact cluster or org-wide response rules with audited atomic mutation, strict
+  validation, receiver-name normalization and fail-closed unsupported action
+  params; non-threat event wiring and deployed behavior remain open.
 
 ## P2 — Astronomer-inspired operator experience
 
@@ -871,11 +890,15 @@ progressive disclosure, while retaining Constellation's security vocabulary.
   default in container, deployment, and relevant network views.
 - [x] Keep collection, detection, policy, and enforcement active while hidden.
 - [x] Persist the preference and migrate older `hide_kube_system` saved views.
-- [ ] Move classification to backend `platform_role` metadata using namespace,
+- [x] Move classification to backend `platform_role` metadata using namespace,
   labels, and installation identity so custom install namespaces work like
-  NeuVector's `platform_role=core`.
-- [ ] Expose the same role in APIs and exports; UI namespace matching remains a
-  compatibility fallback.
+  NeuVector's `platform_role=core`. Source API and deterministic browser tests
+  cover custom namespaces; live custom-install verification remains part of the
+  broader UI-3 release matrix.
+- [ ] Expose the same role in all relevant APIs and exports; UI namespace matching
+  remains a compatibility fallback. Deployment, container, network-map, exposure
+  and policy-lifecycle APIs plus container/deployment CSV now carry the role;
+  session/conversation responses, other exports and live-install proof remain.
 
 ### UI-4 Dashboard and operational posture
 

@@ -397,6 +397,7 @@ export interface ContainerRow {
   id: string;
   name: string;
   namespace: string;
+  platform_role?: string;
   pod_name: string;
   image: string;
   state: string;
@@ -660,6 +661,7 @@ export interface Deployment {
   id: string;
   cluster_id?: string;
   namespace: string;
+  platform_role?: string;
   name: string;
   kind: string;
   labels: Record<string, string>;
@@ -1911,6 +1913,7 @@ export interface NetworkWorkload {
   cluster_id?: string;
   cluster_name?: string;
   namespace: string;
+  platform_role?: string;
   name: string;
   kind: string;
   risk_score: number;
@@ -3236,6 +3239,9 @@ export interface AccessControlUser {
   roles: string[];
   last_login_at: string;
   mfa_enabled: boolean;
+  local_password?: boolean;
+  locked?: boolean;
+  password_reset_required?: boolean;
 }
 
 export interface AccessControlRole {
@@ -3334,6 +3340,10 @@ export const accessControl = {
   overview: () => api.get<AccessControlOverview>("/access-control").then((r) => r.data),
   createLocalUser: (body: { email: string; display_name: string; password: string; role: string }) =>
     api.post<{ id: string; email: string; role: string }>("/access-control/local-users", body).then((r) => r.data),
+  unlockLocalUser: (id: string) =>
+    api.post<{ status: "unlocked" }>(`/users/${encodeURIComponent(id)}/unlock`).then((r) => r.data),
+  forceLocalPasswordReset: (id: string) =>
+    api.post<{ status: "reset_required" }>(`/users/${encodeURIComponent(id)}/force-password-reset`).then((r) => r.data),
 };
 
 // Canonical user-facing roles (mirror pkg/rbac). Highest privilege first.
@@ -5233,6 +5243,12 @@ export const responseRulesV2 = {
   delete: (id: string) => api.delete(`/response-rules-v2/${id}`).then((r) => r.data),
   reorder: (orderedIds: string[], params: { cluster_id?: string } = {}) =>
     api.patch<{ ok: boolean; count: number }>("/response-rules-v2:reorder", { ordered_ids: orderedIds }, { params }).then((r) => r.data),
+  exportYaml: (clusterID: string) =>
+    api.get<string>("/response-rules-v2:export", { params: { cluster_id: clusterID }, responseType: "text", headers: { Accept: "application/yaml" } }).then((r) => r.data),
+  importYaml: (clusterID: string, yaml: string) =>
+    api.post<{ created: number; replaced: number; results: Array<{ name: string; status: string }> }>(
+      "/response-rules-v2:import", yaml, { params: { cluster_id: clusterID }, headers: { "Content-Type": "application/yaml" } },
+    ).then((r) => ({ created: r.data.created, updated: r.data.replaced, results: r.data.results })),
 };
 
 // ----- Wave D: Vulnerability Profiles ------

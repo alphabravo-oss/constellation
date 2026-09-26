@@ -54,7 +54,7 @@ import { usePlatformComponentVisibility } from "@/hooks/usePlatformComponentVisi
 import { cn } from "@/lib/cn";
 import { downloadJson } from "@/lib/download";
 import { fmtBytes } from "@/lib/format";
-import { isPlatformNamespace, isPlatformWorkloadID } from "@/lib/platform-components";
+import { isPlatformNamespace, isPlatformResource, namespaceFromWorkloadID } from "@/lib/platform-components";
 import {
   buildNetworkSavedViewSnapshot,
   buildNetworkSavedViewsExport,
@@ -432,12 +432,20 @@ function NetworkMapInner() {
   const enforceMut = useEnforce(clusterID);
 
   const workloads = q.data?.workloads ?? EMPTY_WORKLOADS;
+  const platformWorkloads = useMemo(() => new Map(workloads.map((workload) => [
+    workload.id,
+    isPlatformResource(workload.platform_role, workload.namespace),
+  ])), [workloads]);
+  const isPlatformWorkload = useCallback(
+    (workloadID: string | undefined) => (workloadID ? platformWorkloads.get(workloadID) : undefined) ?? isPlatformNamespace(namespaceFromWorkloadID(workloadID)),
+    [platformWorkloads],
+  );
   const flowsRaw = q.data?.flows ?? EMPTY_FLOWS;
   const liveFlows = q.data?.recent_flows ?? [];
   const sessionsRaw = sessionsQ.data?.sessions ?? EMPTY_SESSIONS;
   const sessions = useMemo(
-    () => hidePlatformComponents ? sessionsRaw.filter((item) => !isPlatformWorkloadID(item.workload_id)) : sessionsRaw,
-    [hidePlatformComponents, sessionsRaw],
+    () => hidePlatformComponents ? sessionsRaw.filter((item) => !isPlatformWorkload(item.workload_id)) : sessionsRaw,
+    [hidePlatformComponents, isPlatformWorkload, sessionsRaw],
   );
   const sessionsTotal = hidePlatformComponents ? sessions.length : (sessionsQ.data?.total ?? sessions.length);
   const sessionsHasMore = sessionsQ.data?.has_more ?? false;
@@ -456,12 +464,12 @@ function NetworkMapInner() {
   const conversationsRaw = conversationsQ.data?.conversations ?? EMPTY_CONVERSATIONS;
   const conversations = useMemo(
     () => hidePlatformComponents
-      ? conversationsRaw.filter((item) => !isPlatformWorkloadID(item.from) && !isPlatformWorkloadID(item.to))
+      ? conversationsRaw.filter((item) => !isPlatformWorkload(item.from) && !isPlatformWorkload(item.to))
       : conversationsRaw,
-    [conversationsRaw, hidePlatformComponents],
+    [conversationsRaw, hidePlatformComponents, isPlatformWorkload],
   );
   const platformWorkloadCount = useMemo(
-    () => workloads.filter((item) => isPlatformNamespace(item.namespace)).length,
+    () => workloads.filter((item) => isPlatformResource(item.platform_role, item.namespace)).length,
     [workloads],
   );
 
@@ -497,11 +505,9 @@ function NetworkMapInner() {
   const isExternal = useCallback((f: NetworkFlow) => f.src.startsWith("external/") || f.dst.startsWith("external/"), []);
   const isPlatformFlow = useCallback(
     (f: NetworkFlow) => {
-      const srcNS = workloadNS.get(f.src) ?? f.src.split("/")[0];
-      const dstNS = workloadNS.get(f.dst) ?? f.dst.split("/")[0];
-      return isPlatformNamespace(srcNS) || isPlatformNamespace(dstNS);
+      return isPlatformWorkload(f.src) || isPlatformWorkload(f.dst);
     },
-    [workloadNS],
+    [isPlatformWorkload],
   );
 
   // Apply L2 chip filters on top of the server-side filters (which only
@@ -548,7 +554,7 @@ function NetworkMapInner() {
   }, [flows]);
   const visibleWorkloads = useMemo(
     () => workloads.filter((w) =>
-      (!hidePlatformComponents || !isPlatformNamespace(w.namespace))
+      (!hidePlatformComponents || !isPlatformResource(w.platform_role, w.namespace))
       && (flowsNoSelf.length === 0 || visibleWorkloadIDs.has(w.id)),
     ),
     [flowsNoSelf.length, hidePlatformComponents, workloads, visibleWorkloadIDs],

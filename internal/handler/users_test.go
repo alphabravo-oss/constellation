@@ -155,12 +155,25 @@ VALUES ($1, 'tok', $2, '["read-findings"]'::jsonb, 'active')`,
 	h := NewUsers(d, audit.New(pool))
 	admin := Subject{UserID: adminID, OrgID: orgID}
 
-	if rec := usersReq(t, http.MethodPost, "/api/v1/users/x/force-password-reset", targetID.String(), h.ForcePasswordReset, admin); rec.Code != http.StatusOK {
-		t.Fatalf("force reset: status=%d body=%s, want 200", rec.Code, rec.Body.String())
+	if rec := usersReq(t, http.MethodPost, "/api/v1/users/x/force-password-reset", targetID.String(), NewUsers(d, nil).ForcePasswordReset, admin); rec.Code != http.StatusInternalServerError {
+		t.Fatalf("reset without audit: status=%d body=%s, want 500", rec.Code, rec.Body.String())
 	}
 	var mustChange bool
 	var epoch int64
 	var liveTokens int
+	if err := pool.QueryRow(ctx, `SELECT must_change_password, session_epoch FROM users WHERE id = $1`, targetID).Scan(&mustChange, &epoch); err != nil {
+		t.Fatalf("read failed reset state: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM api_tokens WHERE user_id = $1 AND revoked_at IS NULL`, targetID).Scan(&liveTokens); err != nil {
+		t.Fatalf("count live tokens after failed reset: %v", err)
+	}
+	if mustChange || epoch != 0 || liveTokens != 1 {
+		t.Fatalf("reset committed without audit: mustChange=%t epoch=%d liveTokens=%d", mustChange, epoch, liveTokens)
+	}
+
+	if rec := usersReq(t, http.MethodPost, "/api/v1/users/x/force-password-reset", targetID.String(), h.ForcePasswordReset, admin); rec.Code != http.StatusOK {
+		t.Fatalf("force reset: status=%d body=%s, want 200", rec.Code, rec.Body.String())
+	}
 	if err := pool.QueryRow(ctx, `SELECT must_change_password, session_epoch FROM users WHERE id = $1`, targetID).Scan(&mustChange, &epoch); err != nil {
 		t.Fatalf("read user: %v", err)
 	}
@@ -175,5 +188,21 @@ VALUES ($1, 'tok', $2, '["read-findings"]'::jsonb, 'active')`,
 	}
 	if liveTokens != 0 {
 		t.Fatalf("expected PATs revoked on forced reset, %d still live", liveTokens)
+	}
+	var auditRows int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id=$1 AND actor_id=$2 AND target_id=$3 AND action='user.force_password_reset'`, orgID, adminID, targetID.String()).Scan(&auditRows); err != nil {
+		t.Fatalf("count reset audit rows: %v", err)
+	}
+	if auditRows != 1 {
+		t.Fatalf("force reset audit rows=%d, want 1", auditRows)
+	}
+	if rec := usersReq(t, http.MethodPost, "/api/v1/users/x/force-password-reset", targetID.String(), h.ForcePasswordReset, Subject{UserID: adminID, OrgID: uuid.New()}); rec.Code != http.StatusNotFound {
+		t.Fatalf("cross-org reset: status=%d, want 404", rec.Code)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE action='user.force_password_reset' AND target_id=$1`, targetID.String()).Scan(&auditRows); err != nil {
+		t.Fatalf("count reset audit rows after rejected request: %v", err)
+	}
+	if auditRows != 1 {
+		t.Fatalf("rejected reset created audit row: %d", auditRows)
 	}
 }

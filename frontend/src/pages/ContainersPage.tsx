@@ -16,7 +16,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { PlatformVisibilityToggle } from "@/components/ui/platform-visibility-toggle";
 import { cn } from "@/lib/cn";
 import { downloadCsv } from "@/lib/csv";
-import { isPlatformNamespace } from "@/lib/platform-components";
+import { isPlatformResource } from "@/lib/platform-components";
 import { usePlatformComponentVisibility } from "@/hooks/usePlatformComponentVisibility";
 
 export function ContainersPage() {
@@ -29,9 +29,9 @@ export function ContainersPage() {
     enabled: !!clusterId,
   });
   const items = useMemo(() => q.data?.items ?? [], [q.data?.items]);
-  const platformCount = useMemo(() => items.filter((item) => isPlatformNamespace(item.namespace)).length, [items]);
+  const platformCount = useMemo(() => items.filter((item) => isPlatformResource(item.platform_role, item.namespace)).length, [items]);
   const visibleItems = useMemo(
-    () => hidePlatformComponents ? items.filter((item) => !isPlatformNamespace(item.namespace)) : items,
+    () => hidePlatformComponents ? items.filter((item) => !isPlatformResource(item.platform_role, item.namespace)) : items,
     [hidePlatformComponents, items],
   );
   const summary = useMemo(
@@ -96,8 +96,8 @@ export function ContainersPage() {
             />
             <button
               type="button"
-              onClick={() => downloadCsv("constellation-containers", ["Container", "Namespace", "Pod", "Image", "Node", "State", "Privileged", "RunAsRoot", "Critical", "High"],
-                rows.map((c) => [c.name, c.namespace, c.pod_name, c.image, c.node, c.state, c.privileged ? "yes" : "", c.run_as_root ? "yes" : "", c.critical, c.high]))}
+              onClick={() => downloadCsv("constellation-containers", ["Container", "Namespace", "Platform Role", "Pod", "Image", "Node", "State", "Privileged", "RunAsRoot", "Critical", "High"],
+                rows.map((c) => [c.name, c.namespace, c.platform_role ?? "", c.pod_name, c.image, c.node, c.state, c.privileged ? "yes" : "", c.run_as_root ? "yes" : "", c.critical, c.high]))}
               className="rounded-md border border-border bg-card px-3 py-2 text-sm hover:bg-accent"
             >Export CSV</button>
           </div>

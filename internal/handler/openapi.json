@@ -3519,6 +3519,7 @@
   "paths": {
     "/api/v1/access-control": {
       "get": {
+        "description": "Requires manage_users. Each users item includes local_password (whether a local password exists), locked (whether the effective failed-login lockout window is still active), and password_reset_required (whether login must change the password). The status field remains active or suspended and is independent of these recovery flags.",
         "summary": "Access control users, roles, bindings, providers, tokens, permissions, and guardrails"
       }
     },
@@ -8788,6 +8789,175 @@
         "summary": "Replace response-rules-v2"
       }
     },
+    "/api/v1/response-rules-v2:export": {
+      "get": {
+        "summary": "Export response rules as portable YAML",
+        "description": "Exports only org-wide rules when cluster_id is omitted, or only rules belonging to the named cluster when present. Requires an org-wide manage_runtime_rules grant; cluster-scoped grants do not authorize this query-parameter route. The file contains no tenant, cluster, or database identifiers and can be imported into another matching scope. Existing receiver IDs are resolved to portable names for notify, ticket, or webhook; quarantine may carry a true/false isolate value. Unknown params fail closed with 422 and no partial YAML is emitted because arbitrary params may contain credentials.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "description": "Owned cluster whose cluster-specific rules to export; omit for org-wide rules.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Versioned response-rule YAML document.",
+            "content": {
+              "application/yaml": {
+                "schema": {
+                  "type": "string"
+                },
+                "example": "api_version: constellation.io/v1\nkind: ResponseRules\nscope: global\nrules:\n  - name: notify-high\n    description: Notify on high-severity events\n    enabled: true\n    priority: 10\n    event_type: runtime\n    conditions:\n      - type: level\n        value: high\n    actions:\n      - kind: notify\n        target: security-team\n    workload_match: {}\n"
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid cluster_id."
+          },
+          "403": {
+            "description": "Caller lacks manage_runtime_rules for this scope."
+          },
+          "404": {
+            "description": "Cluster is not owned by this organization."
+          },
+          "422": {
+            "description": "A rule contains unsupported action params or an unavailable receiver. No YAML is returned."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/response-rules-v2:import": {
+      "post": {
+        "summary": "Import response rules from portable YAML",
+        "description": "Atomically imports up to 100 validated rules into the selected scope. A durable attempt audit precedes writes, and a completion audit commits in the same transaction as the rules. The document must use api_version constellation.io/v1, kind ResponseRules, and scope global or cluster matching the endpoint. Existing names in another scope always conflict. Within the selected scope on_conflict defaults to error; skip retains a rule and replace updates its definition and priority. Each rule may override on_conflict. Action params may reference an existing target-org receiver by name for notify, ticket, or webhook, or carry a true/false isolate value for quarantine; receiver IDs and unknown params are rejected, not silently redacted. YAML aliases, anchors, unknown fields, multiple documents, and documents over 1 MiB are rejected. Requires an org-wide manage_runtime_rules grant; cluster-scoped grants do not authorize this query-parameter route.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "description": "Owned target cluster; omit to import org-wide rules.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "on_conflict",
+            "in": "query",
+            "description": "Default policy for names already present in this scope. Rules can override it with their own on_conflict field.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "error",
+                "skip",
+                "replace"
+              ],
+              "default": "error"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/yaml": {
+              "schema": {
+                "type": "string",
+                "maxLength": 1048576
+              },
+              "example": "api_version: constellation.io/v1\nkind: ResponseRules\nscope: global\nrules:\n  - name: notify-high\n    description: Notify on high-severity events\n    enabled: true\n    priority: 10\n    event_type: runtime\n    conditions:\n      - type: level\n        value: high\n    actions:\n      - kind: notify\n        target: security-team\n    workload_match: {}\n    on_conflict: replace\n"
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Per-rule outcomes and durable attempt and completion audit IDs.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "created",
+                    "replaced",
+                    "skipped",
+                    "results",
+                    "audit_attempt_id",
+                    "completion_audit_id"
+                  ],
+                  "properties": {
+                    "created": {
+                      "type": "integer"
+                    },
+                    "replaced": {
+                      "type": "integer"
+                    },
+                    "skipped": {
+                      "type": "integer"
+                    },
+                    "completion_audit_id": {
+                      "type": "integer"
+                    },
+                    "audit_attempt_id": {
+                      "type": "integer"
+                    },
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "name",
+                          "status"
+                        ],
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "created",
+                              "replaced",
+                              "skipped"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid YAML, rule, parameter, or scope."
+          },
+          "403": {
+            "description": "Caller lacks manage_runtime_rules for this scope."
+          },
+          "404": {
+            "description": "Cluster is not owned by this organization."
+          },
+          "409": {
+            "description": "Name conflicts with another scope or an existing rule whose policy is error."
+          },
+          "415": {
+            "description": "Content-Type is not a supported YAML media type with UTF-8 charset."
+          },
+          "503": {
+            "description": "Durable audit is unavailable; no rules are committed."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/api/v1/response-rules-v2:reorder": {
       "patch": {
         "responses": {
@@ -11564,28 +11734,108 @@
     },
     "/api/v1/users/{id}/force-password-reset": {
       "post": {
+        "description": "Requires manage_users. Marks an org-scoped local-password user for a required password change, invalidates existing JWT sessions, and revokes personal access tokens. The mutation and audit record commit atomically. SSO-only users return 404.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Password change required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "status"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "const": "reset_required"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Create force-password-reset"
+        "summary": "Require a local user to reset their password"
       }
     },
     "/api/v1/users/{id}/unlock": {
       "post": {
+        "description": "Requires manage_users. Clears the failed-login count and block timestamp for an org-scoped user. Idempotent and audited atomically; does not re-enable disabled users.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Lockout cleared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "status"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "const": "unlocked"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Create unlock"
+        "summary": "Clear a user's failed-login lockout"
       }
     },
     "/api/v1/version": {

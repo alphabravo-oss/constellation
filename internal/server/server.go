@@ -846,6 +846,8 @@ func (s *Server) buildRouter() chi.Router {
 			rrv2 := policy.NewResponseRulesV2(s.db, s.auditLog)
 			r.Get("/response-rules-v2", s.requireVerb(rbac.VerbReadFindings, rrv2.List))
 			r.Get("/response-rules-v2/options", s.requireVerb(rbac.VerbReadFindings, rrv2.Options))
+			r.Get("/response-rules-v2:export", s.requireVerb(rbac.VerbManageRuntimeRules, rrv2.ExportYAML))
+			r.Post("/response-rules-v2:import", s.requireVerb(rbac.VerbManageRuntimeRules, rrv2.ImportYAML))
 			r.Post("/response-rules-v2", s.requireVerb(rbac.VerbManageRuntimeRules, rrv2.Create))
 			r.Patch("/response-rules-v2:reorder", s.requireVerb(rbac.VerbManageRuntimeRules, rrv2.Reorder))
 			r.Put("/response-rules-v2/{id}", s.requireVerb(rbac.VerbManageRuntimeRules, rrv2.Update))

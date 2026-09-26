@@ -1,9 +1,11 @@
 package network
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 
+	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
 )
@@ -14,8 +16,9 @@ import (
 // signature move is correlating EXPOSURE with VULNERABILITY (a reachable service with
 // critical CVEs is the top remediation target).
 type exposedServiceDTO struct {
-	Workload      string   `json:"workload"`   // "namespace/name"
+	Workload      string   `json:"workload"` // "namespace/name"
 	Namespace     string   `json:"namespace"`
+	PlatformRole  string   `json:"platform_role,omitempty"`
 	Name          string   `json:"name"`
 	ExternalPeers int      `json:"external_peers"` // distinct external IPs
 	Protocols     []string `json:"protocols"`
@@ -73,7 +76,8 @@ SELECT ` + internalCol + ` AS workload,
        COALESCE(max(d.critical_count), 0)::int                                      AS critical,
        COALESCE(max(d.high_count), 0)::int                                          AS high,
        COALESCE(max(d.risk_score), 0)::int                                          AS risk_score,
-       CASE max(m.r) WHEN 3 THEN 'protect' WHEN 2 THEN 'monitor' WHEN 1 THEN 'discover' ELSE '' END AS policy_mode
+       CASE max(m.r) WHEN 3 THEN 'protect' WHEN 2 THEN 'monitor' WHEN 1 THEN 'discover' ELSE '' END AS policy_mode,
+       COALESCE((array_agg(d.labels) FILTER (WHERE d.labels IS NOT NULL))[1], '{}'::jsonb) AS labels
   FROM network_flows nf
   LEFT JOIN deployments d
     ON d.org_id = nf.org_id AND d.cluster_id = nf.cluster_id
@@ -96,11 +100,13 @@ SELECT ` + internalCol + ` AS workload,
 		out := []exposedServiceDTO{}
 		for rows.Next() {
 			var s exposedServiceDTO
+			var labels []byte
 			if err := rows.Scan(&s.Workload, &s.ExternalPeers, &s.Protocols, &s.Ports,
-				&s.Sessions, &s.Critical, &s.High, &s.RiskScore, &s.PolicyMode); err != nil {
+				&s.Sessions, &s.Critical, &s.High, &s.RiskScore, &s.PolicyMode, &labels); err != nil {
 				return nil, err
 			}
 			s.Namespace, s.Name = splitWorkload(s.Workload)
+			s.PlatformRole = handler.PlatformRoleJSON(s.Namespace, json.RawMessage(labels))
 			out = append(out, s)
 		}
 		return out, rows.Err()

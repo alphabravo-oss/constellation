@@ -118,6 +118,20 @@ INSERT INTO users (id, org_id, email, display_name) VALUES
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", targetID.String())
 	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
+	unavailable := NewUsers(d, nil)
+	failedAudit := httptest.NewRecorder()
+	unavailable.Unlock(failedAudit, r)
+	if failedAudit.Code != http.StatusInternalServerError {
+		t.Fatalf("unlock without audit status = %d, want 500", failedAudit.Code)
+	}
+	var failureCount int
+	var lockoutPresent bool
+	if err := pool.QueryRow(ctx, `SELECT failed_login_count, block_login_since IS NOT NULL FROM users WHERE id = $1`, targetID).Scan(&failureCount, &lockoutPresent); err != nil {
+		t.Fatalf("read failed unlock state: %v", err)
+	}
+	if failureCount != 9 || !lockoutPresent {
+		t.Fatalf("unlock committed without audit: failed=%d blocked=%t", failureCount, lockoutPresent)
+	}
 	w := httptest.NewRecorder()
 	h.Unlock(w, r)
 	if w.Code != http.StatusOK {
@@ -134,6 +148,13 @@ INSERT INTO users (id, org_id, email, display_name) VALUES
 	if failed != 0 || (blocked != nil && *blocked) {
 		t.Fatalf("expected cleared lockout, got failed=%d blocked=%v", failed, blocked)
 	}
+	var auditRows int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id=$1 AND actor_id=$2 AND target_id=$3 AND action='user.unlock'`, orgID, adminID, targetID.String()).Scan(&auditRows); err != nil {
+		t.Fatalf("count unlock audit rows: %v", err)
+	}
+	if auditRows != 1 {
+		t.Fatalf("unlock audit rows=%d, want 1", auditRows)
+	}
 
 	// Unlocking a user in another org must 404 (org scoping).
 	otherOrg := uuid.New()
@@ -146,5 +167,11 @@ INSERT INTO users (id, org_id, email, display_name) VALUES
 	h.Unlock(w2, r2)
 	if w2.Code != http.StatusNotFound {
 		t.Fatalf("cross-org unlock status = %d, want 404", w2.Code)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE action='user.unlock' AND target_id=$1`, targetID.String()).Scan(&auditRows); err != nil {
+		t.Fatalf("count unlock audit rows after rejected request: %v", err)
+	}
+	if auditRows != 1 {
+		t.Fatalf("rejected unlock created audit row: %d", auditRows)
 	}
 }

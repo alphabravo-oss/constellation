@@ -201,24 +201,19 @@ UPDATE users
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "revoke tokens"})
 		return
 	}
+	if err := h.auditUserActionTx(r.Context(), tx, subj.OrgID, subj.UserID, "user.force_password_reset", targetID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "audit reset"})
+		return
+	}
 	if err := tx.Commit(r.Context()); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "commit"})
 		return
 	}
-	h.logUserAction(r.Context(), subj.OrgID, subj.UserID, "user.force_password_reset", targetID)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "reset_required"})
 }
 
-// Unlock clears a user's brute-force lockout (AUTH-LOCKOUT-17): it zeroes failed_login_count
-// and NULLs block_login_since for a user in the caller's org, so an account locked by repeated
-// failed logins can be restored without waiting out the lockout window. Scoped to the caller's
-// org so an admin cannot unlock users in another tenant. Idempotent — unlocking a non-locked
-// user is a no-op that still returns 200. Gated by rbac.VerbManageUsers in the router.
-//
-// ROUTE (add to internal/server/server.go alongside the other /users/{id}/... routes, e.g. after
-// the force-password-reset line ~942):
-//
-//	r.Post("/users/{id}/unlock", s.requireVerb(rbac.VerbManageUsers, users.Unlock))
+// Unlock clears a user's brute-force lockout within the caller's org. Repeated
+// unlocks are idempotent; each successful request has a durable audit event.
 func (h *Users) Unlock(w http.ResponseWriter, r *http.Request) {
 	if h.db == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "db unavailable"})
@@ -234,7 +229,13 @@ func (h *Users) Unlock(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	tag, err := h.db.Pool().Exec(r.Context(), `
+	tx, err := h.db.Pool().Begin(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "begin"})
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	tag, err := tx.Exec(r.Context(), `
 UPDATE users
    SET failed_login_count = 0,
        block_login_since = NULL,
@@ -248,8 +249,26 @@ UPDATE users
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
-	h.logUserAction(r.Context(), subj.OrgID, subj.UserID, "user.unlock", targetID)
+	if err := h.auditUserActionTx(r.Context(), tx, subj.OrgID, subj.UserID, "user.unlock", targetID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "audit unlock"})
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "commit"})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "unlocked"})
+}
+
+func (h *Users) auditUserActionTx(ctx context.Context, tx pgx.Tx, orgID, actorID uuid.UUID, action string, targetID uuid.UUID) error {
+	if h.audit == nil {
+		return errors.New("audit unavailable")
+	}
+	_, _, err := h.audit.LogInTx(ctx, tx, audit.Event{
+		OrgID: &orgID, ActorID: &actorID, Action: action,
+		TargetKind: "user", TargetID: targetID.String(),
+	})
+	return err
 }
 
 func (h *Users) logUserAction(ctx context.Context, orgID, actorID uuid.UUID, action string, targetID uuid.UUID) {

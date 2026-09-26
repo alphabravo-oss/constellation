@@ -2,6 +2,7 @@
 package network
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -87,11 +88,15 @@ func (h *Network) Map(w http.ResponseWriter, r *http.Request) {
 			if ns != "external" {
 				kind = "Workload"
 			}
-			workloads = append(workloads, map[string]any{
+			workload := map[string]any{
 				"id": id, "namespace": ns, "name": name, "kind": kind,
 				"risk_score": 0, "finding_count": 0,
 				"critical_count": 0, "high_count": 0,
-			})
+			}
+			if role := handler.PlatformRole(ns, nil); role != "" {
+				workload["platform_role"] = role
+			}
+			workloads = append(workloads, workload)
 		}
 	}
 
@@ -187,7 +192,7 @@ WITH wl_mode AS (
     FROM groups g
    WHERE g.org_id = $1 AND ($2::uuid IS NULL OR g.cluster_id = $2)
    GROUP BY 1)
-SELECT d.cluster_id::text, COALESCE(c.name, ''), d.namespace, d.name, d.kind, d.risk_score, d.finding_count, d.critical_count, d.high_count,
+SELECT d.cluster_id::text, COALESCE(c.name, ''), d.namespace, d.name, d.kind, d.risk_score, d.finding_count, d.critical_count, d.high_count, COALESCE(d.labels, '{}'::jsonb),
        CASE m.r WHEN 3 THEN 'protect' WHEN 2 THEN 'monitor' WHEN 1 THEN 'discover' ELSE '' END AS policy_mode
   FROM deployments d
   LEFT JOIN clusters c ON c.id = d.cluster_id
@@ -205,16 +210,21 @@ SELECT d.cluster_id::text, COALESCE(c.name, ''), d.namespace, d.name, d.kind, d.
 	for rows.Next() {
 		var cluster, clusterName, ns, name, kind, policyMode string
 		var risk, findings, critical, high int
-		if err := rows.Scan(&cluster, &clusterName, &ns, &name, &kind, &risk, &findings, &critical, &high, &policyMode); err != nil {
+		var labels []byte
+		if err := rows.Scan(&cluster, &clusterName, &ns, &name, &kind, &risk, &findings, &critical, &high, &labels, &policyMode); err != nil {
 			return nil, err
 		}
-		out = append(out, map[string]any{
+		workload := map[string]any{
 			"id": fmt.Sprintf("%s/%s", ns, name), "namespace": ns, "name": name, "kind": kind,
 			"cluster_id": cluster, "cluster_name": clusterName,
 			"risk_score": risk, "finding_count": findings,
 			"critical_count": critical, "high_count": high,
 			"policy_mode": policyMode,
-		})
+		}
+		if role := handler.PlatformRoleJSON(ns, json.RawMessage(labels)); role != "" {
+			workload["platform_role"] = role
+		}
+		out = append(out, workload)
 	}
 	return out, rows.Err()
 }

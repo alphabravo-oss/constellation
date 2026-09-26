@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   isPlatformNamespace,
+  isPlatformResource,
   isPlatformWorkloadID,
   namespaceFromWorkloadID,
 } from "./platform-components";
@@ -21,6 +22,14 @@ describe("platform component classification", () => {
 
   it("normalizes whitespace and case", () => {
     expect(isPlatformNamespace("  ASTRONOMER-SYSTEM ")).toBe(true);
+  });
+
+  it("prefers backend role metadata and falls back only for older responses", () => {
+    expect(isPlatformResource("core", "custom-platform")).toBe(true);
+    expect(isPlatformResource(" CORE ", "payments")).toBe(true);
+    expect(isPlatformResource("", "kube-system")).toBe(false);
+    expect(isPlatformResource(undefined, "kube-system")).toBe(true);
+    expect(isPlatformResource(undefined, "payments")).toBe(false);
   });
 
   it.each([

@@ -8,6 +8,7 @@ import { useCluster } from "@/hooks/useCluster";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { StatCard } from "@/components/ui/stat-card";
+import { ImportExportButtons } from "@/components/ImportExportButtons";
 
 export function ResponseRulesPage() {
   const qc = useQueryClient();
@@ -99,15 +100,26 @@ export function ResponseRulesPage() {
         title="Response Rules"
         description="Match incoming events to automatic actions — notify a channel, open a ticket, or quarantine/isolate a workload — when the conditions you define all hold. Rules evaluate top-to-bottom; use the order arrows to set precedence."
         actions={
-          <button
-            type="button"
-            onClick={() => navigate(`${rulesBase}/new`)}
-            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
-          >
-            <Plus className="h-3.5 w-3.5" /> New rule
-          </button>
+          <div className="flex items-center gap-2">
+            {clusterId ? <ImportExportButtons
+              filename="constellation-response-rules.yaml"
+              label="cluster response rules"
+              exportYaml={() => responseRulesV2.exportYaml(clusterId)}
+              importYaml={(text) => responseRulesV2.importYaml(clusterId, text)}
+              onImported={() => void qc.invalidateQueries({ queryKey: ["response-rules-v2", clusterId] })}
+            /> : null}
+            <button
+              type="button"
+              onClick={() => navigate(`${rulesBase}/new`)}
+              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
+            >
+              <Plus className="h-3.5 w-3.5" /> New rule
+            </button>
+          </div>
         }
       />
+
+      <p className="text-xs text-muted-foreground">YAML export includes cluster-owned rules only; organization-wide rules remain separate.</p>
 
       <section className="grid grid-cols-3 gap-3">
         <StatCard label="Rules" value={rules.length} />

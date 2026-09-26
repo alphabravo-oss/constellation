@@ -13,7 +13,7 @@ import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { PlatformVisibilityToggle } from "@/components/ui/platform-visibility-toggle";
 import { downloadCsv } from "@/lib/csv";
-import { isPlatformNamespace } from "@/lib/platform-components";
+import { isPlatformResource } from "@/lib/platform-components";
 import { StatCard } from "@/components/ui/stat-card";
 import { usePlatformComponentVisibility } from "@/hooks/usePlatformComponentVisibility";
 
@@ -27,9 +27,9 @@ export function DeploymentsPage() {
   });
 
   const allRows = useMemo(() => q.data?.deployments ?? [], [q.data?.deployments]);
-  const platformCount = useMemo(() => allRows.filter((row) => isPlatformNamespace(row.namespace)).length, [allRows]);
+  const platformCount = useMemo(() => allRows.filter((row) => isPlatformResource(row.platform_role, row.namespace)).length, [allRows]);
   const rows = useMemo(
-    () => hidePlatformComponents ? allRows.filter((row) => !isPlatformNamespace(row.namespace)) : allRows,
+    () => hidePlatformComponents ? allRows.filter((row) => !isPlatformResource(row.platform_role, row.namespace)) : allRows,
     [allRows, hidePlatformComponents],
   );
   const summary = useMemo(
@@ -138,8 +138,8 @@ export function DeploymentsPage() {
             </label>
             <button
               type="button"
-              onClick={() => downloadCsv("constellation-workloads", ["Namespace", "Name", "Kind", "Risk", "Findings", "Critical", "High", "Privileged", "RunAsRoot", "HostNetwork", "LastSeen"],
-                rows.map((d) => [d.namespace, d.name, d.kind, d.risk_score, d.finding_count, d.critical_count, d.high_count, Number(d.risk_factors?.privileged) > 0 ? "yes" : "", Number(d.risk_factors?.run_as_root) > 0 ? "yes" : "", Number(d.risk_factors?.host_network) > 0 ? "yes" : "", d.last_seen_at]))}
+              onClick={() => downloadCsv("constellation-workloads", ["Namespace", "Platform Role", "Name", "Kind", "Risk", "Findings", "Critical", "High", "Privileged", "RunAsRoot", "HostNetwork", "LastSeen"],
+                rows.map((d) => [d.namespace, d.platform_role ?? "", d.name, d.kind, d.risk_score, d.finding_count, d.critical_count, d.high_count, Number(d.risk_factors?.privileged) > 0 ? "yes" : "", Number(d.risk_factors?.run_as_root) > 0 ? "yes" : "", Number(d.risk_factors?.host_network) > 0 ? "yes" : "", d.last_seen_at]))}
               className="rounded-md border border-border bg-card px-3 py-1.5 text-sm hover:bg-accent"
             >Export CSV</button>
           </div>

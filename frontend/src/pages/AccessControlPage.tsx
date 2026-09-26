@@ -38,7 +38,7 @@ const userColumns: Column<AccessControlUser>[] = [
     header: "Roles",
     cell: (u) => <div className="flex flex-wrap gap-1">{u.roles.map((role) => <Badge key={role}>{role}</Badge>)}</div>,
   },
-  { id: "status", header: "Status", cell: (u) => <Status value={u.status} /> },
+  { id: "status", header: "Status", cell: (u) => <div className="flex flex-wrap gap-1"><Status value={u.status} />{u.locked && <Status value="locked" />}{u.password_reset_required && <Status value="reset required" />}</div> },
   { id: "last_seen", header: "Last Seen", cell: (u) => formatDate(u.last_login_at), className: "text-xs text-muted-foreground" },
 ];
 
@@ -113,6 +113,33 @@ export function AccessControlPage() {
     onSuccess: () => { toast.success("Provider deleted"); void invalidateAuth(); },
     onError: () => toast.error("Failed to delete provider"),
   });
+  const unlockUser = useMutation({
+    mutationFn: (id: string) => accessControl.unlockLocalUser(id),
+    onSuccess: () => { toast.success("Local user unlocked"); void invalidate(); },
+    onError: () => toast.error("Failed to unlock local user"),
+  });
+  const forceResetUser = useMutation({
+    mutationFn: (id: string) => accessControl.forceLocalPasswordReset(id),
+    onSuccess: () => { toast.success("Password reset required; active credentials revoked"); void invalidate(); },
+    onError: () => toast.error("Failed to require password reset"),
+  });
+  const localUserColumns: Column<AccessControlUser>[] = [
+    ...userColumns,
+    {
+      id: "recovery",
+      header: "Recovery",
+      cell: (user) => user.local_password ? (
+        <div className="flex gap-2">
+          <Button variant="ghost" size="sm" disabled={!user.locked || unlockUser.isPending || forceResetUser.isPending} onClick={() => {
+            if (window.confirm(`Unlock ${user.email}? This clears the login lockout.`)) unlockUser.mutate(user.id);
+          }}>Unlock</Button>
+          <Button variant="ghost" size="sm" disabled={user.password_reset_required || unlockUser.isPending || forceResetUser.isPending} onClick={() => {
+            if (window.confirm(`Require ${user.email} to reset their password? Active sessions and tokens will be revoked.`)) forceResetUser.mutate(user.id);
+          }}>Require reset</Button>
+        </div>
+      ) : <span className="text-xs text-muted-foreground">No local password</span>,
+    },
+  ];
 
   if (q.isPending) return <p className="text-sm text-muted-foreground">Loading access control...</p>;
   const data = q.data;
@@ -135,7 +162,7 @@ export function AccessControlPage() {
           </div>
           <Card padded={false}>
             <div className="overflow-x-auto" data-testid="access-users">
-              <DataTable rows={data?.users ?? []} columns={userColumns} rowKey={(u) => u.id} />
+              <DataTable rows={data?.users ?? []} columns={localUserColumns} rowKey={(u) => u.id} />
             </div>
           </Card>
         </div>
@@ -360,7 +387,7 @@ function Status({ value }: { value: string }) {
     ? "bg-[color:var(--color-status-success)]/15 text-[color:var(--color-status-success)]"
     : value === "rotation_due" || value === "planned" || value === "medium" || value === "pending_rotation" || value === "restricted"
       ? "bg-[color:var(--color-status-warning)]/15 text-[color:var(--color-status-warning)]"
-      : value === "disabled" || value === "expired" || value === "high" || value === "critical" || value === "suspended"
+    : value === "disabled" || value === "expired" || value === "high" || value === "critical" || value === "suspended" || value === "locked"
         ? "bg-[color:var(--color-status-error)]/15 text-[color:var(--color-status-error)]"
         : "bg-muted text-muted-foreground";
   return <span className={`rounded-md px-2 py-1 text-xs ${cls}`}>{value}</span>;

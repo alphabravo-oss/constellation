@@ -27,6 +27,10 @@ export function isPlatformNamespace(namespace: string | null | undefined): boole
   return PLATFORM_NAMESPACES.has((namespace ?? "").trim().toLowerCase());
 }
 
+export function isPlatformResource(platformRole: string | null | undefined, namespace: string | null | undefined): boolean {
+  return platformRole == null ? isPlatformNamespace(namespace) : platformRole.trim().toLowerCase() === "core";
+}
+
 export function namespaceFromWorkloadID(workloadID: string | null | undefined): string {
   return (workloadID ?? "").trim().split("/", 1)[0] ?? "";
 }

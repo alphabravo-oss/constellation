@@ -51,6 +51,7 @@ type deploymentDetailDTO struct {
 	ID              string                         `json:"id"`
 	ClusterID       string                         `json:"cluster_id,omitempty"`
 	Namespace       string                         `json:"namespace"`
+	PlatformRole    string                         `json:"platform_role,omitempty"`
 	Name            string                         `json:"name"`
 	Kind            string                         `json:"kind"`
 	Labels          json.RawMessage                `json:"labels"`
@@ -389,6 +390,9 @@ SELECT id, namespace, name, kind, COALESCE(labels,'{}'::jsonb), risk_score, COAL
 			"first_seen_at":  firstSeen.UTC().Format(time.RFC3339),
 			"last_seen_at":   lastSeen.UTC().Format(time.RFC3339),
 		})
+		if role := PlatformRoleJSON(ns, labels); role != "" {
+			out[len(out)-1]["platform_role"] = role
+		}
 	}
 	writeJSON(w, 200, map[string]any{"deployments": out, "limit": limit})
 }
@@ -420,6 +424,7 @@ SELECT id::text, COALESCE(cluster_id::text, ''), namespace, name, kind,
 		return
 	}
 	detail.Labels = json.RawMessage(labels)
+	detail.PlatformRole = PlatformRoleJSON(detail.Namespace, detail.Labels)
 	detail.RiskFactors = json.RawMessage(factors)
 
 	clusterID := parseOptionalUUID(detail.ClusterID)

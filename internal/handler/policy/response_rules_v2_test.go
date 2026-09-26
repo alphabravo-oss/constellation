@@ -98,6 +98,8 @@ func responseRuleV2Router(d *db.DB, pool *pgxpool.Pool) *chi.Mux {
 	h := NewResponseRulesV2(d, audit.New(pool))
 	r.Get("/api/v1/response-rules-v2", h.List)
 	r.Get("/api/v1/response-rules-v2/options", h.Options)
+	r.Get("/api/v1/response-rules-v2:export", h.ExportYAML)
+	r.Post("/api/v1/response-rules-v2:import", h.ImportYAML)
 	r.Post("/api/v1/response-rules-v2", h.Create)
 	r.Put("/api/v1/response-rules-v2/{id}", h.Update)
 	r.Patch("/api/v1/response-rules-v2:reorder", h.Reorder)

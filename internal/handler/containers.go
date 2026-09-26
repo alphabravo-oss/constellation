@@ -10,20 +10,21 @@ import (
 // This is the per-running-container view NeuVector's Assets → Containers page shows;
 // Constellation previously only aggregated to the deployment level.
 type containerRow struct {
-	Node       string    `json:"node"`
-	ID         string    `json:"id"`
-	Name       string    `json:"name"`
-	Namespace  string    `json:"namespace"`
-	PodName    string    `json:"pod_name"`
-	Image      string    `json:"image"`
-	State      string    `json:"state"`
-	Workload   string    `json:"workload,omitempty"`
-	Privileged bool      `json:"privileged"`
-	RunAsRoot  bool      `json:"run_as_root"`
-	RiskScore  int       `json:"risk_score"`
-	Critical   int       `json:"critical"`
-	High       int       `json:"high"`
-	ObservedAt time.Time `json:"observed_at"`
+	Node         string    `json:"node"`
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	Namespace    string    `json:"namespace"`
+	PlatformRole string    `json:"platform_role,omitempty"`
+	PodName      string    `json:"pod_name"`
+	Image        string    `json:"image"`
+	State        string    `json:"state"`
+	Workload     string    `json:"workload,omitempty"`
+	Privileged   bool      `json:"privileged"`
+	RunAsRoot    bool      `json:"run_as_root"`
+	RiskScore    int       `json:"risk_score"`
+	Critical     int       `json:"critical"`
+	High         int       `json:"high"`
+	ObservedAt   time.Time `json:"observed_at"`
 }
 
 // Containers returns the cluster's running containers by unnesting each node's
@@ -64,10 +65,11 @@ SELECT c.node, c.id, c.name, c.namespace, c.pod_name,
        COALESCE(d.risk_score, 0)                             AS risk_score,
        COALESCE(d.critical_count, 0)                         AS critical,
        COALESCE(d.high_count, 0)                             AS high,
+       COALESCE(d.labels, '{}'::jsonb)                        AS labels,
        c.observed_at
   FROM conts c
   LEFT JOIN LATERAL (
-	  SELECT dd.name, dd.risk_factors, dd.risk_score, dd.critical_count, dd.high_count
+	  SELECT dd.name, dd.risk_factors, dd.risk_score, dd.critical_count, dd.high_count, dd.labels
         FROM deployments dd
        WHERE dd.org_id = $1 AND dd.cluster_id = $2
          AND dd.namespace = c.namespace
@@ -97,11 +99,13 @@ SELECT c.node, c.id, c.name, c.namespace, c.pod_name,
 	running := 0
 	for rows.Next() {
 		var c containerRow
+		var labels []byte
 		if err := rows.Scan(&c.Node, &c.ID, &c.Name, &c.Namespace, &c.PodName, &c.Image, &c.State,
-			&c.Workload, &c.Privileged, &c.RunAsRoot, &c.RiskScore, &c.Critical, &c.High, &c.ObservedAt); err != nil {
+			&c.Workload, &c.Privileged, &c.RunAsRoot, &c.RiskScore, &c.Critical, &c.High, &labels, &c.ObservedAt); err != nil {
 			jsonError(w, http.StatusInternalServerError, "scan container: "+err.Error())
 			return
 		}
+		c.PlatformRole = PlatformRoleJSON(c.Namespace, labels)
 		running++
 		out = append(out, c)
 	}

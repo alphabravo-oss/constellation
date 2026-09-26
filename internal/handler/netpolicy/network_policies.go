@@ -60,6 +60,7 @@ type networkPolicyLifecycleDTO struct {
 	ClusterName           string                         `json:"cluster_name,omitempty"`
 	Workload              string                         `json:"workload"`
 	Namespace             string                         `json:"namespace"`
+	PlatformRole          string                         `json:"platform_role,omitempty"`
 	CurrentMode           string                         `json:"current_mode"`
 	TargetMode            string                         `json:"target_mode,omitempty"`
 	ForcedMode            string                         `json:"-"` // transient: the "force" action's target posture
@@ -773,7 +774,8 @@ SELECT namespace, name, labels
 		preview := buildNetworkPolicyPreview(dep.name, dep.namespace, dep.labels, flows)
 		item := networkPolicyLifecycleDTO{
 			ID: dep.workload, Workload: dep.workload, Namespace: dep.namespace,
-			ClusterID: clusterIDForPolicy(cluster), ClusterName: clusterNameForPolicy(cluster),
+			PlatformRole: handlerpkg.PlatformRole(dep.namespace, dep.labels),
+			ClusterID:    clusterIDForPolicy(cluster), ClusterName: clusterNameForPolicy(cluster),
 			CurrentMode: current, TargetMode: target,
 			Reason: reason, AutoApplied: autoApplied, EvaluatedAt: time.Now().UTC().Format(time.RFC3339),
 			ApprovalStatus: approval, RollbackAvailable: current == "protect",
