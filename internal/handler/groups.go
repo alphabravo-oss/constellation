@@ -15,7 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/alphabravocompany/constellation/internal/db"
-	"github.com/alphabravocompany/constellation/internal/handler/netutil"
+	"github.com/alphabravocompany/constellation/internal/groupprofile"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/group"
 )
@@ -97,15 +97,7 @@ SELECT namespace, name, labels
 // mode vocabulary: discover->learn, monitor->monitor, protect->enforce. Empty
 // when the group mode is unset/invalid (caller skips propagation).
 func baselineModeForGroupMode(m group.Mode) string {
-	switch m {
-	case group.ModeDiscover:
-		return "learn"
-	case group.ModeMonitor:
-		return "monitor"
-	case group.ModeProtect:
-		return "enforce"
-	}
-	return ""
+	return groupprofile.ModeForGroup(m)
 }
 
 // propagateGroupProfileMode sets each member workload's process-baseline mode to
@@ -118,32 +110,7 @@ type groupModeWriter interface {
 }
 
 func propagateGroupProfileMode(ctx context.Context, writer groupModeWriter, orgID, clusterID uuid.UUID, members []string, gmode group.Mode) error {
-	bmode := baselineModeForGroupMode(gmode)
-	if bmode == "" || len(members) == 0 {
-		return nil
-	}
-	for _, wid := range members {
-		ns, name := netutil.SplitWorkload(wid)
-		if _, err := writer.Exec(ctx, `
-INSERT INTO process_baseline_states (org_id, cluster_id, workload_id, namespace, name, mode,
-       learn_started_at, monitor_started_at, enforce_started_at, updated_at)
-VALUES ($1,$2,$3,$4,$5,$6, NOW(),
-        CASE WHEN $6 IN ('monitor','enforce') THEN NOW() END,
-        CASE WHEN $6 = 'enforce' THEN NOW() END, NOW())
-ON CONFLICT (org_id, cluster_id, workload_id) DO UPDATE SET
-       mode = EXCLUDED.mode,
-       monitor_started_at = CASE WHEN $6 IN ('monitor','enforce')
-              THEN COALESCE(process_baseline_states.monitor_started_at, NOW())
-              ELSE process_baseline_states.monitor_started_at END,
-       enforce_started_at = CASE WHEN $6 = 'enforce'
-              THEN COALESCE(process_baseline_states.enforce_started_at, NOW())
-              ELSE process_baseline_states.enforce_started_at END,
-       updated_at = NOW()`,
-			orgID, clusterID, wid, ns, name, bmode); err != nil {
-			return err
-		}
-	}
-	return nil
+	return groupprofile.Propagate(ctx, writer, orgID, clusterID, members, gmode)
 }
 
 func propagateGroupModeTx(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, clusterArg any, members []string, gmode group.Mode) error {

@@ -3,20 +3,18 @@
 // NeuVector re-evaluates every group's criteria whenever a workload starts or
 // stops (controller/cache/group.go groupWorkloadJoin/groupWorkloadLeave/
 // refreshGroupMember), so a rule authored against a group automatically covers
-// future members. Constellation computes groups.members eagerly, but only inside
-// the group Create/Update handlers — a new pod replica ingested by the discoverer
-// (which writes the deployments table out-of-band) never joins existing groups,
-// and the group→group edge expansion (GroupEdgeStore.Expand, which reads the
-// cached members column) has no automatic caller.
+// future members. Constellation initially computed groups.members only in group
+// Create/Update handlers; discoverer deployments arrive out-of-band, so this
+// poll also refreshes existing groups and their safely owned network edges.
 //
-// This reconciler recomputes membership on a short cadence. A changed group is
-// written only when it has no policy references; referenced membership needs an
-// explicit, atomic policy transition before it can be changed safely. Deployment
+// This reconciler recomputes membership on a short cadence. Cluster-scoped
+// groups with only group-edge references transition their members and expanded
+// policies atomically. Other referenced groups remain unchanged. Deployment
 // ingest lives in a separate binary, so the poll is the coherent seam.
 //
-// ENFORCEMENT NOTE: referenced groups are not refreshed by this loop, so newly
-// joined workloads do not inherit their policies until an explicit safe transition
-// exists. Set CONSTELLATION_GROUP_MEMBERSHIP_RECONCILE=false to disable polling.
+// ENFORCEMENT NOTE: DPI, response, admission and org-wide references remain
+// fail-closed pending a complete transition. Set
+// CONSTELLATION_GROUP_MEMBERSHIP_RECONCILE=false to disable polling.
 package runtime
 
 import (
@@ -32,11 +30,12 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/alphabravocompany/constellation/internal/db"
+	"github.com/alphabravocompany/constellation/internal/groupprofile"
 	"github.com/alphabravocompany/constellation/pkg/group"
 	"github.com/alphabravocompany/constellation/pkg/netpolicy"
 )
 
-// GroupMembershipReconciler periodically recomputes unreferenced groups.members.
+// GroupMembershipReconciler periodically recomputes safe groups.members.
 type GroupMembershipReconciler struct {
 	db       *db.DB
 	edges    *GroupEdgeStore
@@ -103,7 +102,7 @@ type reconcileGroup struct {
 }
 
 // reconcileOnce attempts membership refresh for every group and returns the
-// number of unreferenced groups whose members were updated.
+// number of groups whose members were updated.
 func (r *GroupMembershipReconciler) reconcileOnce(ctx context.Context) (int, error) {
 	rows, err := r.db.Pool().Query(ctx,
 		`SELECT id, org_id, name FROM groups`)
@@ -133,10 +132,9 @@ func (r *GroupMembershipReconciler) reconcileOnce(ctx context.Context) (int, err
 				slog.String("org", orgID.String()), slog.String("err", err.Error()))
 			continue
 		}
-		changedNames := map[string]bool{}
 		for i := range groups {
 			rg := &groups[i]
-			name, updated, err := r.reconcileMembership(ctx, orgID, rg.id, wls)
+			_, updated, err := r.reconcileMembership(ctx, orgID, rg.id, wls)
 			if err != nil {
 				r.log.Warn("group membership: persist failed",
 					slog.String("group", rg.name), slog.String("err", err.Error()))
@@ -144,11 +142,7 @@ func (r *GroupMembershipReconciler) reconcileOnce(ctx context.Context) (int, err
 			}
 			if updated {
 				changed++
-				changedNames[name] = true
 			}
-		}
-		if len(changedNames) > 0 {
-			r.reexpandEdges(ctx, orgID, changedNames)
 		}
 	}
 	return changed, nil
@@ -185,9 +179,10 @@ func (r *GroupMembershipReconciler) writeMembership(ctx context.Context, orgID, 
 	}
 	var name string
 	var clusterID *uuid.UUID
+	var profileMode group.Mode
 	var criteria, members []byte
-	err = tx.QueryRow(ctx, `SELECT name, cluster_id, criteria, members FROM groups WHERE id=$1 AND org_id=$2 FOR UPDATE NOWAIT`, groupID, orgID).
-		Scan(&name, &clusterID, &criteria, &members)
+	err = tx.QueryRow(ctx, `SELECT name, cluster_id, profile_mode, criteria, members FROM groups WHERE id=$1 AND org_id=$2 FOR UPDATE NOWAIT`, groupID, orgID).
+		Scan(&name, &clusterID, &profileMode, &criteria, &members)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", false, nil
 	}
@@ -212,8 +207,46 @@ func (r *GroupMembershipReconciler) writeMembership(ctx context.Context, orgID, 
 	if err != nil {
 		return name, false, err
 	}
+	var edges []GroupEdgeRow
 	if references > 0 {
-		return name, false, fmt.Errorf("group %q has %d policy references; membership refresh requires explicit unlink", name, references)
+		if clusterID == nil || r.edges.pol == nil {
+			return name, false, fmt.Errorf("group %q has %d policy references; membership refresh requires explicit unlink", name, references)
+		}
+		rows, err := tx.Query(ctx, `SELECT id, cluster_id, from_group, to_group, ports, mode, comment, updated_at
+ FROM group_rule_edges WHERE org_id=$1 AND (from_group=$2 OR to_group=$2) ORDER BY id FOR UPDATE NOWAIT`, orgID, name)
+		if err != nil {
+			return name, false, err
+		}
+		for rows.Next() {
+			edge, err := scanGroupEdge(rows)
+			if err != nil {
+				rows.Close()
+				return name, false, err
+			}
+			edges = append(edges, edge)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return name, false, err
+		}
+		if len(edges) != references {
+			return name, false, fmt.Errorf("group %q has %d policy references; membership refresh requires explicit unlink", name, references)
+		}
+		for _, edge := range edges {
+			if edge.ClusterID != *clusterID {
+				return name, false, fmt.Errorf("group %q has an out-of-scope edge; membership refresh requires explicit unlink", name)
+			}
+		}
+	}
+	removedPolicies := []*RuntimePolicy{}
+	for _, edge := range edges {
+		owned, err := retractEdgePoliciesTx(ctx, tx, orgID, edge.ClusterID, edge.ID, edge.Mode,
+			netpolicy.GroupEdge{FromGroup: edge.FromGroup, ToGroup: edge.ToGroup})
+		if err != nil {
+			return name, false, err
+		}
+		removedPolicies = append(removedPolicies, owned...)
 	}
 	membersJSON, err := json.Marshal(nextMembers)
 	if err != nil {
@@ -222,9 +255,37 @@ func (r *GroupMembershipReconciler) writeMembership(ctx context.Context, orgID, 
 	if _, err := tx.Exec(ctx, `UPDATE groups SET members=$1, updated_at=NOW() WHERE id=$2 AND org_id=$3`, membersJSON, groupID, orgID); err != nil {
 		return name, false, err
 	}
+	if clusterID != nil {
+		currentMembers := make(map[string]bool, len(current.Members))
+		for _, member := range current.Members {
+			currentMembers[member] = true
+		}
+		joined := []string{}
+		for _, member := range nextMembers {
+			if !currentMembers[member] {
+				joined = append(joined, member)
+			}
+		}
+		if err := groupprofile.PropagateAtLeast(ctx, tx, orgID, *clusterID, joined, profileMode); err != nil {
+			return name, false, err
+		}
+	}
+	createdPolicies := []*RuntimePolicy{}
+	for _, edge := range edges {
+		_, created, err := r.edges.expandTx(ctx, tx, orgID, edge.ClusterID, netpolicy.GroupEdge{
+			ID: edge.ID.String(), FromGroup: edge.FromGroup, ToGroup: edge.ToGroup,
+			Ports: edge.Ports, Mode: edge.Mode, Comment: edge.Comment,
+		}, nil)
+		if err != nil {
+			return name, false, err
+		}
+		createdPolicies = append(createdPolicies, created...)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return name, false, err
 	}
+	r.edges.auditRemovedPolicies(ctx, orgID, nil, removedPolicies)
+	r.edges.auditCreatedPolicies(ctx, orgID, nil, createdPolicies)
 	return name, true, nil
 }
 
@@ -254,43 +315,6 @@ func (r *GroupMembershipReconciler) loadWorkloads(ctx context.Context, orgID uui
 		out = append(out, group.Workload{ID: ns + "/" + name, Cluster: clusterStr, Namespace: ns, Labels: lm})
 	}
 	return out, rows.Err()
-}
-
-// reexpandEdges re-runs Expand for every group_rule_edge whose from/to group is in
-// changedNames. Expand reads the freshly-persisted members column, so new replicas
-// pick up the group→group rule. Best-effort: a failure is logged, not fatal.
-func (r *GroupMembershipReconciler) reexpandEdges(ctx context.Context, orgID uuid.UUID, changedNames map[string]bool) {
-	rows, err := r.db.Pool().Query(ctx, `
-SELECT id, cluster_id, from_group, to_group, ports, mode, comment, updated_at
-  FROM group_rule_edges WHERE org_id = $1`, orgID)
-	if err != nil {
-		r.log.Warn("group membership: load edges failed",
-			slog.String("org", orgID.String()), slog.String("err", err.Error()))
-		return
-	}
-	var edges []GroupEdgeRow
-	for rows.Next() {
-		e, err := scanGroupEdge(rows)
-		if err != nil {
-			rows.Close()
-			r.log.Warn("group membership: scan edge failed", slog.String("err", err.Error()))
-			return
-		}
-		if changedNames[e.FromGroup] || changedNames[e.ToGroup] {
-			edges = append(edges, e)
-		}
-	}
-	rows.Close()
-	for _, e := range edges {
-		ge := netpolicy.GroupEdge{
-			ID: e.ID.String(), FromGroup: e.FromGroup, ToGroup: e.ToGroup,
-			Ports: e.Ports, Mode: e.Mode, Comment: e.Comment,
-		}
-		if _, err := r.edges.Expand(ctx, orgID, e.ClusterID, ge, nil); err != nil {
-			r.log.Warn("group membership: edge re-expansion failed",
-				slog.String("edge", e.ID.String()), slog.String("err", err.Error()))
-		}
-	}
 }
 
 // filterByCluster returns the subset of wls in the given cluster.

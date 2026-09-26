@@ -95,14 +95,11 @@ func (s *Server) startSingletonLoops(ctx context.Context) {
 	learnedGroupWorker := runtime.NewLearnedGroupWorker(s.db, runtime.LearnedGroupWorkerConfigFromEnv(), s.tel.Logger)
 	go learnedGroupWorker.Run(ctx)
 
-	// P0-06: live group-membership reconcile (NeuVector groupWorkloadJoin/Leave
-	// parity). Recomputes groups.members from current deployments and re-expands
-	// group→group edges whose membership changed, so a rule authored against a
-	// group follows future pod replicas instead of going stale until the next
-	// group write. Singleton (deployment ingest lands out-of-band via the
-	// discoverer); on by default. Re-expansion honors each edge's authored mode, so
-	// a protect-mode edge produces ENFORCING default-deny policies for newly-joined
-	// members by design (see edgePolicyPosture); gate off with
+	// P0-06: live group-membership reconcile. Cluster-scoped groups with only
+	// group-edge references transition cached members, profile modes and expanded
+	// policies in one transaction; other referenced groups remain fail-closed.
+	// Singleton (deployment ingest lands out-of-band via the discoverer); on by
+	// default. Re-expansion honors each edge's authored mode; gate off with
 	// CONSTELLATION_GROUP_MEMBERSHIP_RECONCILE=false.
 	membershipReconciler := runtime.NewGroupMembershipReconciler(s.db,
 		runtime.NewRuntimePolicyStore(s.db, s.auditLog), s.tel.Logger)

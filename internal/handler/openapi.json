@@ -850,50 +850,11 @@
           "entries": {
             "type": "array",
             "items": {
-              "type": "object",
-              "required": [
-                "name",
-                "action"
-              ],
-              "properties": {
-                "name": {
-                  "type": "string"
-                },
-                "name_regex": {
-                  "type": "string"
-                },
-                "images": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                },
-                "action": {
-                  "type": "string",
-                  "const": "suppress"
-                },
-                "comment": {
-                  "type": "string"
-                }
-              }
+              "$ref": "#/components/schemas/MigrationVulnerabilityEntry"
             }
           },
           "domain_scope": {
-            "type": "object",
-            "properties": {
-              "clusters": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "namespaces": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              }
-            }
+            "$ref": "#/components/schemas/MigrationDomainScope"
           },
           "cluster_id": {
             "type": "string",
@@ -985,16 +946,16 @@
             "format": "date-time"
           },
           "before": {
-            "$ref": "#/components/schemas/MigrationVulnerabilityProfile"
+            "$ref": "#/components/schemas/MigrationVulnerabilitySnapshot"
           },
           "before_entries": {
             "type": "array",
             "items": {
-              "type": "object"
+              "$ref": "#/components/schemas/MigrationVulnerabilityEntry"
             }
           },
           "before_domain_scope": {
-            "type": "object"
+            "$ref": "#/components/schemas/MigrationDomainScope"
           }
         }
       },
@@ -1048,6 +1009,29 @@
       },
       "MigrationSummary": {
         "type": "object",
+        "required": [
+          "vulnerability_profiles",
+          "registries",
+          "unchanged",
+          "source",
+          "total",
+          "create",
+          "update",
+          "enforce",
+          "monitor",
+          "enabled",
+          "file_profiles",
+          "process_profiles",
+          "groups",
+          "dpi_rules",
+          "dpi_bindings",
+          "network_rules",
+          "unsupported",
+          "engines",
+          "categories",
+          "read_only",
+          "rollback_hint"
+        ],
         "properties": {
           "vulnerability_profiles": {
             "type": "integer",
@@ -1171,6 +1155,13 @@
           "summary",
           "vulnerability_profiles",
           "registries",
+          "policies",
+          "groups",
+          "file_profiles",
+          "process_profiles",
+          "network_rules",
+          "dpi_rules",
+          "dpi_bindings",
           "rollback_bundle"
         ],
         "properties": {
@@ -1196,43 +1187,43 @@
           "policies": {
             "type": "array",
             "items": {
-              "type": "object"
+              "$ref": "#/components/schemas/MigrationPolicy"
             }
           },
           "groups": {
             "type": "array",
             "items": {
-              "type": "object"
+              "$ref": "#/components/schemas/MigrationGroup"
             }
           },
           "file_profiles": {
             "type": "array",
             "items": {
-              "type": "object"
+              "$ref": "#/components/schemas/MigrationFileProfile"
             }
           },
           "process_profiles": {
             "type": "array",
             "items": {
-              "type": "object"
+              "$ref": "#/components/schemas/MigrationProcessProfile"
             }
           },
           "network_rules": {
             "type": "array",
             "items": {
-              "type": "object"
+              "$ref": "#/components/schemas/MigrationNetworkRule"
             }
           },
           "dpi_rules": {
             "type": "array",
             "items": {
-              "type": "object"
+              "$ref": "#/components/schemas/MigrationDPIRule"
             }
           },
           "dpi_bindings": {
             "type": "array",
             "items": {
-              "type": "object"
+              "$ref": "#/components/schemas/MigrationDPIBinding"
             }
           },
           "unsupported": {
@@ -1243,6 +1234,1231 @@
           },
           "rollback_bundle": {
             "type": "string"
+          }
+        }
+      },
+      "MigrationPolicy": {
+        "type": "object",
+        "required": [
+          "name",
+          "description",
+          "engine",
+          "category",
+          "enabled",
+          "mode",
+          "spec_yaml",
+          "diff_action"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "engine": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "spec_yaml": {
+            "type": "string"
+          },
+          "imported_from": {
+            "$ref": "#/components/schemas/MigrationImportedFrom"
+          },
+          "diff_action": {
+            "$ref": "#/components/schemas/MigrationDiffAction"
+          }
+        }
+      },
+      "MigrationVulnerabilityEntry": {
+        "type": "object",
+        "required": [
+          "name",
+          "action"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "name_regex": {
+            "type": "string"
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "action": {
+            "type": "string"
+          },
+          "days_to_fix": {
+            "type": "integer"
+          },
+          "severity_floor": {
+            "type": "string"
+          },
+          "score_floor": {
+            "type": "number"
+          },
+          "reserved": {
+            "type": "string"
+          },
+          "recent_days": {
+            "type": "integer"
+          },
+          "comment": {
+            "type": "string"
+          }
+        }
+      },
+      "MigrationDomainScope": {
+        "type": "object",
+        "properties": {
+          "clusters": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "namespaces": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "MigrationVulnerabilitySnapshot": {
+        "type": "object",
+        "required": [
+          "name",
+          "description",
+          "active",
+          "entries",
+          "domain_scope",
+          "diff_action"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MigrationVulnerabilityEntry"
+            }
+          },
+          "domain_scope": {
+            "$ref": "#/components/schemas/MigrationDomainScope"
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "imported_from": {
+            "$ref": "#/components/schemas/MigrationImportedFrom"
+          },
+          "diff_action": {
+            "type": "string"
+          }
+        }
+      },
+      "MigrationImportedFrom": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        }
+      },
+      "MigrationGroupCriterion": {
+        "type": "object",
+        "required": [
+          "key",
+          "op",
+          "value"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "op": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "MigrationGroup": {
+        "type": "object",
+        "required": [
+          "name",
+          "kind",
+          "criteria",
+          "diff_action"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "comment": {
+            "type": "string"
+          },
+          "cfg_type": {
+            "type": "string"
+          },
+          "policy_mode": {
+            "type": "string"
+          },
+          "profile_mode": {
+            "type": "string"
+          },
+          "criteria": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MigrationGroupCriterion"
+            }
+          },
+          "imported_from": {
+            "$ref": "#/components/schemas/MigrationImportedFrom"
+          },
+          "diff_action": {
+            "$ref": "#/components/schemas/MigrationDiffAction"
+          }
+        }
+      },
+      "MigrationFileProfileRule": {
+        "type": "object",
+        "required": [
+          "filter",
+          "recursive",
+          "behavior",
+          "applications"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "filter": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "regex": {
+            "type": "string"
+          },
+          "recursive": {
+            "type": "boolean"
+          },
+          "behavior": {
+            "type": "string"
+          },
+          "applications": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "description": {
+            "type": "string"
+          },
+          "source_id": {
+            "type": "string"
+          },
+          "source_group": {
+            "type": "string"
+          },
+          "cfg_type": {
+            "type": "string"
+          }
+        }
+      },
+      "MigrationFileProfile": {
+        "type": "object",
+        "required": [
+          "group",
+          "mode",
+          "rules",
+          "diff_action"
+        ],
+        "properties": {
+          "group": {
+            "type": "string"
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "target_group_name": {
+            "type": "string"
+          },
+          "target_workloads": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "mode": {
+            "type": "string"
+          },
+          "cfg_type": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MigrationFileProfileRule"
+            }
+          },
+          "imported_from": {
+            "$ref": "#/components/schemas/MigrationImportedFrom"
+          },
+          "diff_action": {
+            "$ref": "#/components/schemas/MigrationDiffAction"
+          }
+        }
+      },
+      "MigrationProcessRule": {
+        "type": "object",
+        "required": [
+          "name",
+          "path",
+          "action",
+          "allow_update",
+          "enabled"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "user": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "parent_name": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "cfg_type": {
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          },
+          "allow_update": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      },
+      "MigrationProcessProfile": {
+        "type": "object",
+        "required": [
+          "group",
+          "mode",
+          "rules",
+          "diff_action"
+        ],
+        "properties": {
+          "group": {
+            "type": "string"
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "target_group_name": {
+            "type": "string"
+          },
+          "target_workloads": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "mode": {
+            "type": "string"
+          },
+          "baseline": {
+            "type": "string"
+          },
+          "cfg_type": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MigrationProcessRule"
+            }
+          },
+          "imported_from": {
+            "$ref": "#/components/schemas/MigrationImportedFrom"
+          },
+          "diff_action": {
+            "$ref": "#/components/schemas/MigrationDiffAction"
+          }
+        }
+      },
+      "MigrationNetworkPort": {
+        "type": "object",
+        "required": [
+          "protocol",
+          "port"
+        ],
+        "properties": {
+          "protocol": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer"
+          }
+        }
+      },
+      "MigrationNetworkRule": {
+        "type": "object",
+        "required": [
+          "name",
+          "from_group",
+          "to_group",
+          "ports",
+          "mode",
+          "priority",
+          "diff_action"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "from_group": {
+            "type": "string"
+          },
+          "to_group": {
+            "type": "string"
+          },
+          "ports": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MigrationNetworkPort"
+            }
+          },
+          "mode": {
+            "type": "string"
+          },
+          "comment": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "imported_from": {
+            "$ref": "#/components/schemas/MigrationImportedFrom"
+          },
+          "diff_action": {
+            "$ref": "#/components/schemas/MigrationDiffAction"
+          }
+        }
+      },
+      "MigrationDPIPattern": {
+        "type": "object",
+        "required": [
+          "pattern"
+        ],
+        "properties": {
+          "pattern": {
+            "type": "string"
+          },
+          "op": {
+            "type": "string"
+          },
+          "context": {
+            "type": "string"
+          }
+        }
+      },
+      "MigrationDPIRule": {
+        "type": "object",
+        "required": [
+          "name",
+          "category",
+          "apply_dir",
+          "severity",
+          "mode",
+          "patterns",
+          "diff_action"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "category": {
+            "type": "string"
+          },
+          "apply_dir": {
+            "type": "integer"
+          },
+          "severity": {
+            "type": "integer"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "patterns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MigrationDPIPattern"
+            }
+          },
+          "description": {
+            "type": "string"
+          },
+          "source_sensor": {
+            "type": "string"
+          },
+          "source_groups": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "source_path": {
+            "type": "string"
+          },
+          "source_cfg_type": {
+            "type": "string"
+          },
+          "source_rule_cfg_type": {
+            "type": "string"
+          },
+          "federated": {
+            "type": "boolean"
+          },
+          "imported_from": {
+            "$ref": "#/components/schemas/MigrationImportedFrom"
+          },
+          "diff_action": {
+            "$ref": "#/components/schemas/MigrationDiffAction"
+          }
+        }
+      },
+      "MigrationDPIBinding": {
+        "type": "object",
+        "required": [
+          "source_group",
+          "target_group_id",
+          "target_group_name",
+          "sensor_kind",
+          "diff_action"
+        ],
+        "properties": {
+          "source_group": {
+            "type": "string"
+          },
+          "target_group_id": {
+            "type": "string",
+            "description": "Empty when the target group is created by this import."
+          },
+          "target_group_name": {
+            "type": "string"
+          },
+          "sensor_kind": {
+            "type": "string",
+            "enum": [
+              "dlp",
+              "waf"
+            ]
+          },
+          "source_sensors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "imported_from": {
+            "$ref": "#/components/schemas/MigrationImportedFrom"
+          },
+          "diff_action": {
+            "$ref": "#/components/schemas/MigrationDiffAction"
+          }
+        }
+      },
+      "MigrationPolicyRollback": {
+        "type": "object",
+        "required": [
+          "name",
+          "action"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "delete",
+              "restore"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "before": {
+            "$ref": "#/components/schemas/MigrationPolicySnapshot"
+          }
+        }
+      },
+      "MigrationPolicySnapshot": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "engine",
+          "category",
+          "spec_yaml",
+          "enabled",
+          "mode",
+          "version"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "engine": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "spec_yaml": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          },
+          "cfg_type": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        }
+      },
+      "MigrationGroupRollback": {
+        "type": "object",
+        "required": [
+          "name",
+          "action"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "delete",
+              "restore"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "before": {
+            "$ref": "#/components/schemas/MigrationGroupSnapshot"
+          }
+        }
+      },
+      "MigrationGroupSnapshot": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "comment",
+          "criteria",
+          "members"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "comment": {
+            "type": "string"
+          },
+          "criteria": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MigrationGroupCriterion"
+            }
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "learned_from": {
+            "type": "string"
+          },
+          "cfg_type": {
+            "type": "string"
+          },
+          "policy_mode": {
+            "type": "string"
+          },
+          "profile_mode": {
+            "type": "string"
+          }
+        }
+      },
+      "MigrationFileProfileRollback": {
+        "type": "object",
+        "required": [
+          "group",
+          "workload_id",
+          "action"
+        ],
+        "properties": {
+          "group": {
+            "type": "string"
+          },
+          "workload_id": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "state_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "before": {
+            "$ref": "#/components/schemas/MigrationProfileStateSnapshot"
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MigrationFileProfileRuleRollback"
+            }
+          }
+        }
+      },
+      "MigrationProcessProfileRollback": {
+        "type": "object",
+        "required": [
+          "group",
+          "workload_id",
+          "action"
+        ],
+        "properties": {
+          "group": {
+            "type": "string"
+          },
+          "workload_id": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "state_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "before": {
+            "$ref": "#/components/schemas/MigrationProfileStateSnapshot"
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MigrationProcessProfileRuleRollback"
+            }
+          }
+        }
+      },
+      "MigrationProfileStateSnapshot": {
+        "type": "object",
+        "required": [
+          "id",
+          "cluster_id",
+          "workload_id",
+          "namespace",
+          "name",
+          "mode",
+          "learn_started_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "workload_id": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "learn_started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "monitor_started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "enforce_started_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MigrationFileProfileRuleRollback": {
+        "type": "object",
+        "required": [
+          "filter",
+          "action"
+        ],
+        "properties": {
+          "filter": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "before": {
+            "$ref": "#/components/schemas/MigrationFileProfileRuleSnapshot"
+          }
+        }
+      },
+      "MigrationFileProfileRuleSnapshot": {
+        "type": "object",
+        "required": [
+          "id",
+          "cluster_id",
+          "workload_id",
+          "filter",
+          "path",
+          "regex",
+          "recursive",
+          "behavior",
+          "applications",
+          "enabled",
+          "description"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "workload_id": {
+            "type": "string"
+          },
+          "filter": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "regex": {
+            "type": "string"
+          },
+          "recursive": {
+            "type": "boolean"
+          },
+          "behavior": {
+            "type": "string"
+          },
+          "applications": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      },
+      "MigrationProcessProfileRuleRollback": {
+        "type": "object",
+        "required": [
+          "name",
+          "path",
+          "action"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "before": {
+            "$ref": "#/components/schemas/MigrationProcessProfileRuleSnapshot"
+          }
+        }
+      },
+      "MigrationProcessProfileRuleSnapshot": {
+        "type": "object",
+        "required": [
+          "id",
+          "cluster_id",
+          "workload_id",
+          "name",
+          "path",
+          "sha256",
+          "parent_name",
+          "action",
+          "user",
+          "allow_update",
+          "enabled",
+          "description"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "workload_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "parent_name": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "user": {
+            "type": "string"
+          },
+          "allow_update": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      },
+      "MigrationNetworkRuleRollback": {
+        "type": "object",
+        "required": [
+          "name",
+          "from_group",
+          "to_group",
+          "action"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "from_group": {
+            "type": "string"
+          },
+          "to_group": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "delete",
+              "restore"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "before": {
+            "$ref": "#/components/schemas/MigrationNetworkRuleSnapshot"
+          }
+        }
+      },
+      "MigrationNetworkRuleSnapshot": {
+        "type": "object",
+        "required": [
+          "id",
+          "cluster_id",
+          "from_group",
+          "to_group",
+          "ports",
+          "mode",
+          "comment"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "from_group": {
+            "type": "string"
+          },
+          "to_group": {
+            "type": "string"
+          },
+          "ports": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MigrationNetworkPort"
+            }
+          },
+          "mode": {
+            "type": "string"
+          },
+          "comment": {
+            "type": "string"
+          }
+        }
+      },
+      "MigrationDPIRuleRollback": {
+        "type": "object",
+        "required": [
+          "name",
+          "action"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "delete",
+              "restore"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "before": {
+            "$ref": "#/components/schemas/MigrationDPIRuleSnapshot"
+          }
+        }
+      },
+      "MigrationDPIRuleSnapshot": {
+        "type": "object",
+        "required": [
+          "id",
+          "cluster_id",
+          "name",
+          "category",
+          "apply_dir",
+          "severity",
+          "mode",
+          "patterns",
+          "description",
+          "version"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "apply_dir": {
+            "type": "integer"
+          },
+          "severity": {
+            "type": "integer"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "patterns": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/components/schemas/MigrationDPIPattern"
+                }
+              ]
+            }
+          },
+          "scope_macs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "description": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "cfg_type": {
+            "type": "string"
+          },
+          "source_path": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          }
+        }
+      },
+      "MigrationDPIBindingRollback": {
+        "type": "object",
+        "required": [
+          "source_group",
+          "sensor_kind",
+          "action"
+        ],
+        "properties": {
+          "source_group": {
+            "type": "string"
+          },
+          "sensor_kind": {
+            "type": "string",
+            "enum": [
+              "dlp",
+              "waf"
+            ]
+          },
+          "action": {
+            "type": "string",
+            "const": "delete"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       }
@@ -4736,6 +5952,9 @@
               }
             }
           },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
           "default": {
             "$ref": "#/components/responses/Error"
           }
@@ -4766,7 +5985,16 @@
                   "type": "object",
                   "required": [
                     "source",
-                    "generated_at"
+                    "generated_at",
+                    "policies",
+                    "groups",
+                    "file_profiles",
+                    "process_profiles",
+                    "network_rules",
+                    "dpi_rules",
+                    "dpi_bindings",
+                    "vulnerability_profiles",
+                    "registries"
                   ],
                   "properties": {
                     "source": {
@@ -4779,50 +6007,43 @@
                     "policies": {
                       "type": "array",
                       "items": {
-                        "type": "object",
-                        "additionalProperties": true
+                        "$ref": "#/components/schemas/MigrationPolicyRollback"
                       }
                     },
                     "groups": {
                       "type": "array",
                       "items": {
-                        "type": "object",
-                        "additionalProperties": true
+                        "$ref": "#/components/schemas/MigrationGroupRollback"
                       }
                     },
                     "file_profiles": {
                       "type": "array",
                       "items": {
-                        "type": "object",
-                        "additionalProperties": true
+                        "$ref": "#/components/schemas/MigrationFileProfileRollback"
                       }
                     },
                     "process_profiles": {
                       "type": "array",
                       "items": {
-                        "type": "object",
-                        "additionalProperties": true
+                        "$ref": "#/components/schemas/MigrationProcessProfileRollback"
                       }
                     },
                     "network_rules": {
                       "type": "array",
                       "items": {
-                        "type": "object",
-                        "additionalProperties": true
+                        "$ref": "#/components/schemas/MigrationNetworkRuleRollback"
                       }
                     },
                     "dpi_rules": {
                       "type": "array",
                       "items": {
-                        "type": "object",
-                        "additionalProperties": true
+                        "$ref": "#/components/schemas/MigrationDPIRuleRollback"
                       }
                     },
                     "dpi_bindings": {
                       "type": "array",
                       "items": {
-                        "type": "object",
-                        "additionalProperties": true
+                        "$ref": "#/components/schemas/MigrationDPIBindingRollback"
                       }
                     },
                     "vulnerability_profiles": {
@@ -4837,11 +6058,16 @@
                         "$ref": "#/components/schemas/MigrationRegistryRollback"
                       }
                     }
-                  },
-                  "additionalProperties": true
+                  }
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
           },
           "404": {
             "$ref": "#/components/responses/Error"
@@ -4902,8 +6128,7 @@
                     "unsupported": {
                       "type": "array",
                       "items": {
-                        "type": "object",
-                        "additionalProperties": true
+                        "$ref": "#/components/schemas/MigrationUnsupported"
                       }
                     }
                   }
@@ -4911,14 +6136,17 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
           "403": {
-            "description": "Missing policy or registry-management permission."
+            "$ref": "#/components/responses/Error"
           },
           "404": {
             "$ref": "#/components/responses/Error"
           },
           "409": {
-            "description": "Conflicting source/current objects or unsupported import state; transaction is not partially committed."
+            "$ref": "#/components/responses/Error"
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -4950,9 +6178,7 @@
                   "type": "object",
                   "required": [
                     "id",
-                    "status",
-                    "restored",
-                    "deleted"
+                    "status"
                   ],
                   "properties": {
                     "id": {
@@ -4977,14 +6203,17 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
           "403": {
-            "description": "Missing policy or registry-management permission."
+            "$ref": "#/components/responses/Error"
           },
           "404": {
             "$ref": "#/components/responses/Error"
           },
           "409": {
-            "description": "An imported object changed after apply; rollback refuses to overwrite it."
+            "$ref": "#/components/responses/Error"
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -4998,6 +6227,7 @@
         "summary": "Preview reviewed migration equivalents and explicit unsupported objects",
         "description": "Validates an export and persists its redacted preview/history. Does not mutate policy, registry, identity or privilege objects. Cluster-dependent families require an owned target cluster. Credentials and token secrets require reissue and are never imported.",
         "requestBody": {
+          "description": "The entire JSON request body is limited to 2 MiB; oversized bodies return 400.",
           "required": true,
           "content": {
             "application/json": {
@@ -5012,8 +6242,7 @@
                     "type": "string"
                   },
                   "export": {
-                    "type": "string",
-                    "maxLength": 2097152
+                    "type": "string"
                   },
                   "cluster_id": {
                     "type": "string",
@@ -5036,13 +6265,13 @@
             }
           },
           "400": {
-            "description": "Invalid, oversized, unsupported or cross-organization input."
+            "$ref": "#/components/responses/Error"
           },
           "403": {
-            "description": "Caller cannot manage policy."
+            "$ref": "#/components/responses/Error"
           },
-          "413": {
-            "description": "Request exceeds the two-megabyte limit."
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }

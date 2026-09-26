@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import type { ReactNode } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
   BellRing,
@@ -20,7 +20,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/status-pill";
 import { ImportExportButtons } from "@/components/ImportExportButtons";
-import { groupsApi, networkRules, runtimeDLP, runtimeSignatures, vulnProfiles } from "@/api/client";
+import { enterprise, groupsApi, networkRules, runtimeDLP, runtimeSignatures, vulnProfiles, type MigrationImportListItem, type MigrationUnsupported } from "@/api/client";
 
 interface PolicyFamily {
   title: string;
@@ -136,9 +136,52 @@ const policyFamilies: PolicyFamily[] = [
   },
 ];
 
+type MigrationDiagnostic = { item: MigrationUnsupported; importRecord: MigrationImportListItem };
+
+const diagnosticFamilies: Record<string, string> = {
+  network_rule: "network-rules",
+  group: "groups",
+  group_criterion: "groups",
+  process_profile: "runtime/baselines",
+  file_profile: "file-monitor",
+  vulnerability_profile: "vuln-profiles",
+  dlp_group_scope: "runtime-dlp",
+  waf_group_scope: "runtime-signatures",
+};
+
+function diagnosticFamily(item: MigrationUnsupported): string | null {
+  if (item.kind === "dpi_rule" || item.kind === "dpi_pattern") {
+    if (item.source?.category === "dlp") return "runtime-dlp";
+    if (item.source?.category === "waf") return "runtime-signatures";
+    return null;
+  }
+  return diagnosticFamilies[item.kind] ?? null;
+}
+
+function MigrationDiagnostics({ diagnostics }: { diagnostics: MigrationDiagnostic[] }) {
+  return (
+    <div className="space-y-2 border-t pt-3 text-xs" aria-label="Org migration diagnostics">
+      <div className="font-medium text-foreground">NeuVector migration diagnostics · org history</div>
+      {diagnostics.map(({ item, importRecord }, index) => (
+        <div key={`${importRecord.id}:${index}`} className="rounded border bg-muted/30 p-2">
+          <div className="font-medium text-foreground">{item.kind} · {item.name}</div>
+          <div>{item.reason}</div>
+          {item.suggestion ? <div>Suggestion: {item.suggestion}</div> : null}
+          <div className="mt-1 text-muted-foreground">Import {importRecord.id} · {importRecord.status} · {importRecord.created_at}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function PolicyCenterPage() {
   const { clusterId } = useCluster();
   const queryClient = useQueryClient();
+  const importsQuery = useQuery({ queryKey: ["migration-imports"], queryFn: () => enterprise.migrationImports() });
+  const diagnostics: MigrationDiagnostic[] = (importsQuery.isError ? [] : importsQuery.data ?? [])
+    .filter((importRecord) => importRecord.source === "neuvector")
+    .flatMap((importRecord) => (importRecord.unsupported ?? []).map((item) => ({ item, importRecord })));
+  const generalDiagnostics = diagnostics.filter(({ item }) => diagnosticFamily(item) === null);
   const to = (route: string) => clusterId ? `/clusters/${clusterId}/${route}` : "/clusters";
 
   return (
@@ -166,7 +209,7 @@ export function PolicyCenterPage() {
 
       <PageSection
         title="Policy Families"
-        description="Every enforcement and detection surface reachable from one place."
+        description="Every enforcement and detection surface reachable from one place. Migration diagnostics below are org history; import records do not identify a target cluster. They do not describe this cluster's current policies."
       >
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3" data-testid="policy-family-grid">
           {policyFamilies.map((family) => (
@@ -208,9 +251,23 @@ export function PolicyCenterPage() {
                   </div>
                 </div>
               </Card>
+              {diagnostics.some(({ item }) => diagnosticFamily(item) === family.route) ? (
+                <MigrationDiagnostics diagnostics={diagnostics.filter(({ item }) => diagnosticFamily(item) === family.route)} />
+              ) : null}
             </div>
           ))}
         </div>
+      </PageSection>
+      <PageSection title="Migration Diagnostics" description="Org-wide saved NeuVector imports. These records are not attributed to the selected cluster.">
+        {importsQuery.isPending ? <p role="status">Loading migration diagnostics…</p> : null}
+        {importsQuery.isError ? <p role="alert">Migration diagnostics are unavailable. Review saved imports on the Migration Imports page.</p> : null}
+        {importsQuery.isSuccess && diagnostics.length === 0 ? <p>No saved NeuVector unsupported diagnostics in the available import history.</p> : null}
+        {generalDiagnostics.length > 0 ? (
+          <div data-testid="migration-general-diagnostics">
+            <h3 className="text-sm font-medium">Other unsupported objects</h3>
+            <MigrationDiagnostics diagnostics={generalDiagnostics} />
+          </div>
+        ) : null}
       </PageSection>
     </PageContainer>
   );

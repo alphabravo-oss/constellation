@@ -359,3 +359,117 @@ func TestOpenAPIDPISensorBindingSchemas(t *testing.T) {
 		t.Error("DELETE response must contain a UUID")
 	}
 }
+
+func TestOpenAPIMigrationContracts(t *testing.T) {
+	previewPath := "/api/v1/migration/preview"
+	request := openAPISchemaAt(t, "paths", previewPath, "post", "requestBody", "content", "application/json", "schema")
+	assertOpenAPIFields(t, request, []string{"source", "export", "cluster_id"}, []string{"source", "export"})
+	if request["properties"].(map[string]any)["cluster_id"].(map[string]any)["format"] != "uuid" {
+		t.Error("preview cluster_id must be a UUID")
+	}
+	preview := openAPISchemaAt(t, "components", "schemas", "MigrationPreview")
+	assertOpenAPIFields(t, preview,
+		[]string{"import_id", "summary", "vulnerability_profiles", "registries", "policies", "groups", "file_profiles", "process_profiles", "network_rules", "dpi_rules", "dpi_bindings", "unsupported", "rollback_bundle"},
+		[]string{"summary", "vulnerability_profiles", "registries", "policies", "groups", "file_profiles", "process_profiles", "network_rules", "dpi_rules", "dpi_bindings", "rollback_bundle"})
+	if openAPISchemaAt(t, "paths", previewPath, "post", "responses", "200", "content", "application/json", "schema")["$ref"] != "#/components/schemas/MigrationPreview" {
+		t.Error("preview response must use MigrationPreview")
+	}
+	previewResponses := openAPISchemaAt(t, "paths", previewPath, "post", "responses")
+	for _, status := range []string{"400", "403", "default"} {
+		if previewResponses[status].(map[string]any)["$ref"] != "#/components/responses/Error" {
+			t.Errorf("preview %s must use the JSON error response", status)
+		}
+	}
+	if _, ok := previewResponses["413"]; ok {
+		t.Error("preview documents 413, but oversized JSON returns 400")
+	}
+	previewFamilies := map[string]string{
+		"vulnerability_profiles": "MigrationVulnerabilityProfile", "registries": "MigrationRegistry",
+		"policies": "MigrationPolicy", "groups": "MigrationGroup", "file_profiles": "MigrationFileProfile",
+		"process_profiles": "MigrationProcessProfile", "network_rules": "MigrationNetworkRule",
+		"dpi_rules": "MigrationDPIRule", "dpi_bindings": "MigrationDPIBinding", "unsupported": "MigrationUnsupported",
+	}
+	for field, component := range previewFamilies {
+		property := preview["properties"].(map[string]any)[field].(map[string]any)
+		if property["type"] != "array" || property["items"].(map[string]any)["$ref"] != "#/components/schemas/"+component {
+			t.Errorf("preview %s = %v, want %s items", field, property, component)
+		}
+	}
+	for _, family := range []struct {
+		component string
+		field     string
+		item      string
+	}{
+		{"MigrationGroup", "criteria", "MigrationGroupCriterion"},
+		{"MigrationFileProfile", "rules", "MigrationFileProfileRule"},
+		{"MigrationProcessProfile", "rules", "MigrationProcessRule"},
+		{"MigrationNetworkRule", "ports", "MigrationNetworkPort"},
+		{"MigrationDPIRule", "patterns", "MigrationDPIPattern"},
+	} {
+		schema := openAPISchemaAt(t, "components", "schemas", family.component)
+		property := schema["properties"].(map[string]any)[family.field].(map[string]any)
+		if property["items"].(map[string]any)["$ref"] != "#/components/schemas/"+family.item {
+			t.Errorf("%s.%s must use %s", family.component, family.field, family.item)
+		}
+	}
+	assertOpenAPIFields(t, openAPISchemaAt(t, "components", "schemas", "MigrationDPIBinding"),
+		[]string{"source_group", "target_group_id", "target_group_name", "sensor_kind", "source_sensors", "imported_from", "diff_action"},
+		[]string{"source_group", "target_group_id", "target_group_name", "sensor_kind", "diff_action"})
+
+	importsPath := "/api/v1/migration/imports"
+	imports := openAPISchemaAt(t, "paths", importsPath, "get", "responses", "200", "content", "application/json", "schema")
+	assertOpenAPIFields(t, imports, []string{"imports"}, []string{"imports"})
+	importItem := imports["properties"].(map[string]any)["imports"].(map[string]any)["items"].(map[string]any)
+	assertOpenAPIFields(t, importItem,
+		[]string{"id", "source", "status", "summary", "applied_summary", "unsupported", "error", "created_at", "applied_at", "rolled_back_at"},
+		[]string{"id", "source", "status", "summary", "created_at"})
+
+	bundlePath := importsPath + "/{id}/rollback-bundle"
+	bundle := openAPISchemaAt(t, "paths", bundlePath, "get", "responses", "200", "content", "application/json", "schema")
+	rollbackFamilies := map[string]string{
+		"vulnerability_profiles": "MigrationVulnerabilityRollback", "registries": "MigrationRegistryRollback",
+		"policies": "MigrationPolicyRollback", "groups": "MigrationGroupRollback",
+		"file_profiles": "MigrationFileProfileRollback", "process_profiles": "MigrationProcessProfileRollback",
+		"network_rules": "MigrationNetworkRuleRollback", "dpi_rules": "MigrationDPIRuleRollback",
+		"dpi_bindings": "MigrationDPIBindingRollback",
+	}
+	for field, component := range rollbackFamilies {
+		property := bundle["properties"].(map[string]any)[field].(map[string]any)
+		if property["type"] != "array" || property["items"].(map[string]any)["$ref"] != "#/components/schemas/"+component {
+			t.Errorf("rollback bundle %s = %v, want %s items", field, property, component)
+		}
+	}
+	bundleFields := []string{"source", "generated_at"}
+	for field := range rollbackFamilies {
+		bundleFields = append(bundleFields, field)
+	}
+	assertOpenAPIFields(t, bundle, bundleFields, append([]string(nil), bundleFields...))
+	applyPath := importsPath + "/{id}:apply"
+	apply := openAPISchemaAt(t, "paths", applyPath, "post", "responses", "200", "content", "application/json", "schema")
+	assertOpenAPIFields(t, apply, []string{"id", "status", "already_applied", "applied", "unsupported"}, []string{"id", "status"})
+	if !reflect.DeepEqual(apply["properties"].(map[string]any)["status"].(map[string]any)["enum"], []any{"applied", "partial_applied"}) {
+		t.Error("apply status must allow applied and partial_applied")
+	}
+	rollbackPath := importsPath + "/{id}:rollback"
+	rollback := openAPISchemaAt(t, "paths", rollbackPath, "post", "responses", "200", "content", "application/json", "schema")
+	assertOpenAPIFields(t, rollback, []string{"id", "status", "restored", "deleted", "already_rolled_back"}, []string{"id", "status"})
+	if rollback["properties"].(map[string]any)["status"].(map[string]any)["const"] != "rolled_back" {
+		t.Error("rollback status must be rolled_back")
+	}
+	for _, path := range []string{bundlePath, applyPath, rollbackPath} {
+		method := "post"
+		if path == bundlePath {
+			method = "get"
+		}
+		operation := openAPISchemaAt(t, "paths", path, method)
+		parameters := operation["parameters"].([]any)
+		if len(parameters) != 1 || parameters[0].(map[string]any)["name"] != "id" || parameters[0].(map[string]any)["required"] != true || parameters[0].(map[string]any)["schema"].(map[string]any)["format"] != "uuid" {
+			t.Errorf("%s id parameter = %v", path, parameters)
+		}
+		for _, status := range []string{"400", "403", "404", "409"} {
+			if _, ok := operation["responses"].(map[string]any)[status]; !ok {
+				t.Errorf("%s omits %s response", path, status)
+			}
+		}
+	}
+}
