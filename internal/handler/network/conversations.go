@@ -1,6 +1,8 @@
 package network
 
 import (
+	"context"
+	"encoding/json"
 	"net"
 	"net/http"
 	"strconv"
@@ -13,6 +15,7 @@ import (
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
+	"github.com/alphabravocompany/constellation/internal/handler/netutil"
 	"github.com/alphabravocompany/constellation/pkg/graph"
 	"github.com/alphabravocompany/constellation/pkg/livegraph"
 )
@@ -73,6 +76,81 @@ func nodeKinds(nodes []string) map[string]string {
 	return out
 }
 
+type platformConversation struct {
+	graph.Conversation
+	FromPlatformRole string `json:"from_platform_role,omitempty"`
+	ToPlatformRole   string `json:"to_platform_role,omitempty"`
+}
+
+func (h *NetworkConversations) platformConversations(ctx context.Context, orgID uuid.UUID, clusterID *uuid.UUID, conversations []graph.Conversation) []platformConversation {
+	roles := make(map[string]string)
+	namespaces := make(map[string]struct{})
+	names := make(map[string]struct{})
+	for _, conversation := range conversations {
+		for _, workload := range []string{conversation.From, conversation.To} {
+			namespace, name := netutil.SplitWorkload(workload)
+			if role := handler.PlatformRole(namespace, nil); role != "" {
+				roles[workload] = role
+			} else if endpointKind(workload) == "workload" {
+				namespaces[namespace] = struct{}{}
+				names[name] = struct{}{}
+			}
+		}
+	}
+	if clusterID == nil && len(namespaces) > 0 {
+		rows, err := h.db.Pool().Query(ctx, `SELECT id FROM clusters WHERE org_id = $1 LIMIT 2`, orgID)
+		if err == nil {
+			var onlyCluster uuid.UUID
+			count := 0
+			for rows.Next() {
+				var candidate uuid.UUID
+				if rows.Scan(&candidate) == nil {
+					onlyCluster = candidate
+					count++
+				}
+			}
+			rows.Close()
+			if count == 1 {
+				clusterID = &onlyCluster
+			}
+		}
+	}
+	if clusterID != nil && len(namespaces) > 0 {
+		wanted := make([]string, 0, len(namespaces))
+		for namespace := range namespaces {
+			wanted = append(wanted, namespace)
+		}
+		wantedNames := make([]string, 0, len(names))
+		for name := range names {
+			wantedNames = append(wantedNames, name)
+		}
+		rows, err := h.db.Pool().Query(ctx, `
+SELECT namespace, name, labels FROM deployments
+ WHERE org_id = $1 AND cluster_id = $2 AND namespace = ANY($3::text[]) AND name = ANY($4::text[])`, orgID, *clusterID, wanted, wantedNames)
+		if err == nil {
+			for rows.Next() {
+				var namespace, name string
+				var labels json.RawMessage
+				if rows.Scan(&namespace, &name, &labels) == nil {
+					if role := handler.PlatformRoleJSON(namespace, labels); role != "" {
+						roles[namespace+"/"+name] = role
+					}
+				}
+			}
+			rows.Close()
+		}
+	}
+	out := make([]platformConversation, 0, len(conversations))
+	for _, conversation := range conversations {
+		out = append(out, platformConversation{
+			Conversation:     conversation,
+			FromPlatformRole: roles[conversation.From],
+			ToPlatformRole:   roles[conversation.To],
+		})
+	}
+	return out
+}
+
 // NetworkConversations is a slim wrapper that builds a pkg/graph.Graph from the
 // flows table and returns the folded service-conversation view. Distinct from the
 // existing /network/map endpoint which returns the raw flow rows.
@@ -127,7 +205,7 @@ func (h *NetworkConversations) List(w http.ResponseWriter, r *http.Request) {
 		if n, _ := g.Len(); n > 0 {
 			nodes := g.Nodes()
 			httpx.WriteJSON(w, http.StatusOK, map[string]any{
-				"conversations": g.Conversations(),
+				"conversations": h.platformConversations(r.Context(), subj.OrgID, clusterUUID, g.Conversations()),
 				"nodes":         nodes,
 				"node_kinds":    nodeKinds(nodes),
 				"edges":         g.Edges(),
@@ -185,7 +263,7 @@ SELECT src_workload, dst_workload, protocol, dst_port,
 	}
 	nodes := g.Nodes()
 	response := map[string]any{
-		"conversations": g.Conversations(),
+		"conversations": h.platformConversations(r.Context(), subj.OrgID, clusterUUID, g.Conversations()),
 		"nodes":         nodes,
 		"node_kinds":    nodeKinds(nodes),
 		"edges":         g.Edges(),

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -274,6 +275,65 @@ func bindPasswordOf(body map[string]any) string {
 	}
 	s, _ := cfg["bind_password"].(string)
 	return s
+}
+
+func TestAuthServers_TestConnectionScopedAndRedacted(t *testing.T) {
+	_, ts, pool, signer, adminID, auditorID, orgID := newAuthServersTestServer(t)
+	admin := issueFor(t, signer, adminID, orgID, 0)
+	auditor := issueFor(t, signer, auditorID, orgID, 0)
+	ctx := context.Background()
+	cases := []struct {
+		name, kind, config string
+		status             int
+	}{
+		{"saml-valid", "saml", `{"idp_metadata_xml":"<EntityDescriptor xmlns=\"urn:oasis:names:tc:SAML:2.0:metadata\" entityID=\"https://idp.example.test\"><IDPSSODescriptor protocolSupportEnumeration=\"urn:oasis:names:tc:SAML:2.0:protocol\"><SingleSignOnService Binding=\"urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect\" Location=\"https://idp.example.test/sso\"/></IDPSSODescriptor></EntityDescriptor>","acs_url":"https://app.example.test/acs"}`, http.StatusOK},
+		{"saml-invalid", "saml", `{"idp_metadata_xml":"<broken/>","acs_url":"https://app.example.test/acs","sp_key_pem":"private-key-secret"}`, http.StatusUnprocessableEntity},
+		{"ldap-private", "ldap", `{"url":"ldaps://127.0.0.1:636","bind_dn":"cn=svc","bind_password":"bind-secret"}`, http.StatusUnprocessableEntity},
+		{"ldap-linklocal", "ldap", `{"url":"ldaps://169.254.169.254:636"}`, http.StatusUnprocessableEntity},
+		{"ldap-shared", "ldap", `{"url":"ldaps://100.64.0.1:636"}`, http.StatusUnprocessableEntity},
+		{"oidc-private", "oidc", `{"issuer_url":"https://localhost:9443","client_secret":"oidc-secret"}`, http.StatusUnprocessableEntity},
+		{"oidc-ipv6-private", "oidc", `{"issuer_url":"https://[::1]:9443"}`, http.StatusUnprocessableEntity},
+		{"ldap-plaintext", "ldap", `{"url":"ldap://example.com:389"}`, http.StatusUnprocessableEntity},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			id := uuid.New()
+			if _, err := pool.Exec(ctx, `INSERT INTO auth_servers (id, org_id, type, name, config) VALUES ($1,$2,$3,$4,$5)`, id, orgID, tc.kind, tc.name, []byte(tc.config)); err != nil {
+				t.Fatalf("insert provider: %v", err)
+			}
+			path := ts.URL + "/api/v1/auth-servers/" + id.String() + "/test"
+			status, body := doJSON(t, http.MethodPost, path, admin, nil)
+			if status != tc.status || body["ok"] != (tc.status == http.StatusOK) {
+				t.Fatalf("test status=%d body=%v", status, body)
+			}
+			if strings.Contains(strings.ToLower(fmt.Sprint(body)), "secret") {
+				t.Fatalf("response leaked secret: %v", body)
+			}
+			var auditCount int
+			if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id=$1 AND actor_id=$2 AND action='auth.server.test' AND target_id=$3 AND after->>'success'=$4`, orgID, adminID, id.String(), fmt.Sprint(tc.status == http.StatusOK)).Scan(&auditCount); err != nil || auditCount != 1 {
+				t.Fatalf("test audit count=%d err=%v, want 1", auditCount, err)
+			}
+			var auditAfter string
+			if err := pool.QueryRow(ctx, `SELECT after::text FROM audit_events WHERE org_id=$1 AND action='auth.server.test' AND target_id=$2`, orgID, id.String()).Scan(&auditAfter); err != nil || strings.Contains(auditAfter, "secret") {
+				t.Fatalf("test audit leaked secret or missing: %v %q", err, auditAfter)
+			}
+			if status, _ := doJSON(t, http.MethodPost, path, auditor, nil); status != http.StatusForbidden {
+				t.Fatalf("auditor status=%d, want 403", status)
+			}
+		})
+	}
+	otherOrgID := uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, display_name) VALUES ($1,$2,$3)`, otherOrgID, "foreign-"+otherOrgID.String(), "Foreign"); err != nil {
+		t.Fatalf("insert foreign org: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id=$1`, otherOrgID) })
+	foreignID := uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO auth_servers (id, org_id, type, name, config) VALUES ($1,$2,'saml','foreign','{}')`, foreignID, otherOrgID); err != nil {
+		t.Fatalf("insert foreign provider: %v", err)
+	}
+	if status, _ := doJSON(t, http.MethodPost, ts.URL+"/api/v1/auth-servers/"+foreignID.String()+"/test", admin, nil); status != http.StatusNotFound {
+		t.Fatalf("foreign provider status=%d, want 404", status)
+	}
 }
 
 func ldapURL(p *auth.LDAPProvider) string {

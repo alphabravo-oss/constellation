@@ -119,6 +119,9 @@ function AuthProviderForm({ provider }: { provider: AuthServer | null }) {
     onSuccess: () => { toast.success(isEdit ? "Provider updated" : "Provider created"); navigate(BACK_TO); },
     onError: () => toast.error(isEdit ? "Failed to update provider" : "Failed to create provider"),
   });
+  const connectionTest = useMutation({
+    mutationFn: () => authServersApi.testConnection(provider!.id!),
+  });
 
   return (
     <div className="space-y-6">
@@ -185,8 +188,16 @@ function AuthProviderForm({ provider }: { provider: AuthServer | null }) {
             <Button type="submit" variant="primary" size="lg" disabled={save.isPending}>
               {save.isPending ? "Saving…" : isEdit ? "Save changes" : "Create provider"}
             </Button>
+            {isEdit && <Button type="button" variant="outline" size="lg" disabled={connectionTest.isPending} onClick={() => connectionTest.mutate()}>
+              {connectionTest.isPending ? "Testing…" : "Test saved connection"}
+            </Button>}
             <Button type="button" variant="ghost" size="lg" onClick={() => navigate(BACK_TO)}>Cancel</Button>
           </div>
+          {connectionTest.isSuccess && <p role="status" className="text-sm text-status-success">Saved {provider?.type.toUpperCase()} connection passed.</p>}
+          {connectionTest.isError && <p role="alert" className="text-sm text-status-error">
+            {(connectionTest.error as { response?: { data?: { message?: string } } })?.response?.data?.message ?? "Saved connection test failed."}
+          </p>}
+          {isEdit && <p className="text-xs text-muted-foreground">Connection test uses the last saved provider settings, not unsaved edits.</p>}
         </form>
       </Card>
     </div>

@@ -219,6 +219,10 @@ func openConfigSecrets(cfg ServerConfig, sealer Sealer) (ServerConfig, error) {
 	return cfg, nil
 }
 
+func OpenAuthServerConfigSecrets(cfg ServerConfig, sealer Sealer) (ServerConfig, error) {
+	return openConfigSecrets(cfg, sealer)
+}
+
 // ---------------------------------- store -----------------------------------
 
 // store is the minimal pgx surface this package needs; *pgxpool.Pool satisfies it.

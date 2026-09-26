@@ -119,6 +119,9 @@ func EventTypeMatches(ruleType, eventType EventType) bool {
 	if isSecurityUmbrella(ruleType) && isSecurityEvent(eventType) {
 		return true
 	}
+	if ruleType == EventThreat && (eventType == EventDLP || eventType == EventWAF) {
+		return true
+	}
 	if isScanEvent(ruleType) && isScanEvent(eventType) {
 		return true
 	}

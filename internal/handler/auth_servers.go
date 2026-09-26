@@ -1,11 +1,21 @@
 package handler
 
 import (
+	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
+	"net/netip"
+	"net/url"
 	"strings"
+	"time"
+
+	"github.com/crewjam/saml/samlsp"
+	"github.com/go-ldap/ldap/v3"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -126,6 +136,202 @@ func (h *AuthServers) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, toBody(srv))
+}
+
+func (h *AuthServers) TestConnection(w http.ResponseWriter, r *http.Request) {
+	subj, ok := SubjectFrom(r.Context())
+	if !ok {
+		jsonError(w, http.StatusUnauthorized, "no subject")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	srv, err := auth.GetAuthServer(r.Context(), h.db.Pool(), subj.OrgID, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		jsonError(w, http.StatusNotFound, "auth server not found")
+		return
+	}
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "auth server unavailable")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	var result string
+	switch srv.Type {
+	case auth.ServerTypeLDAP:
+		cfg, err := auth.OpenAuthServerConfigSecrets(srv.Config, h.sealer)
+		if err != nil {
+			result = "configuration unavailable"
+		} else {
+			result = testLDAP(ctx, cfg)
+		}
+	case auth.ServerTypeOIDC:
+		result = testOIDC(ctx, srv.Config)
+	case auth.ServerTypeSAML:
+		result = testSAML(srv.Config)
+	default:
+		result = "invalid configuration"
+	}
+	if result != "" {
+		h.auditConnectionTest(r, srv, false)
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"ok": false, "type": srv.Type, "message": result})
+		return
+	}
+	h.auditConnectionTest(r, srv, true)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "type": srv.Type})
+}
+
+func (h *AuthServers) auditConnectionTest(r *http.Request, srv auth.AuthServer, success bool) {
+	if h.audit == nil {
+		return
+	}
+	subj, _ := SubjectFrom(r.Context())
+	_, _, _ = h.audit.Log(r.Context(), audit.Event{
+		OrgID: &subj.OrgID, ActorID: &subj.UserID, Action: "auth.server.test",
+		TargetKind: "auth_server", TargetID: srv.ID.String(),
+		After: map[string]any{"type": srv.Type, "success": success},
+	})
+}
+
+func testSAML(cfg auth.ServerConfig) string {
+	if len(cfg.IdPMetadataXML) > 1<<20 {
+		return "invalid metadata"
+	}
+	metadata, err := samlsp.ParseMetadata([]byte(cfg.IdPMetadataXML))
+	if err != nil || metadata == nil || len(metadata.IDPSSODescriptors) == 0 {
+		return "invalid metadata"
+	}
+	return ""
+}
+
+func testLDAP(ctx context.Context, cfg auth.ServerConfig) string {
+	target, address, err := publicTarget(ctx, cfg.URL, "ldaps", "636")
+	if err != nil {
+		return "target not permitted"
+	}
+	rawConn, err := (&net.Dialer{}).DialContext(ctx, "tcp", address)
+	if err != nil {
+		return "connection failed"
+	}
+	conn := tls.Client(rawConn, &tls.Config{ServerName: target.Hostname(), MinVersion: tls.VersionTLS12})
+	defer conn.Close()
+	if err := conn.HandshakeContext(ctx); err != nil {
+		return "connection failed"
+	}
+	deadline, ok := ctx.Deadline()
+	if ok {
+		_ = conn.SetDeadline(deadline)
+	}
+	client := ldap.NewConn(conn, true)
+	client.Start()
+	defer client.Close()
+	client.SetTimeout(5 * time.Second)
+	if cfg.BindDN != "" && client.Bind(cfg.BindDN, cfg.BindPassword) != nil {
+		return "bind failed"
+	}
+	return ""
+}
+
+func testOIDC(ctx context.Context, cfg auth.ServerConfig) string {
+	target, address, err := publicTarget(ctx, cfg.IssuerURL, "https", "443")
+	if err != nil {
+		return "target not permitted"
+	}
+	endpoint := strings.TrimRight(target.String(), "/") + "/.well-known/openid-configuration"
+	transport := &http.Transport{Proxy: nil, TLSClientConfig: &tls.Config{ServerName: target.Hostname(), MinVersion: tls.VersionTLS12}, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "tcp", address)
+	}}
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Timeout: 5 * time.Second, Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return "invalid configuration"
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "discovery failed"
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "discovery failed"
+	}
+	var metadata oidcDiscoveryMetadata
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&metadata); err != nil || !validOIDCMetadata(cfg.IssuerURL, metadata) {
+		return "invalid discovery metadata"
+	}
+	for _, endpoint := range []string{metadata.AuthorizationEndpoint, metadata.TokenEndpoint, metadata.JWKSURI} {
+		if _, _, err := publicTarget(ctx, endpoint, "https", "443"); err != nil {
+			return "invalid discovery metadata"
+		}
+	}
+	return ""
+}
+
+type oidcDiscoveryMetadata struct {
+	Issuer                string `json:"issuer"`
+	AuthorizationEndpoint string `json:"authorization_endpoint"`
+	TokenEndpoint         string `json:"token_endpoint"`
+	JWKSURI               string `json:"jwks_uri"`
+}
+
+func validOIDCMetadata(issuer string, metadata oidcDiscoveryMetadata) bool {
+	if metadata.Issuer != strings.TrimRight(issuer, "/") {
+		return false
+	}
+	for _, endpoint := range []string{metadata.AuthorizationEndpoint, metadata.TokenEndpoint, metadata.JWKSURI} {
+		target, err := url.Parse(endpoint)
+		if err != nil || target.Scheme != "https" || target.Hostname() == "" || target.User != nil || target.Fragment != "" {
+			return false
+		}
+		if address, err := netip.ParseAddr(target.Hostname()); err == nil && !publicIP(address) {
+			return false
+		}
+	}
+	return true
+}
+
+func publicTarget(ctx context.Context, raw, scheme, defaultPort string) (*url.URL, string, error) {
+	target, err := url.Parse(raw)
+	if err != nil || target.Scheme != scheme || target.Hostname() == "" || target.User != nil || target.RawQuery != "" || target.Fragment != "" {
+		return nil, "", errors.New("invalid target")
+	}
+	if scheme == "ldaps" && target.Path != "" || strings.Contains(target.Hostname(), "%") {
+		return nil, "", errors.New("invalid target")
+	}
+	port := target.Port()
+	if port == "" {
+		port = defaultPort
+	}
+	if _, err := net.LookupPort("tcp", port); err != nil {
+		return nil, "", err
+	}
+	ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", target.Hostname())
+	if err != nil || len(ips) == 0 {
+		return nil, "", errors.New("invalid target")
+	}
+	for _, ip := range ips {
+		if !publicIP(ip) {
+			return nil, "", errors.New("invalid target")
+		}
+	}
+	return target, net.JoinHostPort(ips[0].String(), port), nil
+}
+
+func publicIP(ip netip.Addr) bool {
+	ip = ip.Unmap()
+	if !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+		return false
+	}
+	for _, cidr := range []string{"100.64.0.0/10", "192.0.0.0/24", "192.0.2.0/24", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "2001:db8::/32"} {
+		if netip.MustParsePrefix(cidr).Contains(ip) {
+			return false
+		}
+	}
+	return true
 }
 
 func (h *AuthServers) Create(w http.ResponseWriter, r *http.Request) {

@@ -558,6 +558,11 @@ func responseEventForIngest(clusterID uuid.UUID, ev *IngestEvent, cls eventClass
 		Title:       fmt.Sprintf("runtime.alert.%s on %s/%s", auditSubKind(ev.Kind), ev.Namespace, ev.Pod),
 		URL:         "/runtime/events",
 	}
+	if cls.FileRule != nil || ev.Blocked {
+		revt.Type = response.EventViolation
+	} else if cls.FIM != nil || (ev.Kind == "process_exec" && cls.Reason != "") || cls.Reason == "setuid-without-exec" {
+		revt.Type = response.EventIncident
+	}
 	if cls.Reason != "" {
 		revt.Name = cls.Reason
 	}

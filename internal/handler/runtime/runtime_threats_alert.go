@@ -322,10 +322,17 @@ func (h *RuntimeThreats) fanOutOneThreat(ctx context.Context, orgID uuid.UUID, p
 }
 
 func responseEventForThreat(p *pendingThreatAlert, sev, name, action string) response.Event {
+	eventType := response.EventThreat
+	switch threatCategory(int32(p.row.ThreatID)) {
+	case "dlp":
+		eventType = response.EventDLP
+	case "waf":
+		eventType = response.EventWAF
+	}
 	return response.Event{
 		ID:        uuid.NewString(),
 		Name:      name,
-		Type:      response.EventThreat,
+		Type:      eventType,
 		Severity:  sev,
 		Cluster:   p.clusterID.String(),
 		Namespace: p.namespace,

@@ -283,6 +283,90 @@ SELECT COALESCE(after->>'enforced','')
 	}
 }
 
+func TestRuntimeThreats_V2SpecificCategoriesSuppressOnlyMatchingThreats(t *testing.T) {
+	d := openTestDB(t)
+	t.Cleanup(d.Close)
+	ctx := context.Background()
+	pool := d.Pool()
+	var orgID, clusterID uuid.UUID
+	orgName := "response-categories-" + uuid.NewString()
+	if err := pool.QueryRow(ctx, `INSERT INTO orgs (name, display_name) VALUES ($1, $1) RETURNING id`, orgName).Scan(&orgID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id=$1`, orgID) })
+	if err := pool.QueryRow(ctx, `INSERT INTO clusters (org_id, name) VALUES ($1, $2) RETURNING id`, orgID, orgName).Scan(&clusterID); err != nil {
+		t.Fatal(err)
+	}
+	tokenName := "response-categories-" + uuid.NewString()
+	raw, tokenID, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, tokenName, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO cluster_init_bundles (org_id, cluster_id, name, expires_at, runtime_agent_token_id, kek_fingerprint, contents_encrypted) VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`, orgID, clusterID, "response-categories-"+uuid.NewString(), tokenID); err != nil {
+		t.Fatal(err)
+	}
+	workloadID := "response-categories/" + uuid.NewString()
+	conditions, _ := json.Marshal([]response.Condition{{Type: response.CondLevel, Value: "high"}})
+	actions, _ := json.Marshal([]response.Action{{Kind: response.ActionSuppressLog}})
+	selector, _ := json.Marshal(response.WorkloadSelector{})
+	ruleIDs := []uuid.UUID{}
+	for _, eventType := range []response.EventType{response.EventDLP, response.EventWAF} {
+		var ruleID uuid.UUID
+		if err := pool.QueryRow(ctx, `INSERT INTO response_rules_v2 (org_id, cluster_id, name, description, enabled, event_type, conditions, actions, workload_match) VALUES ($1, $2, $3, '', true, $4, $5, $6, $7) RETURNING id`, orgID, clusterID, "response-categories-"+string(eventType)+"-"+uuid.NewString(), eventType, conditions, actions, selector).Scan(&ruleID); err != nil {
+			t.Fatal(err)
+		}
+		ruleIDs = append(ruleIDs, ruleID)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM runtime_threats WHERE org_id=$1 AND workload_id=$2`, orgID, workloadID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM audit_events WHERE org_id=$1 AND target_id=$2`, orgID, workloadID)
+		for _, ruleID := range ruleIDs {
+			_, _ = pool.Exec(context.Background(), `DELETE FROM response_rules_v2 WHERE id=$1`, ruleID)
+		}
+		_, _ = pool.Exec(context.Background(), `DELETE FROM runtime_agent_tokens WHERE name=$1`, tokenName)
+	})
+	rows := []ThreatIngestRow{
+		{At: time.Now().UTC(), Node: "response-categories", WorkloadID: workloadID, ThreatID: 2022, Severity: 4},
+		{At: time.Now().UTC(), Node: "response-categories", WorkloadID: workloadID, ThreatID: 20001, Severity: 4},
+		{At: time.Now().UTC(), Node: "response-categories", WorkloadID: workloadID, ThreatID: 40001, Severity: 4},
+	}
+	body, _ := json.Marshal(rows)
+	var gotTypes []response.EventType
+	h := NewRuntimeThreats(d).
+		WithAudit(audit.New(pool)).
+		WithResponseDecision(NewResponseDecision(d)).
+		WithResponseEngine(func(_ context.Context, _, _ uuid.UUID, event response.Event) {
+			gotTypes = append(gotTypes, event.Type)
+		})
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/runtime-threats:bulk", bytes.NewReader(body))
+	request.Header.Set("Authorization", "Bearer "+raw)
+	result := httptest.NewRecorder()
+	handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(h.Bulk)).ServeHTTP(result, request)
+	if result.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", result.Code, result.Body.String())
+	}
+	var ingested ThreatIngestResponse
+	if err := json.NewDecoder(result.Body).Decode(&ingested); err != nil {
+		t.Fatal(err)
+	}
+	if ingested.Accepted != 1 || ingested.Alerts != 1 {
+		t.Fatalf("accepted=%d alerts=%d want 1/1", ingested.Accepted, ingested.Alerts)
+	}
+	if len(gotTypes) != 3 || gotTypes[0] != response.EventThreat || gotTypes[1] != response.EventDLP || gotTypes[2] != response.EventWAF {
+		t.Fatalf("response types=%v", gotTypes)
+	}
+	var persisted, suppressed int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM runtime_threats WHERE org_id=$1 AND workload_id=$2`, orgID, workloadID).Scan(&persisted); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id=$1 AND target_id=$2 AND action='response_rule_v2.action.suppress_log'`, orgID, workloadID).Scan(&suppressed); err != nil {
+		t.Fatal(err)
+	}
+	if persisted != 1 || suppressed != 2 {
+		t.Fatalf("persisted=%d suppressed=%d want 1/2", persisted, suppressed)
+	}
+}
+
 // TestThreatCategory pins the NeuVector-parity threat_id->category mapping that the
 // ?category= filter relies on: built-in IPS/IDS DPI signatures (incl. SQL_INJECTION 2022
 // and the flood detectors 1001-1003) are "ips" — NOT "waf"; DLP rules occupy [20000,40000)

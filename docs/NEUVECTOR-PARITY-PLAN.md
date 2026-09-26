@@ -87,12 +87,12 @@ Unchecked parent items remain open until **all** their acceptance requirements
 are met. Code present is not the same as verified or release-ready. The older
 deficiency ledger includes findings that already have fixes; do not use its
 historical counts as a count of currently open defects.
-Acceptance backlog: **100 open**. Since the `800b0ef` baseline of 107 open,
-**ten existing items closed** (four OPS-1 items, three SIEM-1 items, one
-POL-1 item, one IAM-1 item and one UI-3 item), and three new items were added: vendor interoperability, legacy
+Acceptance backlog: **99 open**. Since the `800b0ef` baseline of 107 open,
+**eleven existing items closed** (four OPS-1 items, three SIEM-1 items, one
+POL-1 item, one IAM-1 item, one UI-2 item and one UI-3 item), and three new items were added: vendor interoperability, legacy
 DPI binding tenant validation, and registration/proof of the unreachable
 group-edge HTTP workflow.
-The checklist contains **49 checked bounded rows** (39 at baseline). Earlier
+The checklist contains **50 checked bounded rows** (39 at baseline). Earlier
 rounds added bounded POL-1, POL-2 and API-1 fixes without closing their parent
 acceptance item. Those rounds added an eight-object cutover fixture and opt-in
 runner, network precedence guards, and YAML API contracts. A subsequent round added
@@ -101,7 +101,10 @@ snapshot history export, and DLP/WAF visibility browser fixtures. Source tests,
 deterministic browser tests, and a disposable local API/UI smoke are not a
 complete NeuVector fixture or deployed cutover. This round closes local-user
 recovery and backend platform-role classification, and adds bounded response-rule
-YAML portability without closing its composite POL-3 item.
+YAML portability without closing its composite POL-3 item. Session and
+conversation APIs/CSV now use backend platform roles, and selected non-threat
+ingest sources now emit specific response categories; neither change closes
+the remaining UI-3 or POL-3 parent item.
 Partial scanner, registry and POL-1 fixes are recorded in the review table, not counted as
 closures. A checked child does not close its unchecked parent or replace live
 deployment evidence.
@@ -121,6 +124,20 @@ coverage remain open.
 | POL-1 shared GroupPicker coverage | Editor audit and a response-rule save-path test prove shared group selection; full enforcement remains a separate open item. |
 | IAM-1 local-user recovery | PostgreSQL/router tests prove scoped unlock and force reset with atomic audit receipts; a deterministic production-browser test exercises the local-only operator controls. Other IAM-1 items remain open. |
 | UI-3 platform-role classification | Source API tests and a deterministic production-browser test prove custom-namespace `core` classification and visibility behavior. The complete API/export and live-install matrix remains open. |
+| UI-2 YAML contract discipline | The six enterprise-table YAML controls (network, DLP, signatures, response, groups, vulnerability profiles) each pair export with a registered import route and typed client call. Generated cluster-init and Kubernetes policy YAML are deployment artifacts, not table configuration imports. The response-rule control has deterministic production-browser coverage; the other families have existing import tests. This closes only the YAML discipline row, not shared-table completeness. |
+
+New bounded evidence without a checklist closure: network sessions and
+conversations now return tenant/cluster-scoped platform roles, and their CSV
+exports include those roles. Source race tests and deterministic browser tests
+cover a custom namespace; conversation detail, summaries, other exports and a
+live custom install remain open. Process anomalies, setuid and FIM now map to
+incident, file-profile hits/blocks to violation, and DPI threat IDs to DLP/WAF
+response categories. Focused race and PostgreSQL tests pass; other ingest
+sources, full rule-category behavior and deployed enforcement remain open.
+Saved-provider probes now exercise public LDAPS TLS/optional bind, local SAML
+metadata parsing and public HTTPS OIDC discovery with scoped authorization,
+redacted responses and audit tests. Private/air-gapped IdPs and live SAML
+connectivity are not supported by these probes, so IAM-1 stays open.
 
 | Slice | Current status | Evidence / remaining work |
 |---|---|---|
@@ -643,7 +660,10 @@ row saying `enforced`.
 ### IAM-1 Identity-provider and RBAC cutover
 
 - [ ] Add bounded, secret-redacted connection tests for LDAP, SAML metadata, and
-  OIDC discovery.
+  OIDC discovery. Saved-provider API/UI probes cover public LDAPS TLS/optional
+  bind, local SAML metadata parsing and public HTTPS OIDC discovery with
+  scoped authorization, audit and sanitized results. Private or air-gapped
+  LDAP/OIDC endpoints and live SAML connectivity remain open.
 - [ ] Add group-resolution and final mapped-role/scope previews.
 - [ ] Import NeuVector users, roles, mappings, and token metadata without
   privilege escalation; require token reissue.
@@ -857,7 +877,10 @@ row saying `enforced`.
   non-threat ingest sources. A bounded, versioned YAML export/import now covers
   exact cluster or org-wide response rules with audited atomic mutation, strict
   validation, receiver-name normalization and fail-closed unsupported action
-  params; non-threat event wiring and deployed behavior remain open.
+  params. Process anomalies, setuid and FIM emit incident, file-profile
+  hits/blocks emit violation, and DPI threat IDs emit DLP/WAF response
+  categories with focused tests. Other non-threat sources, full category
+  behavior and deployed enforcement remain open.
 
 ## P2 — Astronomer-inspired operator experience
 
@@ -879,7 +902,9 @@ progressive disclosure, while retaining Constellation's security vocabulary.
 
 - [ ] Apply visible pagination, server filters, column selection, density,
   refresh controls, saved views, and CSV export to remaining high-volume pages.
-- [ ] Add YAML only where a matching import contract exists.
+- [x] Add YAML only where a matching import contract exists. Audited the six
+  enterprise-table YAML control families against registered import routes and
+  client methods; generated deployment artifacts are outside this table rule.
 - [ ] Persist operator choices without making saved state hide active filters.
 - [ ] Add detail drawers to repetitive triage tables where full-page navigation
   interrupts the workflow.
@@ -897,8 +922,10 @@ progressive disclosure, while retaining Constellation's security vocabulary.
   broader UI-3 release matrix.
 - [ ] Expose the same role in all relevant APIs and exports; UI namespace matching
   remains a compatibility fallback. Deployment, container, network-map, exposure
-  and policy-lifecycle APIs plus container/deployment CSV now carry the role;
-  session/conversation responses, other exports and live-install proof remain.
+  and policy-lifecycle APIs plus session/conversation responses and
+  container/deployment/session/conversation CSV now carry the role. Multi-cluster
+  org-wide conversations omit ambiguous label-derived roles; conversation
+  detail/summaries, other exports and live-install proof remain open.
 
 ### UI-4 Dashboard and operational posture
 

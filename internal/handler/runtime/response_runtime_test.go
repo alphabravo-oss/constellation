@@ -42,7 +42,7 @@ func TestEventsIngest_DispatchResponseHook(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("expected 1 response dispatch, got %d", len(got))
 	}
-	if got[0].Severity != "critical" || got[0].Type != response.EventRuntime {
+	if got[0].Severity != "critical" || got[0].Type != response.EventIncident {
 		t.Fatalf("unexpected response event: %+v", got[0])
 	}
 	if got[0].Workload != "default/api" || got[0].Cluster != clusterID.String() {
@@ -55,6 +55,35 @@ func TestEventsIngest_DispatchResponseHook(t *testing.T) {
 
 	// Nil hook must be a no-op (no panic).
 	NewEventsIngest(nil, nil, nil).WithResponseEngine(nil)
+}
+
+func TestResponseEventForIngestCategories(t *testing.T) {
+	clusterID := uuid.New()
+	cases := []struct {
+		name           string
+		event          IngestEvent
+		classification eventClassification
+		want           response.EventType
+	}{
+		{"generic process", IngestEvent{Kind: "process_exec"}, eventClassification{Severity: "high"}, response.EventRuntime},
+		{"process incident", IngestEvent{Kind: "process_exec"}, eventClassification{Severity: "high", Reason: "suspicious-binary"}, response.EventIncident},
+		{"setuid incident", IngestEvent{Kind: "uid_change"}, eventClassification{Severity: "high", Reason: "setuid-without-exec"}, response.EventIncident},
+		{"file profile violation", IngestEvent{Kind: "file_open"}, eventClassification{Severity: "high", FileRule: &fileProfileRuleMatch{}}, response.EventViolation},
+		{"blocked file violation", IngestEvent{Kind: "file_open", Blocked: true}, eventClassification{Severity: "high"}, response.EventViolation},
+		{"fim incident", IngestEvent{Kind: "file_open"}, eventClassification{Severity: "high", FIM: &fimWatch{}}, response.EventIncident},
+		{"generic network", IngestEvent{Kind: "tcp_connect"}, eventClassification{Severity: "high"}, response.EventRuntime},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			got := responseEventForIngest(clusterID, &testCase.event, testCase.classification)
+			if got.Type != testCase.want {
+				t.Fatalf("type=%q want %q", got.Type, testCase.want)
+			}
+			if !response.EventTypeMatches(response.EventRuntime, got.Type) || !response.EventTypeMatches(response.EventSecurity, got.Type) {
+				t.Fatalf("runtime/security aliases do not match %q", got.Type)
+			}
+		})
+	}
 }
 
 // RT-2 end-to-end: a critical runtime event flowing through Bulk fires a response rule

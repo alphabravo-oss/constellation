@@ -256,7 +256,10 @@ func TestRule_Match_EventAliases(t *testing.T) {
 	}{
 		{"legacy runtime catches threat", EventRuntime, EventThreat, true},
 		{"nv security-event catches runtime", EventSecurity, EventRuntime, true},
-		{"threat is specific", EventThreat, EventWAF, false},
+		{"legacy threat catches waf", EventThreat, EventWAF, true},
+		{"legacy threat catches dlp", EventThreat, EventDLP, true},
+		{"waf excludes dlp", EventWAF, EventDLP, false},
+		{"dlp excludes ips threat", EventDLP, EventThreat, false},
 		{"scan catches cve-report", EventScan, EventCVEReport, true},
 		{"cve-report catches scan", EventCVEReport, EventScan, true},
 		{"admission catches admission-control", EventAdmission, EventAdmissionControl, true},

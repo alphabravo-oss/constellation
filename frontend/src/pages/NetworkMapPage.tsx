@@ -440,12 +440,18 @@ function NetworkMapInner() {
     (workloadID: string | undefined) => (workloadID ? platformWorkloads.get(workloadID) : undefined) ?? isPlatformNamespace(namespaceFromWorkloadID(workloadID)),
     [platformWorkloads],
   );
+  const isPlatformEndpoint = useCallback(
+    (workloadID: string | undefined, platformRole: string | undefined) => platformRole == null
+      ? isPlatformWorkload(workloadID)
+      : isPlatformResource(platformRole, namespaceFromWorkloadID(workloadID)),
+    [isPlatformWorkload],
+  );
   const flowsRaw = q.data?.flows ?? EMPTY_FLOWS;
   const liveFlows = q.data?.recent_flows ?? [];
   const sessionsRaw = sessionsQ.data?.sessions ?? EMPTY_SESSIONS;
   const sessions = useMemo(
-    () => hidePlatformComponents ? sessionsRaw.filter((item) => !isPlatformWorkload(item.workload_id)) : sessionsRaw,
-    [hidePlatformComponents, isPlatformWorkload, sessionsRaw],
+    () => hidePlatformComponents ? sessionsRaw.filter((item) => !isPlatformEndpoint(item.workload_id, item.platform_role)) : sessionsRaw,
+    [hidePlatformComponents, isPlatformEndpoint, sessionsRaw],
   );
   const sessionsTotal = hidePlatformComponents ? sessions.length : (sessionsQ.data?.total ?? sessions.length);
   const sessionsHasMore = sessionsQ.data?.has_more ?? false;
@@ -464,9 +470,9 @@ function NetworkMapInner() {
   const conversationsRaw = conversationsQ.data?.conversations ?? EMPTY_CONVERSATIONS;
   const conversations = useMemo(
     () => hidePlatformComponents
-      ? conversationsRaw.filter((item) => !isPlatformWorkload(item.from) && !isPlatformWorkload(item.to))
+      ? conversationsRaw.filter((item) => !isPlatformEndpoint(item.from, item.from_platform_role) && !isPlatformEndpoint(item.to, item.to_platform_role))
       : conversationsRaw,
-    [conversationsRaw, hidePlatformComponents, isPlatformWorkload],
+    [conversationsRaw, hidePlatformComponents, isPlatformEndpoint],
   );
   const platformWorkloadCount = useMemo(
     () => workloads.filter((item) => isPlatformResource(item.platform_role, item.namespace)).length,
@@ -1466,10 +1472,12 @@ function NetworkConversationsWorkspaceTab({
           variant="outline"
           onClick={() => downloadCsv(
             `network-conversations-${hours}h.csv`,
-            ["from", "to", "bytes", "packets", "streams", "verdict", "apps", "last_seen"],
+            ["from", "from_platform_role", "to", "to_platform_role", "bytes", "packets", "streams", "verdict", "apps", "last_seen"],
             rows.map((row) => [
               row.from,
+              row.from_platform_role ?? "",
               row.to,
+              row.to_platform_role ?? "",
               String(row.bytes),
               String(row.packets),
               String(row.edges),
@@ -1545,11 +1553,12 @@ function NetworkSessionsWorkspaceTab({
           variant="outline"
           onClick={() => downloadCsv(
             "network-sessions.csv",
-            ["node", "id", "workload", "application", "protocol", "client", "server", "client_bytes", "server_bytes", "age_s", "idle_s", "state", "threat_id"],
+            ["node", "id", "workload", "platform_role", "application", "protocol", "client", "server", "client_bytes", "server_bytes", "age_s", "idle_s", "state", "threat_id"],
             rows.map((row) => [
               row.node,
               String(row.id),
               row.workload_id ?? "",
+              row.platform_role ?? "",
               row.application,
               row.ip_proto,
               `${row.client_ip}:${row.client_port}`,

@@ -16,6 +16,7 @@ import (
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
+	"github.com/alphabravocompany/constellation/internal/handler/netutil"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 )
 
@@ -430,26 +431,27 @@ func appFilterPorts(raw string) []int {
 
 // sessionDTO is one live connection returned to the UI (NV RESTSession).
 type sessionDTO struct {
-	ID          int64  `json:"id"`
-	Node        string `json:"node"`
-	WorkloadID  string `json:"workload_id,omitempty"`
-	Application string `json:"application"`
-	IPProto     string `json:"ip_proto"`
-	ClientIP    string `json:"client_ip"`
-	ClientPort  int    `json:"client_port"`
-	ServerIP    string `json:"server_ip"`
-	ServerPort  int    `json:"server_port"`
-	ClientState string `json:"client_state"`
-	ServerState string `json:"server_state"`
-	ClientBytes int64  `json:"client_bytes"`
-	ServerBytes int64  `json:"server_bytes"`
-	ClientPkts  int64  `json:"client_pkts"`
-	ServerPkts  int64  `json:"server_pkts"`
-	Age         int    `json:"age"`
-	Idle        int    `json:"idle"`
-	Ingress     bool   `json:"ingress"`
-	Severity    int    `json:"severity"`
-	ThreatID    int64  `json:"threat_id,omitempty"`
+	ID           int64  `json:"id"`
+	Node         string `json:"node"`
+	WorkloadID   string `json:"workload_id,omitempty"`
+	PlatformRole string `json:"platform_role,omitempty"`
+	Application  string `json:"application"`
+	IPProto      string `json:"ip_proto"`
+	ClientIP     string `json:"client_ip"`
+	ClientPort   int    `json:"client_port"`
+	ServerIP     string `json:"server_ip"`
+	ServerPort   int    `json:"server_port"`
+	ClientState  string `json:"client_state"`
+	ServerState  string `json:"server_state"`
+	ClientBytes  int64  `json:"client_bytes"`
+	ServerBytes  int64  `json:"server_bytes"`
+	ClientPkts   int64  `json:"client_pkts"`
+	ServerPkts   int64  `json:"server_pkts"`
+	Age          int    `json:"age"`
+	Idle         int    `json:"idle"`
+	Ingress      bool   `json:"ingress"`
+	Severity     int    `json:"severity"`
+	ThreatID     int64  `json:"threat_id,omitempty"`
 }
 
 // Sessions returns the current live connection table (NV's Network > Sessions). Cluster-scoped;
@@ -496,7 +498,13 @@ SELECT COUNT(*)::int
 	rows, err := h.db.Pool().Query(r.Context(), fmt.Sprintf(`
 SELECT id, node, workload_id, application, ip_proto,
        client_ip, client_port, server_ip, server_port, client_state, server_state,
-       client_bytes, server_bytes, client_pkts, server_pkts, age, idle, ingress, severity, threat_id
+       client_bytes, server_bytes, client_pkts, server_pkts, age, idle, ingress, severity, threat_id,
+       COALESCE((SELECT d.labels FROM deployments d
+                  WHERE d.org_id = network_sessions.org_id
+                    AND d.cluster_id = network_sessions.cluster_id
+                    AND d.namespace = split_part(network_sessions.workload_id, '/', 1)
+                    AND d.name = split_part(network_sessions.workload_id, '/', 2)
+                  ORDER BY d.last_seen_at DESC LIMIT 1), '{}'::jsonb)
   FROM network_sessions
  WHERE %s
  ORDER BY (client_bytes + server_bytes) DESC, age DESC
@@ -510,11 +518,14 @@ SELECT id, node, workload_id, application, ip_proto,
 	for rows.Next() {
 		var s sessionDTO
 		var proto, cstate, sstate int
+		var labels []byte
 		if err := rows.Scan(&s.ID, &s.Node, &s.WorkloadID, new(int), &proto,
 			&s.ClientIP, &s.ClientPort, &s.ServerIP, &s.ServerPort, &cstate, &sstate,
-			&s.ClientBytes, &s.ServerBytes, &s.ClientPkts, &s.ServerPkts, &s.Age, &s.Idle, &s.Ingress, &s.Severity, &s.ThreatID); err != nil {
+			&s.ClientBytes, &s.ServerBytes, &s.ClientPkts, &s.ServerPkts, &s.Age, &s.Idle, &s.Ingress, &s.Severity, &s.ThreatID, &labels); err != nil {
 			continue
 		}
+		namespace, _ := netutil.SplitWorkload(s.WorkloadID)
+		s.PlatformRole = handler.PlatformRoleJSON(namespace, labels)
 		s.IPProto = ipProtoName(proto)
 		s.Application = appLabel(proto, s.ServerPort)
 		s.ClientState = tcpStateName(cstate)

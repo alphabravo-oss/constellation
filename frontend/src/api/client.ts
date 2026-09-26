@@ -1985,6 +1985,7 @@ export interface NetworkSession {
   id: number;
   node: string;
   workload_id?: string;
+  platform_role?: string;
   application: string;
   ip_proto: string;
   client_ip: string;
@@ -2203,6 +2204,8 @@ export interface NetworkConversationEdge {
 export interface NetworkConversation {
   from: string;
   to: string;
+  from_platform_role?: string;
+  to_platform_role?: string;
   bytes: number;
   packets: number;
   edges: number;
@@ -4870,6 +4873,8 @@ export interface AuthServer {
 
 export const authServersApi = {
   list: () => api.get<{ auth_servers: AuthServer[] }>("/auth-servers").then((r) => r.data.auth_servers),
+  testConnection: (id: string) =>
+    api.post<{ ok: boolean; type: string; message?: string }>(`/auth-servers/${encodeURIComponent(id)}/test`).then((r) => r.data),
   create: (body: Omit<AuthServer, "id" | "revision">) =>
     api.post<AuthServer>("/auth-servers", body).then((r) => r.data),
   update: (id: string, body: AuthServer) =>

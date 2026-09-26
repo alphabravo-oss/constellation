@@ -4028,6 +4028,76 @@
         "summary": "Delete scoped-mappings"
       }
     },
+    "/api/v1/auth-servers/{id}/test": {
+      "post": {
+        "summary": "Test a saved identity provider configuration",
+        "description": "Requires manage_auth_servers. Tests only the caller organization's stored provider: LDAPS TLS and optional service bind, local SAML metadata parsing (not a live IdP fetch), or HTTPS OIDC discovery. This bounded probe intentionally rejects private, loopback, link-local, and other non-public LDAP/OIDC targets; private enterprise and air-gapped IdPs are not supported by this test endpoint yet. Outbound connections pin a vetted resolved address, disallow redirects and proxies, and have a short timeout. No credentials, metadata, or remote error detail is returned.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Probe succeeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid provider id."
+          },
+          "401": {
+            "description": "Missing or invalid authentication."
+          },
+          "403": {
+            "description": "Caller lacks manage_auth_servers."
+          },
+          "404": {
+            "description": "Provider not found in the caller's organization."
+          },
+          "422": {
+            "description": "Probe failed; sanitized reason only.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "type": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/auth/change-password": {
       "post": {
         "responses": {

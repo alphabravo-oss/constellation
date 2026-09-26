@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -183,6 +184,74 @@ VALUES
 	}
 	if len(got.Sessions) != 2 || got.Total != 3 || got.Limit != 2 || !got.HasMore || got.ClusterID != clusterID.String() {
 		t.Fatalf("unexpected sessions metadata: %+v", got)
+	}
+}
+
+func TestNetwork_SessionsPlatformRoleScopedToOwnedDeployment(t *testing.T) {
+	database := openTestDB(t)
+	t.Cleanup(database.Close)
+	ctx := context.Background()
+	pool := database.Pool()
+	orgID, foreignOrgID, clusterID, otherClusterID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, display_name) VALUES ($1, $2, $2)`, orgID, "session-role-"+orgID.String()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, display_name) VALUES ($1, $2, $2)`, foreignOrgID, "session-role-"+foreignOrgID.String()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id IN ($1, $2)`, orgID, foreignOrgID)
+	})
+	if _, err := pool.Exec(ctx, `INSERT INTO clusters (id, org_id, name) VALUES ($1, $3, 'first'), ($2, $3, 'second')`, clusterID, otherClusterID, orgID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO deployments (org_id, cluster_id, namespace, name, kind, labels) VALUES
+		($1, $2, 'operations', 'houston', 'Deployment', '{"app.kubernetes.io/part-of":"astronomer"}'::jsonb),
+		($1, $3, 'operations', 'houston', 'Deployment', '{}'::jsonb),
+		($4, $3, 'operations', 'houston', 'Deployment', '{"app.kubernetes.io/part-of":"astronomer"}'::jsonb)`, orgID, clusterID, otherClusterID, foreignOrgID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO network_sessions (org_id, cluster_id, node, id, workload_id, client_bytes, updated_at) VALUES
+		($1, $2, 'node', 1, 'operations/houston', 400, NOW()),
+		($1, $2, 'node', 2, 'kube-system/coredns', 300, NOW()),
+		($1, $2, 'node', 3, 'payments/api', 200, NOW()),
+		($1, $3, 'node', 4, 'operations/houston', 100, NOW())`, orgID, clusterID, otherClusterID); err != nil {
+		t.Fatal(err)
+	}
+	get := func(cluster uuid.UUID, limit int) struct {
+		Sessions []sessionDTO `json:"sessions"`
+		Total    int          `json:"total"`
+		HasMore  bool         `json:"has_more"`
+	} {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/network/sessions?cluster_id=%s&limit=%d", cluster, limit), nil)
+		request = request.WithContext(authctx.WithSubject(request.Context(), authctx.Subject{OrgID: orgID, UserID: uuid.New()}))
+		response := httptest.NewRecorder()
+		NewNetwork(database).Sessions(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status %d: %s", response.Code, response.Body.String())
+		}
+		var body struct {
+			Sessions []sessionDTO `json:"sessions"`
+			Total    int          `json:"total"`
+			HasMore  bool         `json:"has_more"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		return body
+	}
+	first := get(clusterID, 2)
+	if first.Total != 3 || !first.HasMore || len(first.Sessions) != 2 || first.Sessions[0].PlatformRole != "core" || first.Sessions[1].PlatformRole != "core" {
+		t.Fatalf("first cluster page: %+v", first)
+	}
+	full := get(clusterID, 10)
+	if len(full.Sessions) != 3 || full.Sessions[2].PlatformRole != "" {
+		t.Fatalf("first cluster full list: %+v", full)
+	}
+	second := get(otherClusterID, 10)
+	if second.Total != 1 || len(second.Sessions) != 1 || second.Sessions[0].PlatformRole != "" {
+		t.Fatalf("second cluster: %+v", second)
 	}
 }
 
