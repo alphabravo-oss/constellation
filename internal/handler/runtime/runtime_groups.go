@@ -180,13 +180,13 @@ func (s *GroupEdgeStore) Delete(ctx context.Context, orgID, id uuid.UUID) error 
 
 // groupMembers reads the cached member list for a group by name from the groups
 // table (owned elsewhere; read-only here). Members are "namespace/name" ids.
-func (s *GroupEdgeStore) groupMembers(ctx context.Context, orgID, clusterID uuid.UUID, name string) ([]string, error) {
+func (s *GroupEdgeStore) groupMembers(ctx context.Context, tx pgx.Tx, orgID, clusterID uuid.UUID, name string) ([]string, error) {
 	if name == "external" || name == "nodes" {
 		return nil, nil
 	}
 	var raw json.RawMessage
-	err := s.db.Pool().QueryRow(ctx,
-		`SELECT members FROM groups WHERE org_id = $1 AND name = $2 AND (cluster_id IS NULL OR cluster_id = $3)`, orgID, name, clusterID).Scan(&raw)
+	err := tx.QueryRow(ctx,
+		`SELECT members FROM groups WHERE org_id = $1 AND name = $2 AND (cluster_id IS NULL OR cluster_id = $3) FOR SHARE`, orgID, name, clusterID).Scan(&raw)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("group %q does not exist in cluster: %w", name, errEdgeGroupNotFound)
 	}
@@ -218,18 +218,50 @@ func (s *GroupEdgeStore) Expand(ctx context.Context, orgID, clusterID uuid.UUID,
 	if err := e.Validate(); err != nil {
 		return ExpandResult{}, err
 	}
-	fromMembers, err := s.groupMembers(ctx, orgID, clusterID, e.FromGroup)
+	tx, err := s.db.Pool().Begin(ctx)
 	if err != nil {
 		return ExpandResult{}, err
 	}
-	toMembers, err := s.groupMembers(ctx, orgID, clusterID, e.ToGroup)
+	defer tx.Rollback(ctx)
+	var lockedOrgID, lockedClusterID uuid.UUID
+	if err := tx.QueryRow(ctx, `SELECT id FROM orgs WHERE id=$1 FOR KEY SHARE`, orgID).Scan(&lockedOrgID); err != nil {
+		return ExpandResult{}, err
+	}
+	if err := tx.QueryRow(ctx, `SELECT id FROM clusters WHERE id=$1 AND org_id=$2 FOR KEY SHARE`, clusterID, orgID).Scan(&lockedClusterID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ExpandResult{}, errEdgeClusterNotFound
+		}
+		return ExpandResult{}, err
+	}
+	if e.ID != "" {
+		edgeID, err := uuid.Parse(e.ID)
+		if err != nil {
+			return ExpandResult{}, err
+		}
+		row, err := scanGroupEdge(tx.QueryRow(ctx, `
+SELECT id, cluster_id, from_group, to_group, ports, mode, comment, updated_at
+  FROM group_rule_edges WHERE id=$1 AND org_id=$2 AND cluster_id=$3 FOR UPDATE`, edgeID, orgID, clusterID))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ExpandResult{}, errEdgeNotFound
+		}
+		if err != nil {
+			return ExpandResult{}, err
+		}
+		e = netpolicy.GroupEdge{ID: row.ID.String(), FromGroup: row.FromGroup, ToGroup: row.ToGroup,
+			Ports: row.Ports, Mode: row.Mode, Comment: row.Comment}
+	}
+	fromMembers, err := s.groupMembers(ctx, tx, orgID, clusterID, e.FromGroup)
+	if err != nil {
+		return ExpandResult{}, err
+	}
+	toMembers, err := s.groupMembers(ctx, tx, orgID, clusterID, e.ToGroup)
 	if err != nil {
 		return ExpandResult{}, err
 	}
 	flows := netpolicy.ExpandEdge(e, fromMembers, toMembers)
 	res := ExpandResult{FromMembers: len(fromMembers), ToMembers: len(toMembers), Flows: len(flows)}
 	if len(flows) == 0 {
-		return res, nil
+		return res, tx.Commit(ctx)
 	}
 	// P0-07: honor the edge's authored mode instead of always emitting informational
 	// monitor policies. A 'protect' edge produces an ENFORCING policy with a default-deny
@@ -239,6 +271,7 @@ func (s *GroupEdgeStore) Expand(ctx context.Context, orgID, clusterID uuid.UUID,
 	policyMode, opts := edgePolicyPosture(e.Mode)
 	members := uniqueStrings(append(append([]string{}, fromMembers...), toMembers...))
 	name := edgePolicyName(e)
+	createdPolicies := []*RuntimePolicy{}
 	for _, m := range members {
 		m = strings.TrimSpace(m)
 		if m == "" {
@@ -254,10 +287,22 @@ func (s *GroupEdgeStore) Expand(ctx context.Context, orgID, clusterID uuid.UUID,
 			Mode: policyMode, DefAction: defAction, ApplyDir: applyDir,
 			CreatedBy: by,
 		}
-		if _, err := s.pol.UpsertLearnedPolicy(ctx, policy, rules, by); err != nil {
-			return res, err
+		if _, created, err := s.pol.upsertLearnedPolicyTx(ctx, tx, policy, rules, by); err != nil {
+			return ExpandResult{}, err
+		} else if created {
+			createdPolicies = append(createdPolicies, policy)
 		}
 		res.Policies = append(res.Policies, m)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return ExpandResult{}, err
+	}
+	if s.pol.auditLog != nil {
+		for _, policy := range createdPolicies {
+			if err := s.pol.auditLog.LogPolicyCreate(ctx, orgID, by, snapshot(policy), ""); err != nil {
+				slog.Default().Warn("edge expansion policy audit failed after commit", "policy_id", policy.ID, "error", err)
+			}
+		}
 	}
 	return res, nil
 }

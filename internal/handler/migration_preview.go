@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"path"
@@ -16,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/alphabravocompany/constellation/internal/migration/aqua"
 	"github.com/alphabravocompany/constellation/internal/migration/neuvector"
@@ -894,6 +896,10 @@ func (h *Enterprise) MigrationApply(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusForbidden, "forbidden: "+string(rbac.VerbManageRegistries))
 		return
 	}
+	if err := lockMigrationGroupReferences(r, tx, subj.OrgID, len(preview.Groups) > 0, len(preview.NetworkRules) > 0); err != nil {
+		jsonError(w, migrationGroupErrorStatus(err), err.Error())
+		return
+	}
 	remainingApplied, vulnerabilityRollback, registryRollback, err := h.applyMigrationRemaining(r, tx, subj, preview)
 	if err != nil {
 		h.auditMigration(r, subj, "migration.import.apply.failed", id.String(), map[string]any{"reason": "remaining_family_conflict"})
@@ -912,9 +918,11 @@ func (h *Enterprise) MigrationApply(w http.ResponseWriter, r *http.Request) {
 	groupApplied, groupRollback, err := h.applyMigrationGroups(r, tx, subj, preview.Groups)
 	if err != nil {
 		_ = tx.Rollback(r.Context())
-		_, _ = h.db.Pool().Exec(r.Context(), `UPDATE migration_imports SET status='failed', error=$3 WHERE id=$1 AND org_id=$2`, id, subj.OrgID, err.Error())
+		if !errors.Is(err, errMigrationGroupConflict) {
+			_, _ = h.db.Pool().Exec(r.Context(), `UPDATE migration_imports SET status='failed', error=$3 WHERE id=$1 AND org_id=$2`, id, subj.OrgID, err.Error())
+		}
 		h.auditMigration(r, subj, "migration.import.apply.failed", id.String(), map[string]any{"source": source, "reason": "apply_failed", "error": err.Error()})
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		jsonError(w, migrationGroupErrorStatus(err), err.Error())
 		return
 	}
 	mergeAppliedCounts(applied, groupApplied)
@@ -939,9 +947,11 @@ func (h *Enterprise) MigrationApply(w http.ResponseWriter, r *http.Request) {
 	networkApplied, networkRollback, err := h.applyMigrationNetworkRules(r, tx, subj, preview.NetworkRules)
 	if err != nil {
 		_ = tx.Rollback(r.Context())
-		_, _ = h.db.Pool().Exec(r.Context(), `UPDATE migration_imports SET status='failed', error=$3 WHERE id=$1 AND org_id=$2`, id, subj.OrgID, err.Error())
+		if !errors.Is(err, errMigrationGroupConflict) {
+			_, _ = h.db.Pool().Exec(r.Context(), `UPDATE migration_imports SET status='failed', error=$3 WHERE id=$1 AND org_id=$2`, id, subj.OrgID, err.Error())
+		}
 		h.auditMigration(r, subj, "migration.import.apply.failed", id.String(), map[string]any{"source": source, "reason": "apply_failed", "error": err.Error()})
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		jsonError(w, migrationGroupErrorStatus(err), err.Error())
 		return
 	}
 	mergeAppliedCounts(applied, networkApplied)
@@ -1077,6 +1087,10 @@ SELECT source, status, rollback_json
 		jsonError(w, http.StatusForbidden, "forbidden: "+string(rbac.VerbManageRegistries))
 		return
 	}
+	if err := lockMigrationGroupReferences(r, tx, subj.OrgID, len(rollback.Groups) > 0, len(rollback.NetworkRules) > 0); err != nil {
+		jsonError(w, migrationGroupErrorStatus(err), err.Error())
+		return
+	}
 	remainingRestored, remainingDeleted, err := rollbackMigrationRemaining(r, tx, subj.OrgID, rollback.VulnerabilityProfiles, rollback.Registries)
 	if err != nil {
 		jsonError(w, http.StatusConflict, err.Error())
@@ -1113,7 +1127,7 @@ SELECT source, status, rollback_json
 	if err != nil {
 		_ = tx.Rollback(r.Context())
 		h.auditMigration(r, subj, "migration.import.rollback.failed", id.String(), map[string]any{"source": source, "reason": "rollback_failed", "error": err.Error()})
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		jsonError(w, migrationGroupErrorStatus(err), err.Error())
 		return
 	}
 	restored += networkRestored
@@ -1140,7 +1154,7 @@ SELECT source, status, rollback_json
 	if err != nil {
 		_ = tx.Rollback(r.Context())
 		h.auditMigration(r, subj, "migration.import.rollback.failed", id.String(), map[string]any{"source": source, "reason": "rollback_failed", "error": err.Error()})
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		jsonError(w, migrationGroupErrorStatus(err), err.Error())
 		return
 	}
 	restored += groupRestored
@@ -2491,6 +2505,78 @@ RETURNING id`, orgID, policy.Name, policy.Description, policy.Engine, policy.Cat
 	return applied, rollback, nil
 }
 
+var errMigrationGroupConflict = errors.New("migration group reference conflict")
+
+func migrationGroupErrorStatus(err error) int {
+	if errors.Is(err, errMigrationGroupConflict) {
+		return http.StatusConflict
+	}
+	return http.StatusInternalServerError
+}
+
+func migrationGroupLockError(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "55P03" {
+		return fmt.Errorf("%w: group is being changed; retry", errMigrationGroupConflict)
+	}
+	return err
+}
+
+func lockMigrationGroupReferences(r *http.Request, tx pgx.Tx, orgID uuid.UUID, changeGroups, changeEdges bool) error {
+	if !changeGroups && !changeEdges {
+		return nil
+	}
+	var lockedOrgID uuid.UUID
+	if err := tx.QueryRow(r.Context(), `SELECT id FROM orgs WHERE id=$1 FOR KEY SHARE NOWAIT`, orgID).Scan(&lockedOrgID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("%w: organization no longer exists", errMigrationGroupConflict)
+		}
+		return migrationGroupLockError(err)
+	}
+	lock := `LOCK TABLE group_rule_edges IN ROW EXCLUSIVE MODE NOWAIT`
+	if changeGroups {
+		lock = `LOCK TABLE group_rule_edges, group_dpi_sensor_bindings, response_rules_v2, policies IN SHARE ROW EXCLUSIVE MODE NOWAIT`
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		if _, err := tx.Exec(r.Context(), `SAVEPOINT migration_group_reference_lock`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(r.Context(), lock)
+		if err == nil {
+			_, err = tx.Exec(r.Context(), `RELEASE SAVEPOINT migration_group_reference_lock`)
+			return err
+		}
+		if _, rollbackErr := tx.Exec(r.Context(), `ROLLBACK TO SAVEPOINT migration_group_reference_lock`); rollbackErr != nil {
+			return rollbackErr
+		}
+		if _, releaseErr := tx.Exec(r.Context(), `RELEASE SAVEPOINT migration_group_reference_lock`); releaseErr != nil {
+			return releaseErr
+		}
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "55P03" {
+			return err
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("%w: group references are being changed; retry", errMigrationGroupConflict)
+		}
+		select {
+		case <-r.Context().Done():
+			return r.Context().Err()
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+}
+
+func lockMigrationGroupCluster(r *http.Request, tx pgx.Tx, orgID, clusterID uuid.UUID) error {
+	var lockedClusterID uuid.UUID
+	err := tx.QueryRow(r.Context(), `SELECT id FROM clusters WHERE id=$1 AND org_id=$2 FOR KEY SHARE NOWAIT`, clusterID, orgID).Scan(&lockedClusterID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("%w: target cluster no longer exists in this organization", errMigrationGroupConflict)
+	}
+	return migrationGroupLockError(err)
+}
+
 func (h *Enterprise) applyMigrationGroups(r *http.Request, tx pgx.Tx, subj Subject, groups []migrationPreviewGroupDTO) (map[string]int, []migrationGroupRollbackDTO, error) {
 	applied := map[string]int{"created": 0, "updated": 0, "groups": 0}
 	rollback := make([]migrationGroupRollbackDTO, 0, len(groups))
@@ -2500,15 +2586,11 @@ func (h *Enterprise) applyMigrationGroups(r *http.Request, tx pgx.Tx, subj Subje
 		if err != nil {
 			return nil, nil, fmt.Errorf("group %s is missing a valid target cluster_id", item.Name)
 		}
-		ok, cached := clusterCache[clusterID]
-		if !cached {
-			if err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM clusters WHERE org_id=$1 AND id=$2)`, subj.OrgID, clusterID).Scan(&ok); err != nil {
-				return nil, nil, err
+		if !clusterCache[clusterID] {
+			if err := lockMigrationGroupCluster(r, tx, subj.OrgID, clusterID); err != nil {
+				return nil, nil, fmt.Errorf("group %s: %w", item.Name, err)
 			}
-			clusterCache[clusterID] = ok
-		}
-		if !ok {
-			return nil, nil, fmt.Errorf("group %s targets a cluster outside this organization", item.Name)
+			clusterCache[clusterID] = true
 		}
 		criteria, err := migrationGroupCriteria(item.Criteria)
 		if err != nil {
@@ -2534,9 +2616,33 @@ func (h *Enterprise) applyMigrationGroups(r *http.Request, tx pgx.Tx, subj Subje
 		membersJSON, _ := json.Marshal(members)
 		before, exists, err := migrationGroupSnapshot(r, tx, subj.OrgID, g.Name)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, migrationGroupLockError(err)
 		}
 		if exists {
+			if before.ClusterID != "" && before.ClusterID != clusterID.String() {
+				return nil, nil, fmt.Errorf("%w: group %s belongs to another cluster", errMigrationGroupConflict, g.Name)
+			}
+			var previousMembers []string
+			if err := json.Unmarshal(before.Members, &previousMembers); err != nil {
+				return nil, nil, err
+			}
+			changes := groupReferenceSensitiveChanges(before.Name, group.Kind(before.Kind), before.Criteria, before.LearnedFrom, before.CfgType, g)
+			if (&group.Group{Members: normalizeGroupMembers(previousMembers)}).MembersChanged(normalizeGroupMembers(members)) {
+				changes = append(changes, "members")
+			}
+			if len(changes) > 0 {
+				groupID, err := uuid.Parse(before.ID)
+				if err != nil {
+					return nil, nil, err
+				}
+				refs, err := groupBlockingReferenceCount(r.Context(), tx, subj.OrgID, groupID, before.Name)
+				if err != nil {
+					return nil, nil, err
+				}
+				if refs > 0 {
+					return nil, nil, fmt.Errorf("%w: group %s has %d policy references", errMigrationGroupConflict, g.Name, refs)
+				}
+			}
 			if _, err := tx.Exec(r.Context(), `
 UPDATE groups
    SET kind=$3, comment=$4, criteria=$5::jsonb, members=$6::jsonb,
@@ -2735,15 +2841,11 @@ func (h *Enterprise) applyMigrationNetworkRules(r *http.Request, tx pgx.Tx, subj
 		if err != nil {
 			return nil, nil, fmt.Errorf("network rule %s is missing a valid target cluster_id", rule.Name)
 		}
-		ok, cached := clusterCache[clusterID]
-		if !cached {
-			if err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM clusters WHERE org_id=$1 AND id=$2)`, subj.OrgID, clusterID).Scan(&ok); err != nil {
-				return nil, nil, err
+		if !clusterCache[clusterID] {
+			if err := lockMigrationGroupCluster(r, tx, subj.OrgID, clusterID); err != nil {
+				return nil, nil, fmt.Errorf("network rule %s: %w", rule.Name, err)
 			}
-			clusterCache[clusterID] = ok
-		}
-		if !ok {
-			return nil, nil, fmt.Errorf("network rule %s targets a cluster outside this organization", rule.Name)
+			clusterCache[clusterID] = true
 		}
 		ports, err := migrationNetworkPorts(rule.Ports)
 		if err != nil {
@@ -2768,7 +2870,7 @@ func (h *Enterprise) applyMigrationNetworkRules(r *http.Request, tx pgx.Tx, subj
 		}
 		before, exists, err := migrationNetworkRuleSnapshot(r, tx, subj.OrgID, clusterID, edge.FromGroup, edge.ToGroup)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, migrationGroupLockError(err)
 		}
 		if exists {
 			if _, err := tx.Exec(r.Context(), `
@@ -3000,7 +3102,8 @@ SELECT id::text, COALESCE(cluster_id::text,''), name, kind, COALESCE(comment,'')
   FROM groups
  WHERE org_id=$1 AND name=$2
  ORDER BY updated_at DESC
- LIMIT 1`, orgID, name).Scan(
+ LIMIT 1
+ FOR UPDATE NOWAIT`, orgID, name).Scan(
 		&snap.ID, &snap.ClusterID, &snap.Name, &snap.Kind, &snap.Comment,
 		&criteriaText, &membersText, &snap.LearnedFrom, &snap.CfgType, &snap.PolicyMode, &snap.ProfileMode,
 	)
@@ -3023,7 +3126,8 @@ SELECT id::text, cluster_id::text, from_group, to_group, ports::text, mode, COAL
   FROM group_rule_edges
  WHERE org_id=$1 AND cluster_id=$2 AND from_group=$3 AND to_group=$4
  ORDER BY updated_at DESC
- LIMIT 1`, orgID, clusterID, fromGroup, toGroup).Scan(
+ LIMIT 1
+ FOR UPDATE NOWAIT`, orgID, clusterID, fromGroup, toGroup).Scan(
 		&snap.ID, &snap.ClusterID, &snap.FromGroup, &snap.ToGroup, &portsText, &snap.Mode, &snap.Comment,
 	)
 	if err == pgx.ErrNoRows {
@@ -3449,19 +3553,22 @@ func migrationNetworkGroupsExist(r *http.Request, tx pgx.Tx, orgID, clusterID uu
 		if groupName == "" {
 			return fmt.Errorf("group name is required")
 		}
-		var exists bool
-		if err := tx.QueryRow(r.Context(), `
-SELECT EXISTS(
-  SELECT 1
-    FROM groups
-   WHERE org_id=$1
-     AND name=$2
-     AND (cluster_id IS NULL OR cluster_id=$3)
-)`, orgID, groupName, clusterID).Scan(&exists); err != nil {
-			return err
+		if groupName == "external" || groupName == "nodes" {
+			continue
 		}
-		if !exists {
-			return fmt.Errorf("target group %s no longer exists", groupName)
+		var groupID uuid.UUID
+		if err := tx.QueryRow(r.Context(), `
+SELECT id FROM groups
+ WHERE org_id=$1 AND name=$2 AND (cluster_id IS NULL OR cluster_id=$3)
+ FOR KEY SHARE NOWAIT`, orgID, groupName, clusterID).Scan(&groupID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("%w: target group %s no longer exists", errMigrationGroupConflict, groupName)
+			}
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "55P03" {
+				return fmt.Errorf("%w: target group %s is being changed; retry", errMigrationGroupConflict, groupName)
+			}
+			return err
 		}
 	}
 	return nil
@@ -3596,6 +3703,16 @@ func (h *Enterprise) rollbackMigrationNetworkRules(r *http.Request, tx pgx.Tx, o
 				continue
 			}
 			before := item.Before
+			clusterID, err := uuid.Parse(before.ClusterID)
+			if err != nil {
+				return restored, deleted, fmt.Errorf("%w: edge rollback has invalid cluster", errMigrationGroupConflict)
+			}
+			if err := lockMigrationGroupCluster(r, tx, orgID, clusterID); err != nil {
+				return restored, deleted, err
+			}
+			if err := migrationNetworkGroupsExist(r, tx, orgID, clusterID, before.FromGroup, before.ToGroup); err != nil {
+				return restored, deleted, err
+			}
 			ports := before.Ports
 			if len(ports) == 0 {
 				ports = json.RawMessage(`[]`)
@@ -3753,10 +3870,42 @@ UPDATE file_profile_states
 func (h *Enterprise) rollbackMigrationGroups(r *http.Request, tx pgx.Tx, orgID uuid.UUID, groups []migrationGroupRollbackDTO) (int, int, error) {
 	var restored, deleted int
 	for _, item := range groups {
+		if item.ID == "" {
+			continue
+		}
+		groupID, err := uuid.Parse(item.ID)
+		if err != nil {
+			return restored, deleted, fmt.Errorf("%w: invalid group rollback ID", errMigrationGroupConflict)
+		}
+		var currentName string
+		err = tx.QueryRow(r.Context(), `SELECT name FROM groups WHERE id=$1 AND org_id=$2 FOR UPDATE NOWAIT`, groupID, orgID).Scan(&currentName)
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return restored, deleted, migrationGroupLockError(err)
+		}
+		if currentName != item.Name {
+			return restored, deleted, fmt.Errorf("%w: group %s changed after import", errMigrationGroupConflict, item.Name)
+		}
+		current, found, err := migrationGroupSnapshot(r, tx, orgID, currentName)
+		if err != nil {
+			return restored, deleted, migrationGroupLockError(err)
+		}
+		if !found || current.ID != item.ID {
+			return restored, deleted, fmt.Errorf("%w: group %s changed after import", errMigrationGroupConflict, item.Name)
+		}
+		var refs int
+		if item.Action == "delete" || item.Action == "restore" {
+			refs, err = groupBlockingReferenceCount(r.Context(), tx, orgID, groupID, currentName)
+			if err != nil {
+				return restored, deleted, err
+			}
+		}
 		switch item.Action {
 		case "delete":
-			if item.ID == "" {
-				continue
+			if refs > 0 {
+				return restored, deleted, fmt.Errorf("%w: group %s has %d policy references", errMigrationGroupConflict, currentName, refs)
 			}
 			tag, err := tx.Exec(r.Context(), `DELETE FROM groups WHERE id=$1::uuid AND org_id=$2`, item.ID, orgID)
 			if err != nil {
@@ -3768,6 +3917,36 @@ func (h *Enterprise) rollbackMigrationGroups(r *http.Request, tx pgx.Tx, orgID u
 				continue
 			}
 			before := item.Before
+			if before.ID != item.ID || before.Name != item.Name {
+				return restored, deleted, fmt.Errorf("%w: group rollback snapshot does not match", errMigrationGroupConflict)
+			}
+			if before.ClusterID != "" {
+				clusterID, err := uuid.Parse(before.ClusterID)
+				if err != nil {
+					return restored, deleted, fmt.Errorf("%w: group rollback has invalid cluster", errMigrationGroupConflict)
+				}
+				if err := lockMigrationGroupCluster(r, tx, orgID, clusterID); err != nil {
+					return restored, deleted, err
+				}
+			}
+			var currentMembers, beforeMembers []string
+			if err := json.Unmarshal(current.Members, &currentMembers); err != nil {
+				return restored, deleted, err
+			}
+			if err := json.Unmarshal(before.Members, &beforeMembers); err != nil {
+				return restored, deleted, err
+			}
+			next := &group.Group{Name: before.Name, Kind: group.Kind(before.Kind), LearnedFrom: before.LearnedFrom, CfgType: before.CfgType}
+			if err := json.Unmarshal(before.Criteria, &next.Criteria); err != nil {
+				return restored, deleted, err
+			}
+			changes := groupReferenceSensitiveChanges(current.Name, group.Kind(current.Kind), current.Criteria, current.LearnedFrom, current.CfgType, next)
+			if current.ClusterID != before.ClusterID || (&group.Group{Members: normalizeGroupMembers(currentMembers)}).MembersChanged(normalizeGroupMembers(beforeMembers)) {
+				changes = append(changes, "scope or members")
+			}
+			if len(changes) > 0 && refs > 0 {
+				return restored, deleted, fmt.Errorf("%w: group %s has %d policy references", errMigrationGroupConflict, currentName, refs)
+			}
 			criteria := before.Criteria
 			if len(criteria) == 0 {
 				criteria = json.RawMessage(`[]`)

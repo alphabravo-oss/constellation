@@ -357,18 +357,7 @@ func applyFedRevision(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, 
 	}
 	switch rev.Kind {
 	case "policy":
-		// Carry the master's enabled value so master-enabled policies actually
-		// take effect on joints; ON CONFLICT must set it too (re-applied fed rows
-		// would otherwise keep a stale enabled).
-		_, err := pool.Exec(ctx, `
-INSERT INTO policies (org_id, name, description, engine, category, spec_yaml, enabled, mode, version, cfg_type)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1,'fed')
-ON CONFLICT (org_id, name, version) DO UPDATE SET
-    description=EXCLUDED.description, engine=EXCLUDED.engine, category=EXCLUDED.category,
-    spec_yaml=EXCLUDED.spec_yaml, enabled=EXCLUDED.enabled, mode=EXCLUDED.mode,
-    cfg_type='fed', updated_at=NOW()`,
-			orgID, p.Name, p.Description, p.Engine, p.Category, p.SpecYAML, p.Enabled, p.Mode)
-		return err
+		return upsertFedPolicy(ctx, pool, orgID, p)
 	case "policy_delete":
 		// Tombstone: the master deleted this policy. Remove the joint's fed copy.
 		// Scoped to cfg_type='fed' so a local user policy that happens to share a
@@ -381,32 +370,54 @@ ON CONFLICT (org_id, name, version) DO UPDATE SET
 		if len(criteria) == 0 {
 			criteria = json.RawMessage("[]")
 		}
-		_, err := pool.Exec(ctx, `
+		return withFedGroupMutation(ctx, pool, orgID, false, func(tx pgx.Tx) error {
+			var groupID uuid.UUID
+			var cfgType string
+			var sensitiveChange bool
+			err := tx.QueryRow(ctx, `
+SELECT id, cfg_type, kind IS DISTINCT FROM 'federated' OR criteria IS DISTINCT FROM $3::jsonb
+  FROM groups WHERE org_id=$1 AND name=$2 FOR UPDATE NOWAIT`, orgID, p.Name, []byte(criteria)).
+				Scan(&groupID, &cfgType, &sensitiveChange)
+			if errors.Is(err, pgx.ErrNoRows) {
+				_, err = tx.Exec(ctx, `
 INSERT INTO groups (org_id, name, kind, comment, criteria, cfg_type)
-VALUES ($1,$2,'federated',$3,$4,'fed')
-ON CONFLICT (org_id, name) DO UPDATE SET
-    kind='federated', comment=EXCLUDED.comment, criteria=EXCLUDED.criteria, cfg_type='fed', updated_at=NOW()`,
-			orgID, p.Name, p.Comment, []byte(criteria))
-		return err
+VALUES ($1,$2,'federated',$3,$4,'fed')`, orgID, p.Name, p.Comment, []byte(criteria))
+				return err
+			}
+			if err != nil {
+				return err
+			}
+			if cfgType != "fed" {
+				return fmt.Errorf("federated group %q conflicts with a local group", p.Name)
+			}
+			if sensitiveChange {
+				if err := rejectFedGroupReferences(ctx, tx, orgID, groupID, p.Name); err != nil {
+					return err
+				}
+			}
+			_, err = tx.Exec(ctx, `
+UPDATE groups SET kind='federated', comment=$3, criteria=$4, updated_at=NOW()
+ WHERE org_id=$1 AND name=$2 AND cfg_type='fed'`, orgID, p.Name, p.Comment, []byte(criteria))
+			return err
+		})
 	case "group_delete":
-		_, err := pool.Exec(ctx,
-			`DELETE FROM groups WHERE org_id=$1 AND name=$2 AND cfg_type='fed'`, orgID, p.Name)
-		return err
+		return withFedGroupMutation(ctx, pool, orgID, false, func(tx pgx.Tx) error {
+			var groupID uuid.UUID
+			err := tx.QueryRow(ctx, `SELECT id FROM groups WHERE org_id=$1 AND name=$2 AND cfg_type='fed' FOR UPDATE NOWAIT`, orgID, p.Name).Scan(&groupID)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			if err := rejectFedGroupReferences(ctx, tx, orgID, groupID, p.Name); err != nil {
+				return err
+			}
+			_, err = tx.Exec(ctx, `DELETE FROM groups WHERE id=$1`, groupID)
+			return err
+		})
 	case "admission_policy":
-		// Admission-deny policies are ordinary rows in `policies` (engine
-		// 'constellation-admission'); they replicate exactly like a 'policy' but
-		// carry a distinct revision kind so the log mirrors NeuVector's separate
-		// FedAdmCtrlDenyRulesType. Read-only enforcement is the shared policyIsFed
-		// path on the policies CRUD — no separate guard needed.
-		_, err := pool.Exec(ctx, `
-INSERT INTO policies (org_id, name, description, engine, category, spec_yaml, enabled, mode, version, cfg_type)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1,'fed')
-ON CONFLICT (org_id, name, version) DO UPDATE SET
-    description=EXCLUDED.description, engine=EXCLUDED.engine, category=EXCLUDED.category,
-    spec_yaml=EXCLUDED.spec_yaml, enabled=EXCLUDED.enabled, mode=EXCLUDED.mode,
-    cfg_type='fed', updated_at=NOW()`,
-			orgID, p.Name, p.Description, p.Engine, p.Category, p.SpecYAML, p.Enabled, p.Mode)
-		return err
+		return upsertFedPolicy(ctx, pool, orgID, p)
 	case "admission_policy_delete":
 		_, err := pool.Exec(ctx,
 			`DELETE FROM policies WHERE org_id=$1 AND name=$2 AND cfg_type='fed'`, orgID, p.Name)
@@ -461,6 +472,101 @@ ON CONFLICT (org_id, rule_kind, rule_key) DO UPDATE SET
 		return nil
 	}
 }
+
+func withFedGroupMutation(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, purgePolicies bool, mutate func(pgx.Tx) error) error {
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		var lockedOrgID uuid.UUID
+		err = tx.QueryRow(ctx, `SELECT id FROM orgs WHERE id=$1 FOR KEY SHARE`, orgID).Scan(&lockedOrgID)
+		if err == nil {
+			if purgePolicies {
+				_, err = tx.Exec(ctx, `LOCK TABLE group_rule_edges, group_dpi_sensor_bindings, response_rules_v2 IN SHARE MODE NOWAIT`)
+				if err == nil {
+					_, err = tx.Exec(ctx, `LOCK TABLE policies IN SHARE ROW EXCLUSIVE MODE NOWAIT`)
+				}
+			} else {
+				_, err = tx.Exec(ctx, `LOCK TABLE group_rule_edges, group_dpi_sensor_bindings, response_rules_v2, policies IN SHARE MODE NOWAIT`)
+			}
+		}
+		if err == nil {
+			err = mutate(tx)
+		}
+		if err == nil {
+			err = tx.Commit(ctx)
+		}
+		if err == nil {
+			return nil
+		}
+		_ = tx.Rollback(ctx)
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || (pgErr.Code != "55P03" && pgErr.Code != "23505") || time.Now().After(deadline) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+}
+
+func rejectFedGroupReferences(ctx context.Context, tx pgx.Tx, orgID, groupID uuid.UUID, name string) error {
+	count, err := groupBlockingReferenceCount(ctx, tx, orgID, groupID, name)
+	if err != nil {
+		return err
+	}
+	if count != 0 {
+		return fmt.Errorf("federated group %q has %d policy references", name, count)
+	}
+	return nil
+}
+
+func upsertFedPolicy(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, payload fedSyncPayload) error {
+	selectors := admissionRuleGroups(payload.SpecYAML)
+	if payload.Engine != "constellation-admission" || len(selectors) == 0 {
+		_, err := pool.Exec(ctx, fedPolicyUpsertSQL, orgID, payload.Name, payload.Description,
+			payload.Engine, payload.Category, payload.SpecYAML, payload.Enabled, payload.Mode)
+		return err
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var lockedOrgID uuid.UUID
+	if err := tx.QueryRow(ctx, `SELECT id FROM orgs WHERE id=$1 FOR KEY SHARE`, orgID).Scan(&lockedOrgID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `LOCK TABLE policies IN ROW EXCLUSIVE MODE`); err != nil {
+		return err
+	}
+	for _, selector := range selectors {
+		var groupID uuid.UUID
+		if err := tx.QueryRow(ctx, `
+SELECT id FROM groups
+ WHERE org_id=$1 AND cluster_id IS NULL AND (id::text=$2 OR lower(name)=lower($2))
+ LIMIT 1 FOR KEY SHARE`, orgID, selector).Scan(&groupID); err != nil {
+			return fmt.Errorf("federated admission policy %q group %q: %w", payload.Name, selector, err)
+		}
+	}
+	if _, err := tx.Exec(ctx, fedPolicyUpsertSQL, orgID, payload.Name, payload.Description,
+		payload.Engine, payload.Category, payload.SpecYAML, payload.Enabled, payload.Mode); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+const fedPolicyUpsertSQL = `
+INSERT INTO policies (org_id, name, description, engine, category, spec_yaml, enabled, mode, version, cfg_type)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1,'fed')
+ON CONFLICT (org_id, name, version) DO UPDATE SET
+    description=EXCLUDED.description, engine=EXCLUDED.engine, category=EXCLUDED.category,
+    spec_yaml=EXCLUDED.spec_yaml, enabled=EXCLUDED.enabled, mode=EXCLUDED.mode,
+    cfg_type='fed', updated_at=NOW()`
 
 // ReconcileFedSyncLoop runs ReconcileFedSync shortly after start and on interval.
 // No-op when masterURL is empty (standalone/master controllers). Mirrors
@@ -551,22 +657,47 @@ func PurgeFedRows(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID) erro
 }
 
 func purgeFedRows(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID) error {
-	// Every table that carries cfg_type='fed' rows. fed_runtime_profiles (P2-3) is
-	// exclusively fed so an unqualified org delete is equivalent, but the cfg_type
-	// predicate is kept uniform across all statements.
-	stmts := []string{
-		`DELETE FROM policies WHERE org_id=$1 AND cfg_type='fed'`,
-		`DELETE FROM groups WHERE org_id=$1 AND cfg_type='fed'`,
-		`DELETE FROM response_rule_overrides WHERE org_id=$1 AND cfg_type='fed'`,
-		`DELETE FROM fed_runtime_profiles WHERE org_id=$1 AND cfg_type='fed'`,
-	}
-	for _, q := range stmts {
-		if _, err := pool.Exec(ctx, q, orgID); err != nil {
+	return withFedGroupMutation(ctx, pool, orgID, true, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `DELETE FROM policies WHERE org_id=$1 AND cfg_type='fed'`, orgID); err != nil {
 			return err
 		}
-	}
-	// Drop the joint's local sync cursor too, so a future re-join replays the new
-	// master's log from revision 0 instead of resuming a stale `since`.
-	_, err := pool.Exec(ctx, `DELETE FROM fed_sync_state WHERE org_id=$1`, orgID)
-	return err
+		rows, err := tx.Query(ctx, `SELECT id, name FROM groups WHERE org_id=$1 AND cfg_type='fed' ORDER BY id FOR UPDATE NOWAIT`, orgID)
+		if err != nil {
+			return err
+		}
+		type fedGroup struct {
+			id   uuid.UUID
+			name string
+		}
+		groups := []fedGroup{}
+		for rows.Next() {
+			var group fedGroup
+			if err := rows.Scan(&group.id, &group.name); err != nil {
+				rows.Close()
+				return err
+			}
+			groups = append(groups, group)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		for _, group := range groups {
+			if err := rejectFedGroupReferences(ctx, tx, orgID, group.id, group.name); err != nil {
+				return err
+			}
+		}
+		for _, statement := range []string{
+			`DELETE FROM groups WHERE org_id=$1 AND cfg_type='fed'`,
+			`DELETE FROM response_rule_overrides WHERE org_id=$1 AND cfg_type='fed'`,
+			`DELETE FROM fed_runtime_profiles WHERE org_id=$1 AND cfg_type='fed'`,
+			`DELETE FROM fed_sync_state WHERE org_id=$1`,
+		} {
+			if _, err := tx.Exec(ctx, statement, orgID); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

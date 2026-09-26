@@ -346,6 +346,63 @@ func (s *RuntimePolicyStore) UpsertLearnedPolicy(ctx context.Context, p *Runtime
 	return existing.ID, nil
 }
 
+func (s *RuntimePolicyStore) upsertLearnedPolicyTx(ctx context.Context, tx pgx.Tx, policy *RuntimePolicy,
+	learned []*dp.PolicyRule, by *uuid.UUID) (uuid.UUID, bool, error) {
+	var existing *RuntimePolicy
+	row := tx.QueryRow(ctx, `SELECT `+policySelectCols+`
+ FROM runtime_policies
+ WHERE org_id=$1 AND cluster_id=$2 AND workload=$3 AND name=$4
+ FOR UPDATE`, policy.OrgID, policy.ClusterID, policy.Workload, policy.Name)
+	current, err := scanPolicy(row)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, false, err
+	}
+	if err == nil {
+		existing = current
+	}
+	tagged := netpolicy.Tag(learned, netpolicy.CfgTypeLearned)
+	if existing == nil {
+		encoded, err := json.Marshal(tagged)
+		if err != nil {
+			return uuid.Nil, false, err
+		}
+		if policy.Mode == "" {
+			policy.Mode = PolicyModeMonitor
+		}
+		if !policy.Mode.Valid() || policy.Workload == "" || policy.Namespace == "" || policy.Name == "" {
+			return uuid.Nil, false, errors.New("invalid learned policy")
+		}
+		policy.Rules = encoded
+		var dpPolicyID int64
+		if err := tx.QueryRow(ctx, `
+INSERT INTO runtime_policies
+  (org_id, cluster_id, workload, namespace, name, mode, def_action, apply_dir, rules, version, created_by, updated_by)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,1,$10,$10)
+RETURNING id, dp_policy_id`, policy.OrgID, policy.ClusterID, policy.Workload, policy.Namespace,
+			policy.Name, string(policy.Mode), int16(policy.DefAction), int16(policy.ApplyDir), string(policy.Rules), by).
+			Scan(&policy.ID, &dpPolicyID); err != nil {
+			return uuid.Nil, false, err
+		}
+		policy.DPPolicyID = dpPolicyID
+		policy.Version = 1
+		return policy.ID, true, nil
+	}
+	prior, err := netpolicy.DecodeSourced(existing.Rules)
+	if err != nil {
+		return uuid.Nil, false, err
+	}
+	merged := netpolicy.MergeRules(prior, tagged)
+	encoded, err := json.Marshal(merged)
+	if err != nil {
+		return uuid.Nil, false, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE runtime_policies SET rules=$1::jsonb, updated_by=$2 WHERE id=$3 AND org_id=$4`,
+		string(encoded), by, existing.ID, policy.OrgID); err != nil {
+		return uuid.Nil, false, err
+	}
+	return existing.ID, false, nil
+}
+
 // GetByName fetches one policy by its natural key (org, cluster, workload,
 // name), returning (nil, nil) when no such row exists. Used by the regenerate
 // path to decide MERGE-vs-INSERT (P2-2).

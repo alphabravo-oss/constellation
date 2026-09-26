@@ -23,10 +23,16 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"gopkg.in/yaml.v3"
 
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/pkg/group"
@@ -184,11 +190,9 @@ SELECT org_id, cluster_id, namespace, name, COALESCE(labels,'{}'::jsonb), last_s
 	return upserted, nil
 }
 
-// upsertLearnedGroup writes one learned group. It only ever creates or refreshes a
-// cfg_type='learned' row: the DO UPDATE ... WHERE guard means a name collision with
-// an operator's ground group or a federated group is a no-op rather than a clobber.
-// New rows land in discover (Learn) mode; an operator's later mode promotion is
-// preserved across ticks because the UPDATE does not touch policy_mode/profile_mode.
+// upsertLearnedGroup writes one learned group. A refresh uses the same org,
+// reference-table, group-row lock order as interactive group mutations. New rows
+// land in discover mode; later mode promotions are preserved across ticks.
 func (w *LearnedGroupWorker) upsertLearnedGroup(ctx context.Context, orgID uuid.UUID, clusterID *uuid.UUID, g group.Group) error {
 	criteria, err := json.Marshal(g.Criteria)
 	if err != nil {
@@ -198,18 +202,106 @@ func (w *LearnedGroupWorker) upsertLearnedGroup(ctx context.Context, orgID uuid.
 	if err != nil {
 		return err
 	}
-	_, err = w.db.Pool().Exec(ctx, `
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		err = w.writeLearnedGroup(ctx, orgID, clusterID, g, criteria, members)
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "55P03" || time.Now().After(deadline) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+}
+
+func (w *LearnedGroupWorker) writeLearnedGroup(ctx context.Context, orgID uuid.UUID, clusterID *uuid.UUID, g group.Group, criteria, members []byte) error {
+	tx, err := w.db.Pool().Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var lockedOrgID uuid.UUID
+	if err := tx.QueryRow(ctx, `SELECT id FROM orgs WHERE id=$1 FOR KEY SHARE`, orgID).Scan(&lockedOrgID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `LOCK TABLE group_rule_edges, group_dpi_sensor_bindings, response_rules_v2, policies IN SHARE MODE NOWAIT`); err != nil {
+		return err
+	}
+	var groupID uuid.UUID
+	var cfgType string
+	var changed bool
+	err = tx.QueryRow(ctx, `
+SELECT id, cfg_type,
+       cluster_id IS DISTINCT FROM $3::uuid OR criteria IS DISTINCT FROM $4::jsonb
+       OR members IS DISTINCT FROM $5::jsonb OR learned_from IS DISTINCT FROM $6
+  FROM groups
+ WHERE org_id=$1 AND name=$2
+ FOR UPDATE NOWAIT`, orgID, g.Name, clusterID, criteria, members, g.LearnedFrom).Scan(&groupID, &cfgType, &changed)
+	if errors.Is(err, pgx.ErrNoRows) {
+		_, err = tx.Exec(ctx, `
 INSERT INTO groups (org_id, cluster_id, name, kind, comment, criteria, members,
                     learned_from, cfg_type, policy_mode, profile_mode)
 VALUES ($1, $2, $3, 'learned', 'auto-learned from observed workloads',
         $4, $5, $6, 'learned', 'discover', 'discover')
-ON CONFLICT (org_id, name) DO UPDATE SET
-    criteria     = EXCLUDED.criteria,
-    members      = EXCLUDED.members,
-    learned_from = EXCLUDED.learned_from,
-    cluster_id   = EXCLUDED.cluster_id,
-    updated_at   = NOW()
- WHERE groups.cfg_type = 'learned'`,
-		orgID, clusterID, g.Name, criteria, members, g.LearnedFrom)
-	return err
+ON CONFLICT (org_id, name) DO NOTHING`, orgID, clusterID, g.Name, criteria, members, g.LearnedFrom)
+	} else if err == nil && cfgType == "learned" && changed {
+		var references int
+		references, err = learnedGroupReferenceCount(ctx, tx, orgID, groupID, g.Name)
+		if err == nil && references > 0 {
+			return fmt.Errorf("learned group %q has %d policy references; refresh cannot change its selector or members", g.Name, references)
+		}
+		if err == nil {
+			_, err = tx.Exec(ctx, `
+UPDATE groups SET criteria=$1, members=$2, learned_from=$3, cluster_id=$4, updated_at=NOW()
+ WHERE id=$5 AND org_id=$6 AND cfg_type='learned'`, criteria, members, g.LearnedFrom, clusterID, groupID, orgID)
+		}
+	}
+	if err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func learnedGroupReferenceCount(ctx context.Context, tx pgx.Tx, orgID, groupID uuid.UUID, groupName string) (int, error) {
+	var references int
+	err := tx.QueryRow(ctx, `
+SELECT (SELECT count(*) FROM group_rule_edges WHERE org_id=$1 AND (from_group=$2 OR to_group=$2))
+     + (SELECT count(*) FROM group_dpi_sensor_bindings WHERE org_id=$1 AND group_id=$3)
+     + (SELECT count(*) FROM response_rules_v2 WHERE org_id=$1 AND (workload_match->>'group'=$2 OR workload_match->>'group'=$4))`,
+		orgID, groupName, groupID, groupID.String()).Scan(&references)
+	if err != nil {
+		return 0, err
+	}
+	rows, err := tx.Query(ctx, `SELECT spec_yaml FROM policies WHERE org_id=$1 AND engine='constellation-admission'`, orgID)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var specYAML string
+		if err := rows.Scan(&specYAML); err != nil {
+			return 0, err
+		}
+		var doc struct {
+			Spec struct {
+				Match struct {
+					Groups []string `yaml:"groups"`
+				} `yaml:"match"`
+			} `yaml:"spec"`
+		}
+		if yaml.Unmarshal([]byte(specYAML), &doc) != nil {
+			continue
+		}
+		for _, selector := range doc.Spec.Match.Groups {
+			selector = strings.TrimSpace(selector)
+			if selector == groupID.String() || strings.EqualFold(selector, groupName) {
+				references++
+				break
+			}
+		}
+	}
+	return references, rows.Err()
 }
