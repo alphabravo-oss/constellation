@@ -113,6 +113,87 @@ VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`,
 	}
 }
 
+func TestHeartbeatsScannerTokenClusterScope(t *testing.T) {
+	d := openTestDB(t)
+	t.Cleanup(d.Close)
+	ctx := context.Background()
+	pool := d.Pool()
+	orgID, foreignOrgID := uuid.New(), uuid.New()
+	firstID, secondID, foreignID := uuid.New(), uuid.New(), uuid.New()
+	firstName, secondName, foreignName := "heartbeat-first-"+firstID.String(), "heartbeat-second-"+secondID.String(), "heartbeat-foreign-"+foreignID.String()
+	for _, id := range []uuid.UUID{orgID, foreignOrgID} {
+		if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, display_name) VALUES ($1, $2, $2)`, id, "heartbeat-scanner-scope-"+id.String()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM component_heartbeats WHERE org_id = $1`, orgID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id IN ($1, $2)`, orgID, foreignOrgID)
+	})
+	for _, cluster := range []struct {
+		id, orgID uuid.UUID
+		name      string
+	}{{firstID, orgID, firstName}, {secondID, orgID, secondName}, {foreignID, foreignOrgID, foreignName}} {
+		if _, err := pool.Exec(ctx, `INSERT INTO clusters (id, org_id, name) VALUES ($1, $2, $3)`, cluster.id, cluster.orgID, cluster.name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw := "cst_heartbeat-scanner-scope-" + uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO scanner_tokens (org_id, name, token_hash) VALUES ($1, $2, $3)`, orgID, "heartbeat-scanner-scope", tokenHashForTest(raw)); err != nil {
+		t.Fatal(err)
+	}
+	handler := AnyServiceTokenMiddleware(pool)(http.HandlerFunc(NewHeartbeats(d, nil).Ingest))
+	for _, tc := range []struct {
+		name, clusterID, clusterName string
+		wantStatus                   int
+		wantClusterID                uuid.UUID
+	}{
+		{"first same-org ID", firstID.String(), "", http.StatusOK, firstID},
+		{"second same-org ID", secondID.String(), "", http.StatusOK, secondID},
+		{"second same-org name", "", secondName, http.StatusOK, secondID},
+		{"matching ID and name", firstID.String(), firstName, http.StatusOK, firstID},
+		{"foreign ID", foreignID.String(), "", http.StatusForbidden, uuid.Nil},
+		{"foreign name", "", foreignName, http.StatusBadRequest, uuid.Nil},
+		{"foreign name with owned ID", firstID.String(), foreignName, http.StatusForbidden, uuid.Nil},
+		{"different owned name with owned ID", firstID.String(), secondName, http.StatusForbidden, uuid.Nil},
+		{"unknown ID", uuid.NewString(), "", http.StatusForbidden, uuid.Nil},
+		{"unknown name", "", "heartbeat-missing-" + uuid.NewString(), http.StatusBadRequest, uuid.Nil},
+		{"malformed ID", "not-a-uuid", "", http.StatusBadRequest, uuid.Nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hostname := "heartbeat-scope-" + uuid.NewString()
+			body, err := json.Marshal(heartbeatBody{Component: "scanner", ClusterID: tc.clusterID, ClusterName: tc.clusterName, Hostname: hostname, UptimeSeconds: 10})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/heartbeats", strings.NewReader(string(body)))
+			req.Header.Set("Authorization", "Bearer "+raw)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status=%d want %d: %s", rec.Code, tc.wantStatus, rec.Body.String())
+			}
+			if tc.wantStatus == http.StatusOK {
+				var gotOrgID, gotClusterID uuid.UUID
+				if err := pool.QueryRow(ctx, `SELECT org_id, cluster_id FROM component_heartbeats WHERE hostname = $1`, hostname).Scan(&gotOrgID, &gotClusterID); err != nil {
+					t.Fatal(err)
+				}
+				if gotOrgID != orgID || gotClusterID != tc.wantClusterID {
+					t.Fatalf("heartbeat org/cluster = %s/%s, want %s/%s", gotOrgID, gotClusterID, orgID, tc.wantClusterID)
+				}
+				return
+			}
+			var count int
+			if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM component_heartbeats WHERE hostname = $1`, hostname).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if count != 0 {
+				t.Fatalf("rejected heartbeat wrote %d rows", count)
+			}
+		})
+	}
+}
+
 func TestAnyServiceTokenMiddlewareAcceptsPrefixlessScannerToken(t *testing.T) {
 	d := openTestDB(t)
 	defer d.Close()

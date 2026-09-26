@@ -121,9 +121,10 @@ SELECT id
 	if clusterID != nil {
 		var owned uuid.UUID
 		err := h.db.Pool().QueryRow(ctx,
-			`SELECT id FROM clusters WHERE id = $1 AND org_id = $2`, *clusterID, orgID).Scan(&owned)
+			`SELECT id FROM clusters WHERE id = $1 AND org_id = $2 AND ($3 = '' OR name = $3)`,
+			*clusterID, orgID, body.ClusterName).Scan(&owned)
 		if errors.Is(err, pgx.ErrNoRows) {
-			jsonError(w, http.StatusForbidden, "cluster does not belong to token org")
+			jsonError(w, http.StatusForbidden, "cluster does not match token org or cluster_name")
 			return
 		}
 		if err != nil {

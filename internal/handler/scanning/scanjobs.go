@@ -572,7 +572,7 @@ UPDATE scan_jobs sj
  WHERE sj.id = (
    SELECT sj2.id
      FROM scan_jobs sj2
-     JOIN scan_targets st2 ON st2.id = sj2.target_id
+     JOIN scan_targets st2 ON st2.id = sj2.target_id AND st2.org_id = sj2.org_id
     WHERE sj2.org_id = $2
       AND (cardinality($4::text[]) = 0 OR st2.type = ANY($4::text[]))
       AND (
@@ -618,14 +618,16 @@ SELECT c.id, c.org_id, st.id, c.lease_expires_at,
        ev.id
   FROM claimed c
   JOIN attempt a ON a.job_id = c.id
-  JOIN scan_targets st ON st.id = c.target_id
+  JOIN scan_targets st ON st.id = c.target_id AND st.org_id = c.org_id
   LEFT JOIN LATERAL (
-      SELECT id
-        FROM scan_evidence
-       WHERE org_id = c.org_id
-         AND evidence_type = 'package-inventory'
+      SELECT ev.id
+        FROM scan_evidence ev
+        JOIN scan_targets evidence_target ON evidence_target.id = ev.scan_target_id
+                                         AND evidence_target.org_id = c.org_id
+       WHERE ev.org_id = c.org_id
+         AND ev.evidence_type = 'package-inventory'
          AND (
-              scan_target_id = st.id
+              ev.scan_target_id = st.id
               -- For image targets, also reuse package evidence collected for
               -- the SAME image under another target (e.g. the runtime-agent
               -- collected it off a running container, keyed by digest). Match
@@ -634,11 +636,11 @@ SELECT c.id, c.org_id, st.id, c.lease_expires_at,
               -- scanned from local evidence instead of failing on a registry
               -- pull. NOTE: requires st.image_digest to be populated for the
               -- digest path to connect to runtime-agent evidence (see plan F1).
-              OR (st.type = 'image' AND target_ref = st.ref)
-              OR (st.type = 'image' AND st.image_digest <> '' AND target_ref = st.image_digest)
+              OR (st.type = 'image' AND ev.target_ref = st.ref)
+              OR (st.type = 'image' AND st.image_digest <> '' AND ev.target_ref = st.image_digest)
              )
-         AND (COALESCE(st.inventory_hash, '') = '' OR inventory_hash = st.inventory_hash)
-       ORDER BY (scan_target_id = st.id) DESC, observed_at DESC
+         AND (COALESCE(st.inventory_hash, '') = '' OR ev.inventory_hash = st.inventory_hash)
+       ORDER BY (ev.scan_target_id = st.id) DESC, ev.observed_at DESC
        LIMIT 1
   ) ev ON st.type IN ('host', 'workload', 'platform', 'serverless', 'repository')
       OR st.type = 'image'`,
@@ -693,6 +695,7 @@ UPDATE scan_jobs
    AND org_id = $2
    AND status = 'running'
    AND worker_id = $3
+   AND EXISTS (SELECT 1 FROM scan_targets st WHERE st.id = scan_jobs.target_id AND st.org_id = scan_jobs.org_id)
  RETURNING lease_expires_at, COALESCE(attempt_count, 0), COALESCE(max_attempts, 3)`,
 		id, token.OrgID, workerID, handler.ScannerJobLeaseInterval).Scan(&leaseExpiresAt, &attemptCount, &maxAttempts); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -770,9 +773,9 @@ func (h *ScanJobs) Complete(w http.ResponseWriter, r *http.Request) {
 		        st.registry_id, COALESCE(st.platform, ''),
 		        COALESCE(st.inventory_hash, '')
 		   FROM scan_jobs sj
-		   JOIN scan_targets st ON st.id = sj.target_id
+		   JOIN scan_targets st ON st.id = sj.target_id AND st.org_id = sj.org_id
 		  WHERE sj.id = $1
-		  FOR UPDATE OF sj`, id,
+		  FOR UPDATE OF sj, st`, id,
 	).Scan(&orgID, &status, &workerID, &attemptCount, &claimedAt, &jobVulnDBBundleVersion,
 		&target.ID, &target.OrgID, &target.ClusterID, &target.Type, &target.Ref, &target.SourceType,
 		&target.SourceRef, &target.ImageRef, &target.ImageDigest, &target.RegistryID, &target.Platform, &target.InventoryHash); err != nil {
@@ -856,8 +859,8 @@ UPDATE scan_targets
        image_digest = COALESCE(NULLIF($3, ''), image_digest),
        platform = COALESCE(NULLIF($4, ''), platform),
        inventory_hash = COALESCE(NULLIF($5, ''), inventory_hash)
- WHERE id = $1`,
-		target.ID, target.ImageRef, target.ImageDigest, target.Platform, target.InventoryHash); err != nil {
+ WHERE id = $1 AND org_id = $6`,
+		target.ID, target.ImageRef, target.ImageDigest, target.Platform, target.InventoryHash, orgID); err != nil {
 		jsonError(w, http.StatusInternalServerError, "target update: "+err.Error())
 		return
 	}
@@ -2256,6 +2259,7 @@ WITH current_job AS (
 	   AND org_id = $3
 	   AND status = 'running'
 	   AND worker_id = $4
+	   AND EXISTS (SELECT 1 FROM scan_targets st WHERE st.id = scan_jobs.target_id AND st.org_id = scan_jobs.org_id)
 	 FOR UPDATE
 ),
 updated AS (

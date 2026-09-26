@@ -543,11 +543,17 @@ func (w *worker) executeJob(ctx context.Context, j *scanJob) {
 		// REG-PRIVAUTH-11: a registry-scoped job carries the credentials needed
 		// to pull from a private registry. Fetch + materialize them (per-job
 		// docker config.json + TRIVY_/GRYPE_/SYFT_ env) for the scan tools, and
-		// clean them up when the job returns. Best-effort: a fetch failure logs
-		// and proceeds unauthenticated (public images still scan).
+		// clean them up when the job returns.
 		var releaseRegAuth func()
-		regAuth, releaseRegAuth = w.resolveRegistryAuth(ctx, j, imageRef)
+		var regAuthErr error
+		regAuth, releaseRegAuth, regAuthErr = w.resolveRegistryAuth(ctx, j, imageRef)
 		defer releaseRegAuth()
+		if regAuthErr != nil {
+			w.logger.Error("registry credentials unavailable", "job_id", j.ID, "err", regAuthErr)
+			w.setLastError("registry credentials unavailable")
+			_ = w.reportFailure(ctx, j.ID, "registry_credentials_unavailable")
+			return
+		}
 		hasEvidence := j.EvidenceID != nil && strings.TrimSpace(*j.EvidenceID) != ""
 		// scanFromEvidence scans the image's pre-collected package inventory
 		// (no registry pull). It sets res/err and returns true when it handled
@@ -1277,21 +1283,19 @@ type registryAuth struct {
 // per-job temporary docker config.json (DOCKER_CONFIG) and returns the
 // username/password/authority the aggregator threads into TRIVY_/GRYPE_/SYFT_
 // env. The returned cleanup func removes the temp dir; it is always non-nil and
-// safe to call. On any error (no registry_id, fetch failure, empty creds) it
-// returns a zero registryAuth and a no-op cleanup so the scan proceeds
-// unauthenticated — public images still scan.
-func (w *worker) resolveRegistryAuth(ctx context.Context, j *scanJob, imageRef string) (registryAuth, func()) {
+// safe to call. Jobs without a registry ID or with an explicitly credential-free
+// registry scan unauthenticated; credential retrieval or isolation failures abort.
+func (w *worker) resolveRegistryAuth(ctx context.Context, j *scanJob, imageRef string) (registryAuth, func(), error) {
 	noop := func() {}
 	if j == nil || j.RegistryID == nil || strings.TrimSpace(*j.RegistryID) == "" {
-		return registryAuth{}, noop
+		return registryAuth{}, noop, nil
 	}
 	registryID := strings.TrimSpace(*j.RegistryID)
 
 	creds, err := w.fetchRegistryCredentials(ctx, registryID)
 	if err != nil {
 		w.logger.Warn("fetch registry credentials", "job_id", j.ID, "registry_id", registryID, "err", err)
-		w.setLastError("fetch registry credentials: " + err.Error())
-		return registryAuth{}, noop
+		return registryAuth{}, noop, err
 	}
 	// Token-only auth (e.g. GHCR PAT, bearer) is delivered as the password with
 	// a conventional username; static user/pass passes through unchanged.
@@ -1302,23 +1306,27 @@ func (w *worker) resolveRegistryAuth(ctx context.Context, j *scanJob, imageRef s
 			username = "x-access-token"
 		}
 	}
+	if username == "" && password == "" {
+		if strings.EqualFold(strings.TrimSpace(creds.AuthKind), "none") {
+			return registryAuth{}, noop, nil
+		}
+		return registryAuth{}, noop, errors.New("registry credentials are missing")
+	}
 	if username == "" || password == "" {
-		// Registry configured with auth_kind=none (or empty secret): nothing to do.
-		return registryAuth{}, noop
+		return registryAuth{}, noop, errors.New("registry credentials are incomplete")
 	}
 
 	authority := registryAuthority(imageRef, "")
 	endpointAuthority := registryAuthority("", creds.Endpoint)
 	if authority == "" || endpointAuthority == "" || !sameRegistryAuthority(authority, endpointAuthority) {
 		w.logger.Warn("registry credentials do not match image authority", "job_id", j.ID, "registry_id", registryID)
-		return registryAuth{}, noop
+		return registryAuth{}, noop, errors.New("registry credentials do not match image authority")
 	}
 
 	dir, err := os.MkdirTemp("", "constellation-scan-dockercfg-")
 	if err != nil {
 		w.logger.Warn("create docker config dir", "job_id", j.ID, "err", err)
-		// Still hand back the env-var credentials; only the config.json is lost.
-		return registryAuth{Username: username, Password: password, Authority: authority}, noop
+		return registryAuth{}, noop, errors.New("cannot create isolated registry config")
 	}
 	cleanup := func() {
 		if rmErr := os.RemoveAll(dir); rmErr != nil {
@@ -1328,7 +1336,7 @@ func (w *worker) resolveRegistryAuth(ctx context.Context, j *scanJob, imageRef s
 	if err := writeDockerConfig(dir, authority, username, password); err != nil {
 		w.logger.Warn("write docker config", "job_id", j.ID, "err", err)
 		cleanup()
-		return registryAuth{Username: username, Password: password, Authority: authority}, noop
+		return registryAuth{}, noop, errors.New("cannot write isolated registry config")
 	}
 
 	return registryAuth{
@@ -1336,7 +1344,7 @@ func (w *worker) resolveRegistryAuth(ctx context.Context, j *scanJob, imageRef s
 		Password:        password,
 		Authority:       authority,
 		DockerConfigDir: dir,
-	}, cleanup
+	}, cleanup, nil
 }
 
 func sameRegistryAuthority(left, right string) bool {

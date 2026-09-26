@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -116,9 +117,15 @@ func TestResolveRegistryAuthPerJobIsolationAndModes(t *testing.T) {
 	w := &worker{controlPlane: server.URL, token: "scanner-token", logger: nopLogger{}}
 
 	firstID, secondID := "first", "second"
-	first, releaseFirst := w.resolveRegistryAuth(context.Background(), &scanJob{ID: firstID, RegistryID: &firstID}, "ghcr.io/team/app:1")
+	first, releaseFirst, err := w.resolveRegistryAuth(context.Background(), &scanJob{ID: firstID, RegistryID: &firstID}, "ghcr.io/team/app:1")
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer releaseFirst()
-	second, releaseSecond := w.resolveRegistryAuth(context.Background(), &scanJob{ID: secondID, RegistryID: &secondID}, "ghcr.io/team/app:2")
+	second, releaseSecond, err := w.resolveRegistryAuth(context.Background(), &scanJob{ID: secondID, RegistryID: &secondID}, "ghcr.io/team/app:2")
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer releaseSecond()
 	if first.DockerConfigDir == "" || second.DockerConfigDir == "" || first.DockerConfigDir == second.DockerConfigDir {
 		t.Fatalf("jobs must have distinct config dirs: %q, %q", first.DockerConfigDir, second.DockerConfigDir)
@@ -140,10 +147,82 @@ func TestResolveRegistryAuthRejectsOtherRegistryEndpoint(t *testing.T) {
 	defer server.Close()
 	w := &worker{controlPlane: server.URL, logger: nopLogger{}}
 	registryID := "registry-id"
-	auth, release := w.resolveRegistryAuth(context.Background(), &scanJob{ID: "job", RegistryID: &registryID}, "registry.example.test/team/app:latest")
+	auth, release, err := w.resolveRegistryAuth(context.Background(), &scanJob{ID: "job", RegistryID: &registryID}, "registry.example.test/team/app:latest")
 	defer release()
-	if auth != (registryAuth{}) {
-		t.Fatal("mismatched registry credentials were materialized")
+	if auth != (registryAuth{}) || err == nil {
+		t.Fatalf("mismatched registry credentials accepted: %+v, %v", auth, err)
+	}
+}
+
+func TestResolveRegistryAuthRejectsMissingOrIncompleteCredentials(t *testing.T) {
+	for _, testCase := range []struct {
+		name   string
+		status int
+		creds  registryCredentials
+	}{
+		{"fetch failure", http.StatusServiceUnavailable, registryCredentials{}},
+		{"incomplete credentials", http.StatusOK, registryCredentials{Endpoint: "https://ghcr.io", Username: "alice"}},
+		{"missing configured credentials", http.StatusOK, registryCredentials{Endpoint: "https://ghcr.io", AuthKind: "static"}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				writer.WriteHeader(testCase.status)
+				if testCase.status == http.StatusOK {
+					_ = json.NewEncoder(writer).Encode(testCase.creds)
+				}
+			}))
+			defer server.Close()
+			worker := &worker{controlPlane: server.URL, logger: nopLogger{}}
+			registryID := "registry"
+			auth, cleanup, err := worker.resolveRegistryAuth(context.Background(), &scanJob{ID: "job", RegistryID: &registryID}, "ghcr.io/team/app:latest")
+			defer cleanup()
+			if err == nil || auth != (registryAuth{}) {
+				t.Fatalf("registry credentials accepted: %+v, %v", auth, err)
+			}
+		})
+	}
+}
+
+func TestResolveRegistryAuthAllowsExplicitlyAnonymousRegistry(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		_ = json.NewEncoder(writer).Encode(registryCredentials{Endpoint: "https://ghcr.io", AuthKind: "none"})
+	}))
+	defer server.Close()
+	worker := &worker{controlPlane: server.URL, logger: nopLogger{}}
+	registryID := "anonymous-registry"
+	auth, cleanup, err := worker.resolveRegistryAuth(context.Background(), &scanJob{ID: "job", RegistryID: &registryID}, "ghcr.io/team/app:latest")
+	defer cleanup()
+	if err != nil || auth != (registryAuth{}) {
+		t.Fatalf("explicitly anonymous registry rejected: %+v, %v", auth, err)
+	}
+}
+
+func TestExecuteJobFailsWhenRegistryCredentialsDoNotMatch(t *testing.T) {
+	reports := make(chan string, 1)
+	server := registryCredentialsServer(t, reports)
+	defer server.Close()
+	var scanned atomic.Bool
+	registryID := "registry-mismatch"
+	w := &worker{
+		controlPlane: server.URL,
+		token:        "scanner-token",
+		logger:       nopLogger{},
+		agg: &scanner.Aggregator{Engines: []scanner.Engine{registryTestEngine{scan: func(context.Context, string, scanner.ScanOptions) (*scanner.EngineResult, error) {
+			scanned.Store(true)
+			return nil, nil
+		}}}},
+	}
+	w.executeJob(context.Background(), &scanJob{ID: "mismatch", TargetType: "image", TargetRef: "registry.example.test/team/app:latest", RegistryID: &registryID})
+	if scanned.Load() {
+		t.Fatal("scan ran after registry credentials failed authority validation")
+	}
+	select {
+	case report := <-reports:
+		if !strings.HasSuffix(report, "/fail") {
+			t.Fatalf("job reported %q instead of failure", report)
+		}
+	default:
+		t.Fatal("job did not report credential failure")
 	}
 }
 
@@ -286,9 +365,9 @@ func (engine registryTestEngine) Scan(ctx context.Context, ref string, opts scan
 // short-circuits to zero-auth without touching the filesystem or network.
 func TestResolveRegistryAuthNoRegistryIsNoop(t *testing.T) {
 	w := &worker{logger: nopLogger{}}
-	auth, cleanup := w.resolveRegistryAuth(nil, &scanJob{ID: "j1"}, "ghcr.io/x/y:1")
+	auth, cleanup, err := w.resolveRegistryAuth(nil, &scanJob{ID: "j1"}, "ghcr.io/x/y:1")
 	defer cleanup()
-	if auth.Username != "" || auth.Password != "" || auth.DockerConfigDir != "" {
+	if err != nil || auth.Username != "" || auth.Password != "" || auth.DockerConfigDir != "" {
 		t.Fatalf("expected zero auth for registry-less job, got %+v", auth)
 	}
 	cleanup() // must be safe to call (no-op)
