@@ -167,6 +167,15 @@ it("loads older import history pages without silently truncating at 25", async (
   expect(host.querySelector('[data-testid="migration-import-history-load-more"]')).toBeNull();
 });
 
+it("distinguishes loaded-row CSV from the full metadata history download", async () => {
+  await render();
+  const link = element<HTMLAnchorElement>("migration-import-history-export-all");
+  expect(link.getAttribute("href")).toBe("/api/v1/migration/imports/export");
+  expect(link.getAttribute("download")).toBe("migration-imports.ndjson");
+  expect(host.textContent).toContain("The table’s CSV includes loaded rows only.");
+  expect(host.textContent).toContain("Verify its final complete record and count");
+});
+
 it("keeps same-kind redacted diagnostics visible across previews without presenting rejected source as converted", async () => {
   const consoleErrors = vi.spyOn(console, "error").mockImplementation(() => {});
   await render();

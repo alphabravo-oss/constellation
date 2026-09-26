@@ -7345,6 +7345,37 @@
         "summary": "List persisted migration imports"
       }
     },
+    "/api/v1/migration/imports/export": {
+      "get": {
+        "summary": "Stream all saved migration import history",
+        "description": "Streams every saved migration import for the authenticated organization as newline-delimited JSON in a repeatable-read snapshot, ordered by created_at descending then id descending. Output is metadata-only: raw previews, rollback bundles, unsupported reasons/source and error text are never exported. Consumers must require the final complete record and matching count; a missing completion record means the stream failed or was interrupted and must not be treated as a complete export. No row limit is applied; rows are streamed rather than buffered into a single response.",
+        "responses": {
+          "200": {
+            "description": "NDJSON import records followed by a required completion record",
+            "content": {
+              "application/x-ndjson": {
+                "schema": {
+                  "type": "string",
+                  "description": "Each line is a JSON object. Import lines have type=import, id, source, status, created_at, unsupported_count, and optional target_cluster_id/applied_at/rolled_back_at. The final line has type=complete and count equal to the number of import lines."
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/api/v1/migration/imports/{id}/rollback-bundle": {
       "get": {
         "description": "Downloads the persisted rollback snapshot captured during migration apply. The bundle is available only after an import reaches applied, partial_applied, or rolled_back state.",

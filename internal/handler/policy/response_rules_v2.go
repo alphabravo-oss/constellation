@@ -434,6 +434,10 @@ type reorderBody struct {
 // reassigned 10,20,30... so later single-position inserts have room. PATCH /response-rules-v2:reorder
 func (h *ResponseRulesV2) Reorder(w http.ResponseWriter, r *http.Request) {
 	subj, _ := authctx.SubjectFrom(r.Context())
+	if h.auditLog == nil {
+		httpx.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "audit unavailable"})
+		return
+	}
 	clusterArg, err := sqlx.ParseClusterIDParam(r)
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -463,12 +467,23 @@ func (h *ResponseRulesV2) Reorder(w http.ResponseWriter, r *http.Request) {
 		seen[id] = struct{}{}
 	}
 
-	tx, err := h.db.Pool().Begin(r.Context())
+	tx, err := h.db.Pool().BeginTx(r.Context(), pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
+	if clusterArg != nil {
+		var ownedCluster uuid.UUID
+		if err := tx.QueryRow(r.Context(), `SELECT id FROM clusters WHERE id=$1 AND org_id=$2 FOR SHARE`, clusterArg, subj.OrgID).Scan(&ownedCluster); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found"})
+			} else {
+				httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify cluster"})
+			}
+			return
+		}
+	}
 
 	rows, err := tx.Query(r.Context(), `
 SELECT id
@@ -482,6 +497,7 @@ SELECT id
 		return
 	}
 	scopeIDs := make(map[uuid.UUID]struct{}, len(ids))
+	beforeOrder := make([]string, 0, len(ids))
 	for rows.Next() {
 		var id uuid.UUID
 		if err := rows.Scan(&id); err != nil {
@@ -490,6 +506,7 @@ SELECT id
 			return
 		}
 		scopeIDs[id] = struct{}{}
+		beforeOrder = append(beforeOrder, id.String())
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
@@ -501,11 +518,29 @@ SELECT id
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "ordered_ids must include every response rule in scope"})
 		return
 	}
-	for i, id := range ids {
+	for _, id := range ids {
 		if _, ok := scopeIDs[id]; !ok {
 			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "ordered_ids contains a rule outside this scope"})
 			return
 		}
+	}
+	afterOrder := make([]string, 0, len(ids))
+	for _, id := range ids {
+		afterOrder = append(afterOrder, id.String())
+	}
+	targetID := "org"
+	if clusterArg != nil {
+		targetID = clusterArg.(uuid.UUID).String()
+	}
+	orgID, userID := subj.OrgID, subj.UserID
+	attemptID, _, err := h.auditLog.Log(r.Context(), audit.Event{OrgID: &orgID, ActorID: &userID,
+		Action: "response_rule_v2.reorder_attempt", TargetKind: "response-rule-v2", TargetID: targetID,
+		Before: map[string]any{"ordered_ids": beforeOrder}, After: map[string]any{"ordered_ids": afterOrder}})
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "audit unavailable"})
+		return
+	}
+	for i, id := range ids {
 		if _, err := tx.Exec(r.Context(),
 			`UPDATE response_rules_v2 SET priority=$1, updated_at=NOW() WHERE id=$2 AND org_id=$3`,
 			(i+1)*10, id, subj.OrgID); err != nil {
@@ -513,14 +548,17 @@ SELECT id
 			return
 		}
 	}
+	completionID, _, err := h.auditLog.LogInTx(r.Context(), tx, audit.Event{OrgID: &orgID, ActorID: &userID,
+		Action: "response_rule_v2.reorder", TargetKind: "response-rule-v2", TargetID: targetID,
+		Before: map[string]any{"ordered_ids": beforeOrder}, After: map[string]any{"ordered_ids": afterOrder, "audit_attempt_id": attemptID}})
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "audit unavailable"})
+		return
+	}
 	if err := tx.Commit(r.Context()); err != nil {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	oid := subj.OrgID
-	uid := subj.UserID
-	_, _, _ = h.auditLog.Log(r.Context(), audit.Event{OrgID: &oid, ActorID: &uid,
-		Action: "response_rule_v2.reorder", TargetKind: "response-rule-v2", TargetID: "",
-		After: map[string]any{"count": len(ids)}})
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(ids)})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(ids),
+		"audit_attempt_id": attemptID, "completion_audit_id": completionID})
 }

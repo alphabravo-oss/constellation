@@ -205,6 +205,20 @@ curl -fsS -X POST -H "Authorization: Bearer $TOKEN" \
   "$CONSTELLATION/api/v1/migration/imports/$IMPORT_ID:rollback"
 ```
 
+To export **all** saved import-history metadata rather than the Migration table's
+loaded-row CSV, request the org-scoped NDJSON stream:
+
+```bash
+curl -fsS -H "Authorization: Bearer $TOKEN" \
+  "$CONSTELLATION/api/v1/migration/imports/export" > migration-imports.ndjson
+tail -n 1 migration-imports.ndjson
+```
+
+The final line must be a `complete` record whose `count` matches the preceding
+`import` records; otherwise discard the interrupted download and retry. Each
+export uses one database snapshot, but contains metadata only: it omits raw
+previews, unsupported reason/source text, errors, and rollback bundles.
+
 ### List and Export Groups
 
 ```bash

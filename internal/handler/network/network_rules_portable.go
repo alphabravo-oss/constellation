@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"gopkg.in/yaml.v3"
 
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
@@ -139,10 +140,26 @@ func (h *Network) ImportNetworkRules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	orgID, userID := subj.OrgID, subj.UserID
-	if _, _, err := h.audit.Log(r.Context(), audit.Event{OrgID: &orgID, ActorID: &userID,
+	attemptID, _, err := h.audit.Log(r.Context(), audit.Event{OrgID: &orgID, ActorID: &userID,
 		Action: "network_rule.import_attempt", TargetKind: "network_rule", TargetID: clusterID.String(),
-		After: map[string]any{"cluster_id": clusterID.String(), "rules": len(bundle.Rules)}}); err != nil {
+		After: map[string]any{"cluster_id": clusterID.String(), "rules": len(bundle.Rules)}})
+	if err != nil {
 		httpx.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "audit unavailable"})
+		return
+	}
+	tx, err := h.db.Pool().BeginTx(r.Context(), pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to begin import"})
+		return
+	}
+	defer tx.Rollback(r.Context())
+	var lockedCluster uuid.UUID
+	if err := tx.QueryRow(r.Context(), `SELECT id FROM clusters WHERE id=$1 AND org_id=$2 FOR UPDATE`, clusterID, orgID).Scan(&lockedCluster); err != nil {
+		if err == pgx.ErrNoRows {
+			httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found"})
+		} else {
+			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify cluster"})
+		}
 		return
 	}
 	type result struct {
@@ -172,18 +189,31 @@ func (h *Network) ImportNetworkRules(w http.ResponseWriter, r *http.Request) {
 			rule.Priority = 1000
 		}
 		rule.Applications = normalizeNetworkRuleApplications(rule.Applications)
+		rowTx, err := tx.Begin(r.Context())
+		if err != nil {
+			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to begin import row"})
+			return
+		}
 		cfgType := "user_created"
 		var learned bool
-		_ = h.db.Pool().QueryRow(r.Context(), `
+		if err := rowTx.QueryRow(r.Context(), `
 SELECT EXISTS (
   SELECT 1 FROM network_flow_rollups
    WHERE org_id = $1 AND cluster_id = $2 AND src_workload = $3 AND dst_workload = $4)`,
-			subj.OrgID, clusterID, rule.From, rule.To).Scan(&learned)
+			subj.OrgID, clusterID, rule.From, rule.To).Scan(&learned); err != nil {
+			if rollbackErr := rowTx.Rollback(r.Context()); rollbackErr != nil {
+				httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to roll back import row"})
+				return
+			}
+			res.Status, res.Error = "error", err.Error()
+			results = append(results, res)
+			continue
+		}
 		if learned {
 			cfgType = "learned_override"
 		}
 		var wasInsert bool
-		if err := h.db.Pool().QueryRow(r.Context(), `
+		if err := rowTx.QueryRow(r.Context(), `
 INSERT INTO network_rule_overrides
   (org_id, cluster_id, from_ep, to_ep, ports, applications, action, disable, comment, priority, cfg_type, updated_by, updated_at)
 SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW()
@@ -195,9 +225,17 @@ ON CONFLICT (org_id, cluster_id, from_ep, to_ep) DO UPDATE SET
 RETURNING (xmax = 0)`,
 			subj.OrgID, clusterID, rule.From, rule.To, rule.Ports, rule.Applications,
 			rule.Action, rule.Disable, rule.Comment, rule.Priority, cfgType, subj.UserID).Scan(&wasInsert); err != nil {
+			if rollbackErr := rowTx.Rollback(r.Context()); rollbackErr != nil {
+				httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to roll back import row"})
+				return
+			}
 			res.Status, res.Error = "error", err.Error()
 			results = append(results, res)
 			continue
+		}
+		if err := rowTx.Commit(r.Context()); err != nil {
+			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to complete import row"})
+			return
 		}
 		if wasInsert {
 			res.Status = "created"
@@ -208,9 +246,16 @@ RETURNING (xmax = 0)`,
 		}
 		results = append(results, res)
 	}
-	_, _, _ = h.audit.Log(r.Context(), audit.Event{OrgID: &orgID, ActorID: &userID,
+	if _, _, err := h.audit.LogInTx(r.Context(), tx, audit.Event{OrgID: &orgID, ActorID: &userID,
 		Action: "network_rule.import", TargetKind: "network_rule", TargetID: clusterID.String(),
-		After: map[string]any{"cluster_id": clusterID.String(), "created": created, "updated": updated, "total": len(bundle.Rules)}})
+		After: map[string]any{"cluster_id": clusterID.String(), "created": created, "updated": updated, "total": len(bundle.Rules), "audit_attempt_id": attemptID}}); err != nil {
+		httpx.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "audit unavailable"})
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to commit import"})
+		return
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"created": created, "updated": updated, "results": results})
 }
 

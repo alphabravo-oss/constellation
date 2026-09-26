@@ -3,6 +3,7 @@ package policy
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -205,6 +206,70 @@ func TestResponseRulesV2_ReorderRejectsPartialDuplicateAndOutOfScopeIDs(t *testi
 	got := listResponseRulesV2(t, router, orgID, userID, clusterA)
 	if len(got) != 2 || got[0].ID != globalID || got[0].Priority != 10 || got[1].ID != clusterAID || got[1].Priority != 20 {
 		t.Fatalf("invalid reorders should not change priorities, got %+v", got)
+	}
+}
+
+func TestResponseRulesV2_ReorderAuditCompletionIsAtomic(t *testing.T) {
+	d := openTestDB(t)
+	defer d.Close()
+	pool := d.Pool()
+	ensureResponseRulesV2Table(t, pool)
+	orgID, userID := seedOrgUser(t, pool)
+	clusterID := seedResponseRuleV2Cluster(t, pool, orgID, "rrv2-audit")
+	firstID := insertResponseRuleV2(t, pool, orgID, clusterID, "audit-first", 10)
+	secondID := insertResponseRuleV2(t, pool, orgID, clusterID, "audit-second", 20)
+	path := "/api/v1/response-rules-v2:reorder?cluster_id=" + clusterID.String()
+	body := `{"ordered_ids":["` + secondID.String() + `","` + firstID.String() + `"]}`
+	request := func(handler *ResponseRulesV2) *httptest.ResponseRecorder {
+		t.Helper()
+		request := withSubj(httptest.NewRequest(http.MethodPatch, path, strings.NewReader(body)), orgID, userID)
+		response := httptest.NewRecorder()
+		handler.Reorder(response, request)
+		return response
+	}
+	if response := request(NewResponseRulesV2(d, nil)); response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("missing audit status=%d body=%s", response.Code, response.Body.String())
+	}
+	const constraint = "test_response_reorder_audit_guard"
+	statement := fmt.Sprintf(`ALTER TABLE audit_events ADD CONSTRAINT %s CHECK (NOT (org_id='%s' AND action='response_rule_v2.reorder')) NOT VALID`, constraint, orgID)
+	if _, err := pool.Exec(context.Background(), statement); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `ALTER TABLE audit_events DROP CONSTRAINT IF EXISTS `+constraint)
+	})
+	if response := request(NewResponseRulesV2(d, audit.New(pool))); response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("failed completion status=%d body=%s", response.Code, response.Body.String())
+	}
+	if _, err := pool.Exec(context.Background(), `ALTER TABLE audit_events DROP CONSTRAINT `+constraint); err != nil {
+		t.Fatal(err)
+	}
+	var firstPriority, secondPriority, attempts, completions int
+	if err := pool.QueryRow(context.Background(), `SELECT priority FROM response_rules_v2 WHERE id=$1`, firstID).Scan(&firstPriority); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(context.Background(), `SELECT priority FROM response_rules_v2 WHERE id=$1`, secondID).Scan(&secondPriority); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(context.Background(), `SELECT count(*) FILTER (WHERE action='response_rule_v2.reorder_attempt'), count(*) FILTER (WHERE action='response_rule_v2.reorder') FROM audit_events WHERE org_id=$1`, orgID).Scan(&attempts, &completions); err != nil {
+		t.Fatal(err)
+	}
+	if firstPriority != 10 || secondPriority != 20 || attempts != 1 || completions != 0 {
+		t.Fatalf("failed reorder priorities=%d/%d attempts=%d completions=%d", firstPriority, secondPriority, attempts, completions)
+	}
+	response := request(NewResponseRulesV2(d, audit.New(pool)))
+	if response.Code != http.StatusOK {
+		t.Fatalf("reorder retry status=%d body=%s", response.Code, response.Body.String())
+	}
+	var receipt struct {
+		AuditAttemptID    int64 `json:"audit_attempt_id"`
+		CompletionAuditID int64 `json:"completion_audit_id"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &receipt); err != nil || receipt.AuditAttemptID == 0 || receipt.CompletionAuditID == 0 {
+		t.Fatalf("reorder receipt=%+v err=%v", receipt, err)
+	}
+	if err := pool.QueryRow(context.Background(), `SELECT priority FROM response_rules_v2 WHERE id=$1`, secondID).Scan(&secondPriority); err != nil || secondPriority != 10 {
+		t.Fatalf("reordered priority=%d err=%v", secondPriority, err)
 	}
 }
 

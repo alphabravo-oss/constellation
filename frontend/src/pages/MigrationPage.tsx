@@ -836,6 +836,13 @@ export function MigrationPage() {
         description="Persisted previews, applied imports, partial imports, failures, and rollback state for the current organization. Load more to inspect older records."
         padded={false}
       >
+        <div className="flex flex-wrap items-center justify-between gap-2 px-6 pt-4 text-xs text-muted-foreground">
+          <span>The table’s CSV includes loaded rows only.</span>
+          <a href="/api/v1/migration/imports/export" download="migration-imports.ndjson" className="font-medium text-primary underline underline-offset-2" data-testid="migration-import-history-export-all">
+            Download all history (NDJSON)
+          </a>
+        </div>
+        <p className="px-6 pt-1 text-xs text-muted-foreground">The download contains metadata only. Verify its final complete record and count before treating it as a full export.</p>
         {importsQ.isPending ? <p className="px-6 pt-4 text-xs" role="status">Loading import history…</p> : null}
         {importsQ.isError && !importsQ.data ? <p className="px-6 pt-4 text-xs text-destructive" role="alert">Import history is unavailable.</p> : null}
         <DataTable

@@ -742,6 +742,14 @@ func TestOpenAPIMigrationContracts(t *testing.T) {
 	if _, ok := openAPISchemaAt(t, "paths", importsPath, "get", "responses")["400"]; !ok {
 		t.Error("migration history must document invalid pagination as 400")
 	}
+	export := openAPISchemaAt(t, "paths", importsPath+"/export", "get")
+	if _, ok := export["parameters"]; ok {
+		t.Error("migration history export must not imply a row limit")
+	}
+	exportContent := openAPISchemaAt(t, "paths", importsPath+"/export", "get", "responses", "200", "content")
+	if exportContent["application/x-ndjson"] == nil || !strings.Contains(export["description"].(string), "complete record") {
+		t.Error("migration history export must document NDJSON completion detection")
+	}
 
 	bundlePath := importsPath + "/{id}/rollback-bundle"
 	bundle := openAPISchemaAt(t, "paths", bundlePath, "get", "responses", "200", "content", "application/json", "schema")

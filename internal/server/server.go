@@ -830,6 +830,7 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/migration/sources", s.requireVerb(rbac.VerbReadFindings, enterprise.MigrationSources))
 			r.Post("/migration/preview", s.requireVerb(rbac.VerbManagePolicies, enterprise.MigrationPreview))
 			r.Get("/migration/imports", s.requireVerb(rbac.VerbManagePolicies, enterprise.MigrationImports))
+			r.Get("/migration/imports/export", s.requireVerb(rbac.VerbManagePolicies, enterprise.MigrationImportsExport))
 			r.Get("/migration/imports/{id}/rollback-bundle", s.requireVerb(rbac.VerbManagePolicies, enterprise.MigrationRollbackBundle))
 			r.Post("/migration/imports/{id}:apply", s.requireVerb(rbac.VerbManagePolicies, enterprise.MigrationApply))
 			r.Post("/migration/imports/{id}:rollback", s.requireVerb(rbac.VerbManagePolicies, enterprise.MigrationRollback))
