@@ -225,15 +225,19 @@
       "NetworkRuleImportBundle": {
         "type": "object",
         "required": [
+          "apiVersion",
+          "kind",
           "rules"
         ],
-        "description": "The importer requires at least one rule but does not validate apiVersion or kind. Rules may fail individually while the request still returns 200.",
+        "description": "The importer requires the constellation/v1 NetworkRuleBundle envelope and at least one rule. Rules may fail individually while the request still returns 200.",
         "properties": {
           "apiVersion": {
-            "type": "string"
+            "type": "string",
+            "const": "constellation/v1"
           },
           "kind": {
-            "type": "string"
+            "type": "string",
+            "const": "NetworkRuleBundle"
           },
           "rules": {
             "type": "array",
@@ -4848,6 +4852,12 @@
             "$ref": "#/components/responses/Error"
           },
           "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "415": {
             "$ref": "#/components/responses/Error"
           },
           "default": {

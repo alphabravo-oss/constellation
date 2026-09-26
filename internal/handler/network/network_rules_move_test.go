@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -174,5 +175,31 @@ func TestNetworkRulesPreservesNegativePrecedence(t *testing.T) {
 	}
 	if len(result.Rules) != 2 || result.Rules[0].From != "default/lower" || result.Rules[0].Priority != -10 {
 		t.Fatalf("negative precedence list=%+v", result.Rules)
+	}
+}
+
+func TestMoveNetworkRuleToTopRollsBackWhenCompletionAuditFails(t *testing.T) {
+	database, orgID, userID, clusterID := moveRuleFixture(t)
+	const constraint = "test_move_top_completion_audit_guard"
+	statement := fmt.Sprintf(`ALTER TABLE audit_events ADD CONSTRAINT %s CHECK (NOT (org_id='%s' AND action='network_rule.move_top')) NOT VALID`, constraint, orgID)
+	if _, err := database.Pool().Exec(context.Background(), statement); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = database.Pool().Exec(context.Background(), `ALTER TABLE audit_events DROP CONSTRAINT `+constraint)
+	})
+	response := moveRuleRequest(database, orgID, userID, clusterID, "default/lower", true)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("move status=%d body=%s", response.Code, response.Body.String())
+	}
+	var priority, attempts, completions int
+	if err := database.Pool().QueryRow(context.Background(), `SELECT priority FROM network_rule_overrides WHERE org_id=$1 AND cluster_id=$2 AND from_ep='default/lower'`, orgID, clusterID).Scan(&priority); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Pool().QueryRow(context.Background(), `SELECT count(*) FILTER (WHERE action='network_rule.move_top_attempt'), count(*) FILTER (WHERE action='network_rule.move_top') FROM audit_events WHERE org_id=$1`, orgID).Scan(&attempts, &completions); err != nil {
+		t.Fatal(err)
+	}
+	if priority != 1010 || attempts != 1 || completions != 0 {
+		t.Fatalf("failed move changed priority or completion receipt: priority=%d attempts=%d completions=%d", priority, attempts, completions)
 	}
 }

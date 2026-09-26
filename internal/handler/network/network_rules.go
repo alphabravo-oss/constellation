@@ -345,7 +345,7 @@ func (h *Network) MoveNetworkRuleToTop(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "audit unavailable"})
 		return
 	}
-	tx, err := h.db.Pool().Begin(r.Context())
+	tx, err := h.db.Pool().BeginTx(r.Context(), pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to begin rule transition"})
 		return
@@ -411,20 +411,23 @@ ON CONFLICT (org_id, cluster_id, from_ep, to_ep) DO UPDATE SET
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	if err := tx.Commit(r.Context()); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to commit precedence"})
-		return
-	}
-	completionID, _, completionErr := h.audit.Log(r.Context(), audit.Event{
+	completionID, _, err := h.audit.LogInTx(r.Context(), tx, audit.Event{
 		OrgID: &subj.OrgID, ActorID: &subj.UserID, ActorIP: networkActorIP(r),
 		Action: "network_rule.move_top", TargetKind: "network_rule", TargetID: targetID,
 		Before: before, After: map[string]any{"priority": newPri, "audit_attempt_id": auditID},
 	})
-	response := map[string]any{"ok": true, "priority": newPri, "audit_attempt_id": auditID, "completion_audit_recorded": completionErr == nil}
-	if completionErr == nil {
-		response["completion_audit_id"] = completionID
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "audit unavailable"})
+		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, response)
+	if err := tx.Commit(r.Context()); err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to commit precedence"})
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "priority": newPri, "audit_attempt_id": auditID,
+		"completion_audit_recorded": true, "completion_audit_id": completionID,
+	})
 }
 
 // DeleteNetworkRule drops the override for a pair. A manual rule vanishes; a learned rule

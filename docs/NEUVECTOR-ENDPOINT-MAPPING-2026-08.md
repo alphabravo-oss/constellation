@@ -88,6 +88,22 @@ inspect import history in that case. The browser gate runs this mode only
 with `API_RECIPES_APPLY_ROLLBACK_FIXTURE=1`. Other mutating runbook recipes
 remain outside this bounded smoke check.
 
+For an eight-object NeuVector cutover subset on a **disposable** local API and
+separate loopback UI server, set `CONSTELLATION`, `TOKEN`, `CLUSTER`, and
+`UI_ORIGIN` to loopback origins and run:
+
+```bash
+python3 -B scripts/cutover_neuvector_fixture.py --apply-and-rollback
+```
+
+The runner refuses nonempty migration history and preexisting fixture targets,
+then checks preview counts, applied groups/network edge/vulnerability profile/
+DLP/WAF rules and bindings, HTML availability for Migration and Policy Center,
+and rollback counts. Preview leaves a saved history record. The script attempts
+cleanup after post-apply failures but cannot guarantee it; inspect import history
+if cleanup is unconfirmed. HTML availability is not browser rendering, and this
+subset is not the complete canonical fixture or a deployed cutover.
+
 ## Authentication
 
 Constellation API examples use bearer tokens:

@@ -21,6 +21,8 @@ from smoke_api_recipes import (CheckError, MAX_EXPORT, MAX_RESPONSE, NoRedirect,
 
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
+EMPTY_TARGETS = (0, 0, 0, 0, 0, 0, 0)
+APPLIED_TARGETS = (2, 1, 1, 1, 1, 1, 1)
 
 
 def load_fixture():
@@ -35,7 +37,8 @@ def load_fixture():
     try:
         names = manifest["names"]
         expected = {"groups": 2, "network_rules": 1,
-                    "vulnerability_profiles": 1, "total": 4}
+                    "vulnerability_profiles": 1, "dpi_rules": 2,
+                    "dpi_bindings": 2, "total": 8}
         if (manifest["source"] != "neuvector"
                 or manifest["fixture"] != "neuvector-cutover-export.json"
                 or manifest["source_objects"] != expected
@@ -43,8 +46,9 @@ def load_fixture():
                 or manifest["unsupported"] != 0
                 or manifest["applied"] != {"groups": 2, "network_rules": 1,
                                           "vulnerability_profiles": 1,
-                                          "created": 4, "updated": 0}
-                or manifest["rolled_back"] != {"deleted": 4, "restored": 0}
+                                          "dpi_rules": 2, "dpi_bindings": 2,
+                                          "created": 8, "updated": 0}
+                or manifest["rolled_back"] != {"deleted": 8, "restored": 0}
                 or len(names["groups"]) != 2 or len(names["network_edge"]) != 2
                 or len(set(names["groups"])) != 2
                 or names["network_edge"] != names["groups"]
@@ -55,6 +59,19 @@ def load_fixture():
                 or export["network_rules"][0]["to"] != names["network_edge"][1]
                 or len(export["vulnerability_profiles"]) != 1
                 or export["vulnerability_profiles"][0]["name"] != names["vulnerability_profile"]
+                or set(names["dpi_rules"]) != {"dlp", "waf"}
+                or set(names["dpi_bindings"]) != {"dlp", "waf"}
+                or len(export["dlp_sensors"]) != 1
+                or len(export["waf_sensors"]) != 1
+                or len(export["dlp_groups"]) != 1
+                or len(export["waf_groups"]) != 1
+                or any(len(export[f"{kind}_sensors"][0]["rules"]) != 1
+                       or len(export[f"{kind}_sensors"][0]["rules"][0]["patterns"]) != 1
+                       or export[f"{kind}_groups"][0]["name"] != names["dpi_bindings"][kind]
+                       or export[f"{kind}_groups"][0]["status"] is not True
+                       or len(export[f"{kind}_groups"][0]["sensors"]) != 1
+                       or export[f"{kind}_groups"][0]["sensors"][0]["name"] != export[f"{kind}_sensors"][0]["name"]
+                       for kind in ("dlp", "waf"))
                 or manifest["ui_routes"] != ["/settings/migration",
                                              "/clusters/{cluster_id}/policy-center"]):
             raise CheckError("fixture: manifest and export do not match the fixed cutover contract")
@@ -102,39 +119,73 @@ def targets(opener, origin, token, cluster, names):
                          "/api/v1/runtime-policies/group-edges" + query)
     profiles = request_json(opener, origin, token, "vulnerability profiles",
                             "/api/v1/vuln-profiles" + query)
+    rules = request_json(opener, origin, token, "DLP/WAF rules",
+                         "/api/v1/runtime-dlp-rules" + query)
+    bindings = request_json(opener, origin, token, "DLP/WAF bindings",
+                            "/api/v1/runtime/dpi-sensor-bindings")
     for label, result, field in (("groups", groups, "groups"),
                                  ("network edges", edges, "edges"),
-                                 ("vulnerability profiles", profiles, "profiles")):
+                                 ("vulnerability profiles", profiles, "profiles"),
+                                 ("DLP/WAF rules", rules, "rules"),
+                                 ("DLP/WAF bindings", bindings, "bindings")):
+        if label in ("network edges", "DLP/WAF bindings") and result.get(field) is None:
+            result[field] = []
         assert_shape(label, result, {field: list})
     group_names = set(names["groups"])
+    group_ids = {item.get("name"): item.get("id") for item in groups["groups"]
+                 if item.get("name") in group_names}
     pair = tuple(names["network_edge"])
     return (sum(item.get("name") in group_names for item in groups["groups"]),
             sum((item.get("from_group"), item.get("to_group")) == pair
                 for item in edges["edges"]),
             sum(item.get("name") == names["vulnerability_profile"]
-                for item in profiles["profiles"]))
+                for item in profiles["profiles"]),
+            *(sum(item.get("name") == names["dpi_rules"][kind]
+                   and item.get("category") == kind and item.get("cluster_id") == cluster
+                   for item in rules["rules"])
+              for kind in ("dlp", "waf")),
+            *(sum(item.get("group_id") == group_ids.get(names["dpi_bindings"][kind])
+                   and item.get("sensor_kind") == kind
+                   for item in bindings["bindings"])
+              for kind in ("dlp", "waf")))
 
 
 def check_preview(preview, manifest, cluster):
     assert_shape("preview", preview, {"import_id": str, "summary": dict,
                                       "groups": list, "network_rules": list,
-                                      "vulnerability_profiles": list})
+                                      "vulnerability_profiles": list,
+                                      "dpi_rules": list, "dpi_bindings": list})
     summary = preview["summary"]
     expected = manifest["converted"]
     if (summary.get("source") != "neuvector" or summary.get("read_only") is not True
             or preview.get("target_cluster_id") != cluster
             or any(type(summary.get(key)) is not int or summary[key] != count
                    for key, count in expected.items())
-            or summary.get("create") != 4 or summary.get("update") != 0
+            or summary.get("source_total") != manifest["source_objects"]["total"]
+            or summary.get("create") != 8 or summary.get("update") != 0
             or summary.get("unsupported") != 0
             or len(preview["groups"]) != 2 or len(preview["network_rules"]) != 1
             or len(preview["vulnerability_profiles"]) != 1
+            or len(preview["dpi_rules"]) != 2 or len(preview["dpi_bindings"]) != 2
             or {item.get("name") for item in preview["groups"]} != set(manifest["names"]["groups"])
             or preview["network_rules"][0].get("from_group") != manifest["names"]["network_edge"][0]
             or preview["network_rules"][0].get("to_group") != manifest["names"]["network_edge"][1]
             or preview["vulnerability_profiles"][0].get("name") != manifest["names"]["vulnerability_profile"]
+            or any(not any(item.get("name") == manifest["names"]["dpi_rules"][kind]
+                               and item.get("category") == kind
+                               and item.get("cluster_id") == cluster
+                               and item.get("mode") == "monitor"
+                               and isinstance(item.get("patterns"), list)
+                               and len(item.get("patterns", [])) == 1
+                               for item in preview["dpi_rules"])
+                   for kind in ("dlp", "waf"))
+            or any(not any(item.get("sensor_kind") == kind
+                               and item.get("source_group") == manifest["names"]["dpi_bindings"][kind]
+                               and item.get("target_group_name") == manifest["names"]["dpi_bindings"][kind]
+                               for item in preview["dpi_bindings"])
+                   for kind in ("dlp", "waf"))
             or any(item.get("diff_action") != "create" for field in
-                   ("groups", "network_rules", "vulnerability_profiles")
+                   ("groups", "network_rules", "vulnerability_profiles", "dpi_rules", "dpi_bindings")
                    for item in preview[field])):
         raise CheckError("preview: counts, scope, or create-only conversion differ from manifest")
     try:
@@ -170,7 +221,7 @@ def run(environment, apply_and_rollback=False, output=print):
     assert_shape("import history", history, {"imports": list, "has_more": bool})
     if history["imports"] or history["has_more"]:
         raise CheckError("import history is not empty; use a fresh organization")
-    if targets(opener, origin, token, cluster, manifest["names"]) != (0, 0, 0):
+    if targets(opener, origin, token, cluster, manifest["names"]) != EMPTY_TARGETS:
         raise CheckError("fixture targets already exist; refusing cutover")
     ui_routes_available(opener, ui, cluster, manifest["ui_routes"])
     output("PASS preflight: empty history, absent targets, UI HTML routes")
@@ -180,28 +231,28 @@ def run(environment, apply_and_rollback=False, output=print):
         raise CheckError("preview: encoded request exceeds API limit")
     preview = request_json(opener, origin, token, "preview", "/api/v1/migration/preview", payload)
     import_id = check_preview(preview, manifest, cluster)
-    if targets(opener, origin, token, cluster, manifest["names"]) != (0, 0, 0):
+    if targets(opener, origin, token, cluster, manifest["names"]) != EMPTY_TARGETS:
         raise CheckError("preview created target objects; refusing apply")
-    output("PASS preview: four create-only conversions, no target objects")
+    output("PASS preview: eight create-only conversions, no target objects")
     path = "/api/v1/migration/imports/" + import_id
     try:
         applied = request_json(opener, origin, token, "apply", path + ":apply", b"")
         check_counts("apply", applied, import_id, "applied", manifest["applied"])
-        if targets(opener, origin, token, cluster, manifest["names"]) != (2, 1, 1):
-            raise CheckError("apply: expected groups, network edge, and profile are not present")
+        if targets(opener, origin, token, cluster, manifest["names"]) != APPLIED_TARGETS:
+            raise CheckError("apply: expected groups, edge, profile, DLP/WAF rules and bindings are not present")
         ui_routes_available(opener, ui, cluster, manifest["ui_routes"])
-        output("PASS apply: four objects and UI HTML routes")
+        output("PASS apply: eight objects and UI HTML routes")
         rolled_back = request_json(opener, origin, token, "rollback", path + ":rollback", b"")
         check_counts("rollback", rolled_back, import_id, "rolled_back", manifest["rolled_back"])
-        if targets(opener, origin, token, cluster, manifest["names"]) != (0, 0, 0):
+        if targets(opener, origin, token, cluster, manifest["names"]) != EMPTY_TARGETS:
             raise CheckError("rollback: fixture targets remain")
-        output("PASS rollback: four objects removed")
+        output("PASS rollback: eight objects removed")
     except CheckError as error:
         try:
             cleanup = request_json(opener, origin, token, "cleanup", path + ":rollback", b"")
             if (not isinstance(cleanup, dict) or cleanup.get("id") != import_id
                     or cleanup.get("status") != "rolled_back"
-                    or targets(opener, origin, token, cluster, manifest["names"]) != (0, 0, 0)):
+                    or targets(opener, origin, token, cluster, manifest["names"]) != EMPTY_TARGETS):
                 raise CheckError("cleanup: rollback not confirmed")
         except CheckError:
             raise CheckError(f"{error}; cleanup rollback unconfirmed; inspect import history") from None

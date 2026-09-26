@@ -2,6 +2,7 @@ package network
 
 import (
 	"io"
+	"mime"
 	"net/http"
 	"strings"
 
@@ -97,6 +98,11 @@ func (h *Network) ImportNetworkRules(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster id"})
 		return
 	}
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/x-yaml" {
+		httpx.WriteJSON(w, http.StatusUnsupportedMediaType, map[string]string{"error": "Content-Type must be application/x-yaml"})
+		return
+	}
 	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "read body"})
@@ -107,8 +113,36 @@ func (h *Network) ImportNetworkRules(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid bundle: " + err.Error()})
 		return
 	}
+	if bundle.APIVersion != "constellation/v1" {
+		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "apiVersion must be constellation/v1"})
+		return
+	}
+	if bundle.Kind != "NetworkRuleBundle" {
+		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "kind must be NetworkRuleBundle"})
+		return
+	}
 	if len(bundle.Rules) == 0 {
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bundle contains no rules"})
+		return
+	}
+	var ownedCluster bool
+	if err := h.db.Pool().QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM clusters WHERE id=$1 AND org_id=$2)`, clusterID, subj.OrgID).Scan(&ownedCluster); err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify cluster"})
+		return
+	}
+	if !ownedCluster {
+		httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found"})
+		return
+	}
+	if h.audit == nil {
+		httpx.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "audit unavailable"})
+		return
+	}
+	orgID, userID := subj.OrgID, subj.UserID
+	if _, _, err := h.audit.Log(r.Context(), audit.Event{OrgID: &orgID, ActorID: &userID,
+		Action: "network_rule.import_attempt", TargetKind: "network_rule", TargetID: clusterID.String(),
+		After: map[string]any{"cluster_id": clusterID.String(), "rules": len(bundle.Rules)}}); err != nil {
+		httpx.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "audit unavailable"})
 		return
 	}
 	type result struct {
@@ -152,7 +186,8 @@ SELECT EXISTS (
 		if err := h.db.Pool().QueryRow(r.Context(), `
 INSERT INTO network_rule_overrides
   (org_id, cluster_id, from_ep, to_ep, ports, applications, action, disable, comment, priority, cfg_type, updated_by, updated_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW())
+SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW()
+  FROM clusters WHERE id=$2 AND org_id=$1
 ON CONFLICT (org_id, cluster_id, from_ep, to_ep) DO UPDATE SET
   ports = EXCLUDED.ports, applications = EXCLUDED.applications, action = EXCLUDED.action,
   disable = EXCLUDED.disable, comment = EXCLUDED.comment, priority = EXCLUDED.priority,
@@ -173,12 +208,9 @@ RETURNING (xmax = 0)`,
 		}
 		results = append(results, res)
 	}
-	if h.audit != nil {
-		oid, uid := subj.OrgID, subj.UserID
-		_, _, _ = h.audit.Log(r.Context(), audit.Event{OrgID: &oid, ActorID: &uid,
-			Action: "network_rule.import", TargetKind: "network_rule", TargetID: "",
-			After: map[string]any{"cluster_id": clusterID.String(), "created": created, "updated": updated, "total": len(bundle.Rules)}})
-	}
+	_, _, _ = h.audit.Log(r.Context(), audit.Event{OrgID: &orgID, ActorID: &userID,
+		Action: "network_rule.import", TargetKind: "network_rule", TargetID: clusterID.String(),
+		After: map[string]any{"cluster_id": clusterID.String(), "created": created, "updated": updated, "total": len(bundle.Rules)}})
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"created": created, "updated": updated, "results": results})
 }
 

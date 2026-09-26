@@ -72,7 +72,19 @@ func (l *Logger) Log(ctx context.Context, ev Event) (id int64, chainHash string,
 		return 0, "", fmt.Errorf("audit: begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	id, chainHash, err = l.LogInTx(ctx, tx, ev)
+	if err != nil {
+		return 0, "", err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, "", fmt.Errorf("audit: commit: %w", err)
+	}
+	return id, chainHash, nil
+}
 
+// LogInTx appends an event in a caller-owned READ COMMITTED transaction so the
+// event and the caller's mutation commit or roll back together.
+func (l *Logger) LogInTx(ctx context.Context, tx pgx.Tx, ev Event) (id int64, chainHash string, err error) {
 	// Serialize all chain writers on a fixed transaction-scoped advisory lock BEFORE reading the
 	// head, so a concurrent writer queues here and reads the true (committed) head once it acquires
 	// the lock — instead of racing on a "moving head" row under READ COMMITTED. See
@@ -131,9 +143,6 @@ RETURNING id`
 		beforeJSON, afterJSON, prev, rowHash, ev.RequestID, at,
 	).Scan(&id); err != nil {
 		return 0, "", fmt.Errorf("audit: insert: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return 0, "", fmt.Errorf("audit: commit: %w", err)
 	}
 	return id, rowHash, nil
 }

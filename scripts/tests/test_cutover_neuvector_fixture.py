@@ -18,8 +18,11 @@ CLUSTER = "11111111-1111-1111-1111-111111111111"
 IMPORT_ID = "22222222-2222-2222-2222-222222222222"
 TOKEN = "secret-cutover-token"
 NAMES = ["cutover.api.default", "cutover.db.default"]
+GROUP_IDS = ["33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444"]
 EDGE = (NAMES[0], NAMES[1])
 PROFILE = "cutover-vuln-profile"
+DPI_RULES = {"dlp": "nv-dlp-cutover-pii-account-marker",
+             "waf": "nv-waf-cutover-waf-probe-path"}
 
 
 class APIHandler(BaseHTTPRequestHandler):
@@ -38,32 +41,60 @@ class APIHandler(BaseHTTPRequestHandler):
             result = {"imports": [{"id": IMPORT_ID}] if state["history"] else [],
                       "has_more": False}
         elif path == "/api/v1/groups":
-            result = {"groups": [{"name": name} for name in NAMES] if state["groups"] else []}
+            result = {"groups": [{"id": group_id, "name": name}
+                                 for group_id, name in zip(GROUP_IDS, NAMES)]
+                      if state["groups"] else []}
         elif path == "/api/v1/runtime-policies/group-edges":
             result = {"edges": [{"from_group": EDGE[0], "to_group": EDGE[1]}]
-                      if state["edge"] else []}
+                      if state["edge"] else None}
         elif path == "/api/v1/vuln-profiles":
             result = {"profiles": [{"name": PROFILE}] if state["profile"] else []}
+        elif path == "/api/v1/runtime-dlp-rules":
+            result = {"rules": [{"name": DPI_RULES[kind], "category": kind,
+                                  "cluster_id": CLUSTER}
+                                for kind in ("dlp", "waf") if state[f"{kind}_rule"]]}
+        elif path == "/api/v1/runtime/dpi-sensor-bindings":
+            result = {"bindings": [{"group_id": GROUP_IDS[0], "sensor_kind": kind}
+                                   for kind in ("dlp", "waf") if state[f"{kind}_binding"]]
+                      if any(state[f"{kind}_binding"] for kind in ("dlp", "waf")) else None}
         elif path == "/api/v1/migration/preview":
             state["preview_body"] = json.loads(body)
             result = {"import_id": IMPORT_ID, "target_cluster_id": CLUSTER,
                       "summary": {"source": "neuvector", "read_only": True,
-                                  "total": 4, "create": 4, "update": 0, "unsupported": 0,
+                                  "total": 8, "source_total": 8, "create": 8,
+                                  "update": 0, "unsupported": 0,
                                   "groups": 2, "network_rules": 1,
-                                  "vulnerability_profiles": 1},
+                                  "vulnerability_profiles": 1, "dpi_rules": 2,
+                                  "dpi_bindings": 2},
                       "groups": [{"name": name, "diff_action": "create"} for name in NAMES],
                       "network_rules": [{"from_group": EDGE[0], "to_group": EDGE[1],
                                          "diff_action": "create"}],
-                      "vulnerability_profiles": [{"name": PROFILE, "diff_action": "create"}]}
+                      "vulnerability_profiles": [{"name": PROFILE, "diff_action": "create"}],
+                      "dpi_rules": [{"name": DPI_RULES[kind], "category": kind,
+                                     "cluster_id": CLUSTER, "mode": "monitor",
+                                     "patterns": [{"pattern": "fixture"}],
+                                     "diff_action": "create"}
+                                    for kind in ("dlp", "waf")],
+                      "dpi_bindings": [{"sensor_kind": kind, "source_group": NAMES[0],
+                                        "target_group_name": NAMES[0], "diff_action": "create"}
+                                       for kind in ("dlp", "waf")]}
         elif path == f"/api/v1/migration/imports/{IMPORT_ID}:apply":
-            state.update(groups=True, edge=True, profile=True)
+            state.update(groups=True, edge=True, profile=True, dlp_rule=True,
+                         waf_rule=True, dlp_binding=True, waf_binding=True)
+            if state["omit_on_apply"]:
+                state[state["omit_on_apply"]] = False
             result = {"id": IMPORT_ID, "status": "applied",
                       "applied": {"groups": 2, "network_rules": 1,
-                                  "vulnerability_profiles": 1, "created": 4, "updated": 0}}
+                                  "vulnerability_profiles": 1, "dpi_rules": 2,
+                                  "dpi_bindings": 2, "created": 8, "updated": 0}}
         elif path == f"/api/v1/migration/imports/{IMPORT_ID}:rollback":
-            was_applied = state["groups"] or state["edge"] or state["profile"]
-            state.update(groups=False, edge=False, profile=False)
-            result = ({"id": IMPORT_ID, "status": "rolled_back", "deleted": 4, "restored": 0}
+            was_applied = any(state[key] for key in ("groups", "edge", "profile", "dlp_rule",
+                                                    "waf_rule", "dlp_binding", "waf_binding"))
+            state.update(groups=False, edge=False, profile=False, dlp_rule=False,
+                         waf_rule=False, dlp_binding=False, waf_binding=False)
+            if state["retain_on_rollback"]:
+                state[state["retain_on_rollback"]] = True
+            result = ({"id": IMPORT_ID, "status": "rolled_back", "deleted": 8, "restored": 0}
                       if was_applied else {"id": IMPORT_ID, "status": "rolled_back",
                                            "already_rolled_back": True})
         else:
@@ -71,9 +102,11 @@ class APIHandler(BaseHTTPRequestHandler):
             return
         status, result = state["overrides"].get(path, (200, result))
         if path.endswith(":apply") and status != 200:
-            state.update(groups=False, edge=False, profile=False)
+            state.update(groups=False, edge=False, profile=False, dlp_rule=False,
+                         waf_rule=False, dlp_binding=False, waf_binding=False)
         if path.endswith(":rollback") and status != 200:
-            state.update(groups=True, edge=True, profile=True)
+            state.update(groups=True, edge=True, profile=True, dlp_rule=True,
+                         waf_rule=True, dlp_binding=True, waf_binding=True)
         if status == 302:
             self.send_response(302)
             self.send_header("Location", "http://example.com/redirect")
@@ -116,7 +149,10 @@ class CutoverFixtureTests(unittest.TestCase):
     def setUp(self):
         self.api = ThreadingHTTPServer(("127.0.0.1", 0), APIHandler)
         self.api.state = {"calls": [], "history": False, "groups": False,
-                          "edge": False, "profile": False, "overrides": {}}
+                          "edge": False, "profile": False, "dlp_rule": False,
+                          "waf_rule": False, "dlp_binding": False,
+                          "waf_binding": False, "omit_on_apply": None,
+                          "retain_on_rollback": None, "overrides": {}}
         self.ui = ThreadingHTTPServer(("127.0.0.1", 0), UIHandler)
         self.ui.calls = []
         self.ui.status = 200
@@ -145,10 +181,12 @@ class CutoverFixtureTests(unittest.TestCase):
     def test_full_cutover_is_bounded_and_rolls_back(self):
         result = self.run_cli("--apply-and-rollback")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("PASS rollback: four objects removed", result.stdout)
+        self.assertIn("PASS rollback: eight objects removed", result.stdout)
         self.assertEqual(json.loads(self.api.state["preview_body"]["export"]), EXPORT)
         self.assertEqual(self.api.state["preview_body"]["cluster_id"], CLUSTER)
-        self.assertFalse(any(self.api.state[key] for key in ("groups", "edge", "profile")))
+        self.assertFalse(any(self.api.state[key] for key in ("groups", "edge", "profile",
+                                                          "dlp_rule", "waf_rule",
+                                                          "dlp_binding", "waf_binding")))
         calls = self.api.state["calls"]
         self.assertEqual(calls[0][:2], ("GET", "/api/v1/migration/imports?limit=1"))
         self.assertEqual(sum(path.endswith(":apply") for _, path, _, _ in calls), 1)
@@ -171,26 +209,40 @@ class CutoverFixtureTests(unittest.TestCase):
         self.assertEqual(self.api.state["calls"], [])
 
     def test_refuses_existing_history_or_targets_without_preview(self):
-        for field in ("history", "groups", "edge", "profile"):
+        for field in ("history", "groups", "edge", "profile", "dlp_rule", "waf_rule",
+                      "dlp_binding", "waf_binding"):
             with self.subTest(field=field):
                 self.api.state[field] = True
+                if field.endswith("_binding"):
+                    self.api.state["groups"] = True
                 result = self.run_cli("--apply-and-rollback")
                 self.assertNotEqual(result.returncode, 0)
                 self.assertFalse(any(method == "POST" for method, _, _, _ in self.api.state["calls"]))
                 self.assert_no_leaks(result)
                 self.api.state[field] = False
+                self.api.state["groups"] = False
                 self.api.state["calls"].clear()
 
     def test_refuses_bad_preview_without_apply(self):
         self.api.state["overrides"]["/api/v1/migration/preview"] = (200, {
             "import_id": IMPORT_ID, "target_cluster_id": CLUSTER,
-            "summary": {"source": "neuvector", "read_only": True, "total": 4,
+            "summary": {"source": "neuvector", "read_only": True, "total": 8,
                         "create": 3, "update": 1, "unsupported": 0,
-                        "groups": 2, "network_rules": 1, "vulnerability_profiles": 1},
-            "groups": [], "network_rules": [], "vulnerability_profiles": []})
+                        "groups": 2, "network_rules": 1, "vulnerability_profiles": 1,
+                        "dpi_rules": 2, "dpi_bindings": 2},
+            "groups": [], "network_rules": [], "vulnerability_profiles": [],
+            "dpi_rules": [], "dpi_bindings": []})
         result = self.run_cli("--apply-and-rollback")
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(any(path.endswith(":apply") for _, path, _, _ in self.api.state["calls"]))
+        self.assert_no_leaks(result)
+
+    def test_rejects_malformed_dpi_inventory_before_preview(self):
+        self.api.state["overrides"]["/api/v1/runtime-dlp-rules"] = (200, {"rules": [None]})
+        result = self.run_cli("--apply-and-rollback")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("expected rules entries to be objects", result.stderr)
+        self.assertFalse(any(method == "POST" for method, _, _, _ in self.api.state["calls"]))
         self.assert_no_leaks(result)
 
     def test_apply_mismatch_attempts_cleanup(self):
@@ -201,6 +253,28 @@ class CutoverFixtureTests(unittest.TestCase):
         self.assertIn("counts differ", result.stderr)
         self.assertEqual(sum(path.endswith(":rollback") for _, path, _, _ in self.api.state["calls"]), 1)
         self.assertFalse(self.api.state["groups"])
+        self.assert_no_leaks(result)
+
+    def test_missing_dpi_target_after_apply_attempts_cleanup(self):
+        for field in ("dlp_rule", "waf_rule", "dlp_binding", "waf_binding"):
+            with self.subTest(field=field):
+                self.api.state["omit_on_apply"] = field
+                result = self.run_cli("--apply-and-rollback")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("expected groups, edge, profile, DLP/WAF rules and bindings", result.stderr)
+                self.assertEqual(sum(path.endswith(":rollback") for _, path, _, _ in self.api.state["calls"]), 1)
+                self.assertFalse(any(self.api.state[key] for key in ("groups", "edge", "profile",
+                                                                  "dlp_rule", "waf_rule",
+                                                                  "dlp_binding", "waf_binding")))
+                self.assert_no_leaks(result)
+                self.api.state["calls"].clear()
+
+    def test_lingering_dpi_rule_after_rollback_is_unconfirmed(self):
+        self.api.state["retain_on_rollback"] = "waf_rule"
+        result = self.run_cli("--apply-and-rollback")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("cleanup rollback unconfirmed", result.stderr)
+        self.assertEqual(sum(path.endswith(":rollback") for _, path, _, _ in self.api.state["calls"]), 2)
         self.assert_no_leaks(result)
 
     def test_post_apply_ui_failure_attempts_cleanup(self):

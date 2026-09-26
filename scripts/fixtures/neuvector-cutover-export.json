@@ -31,5 +31,27 @@
       "name": "cutover-vuln-profile",
       "entries": [{"name": "CVE-2026-1234"}]
     }
+  ],
+  "dlp_sensors": [
+    {
+      "name": "cutover-pii",
+      "rules": [
+        {"name": "account-marker", "patterns": [{"key": "pattern", "value": "CUTOVER-ACCOUNT-[0-9]{4}", "op": "regex"}]}
+      ]
+    }
+  ],
+  "waf_sensors": [
+    {
+      "name": "cutover-waf",
+      "rules": [
+        {"name": "probe-path", "patterns": [{"key": "pattern", "value": "(?i)/cutover-probe", "op": "regex", "context": "uri"}]}
+      ]
+    }
+  ],
+  "dlp_groups": [
+    {"name": "cutover.api.default", "status": true, "sensors": [{"name": "cutover-pii", "action": "allow"}]}
+  ],
+  "waf_groups": [
+    {"name": "cutover.api.default", "status": true, "sensors": [{"name": "cutover-waf", "action": "allow"}]}
   ]
 }

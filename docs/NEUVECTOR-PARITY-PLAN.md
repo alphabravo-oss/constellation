@@ -94,9 +94,10 @@ DPI binding tenant validation, and registration/proof of the unreachable
 group-edge HTTP workflow.
 The checklist contains **47 checked bounded rows** (39 at baseline). Recent
 rounds add bounded POL-1, POL-2 and API-1 fixes but close no additional parent
-acceptance item. This round also adds a four-object cutover fixture and opt-in
-runner, network precedence guards, and YAML API contracts; these are source and
-mock proofs, not a complete NeuVector fixture or deployed cutover.
+acceptance item. This round also adds an eight-object cutover fixture and opt-in
+runner, network precedence guards, and YAML API contracts. Source tests,
+deterministic browser tests, and a disposable local API/UI smoke are not a
+complete NeuVector fixture or deployed cutover.
 Partial scanner, registry and POL-1 fixes are recorded in the review table, not counted as
 closures. A checked child does not close its unchecked parent or replace live
 deployment evidence.
@@ -142,12 +143,12 @@ deployment evidence.
 | POL-1 DPI binding tenant guard | Source, deployed API and validated-schema upgrade verified; real legacy inventory open | A DLP/WAF binding previously accepted a foreign-org `group_id` because its FK checked only the group ID. Bind now inserts only from a group row in the authenticated org and refuses a conflicting stale binding owned by another org. PostgreSQL HTTP and Helm API negatives return 400/zero rows for foreign groups, while same-org binding returns 201. Migration 165 adds a composite `(org_id, group_id)` FK marked `NOT VALID` and rejects new invalid writes. The read-only preflight reports legacy mismatches; migration 166 validates the FK and stops without deleting rows when a mismatch exists. A genuine 164→165→166 fixture preserved its invalid row and stayed at version 165 until explicit repair, after which preflight and validation passed. The [upgrade runbook](group-dpi-binding-upgrade.md) requires audited API repair. Actual installation inventories, audited repair receipts, and broader import-writer proof remain open. |
 | API-1 group/DPI/edge OpenAPI contracts | Source schemas and focused tests verified; parent open | Group usage now documents response/admission counters, org-wide direct references, and error responses. DLP/WAF binding list/create/delete document typed requests, responses and actual status codes. Group-edge list/upsert/expand/delete now use typed row, port and expansion schemas with cluster-grant/transactional-edit semantics and a focused spec test. Other API-1 endpoint families and live contract smoke remain open. |
 | API-1 migration OpenAPI contracts | Fresh migration-166 PostgreSQL and focused contract tests verified; parent open | Migration preview, saved-import history, apply, rollback and rollback-bundle operations document typed contracts. History accepts bounded limit/offset and keyset cursor pages so newer inserts do not shift older pages; preview and history expose a validated target-cluster ID for new imports, while legacy records retain unknown target scope. PostgreSQL tests cover page boundaries, tied timestamps, concurrent newer insertion, tenant isolation, validation and persisted attribution. Complete runbook and deployed contract smoke remain open. |
-| API-1 network/admission OpenAPI contracts | Focused source contract tests passed; parent open | Network-rule list, mutation, deletion and move-top contracts and admission assessment/dry-run history have typed schemas reflecting handler response statuses. YAML export/import bundle schemas now describe the actual per-row import result and intentionally permissive import behavior; the importer still does not enforce media type or bundle version/kind and may return 200 with rule errors. Focused spec tests, JSON validation and `go vet` pass. Runtime validation hardening, full family review and live contract smoke remain open. |
+| API-1 network/admission OpenAPI contracts | Focused source contract tests passed; parent open | Network-rule list, mutation, deletion and move-top contracts and admission assessment/dry-run history have typed schemas reflecting handler response statuses. YAML export/import bundles, validated media type/version/kind, and per-rule outcomes are documented and source-tested. Import now refuses foreign clusters and unavailable audit before writing, with a durable attempt receipt; partial success still returns 200 and the completion receipt remains best-effort. Focused race/spec tests, JSON validation and `go vet` pass. Full endpoint-family review and deployed contract smoke remain open. |
 | API-1 registry/events/PCAP/support contracts | Focused source contract tests passed; parent open | Registry sync/cancel, event export, PCAP lifecycle and support-bundle generation/job/download operations now document their concrete request and response shapes, status codes and agent security where applicable. Source-dependent NDJSON and support-bundle sections remain open-ended; deployed contract smoke and full endpoint-family review remain open. |
 | POL-2 saved migration diagnostics | Source API and frontend component/build verified; deployed UI proof open | Policy Center shows saved NeuVector unsupported reasons and suggestions beside mapped families; ambiguous/unknown kinds stay general. New previews persist validated target-cluster metadata, while legacy or unspecified targets remain explicitly unknown. The history API serves bounded pages instead of silently truncating at 25; Policy Center and Migration Imports use keyset Load more so newer imports do not shift subsequent pages, and the latter labels target scope. Policy Center separates selected-cluster, other-cluster and unknown-target records. Twelve focused Policy Center tests, eight Migration Page tests, all 104 frontend tests and the production build pass. This is import-time diagnostic history, not current enforcement health. A fixed snapshot across all writes, all-history export, deployed browser proof and historical target backfill remain open, so the checklist item stays unchecked. |
 | POL-2 listed change/match metadata | Frontend component tests verified; full family health open | Policy Center uses existing DLP, signature, group and vulnerability-profile list timestamps to show a clearly scoped latest *listed* change, with unavailable/empty states. It also sums listed network-rule match counters and shows their last listed match, rejecting invalid counters/timestamps and explicitly not treating matches as enforcement health. Focused component tests and TypeScript pass. Network/admission/response and other families, authoritative all-item last-changed, broader hit/last-hit coverage, enforcement health and deployed proof remain open. |
-| POL-2 precedence entry points | Source API and frontend tests verified; deployed and full audit proof open | Policy Center links to existing move-to-top and response up/down controls only for families with runtime ordering. The network table initially preserves server evaluation order, shows priority, and does not mistake the first filtered row for the global top. Move-to-top now verifies the owned cluster and existing rule, serializes concurrent moves, rejects audit-attempt failure before writing, and preserves negative priorities in list order. Focused PostgreSQL race tests, 107 frontend tests and production build pass. Completion audit is best-effort, other network-rule writers do not share this serialization, full RBAC/browser and deployed enforcement proof remain open. |
-| MIG-1 bounded cutover fixture | Four-object PostgreSQL and mock-runner proof; complete canonical fixture open | A manifest enumerates two groups, one network edge and one vulnerability profile with source, converted, unsupported, applied and rolled-back counts. A fresh migration-166 PostgreSQL handler test verifies preview, target rows, apply and rollback. The opt-in loopback-only runner refuses nonempty import history or preexisting targets, checks bounded counts and HTML availability for Migration and Policy Center routes, and attempts rollback cleanup on failure; eight mock tests pass. It has not run against a live API/UI, does not render a browser, and does not cover remaining migration families, so neither the full fixture nor new-org cutover acceptance item is closed. |
+| POL-2 precedence entry points | Source/race and deterministic production-browser tests verified; deployment open | Policy Center links to existing move-to-top and response up/down controls only for families with runtime ordering. The network table initially preserves server evaluation order, shows priority, and does not mistake the first filtered row for the global top. Move-to-top verifies the owned cluster and existing rule, serializes concurrent moves, rejects audit-attempt failure before writing, and preserves negative priorities in list order. Its completion receipt now commits atomically with the priority change; injected audit failure rolls both back while retaining the attempt receipt. Focused PostgreSQL race/audit-chain tests, 107 frontend tests, production build and two Chromium tests with mocked APIs pass. Other network-rule writers do not share this serialization; full registered-route RBAC, live backend browser and deployed enforcement proof remain open. |
+| MIG-1 bounded cutover fixture | Eight-object PostgreSQL, mock and disposable local API smoke; complete canonical fixture open | A manifest enumerates two groups, one network edge, one vulnerability profile, one DLP rule, one WAF rule and two group bindings with source, converted, unsupported, applied and rolled-back counts. A fresh migration-166 PostgreSQL handler test verifies preview semantics, target rows, apply and rollback. The opt-in loopback-only runner refuses nonempty import history or preexisting targets, checks counts and HTML availability for Migration and Policy Center routes, and attempts rollback cleanup on failure; 11 mock tests pass. Against a disposable local API and separate production-build UI HTML server, preflight, eight-create preview, apply/target reads and eight-delete rollback all passed. The UI was not browser-rendered, this was a seeded local org rather than a genuine new-org cutover, and remaining migration families are absent, so neither the full fixture nor new-org cutover acceptance item is closed. |
 | POL-1 group workflow | API and production-browser control plane verified; enforcement open | A PostgreSQL-backed server test creates groups, previews/applies a NeuVector fixture containing a network edge and DLP/WAF bindings, checks usage and mode promotion, verifies RBAC/audit, and rejects unsafe delete without losing the group or references. A Chromium Playwright run against both an isolated production stack and a Helm-deployed API with a production frontend build creates a group, uses it in a network rule and DLP/WAF bindings, inspects usage, promotes mode, gets 409 on unsafe delete and cleans up. The UI-authored network rule is a network override, not a `group_rule_edges` row, so the usage blocker count is two (DLP/WAF). Live network and DPI enforcement remain unproven; the item stays open. |
 
 | REG-1 kind validation | Source fix verified; connector matrix open | Registry create rejects unknown kinds with an explicit 400; PATCH rejects any supplied `kind` (including null/empty/non-string) rather than silently ignoring an attempted type change. Unit/HTTP tests cover all 13 accepted kinds, unknown create and immutable update. This does not prove per-kind discovery/auth against real registries or endpoint/credential validation. |
@@ -594,8 +595,9 @@ row saying `enforced`.
   Covered by remaining-family parser/API redaction tests and both browser import
   cases; registry metadata imports do not copy credentials or enable auto-scans.
 - [ ] Publish one complete fixture manifest with source, converted, unsupported,
-  applied, and rolled-back object counts. A four-object subset has a counted
-  manifest and PostgreSQL apply/rollback proof; remaining families and the
+  applied, and rolled-back object counts. An eight-object subset has a counted
+  manifest, PostgreSQL apply/rollback proof and disposable local API smoke;
+  remaining families and the
   complete mixed-family fixture are still open.
 - [ ] Add browser coverage for paste/upload, preview, dry-run, apply, history,
   rollback-bundle download, rollback, and post-rollback inspection.
@@ -640,9 +642,10 @@ row saying `enforced`.
   sync/cancel, event export, PCAP and support-bundle contracts now have typed
   bounded operations too. Source-dependent NDJSON and bundle sections,
   network-rule YAML export/import bundles and per-rule outcomes are also typed.
-  Import still accepts unspecified version/kind and can return 200 with per-row
-  errors; runtime validation, full endpoint-family review and deployed contract
-  proof remain open.
+  Import now validates media type, version/kind, owned cluster and durable audit
+  attempt before writes; partial success still returns 200 with per-row errors.
+  Reliable import completion receipts, full endpoint-family review and deployed
+  contract proof remain open.
 - [x] Add a link/route checker for the endpoint mapping document.
   `make check-endpoint-mapping` validates 107 explicit API references and local
   links against OpenAPI, then runs the registered-router/OpenAPI tests; CI gates
@@ -665,8 +668,9 @@ row saying `enforced`.
   remain opt-in and the parent item remains open.
 - [ ] Add a new-org cutover script that imports the canonical fixture, checks
   counts and key UI routes, then rolls back. A loopback-only opt-in runner covers
-  the four-object subset and HTML route availability with mock tests; full
-  canonical-fixture coverage, real API/browser smoke and deployed proof remain.
+  an eight-object subset, HTML route availability, 11 mock tests and a disposable
+  local API apply/rollback smoke. Full canonical-fixture coverage, a genuine new
+  org, browser-rendered UI and deployed proof remain.
 
 ## P1 — enforcement and runtime fidelity
 
@@ -797,8 +801,10 @@ row saying `enforced`.
   audit tests. Policy Center now links only the existing network move-to-top
   and response up/down controls. Network list order, filtered top detection,
   owned-cluster/rule checks, concurrent move serialization, negative priorities
-  and durable audit attempts have source tests; completion receipts, other
-  writers, full RBAC/browser and deployed enforcement proof remain open.
+  and durable audit attempts/completions have source tests. Two deterministic
+  production-browser cases verify links and view-only sorting/move refetch;
+  other writers, full registered-route RBAC, live backend browser and deployed
+  enforcement proof remain open.
 - [ ] Add real family-specific import/export actions; do not link placeholders.
   Policy Center retains five working portable YAML contracts and removes generic
   family Import links/badges that only opened Migration. Frontend tests verify

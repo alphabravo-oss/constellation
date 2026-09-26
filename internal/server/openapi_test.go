@@ -440,9 +440,11 @@ func TestOpenAPINetworkRuleYAMLContracts(t *testing.T) {
 		t.Errorf("export bundle shape = %v", exportBundle)
 	}
 	importBundle := openAPISchemaAt(t, "components", "schemas", "NetworkRuleImportBundle")
-	assertOpenAPIFields(t, importBundle, []string{"apiVersion", "kind", "rules"}, []string{"rules"})
+	assertOpenAPIFields(t, importBundle, []string{"apiVersion", "kind", "rules"}, []string{"apiVersion", "kind", "rules"})
 	if importBundle["properties"].(map[string]any)["rules"].(map[string]any)["minItems"] != float64(1) ||
-		importBundle["properties"].(map[string]any)["rules"].(map[string]any)["items"].(map[string]any)["$ref"] != "#/components/schemas/PortableNetworkRule" {
+		importBundle["properties"].(map[string]any)["rules"].(map[string]any)["items"].(map[string]any)["$ref"] != "#/components/schemas/PortableNetworkRule" ||
+		importBundle["properties"].(map[string]any)["apiVersion"].(map[string]any)["const"] != "constellation/v1" ||
+		importBundle["properties"].(map[string]any)["kind"].(map[string]any)["const"] != "NetworkRuleBundle" {
 		t.Errorf("import bundle rules = %v", importBundle)
 	}
 	importResult := openAPISchemaAt(t, "components", "schemas", "NetworkRuleImportResult")
@@ -458,7 +460,7 @@ func TestOpenAPINetworkRuleYAMLContracts(t *testing.T) {
 		statuses                           []string
 	}{
 		{basePath + ":export", "get", "application/x-yaml", "#/components/schemas/NetworkRuleExportBundle", []string{"200", "400", "401", "403", "500", "default"}},
-		{basePath + ":import", "post", "application/json", "#/components/schemas/NetworkRuleImportResult", []string{"200", "400", "401", "403", "default"}},
+		{basePath + ":import", "post", "application/json", "#/components/schemas/NetworkRuleImportResult", []string{"200", "400", "401", "403", "404", "415", "default"}},
 	} {
 		operation := openAPISchemaAt(t, "paths", contract.path, contract.method)
 		parameters := operation["parameters"].([]any)

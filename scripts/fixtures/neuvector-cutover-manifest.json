@@ -6,30 +6,44 @@
     "groups": 2,
     "network_rules": 1,
     "vulnerability_profiles": 1,
-    "total": 4
+    "dpi_rules": 2,
+    "dpi_bindings": 2,
+    "total": 8
   },
   "converted": {
     "groups": 2,
     "network_rules": 1,
     "vulnerability_profiles": 1,
-    "total": 4
+    "dpi_rules": 2,
+    "dpi_bindings": 2,
+    "total": 8
   },
   "unsupported": 0,
   "applied": {
     "groups": 2,
     "network_rules": 1,
     "vulnerability_profiles": 1,
-    "created": 4,
+    "dpi_rules": 2,
+    "dpi_bindings": 2,
+    "created": 8,
     "updated": 0
   },
   "rolled_back": {
-    "deleted": 4,
+    "deleted": 8,
     "restored": 0
   },
   "names": {
     "groups": ["cutover.api.default", "cutover.db.default"],
     "network_edge": ["cutover.api.default", "cutover.db.default"],
-    "vulnerability_profile": "cutover-vuln-profile"
+    "vulnerability_profile": "cutover-vuln-profile",
+    "dpi_rules": {
+      "dlp": "nv-dlp-cutover-pii-account-marker",
+      "waf": "nv-waf-cutover-waf-probe-path"
+    },
+    "dpi_bindings": {
+      "dlp": "cutover.api.default",
+      "waf": "cutover.api.default"
+    }
   },
   "ui_routes": ["/settings/migration", "/clusters/{cluster_id}/policy-center"]
 }
