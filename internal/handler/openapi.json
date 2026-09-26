@@ -6256,6 +6256,261 @@
         "summary": "Create runtime-policies"
       }
     },
+    "/api/v1/runtime-policies/group-edges": {
+      "get": {
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Group edges in the caller's organization and cluster.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "edges"
+                  ],
+                  "properties": {
+                    "edges": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "List group-to-group network edges",
+        "description": "Requires read_findings. A foreign or missing cluster returns 404."
+      },
+      "post": {
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "cluster_id",
+                  "from_group",
+                  "to_group"
+                ],
+                "properties": {
+                  "cluster_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "from_group": {
+                    "type": "string"
+                  },
+                  "to_group": {
+                    "type": "string"
+                  },
+                  "ports": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    }
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "discover",
+                      "monitor",
+                      "protect"
+                    ]
+                  },
+                  "comment": {
+                    "type": "string"
+                  },
+                  "expand": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Edge saved; optional expansion result is returned when requested.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "edge"
+                  ],
+                  "properties": {
+                    "edge": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "cluster_id",
+                        "from_group",
+                        "to_group",
+                        "mode",
+                        "updated_at"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "cluster_id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "from_group": {
+                          "type": "string"
+                        },
+                        "to_group": {
+                          "type": "string"
+                        },
+                        "mode": {
+                          "type": "string"
+                        },
+                        "updated_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    "expansion": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Upsert a group-to-group network edge",
+        "description": "Requires manage_policies. A durable audit attempt is required before saving or expanding; expansion can partially apply if a later policy write fails."
+      }
+    },
+    "/api/v1/runtime-policies/group-edges/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Edge deleted. Already expanded runtime policies are not retracted."
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Delete a group-to-group edge",
+        "description": "Requires manage_policies and a durable audit attempt."
+      }
+    },
+    "/api/v1/runtime-policies/group-edges/{id}/expand": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current group members expanded into runtime policies.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "from_members",
+                    "to_members",
+                    "flows",
+                    "policies"
+                  ],
+                  "properties": {
+                    "from_members": {
+                      "type": "integer"
+                    },
+                    "to_members": {
+                      "type": "integer"
+                    },
+                    "flows": {
+                      "type": "integer"
+                    },
+                    "policies": {
+                      "type": [
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Re-expand a group edge",
+        "description": "Requires manage_policies and a durable audit attempt. Does not roll back earlier policy writes if a later expansion write fails."
+      }
+    },
     "/api/v1/runtime-policies/{id}": {
       "delete": {
         "responses": {

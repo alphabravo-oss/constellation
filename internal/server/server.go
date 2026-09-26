@@ -714,6 +714,11 @@ func (s *Server) buildRouter() chi.Router {
 			// where dp's NFQUEUE path is bypassed — operator exports
 			// CiliumNetworkPolicy and applies it via kubectl.
 			r.Get("/runtime-policies/{id}/export", s.requireVerb(rbac.VerbReadFindings, rtPolicies.Export))
+			groupEdges := runtime.NewGroupEdgesHTTP(s.db, runtime.NewRuntimePolicyStore(s.db, s.auditLog), s.auditLog)
+			r.Get("/runtime-policies/group-edges", s.requireVerb(rbac.VerbReadFindings, groupEdges.List))
+			r.Post("/runtime-policies/group-edges", s.requireVerb(rbac.VerbManagePolicies, groupEdges.Create))
+			r.Post("/runtime-policies/group-edges/{id}/expand", s.requireVerb(rbac.VerbManagePolicies, groupEdges.Expand))
+			r.Delete("/runtime-policies/group-edges/{id}", s.requireVerb(rbac.VerbManagePolicies, groupEdges.Delete))
 
 			// Wave C4: DLP regex rules. Same mode vocabulary as runtime_policies
 			// (monitor / enforce / disabled) and same audit-action mapping.

@@ -9,13 +9,9 @@
 // datapath primitive. Re-running Expand after a group-sync membership change is
 // how "applies to future members" is honoured (live membership update).
 //
-// SAFETY: seeded rows are always monitor-mode with an allow default action, so
-// expansion never blocks live workloads. Rows are tagged provenance=learned so a
-// later regeneration merges non-destructively (P2-2).
-//
-// ponytail: HTTP route registration lives in internal/server/server.go (outside
-// this subsystem's assigned paths). Wire the handlers below under
-// /runtime-policies/group-edges (GET/POST/DELETE + POST .../expand) there.
+// Discover/monitor edges expand to informational policies; protect edges expand
+// to enforcing policies. Rows are tagged provenance=learned so a later
+// regeneration merges non-destructively (P2-2).
 package runtime
 
 import (
@@ -23,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -33,6 +30,7 @@ import (
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
+	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/netpolicy"
 )
 
@@ -52,6 +50,16 @@ type GroupEdgeRow struct {
 type GroupEdgeStore struct {
 	db  *db.DB
 	pol *RuntimePolicyStore
+}
+
+var errEdgeClusterNotFound = errors.New("cluster not found")
+var errEdgeNotFound = errors.New("edge not found")
+var errEdgeGroupNotFound = errors.New("group not found in cluster")
+
+func (s *GroupEdgeStore) clusterExists(ctx context.Context, orgID, clusterID uuid.UUID) (bool, error) {
+	var exists bool
+	err := s.db.Pool().QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM clusters WHERE id=$1 AND org_id=$2)`, clusterID, orgID).Scan(&exists)
+	return exists, err
 }
 
 // NewGroupEdgeStore builds the edge store. It shares the runtime-policy store so
@@ -78,6 +86,13 @@ func (s *GroupEdgeStore) Upsert(ctx context.Context, orgID, clusterID uuid.UUID,
 	if err := tx.QueryRow(ctx, `SELECT id FROM orgs WHERE id=$1 FOR KEY SHARE`, orgID).Scan(&lockedOrgID); err != nil {
 		return GroupEdgeRow{}, err
 	}
+	var lockedClusterID uuid.UUID
+	if err := tx.QueryRow(ctx, `SELECT id FROM clusters WHERE id=$1 AND org_id=$2 FOR KEY SHARE`, clusterID, orgID).Scan(&lockedClusterID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return GroupEdgeRow{}, errEdgeClusterNotFound
+		}
+		return GroupEdgeRow{}, err
+	}
 	if _, err := tx.Exec(ctx, `LOCK TABLE group_rule_edges IN ROW EXCLUSIVE MODE`); err != nil {
 		return GroupEdgeRow{}, err
 	}
@@ -91,7 +106,7 @@ SELECT id FROM groups
  WHERE org_id = $1 AND name = $2 AND (cluster_id IS NULL OR cluster_id = $3)
  FOR KEY SHARE`, orgID, name, clusterID).Scan(&groupID)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return GroupEdgeRow{}, fmt.Errorf("group %q does not exist in cluster", name)
+			return GroupEdgeRow{}, fmt.Errorf("group %q does not exist in cluster: %w", name, errEdgeGroupNotFound)
 		}
 		if err != nil {
 			return GroupEdgeRow{}, err
@@ -158,7 +173,7 @@ func (s *GroupEdgeStore) Delete(ctx context.Context, orgID, id uuid.UUID) error 
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return errors.New("not found")
+		return errEdgeNotFound
 	}
 	return nil
 }
@@ -166,11 +181,14 @@ func (s *GroupEdgeStore) Delete(ctx context.Context, orgID, id uuid.UUID) error 
 // groupMembers reads the cached member list for a group by name from the groups
 // table (owned elsewhere; read-only here). Members are "namespace/name" ids.
 func (s *GroupEdgeStore) groupMembers(ctx context.Context, orgID, clusterID uuid.UUID, name string) ([]string, error) {
+	if name == "external" || name == "nodes" {
+		return nil, nil
+	}
 	var raw json.RawMessage
 	err := s.db.Pool().QueryRow(ctx,
-		`SELECT members FROM groups WHERE org_id = $1 AND name = $2`, orgID, name).Scan(&raw)
+		`SELECT members FROM groups WHERE org_id = $1 AND name = $2 AND (cluster_id IS NULL OR cluster_id = $3)`, orgID, name, clusterID).Scan(&raw)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
+		return nil, fmt.Errorf("group %q does not exist in cluster: %w", name, errEdgeGroupNotFound)
 	}
 	if err != nil {
 		return nil, err
@@ -181,7 +199,6 @@ func (s *GroupEdgeStore) groupMembers(ctx context.Context, orgID, clusterID uuid
 			return nil, err
 		}
 	}
-	_ = clusterID // groups are org-scoped by name; cluster filtering is advisory
 	return members, nil
 }
 
@@ -303,12 +320,46 @@ func scanGroupEdge(sc rowScanner) (GroupEdgeRow, error) {
 
 // GroupEdgesHTTP serves the group-edge CRUD + expansion endpoints.
 type GroupEdgesHTTP struct {
-	store *GroupEdgeStore
+	store       *GroupEdgeStore
+	auditWriter func(context.Context, audit.Event) error
 }
 
 // NewGroupEdgesHTTP builds the HTTP surface, sharing the runtime-policy store.
-func NewGroupEdgesHTTP(d *db.DB, pol *RuntimePolicyStore) *GroupEdgesHTTP {
-	return &GroupEdgesHTTP{store: NewGroupEdgeStore(d, pol)}
+func NewGroupEdgesHTTP(d *db.DB, pol *RuntimePolicyStore, auditLog *audit.Logger) *GroupEdgesHTTP {
+	h := &GroupEdgesHTTP{store: NewGroupEdgeStore(d, pol)}
+	if auditLog != nil {
+		h.auditWriter = func(ctx context.Context, event audit.Event) error {
+			_, _, err := auditLog.Log(ctx, event)
+			return err
+		}
+	}
+	return h
+}
+
+func (h *GroupEdgesHTTP) writeAudit(r *http.Request, sub authctx.Subject, action, targetID string, before, after any) error {
+	if h.auditWriter == nil {
+		return errors.New("audit writer unavailable")
+	}
+	return h.auditWriter(r.Context(), audit.Event{
+		OrgID: &sub.OrgID, ActorID: &sub.UserID, Action: action,
+		TargetKind: "group_rule_edge", TargetID: targetID,
+		Before: before, After: after, RequestID: requestIDFrom(r),
+	})
+}
+
+func (h *GroupEdgesHTTP) requireAuditAttempt(w http.ResponseWriter, r *http.Request, sub authctx.Subject, action, targetID string, before, after any) bool {
+	if err := h.writeAudit(r, sub, action+"_attempt", targetID, before, after); err != nil {
+		slog.Default().Error("group edge audit attempt failed; mutation rejected", "action", action, "target_id", targetID, "error", err)
+		jsonError(w, http.StatusServiceUnavailable, "audit unavailable; mutation rejected")
+		return false
+	}
+	return true
+}
+
+func (h *GroupEdgesHTTP) auditMutation(r *http.Request, sub authctx.Subject, action string, row GroupEdgeRow, before, after any) {
+	if err := h.writeAudit(r, sub, action, row.ID.String(), before, after); err != nil {
+		slog.Default().Warn("group edge completion audit failed; mutation already committed", "action", action, "edge_id", row.ID, "error", err)
+	}
 }
 
 // CreateEdgeRequest is the POST body.
@@ -332,6 +383,15 @@ func (h *GroupEdgesHTTP) List(w http.ResponseWriter, r *http.Request) {
 	clusterID, err := uuid.Parse(strings.TrimSpace(r.URL.Query().Get("cluster_id")))
 	if err != nil {
 		jsonError(w, http.StatusBadRequest, "cluster_id is required")
+		return
+	}
+	exists, err := h.store.clusterExists(r.Context(), sub.OrgID, clusterID)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "failed to check cluster")
+		return
+	}
+	if !exists {
+		jsonError(w, http.StatusNotFound, "cluster not found")
 		return
 	}
 	rows, err := h.store.List(r.Context(), sub.OrgID, clusterID)
@@ -363,19 +423,43 @@ func (h *GroupEdgesHTTP) Create(w http.ResponseWriter, r *http.Request) {
 		FromGroup: req.FromGroup, ToGroup: req.ToGroup,
 		Ports: req.Ports, Mode: req.Mode, Comment: req.Comment,
 	}
-	row, err := h.store.Upsert(r.Context(), sub.OrgID, req.ClusterID, edge, &sub.UserID)
-	if err != nil {
+	if err := edge.Validate(); err != nil {
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if !h.requireAuditAttempt(w, r, sub, "group_rule_edge.upsert", req.ClusterID.String()+"/"+edge.FromGroup+"/"+edge.ToGroup, nil, map[string]any{"cluster_id": req.ClusterID, "edge": edge, "expand": req.Expand}) {
+		return
+	}
+	row, err := h.store.Upsert(r.Context(), sub.OrgID, req.ClusterID, edge, &sub.UserID)
+	if err != nil {
+		if errors.Is(err, errEdgeClusterNotFound) {
+			jsonError(w, http.StatusNotFound, "cluster not found")
+			return
+		}
+		if errors.Is(err, errEdgeGroupNotFound) {
+			jsonError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		jsonError(w, http.StatusInternalServerError, "failed to save edge")
+		return
+	}
+	h.auditMutation(r, sub, "group_rule_edge.upsert", row, nil, row)
 	resp := map[string]any{"edge": row}
 	if req.Expand {
+		if !h.requireAuditAttempt(w, r, sub, "group_rule_edge.expand", row.ID.String(), row, map[string]any{"requested_by_create": true}) {
+			return
+		}
 		edge.ID = row.ID.String()
 		exp, err := h.store.Expand(r.Context(), sub.OrgID, req.ClusterID, edge, &sub.UserID)
 		if err != nil {
-			jsonError(w, http.StatusInternalServerError, "expand: "+err.Error())
+			if errors.Is(err, errEdgeGroupNotFound) {
+				jsonError(w, http.StatusConflict, err.Error())
+				return
+			}
+			jsonError(w, http.StatusInternalServerError, "failed to expand edge")
 			return
 		}
+		h.auditMutation(r, sub, "group_rule_edge.expand", row, row, exp)
 		resp["expansion"] = exp
 	}
 	httpx.WriteJSON(w, http.StatusCreated, resp)
@@ -395,18 +479,39 @@ func (h *GroupEdgesHTTP) Expand(w http.ResponseWriter, r *http.Request) {
 	}
 	row, err := h.store.get(r.Context(), sub.OrgID, id)
 	if err != nil {
-		jsonError(w, http.StatusNotFound, "not found")
+		if errors.Is(err, pgx.ErrNoRows) {
+			jsonError(w, http.StatusNotFound, "not found")
+		} else {
+			jsonError(w, http.StatusInternalServerError, "failed to read edge")
+		}
+		return
+	}
+	exists, err := h.store.clusterExists(r.Context(), sub.OrgID, row.ClusterID)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "failed to check cluster")
+		return
+	}
+	if !exists {
+		jsonError(w, http.StatusNotFound, "cluster not found")
 		return
 	}
 	edge := netpolicy.GroupEdge{
 		ID: row.ID.String(), FromGroup: row.FromGroup, ToGroup: row.ToGroup,
 		Ports: row.Ports, Mode: row.Mode, Comment: row.Comment,
 	}
-	exp, err := h.store.Expand(r.Context(), sub.OrgID, row.ClusterID, edge, &sub.UserID)
-	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+	if !h.requireAuditAttempt(w, r, sub, "group_rule_edge.expand", row.ID.String(), row, map[string]any{"requested_by_create": false}) {
 		return
 	}
+	exp, err := h.store.Expand(r.Context(), sub.OrgID, row.ClusterID, edge, &sub.UserID)
+	if err != nil {
+		if errors.Is(err, errEdgeGroupNotFound) {
+			jsonError(w, http.StatusConflict, err.Error())
+			return
+		}
+		jsonError(w, http.StatusInternalServerError, "failed to expand edge")
+		return
+	}
+	h.auditMutation(r, sub, "group_rule_edge.expand", row, row, exp)
 	httpx.WriteJSON(w, http.StatusOK, exp)
 }
 
@@ -422,14 +527,27 @@ func (h *GroupEdgesHTTP) Delete(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	if err := h.store.Delete(r.Context(), sub.OrgID, id); err != nil {
-		if strings.Contains(err.Error(), "not found") {
+	row, err := h.store.get(r.Context(), sub.OrgID, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
 			jsonError(w, http.StatusNotFound, "not found")
-			return
+		} else {
+			jsonError(w, http.StatusInternalServerError, "failed to read edge")
 		}
-		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if !h.requireAuditAttempt(w, r, sub, "group_rule_edge.delete", row.ID.String(), row, nil) {
+		return
+	}
+	if err := h.store.Delete(r.Context(), sub.OrgID, id); err != nil {
+		if errors.Is(err, errEdgeNotFound) {
+			jsonError(w, http.StatusNotFound, "not found")
+		} else {
+			jsonError(w, http.StatusInternalServerError, "failed to delete edge")
+		}
+		return
+	}
+	h.auditMutation(r, sub, "group_rule_edge.delete", row, row, nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 

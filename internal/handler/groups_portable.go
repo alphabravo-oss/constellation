@@ -2,10 +2,14 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"gopkg.in/yaml.v3"
 
 	"github.com/alphabravocompany/constellation/pkg/audit"
@@ -142,15 +146,8 @@ func (h *Groups) Import(w http.ResponseWriter, r *http.Request) {
 		}
 		criteriaJSON, _ := json.Marshal(g.Criteria)
 		membersJSON, _ := json.Marshal(memberIDs)
-		var wasInsert bool
-		if err := h.db.Pool().QueryRow(r.Context(), `
-INSERT INTO groups (org_id, cluster_id, name, kind, comment, criteria, members, cfg_type, policy_mode, profile_mode, created_by)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-ON CONFLICT (org_id, name) DO UPDATE SET
-  kind=EXCLUDED.kind, comment=EXCLUDED.comment, criteria=EXCLUDED.criteria, members=EXCLUDED.members,
-  policy_mode=EXCLUDED.policy_mode, profile_mode=EXCLUDED.profile_mode, updated_at=NOW()
-RETURNING (xmax = 0)`,
-			subj.OrgID, clusterArg, g.Name, g.Kind, g.Comment, criteriaJSON, membersJSON, g.CfgType, g.PolicyMode, g.ProfileMode, subj.UserID).Scan(&wasInsert); err != nil {
+		wasInsert, err := h.importPortableGroup(r, subj.OrgID, subj.UserID, clusterArg, g, criteriaJSON, membersJSON)
+		if err != nil {
 			res.Status, res.Error = "error", err.Error()
 			results = append(results, res)
 			continue
@@ -172,6 +169,92 @@ RETURNING (xmax = 0)`,
 			After: map[string]any{"created": created, "updated": updated, "total": len(bundle.Groups)}})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"created": created, "updated": updated, "results": results})
+}
+
+func (h *Groups) importPortableGroup(r *http.Request, orgID, userID uuid.UUID, clusterArg any, groupValue *group.Group, criteriaJSON, membersJSON []byte) (bool, error) {
+	if clusterID, ok := clusterArg.(uuid.UUID); ok {
+		var owned bool
+		if err := h.db.Pool().QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM clusters WHERE id=$1 AND org_id=$2)`, clusterID, orgID).Scan(&owned); err != nil {
+			return false, err
+		}
+		if !owned {
+			return false, fmt.Errorf("cluster not found in organization")
+		}
+	}
+	var groupID uuid.UUID
+	err := h.db.Pool().QueryRow(r.Context(), `
+INSERT INTO groups (org_id, cluster_id, name, kind, comment, criteria, members, cfg_type, policy_mode, profile_mode, created_by)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+ON CONFLICT (org_id, name) DO NOTHING
+RETURNING id`,
+		orgID, clusterArg, groupValue.Name, groupValue.Kind, groupValue.Comment, criteriaJSON, membersJSON,
+		groupValue.CfgType, groupValue.PolicyMode, groupValue.ProfileMode, userID).Scan(&groupID)
+	if err == nil {
+		return true, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return false, err
+	}
+	if err := h.db.Pool().QueryRow(r.Context(), `SELECT id FROM groups WHERE org_id=$1 AND name=$2`, orgID, groupValue.Name).Scan(&groupID); err != nil {
+		return false, err
+	}
+	tx, err := h.beginGroupReferenceMutation(r.Context(), orgID, groupID)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(r.Context())
+	var currentName, learnedFrom, cfgType string
+	var currentClusterID *uuid.UUID
+	var currentKind group.Kind
+	var currentCriteria, currentMembers []byte
+	if err := tx.QueryRow(r.Context(), `SELECT name, cluster_id, kind, criteria, members, learned_from, cfg_type FROM groups WHERE id=$1 AND org_id=$2`, groupID, orgID).
+		Scan(&currentName, &currentClusterID, &currentKind, &currentCriteria, &currentMembers, &learnedFrom, &cfgType); err != nil {
+		return false, err
+	}
+	if currentClusterID != nil {
+		requestedClusterID, ok := clusterArg.(uuid.UUID)
+		if !ok || requestedClusterID != *currentClusterID {
+			return false, fmt.Errorf("group belongs to another cluster")
+		}
+	}
+	if currentName != groupValue.Name {
+		return false, fmt.Errorf("group changed during import; retry")
+	}
+	if cfgType == "fed" {
+		return false, errFedReadOnly
+	}
+	next := *groupValue
+	next.CfgType = cfgType
+	next.LearnedFrom = learnedFrom
+	changes := groupReferenceSensitiveChanges(currentName, currentKind, currentCriteria, learnedFrom, cfgType, &next)
+	var previousMembers, nextMembers []string
+	if err := json.Unmarshal(currentMembers, &previousMembers); err != nil {
+		return false, err
+	}
+	if err := json.Unmarshal(membersJSON, &nextMembers); err != nil {
+		return false, err
+	}
+	if (&group.Group{Members: normalizeGroupMembers(previousMembers)}).MembersChanged(normalizeGroupMembers(nextMembers)) {
+		changes = append(changes, "members")
+	}
+	if len(changes) > 0 {
+		blockingRefs, err := groupBlockingReferenceCount(r.Context(), tx, orgID, groupID, currentName)
+		if err != nil {
+			return false, err
+		}
+		if blockingRefs > 0 {
+			return false, fmt.Errorf("group has %d policy references; unlink before importing changes", blockingRefs)
+		}
+	}
+	if _, err := tx.Exec(r.Context(), `
+UPDATE groups SET kind=$1, comment=$2, criteria=$3, members=$4,
+  policy_mode=$5, profile_mode=$6, updated_at=NOW()
+ WHERE id=$7 AND org_id=$8`,
+		groupValue.Kind, groupValue.Comment, criteriaJSON, membersJSON, groupValue.PolicyMode, groupValue.ProfileMode,
+		groupID, orgID); err != nil {
+		return false, err
+	}
+	return false, tx.Commit(r.Context())
 }
 
 func orDefault(v, def string) string {
