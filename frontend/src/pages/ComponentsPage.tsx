@@ -51,7 +51,9 @@ export function ComponentsPage() {
 
   function selectNVRole(role: string) {
     setNvRole(role);
+    setSelectedID(null);
     const next = new URLSearchParams(searchParams);
+    next.delete("component");
     if (role === "all") {
       next.delete("role");
     } else {

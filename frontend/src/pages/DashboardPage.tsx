@@ -62,6 +62,7 @@ import { RiskScore, RiskGauge } from "@/components/ui/risk-score";
 import { Sparkline } from "@/components/ui/sparkline";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ScannerDbCapacity } from "@/components/ScannerDbCapacity";
 import { PageHeader } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { fmtBytes, fmtRelative } from "@/lib/format";
@@ -115,6 +116,13 @@ export function DashboardPage() {
     queryKey: ["system-health", "cluster", clusterId],
     queryFn: () => systemHealth.cluster(clusterId!),
     enabled: !!clusterId,
+    staleTime: 30_000,
+    refetchInterval: 30_000,
+  });
+  const fleetHealth = useQuery({
+    queryKey: ["system-health"],
+    queryFn: systemHealth.overview,
+    enabled: !clusterId,
     staleTime: 30_000,
     refetchInterval: 30_000,
   });
@@ -289,6 +297,16 @@ export function DashboardPage() {
         }
       />
 
+      {!clusterId && (
+        <section className="rounded-md border border-border bg-card p-4" data-testid="dashboard-scanner-db-capacity">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold">Scanner database and capacity</h2>
+            <Link to="/settings/scanner" className="text-xs text-[color:var(--color-primary)] hover:underline">Scanner details</Link>
+          </div>
+          <ScannerDbCapacity heartbeats={fleetHealth.data?.heartbeats} unavailable={fleetHealth.isError} loading={fleetHealth.isPending} />
+        </section>
+      )}
+
       {clusterId && (
         <section className="c-rise c-rise-1 grid gap-3 xl:grid-cols-[minmax(0,1fr)_360px]" data-testid="dashboard-operator-strip">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5" data-testid="dashboard-component-health">
@@ -343,6 +361,9 @@ export function DashboardPage() {
                   }
                 />
               </dl>
+              <div className="mt-3 border-t border-border pt-3">
+                <ScannerDbCapacity heartbeats={clusterHealth.data?.heartbeats} unavailable={clusterHealth.isError} loading={clusterHealth.isPending} />
+              </div>
             </Link>
 
             {federationHealth.participating && (

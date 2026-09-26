@@ -87,16 +87,17 @@ Unchecked parent items remain open until **all** their acceptance requirements
 are met. Code present is not the same as verified or release-ready. The older
 deficiency ledger includes findings that already have fixes; do not use its
 historical counts as a count of currently open defects.
-Acceptance backlog: **106 open**. Since the `800b0ef` baseline of 107 open,
-**one existing item closed** (OPS-1 heartbeat fixtures); no other open item
-has closed. The checklist also contains **40 checked bounded rows** (39 at
-baseline). Partial scanner, registry and SIEM fixes are recorded in the review
+Acceptance backlog: **105 open**. Since the `800b0ef` baseline of 107 open,
+**two existing items closed** (OPS-1 heartbeat fixtures and OPS-1 role/diagnostics
+tests); no other open item has closed. The checklist also contains **41 checked
+bounded rows** (39 at baseline). Partial scanner, registry and SIEM fixes are recorded in the review
 table, not counted as closures. A checked child does not close its unchecked
 parent or replace live deployment evidence.
 
 | Acceptance item closed since `800b0ef` | Closure evidence |
 |---|---|
-| OPS-1 heartbeat fixtures | API-level tests ingest all 15 required and optional roles and check empty, partial and healthy org/cluster rollups. The separate OPS-1 diagnostics and E2E item remains open. |
+| OPS-1 heartbeat fixtures | API-level tests ingest all 15 required and optional roles and check empty, partial and healthy org/cluster rollups. |
+| OPS-1 role aliases, diagnostics and E2E filtering | DB-backed component tests cover controller, runtime-agent/enforcer and scanner role aliases, diagnostics status/checks, redaction and access failures. Existing frontend alias tests pass. A production-build Playwright browser run verifies URL role filters, matching rows, selection and role-specific diagnostics for all three roles using deterministic API fixtures; this closes the test item, not deployed component-health proof. |
 
 | Slice | Current status | Evidence / remaining work |
 |---|---|---|
@@ -109,7 +110,8 @@ parent or replace live deployment evidence.
 | P0 scanner-job/heartbeat tenant scope | Bounded source and DB tests verified; scanner-token cluster binding remains open | Claim, renew, complete and fail reject scan jobs whose target belongs to another org; claim also ignores package evidence linked to a foreign-org target. Scanner-token heartbeat accepts owned clusters by ID or name, rejects foreign clusters and conflicting ID/name pairs. Scanner tokens remain org-scoped and can report any owned cluster; these checks do not prove node identity or deployed multi-cluster behavior. Schema-level composite foreign keys and remaining scanner-originated writes still need audit. |
 | P0 scanner read scope | Bounded source and DB tests verified; wider scanner inventory open | Job list, attempts and status exclude rows whose target belongs to another org. Shared queue metrics apply the same target-org check for both scan-job and compliance consumers. Scanner-token package-evidence GET also requires its linked target to share the evidence org. Direct DB tests inject mismatched links and verify no cross-org target metadata, attempt ledger, status bundle, queue metric or evidence payload is surfaced. Schema-level composite foreign keys, other scanner reads/writes and deployment proof remain open. |
 | P0 scanner target-link integrity | Bounded source and DB tests verified; parent tenant-scope item open | Package-evidence upsert now selects canonical target metadata from an owned target and writes nothing for a foreign target; latest-evidence lookup also ignores mismatched links. Scan-object evidence/jobs/finding counts/vulnerabilities exclude mismatched links, and enqueue rechecks and locks the owned target. Attestation report, read and verification paths reject or hide foreign-org target/evidence/image-result links. Direct DB tests cover valid and negative paths. Schema-level composite foreign keys, other consumers, transactional verification history and deployed multi-cluster proof remain open. |
-| OPS-1 component role fixtures | API-level tests verified; diagnostics/E2E coverage open | Heartbeat fixtures cover all 15 declared required and optional component roles, with empty, partial and healthy inventories, org/cluster rollups and instance-scope assertions. This is local API/DB proof only; role aliases, diagnostics and browser filtering remain open. |
+| OPS-1 component role fixtures | API and browser tests verified; deployed health open | Heartbeat fixtures cover all 15 declared required and optional component roles, with empty, partial and healthy inventories, org/cluster rollups and instance-scope assertions. Additional DB-backed component tests cover controller, runtime-agent/enforcer and scanner role aliases and healthy/degraded/stale/drift diagnostics, redaction and access failures. A production-build Playwright test verifies URL role filters, matching rows, selection and role-specific diagnostics with deterministic API fixtures. Deployed component health remains open. |
+| REG-1 scanner DB and capacity surfaces | Partial UI implementation; engine revisions open | Dashboard, System Health and Scanner & CVE Sources show current scanner heartbeat capacity and applied host VulnDB bundle versions, with component tests for live/stale/missing/unavailable reports. They explicitly label Trivy/Grype download and applied revisions as not reported; the scanner heartbeat/API do not yet expose those engine revisions, so the existing REG-1 acceptance item remains open. |
 | P0 audit/timeline/exemption scope | Source fixes and direct PostgreSQL tests verified; deployed matrix open | Audit, timeline, compliance checks/summary and evidence cluster filters reject clusters outside the subject org; timeline violation attribution cannot join a foreign-org deployment. Exemption create/list/revoke tests cover cross-org/foreign-cluster and no-write behavior. The evidence overlay applies cluster-specific exemptions only to matching-cluster items, falls back to org-wide exemptions and rejects misattributed exemptions; checks/summary exclude misattributed foreign-cluster check and exemption rows. Remaining aggregation and agent-write inventory, route-level cluster-grant RBAC, and deployed multi-cluster paths are open. |
 | SIEM-1 TLS material guard | Source fix and in-process mTLS tests verified; broader SIEM slice open | Syslog target validation rejects configured CA/client-key material on plaintext transports, and the delivery sender independently refuses plaintext when TLS credentials or a server name are present. In-process collector tests cover verified TLS 1.2/1.3, wrong server CA, absent/untrusted client credentials and plaintext rejection. Full wire-format/filter matrix and deployed collector validation remain open. |
 | SIEM-1 severity floor | Bounded source tests verified; collector matrix open | Syslog filtering treats an unknown configured minimum level as deny-all rather than silently sending every alert. An unknown alert severity also falls below an `info` floor. Tests cover RFC5424/JSON/CEF source formatters, level/category basics and the new filter-before-dial rejection; deployed collector interoperability and full format/filter matrix remain open. |
@@ -610,7 +612,7 @@ progressive disclosure, while retaining Constellation's security vocabulary.
 
 ### OPS-1 Component cockpit and support bundles
 
-- [ ] Complete role-alias and diagnostics component tests plus E2E filtering for
+- [x] Complete role-alias and diagnostics component tests plus E2E filtering for
   controller, enforcer/runtime-agent, and scanner roles.
 - [x] Add API-level heartbeat fixtures for all 15 declared required and optional
   component roles; assert empty, partial and healthy inventories, org/cluster

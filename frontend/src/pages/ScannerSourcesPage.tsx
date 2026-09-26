@@ -22,6 +22,7 @@ import {
   scanJobs,
   scanJobsAdmin,
   scannerOperations,
+  systemHealth,
   systemConfigApi,
   type ScanJob,
   type ScanJobAttempt,
@@ -39,6 +40,7 @@ import { Field, TextInput } from "@/components/ui/form";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { StatCard } from "@/components/ui/stat-card";
 import { StatusPill } from "@/components/ui/status-pill";
+import { ScannerDbCapacity } from "@/components/ScannerDbCapacity";
 import { cn } from "@/lib/cn";
 import {
   scanJobBundleRows,
@@ -58,6 +60,7 @@ export function ScannerSourcesPage() {
   const systemConfig = useQuery({ queryKey: ["system-config"], queryFn: () => systemConfigApi.get() });
   const scanStatus = useQuery({ queryKey: ["scan-status"], queryFn: scannerOperations.status });
   const scannerWorkers = useQuery({ queryKey: ["scan-scanner-workers"], queryFn: scannerOperations.workers });
+  const scannerHealth = useQuery({ queryKey: ["system-health"], queryFn: systemHealth.overview, refetchInterval: 30_000 });
   const scanJobList = useQuery({ queryKey: ["scan-jobs", "scanner-sources"], queryFn: () => scanJobs.list() });
   const config = systemConfig.data?.config ?? {};
   const revision = systemConfig.data?.revision ?? 0;
@@ -303,6 +306,7 @@ export function ScannerSourcesPage() {
   function refreshOperatorState() {
     void qc.invalidateQueries({ queryKey: ["scan-status"] });
     void qc.invalidateQueries({ queryKey: ["scan-scanner-workers"] });
+    void qc.invalidateQueries({ queryKey: ["system-health"] });
     void qc.invalidateQueries({ queryKey: ["scan-jobs", "scanner-sources"] });
     if (selectedScannerID) {
       void qc.invalidateQueries({ queryKey: ["scanner-cache-stat", selectedScannerID] });
@@ -340,6 +344,10 @@ export function ScannerSourcesPage() {
         <StatCard label="Paused" value={(lifecycle?.paused ?? 0).toLocaleString()} icon={<PauseCircle className="h-3.5 w-3.5" />} tone={(lifecycle?.paused ?? 0) > 0 ? "medium" : "neutral"} />
         <StatCard label="Scanners" value={workers.length.toLocaleString()} icon={<Database className="h-3.5 w-3.5" />} hint="last 24h" />
       </section>
+
+      <Card title="Scanner database and capacity" description="Live heartbeat capacity and host VulnDB bundle reports. Trivy/Grype download and apply revisions are not reported by the current API.">
+        <ScannerDbCapacity heartbeats={scannerHealth.data?.heartbeats} unavailable={scannerHealth.isError} loading={scannerHealth.isPending} />
+      </Card>
 
       <Card
         title="Database refresh"

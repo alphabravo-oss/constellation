@@ -585,3 +585,185 @@ VALUES ($1, $2, $3, 'linux-node', 12, 1, 2, 3, '{"checks":[]}'::jsonb, $4)`,
 		t.Fatalf("diagnostics leaked raw node payload: %s", body)
 	}
 }
+
+func TestComponentsInventoryRoleDiagnosticsAPI(t *testing.T) {
+	d := openTestDB(t)
+	t.Cleanup(d.Close)
+	ctx := context.Background()
+	pool := d.Pool()
+	var regclass string
+	if err := pool.QueryRow(ctx, `SELECT COALESCE(to_regclass('public.component_heartbeats')::text, '')`).Scan(&regclass); err != nil || regclass == "" {
+		t.Skipf("skipping: component_heartbeats migration not applied (%v)", err)
+	}
+
+	orgID, foreignOrgID := uuid.New(), uuid.New()
+	clusterID := uuid.New()
+	for _, id := range []uuid.UUID{orgID, foreignOrgID} {
+		if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, display_name) VALUES ($1, $2, $2)`, id, "role-diagnostics-"+id.String()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), `DELETE FROM orgs WHERE id IN ($1, $2)`, orgID, foreignOrgID); err != nil {
+			t.Errorf("delete role diagnostics orgs: %v", err)
+		}
+	})
+	if _, err := pool.Exec(ctx, `INSERT INTO clusters (id, org_id, name) VALUES ($1, $2, 'role-diagnostics')`, clusterID, orgID); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC()
+	operatorID, agentID, scannerID, foreignID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	for _, row := range []struct {
+		id, orgID uuid.UUID
+		component string
+		metadata  string
+	}{
+		{operatorID, orgID, "operator", `{"leader_election":true}`},
+		{agentID, orgID, "runtime-agent", `{"enforcer":{"node":"node-a","dp_status":"ready","ebpf_status":"ready","probe_status":"ready","policy_mode":"monitor"},"token":"agent-secret"}`},
+		{scannerID, orgID, "scanner", `{"active_jobs":1,"idle_capacity":0,"max_concurrent":1,"vulndb":{"enabled":true,"ready":false,"status":"missing-store","error":"secret token leaked"},"token":"scanner-secret"}`},
+		{foreignID, foreignOrgID, "scanner", `{"vulndb":{"enabled":true,"ready":true}}`},
+	} {
+		var rowCluster any
+		if row.orgID == orgID {
+			rowCluster = clusterID
+		}
+		if _, err := pool.Exec(ctx, `
+INSERT INTO component_heartbeats
+    (id, org_id, cluster_id, component, version, commit, hostname, uptime_seconds, metadata, last_seen_at, first_seen_at)
+VALUES ($1, $2, $3, $4, 'test', 'current-commit', $5, 60, $6::jsonb, $7, $7)`,
+			row.id, row.orgID, rowCluster, row.component, row.component+"-"+row.id.String(), row.metadata, now); err != nil {
+			t.Fatalf("insert %s heartbeat: %v", row.component, err)
+		}
+	}
+
+	subject := Subject{UserID: uuid.New(), OrgID: orgID}
+	inventory := NewComponentsInventory(d)
+	router := chi.NewRouter()
+	router.Get("/api/v1/components", inventory.List)
+	router.Get("/api/v1/components/{id}", inventory.Get)
+	router.Get("/api/v1/components/{id}/diagnostics", inventory.Diagnostics)
+	request := func(path string, authenticated bool) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		if authenticated {
+			req = req.WithContext(WithSubject(req.Context(), subject))
+		}
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+	readDiagnostics := func(t *testing.T, id uuid.UUID) componentDiagnosticsDTO {
+		t.Helper()
+		rec := request("/api/v1/components/"+id.String()+"/diagnostics", true)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("diagnostics %s: status %d body %s", id, rec.Code, rec.Body.String())
+		}
+		var diagnostics componentDiagnosticsDTO
+		if err := json.Unmarshal(rec.Body.Bytes(), &diagnostics); err != nil {
+			t.Fatal(err)
+		}
+		if diagnostics.AdminGate != "manage-org" || diagnostics.Component.ID != id || !diagnostics.Debug.SupportBundleEnabled || diagnostics.Debug.LiveLogsEnabled || diagnostics.Debug.ProfilingEnabled {
+			t.Fatalf("diagnostics contract for %s: %+v", id, diagnostics)
+		}
+		if strings.Contains(rec.Body.String(), "agent-secret") || strings.Contains(rec.Body.String(), "scanner-secret") || strings.Contains(rec.Body.String(), "secret token leaked") {
+			t.Fatalf("diagnostics leaked secret: %s", rec.Body.String())
+		}
+		return diagnostics
+	}
+	checksFor := func(diagnostics componentDiagnosticsDTO) map[string]componentDiagnosticCheck {
+		checks := make(map[string]componentDiagnosticCheck, len(diagnostics.Diagnostics))
+		for _, check := range diagnostics.Diagnostics {
+			checks[check.Key] = check
+		}
+		return checks
+	}
+
+	list := request("/api/v1/components?cluster_id="+clusterID.String(), true)
+	if list.Code != http.StatusOK {
+		t.Fatalf("list status %d: %s", list.Code, list.Body.String())
+	}
+	var inventoryResponse struct {
+		Components []componentInstanceDTO        `json:"components"`
+		Rollups    []componentInventoryRollupDTO `json:"rollups"`
+	}
+	if err := json.Unmarshal(list.Body.Bytes(), &inventoryResponse); err != nil {
+		t.Fatal(err)
+	}
+	if len(inventoryResponse.Components) != 3 {
+		t.Fatalf("role instances = %+v", inventoryResponse.Components)
+	}
+	roles := map[string]string{"operator": "controller", "runtime-agent": "enforcer", "scanner": "scanner"}
+	for _, component := range inventoryResponse.Components {
+		if component.Role != roles[component.Component] || component.ClusterID == nil || *component.ClusterID != clusterID {
+			t.Errorf("role-alias instance = %+v", component)
+		}
+	}
+	for _, rollup := range inventoryResponse.Rollups {
+		if role, ok := roles[rollup.Component]; ok && (rollup.Role != role || rollup.Instances != 1) {
+			t.Errorf("role-alias rollup = %+v", rollup)
+		}
+	}
+
+	for _, role := range []struct {
+		id                                              uuid.UUID
+		component, alias, status, checkKey, checkStatus string
+	}{
+		{operatorID, "operator", "controller", "healthy", "operator_leader_election", "ready"},
+		{agentID, "runtime-agent", "enforcer", "healthy", "enforcer_dp_status", "ready"},
+		{scannerID, "scanner", "scanner", "degraded", "scanner_vulndb", "degraded"},
+	} {
+		t.Run(role.component, func(t *testing.T) {
+			diagnostics := readDiagnostics(t, role.id)
+			if diagnostics.Component.Component != role.component || diagnostics.Component.Role != role.alias || diagnostics.Status.State != role.status || diagnostics.Status.Degraded != (role.status == "degraded") {
+				t.Fatalf("role diagnostics = %+v", diagnostics)
+			}
+			checks := checksFor(diagnostics)
+			if checks[role.checkKey].Status != role.checkStatus {
+				t.Fatalf("role check %s = %+v", role.checkKey, checks[role.checkKey])
+			}
+		})
+	}
+	if checks := checksFor(readDiagnostics(t, agentID)); checks["enforcer_policy_mode"].Value != "monitor" || checks["node_host_facts"].Status != "missing" {
+		t.Fatalf("enforcer checks = %+v", checks)
+	}
+	if checks := checksFor(readDiagnostics(t, scannerID)); checks["scanner_capacity"].Status != "saturated" || checks["scanner_vulndb"].Reason != "redacted by diagnostics policy" {
+		t.Fatalf("scanner failure checks = %+v", checks)
+	}
+
+	if _, err := pool.Exec(ctx, `UPDATE component_heartbeats SET commit = 'old-commit', last_seen_at = $2 WHERE id = $1`, operatorID, now.Add(-time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE component_heartbeats SET last_seen_at = $2 WHERE id = $1`, agentID, now.Add(-6*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	controller := readDiagnostics(t, operatorID)
+	if controller.Status.State != "drift" || !controller.Status.Drift || checksFor(controller)["build"].Status != "drift" {
+		t.Fatalf("controller drift = %+v", controller)
+	}
+	enforcer := readDiagnostics(t, agentID)
+	if enforcer.Status.State != "stale" || !enforcer.Status.Stale || checksFor(enforcer)["heartbeat"].Status != "stale" {
+		t.Fatalf("enforcer stale = %+v", enforcer)
+	}
+
+	for _, failure := range []struct {
+		name, path    string
+		authenticated bool
+		wantStatus    int
+	}{
+		{"unauthenticated", "/api/v1/components/" + operatorID.String() + "/diagnostics", false, http.StatusUnauthorized},
+		{"invalid id", "/api/v1/components/not-a-uuid/diagnostics", true, http.StatusBadRequest},
+		{"unknown id", "/api/v1/components/" + uuid.NewString() + "/diagnostics", true, http.StatusNotFound},
+		{"foreign org diagnostics", "/api/v1/components/" + foreignID.String() + "/diagnostics", true, http.StatusNotFound},
+		{"foreign org get", "/api/v1/components/" + foreignID.String(), true, http.StatusNotFound},
+	} {
+		t.Run(failure.name, func(t *testing.T) {
+			rec := request(failure.path, failure.authenticated)
+			if rec.Code != failure.wantStatus {
+				t.Fatalf("status %d, want %d: %s", rec.Code, failure.wantStatus, rec.Body.String())
+			}
+			if strings.Contains(rec.Body.String(), foreignID.String()) || strings.Contains(rec.Body.String(), "scanner-secret") {
+				t.Fatalf("failure response leaked component data: %s", rec.Body.String())
+			}
+		})
+	}
+}

@@ -135,6 +135,81 @@ test("Components page exposes NeuVector role filters and version drift matrix", 
   await expect(page.getByTestId("component-version-matrix")).toContainText(/Version Drift/i);
 });
 
+test("Components role filters show matching instances and diagnostics", async ({ page }) => {
+  await page.goto("/dashboard");
+  await page.waitForURL(/\/clusters\/[^/]+\/dashboard/);
+  const clusterID = page.url().match(/\/clusters\/([^/]+)\//)?.[1];
+  expect(clusterID).toBeTruthy();
+
+  const roles = [
+    { id: "controller", component: "operator", role: "controller", name: "Parity control plane", host: "controller-parity-test" },
+    { id: "enforcer", component: "runtime-agent", role: "enforcer", name: "Parity runtime agent", host: "enforcer-parity-test" },
+    { id: "scanner", component: "scanner", role: "scanner", name: "Parity scan worker", host: "scanner-parity-test" },
+  ] as const;
+  const components = roles.map((role) => ({
+    id: role.id,
+    component: role.component,
+    display_name: role.name,
+    role: role.role,
+    scope: "cluster",
+    kind: "service",
+    status: "healthy",
+    cluster_id: clusterID,
+    hostname: role.host,
+    version: "1.0.0",
+    uptime_seconds: 3600,
+    restart_count: 0,
+    first_seen_at: "2026-01-01T00:00:00Z",
+    last_seen_at: "2026-01-01T01:00:00Z",
+  }));
+  await page.route("**/api/v1/components**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/components")) {
+      await route.fulfill({ json: {
+        summary: { generated_at: "2026-01-01T01:00:00Z", components: 3, total_instances: 3, healthy: 3, degraded: 0, stale: 0, drift: 0, crashlooping: 0, missing: 0 },
+        rollups: [],
+        components,
+      } });
+      return;
+    }
+    const id = path.split("/").at(-1) === "diagnostics" ? path.split("/").at(-2) : path.split("/").at(-1);
+    const component = components.find((item) => item.id === id);
+    if (!component) {
+      await route.fulfill({ status: 404, json: { error: "not found" } });
+      return;
+    }
+    if (path.endsWith("/diagnostics")) {
+      await route.fulfill({ json: {
+        component,
+        generated_at: "2026-01-01T01:00:00Z",
+        admin_gate: "global-admin",
+        status: { state: "healthy", stale: false, drift: false, crashlooping: false, degraded: false, uptime_seconds: 3600, restart_count: 0, first_seen_at: component.first_seen_at, last_seen_at: component.last_seen_at },
+        diagnostics: [{ key: "role", label: `${id} diagnostic`, status: "healthy", evidence: component.hostname }],
+        counters: [],
+        config: [],
+        debug: { profiling_enabled: false, live_logs_enabled: false, support_bundle_enabled: false },
+      } });
+      return;
+    }
+    await route.fulfill({ json: { component } });
+  });
+
+  await page.goto(`/clusters/${clusterID}/components?role=enforcer`);
+  const table = page.getByTestId("component-inventory-table");
+  for (const role of [roles[1], roles[0], roles[2]]) {
+    await page.getByTestId(`component-nv-role-${role.id}`).click();
+    await expect(page).toHaveURL(new RegExp(`\\?role=${role.id}$`));
+    await expect(table).toContainText(role.host);
+    for (const other of roles.filter((candidate) => candidate.id !== role.id)) {
+      await expect(table).not.toContainText(other.host);
+    }
+    await table.getByRole("row", { name: new RegExp(role.host) }).click();
+    await expect(page).toHaveURL(new RegExp(`role=${role.id}.*component=${role.id}$`));
+    await expect(page.getByTestId("component-diagnostics")).toContainText(`${role.id} diagnostic`);
+    await expect(page.getByTestId("component-preview")).toContainText(role.host);
+  }
+});
+
 test("NeuVector route aliases redirect to Constellation destinations", async ({ page }) => {
   await page.goto("/dashboard");
   await page.waitForURL(/\/clusters\/[^/]+\/dashboard/);

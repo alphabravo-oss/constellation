@@ -27,6 +27,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { componentDiagnosticsHref, nvRoleAlias } from "@/lib/component-roles";
 import { downloadJson } from "@/lib/download";
+import { ScannerDbCapacity } from "@/components/ScannerDbCapacity";
 
 const heartbeatColumns: Column<SystemHealthHeartbeat>[] = [
   {
@@ -257,6 +258,10 @@ export function SystemHealthPage() {
 
       {/* ------------- VERDICT ------------- */}
       <VerdictBanner status={verdictStatus} title={verdictTitle} detail={verdictDetail} />
+
+      <Card title="Scanner database and capacity" description="Capacity and applied host VulnDB bundles from scanner heartbeats; Trivy/Grype download and apply revisions are not reported.">
+        <ScannerDbCapacity heartbeats={heartbeats} />
+      </Card>
 
       {/* ------------- FLEET STAT TILES ------------- */}
       <section
