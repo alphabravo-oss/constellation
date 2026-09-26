@@ -4,7 +4,7 @@
 # Runs every 6h by default (operator-managed CronJob). Walks the audit chain, verifies
 # integrity, freezes the rolling window to S3, and signs the manifest with cosign.
 
-ARG GO_VERSION=1.26
+ARG GO_VERSION=1.26.8
 ARG COSIGN_VERSION=2.6.1
 ARG COSIGN_SHA256_AMD64=064954c5d8c7e3b28188eee5b1727b31c411550bc5fefd41aa672d3c761d103a
 ARG COSIGN_SHA256_ARM64=56a16480bdd56ec789abaa65924402f6b92c0041f06885995853c05567b76f34

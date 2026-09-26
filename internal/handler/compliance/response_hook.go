@@ -22,6 +22,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/notify"
 	"github.com/alphabravocompany/constellation/pkg/response"
 	"github.com/alphabravocompany/constellation/pkg/responserule"
@@ -153,6 +154,7 @@ type complianceResponder struct {
 	// dispatcher fans a compliance failure out to the org's receivers and the syslog
 	// mirror.
 	dispatcher *notify.Dispatcher
+	audit      *audit.Logger
 	// evalRules is the E1 declarative evaluator. It fires webhook actions in-evaluator
 	// and returns the matched actions so suppress_log can gate the notify fan-out.
 	evalRules func(ctx context.Context, orgID uuid.UUID, ev *responserule.Event) ([]responserule.Action, error)
@@ -179,6 +181,33 @@ func (cr complianceResponder) fire(ctx context.Context, orgID, clusterID uuid.UU
 				slog.Default().Warn("compliance response-rule evaluate", slog.Any("err", err))
 			} else {
 				suppress = actionsSuppressLog(acts)
+				for order, action := range acts {
+					if action.Type != responserule.ActionTag || cr.audit == nil {
+						continue
+					}
+					after := map[string]any{
+						"action":        string(action.Type),
+						"order":         order,
+						"cluster_id":    clusterStr(clusterID),
+						"check_id":      f.CheckID,
+						"framework":     f.Framework,
+						"node":          f.Node,
+						"enforced":      "unsupported",
+						"enforce_error": "tag action has no compliance check or workload label side effect",
+					}
+					for key, value := range action.Params {
+						after["param_"+key] = value
+					}
+					if _, _, err := cr.audit.Log(ctx, audit.Event{
+						OrgID:      &orgID,
+						Action:     "response_rule.action.tag",
+						TargetKind: "compliance_check",
+						TargetID:   f.name(),
+						After:      after,
+					}); err != nil {
+						slog.Default().Warn("compliance response-rule action audit", slog.Any("err", err))
+					}
+				}
 			}
 		}
 		// RT-2 engine — independent of E1 suppress_log, mirroring the events path.

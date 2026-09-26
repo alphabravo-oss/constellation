@@ -3,6 +3,7 @@ package k8saudit
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -106,7 +107,7 @@ type pendingAlert struct {
 // audit.k8s.io/v1 Events here (kind: EventList). Auth is the runtime-agent /
 // cluster token — the same credential the DaemonSet agent uses for the other
 // ingest routes — supplied to the apiserver as the webhook kubeconfig's bearer
-// token. cluster_id is resolved best-effort against the token's org.
+// token. cluster_id comes from the token's resolved cluster binding.
 //
 // TODO(matrix): apiserver audit-webhook config required to feed this endpoint
 // (documented here rather than in a separate doc so it travels with the code):
@@ -160,19 +161,20 @@ func (h *Ingest) Bulk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve the org's primary cluster as the attribution fallback — same
-	// heuristic the runtime-threats ingest uses (the token knows only the org).
-	var cluster uuid.UUID
-	_ = h.db.Pool().QueryRow(r.Context(),
-		`SELECT id FROM clusters WHERE org_id = $1
-		 ORDER BY CASE WHEN state = 'connected' THEN 0 ELSE 1 END,
-		          last_heartbeat_at DESC NULLS LAST, created_at ASC
-		 LIMIT 1`, tok.OrgID).
-		Scan(&cluster)
-	if cluster == uuid.Nil {
-		httpx.WriteJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "no cluster for org"})
+	boundCluster, err := handler.ResolveAgentClusterID(r.Context(), h.db, tok)
+	if err != nil {
+		if errors.Is(err, handler.ErrAgentClusterScope) {
+			httpx.WriteJSON(w, http.StatusForbidden, map[string]string{"error": "agent token cluster scope mismatch"})
+			return
+		}
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "resolve cluster failed"})
 		return
 	}
+	if boundCluster == nil {
+		httpx.WriteJSON(w, http.StatusForbidden, map[string]string{"error": "agent token cluster scope is ambiguous"})
+		return
+	}
+	cluster := *boundCluster
 
 	tx, err := h.db.Pool().Begin(r.Context())
 	if err != nil {
@@ -363,6 +365,34 @@ func (h *Ingest) fanOutOne(ctx context.Context, orgID uuid.UUID, p *pendingAlert
 			break
 		}
 	}
+	for order, ruleAction := range ruleActions {
+		if ruleAction.Type != responserule.ActionTag || h.audit == nil {
+			continue
+		}
+		outcome := map[string]any{
+			"action":        string(ruleAction.Type),
+			"order":         order,
+			"audit_id":      strings.TrimSpace(p.ev.AuditID),
+			"signal":        p.signal,
+			"cluster_id":    p.clusterID.String(),
+			"namespace":     strings.TrimSpace(p.ev.ObjectRef.Namespace),
+			"name":          strings.TrimSpace(p.ev.ObjectRef.Name),
+			"enforced":      "unsupported",
+			"enforce_error": "tag action has no audit event or workload label side effect",
+		}
+		for key, value := range ruleAction.Params {
+			outcome["param_"+key] = value
+		}
+		if _, _, err := h.audit.Log(ctx, audit.Event{
+			OrgID:      &orgID,
+			Action:     "response_rule.action.tag",
+			TargetKind: "k8s_audit",
+			TargetID:   strings.TrimSpace(p.ev.AuditID),
+			After:      outcome,
+		}); err != nil {
+			slog.Default().Warn("k8s audit response-rule action audit", slog.Any("err", err))
+		}
+	}
 
 	if !suppressed {
 		if h.audit != nil {
@@ -441,12 +471,13 @@ func (h *Ingest) evalRulesSafe(ctx context.Context, orgID uuid.UUID, p *pendingA
 		slog.Default().Warn("k8s audit response-rule evaluate", slog.Any("err", err))
 		return nil
 	}
-	// TODO(matrix): enforce quarantine/tag actions here (mirroring the runtime
+	// TODO(matrix): enforce quarantine actions here (mirroring the runtime
 	// threats path's applyThreatResponseRuleActions). Control-plane audit is
 	// out-of-band so there is no live request to block; the useful enforcement
 	// is quarantining the *subject workload* that just exec'd, which needs the
 	// pod->workload resolver. Until then we honor suppress_log + webhook (fired
-	// inside the evaluator) and leave the rest observe-only.
+	// inside the evaluator), report legacy tag attempts as unsupported, and leave
+	// quarantine observe-only.
 	return got
 }
 

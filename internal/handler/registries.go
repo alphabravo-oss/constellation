@@ -309,10 +309,12 @@ type registryCreateRequest struct {
 	ScanPolicy  *registryScanPolicy `json:"scan_policy,omitempty"`
 }
 
-// registryUpdateRequest is the PATCH body. All fields optional; missing fields
-// are not updated. Setting credentials rotates the encrypted secret.
+// registryUpdateRequest is the PATCH body. All mutable fields are optional;
+// kind is recognized so attempts to change it return a client error.
+// Setting credentials rotates the encrypted secret.
 type registryUpdateRequest struct {
 	Name        *string             `json:"name,omitempty"`
+	Kind        json.RawMessage     `json:"kind,omitempty"`
 	Endpoint    *string             `json:"endpoint,omitempty"`
 	AuthKind    *string             `json:"auth_kind,omitempty"`
 	Credentials *map[string]string  `json:"credentials,omitempty"`
@@ -502,6 +504,17 @@ func (h *Registries) Patch(w http.ResponseWriter, r *http.Request) {
 	var req registryUpdateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		jsonError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	if len(req.Kind) > 0 {
+		var kind string
+		if err := json.Unmarshal(req.Kind, &kind); err != nil || strings.TrimSpace(kind) == "" {
+			jsonError(w, http.StatusBadRequest, "kind must be a non-empty string")
+		} else if err := validateRegistryKind(kind); err != nil {
+			jsonError(w, http.StatusBadRequest, err.Error())
+		} else {
+			jsonError(w, http.StatusBadRequest, "kind cannot be updated")
+		}
 		return
 	}
 
@@ -932,8 +945,8 @@ func validateCreate(req *registryCreateRequest) error {
 	if req.Name == "" {
 		return errors.New("name required")
 	}
-	if !validKinds[req.Kind] {
-		return errors.New("invalid kind")
+	if err := validateRegistryKind(req.Kind); err != nil {
+		return err
 	}
 	if req.Endpoint == "" {
 		return errors.New("endpoint required")
@@ -952,6 +965,13 @@ func validateCreate(req *registryCreateRequest) error {
 	policy := normalizeRegistryScanPolicy(req.ScanPolicy, req.ImageGlobs)
 	if err := validateRegistryScanPolicy(policy); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateRegistryKind(kind string) error {
+	if !validKinds[kind] {
+		return fmt.Errorf("unsupported registry kind %q", kind)
 	}
 	return nil
 }

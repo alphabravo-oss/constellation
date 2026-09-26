@@ -40,8 +40,11 @@ func TestRuntimeThreats_BulkRoundTrip(t *testing.T) {
 	}
 
 	tokenName := "wave5-test-" + uuid.New().String()
-	raw, _, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, tokenName, time.Hour)
+	raw, tokenID, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, tokenName, time.Hour)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO cluster_init_bundles (org_id, cluster_id, name, expires_at, runtime_agent_token_id, kek_fingerprint, contents_encrypted) VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`, orgID, clusterID, "threat-test-"+uuid.NewString(), tokenID); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -198,8 +201,11 @@ func TestRuntimeThreats_V2SuppressLogSkipsThreatRow(t *testing.T) {
 	}
 
 	tokenName := "threat-v2-suppress-" + uuid.New().String()
-	raw, _, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, tokenName, time.Hour)
+	raw, tokenID, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, tokenName, time.Hour)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO cluster_init_bundles (org_id, cluster_id, name, expires_at, runtime_agent_token_id, kek_fingerprint, contents_encrypted) VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`, orgID, clusterID, "threat-test-"+uuid.NewString(), tokenID); err != nil {
 		t.Fatal(err)
 	}
 	workloadID := "payments/api-" + uuid.New().String()
@@ -330,8 +336,11 @@ func TestRuntimeThreats_CategoryFilter(t *testing.T) {
 
 	node := "cat-filter-node-" + uuid.New().String()
 	tokenName := "cat-filter-" + uuid.New().String()
-	raw, _, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, tokenName, time.Hour)
+	raw, tokenID, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, tokenName, time.Hour)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO cluster_init_bundles (org_id, cluster_id, name, expires_at, runtime_agent_token_id, kek_fingerprint, contents_encrypted) VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`, orgID, clusterID, "threat-test-"+uuid.NewString(), tokenID); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {

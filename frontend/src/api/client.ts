@@ -1,49 +1,74 @@
-import axios, { type AxiosInstance } from "axios";
+import axios, { type AxiosInstance, type InternalAxiosRequestConfig } from "axios";
 
-const STORAGE_TOKEN = "constellation.token";
+type SessionRequest = InternalAxiosRequestConfig & { sessionRetried?: boolean; sessionGeneration?: number };
+let sessionGeneration = 0;
+let refreshInFlight: Promise<void> | null = null;
+
+if (typeof localStorage !== "undefined") localStorage.removeItem("constellation.token");
 
 const api: AxiosInstance = axios.create({
   baseURL: "/api/v1",
   withCredentials: true,
+  headers: { "X-Constellation-Client": "browser" },
 });
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem(STORAGE_TOKEN);
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
+  const request = config as SessionRequest;
+  request.sessionGeneration ??= sessionGeneration;
   return config;
 });
 
+const sessionTransport = axios.create({
+  baseURL: "/api/v1",
+  withCredentials: true,
+  headers: { "X-Constellation-Client": "browser" },
+});
+
+export function refreshBrowserSession(): Promise<void> {
+  if (!refreshInFlight) {
+    const rotate = async () => {
+      await sessionTransport.post("/auth/refresh");
+      sessionGeneration += 1;
+    };
+    const refresh = typeof navigator !== "undefined" && navigator.locks
+      ? navigator.locks.request("constellation-session-refresh", async () => {
+        try {
+          await sessionTransport.get("/auth/me");
+          sessionGeneration += 1;
+        } catch (error) {
+          if (!axios.isAxiosError(error) || error.response?.status !== 401) throw error;
+          await rotate();
+        }
+      })
+      : rotate();
+    refreshInFlight = Promise.resolve(refresh).then(() => {}).finally(() => { refreshInFlight = null; });
+  }
+  return refreshInFlight;
+}
+
 api.interceptors.response.use(
   (r) => r,
-  (err) => {
-    if (err.response?.status === 401) {
-      const sentAuth = Boolean(err.config?.headers?.Authorization);
-      const url: string = err.config?.url || "";
-      // Only treat as a real session expiry if the request carried our token AND
-      // it was either /auth/me (the canonical session probe) or any non-auth API call.
-      // Login attempts (/auth/login) returning 401 are user-typo events, not session expiry.
-      const isLoginAttempt = url.includes("/auth/login");
-      if (sentAuth && !isLoginAttempt) {
-        localStorage.removeItem(STORAGE_TOKEN);
-        if (!window.location.pathname.startsWith("/auth/login") && !window.location.pathname.startsWith("/login")) {
-          window.location.href = "/auth/login";
+  async (err) => {
+    const request = err.config as SessionRequest | undefined;
+    const url = request?.url ?? "";
+    const protectedRequest = !url.startsWith("/auth/") || ["/auth/me", "/auth/logout", "/auth/change-password"].includes(url);
+    if (err.response?.status === 401 && request && protectedRequest && !request.headers.Authorization) {
+      if (!request.sessionRetried) {
+        request.sessionRetried = true;
+        try {
+          if (request.sessionGeneration === sessionGeneration) await refreshBrowserSession();
+          return await api.request(request);
+        } catch (refreshError) {
+          if (!axios.isAxiosError(refreshError) || refreshError.response?.status !== 401) throw refreshError;
         }
+      }
+      if (!window.location.pathname.startsWith("/auth/login") && !window.location.pathname.startsWith("/login")) {
+        window.location.href = "/auth/login";
       }
     }
     return Promise.reject(err);
   },
 );
-
-export function setToken(t: string | null) {
-  if (t) localStorage.setItem(STORAGE_TOKEN, t);
-  else localStorage.removeItem(STORAGE_TOKEN);
-}
-
-export function getToken(): string | null {
-  return localStorage.getItem(STORAGE_TOKEN);
-}
 
 export { api };
 
@@ -2345,14 +2370,17 @@ export const network = {
     const qs = new URLSearchParams();
     if (params.cluster_id) qs.set("cluster_id", params.cluster_id);
     const url = `/api/v1/network/flows:stream${qs.toString() ? `?${qs.toString()}` : ""}`;
-    const token = getToken();
     void (async () => {
       try {
-        const res = await fetch(url, {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        const options: RequestInit = {
           credentials: "include",
           signal: controller.signal,
-        });
+        };
+        let res = await fetch(url, options);
+        if (res.status === 401 && !controller.signal.aborted) {
+          await refreshBrowserSession();
+          res = await fetch(url, options);
+        }
         if (!res.ok || !res.body) return;
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
@@ -2861,6 +2889,46 @@ export interface MigrationUnsupported {
   source?: Record<string, unknown>;
 }
 
+export type MigrationDiffAction = "create" | "update" | "unchanged";
+
+export interface MigrationVulnerabilityProfile {
+  name: string;
+  description: string;
+  active: boolean;
+  entries: VPEntry[];
+  domain_scope: VulnProfile["domain_scope"];
+  cluster_id?: string;
+  imported_from?: Record<string, string>;
+  diff_action: MigrationDiffAction;
+}
+
+export interface MigrationRegistry {
+  name: string;
+  kind: string;
+  endpoint: string;
+  image_globs: string[];
+  auth_kind: "none";
+  scan_cadence: "manual";
+  credentials_required: boolean;
+  imported_from?: Record<string, string>;
+  diff_action: MigrationDiffAction;
+}
+
+export interface MigrationAppliedSummary extends Record<string, number | undefined> {
+  created?: number;
+  updated?: number;
+  unchanged?: number;
+  policies?: number;
+  file_profiles?: number;
+  process_profiles?: number;
+  groups?: number;
+  network_rules?: number;
+  dpi_rules?: number;
+  dpi_bindings?: number;
+  vulnerability_profiles?: number;
+  registries?: number;
+}
+
 export interface MigrationPreview {
   import_id?: string;
   summary: {
@@ -2871,6 +2939,7 @@ export interface MigrationPreview {
     unaccounted_source?: number;
     create: number;
     update: number;
+    unchanged?: number;
     enforce: number;
     monitor: number;
     enabled: number;
@@ -2880,6 +2949,8 @@ export interface MigrationPreview {
     dpi_rules: number;
     dpi_bindings: number;
     network_rules: number;
+    vulnerability_profiles?: number;
+    registries?: number;
     unsupported: number;
     engines: Record<string, number>;
     categories: Record<string, number>;
@@ -2985,6 +3056,8 @@ export interface MigrationPreview {
     imported_from?: Record<string, string>;
     diff_action: "create" | "update";
   }>;
+  vulnerability_profiles?: MigrationVulnerabilityProfile[];
+  registries?: MigrationRegistry[];
   unsupported?: MigrationUnsupported[];
   rollback_bundle: string;
 }
@@ -2994,7 +3067,7 @@ export interface MigrationImportListItem {
   source: string;
   status: "previewed" | "applied" | "partial_applied" | "rolled_back" | "failed" | string;
   summary: MigrationPreview["summary"];
-  applied_summary?: Record<string, number>;
+  applied_summary?: MigrationAppliedSummary;
   unsupported?: MigrationUnsupported[];
   error?: string;
   created_at: string;
@@ -3006,18 +3079,39 @@ export interface MigrationApplyResponse {
   id: string;
   status: string;
   already_applied?: boolean;
-  applied?: Record<string, number>;
+  applied?: MigrationAppliedSummary;
   unsupported?: MigrationUnsupported[];
 }
 
 export interface MigrationRollbackResponse {
   id: string;
   status: "rolled_back" | string;
-  restored: number;
-  deleted: number;
+  restored?: number;
+  deleted?: number;
+  already_rolled_back?: boolean;
 }
 
-export type MigrationRollbackBundle = Record<string, unknown>;
+export interface MigrationVulnerabilityRollback {
+  id: string;
+  action: "create" | "update";
+  applied_at: string;
+  before?: Omit<MigrationVulnerabilityProfile, "diff_action"> & { diff_action?: "" };
+  before_entries?: VPEntry[];
+  before_domain_scope?: Record<string, unknown>;
+}
+
+export interface MigrationRegistryRollback {
+  id: string;
+  action: "create";
+  applied_at: string;
+}
+
+export interface MigrationRollbackBundle extends Record<string, unknown> {
+  source?: string;
+  generated_at?: string;
+  vulnerability_profiles?: MigrationVulnerabilityRollback[];
+  registries?: MigrationRegistryRollback[];
+}
 
 export interface OnboardingOverview {
   install_methods: Array<{ id: string; name: string; status: string; command: string }>;
@@ -4648,6 +4742,11 @@ export const settingsApi = {
     api.patch<{ settings: Record<string, unknown> }>("/settings/user", patch).then((r) => r.data),
 };
 
+export interface ConfigProvenance {
+  source: "default" | "environment_bootstrap" | "database";
+  redacted: boolean;
+}
+
 export interface SystemConfigResponse {
   config: Record<string, unknown>;
   revision: number;
@@ -4655,6 +4754,15 @@ export interface SystemConfigResponse {
   updated_at?: string;
   updated_by?: string;
   updated_by_email?: string;
+  provenance?: Record<string, ConfigProvenance>;
+  applied?: {
+    provider: {
+      component: "system_config_provider";
+      scope: "serving_replica";
+      revision: number | null;
+      status: "current" | "behind" | "ahead" | "unavailable";
+    };
+  };
 }
 
 export const systemConfigApi = {
@@ -5285,7 +5393,7 @@ export const runtimeEvents = {
 
 export const auth = {
   login: (email: string, password: string) =>
-    api.post<{ token: string; expires_at: string }>(`/auth/login`, { email, password }).then((r) => r.data),
+    api.post<{ expires_at: string }>(`/auth/login`, { email, password }).then((r) => r.data),
   me:    () => api.get<{ user_id: string; org_id: string; email: string; roles: string[] }>("/auth/me").then((r) => r.data),
   logout: () => api.post(`/auth/logout`).then((r) => r.data),
   oidcStart: () => api.get<{ authorize_url: string }>(`/auth/oidc/start`).then((r) => r.data),
@@ -5490,6 +5598,7 @@ export interface BackupSchedule {
 }
 
 export interface BackupManifestDTO {
+  verified: boolean;
   format_version: string;
   org_id: string;
   org_name: string;
@@ -5600,7 +5709,7 @@ export const backupsApi = {
     api.post<BackupManifestDTO>("/backups/verify", file, {
       headers: { "Content-Type": "application/octet-stream" },
     }).then((r) => r.data),
-  restore: (file: File, opts: { on_conflict?: "skip" | "overwrite"; allow_unverified?: boolean }) =>
+  restore: (file: File, opts: { on_conflict?: "skip" | "overwrite" }) =>
     api.post(`/backups/restore`, file, {
       params: opts,
       headers: { "Content-Type": "application/octet-stream" },

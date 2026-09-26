@@ -1,5 +1,9 @@
 # Constellation vs NeuVector — Capability & Security Audit
 
+> Historical point-in-time audit. Findings may have been closed since this was
+> written. Use [the canonical parity plan](NEUVECTOR-PARITY-PLAN.md) for current
+> status and verify claims against the current tree.
+
 _Adversarially-verified comparison across 10 security dimensions._
 _Date: 2026-06-23_
 

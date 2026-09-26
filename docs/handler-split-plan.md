@@ -1,7 +1,8 @@
 # `internal/handler` god-package split plan (WS-D / D2)
 
 Status: **plan + 1 proof-of-pattern extraction landed** (`handler/network`).
-Tracking: stabilization plan §D2 (`docs/constellation-stabilization-and-parity-plan.md:573`).
+Tracking: architecture-specific continuation; parity-level status is summarized
+in [the canonical parity plan](NEUVECTOR-PARITY-PLAN.md).
 
 ## Why
 

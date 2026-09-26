@@ -27,6 +27,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -373,6 +374,23 @@ func (h *PcapHTTP) Delete(w http.ResponseWriter, r *http.Request) {
 
 // ----- agent endpoints -------------------------------------------------------
 
+func (h *PcapHTTP) agentCluster(w http.ResponseWriter, r *http.Request, tok *handler.RuntimeAgentToken) (uuid.UUID, bool) {
+	clusterID, err := handler.ResolveAgentClusterID(r.Context(), h.db, tok)
+	if err != nil {
+		if errors.Is(err, handler.ErrAgentClusterScope) {
+			jsonError(w, http.StatusForbidden, "agent token cluster scope mismatch")
+			return uuid.Nil, false
+		}
+		jsonError(w, http.StatusInternalServerError, "resolve cluster failed")
+		return uuid.Nil, false
+	}
+	if clusterID == nil {
+		jsonError(w, http.StatusForbidden, "agent token cluster scope is ambiguous")
+		return uuid.Nil, false
+	}
+	return *clusterID, true
+}
+
 // Claim handles GET /api/v1/runtime-pcap/claim?cluster_id=... — the agent
 // asks for the next pending capture in its cluster, atomically marks it
 // running. Returns 204 (no content) when there's nothing to do.
@@ -389,6 +407,14 @@ func (h *PcapHTTP) Claim(w http.ResponseWriter, r *http.Request) {
 	clusterID, err := uuid.Parse(strings.TrimSpace(r.URL.Query().Get("cluster_id")))
 	if err != nil {
 		jsonError(w, http.StatusBadRequest, "cluster_id required")
+		return
+	}
+	boundCluster, ok := h.agentCluster(w, r, tok)
+	if !ok {
+		return
+	}
+	if clusterID != boundCluster {
+		jsonError(w, http.StatusForbidden, "agent token cluster scope mismatch")
 		return
 	}
 	node := strings.TrimSpace(r.URL.Query().Get("node"))
@@ -456,11 +482,15 @@ func (h *PcapHTTP) Upload(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
+	boundCluster, ok := h.agentCluster(w, r, tok)
+	if !ok {
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxPcapBytes+1024)
 
 	// Verify the capture belongs to this org + is in running state.
 	got, err := h.getByID(r.Context(), tok.OrgID, id)
-	if err != nil || got == nil {
+	if err != nil || got == nil || got.ClusterID != boundCluster {
 		jsonError(w, http.StatusNotFound, "not found")
 		return
 	}
@@ -511,8 +541,8 @@ UPDATE runtime_pcap_captures
        file_size_bytes = $2,
        sha256 = $3,
        completed_at = NOW()
- WHERE id = $4 AND org_id = $5`,
-		path, written, sum, id, tok.OrgID); err != nil {
+	 WHERE id = $4 AND org_id = $5 AND cluster_id = $6`,
+		path, written, sum, id, tok.OrgID, boundCluster); err != nil {
 		jsonError(w, http.StatusInternalServerError, "update: "+err.Error())
 		return
 	}
@@ -546,6 +576,15 @@ func (h *PcapHTTP) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
+	boundCluster, ok := h.agentCluster(w, r, tok)
+	if !ok {
+		return
+	}
+	got, err := h.getByID(r.Context(), tok.OrgID, id)
+	if err != nil || got == nil || got.ClusterID != boundCluster {
+		jsonError(w, http.StatusNotFound, "not found")
+		return
+	}
 	var req AgentStatusUpdate
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -567,12 +606,12 @@ func (h *PcapHTTP) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.db.Pool().Exec(r.Context(), `
 UPDATE runtime_pcap_captures
    SET status = $1, error_message = $2, packet_count = COALESCE(NULLIF($3,0::bigint), packet_count)`+completedAtClause+`
- WHERE id = $4 AND org_id = $5`,
-		string(req.Status), req.ErrorMessage, req.PacketCount, id, tok.OrgID); err != nil {
+ WHERE id = $4 AND org_id = $5 AND cluster_id = $6`,
+		string(req.Status), req.ErrorMessage, req.PacketCount, id, tok.OrgID, boundCluster); err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	got, _ := h.getByID(r.Context(), tok.OrgID, id)
+	got, _ = h.getByID(r.Context(), tok.OrgID, id)
 	httpx.WriteJSON(w, http.StatusOK, got)
 }
 

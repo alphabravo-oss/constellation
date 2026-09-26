@@ -47,9 +47,16 @@ VALUES ($1, $2, 'local-k3s', 'kubernetes', 'connected')`, clusterID, orgID); err
 		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgID)
 	})
 
-	runtimeToken, _, err := IssueRuntimeAgentToken(ctx, pool, orgID, "platform-facts-test", time.Hour)
+	runtimeToken, tokenID, err := IssueRuntimeAgentToken(ctx, pool, orgID, "platform-facts-test", time.Hour)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+INSERT INTO cluster_init_bundles
+  (org_id, cluster_id, name, expires_at, runtime_agent_token_id, kek_fingerprint, contents_encrypted)
+VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`,
+		orgID, clusterID, "platform-facts-"+uuid.NewString(), tokenID); err != nil {
+		t.Fatalf("bundle: %v", err)
 	}
 	body, _ := json.Marshal(PlatformFactsReport{
 		ClusterID:            clusterID,
@@ -175,5 +182,114 @@ SELECT id
 	}
 	if latestEvidenceID != report.ScanEvidenceID {
 		t.Fatalf("latest evidence = %s report = %s", latestEvidenceID, report.ScanEvidenceID)
+	}
+}
+
+func TestPlatformFactsReportRejectsUnboundClustersWithoutWrites(t *testing.T) {
+	d := openTestDB(t)
+	t.Cleanup(d.Close)
+	ctx := context.Background()
+	pool := d.Pool()
+	orgID, foreignOrgID := uuid.New(), uuid.New()
+	boundClusterID, otherClusterID, foreignClusterID := uuid.New(), uuid.New(), uuid.New()
+	for _, id := range []uuid.UUID{orgID, foreignOrgID} {
+		if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, display_name) VALUES ($1, $2, $2)`, id, "platform-scope-"+id.String()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id IN ($1, $2)`, orgID, foreignOrgID)
+	})
+	for _, cluster := range []struct{ id, orgID uuid.UUID }{
+		{boundClusterID, orgID}, {otherClusterID, orgID}, {foreignClusterID, foreignOrgID},
+	} {
+		if _, err := pool.Exec(ctx, `INSERT INTO clusters (id, org_id, name, state) VALUES ($1, $2, $3, 'pending')`,
+			cluster.id, cluster.orgID, "platform-scope-"+cluster.id.String()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	issue := func(bundleClusterID *uuid.UUID) string {
+		t.Helper()
+		raw, tokenID, err := IssueRuntimeAgentToken(ctx, pool, orgID, "platform-scope-"+uuid.NewString(), time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bundleClusterID != nil {
+			if _, err := pool.Exec(ctx, `
+INSERT INTO cluster_init_bundles
+  (org_id, cluster_id, name, expires_at, runtime_agent_token_id, kek_fingerprint, contents_encrypted)
+VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`,
+				orgID, *bundleClusterID, "platform-scope-"+uuid.NewString(), tokenID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return raw
+	}
+	boundToken := issue(&boundClusterID)
+	unboundToken := issue(nil)
+	foreignBundleToken := issue(&foreignClusterID)
+	singleClusterToken, _, err := IssueRuntimeAgentToken(ctx, pool, foreignOrgID, "platform-scope-"+uuid.NewString(), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scannerToken, _, err := IssueScannerToken(ctx, pool, orgID, "platform-scope-"+uuid.NewString(), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, testCase := range []struct {
+		name      string
+		token     string
+		clusterID uuid.UUID
+		wantCode  int
+	}{
+		{name: "foreign cluster", token: boundToken, clusterID: foreignClusterID, wantCode: http.StatusNotFound},
+		{name: "ambiguous token", token: unboundToken, clusterID: boundClusterID, wantCode: http.StatusForbidden},
+		{name: "unbound single cluster", token: singleClusterToken, clusterID: foreignClusterID, wantCode: http.StatusForbidden},
+		{name: "same-org mismatch", token: boundToken, clusterID: otherClusterID, wantCode: http.StatusForbidden},
+		{name: "foreign bundle", token: foreignBundleToken, clusterID: boundClusterID, wantCode: http.StatusForbidden},
+		{name: "scanner token", token: scannerToken, clusterID: boundClusterID, wantCode: http.StatusUnauthorized},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			body, err := json.Marshal(PlatformFactsReport{
+				ClusterID: testCase.clusterID, Distro: "k3s", KubernetesGitVersion: "v1.30.1+k3s1",
+				Components: []PlatformComponent{{Name: "coredns", Version: "1.11.1"}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/platform-facts:report", bytes.NewReader(body))
+			req.Header.Set("Authorization", "Bearer "+testCase.token)
+			rec := httptest.NewRecorder()
+			AnyServiceTokenMiddleware(pool)(http.HandlerFunc(NewPlatformFacts(d).Report)).ServeHTTP(rec, req)
+			if rec.Code != testCase.wantCode {
+				t.Fatalf("status=%d want=%d body=%s", rec.Code, testCase.wantCode, rec.Body.String())
+			}
+
+			for _, check := range []struct {
+				name  string
+				query string
+			}{
+				{"facts", `SELECT COUNT(*) FROM cluster_platform_facts WHERE org_id IN ($1, $2)`},
+				{"targets", `SELECT COUNT(*) FROM scan_targets WHERE org_id IN ($1, $2) AND type = 'platform'`},
+				{"evidence", `SELECT COUNT(*) FROM scan_evidence WHERE org_id IN ($1, $2) AND target_type = 'platform'`},
+				{"jobs", `SELECT COUNT(*) FROM scan_jobs sj JOIN scan_targets st ON st.id = sj.target_id WHERE sj.org_id IN ($1, $2) AND st.type = 'platform'`},
+			} {
+				var count int
+				if err := pool.QueryRow(ctx, check.query, orgID, foreignOrgID).Scan(&count); err != nil {
+					t.Fatal(err)
+				}
+				if count != 0 {
+					t.Fatalf("rejected report persisted %d %s", count, check.name)
+				}
+			}
+			var changedClusters int
+			if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM clusters WHERE org_id IN ($1, $2) AND (state <> 'pending' OR distro <> 'kubernetes' OR last_heartbeat_at IS NOT NULL)`, orgID, foreignOrgID).Scan(&changedClusters); err != nil {
+				t.Fatal(err)
+			}
+			if changedClusters != 0 {
+				t.Fatalf("rejected report updated %d clusters", changedClusters)
+			}
+		})
 	}
 }

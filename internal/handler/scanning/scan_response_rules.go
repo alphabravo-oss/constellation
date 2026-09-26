@@ -8,7 +8,8 @@
 // Webhook actions fire inside the injected evaluator (which owns the notify dispatcher, like
 // the runtime path). The returned non-webhook actions are applied here: quarantine reuses the
 // origin='auto' quarantine_entries bridge (scoped to the image, NeuVector's "block this
-// vulnerable image at admission" primitive); suppress_log/tag stay audit-recorded.
+// vulnerable image at admission" primitive); suppress_log reports that scan completion
+// has no security-event log to suppress, and legacy tag actions report unsupported.
 package scanning
 
 import (
@@ -122,8 +123,10 @@ func (h *ScanJobs) dispatchScanResponseRules(ctx context.Context, orgID uuid.UUI
 // records an origin='auto', scope='image' quarantine_entries row (the same insert the runtime
 // bridge uses) so the vulnerable image is blocked at next admission — but only when the scan
 // is attributable to a cluster (target.ClusterID); a registry/repository scan with no cluster
-// has nowhere to enforce, so it is audit-recorded only. suppress_log/tag are metadata-only and
-// stay audit-recorded. Webhook delivery already happened inside the evaluator.
+// has nowhere to enforce, so it is audit-recorded only. Scan completion writes operational
+// history, not a security-event log or generic notification; suppress_log has no such output
+// to suppress. Legacy tag actions are explicitly unsupported. Webhook delivery already
+// happened inside the evaluator.
 func (h *ScanJobs) applyScanResponseRuleActions(ctx context.Context, orgID uuid.UUID, target handler.ScanTarget, identity scanImageIdentity, ev *responserule.Event, actions []responserule.Action) {
 	for i := range actions {
 		a := actions[i]
@@ -139,6 +142,14 @@ func (h *ScanJobs) applyScanResponseRuleActions(ctx context.Context, orgID uuid.
 		}
 		for k, v := range a.Params {
 			after["param_"+k] = v
+		}
+		if a.Type == responserule.ActionTag {
+			after["enforced"] = "unsupported"
+			after["enforce_error"] = "tag action has no image or workload label side effect"
+		}
+		if a.Type == responserule.ActionSuppressLog {
+			after["enforced"] = "skipped_no_security_event"
+			after["enforce_skip_reason"] = "scan completion emits no security-event log or generic notification"
 		}
 		if a.Type == responserule.ActionQuarantine {
 			matchKey := scanImageMatchKey(target, identity)

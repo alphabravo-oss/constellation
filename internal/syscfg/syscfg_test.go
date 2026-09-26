@@ -414,6 +414,38 @@ func TestSyslogSenderAccessor(t *testing.T) {
 	}
 }
 
+func TestSyslogTLSMaterialRequiresTLSTransport(t *testing.T) {
+	ca := testCACert(t)
+	for _, tc := range []struct {
+		name     string
+		target   SyslogTarget
+		wantFail bool
+	}{
+		{"plaintext CA", SyslogTarget{Host: "siem.local", Port: 514, Protocol: "tcp", CACert: ca}, true},
+		{"plaintext client keypair", SyslogTarget{Host: "siem.local", Port: 514, Protocol: "udp", ClientCert: "cert", ClientKey: "key"}, true},
+		{"TLS protocol", SyslogTarget{Host: "siem.local", Port: 6514, Protocol: "tls", CACert: ca}, false},
+		{"TLS toggle", SyslogTarget{Host: "siem.local", Port: 6514, Protocol: "tcp", TLS: true, CACert: ca}, false},
+		{"legacy plaintext", SyslogTarget{Host: "siem.local", Port: 514, Protocol: "udp"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Default()
+			cfg.SyslogSIEM = tc.target
+			err := cfg.Validate()
+			if tc.wantFail {
+				validation := requireSafeValidation(t, err, "")
+				for _, field := range validation.Fields {
+					if field.Field == "syslog_siem_target.tls" {
+						return
+					}
+				}
+				t.Fatalf("Validate() fields = %v, want syslog_siem_target.tls", validation.Fields)
+			} else if err != nil {
+				t.Fatalf("Validate() = %v, want success", err)
+			}
+		})
+	}
+}
+
 // testCACert returns a valid self-signed CA cert PEM for the CA-bundle validation tests.
 func testCACert(t *testing.T) string {
 	t.Helper()

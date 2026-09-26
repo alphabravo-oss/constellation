@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
@@ -48,6 +49,17 @@ func (c *Compliance) ListExemptions(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
+	}
+	if clusterArg != nil {
+		var owned bool
+		if err := c.db.Pool().QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM clusters WHERE id = $1 AND org_id = $2)`, clusterArg, subj.OrgID).Scan(&owned); err != nil {
+			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if !owned {
+			httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found"})
+			return
+		}
 	}
 	items, err := c.listExemptions(r, subj.OrgID, framework, controlID, clusterArg)
 	if err != nil {
@@ -99,10 +111,15 @@ func (c *Compliance) CreateExemption(w http.ResponseWriter, r *http.Request) {
 	var id uuid.UUID
 	if err := c.db.Pool().QueryRow(r.Context(), `
 INSERT INTO compliance_exemptions (org_id, cluster_id, framework, control_id, reason, approved_by, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+SELECT $1, $2, $3, $4, $5, $6, $7
+WHERE $2::uuid IS NULL OR EXISTS (SELECT 1 FROM clusters WHERE id = $2 AND org_id = $1)
 RETURNING id`,
 		subj.OrgID, clusterArg, body.Framework, body.ControlID, body.Reason, subj.UserID, expiresAt.UTC(),
 	).Scan(&id); err != nil {
+		if err == pgx.ErrNoRows {
+			httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found"})
+			return
+		}
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -133,9 +150,10 @@ func (c *Compliance) RevokeExemption(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tag, err := c.db.Pool().Exec(r.Context(), `
-UPDATE compliance_exemptions
+UPDATE compliance_exemptions AS ce
    SET revoked_at = NOW(), updated_at = NOW()
- WHERE id = $1 AND org_id = $2 AND revoked_at IS NULL`, id, subj.OrgID)
+ WHERE ce.id = $1 AND ce.org_id = $2 AND ce.revoked_at IS NULL
+   AND (ce.cluster_id IS NULL OR EXISTS (SELECT 1 FROM clusters WHERE id = ce.cluster_id AND org_id = $2))`, id, subj.OrgID)
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -159,8 +177,9 @@ UPDATE compliance_exemptions
 func (c *Compliance) listExemptions(r *http.Request, orgID uuid.UUID, framework, controlID string, clusterArg any) ([]complianceExemptionDTO, error) {
 	rows, err := c.db.Pool().Query(r.Context(), `
 SELECT id, cluster_id, framework, control_id, reason, approved_by, expires_at, created_at, revoked_at
-  FROM compliance_exemptions
- WHERE org_id = $1
+  FROM compliance_exemptions AS ce
+ WHERE ce.org_id = $1
+   AND (ce.cluster_id IS NULL OR EXISTS (SELECT 1 FROM clusters WHERE id = ce.cluster_id AND org_id = $1))
    AND ($2::text = '' OR framework = $2)
    AND ($3::text = '' OR control_id = $3)
    AND ($4::uuid IS NULL OR cluster_id = $4 OR cluster_id IS NULL)

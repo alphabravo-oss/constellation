@@ -447,7 +447,7 @@ func (h *RuntimeThreats) evalThreatRulesSafe(ctx context.Context, orgID uuid.UUI
 // applyThreatResponseRuleActions applies the ordered E1 actions, reusing the
 // same quarantineRuntime bridge the events path uses. Each action is audited so
 // the enforcement is observable. suppress_log was already honored (audit/notify
-// skipped); webhooks fired inside the evaluator; quarantine/isolate/tag land
+// skipped); webhooks fired inside the evaluator; quarantine/isolate land
 // here. Best-effort, mirrors EventsIngest.applyResponseRuleActions.
 func (h *RuntimeThreats) applyThreatResponseRuleActions(ctx context.Context, orgID uuid.UUID, p *pendingThreatAlert, actions []responserule.Action) {
 	for i := range actions {
@@ -468,7 +468,8 @@ func (h *RuntimeThreats) applyThreatResponseRuleActions(ctx context.Context, org
 		case responserule.ActionSuppressLog:
 			after["enforced"] = "suppressed_log"
 		case responserule.ActionTag:
-			after["enforced"] = "tagged"
+			after["enforced"] = "unsupported"
+			after["enforce_error"] = "tag action has no event or workload label side effect"
 		case responserule.ActionWebhook:
 			after["enforced"] = "webhook_dispatched"
 		case responserule.ActionQuarantine:

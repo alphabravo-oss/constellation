@@ -31,7 +31,8 @@ type RegoPolicy struct {
 	Module string // the Rego source
 	Mode   string // monitor | enforce
 
-	query rego.PreparedEvalQuery
+	query        rego.PreparedEvalQuery
+	compileError error
 }
 
 // RegoEngine implements the Engine interface using a set of compiled Rego policies.
@@ -39,24 +40,24 @@ type RegoEngine struct {
 	Policies []*RegoPolicy
 }
 
-// NewRegoEngine compiles `modules` into RegoPolicy entries. Compilation errors are
-// returned per policy so the caller can surface them in the UI without rejecting the
-// whole set.
+// NewRegoEngine compiles `modules` into RegoPolicy entries. Invalid enforce-mode
+// policies stay in the engine as fail-closed sentinels rather than disappearing.
 func NewRegoEngine(ctx context.Context, modules map[string]string, modes map[string]string) (*RegoEngine, map[string]error, error) {
 	e := &RegoEngine{}
 	errs := map[string]error{}
 	for id, src := range modules {
+		mode := modes[id]
+		if mode == "" {
+			mode = "enforce"
+		}
 		q, err := rego.New(
 			rego.Query("data.constellation.admission.deny"),
 			rego.Module(id+".rego", src),
 		).PrepareForEval(ctx)
 		if err != nil {
 			errs[id] = err
+			e.Policies = append(e.Policies, &RegoPolicy{ID: id, Module: src, Mode: mode, compileError: err})
 			continue
-		}
-		mode := modes[id]
-		if mode == "" {
-			mode = "enforce"
 		}
 		e.Policies = append(e.Policies, &RegoPolicy{ID: id, Module: src, Mode: mode, query: q})
 	}
@@ -95,13 +96,23 @@ func (e *RegoEngine) evaluate(ctx context.Context, req *admissionv1.AdmissionReq
 
 	var warnings []string
 	for _, p := range e.Policies {
+		if p.compileError != nil {
+			if p.Mode != "monitor" {
+				resp.Allowed = false
+				resp.Result = &metav1.Status{Message: fmt.Sprintf("rego policy %q unavailable (denied fail-closed)", p.ID)}
+				resp.Warnings = warnings
+				return resp, p.ID
+			}
+			warnings = append(warnings, fmt.Sprintf("rego/%s (monitor) unavailable", p.ID))
+			continue
+		}
 		rs, err := p.query.Eval(ctx, rego.EvalInput(input))
 		if err != nil {
 			// Fail CLOSED on an enforce-mode eval error. An OPA query that errors
 			// out leaves the policy's verdict unknown; admitting on the error path
 			// would let a runtime fault silently disable an enforce rule. Monitor
 			// rules keep warning so they can never start blocking on an error.
-			if p.Mode == "enforce" {
+			if p.Mode != "monitor" {
 				resp.Allowed = false
 				resp.Result = &metav1.Status{
 					Message: fmt.Sprintf("rego policy %q evaluation error (denied fail-closed): %s", p.ID, err),
@@ -116,7 +127,7 @@ func (e *RegoEngine) evaluate(ctx context.Context, req *admissionv1.AdmissionReq
 		if len(denials) == 0 {
 			continue
 		}
-		if p.Mode == "enforce" {
+		if p.Mode != "monitor" {
 			resp.Allowed = false
 			resp.Result = &metav1.Status{
 				Message: fmt.Sprintf("rego policy %q denied: %v", p.ID, denials),

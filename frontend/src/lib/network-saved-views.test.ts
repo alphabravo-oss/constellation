@@ -21,7 +21,7 @@ describe("network activity saved views", () => {
       verdictsVisible: { allow: false, alert: true, block: true },
       protocolFilter: new Set(["http", "DNS", ""]),
       namespaceFilter: new Set(["prod", "default", "prod"]),
-      hideKubeSystem: false,
+      hidePlatformComponents: false,
       hiddenKinds: new Set(["unmanaged", "bad-kind", "external"]),
       scopeMode: "external",
       sessionFilters: {
@@ -48,7 +48,7 @@ describe("network activity saved views", () => {
     });
 
     expect(snapshot).toEqual({
-      schema_version: 1,
+      schema_version: 2,
       workspace_tab: "threats",
       hours: 24,
       namespace: "payments",
@@ -57,7 +57,7 @@ describe("network activity saved views", () => {
       verdicts_visible: { allow: false, alert: true, block: true },
       protocols: ["DNS", "HTTP"],
       namespaces: ["default", "prod"],
-      hide_kube_system: false,
+      hide_platform_components: false,
       hidden_kinds: ["unmanaged", "external"],
       scope_mode: "external",
       session_filters: {
@@ -117,7 +117,7 @@ describe("network activity saved views", () => {
         cluster_id: "cluster-1",
         saved_at: "2026-08-23T00:00:00.000Z",
         filters: {
-          schema_version: 1,
+          schema_version: 2,
           workspace_tab: "map",
           hours: 168,
           namespace: "payments",
@@ -126,7 +126,7 @@ describe("network activity saved views", () => {
           verdicts_visible: { allow: false, alert: true, block: true },
           protocols: ["TCP"],
           namespaces: ["payments"],
-          hide_kube_system: true,
+          hide_platform_components: true,
           hidden_kinds: ["unmanaged"],
           scope_mode: "internal",
           session_filters: {
@@ -170,7 +170,7 @@ describe("network activity saved views", () => {
     const view = makeView("view-1", "Blocked");
     expect(networkActivitySavedViewsStorageKey("cluster-1", "user-1")).toBe("constellation:network-activity:saved-views:cluster-1:user-1");
     expect(buildNetworkSavedViewsExport("cluster-1", [view], "2026-08-23T00:00:00.000Z")).toMatchObject({
-      schema_version: 1,
+      schema_version: 2,
       kind: "constellation.networkActivity.savedViews",
       cluster_id: "cluster-1",
       exported_at: "2026-08-23T00:00:00.000Z",
@@ -195,7 +195,7 @@ function makeView(id: string, name: string): NetworkSavedView {
       verdictsVisible: { allow: true, alert: true, block: true },
       protocolFilter: [],
       namespaceFilter: [],
-      hideKubeSystem: true,
+      hidePlatformComponents: true,
       hiddenKinds: ["unmanaged"],
       scopeMode: "both",
       sessionFilters: {},

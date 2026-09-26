@@ -55,11 +55,9 @@ test("findings page under a cluster is scoped to that cluster", async ({ page })
 
   // Verify via API that the response observes the cluster_id filter, since the
   // visible rows are limited to what fit in the viewport — the API is canonical.
-  const token = await page.evaluate(() => localStorage.getItem("constellation.token"));
   const apiBase = process.env.VITE_API_URL ?? "http://localhost:18080";
   const resp = await page.request.get(
     `${apiBase}/api/v1/findings?cluster_id=${clusterId}&limit=50`,
-    { headers: { Authorization: `Bearer ${token}` } },
   );
   expect(resp.ok()).toBeTruthy();
   const body = await resp.json();

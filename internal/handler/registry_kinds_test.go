@@ -2,8 +2,12 @@ package handler
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
@@ -17,6 +21,55 @@ func TestValidKinds_AcceptsNewConnectors(t *testing.T) {
 	}
 	if validKinds["not-a-registry"] {
 		t.Errorf("validKinds accepted a bogus kind")
+	}
+}
+
+func TestRegistryCreateKindValidation(t *testing.T) {
+	for _, kind := range []string{
+		"docker-hub", "ghcr", "ecr", "gcr", "acr", "quay", "harbor", "gitlab", "jfrog",
+		"ibmcloud", "openshift", "nexus", "generic-v2",
+	} {
+		t.Run(kind, func(t *testing.T) {
+			req := &registryCreateRequest{Name: "test", Kind: kind, Endpoint: "registry.example.com", AuthKind: "none"}
+			if err := validateCreate(req); err != nil {
+				t.Fatalf("advertised kind %q rejected: %v", kind, err)
+			}
+		})
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/registries", strings.NewReader(`{"name":"test","kind":"unknown","endpoint":"registry.example.com","auth_kind":"none"}`))
+	req = req.WithContext(WithSubject(req.Context(), Subject{OrgID: uuid.New(), UserID: uuid.New()}))
+	response := httptest.NewRecorder()
+	(&Registries{}).Create(response, req)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `unsupported registry kind`) {
+		t.Fatalf("unsupported create status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestRegistryPatchRejectsKind(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{"unsupported kind with other fields", `{"kind":"unknown","name":"renamed"}`, `unsupported registry kind`},
+		{"supported kind is immutable", `{"kind":"ghcr","name":"renamed"}`, `kind cannot be updated`},
+		{"null kind is not ignored", `{"kind":null,"name":"renamed"}`, `kind must be a non-empty string`},
+		{"empty kind is not ignored", `{"kind":"","name":"renamed"}`, `kind must be a non-empty string`},
+		{"non-string kind is rejected", `{"kind":42,"name":"renamed"}`, `kind must be a non-empty string`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			id := uuid.New().String()
+			req := httptest.NewRequest(http.MethodPatch, "/api/v1/registries/"+id, strings.NewReader(tc.body))
+			route := chi.NewRouteContext()
+			route.URLParams.Add("id", id)
+			req = req.WithContext(WithSubject(context.WithValue(req.Context(), chi.RouteCtxKey, route), Subject{OrgID: uuid.New(), UserID: uuid.New()}))
+			response := httptest.NewRecorder()
+			(&Registries{}).Patch(response, req)
+			if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), tc.want) {
+				t.Fatalf("patch status=%d body=%s, want %q", response.Code, response.Body.String(), tc.want)
+			}
+		})
 	}
 }
 

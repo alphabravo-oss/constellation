@@ -119,7 +119,7 @@ type ResponseRuleCondition struct {
 // ResponseRuleAction is one structured action, mirroring pkg/responserule.Action and the
 // response_rules.actions JSONB element shape ({type, params}).
 type ResponseRuleAction struct {
-	// Type is the action kind: quarantine | suppress_log | webhook | tag.
+	// Type is the action kind: quarantine | suppress_log | webhook.
 	Type string `json:"type"`
 	// Params carries action-specific knobs (e.g. {"receiver":"sec-webhook"} for webhook).
 	Params map[string]string `json:"params,omitempty"`

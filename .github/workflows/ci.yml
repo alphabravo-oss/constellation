@@ -1,0 +1,223 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  merge_group:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ARTIFACT_DIR: artifacts
+
+jobs:
+  quality:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - run: bash scripts/install-ci-tools.sh golangci-lint shellcheck actionlint
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12.14"
+      - run: make test-tooling
+      - run: make check-endpoint-mapping
+      - run: golangci-lint config verify
+      - run: make lint
+      - if: ${{ !cancelled() }}
+        run: make fmt
+      - if: ${{ !cancelled() }}
+        run: make lint-shell
+      - if: ${{ !cancelled() }}
+        run: actionlint
+      - if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: quality-reports
+          path: artifacts/
+          retention-days: 14
+
+  go-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [unit, integration]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - run: bash scripts/install-ci-tools.sh gotestsum goose
+      - run: bash scripts/test-go.sh "${{ matrix.suite }}"
+      - if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: go-${{ matrix.suite }}-reports
+          path: artifacts/
+          retention-days: 14
+
+  security:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        scanner: [gosec, govulncheck, gitleaks]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - run: bash scripts/install-ci-tools.sh "${{ matrix.scanner }}"
+      - run: bash scripts/security-scan.sh "${{ matrix.scanner }}"
+      - if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: security-${{ matrix.scanner }}
+          path: artifacts/
+          retention-days: 14
+      - if: ${{ !cancelled() && matrix.scanner != 'gitleaks' && hashFiles(format('artifacts/{0}.sarif', matrix.scanner)) != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+        uses: github/codeql-action/upload-sarif@b0565cb28b456da32509aef995361ffcc63f40b0 # v3.28.15
+        with:
+          sarif_file: artifacts/${{ matrix.scanner }}.sarif
+          category: ${{ matrix.scanner }}
+
+  frontend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run test:ci
+        working-directory: frontend
+      - if: ${{ !cancelled() }}
+        run: npm run build
+        working-directory: frontend
+      - if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frontend-reports
+          path: artifacts/
+          retention-days: 14
+
+  npm-dependencies:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { directory: frontend, name: frontend }
+          - { directory: tools/vscode-extension, name: vscode-extension }
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+      - run: |
+          mkdir -p artifacts
+          npm audit --prefix "${{ matrix.directory }}" --package-lock-only --json > artifacts/npm-audit.json
+      - if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: npm-audit-${{ matrix.name }}
+          path: artifacts/
+          retention-days: 14
+
+  python-dependencies:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12.14"
+      - run: |
+          python3 -m venv /tmp/pip-audit
+          /tmp/pip-audit/bin/pip install pip-audit==2.10.0
+          mkdir -p artifacts
+          /tmp/pip-audit/bin/pip-audit --requirement tools/constellation-test-suite/requirements.txt --format json --output artifacts/pip-audit.json
+      - if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: python-audit
+          path: artifacts/
+          retention-days: 14
+
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12.14"
+      - run: bash scripts/install-ci-tools.sh goose
+      - run: npm ci
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - run: bash scripts/test-browser.sh
+      - if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: browser-evidence
+          path: |
+            artifacts/
+            frontend/playwright-report/
+            frontend/test-results/
+          retention-days: 14
+
+  required:
+    if: ${{ always() }}
+    needs: [quality, go-tests, security, frontend, npm-dependencies, python-dependencies, browser]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every gate to pass
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: jq --exit-status 'all(.[]; .result == "success")' <<< "$RESULTS"

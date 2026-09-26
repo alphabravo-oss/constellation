@@ -1,5 +1,8 @@
 # NeuVector to Constellation API Mapping (2026-08)
 
+> Point-in-time runbook evidence. It is not a status tracker. Active work is
+> maintained only in [the canonical parity plan](NEUVECTOR-PARITY-PLAN.md).
+
 Purpose: help NeuVector operators translate scripts and runbooks to
 Constellation without reading source code. This document is scoped to the
 primary endpoint families present in the local NeuVector API spec
@@ -10,6 +13,80 @@ The live Constellation OpenAPI document is available from the product at:
 
 - Settings -> API Reference
 - `GET /openapi.json`
+
+## Check This Mapping
+
+From the Constellation repository root, run:
+
+```bash
+python3 scripts/check_endpoint_mapping.py
+```
+
+The checker validates explicit Constellation API paths and methods in this
+document against `internal/handler/openapi.json`, checks local Markdown links
+and anchors, and runs the existing Go tests that compare OpenAPI with registered
+routes.
+It needs Python 3 and Go; it does not call a running API or require a database.
+Wildcard references confirm that at least one OpenAPI path matches; they do
+not assert complete coverage of a route family.
+
+## Smoke-Check CLI Recipes Against a Local API
+
+Start a local Constellation API with its database and authentication configured.
+From the repository root, set a valid bearer token with permission to read
+groups, audit events, the security timeline, and scan jobs. Set `CLUSTER` to
+an existing cluster UUID in that token's organization. Use a loopback IP and
+explicit port; the runner rejects remote URLs, redirects, and proxy settings.
+
+```bash
+export CONSTELLATION=http://127.0.0.1:8080
+export TOKEN='<bearer-token>'
+export CLUSTER='<cluster-uuid>'
+python3 -B scripts/smoke_api_recipes.py
+```
+
+The default run makes four GET requests based on the group, audit, timeline,
+and scan-job recipes below. It checks HTTP 200 and JSON response shapes,
+limits audit and timeline pages to five rows, caps each response at 1 MiB,
+and uses a five-second network timeout. It prints only recipe names and
+pass/fail messages, never response bodies or bearer tokens. A failure stops
+the run; this is a small contract check, not exhaustive endpoint coverage.
+
+The production-container browser gate (`scripts/test-browser.sh`) obtains a
+disposable seeded API token and runs these four read-only recipes against its
+freshly built local API before Playwright. It also previews a fixed,
+non-sensitive vulnerability-profile fixture in that disposable database;
+preview persists history and audit but never applies. Arbitrary exports remain
+opt-in. A fixed apply/rollback fixture is available only with the separate
+`API_RECIPES_APPLY_ROLLBACK_FIXTURE=1` opt-in.
+
+To also check the migration preview recipe, explicitly opt in with a reviewed,
+UTF-8 NeuVector JSON export no larger than 512 KiB:
+
+```bash
+python3 -B scripts/smoke_api_recipes.py --preview-file nv-export.json
+```
+
+Preview sends one POST to `/api/v1/migration/preview` and checks its read-only
+summary. The API persists preview history and an audit record, but the runner
+does not apply or roll back arbitrary exports. It does not print the export, preview,
+import ID, or rollback bundle. The export may contain sensitive data, so review
+it before opting in and use a disposable local environment if appropriate.
+
+To smoke-test one fixed vulnerability-profile apply and rollback on a
+**disposable** local API, use the separate mutation mode (never combine it with
+`--preview-file`):
+
+```bash
+python3 -B scripts/smoke_api_recipes.py --apply-rollback-fixture
+```
+
+It refuses a preexisting fixture profile, verifies apply counts and retry
+idempotency, then verifies rollback and profile removal. On failure after an
+apply attempt it tries to roll back and reports when cleanup is unconfirmed;
+inspect import history in that case. The browser gate runs this mode only
+with `API_RECIPES_APPLY_ROLLBACK_FIXTURE=1`. Other mutating runbook recipes
+remain outside this bounded smoke check.
 
 ## Authentication
 
@@ -31,7 +108,7 @@ alias cx='curl -fsS -H "Authorization: Bearer $TOKEN"'
 | Users/roles | `/v1/user`, `/v1/user_role`, `/v1/server/{name}/role/{role}` | `/api/v1/access-control`, `/api/v1/users`, `/api/v1/custom-roles`, `/api/v1/access-control/role-bindings` | Settings -> Access Control | Implemented; provider test and group-mapping preview remain planned |
 | API keys | `/v1/api_key` | `/api/v1/api-tokens`, `/api/v1/api-tokens/{id}/rotate` | Settings -> API Tokens | Implemented |
 | Password profile | `/v1/password_profile` | `/api/v1/auth/security-policy` | Settings -> Security Policy | Implemented |
-| System config | `/v1/system/config`, `/v2/system/config` | `/api/v1/system/config`, `/api/v1/scanner/refresh` | Settings -> Effective Config, Network & Proxy, Scanner & CVE Sources | Implemented; redaction, diff, revision metadata, and per-component applied revision are visible; exact per-key backend provenance remains planned |
+| System config | `/v1/system/config`, `/v2/system/config` | `/api/v1/system/config`, `/api/v1/scanner/refresh` | Settings -> Effective Config, Network & Proxy, Scanner & CVE Sources | Partial; redaction, diff, revision metadata, and default/environment-bootstrap/database per-key provenance are visible; cluster/federation/linked-managed provenance and scanner acknowledgements remain planned |
 | Controllers | `/v1/controller`, `/v1/controller/{id}/stats` | `/api/v1/components?role=controller`, `/api/v1/components/{id}/diagnostics` | Components -> Controller filter | Implemented |
 | Enforcers | `/v1/enforcer`, `/v1/enforcer/{id}/stats` | `/api/v1/components?role=enforcer`, `/api/v1/heartbeats` | Components -> Enforcer filter | Implemented |
 | Scanners | `/v1/scan/scanner`, `/v1/scan/status`, `/v1/scan/cache_stat/{id}` | `/api/v1/scan/scanner`, `/api/v1/scan/status`, `/api/v1/scanner-cache/{scanner_id}/stat` | Scanner & CVE Sources, Components -> Scanner filter | Implemented; queue/capacity, cache, failed-job, retry ledger, and DB freshness views are live; autoscale cockpit remains planned |
@@ -45,7 +122,7 @@ alias cx='curl -fsS -H "Authorization: Bearer $TOKEN"'
 | File monitor | `/v1/file_monitor`, `/v1/file/config` | `/api/v1/runtime/file-profiles`, `/api/v1/runtime/file-profiles/{workload_id}`, `/api/v1/migration/preview`, `/api/v1/migration/imports/{id}:apply` | File Monitor, Migration Imports | Implemented; NeuVector file monitor profile exports preview/apply into workload-scoped file profile states and rules when the referenced group resolves to discovered workloads; missing cluster/group/member mappings remain structured unsupported rows |
 | DLP | `/v1/dlp/sensor`, `/v1/dlp/rule`, `/v1/file/dlp` | `/api/v1/runtime-dlp-rules`, `/api/v1/runtime/dpi-sensor-bindings`, `/api/v1/runtime/dlp-rules:bundle` | DLP Rules | Implemented for runtime rules and group detector scope; NeuVector DLP sensor/rule CRD and REST-style exports preview/apply into `runtime_dlp_rules` category `dlp`; source `dlp_group` scopes bind automatically when the target Constellation group already exists or is imported by the same migration preview, and otherwise remain structured unsupported rows |
 | WAF/DPI | `/v1/waf/sensor`, `/v1/waf/rule`, `/v1/file/waf` | `/api/v1/runtime-signatures`, `/api/v1/runtime/dpi-sensor-bindings`, `/api/v1/policies/dpi-threats` | WAF / DPI Signatures | Implemented for custom signatures and shared detector scope; NeuVector WAF sensor/rule exports preview/apply into `runtime_dlp_rules` category `waf` and are visible in WAF/DPI Signatures; source `waf_group` scopes bind automatically when the target Constellation group already exists or is imported by the same migration preview, and otherwise remain structured unsupported rows |
-| Response rules | `/v1/response/rule`, `/v1/file/response/rule` | `/api/v1/response-rules-v2`, `/api/v1/response-rule-defs`, `/api/v1/response-rules-v2:reorder` | Response Rules, Response Catalog | Implemented |
+| Response rules | `/v1/response/rule`, `/v1/file/response/rule` | `/api/v1/response-rules-v2`, `/api/v1/response-rule-defs`, `/api/v1/response-rules-v2:reorder` | Response Rules, Response Catalog | Partial; E1 `tag` is rejected for new/updated rules because no workload-label side effect exists. E1 scan `suppress_log` is also rejected because scan completion emits no security-event log to suppress; legacy attempts are audit-recorded as skipped. Full action parity remains planned |
 | Vulnerability profiles | `/v1/vulnerability/profile`, `/v1/file/vulnerability/profile` | `/api/v1/vuln-profiles`, `/api/v1/vuln-profiles:export`, `/api/v1/vuln-profiles:import` | Vuln Profiles | Implemented |
 | Registry scans | `/v1/scan/registry`, `/v2/scan/registry`, `/v1/scan/registry/{name}/scan` | `/api/v1/registries`, `/api/v1/registries/{id}/sync-now`, `/api/v1/registries/{id}/cancel-scans`, `/api/v1/registries/{id}/images`, `/api/v1/scan-jobs` | Registries, Scanner & CVE Sources | Implemented; NV schedule knobs, active-scan cancel, retry attempts, and failed-job triage are live; seeded fixture field reconciliation remains planned |
 | Image scan detail | `/v1/scan/image/{id}`, `/v1/scan/workload/{id}` | `/api/v1/image-scan-results`, `/api/v1/image-scan-results/{id}`, SBOM/VEX endpoints | Images, Image detail | Implemented and extends NV with SBOM/VEX |

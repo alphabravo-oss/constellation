@@ -4,7 +4,7 @@
 # Long-running golang:1.26-bookworm with the Constellation module pre-downloaded so
 # `go run ./cmd/<role>` inside a bind-mount feels snappy. Not for production.
 
-ARG GO_VERSION=1.26
+ARG GO_VERSION=1.26.8
 
 FROM golang:${GO_VERSION}-bookworm
 

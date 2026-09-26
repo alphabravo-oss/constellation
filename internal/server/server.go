@@ -530,24 +530,10 @@ func (s *Server) buildRouter() chi.Router {
 	r.Use(chimw.Recoverer)
 	r.Use(s.slogMiddleware)
 	r.Use(s.tel.HTTPMiddleware)
-	// A8 CORS/CSRF hardening:
-	//   - We authenticate exclusively via a bearer token in the Authorization header
-	//     (see authMiddleware — it reads only `Authorization: Bearer …`, never a cookie).
-	//     The browser does not attach the Authorization header automatically, so a
-	//     cross-site form/img/script cannot forge an authenticated mutation: this API
-	//     is structurally CSRF-immune. A CSRF-token middleware would only be required if
-	//     a cookie-authenticated mutation path is ever introduced — if you add one, add
-	//     double-submit / SameSite=strict CSRF protection alongside it.
-	//   - AllowCredentials is true, so per the Fetch spec the wildcard origin "*" is
-	//     forbidden (a wildcard with credentials would let any site read responses).
-	//     corsAllowedOrigins drops any "*"/empty entry defensively; if that leaves the
-	//     list empty we install a deny-all AllowOriginFunc below, so no cross-origin
-	//     browser request is permitted (same-origin only) rather than go-chi's
-	//     empty-list "allow all" default.
 	corsOpts := cors.Options{
 		AllowedOrigins:   corsAllowedOrigins(s.cfg.CORSOrigins),
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Authorization", "Content-Type", "X-Request-Id", "Idempotency-Key"},
+		AllowedHeaders:   []string{"Authorization", "Content-Type", "X-Request-Id", "Idempotency-Key", auth.BrowserHeader},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}
@@ -578,6 +564,7 @@ func (s *Server) buildRouter() chi.Router {
 	r.Get("/openapi.json", handler.OpenAPISpec)
 
 	r.Route("/api/v1", func(r chi.Router) {
+		r.Use(s.browserCSRF)
 		// A3: a lenient global per-token request ceiling on /api/v1/* — an abuse circuit
 		// breaker, not a fairness throttle. Keyed by the bearer token (JWT or PAT) so one
 		// credential cannot saturate the API; keyless requests fall back to the client IP.
@@ -599,7 +586,8 @@ func (s *Server) buildRouter() chi.Router {
 		// password-spray from a single source — complementing the per-account lockout
 		// (A2), which a botnet rotating accounts would otherwise sidestep. RealIP (set in
 		// buildRouter) feeds httprate the real client address behind the proxy.
-		auth := handler.NewAuth(s.db, s.signer, s.oidc, s.saml, s.ldap, s.auditLog).WithProviderSet(s.authProviders)
+		auth := handler.NewAuth(s.db, s.signer, s.oidc, s.saml, s.ldap, s.auditLog).WithProviderSet(s.authProviders).WithBrowserSessionTimeout(s.cfg.SessionIdleTimeout)
+		r.With(httprate.Limit(60, time.Minute, httprate.WithKeyByIP(), httprate.WithLimitHandler(rateLimited))).Post("/auth/refresh", auth.Refresh)
 		r.Group(func(r chi.Router) {
 			r.Use(httprate.Limit(
 				authIPRateLimit, time.Minute,
@@ -1706,8 +1694,13 @@ func (s *Server) slogMiddleware(next http.Handler) http.Handler {
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tok := bearerToken(r)
+		if r.Header.Get("Authorization") == "" {
+			if cookie, err := r.Cookie(auth.AccessCookie); err == nil {
+				tok = cookie.Value
+			}
+		}
 		if tok == "" {
-			writeError(w, http.StatusUnauthorized, "missing bearer token")
+			writeError(w, http.StatusUnauthorized, "missing session")
 			return
 		}
 		// PAT (Personal Access / API token) auth path. Tokens are minted via
@@ -1743,7 +1736,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			mustChange   bool
 		)
 		err = s.db.Pool().QueryRow(r.Context(),
-			`SELECT disabled, session_epoch, must_change_password FROM users WHERE id = $1`, claims.UserID,
+			`SELECT disabled, session_epoch, must_change_password FROM users WHERE id = $1 AND org_id = $2`, claims.UserID, claims.OrgID,
 		).Scan(&disabled, &sessionEpoch, &mustChange)
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusUnauthorized, "user not found")
@@ -1757,28 +1750,25 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "user disabled")
 			return
 		}
-		if claims.Epoch < sessionEpoch {
+		if claims.Epoch != sessionEpoch {
 			writeError(w, http.StatusUnauthorized, "session revoked")
 			return
 		}
-		// A3: concurrent-session cap. A login records its JWT's session id in
-		// user_sessions and evicts the oldest beyond the cap; a JWT whose session row is
-		// gone has been evicted (logged in on too many devices) and is rejected here.
-		// Legacy/test tokens minted without session tracking carry a session id too, so
-		// we only enforce this when at least one session row exists for the user — an
-		// empty set means tracking was never recorded (or was cleared on logout, which
-		// also bumped the epoch and was already caught above).
+		if claims.Tracked && claims.SessionID() == uuid.Nil {
+			writeError(w, http.StatusUnauthorized, "invalid session")
+			return
+		}
 		if sid := claims.SessionID(); sid != uuid.Nil {
 			var (
 				exists, anySession bool
 				lastSeen           *time.Time
 			)
 			if qerr := s.db.Pool().QueryRow(r.Context(), `
-SELECT EXISTS (SELECT 1 FROM user_sessions WHERE session_id = $1),
+SELECT EXISTS (SELECT 1 FROM user_sessions WHERE session_id = $1 AND user_id = $2),
        EXISTS (SELECT 1 FROM user_sessions WHERE user_id = $2),
-       (SELECT last_seen_at FROM user_sessions WHERE session_id = $1)`,
+       (SELECT last_seen_at FROM user_sessions WHERE session_id = $1 AND user_id = $2)`,
 				sid, claims.UserID).Scan(&exists, &anySession, &lastSeen); qerr == nil {
-				if anySession && !exists {
+				if (claims.Tracked || anySession) && !exists {
 					writeError(w, http.StatusUnauthorized, "session evicted")
 					return
 				}
@@ -1792,20 +1782,26 @@ SELECT EXISTS (SELECT 1 FROM user_sessions WHERE session_id = $1),
 				idle := s.cfg.SessionIdleTimeout
 				if pol, _, perr := auth.LoadSecurityPolicy(r.Context(), s.db.Pool(), claims.OrgID); perr == nil {
 					idle = pol.IdleTimeout(s.cfg.SessionIdleTimeout)
+				} else {
+					writeError(w, http.StatusInternalServerError, "load session policy")
+					return
 				}
 				if exists && idle > 0 && lastSeen != nil {
 					if time.Since(*lastSeen) > idle {
-						// Hard-stop the idle session so a later request can't revive it.
-						// Deleting the row alone is NOT enough: once it's gone, anySession
-						// can be false and the same still-within-TTL JWT would be treated
-						// as an untracked token and slip past on replay. Bumping the user's
-						// session_epoch makes the epoch check above reject every later
-						// replay of this (and any sibling) token. Best-effort: a bookkeeping
-						// failure still 401s this request.
-						_, _ = s.db.Pool().Exec(r.Context(),
-							`DELETE FROM user_sessions WHERE session_id = $1`, sid)
-						_, _ = s.db.Pool().Exec(r.Context(),
-							`UPDATE users SET session_epoch = session_epoch + 1 WHERE id = $1`, claims.UserID)
+						deleted, deleteErr := s.db.Pool().Exec(r.Context(),
+							`DELETE FROM user_sessions WHERE session_id = $1 AND last_seen_at <= $2`, sid, *lastSeen)
+						if deleteErr != nil {
+							writeError(w, http.StatusInternalServerError, "expire idle session")
+							return
+						}
+						if deleted.RowsAffected() == 0 {
+							writeError(w, http.StatusUnauthorized, "session state changed; retry authentication")
+							return
+						}
+						if !claims.Tracked {
+							_, _ = s.db.Pool().Exec(r.Context(),
+								`UPDATE users SET session_epoch = session_epoch + 1 WHERE id = $1`, claims.UserID)
+						}
 						// RSP-AUDIT-05: an idle-timeout session rejection is a security-relevant
 						// auth event; record it so inactivity expiries are visible in /audit/events
 						// and the SIEM alongside failed logins.
@@ -1819,10 +1815,13 @@ SELECT EXISTS (SELECT 1 FROM user_sessions WHERE session_id = $1),
 						return
 					}
 					if _, uerr := s.db.Pool().Exec(r.Context(),
-						`UPDATE user_sessions SET last_seen_at = now() WHERE session_id = $1`, sid); uerr != nil {
+						`UPDATE user_sessions SET last_seen_at = GREATEST(last_seen_at, clock_timestamp()) WHERE session_id = $1`, sid); uerr != nil {
 						s.tel.Logger.Warn("update session last_seen_at", slog.String("err", uerr.Error()))
 					}
 				}
+			} else {
+				writeError(w, http.StatusInternalServerError, "load session")
+				return
 			}
 		}
 		// A4: forced password reset. While must_change_password is set, the only thing the

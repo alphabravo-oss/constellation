@@ -26,7 +26,6 @@ package neuvector
 import (
 	"errors"
 	"fmt"
-	"io"
 	"regexp"
 	"sort"
 	"strconv"
@@ -458,32 +457,38 @@ type dpiSensorCandidate struct {
 }
 
 type SourceObjectCounts struct {
-	Policies        int
-	AdmissionRules  int
-	ResponseRules   int
-	FileProfiles    int
-	ProcessProfiles int
-	Groups          int
-	NetworkRules    int
-	DPIRules        int
-	DPIBindings     int
+	Policies              int
+	AdmissionRules        int
+	ResponseRules         int
+	FileProfiles          int
+	ProcessProfiles       int
+	Groups                int
+	NetworkRules          int
+	DPIRules              int
+	DPIBindings           int
+	VulnerabilityProfiles int
+	Registries            int
+	RemainingUnsupported  int
 }
 
 func (c SourceObjectCounts) Total() int {
-	return c.Policies + c.FileProfiles + c.ProcessProfiles + c.Groups + c.NetworkRules + c.DPIRules + c.DPIBindings
+	return c.Policies + c.FileProfiles + c.ProcessProfiles + c.Groups + c.NetworkRules + c.DPIRules + c.DPIBindings + c.VulnerabilityProfiles + c.Registries + c.RemainingUnsupported
 }
 
 func (c SourceObjectCounts) Map() map[string]int {
 	return map[string]int{
-		"policies":         c.Policies,
-		"admission_rules":  c.AdmissionRules,
-		"response_rules":   c.ResponseRules,
-		"file_profiles":    c.FileProfiles,
-		"process_profiles": c.ProcessProfiles,
-		"groups":           c.Groups,
-		"network_rules":    c.NetworkRules,
-		"dpi_rules":        c.DPIRules,
-		"dpi_bindings":     c.DPIBindings,
+		"policies":               c.Policies,
+		"admission_rules":        c.AdmissionRules,
+		"response_rules":         c.ResponseRules,
+		"file_profiles":          c.FileProfiles,
+		"process_profiles":       c.ProcessProfiles,
+		"groups":                 c.Groups,
+		"network_rules":          c.NetworkRules,
+		"dpi_rules":              c.DPIRules,
+		"dpi_bindings":           c.DPIBindings,
+		"vulnerability_profiles": c.VulnerabilityProfiles,
+		"registries":             c.Registries,
+		"remaining_unsupported":  c.RemainingUnsupported,
 	}
 }
 
@@ -525,6 +530,13 @@ func CountSourceObjects(raw []byte) (SourceObjectCounts, error) {
 	for _, doc := range networkDocs {
 		counts.NetworkRules += len(collectNetworkRules(doc))
 	}
+	remaining, err := collectRemainingSource(raw)
+	if err != nil {
+		return SourceObjectCounts{}, err
+	}
+	counts.VulnerabilityProfiles = len(remaining.profiles)
+	counts.Registries = len(remaining.registries)
+	counts.RemainingUnsupported = len(remaining.unsupported)
 	return counts, nil
 }
 
@@ -812,32 +824,28 @@ func ConvertAdmissionProfileBundle(raw []byte) (admission.AdmissionProfileBundle
 }
 
 func parseSourceExport(raw []byte) (SourceExport, error) {
-	if len(raw) == 0 {
-		return SourceExport{}, errors.New("neuvector: empty export")
+	docs, err := parseSourceExports(raw)
+	if err != nil {
+		return SourceExport{}, err
 	}
-	var doc SourceExport
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		return SourceExport{}, fmt.Errorf("neuvector: parse: %w", err)
+	doc := docs[0]
+	for _, next := range docs[1:] {
+		doc.Admission.Rules = append(doc.Admission.Rules, collectAdmissionRules(next)...)
+		doc.Response.Rules = append(doc.Response.Rules, next.Response.Rules...)
 	}
 	return doc, nil
 }
 
 func parseSourceExports(raw []byte) ([]SourceExport, error) {
-	if len(raw) == 0 {
-		return nil, errors.New("neuvector: empty export")
+	nodes, err := parseExportDocuments(raw)
+	if err != nil {
+		return nil, err
 	}
-	dec := yaml.NewDecoder(strings.NewReader(string(raw)))
 	out := []SourceExport{}
-	for {
+	for _, node := range nodes {
 		var doc SourceExport
-		if err := dec.Decode(&doc); err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			return nil, fmt.Errorf("neuvector: parse: %w", err)
-		}
-		if sourceExportEmpty(doc) {
-			continue
+		if err := legacyExportNode(node).Decode(&doc); err != nil {
+			return nil, redactedParseError()
 		}
 		out = append(out, doc)
 	}
@@ -848,18 +856,15 @@ func parseSourceExports(raw []byte) ([]SourceExport, error) {
 }
 
 func parseNetworkSourceExports(raw []byte) ([]networkSourceExport, error) {
-	if len(raw) == 0 {
-		return nil, errors.New("neuvector: empty export")
+	nodes, err := parseExportDocuments(raw)
+	if err != nil {
+		return nil, err
 	}
-	dec := yaml.NewDecoder(strings.NewReader(string(raw)))
 	out := []networkSourceExport{}
-	for {
+	for _, node := range nodes {
 		var doc networkSourceExport
-		if err := dec.Decode(&doc); err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			return nil, fmt.Errorf("neuvector: parse: %w", err)
+		if err := legacyExportNode(node).Decode(&doc); err != nil {
+			return nil, redactedParseError()
 		}
 		if networkSourceExportEmpty(doc) {
 			continue

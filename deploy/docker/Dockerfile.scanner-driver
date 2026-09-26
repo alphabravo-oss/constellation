@@ -15,7 +15,7 @@
 # Loop semantics live in deploy/docker/scanner-driver-loop.sh (wrapped ENTRYPOINT) so the
 # Go program itself stays a clean one-shot.
 
-ARG GO_VERSION=1.26
+ARG GO_VERSION=1.26.8
 ARG SYFT_VERSION=1.42.2
 ARG TRIVY_VERSION=0.69.3
 ARG GRYPE_VERSION=0.109.0

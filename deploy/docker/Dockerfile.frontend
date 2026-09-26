@@ -7,7 +7,7 @@
 # In production the Helm chart wires nginx with the API as an upstream so /api and
 # /openapi.json proxy correctly (see deploy/charts/constellation/templates/frontend-deployment.yaml).
 
-ARG NODE_VERSION=22
+ARG NODE_VERSION=24.21.0
 # Official nginx (nginx Inc. unprivileged variant): alpine-based, low-vuln, runs nonroot on
 # 8080 out of the box — matches nginx.conf. Off Chainguard per project policy.
 ARG NGINX_IMAGE=nginxinc/nginx-unprivileged:stable-alpine

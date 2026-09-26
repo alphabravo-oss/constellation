@@ -19,7 +19,7 @@
 # NFQUEUE redirects. AF_PACKET TAP mode is used as a fallback when TC is
 # unavailable.
 
-ARG GO_VERSION=1.26
+ARG GO_VERSION=1.26.8
 ARG DEBIAN_TAG=bookworm-slim
 ARG CRICTL_VERSION=v1.36.0
 ARG CRICTL_SHA256_AMD64=83855e114566a8a8c44c548d515670f51de3a5e1da8b2effb59870e2f10c25a3

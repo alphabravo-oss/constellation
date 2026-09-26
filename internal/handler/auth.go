@@ -24,12 +24,13 @@ import (
 
 // Auth bundles the auth-related routes.
 type Auth struct {
-	db       *db.DB
-	signer   *auth.Signer
-	oidc     *auth.OIDCClient
-	saml     *auth.SAMLProvider
-	ldap     *auth.LDAPProvider
-	auditLog *audit.Logger
+	db                 *db.DB
+	signer             *auth.Signer
+	oidc               *auth.OIDCClient
+	saml               *auth.SAMLProvider
+	ldap               *auth.LDAPProvider
+	auditLog           *audit.Logger
+	browserIdleTimeout time.Duration
 
 	// providers, when non-nil, is the B4 DB-backed, hot-reloadable provider set. The login
 	// endpoints read the LIVE provider through providerOIDC/providerSAML/providerLDAP, which
@@ -46,6 +47,7 @@ type Auth struct {
 	// live provider-set's ParseResponse is NOT substituted, so the canned-assertion test path
 	// keeps working even after a provider-set reload.
 	samlParseOverridden bool
+	samlBrowserBindings samlBrowserBindingStore
 }
 
 func NewAuth(database *db.DB, signer *auth.Signer, oidc *auth.OIDCClient, samlP *auth.SAMLProvider, ldapP *auth.LDAPProvider, auditLog *audit.Logger) *Auth {
@@ -53,6 +55,11 @@ func NewAuth(database *db.DB, signer *auth.Signer, oidc *auth.OIDCClient, samlP 
 	if samlP != nil {
 		a.samlParse = samlP.ParseResponse
 	}
+	return a
+}
+
+func (a *Auth) WithBrowserSessionTimeout(timeout time.Duration) *Auth {
+	a.browserIdleTimeout = timeout
 	return a
 }
 
@@ -130,7 +137,7 @@ type loginRequest struct {
 }
 
 type loginResponse struct {
-	Token     string    `json:"token"`
+	Token     string    `json:"token,omitempty"`
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
@@ -284,7 +291,7 @@ func (a *Auth) Login(w http.ResponseWriter, r *http.Request) {
 		TargetKind: "user",
 		TargetID:   principal.UserID.String(),
 	})
-	writeJSON(w, http.StatusOK, loginResponse{Token: tok, ExpiresAt: expiresAt})
+	a.respondSession(w, r, tok, expiresAt, false)
 }
 
 func (a *Auth) resolveLoginPrincipal(ctx context.Context, email string) (loginPrincipal, error) {
@@ -479,44 +486,35 @@ func RevokeUserSessions(ctx context.Context, tx sessionEpochExecer, userID uuid.
 	return nil
 }
 
-// issueSession mints a session JWT for the user and records it for the A3
-// concurrent-session cap: the new session id is inserted into user_sessions and any
-// sessions beyond maxConcurrentSessions (oldest first) are evicted. The auth middleware
-// rejects a JWT whose session row has been evicted, so logging in on an (N+1)th device
-// silently logs out the oldest device — bounded fan-out, not a full epoch bump. Session
-// tracking is best-effort: a bookkeeping failure must not block an otherwise-valid login
-// (the JWT still works; the cap is simply not tightened for that login).
 func (a *Auth) issueSession(ctx context.Context, userID, orgID uuid.UUID, email string, roles []string, epoch int64) (string, time.Time, error) {
-	// A1: a per-org SecurityPolicy may override the deploy-time JWT TTL at login time. Load it
-	// (falling back to the signer's env default when the org has no policy row) and mint the
-	// session with that absolute lifetime so the returned expires_at matches the JWT's exp.
-	ttl := a.signer.TTL()
-	if pol, _, perr := auth.LoadSecurityPolicy(ctx, a.db.Pool(), orgID); perr == nil {
-		ttl = pol.SessionTTL(ttl)
-	}
-	expiresAt := time.Now().Add(ttl)
-	tok, sessionID, err := a.signer.IssueWithTTL(ttl, userID, orgID, email, roles, epoch)
+	policy, _, err := auth.LoadSecurityPolicy(ctx, a.db.Pool(), orgID)
 	if err != nil {
 		return "", time.Time{}, err
 	}
-	// A3: record the new session and evict the oldest beyond the cap in ONE transaction, so the
-	// invariant "at most maxConcurrentSessions rows per user" cannot be transiently violated by a
-	// partial write (the original code ran the INSERT and DELETE as two independent Execs, so a
-	// failure between them could leave the user over the cap). Eviction keeps the most recent
-	// maxConcurrentSessions by created_at; session_id is a deterministic tiebreaker for the
-	// (rare) sub-millisecond-simultaneous case so the same row is chosen regardless of plan.
-	// Session tracking remains best-effort: a bookkeeping failure rolls back and does not block
-	// the otherwise-valid login (the JWT still works; the cap is simply not tightened this time).
+	ttl := policy.SessionTTL(a.signer.TTL())
+	if ttl <= 0 || ttl > 15*time.Minute {
+		ttl = 15 * time.Minute
+	}
+	expiresAt := time.Now().Add(ttl)
+	tok, sessionID, err := a.signer.IssueTracked(ttl, uuid.New(), userID, orgID, email, roles, epoch)
+	if err != nil {
+		return "", time.Time{}, err
+	}
 	tx, err := a.db.Pool().Begin(ctx)
 	if err != nil {
-		slog.WarnContext(ctx, "record session: begin", slog.String("err", err.Error()))
-		return tok, expiresAt, nil
+		return "", time.Time{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	var currentEpoch int64
+	if err := tx.QueryRow(ctx, `SELECT session_epoch FROM users WHERE id=$1 AND org_id=$2 AND NOT disabled FOR UPDATE`, userID, orgID).Scan(&currentEpoch); err != nil {
+		return "", time.Time{}, err
+	}
+	if currentEpoch != epoch {
+		return "", time.Time{}, errors.New("session changed during login")
+	}
 	if _, err := tx.Exec(ctx,
-		`INSERT INTO user_sessions (session_id, user_id) VALUES ($1, $2)`, sessionID, userID); err != nil {
-		slog.WarnContext(ctx, "record session", slog.String("err", err.Error()))
-		return tok, expiresAt, nil
+		`INSERT INTO user_sessions (session_id, user_id, created_at, last_seen_at) VALUES ($1, $2, clock_timestamp(), clock_timestamp())`, sessionID, userID); err != nil {
+		return "", time.Time{}, err
 	}
 	if _, err := tx.Exec(ctx, `
 DELETE FROM user_sessions
@@ -527,11 +525,10 @@ DELETE FROM user_sessions
         ORDER BY created_at DESC, session_id
         LIMIT $2
    )`, userID, maxConcurrentSessions); err != nil {
-		slog.WarnContext(ctx, "evict sessions", slog.String("err", err.Error()))
-		return tok, expiresAt, nil
+		return "", time.Time{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		slog.WarnContext(ctx, "record session: commit", slog.String("err", err.Error()))
+		return "", time.Time{}, err
 	}
 	return tok, expiresAt, nil
 }
@@ -737,16 +734,43 @@ func (a *Auth) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 // SAMLLogin starts an SP-initiated SAML login: it mints an AuthnRequest (recording its ID so the
 // ACS can match InResponseTo) and redirects the browser to the IdP's SSO endpoint. Mirrors
 // OIDCStart but uses a 302 since the SAML redirect binding is a plain browser redirect.
+// Browser logins replace caller RelayState with a five-minute, single-use nonce bound to a
+// Secure HttpOnly SameSite=None host cookie; the IdP must return that RelayState unchanged.
 func (a *Auth) SAMLLogin(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	browser := samlBrowserRequest(r)
+	if browser {
+		a.samlBrowserBindings.discardRequest(r)
+	}
 	saml := a.providerSAML()
 	if saml == nil {
+		if browser {
+			clearSAMLBrowserCookie(w)
+		}
 		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "saml disabled"})
 		return
 	}
-	redirectURL, err := saml.StartLogin(r.URL.Query().Get("relay_state"))
+	relayState := r.URL.Query().Get("relay_state")
+	if browser {
+		var err error
+		relayState, err = a.samlBrowserBindings.mint()
+		if err != nil {
+			clearSAMLBrowserCookie(w)
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "unable to start SAML login"})
+			return
+		}
+	}
+	redirectURL, err := saml.StartLogin(relayState)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		if browser {
+			a.samlBrowserBindings.discard(relayState)
+			clearSAMLBrowserCookie(w)
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "unable to start SAML login"})
 		return
+	}
+	if browser {
+		setSAMLBrowserCookie(w, relayState)
 	}
 	http.Redirect(w, r, redirectURL, http.StatusFound)
 }
@@ -755,18 +779,33 @@ func (a *Auth) SAMLLogin(w http.ResponseWriter, r *http.Request) {
 // It validates the assertion, maps groups->roles, links the IdP identity to a provisioned user
 // via the shared oidc_issuer/oidc_subject columns (SAML Issuer + NameID), and issues an
 // identical session to OIDCCallback.
+// Browser ACS requests require the SP-login cookie and RelayState before assertion parsing;
+// unsolicited IdP-initiated browser login is rejected. Non-browser bearer SAML is unchanged.
+// Binding state is process-local, like pending AuthnRequests: replicas need login affinity,
+// and an API restart requires restarting browser login.
 func (a *Auth) SAMLACS(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	browser := samlBrowserRequest(r)
+	if browser {
+		clearSAMLBrowserCookie(w)
+		defer a.samlBrowserBindings.discardRequest(r)
+	}
 	parse := a.providerSAMLParse()
 	if a.providerSAML() == nil || parse == nil {
 		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "saml disabled"})
+		return
+	}
+	if !a.prepareSAMLACS(w, r, browser) {
 		return
 	}
 	id, err := parse(r)
 	if err != nil {
 		// RSP-AUDIT-05: a rejected/invalid SAML assertion is a failed login attempt on the SAML
 		// path — audit it (identity unresolved pre-validation, so no username).
-		a.auditLoginFailure(r.Context(), r, nil, nil, "", "saml_validation_failed")
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
+		if a.auditLog != nil {
+			a.auditLoginFailure(r.Context(), r, nil, nil, "", "saml_validation_failed")
+		}
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid SAML response"})
 		return
 	}
 	a.issueLinkedSession(w, r, id.Issuer, id.Subject, id.Email, id.Roles, id.ScopedRoles, "auth.login.saml")
@@ -956,7 +995,57 @@ func (a *Auth) issueLinkedSession(w http.ResponseWriter, r *http.Request, issuer
 		OrgID: &orgID, ActorID: &userID,
 		Action: action, TargetKind: "user", TargetID: userID.String(),
 	})
-	writeJSON(w, http.StatusOK, loginResponse{Token: tok, ExpiresAt: expiresAt})
+	a.respondSession(w, r, tok, expiresAt, action == "auth.login.oidc" || action == "auth.login.saml")
+}
+
+func (a *Auth) respondSession(w http.ResponseWriter, r *http.Request, token string, expires time.Time, redirect bool) {
+	w.Header().Set("Cache-Control", "no-store")
+	if !auth.BrowserRequest(r) {
+		writeJSON(w, http.StatusOK, loginResponse{Token: token, ExpiresAt: expires})
+		return
+	}
+	session, err := auth.StartBrowserSession(r.Context(), a.db.Pool(), a.signer, token)
+	if err != nil {
+		if claims, verifyErr := a.signer.Verify(token); verifyErr == nil {
+			_, _ = a.db.Pool().Exec(r.Context(), `DELETE FROM user_sessions WHERE session_id=$1`, claims.SessionID())
+		}
+		auth.ClearBrowserCookies(w)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "create browser session"})
+		return
+	}
+	auth.SetBrowserCookies(w, session)
+	if redirect {
+		http.Redirect(w, r, "/clusters", http.StatusSeeOther)
+		return
+	}
+	writeJSON(w, http.StatusOK, loginResponse{ExpiresAt: session.AccessExpires})
+}
+
+func (a *Auth) Refresh(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie(auth.RefreshCookie)
+	if err != nil {
+		auth.ClearBrowserCookies(w)
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing refresh session"})
+		return
+	}
+	session, err := auth.RotateBrowserSession(r.Context(), a.db.Pool(), a.signer, cookie.Value, a.browserIdleTimeout)
+	if err != nil {
+		if errors.Is(err, auth.ErrRefreshReused) && session != nil {
+			_, _, _ = a.auditLog.Log(r.Context(), audit.Event{
+				OrgID: &session.OrgID, ActorID: &session.UserID, Action: "auth.refresh.reuse",
+				TargetKind: "session", TargetID: session.SessionID.String(),
+			})
+		}
+		if errors.Is(err, auth.ErrRefreshInvalid) || errors.Is(err, auth.ErrRefreshReused) {
+			auth.ClearBrowserCookies(w)
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid refresh session"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "refresh session"})
+		return
+	}
+	auth.SetBrowserCookies(w, session)
+	writeJSON(w, http.StatusOK, loginResponse{ExpiresAt: session.AccessExpires})
 }
 
 // Logout bumps the user's session_epoch (A1), which invalidates the JWT used to call it
@@ -964,6 +1053,7 @@ func (a *Auth) issueLinkedSession(w http.ResponseWriter, r *http.Request, issuer
 // revocation primitive, consistent across API replicas. Previously this was a no-op, so a
 // "logged out" token kept working until its 1h TTL.
 func (a *Auth) Logout(w http.ResponseWriter, r *http.Request) {
+	auth.ClearBrowserCookies(w)
 	subj, _ := SubjectFrom(r.Context())
 	uid := subj.UserID
 	oid := subj.OrgID

@@ -67,7 +67,7 @@ func main() {
 		JWTKeys:              loadJWTKeys(envBool("CONSTELLATION_REQUIRE_JWT_KEYS", false)),
 		JWTIssuer:            env("JWT_ISSUER", "constellation"),
 		JWTAudience:          env("JWT_AUDIENCE", "constellation-api"),
-		JWTTTL:               envDuration("JWT_TTL", time.Hour),
+		JWTTTL:               envDuration("JWT_TTL", 15*time.Minute),
 		SessionIdleTimeout:   envDuration("SESSION_IDLE_TIMEOUT", 30*time.Minute),
 		PATMaxLifetime:       envDuration("PAT_MAX_LIFETIME", 90*24*time.Hour),
 		CORSOrigins:          strings.Split(env("CORS_ORIGINS", "http://localhost:5173"), ","),

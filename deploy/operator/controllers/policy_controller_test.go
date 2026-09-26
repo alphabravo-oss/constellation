@@ -67,6 +67,7 @@ type fakeRespStore struct {
 	upserts   int
 	deletes   int
 	upsertErr error
+	deleteErr error
 }
 
 func newFakeRespStore() *fakeRespStore {
@@ -84,6 +85,9 @@ func (f *fakeRespStore) UpsertResponseRule(_ context.Context, rule responserule.
 
 func (f *fakeRespStore) DeleteResponseRule(_ context.Context, org uuid.UUID, name string) (bool, error) {
 	f.deletes++
+	if f.deleteErr != nil {
+		return false, f.deleteErr
+	}
 	k := rowKey(org, name)
 	_, ok := f.rows[k]
 	delete(f.rows, k)
@@ -469,6 +473,82 @@ func TestResponseRule_InvalidSpecRejected(t *testing.T) {
 	}
 	if !condTrue(got.Status.Conditions, cv1alpha1.ConditionError) {
 		t.Fatalf("Error condition not set: %+v", got.Status.Conditions)
+	}
+}
+
+func TestResponseRule_InvalidLegacyTagRemovesLastAppliedRow(t *testing.T) {
+	scheme := policyScheme(t)
+	crr := newResponseCR()
+	crr.Status.LastAppliedOrgID = testOrg
+	crr.Spec.OrgID = "22222222-2222-2222-2222-222222222222"
+	crr.Spec.Actions = []cv1alpha1.ResponseRuleAction{{Type: "tag"}}
+	client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(crr).
+		WithStatusSubresource(&cv1alpha1.ConstellationResponseRule{}).Build()
+	store := newFakeRespStore()
+	store.rows[rowKey(uuid.MustParse(testOrg), crr.Name)] = responserule.ResponseRule{OrgID: uuid.MustParse(testOrg), Name: crr.Name}
+	reconciler := &ResponseRuleReconciler{Client: client, Scheme: scheme, Store: store}
+	request := ctrl.Request{NamespacedName: types.NamespacedName{Name: crr.Name}}
+
+	if _, err := reconciler.Reconcile(context.Background(), request); err != nil {
+		t.Fatalf("reconcile invalid tag: %v", err)
+	}
+	if store.upserts != 0 || store.deletes != 1 || len(store.rows) != 0 {
+		t.Fatalf("stale row not removed: upserts=%d deletes=%d rows=%v", store.upserts, store.deletes, store.rows)
+	}
+	got := &cv1alpha1.ConstellationResponseRule{}
+	if err := client.Get(context.Background(), request.NamespacedName, got); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if !condTrue(got.Status.Conditions, cv1alpha1.ConditionError) || got.Status.LastAppliedOrgID != "" {
+		t.Fatalf("invalid tag status: %+v", got.Status)
+	}
+	if _, err := reconciler.Reconcile(context.Background(), request); err != nil {
+		t.Fatalf("repeat reconcile: %v", err)
+	}
+	if store.deletes != 1 {
+		t.Fatalf("repeated delete count = %d, want 1", store.deletes)
+	}
+
+	if err := client.Get(context.Background(), request.NamespacedName, got); err != nil {
+		t.Fatalf("get before repair: %v", err)
+	}
+	got.Spec.Actions = []cv1alpha1.ResponseRuleAction{{Type: "quarantine"}}
+	if err := client.Update(context.Background(), got); err != nil {
+		t.Fatalf("repair spec: %v", err)
+	}
+	if _, err := reconciler.Reconcile(context.Background(), request); err != nil {
+		t.Fatalf("reconcile repaired rule: %v", err)
+	}
+	if store.upserts != 1 {
+		t.Fatalf("repaired rule upserts = %d, want 1", store.upserts)
+	}
+}
+
+func TestResponseRule_InvalidSpecDeleteFailureRequeues(t *testing.T) {
+	scheme := policyScheme(t)
+	crr := newResponseCR()
+	crr.Status.LastAppliedOrgID = testOrg
+	crr.Spec.Actions = []cv1alpha1.ResponseRuleAction{{Type: "tag"}}
+	client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(crr).
+		WithStatusSubresource(&cv1alpha1.ConstellationResponseRule{}).Build()
+	store := newFakeRespStore()
+	store.deleteErr = errors.New("database unavailable")
+	store.rows[rowKey(uuid.MustParse(testOrg), crr.Name)] = responserule.ResponseRule{OrgID: uuid.MustParse(testOrg), Name: crr.Name}
+	reconciler := &ResponseRuleReconciler{Client: client, Scheme: scheme, Store: store}
+	request := ctrl.Request{NamespacedName: types.NamespacedName{Name: crr.Name}}
+
+	if _, err := reconciler.Reconcile(context.Background(), request); err == nil {
+		t.Fatal("delete failure should requeue")
+	}
+	if store.upserts != 0 || store.deletes != 1 || len(store.rows) != 1 {
+		t.Fatalf("failed delete changed rows: upserts=%d deletes=%d rows=%v", store.upserts, store.deletes, store.rows)
+	}
+	got := &cv1alpha1.ConstellationResponseRule{}
+	if err := client.Get(context.Background(), request.NamespacedName, got); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if !condTrue(got.Status.Conditions, cv1alpha1.ConditionError) || got.Status.LastAppliedOrgID != testOrg {
+		t.Fatalf("delete failure status: %+v", got.Status)
 	}
 }
 

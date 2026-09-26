@@ -114,3 +114,23 @@ func TestCELEngine_MonitorEmitsWarnings(t *testing.T) {
 		t.Fatalf("expected warning")
 	}
 }
+
+func TestCELEngine_CompileErrorFailsClosedOnlyInEnforceMode(t *testing.T) {
+	req := &admissionv1.AdmissionRequest{UID: "compile-error"}
+	for _, mode := range []string{"enforce", "monitor"} {
+		t.Run(mode, func(t *testing.T) {
+			engine, errs, err := NewCELEngine([]*CELRule{{ID: "broken", Expression: "object.", Mode: mode}})
+			if err != nil || errs["broken"] == nil {
+				t.Fatalf("expected compile diagnostic: %v %v", err, errs)
+			}
+			resp, ruleID := engine.evaluate(context.Background(), req)
+			if mode == "enforce" {
+				if resp.Allowed || ruleID != "broken" || resp.Result == nil {
+					t.Fatalf("broken enforce rule must deny with attribution: %+v %q", resp, ruleID)
+				}
+			} else if !resp.Allowed || len(resp.Warnings) == 0 {
+				t.Fatalf("broken monitor rule must warn: %+v", resp)
+			}
+		})
+	}
+}

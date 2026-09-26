@@ -108,6 +108,59 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 	return nil
 }
 
+func lockBindingTarget(ctx context.Context, tx pgx.Tx, kind string, targetID, orgID uuid.UUID) error {
+	var query string
+	switch kind {
+	case "user":
+		query = `SELECT id FROM users WHERE id=$1 AND org_id=$2 FOR UPDATE`
+	case "service_account":
+		query = `SELECT id FROM service_accounts WHERE id=$1 AND org_id=$2 FOR SHARE`
+	case "cluster":
+		query = `SELECT id FROM clusters WHERE id=$1 AND org_id=$2 FOR SHARE`
+	case "project":
+		query = `SELECT id FROM projects WHERE id=$1 AND org_id=$2 FOR SHARE`
+	case "org":
+		if targetID != orgID {
+			return pgx.ErrNoRows
+		}
+		return nil
+	default:
+		return errors.New("unsupported role binding target")
+	}
+	var found uuid.UUID
+	return tx.QueryRow(ctx, query, targetID, orgID).Scan(&found)
+}
+
+func validateBindingScopeOwnership(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, scopes []accessControlScopeDTO) error {
+	for _, scope := range scopes {
+		kind := strings.ToLower(strings.TrimSpace(scope.Kind))
+		if kind == "" || kind == "organization" {
+			kind = "org"
+		}
+		for _, rawID := range scope.Values {
+			targetID, err := uuid.Parse(strings.TrimSpace(rawID))
+			if err != nil {
+				return pgx.ErrNoRows
+			}
+			if err := lockBindingTarget(ctx, tx, kind, targetID, orgID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func bumpBindingSessionEpoch(ctx context.Context, tx pgx.Tx, userID, orgID uuid.UUID) error {
+	result, err := tx.Exec(ctx, `UPDATE users SET session_epoch=session_epoch+1 WHERE id=$1 AND org_id=$2`, userID, orgID)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
+
 // AccessControl handles the enterprise identity catalog: users, roles, role bindings,
 // auth providers, service accounts, and API tokens. DB-backed when a database is
 // provided; otherwise it returns only the static role/permission/guardrail catalog
@@ -532,6 +585,17 @@ func (h *AccessControl) CreateRoleBinding(w http.ResponseWriter, r *http.Request
 		jsonError(w, http.StatusBadRequest, "subject_id, subject_type, role_id required")
 		return
 	}
+	req.SubjectType = strings.ToLower(strings.TrimSpace(req.SubjectType))
+	if req.SubjectType != "user" && req.SubjectType != "service_account" {
+		jsonError(w, http.StatusBadRequest, "subject_type must be user or service_account")
+		return
+	}
+	subjectID, err := uuid.Parse(strings.TrimSpace(req.SubjectID))
+	if err != nil || subjectID == uuid.Nil {
+		jsonError(w, http.StatusBadRequest, "subject_id must be a valid UUID")
+		return
+	}
+	req.SubjectID = subjectID.String()
 	req.RoleID = strings.TrimSpace(req.RoleID)
 	if !rbac.IsRole(req.RoleID) {
 		jsonError(w, http.StatusBadRequest, "invalid role_id")
@@ -563,6 +627,23 @@ func (h *AccessControl) CreateRoleBinding(w http.ResponseWriter, r *http.Request
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
 
+	if err := lockBindingTarget(r.Context(), tx, req.SubjectType, subjectID, subj.OrgID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			jsonError(w, http.StatusNotFound, "subject not found")
+		} else {
+			jsonError(w, http.StatusInternalServerError, "lookup binding subject")
+		}
+		return
+	}
+	if err := validateBindingScopeOwnership(r.Context(), tx, subj.OrgID, req.Scopes); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			jsonError(w, http.StatusNotFound, "scope not found")
+		} else {
+			jsonError(w, http.StatusInternalServerError, "lookup binding scope")
+		}
+		return
+	}
+
 	if _, err := tx.Exec(r.Context(), `
 INSERT INTO role_bindings (id, org_id, subject_id, subject_type, role_id, scopes, granted_by, expires_at)
 VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)`,
@@ -575,7 +656,7 @@ VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)`,
 			jsonError(w, http.StatusInternalServerError, "apply role grant")
 			return
 		}
-		if err := bumpSessionEpoch(r.Context(), tx, targetUID); err != nil {
+		if err := bumpBindingSessionEpoch(r.Context(), tx, targetUID, subj.OrgID); err != nil {
 			jsonError(w, http.StatusInternalServerError, "invalidate sessions")
 			return
 		}
@@ -622,8 +703,7 @@ func (h *AccessControl) DeleteRoleBinding(w http.ResponseWriter, r *http.Request
 
 	var subjectType, subjectID string
 	err = tx.QueryRow(r.Context(), `
-DELETE FROM role_bindings WHERE id = $1 AND org_id = $2
-RETURNING subject_type, subject_id`, id, subj.OrgID).Scan(&subjectType, &subjectID)
+SELECT subject_type, subject_id FROM role_bindings WHERE id = $1 AND org_id = $2`, id, subj.OrgID).Scan(&subjectType, &subjectID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		jsonError(w, http.StatusNotFound, "not found")
 		return
@@ -632,16 +712,42 @@ RETURNING subject_type, subject_id`, id, subj.OrgID).Scan(&subjectType, &subject
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	normalizedType := strings.ToLower(strings.TrimSpace(subjectType))
+	if normalizedType == "user" || normalizedType == "service_account" {
+		targetID, parseErr := uuid.Parse(strings.TrimSpace(subjectID))
+		if parseErr != nil {
+			jsonError(w, http.StatusNotFound, "subject not found")
+			return
+		}
+		if err := lockBindingTarget(r.Context(), tx, normalizedType, targetID, subj.OrgID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				jsonError(w, http.StatusNotFound, "subject not found")
+			} else {
+				jsonError(w, http.StatusInternalServerError, "lookup binding subject")
+			}
+			return
+		}
+	}
+	var deletedID uuid.UUID
+	err = tx.QueryRow(r.Context(), `DELETE FROM role_bindings WHERE id=$1 AND org_id=$2 AND subject_type=$3 AND subject_id=$4 RETURNING id`, id, subj.OrgID, subjectType, subjectID).Scan(&deletedID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		jsonError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "delete binding")
+		return
+	}
 	if targetUID, ok := userSubjectID(subjectType, subjectID); ok {
 		// P0-11: remove exactly the assignments this binding created (matched by binding_id),
 		// regardless of scope. Because role_bindings is UNIQUE(org_id, subject_id, role_id) there
 		// is at most one binding per (user, role), so this never strips a still-granted privilege.
 		if _, err := tx.Exec(r.Context(),
-			`DELETE FROM role_assignments WHERE binding_id = $1`, id); err != nil {
+			`DELETE FROM role_assignments WHERE binding_id = $1 AND scope_org_id=$2`, id, subj.OrgID); err != nil {
 			jsonError(w, http.StatusInternalServerError, "remove role grant")
 			return
 		}
-		if err := bumpSessionEpoch(r.Context(), tx, targetUID); err != nil {
+		if err := bumpBindingSessionEpoch(r.Context(), tx, targetUID, subj.OrgID); err != nil {
 			jsonError(w, http.StatusInternalServerError, "invalidate sessions")
 			return
 		}

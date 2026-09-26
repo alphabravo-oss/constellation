@@ -1,0 +1,58 @@
+version: "2"
+run:
+  timeout: 15m
+  modules-download-mode: readonly
+  tests: true
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - contextcheck
+    - cyclop
+    - errorlint
+    - exhaustive
+    - funlen
+    - gocognit
+    - gocritic
+    - gosec
+    - misspell
+    - nestif
+    - noctx
+    - nolintlint
+    - rowserrcheck
+    - sqlclosecheck
+    - unconvert
+    - wastedassign
+  settings:
+    cyclop:
+      max-complexity: 30
+    gocognit:
+      min-complexity: 20
+    funlen:
+      lines: 100
+      statements: 50
+    nestif:
+      min-complexity: 5
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+  exclusions:
+    generated: strict
+    presets: []
+    paths:
+      - ^third_party/
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/alphabravocompany/constellation
+  exclusions:
+    generated: strict
+    paths:
+      - ^third_party/
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

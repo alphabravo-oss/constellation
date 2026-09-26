@@ -118,6 +118,35 @@ SELECT id
 		}
 		clusterID = &id
 	}
+	if clusterID != nil {
+		var owned uuid.UUID
+		err := h.db.Pool().QueryRow(ctx,
+			`SELECT id FROM clusters WHERE id = $1 AND org_id = $2`, *clusterID, orgID).Scan(&owned)
+		if errors.Is(err, pgx.ErrNoRows) {
+			jsonError(w, http.StatusForbidden, "cluster does not belong to token org")
+			return
+		}
+		if err != nil {
+			jsonError(w, http.StatusInternalServerError, "resolve cluster: "+err.Error())
+			return
+		}
+	}
+	if token, ok := runtimeAgentTokenFrom(r.Context()); ok {
+		boundCluster, err := ResolveAgentClusterID(ctx, h.db, token)
+		if errors.Is(err, ErrAgentClusterScope) {
+			jsonError(w, http.StatusForbidden, "agent token cluster scope mismatch")
+			return
+		}
+		if err != nil {
+			jsonError(w, http.StatusInternalServerError, "resolve agent cluster: "+err.Error())
+			return
+		}
+		if clusterID != nil && (boundCluster == nil || *clusterID != *boundCluster) {
+			jsonError(w, http.StatusForbidden, "agent token cannot report this cluster")
+			return
+		}
+		clusterID = boundCluster
+	}
 
 	var buildTime *time.Time
 	if body.BuildTime != "" {

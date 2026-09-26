@@ -25,7 +25,7 @@ import (
 // the live ingest path now drives it.
 func TestEventsIngest_E1RuleFiresOnIngest(t *testing.T) {
 	d := openTestDB(t)
-	defer d.Close()
+	t.Cleanup(d.Close)
 
 	ctx := context.Background()
 	pool := d.Pool()
@@ -34,13 +34,14 @@ func TestEventsIngest_E1RuleFiresOnIngest(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT id FROM orgs ORDER BY created_at LIMIT 1`).Scan(&orgID); err != nil {
 		t.Skipf("no seed org: %v", err)
 	}
+	var clusterID uuid.UUID
+	if err := pool.QueryRow(ctx, `SELECT id FROM clusters WHERE org_id=$1 ORDER BY created_at LIMIT 1`, orgID).Scan(&clusterID); err != nil {
+		t.Skipf("no cluster for org: %v", err)
+	}
 	workloadID := "e1-ingest/" + uuid.New().String()
 	tokenName := "e1-ingest-" + uuid.New().String()
 
-	raw, _, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, tokenName, time.Hour)
-	if err != nil {
-		t.Fatalf("issue token: %v", err)
-	}
+	raw := issueBoundRuntimeEventToken(t, pool, orgID, clusterID, tokenName)
 
 	// A matching shell exec in an enforce-mode workload -> HIGH, which triggers E1 evaluation.
 	batch := []IngestEvent{
@@ -164,6 +165,61 @@ SELECT after->>'action', (after->>'order')::int
 	})
 }
 
+func TestEventsIngest_LegacyTagDoesNotClaimEnforcement(t *testing.T) {
+	d := openTestDB(t)
+	defer d.Close()
+	pool := d.Pool()
+	var orgID uuid.UUID
+	if err := pool.QueryRow(context.Background(), `SELECT id FROM orgs ORDER BY created_at LIMIT 1`).Scan(&orgID); err != nil {
+		t.Skipf("no seed org: %v", err)
+	}
+	workloadID := "e1-tag-" + uuid.NewString()
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM audit_events WHERE org_id=$1 AND target_id=$2`, orgID, workloadID)
+	})
+	h := NewEventsIngest(d, audit.New(pool), nil)
+	h.applyResponseRuleActions(context.Background(), orgID, uuid.Nil, &IngestEvent{Kind: "process_exec", WorkloadID: workloadID, At: time.Now().UTC()},
+		[]responserule.Action{{Type: responserule.ActionTag, Params: map[string]string{"key": "team", "value": "sec"}}})
+	var enforced, enforceError string
+	if err := pool.QueryRow(context.Background(), `
+SELECT after->>'enforced', after->>'enforce_error'
+  FROM audit_events WHERE org_id=$1 AND target_id=$2 AND action='response_rule.action.tag'`, orgID, workloadID).
+		Scan(&enforced, &enforceError); err != nil {
+		t.Fatalf("query tag audit: %v", err)
+	}
+	if enforced != "unsupported" || enforceError == "" {
+		t.Fatalf("legacy tag outcome=%q error=%q, want unsupported with explanation", enforced, enforceError)
+	}
+}
+
+func TestRuntimeThreats_LegacyTagDoesNotClaimEnforcement(t *testing.T) {
+	d := openTestDB(t)
+	defer d.Close()
+	pool := d.Pool()
+	var orgID uuid.UUID
+	if err := pool.QueryRow(context.Background(), `SELECT id FROM orgs ORDER BY created_at LIMIT 1`).Scan(&orgID); err != nil {
+		t.Skipf("no seed org: %v", err)
+	}
+	workloadID := "e1-threat-tag-" + uuid.NewString()
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM audit_events WHERE org_id=$1 AND target_id=$2`, orgID, workloadID)
+	})
+	h := &RuntimeThreats{db: d, audit: audit.New(pool)}
+	h.applyThreatResponseRuleActions(context.Background(), orgID,
+		&pendingThreatAlert{row: &ThreatIngestRow{At: time.Now().UTC()}, workloadID: workloadID},
+		[]responserule.Action{{Type: responserule.ActionTag, Params: map[string]string{"key": "team", "value": "sec"}}})
+	var enforced, enforceError string
+	if err := pool.QueryRow(context.Background(), `
+SELECT after->>'enforced', after->>'enforce_error'
+  FROM audit_events WHERE org_id=$1 AND target_id=$2 AND action='response_rule.action.tag'`, orgID, workloadID).
+		Scan(&enforced, &enforceError); err != nil {
+		t.Fatalf("query tag audit: %v", err)
+	}
+	if enforced != "unsupported" || enforceError == "" {
+		t.Fatalf("legacy threat tag outcome=%q error=%q, want unsupported with explanation", enforced, enforceError)
+	}
+}
+
 // TestEventsIngest_E1SuppressLog is the regression for the suppress_log half-wired finding:
 // a matching suppress_log response rule must actually suppress the side-effects it claims to —
 // the events row AND the runtime.alert.* audit row are NOT written — while still recording the
@@ -172,7 +228,7 @@ SELECT after->>'action', (after->>'order')::int
 // those rows were already committed, so it suppressed nothing.
 func TestEventsIngest_E1SuppressLog(t *testing.T) {
 	d := openTestDB(t)
-	defer d.Close()
+	t.Cleanup(d.Close)
 
 	ctx := context.Background()
 	pool := d.Pool()
@@ -181,13 +237,14 @@ func TestEventsIngest_E1SuppressLog(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT id FROM orgs ORDER BY created_at LIMIT 1`).Scan(&orgID); err != nil {
 		t.Skipf("no seed org: %v", err)
 	}
+	var clusterID uuid.UUID
+	if err := pool.QueryRow(ctx, `SELECT id FROM clusters WHERE org_id=$1 ORDER BY created_at LIMIT 1`, orgID).Scan(&clusterID); err != nil {
+		t.Skipf("no cluster for org: %v", err)
+	}
 	workloadID := "e1-suppress/" + uuid.New().String()
 	tokenName := "e1-suppress-" + uuid.New().String()
 
-	raw, _, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, tokenName, time.Hour)
-	if err != nil {
-		t.Fatalf("issue token: %v", err)
-	}
+	raw := issueBoundRuntimeEventToken(t, pool, orgID, clusterID, tokenName)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM events WHERE org_id=$1 AND workload_id=$2`, orgID, workloadID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM audit_events WHERE org_id=$1 AND target_id=$2`, orgID, workloadID)

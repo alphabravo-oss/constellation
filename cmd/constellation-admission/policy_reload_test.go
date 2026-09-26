@@ -1,9 +1,13 @@
 package main
 
 import (
+	"context"
+	"io"
+	"log/slog"
 	"testing"
 
 	"github.com/alphabravocompany/constellation/pkg/admission"
+	admissionv1 "k8s.io/api/admission/v1"
 )
 
 func TestAdmissionPolicyRowsToRulesParsesSupportedRows(t *testing.T) {
@@ -62,5 +66,20 @@ func TestAdmissionPolicyRowsToRulesRejectsInvalidYAML(t *testing.T) {
 	}})
 	if err == nil {
 		t.Fatal("expected invalid YAML error")
+	}
+}
+
+func TestCELPolicyParseErrorRemainsFailClosed(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	rules := celPolicyRowsToRules([]admissionPolicyRow{{Name: "broken", Mode: "enforce", SpecYAML: "spec: ["}}, logger)
+	if len(rules) != 1 {
+		t.Fatalf("rules=%d, want malformed rule retained", len(rules))
+	}
+	engine, diagnostics, err := admission.NewCELEngine(rules)
+	if err != nil || diagnostics["broken"] == nil {
+		t.Fatalf("compile diagnostic missing: %v %v", err, diagnostics)
+	}
+	if resp := engine.Evaluate(context.Background(), &admissionv1.AdmissionRequest{}); resp.Allowed {
+		t.Fatal("malformed enforce YAML must deny rather than disappear")
 	}
 }

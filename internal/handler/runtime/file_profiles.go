@@ -450,6 +450,24 @@ func (h *FileProfiles) AgentRulesBundle(w http.ResponseWriter, r *http.Request) 
 		jsonError(w, http.StatusBadRequest, "invalid cluster_id")
 		return
 	}
+	boundClusterID, err := handler.ResolveAgentClusterID(r.Context(), h.db, tok)
+	if err != nil {
+		if errors.Is(err, handler.ErrAgentClusterScope) {
+			jsonError(w, http.StatusForbidden, "agent token cluster scope mismatch")
+			return
+		}
+		jsonError(w, http.StatusInternalServerError, "resolve cluster failed")
+		return
+	}
+	if boundClusterID == nil {
+		jsonError(w, http.StatusForbidden, "agent token cluster binding required")
+		return
+	}
+	if clusterID != *boundClusterID {
+		jsonError(w, http.StatusForbidden, "agent token cluster scope mismatch")
+		return
+	}
+	clusterID = *boundClusterID
 	var exists bool
 	if err := h.db.Pool().QueryRow(r.Context(),
 		`SELECT EXISTS (SELECT 1 FROM clusters WHERE org_id = $1 AND id = $2)`,
@@ -668,6 +686,24 @@ func (h *FileProfiles) ReportWatchInventory(w http.ResponseWriter, r *http.Reque
 		jsonError(w, http.StatusBadRequest, "invalid cluster_id")
 		return
 	}
+	boundClusterID, err := handler.ResolveAgentClusterID(r.Context(), h.db, tok)
+	if err != nil {
+		if errors.Is(err, handler.ErrAgentClusterScope) {
+			jsonError(w, http.StatusForbidden, "agent token cluster scope mismatch")
+			return
+		}
+		jsonError(w, http.StatusInternalServerError, "resolve cluster failed")
+		return
+	}
+	if boundClusterID == nil {
+		jsonError(w, http.StatusForbidden, "agent token cluster binding required")
+		return
+	}
+	if clusterID != *boundClusterID {
+		jsonError(w, http.StatusForbidden, "agent token cluster scope mismatch")
+		return
+	}
+	clusterID = *boundClusterID
 	node := strings.TrimSpace(body.Node)
 	if node == "" {
 		jsonError(w, http.StatusBadRequest, "node is required")

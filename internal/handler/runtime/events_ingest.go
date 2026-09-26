@@ -315,7 +315,7 @@ func (h *EventsIngest) Bulk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	clusterID, status, err := h.resolveRuntimeEventClusterID(r.Context(), tok.OrgID, r)
+	clusterID, status, err := h.resolveRuntimeEventClusterID(r.Context(), tok, r)
 	if err != nil {
 		jsonError(w, status, err.Error())
 		return
@@ -379,7 +379,7 @@ VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),'ebpf',$7,$8,$9,$10,$11,$12)`
 		// post-commit audit/notify fan-out — so a matching suppress_log action can suppress
 		// those side-effects instead of firing after the very log/alert it is meant to
 		// suppress has already been emitted. The evaluator also fires any webhook actions
-		// internally; we capture the ordered matched actions to enforce quarantine/tag in the
+		// internally; we capture the ordered matched actions to enforce quarantine in the
 		// post-commit loop. Panic-isolated so a buggy rule can never roll back or 500 ingest.
 		if (cls.Severity == "high" || cls.Severity == "critical") && h.evalResponseRules != nil {
 			ruleActions[i] = h.evalResponseRulesSafe(r.Context(), tok.OrgID, ev, cls)
@@ -396,7 +396,7 @@ VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),'ebpf',$7,$8,$9,$10,$11,$12)`
 		}
 		// suppress_log: drop the events row entirely for this detection (NeuVector parity —
 		// suppress_log suppresses the security-event log). Enforcement actions on the same
-		// rule (quarantine/tag/v2 explicit response actions) are still applied post-commit.
+		// rule (quarantine/v2 explicit response actions) are still applied post-commit.
 		if suppressed[i] {
 			continue
 		}
@@ -515,7 +515,7 @@ VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),'ebpf',$7,$8,$9,$10,$11,$12)`
 		if h.respond != nil {
 			h.dispatchResponse(r.Context(), orgID, clusterID, ev, cls, techniques)
 		}
-		// E1: enforce the actions matched pre-commit, in priority order (quarantine/tag);
+		// E1: enforce the actions matched pre-commit, in priority order (quarantine);
 		// webhooks already fired inside the evaluator and suppress_log was enforced above.
 		if h.evalResponseRules != nil {
 			h.applyResponseRuleActions(r.Context(), orgID, clusterID, ev, ruleActions[i])
@@ -696,7 +696,7 @@ func responseRuleEvent(ev *IngestEvent, cls eventClassification) *responserule.E
 // applied in the priority order the evaluator returned them. quarantine reuses the existing
 // runtime quarantine bridge (via the RT-2 respond hook is the v2 path; here we audit-log the
 // applied action so the ordered execution is observable and the loop is closed). suppress_log
-// and tag are recorded too. Webhook delivery already happened inside the evaluator.
+// and legacy tag attempts are recorded too. Webhook delivery already happened inside the evaluator.
 func (h *EventsIngest) applyResponseRuleActions(ctx context.Context, orgID, clusterID uuid.UUID, ev *IngestEvent, actions []responserule.Action) {
 	for i := range actions {
 		a := actions[i]
@@ -716,16 +716,15 @@ func (h *EventsIngest) applyResponseRuleActions(ctx context.Context, orgID, clus
 		// origin='auto' quarantine bridge RT-2 uses (quarantineRuntime): a plain quarantine
 		// records the blocking entry; param isolate=true additionally severs the live
 		// workload's network via a deny-all cordon. suppress_log was enforced earlier in Bulk
-		// (the events row / runtime.alert audit / notify fan-out were skipped); tag is recorded
-		// as workload metadata (NeuVector's tag is likewise just a label — Constellation has no
-		// workload-tags table, so it lives in this audit row's param_* fields); webhook already
-		// fired inside the evaluator. Every branch sets an explicit "enforced" outcome so no
-		// configured action is a silent no-op.
+		// (the events row / runtime.alert audit / notify fan-out were skipped); webhook already
+		// fired inside the evaluator. Legacy tag actions have no E1 label persistence path,
+		// so they report an unsupported outcome instead of claiming enforcement.
 		switch a.Type {
 		case responserule.ActionSuppressLog:
 			after["enforced"] = "suppressed_log"
 		case responserule.ActionTag:
-			after["enforced"] = "tagged"
+			after["enforced"] = "unsupported"
+			after["enforce_error"] = "tag action has no event or workload label side effect"
 		case responserule.ActionWebhook:
 			after["enforced"] = "webhook_dispatched"
 		case responserule.ActionQuarantine:
@@ -783,30 +782,30 @@ func workloadMatchKey(ev *IngestEvent) string {
 	return strings.TrimSpace(ev.WorkloadID)
 }
 
-func (h *EventsIngest) resolveRuntimeEventClusterID(ctx context.Context, orgID uuid.UUID, r *http.Request) (uuid.UUID, int, error) {
+func (h *EventsIngest) resolveRuntimeEventClusterID(ctx context.Context, tok *handler.RuntimeAgentToken, r *http.Request) (uuid.UUID, int, error) {
 	raw := strings.TrimSpace(r.URL.Query().Get("cluster_id"))
+	var requestedClusterID uuid.UUID
 	if raw != "" {
 		clusterID, err := uuid.Parse(raw)
 		if err != nil {
 			return uuid.Nil, http.StatusBadRequest, errors.New("invalid cluster_id")
 		}
-		var exists bool
-		if err := h.db.Pool().QueryRow(ctx,
-			`SELECT EXISTS (SELECT 1 FROM clusters WHERE org_id = $1 AND id = $2)`,
-			orgID, clusterID).Scan(&exists); err != nil {
-			return uuid.Nil, http.StatusInternalServerError, fmt.Errorf("cluster lookup: %w", err)
-		}
-		if !exists {
-			return uuid.Nil, http.StatusNotFound, errors.New("cluster not found")
-		}
-		return clusterID, http.StatusOK, nil
+		requestedClusterID = clusterID
 	}
-
-	var clusterID uuid.UUID
-	_ = h.db.Pool().QueryRow(ctx,
-		`SELECT id FROM clusters WHERE org_id = $1 ORDER BY created_at LIMIT 1`, orgID).
-		Scan(&clusterID)
-	return clusterID, http.StatusOK, nil
+	boundClusterID, err := handler.ResolveAgentClusterID(ctx, h.db, tok)
+	if err != nil {
+		if errors.Is(err, handler.ErrAgentClusterScope) {
+			return uuid.Nil, http.StatusForbidden, errors.New("agent token cluster scope mismatch")
+		}
+		return uuid.Nil, http.StatusInternalServerError, fmt.Errorf("resolve cluster: %w", err)
+	}
+	if boundClusterID == nil {
+		return uuid.Nil, http.StatusForbidden, errors.New("agent token cluster binding required")
+	}
+	if raw != "" && requestedClusterID != *boundClusterID {
+		return uuid.Nil, http.StatusForbidden, errors.New("agent token cluster scope mismatch")
+	}
+	return *boundClusterID, http.StatusOK, nil
 }
 
 func (h *EventsIngest) loadFileProfileRuleSet(ctx context.Context, orgID, clusterID uuid.UUID, events []IngestEvent) (*fileProfileRuleSet, error) {

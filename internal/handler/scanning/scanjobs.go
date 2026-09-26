@@ -1056,6 +1056,14 @@ ON CONFLICT (job_id, attempt_number) DO UPDATE
 	if body.BundleMetadata != nil {
 		after["vulndb_bundle"] = body.BundleMetadata
 	}
+	// E1: evaluate the org's enabled EventScan response rules against this scan result and
+	// apply the ordered matching actions (NeuVector EventCVEReport parity). Runs after the
+	// txn has committed so a buggy rule can never roll back the scan ingest; panic-isolated
+	// and best-effort like the runtime path's dispatchResponseRules. Keep the operational
+	// completion audit below regardless of the response-rule outcome.
+	if h.evalResponseRules != nil {
+		h.dispatchScanResponseRules(r.Context(), token.OrgID, target, identity, body.Findings)
+	}
 	_, _, _ = h.audit.Log(r.Context(), audit.Event{
 		OrgID:      &token.OrgID,
 		Action:     "scan-job.complete",
@@ -1063,13 +1071,6 @@ ON CONFLICT (job_id, attempt_number) DO UPDATE
 		TargetID:   id.String(),
 		After:      after,
 	})
-	// E1: evaluate the org's enabled EventScan response rules against this scan result and
-	// apply the ordered matching actions (NeuVector EventCVEReport parity). Runs after the
-	// txn has committed so a buggy rule can never roll back the scan ingest; panic-isolated
-	// and best-effort like the runtime path's dispatchResponseRules.
-	if h.evalResponseRules != nil {
-		h.dispatchScanResponseRules(r.Context(), token.OrgID, target, identity, body.Findings)
-	}
 	httpx.WriteJSON(w, 200, map[string]any{
 		"status":               "completed",
 		"asset_id":             assetID,

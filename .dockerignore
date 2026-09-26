@@ -10,5 +10,7 @@ frontend/test-results
 frontend/playwright-report
 **/*.test.go
 **/testdata
+!frontend/src/**/testdata
+!frontend/src/**/testdata/**
 .env*
 *.log

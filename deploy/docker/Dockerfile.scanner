@@ -5,7 +5,7 @@
 # Go scanner worker. Scales horizontally by scan-job queue depth. Each pod owns a CPU/memory
 # budget tuned for trivy DB loads (~1 GB RAM, ~1 CPU per concurrent scan).
 
-ARG GO_VERSION=1.26
+ARG GO_VERSION=1.26.8
 ARG SYFT_VERSION=1.42.2
 ARG TRIVY_VERSION=0.69.3
 ARG GRYPE_VERSION=0.109.0

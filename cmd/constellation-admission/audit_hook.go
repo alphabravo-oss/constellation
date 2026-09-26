@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,21 +26,15 @@ func newAdmissionAuditHook(ctx context.Context, pool *pgxpool.Pool, clusterID uu
 	}
 	auditor := auditlog.New(pool)
 	return func(ctx context.Context, ev admission.DenyEvent) {
-		if _, _, err := auditor.Log(ctx, admissionAuditEvent(orgID, clusterID, ev)); err != nil && logger != nil {
-			logger.Warn("admission audit log failed", "err", err, "monitor", ev.Monitor, "rule_id", ev.RuleID, "namespace", ev.Namespace, "pod", ev.Pod)
+		suppressed := false
+		if !ev.Monitor {
+			suppressed = evaluateAdmissionResponseRules(ctx, pool, auditor, orgID, clusterID, ev, logger)
 		}
-		// Monitor-mode matches are observe-only (NeuVector monitor-then-enforce tuning):
-		// they are persisted as an 'admission.monitor' audit row above but MUST NOT fire
-		// response-rule actions (quarantine/etc), which are an enforcement side-effect.
-		if ev.Monitor {
-			return
+		if !suppressed {
+			if _, _, err := auditor.Log(ctx, admissionAuditEvent(orgID, clusterID, ev)); err != nil && logger != nil {
+				logger.Warn("admission audit log failed", "err", err, "monitor", ev.Monitor, "rule_id", ev.RuleID, "namespace", ev.Namespace, "pod", ev.Pod)
+			}
 		}
-		// E1: evaluate the org's enabled EventAdmission response rules against this admission
-		// deny and apply their ordered actions (NeuVector EventAdmCtrl parity). This is the
-		// only place admission verdicts are recorded (the webhook writes audit rows directly;
-		// they never reach the API), so it is the admission-decision recording point E1 must
-		// hook. Best-effort/panic-isolated: a buggy rule must never block pod admission.
-		evaluateAdmissionResponseRules(ctx, pool, auditor, orgID, clusterID, ev, logger)
 	}, orgID, nil
 }
 
@@ -135,17 +131,21 @@ func chainDenyHooks(hooks ...admission.DenyHook) admission.DenyHook {
 // them against this deny, and applies the ordered actions. It uses the pure pkg/responserule
 // engine directly (rather than the API handler) so the lean webhook binary stays decoupled
 // from internal/handler. Panic-isolated/best-effort: any error or panic is logged and
-// swallowed so a misbehaving rule can never block pod admission.
+// swallowed so a misbehaving rule can never block pod admission. It returns true only
+// when a matched suppress_log action was successfully audit-recorded.
 //
 // Webhook actions are NOT delivered here: the webhook pod has no notify dispatcher (that lives
 // in the API). They are still audit-recorded so an operator can see the rule fired. Delivery of
 // the deny itself to org receivers + the syslog/SIEM mirror is done API-side by
 // handler.RunAdmissionNotifyDispatcher, which sweeps the admission.deny audit rows this pod
 // writes and fans each one out through notify.Dispatcher (NeuVector EventAdmCtrl parity, P1-18).
-func evaluateAdmissionResponseRules(ctx context.Context, pool *pgxpool.Pool, auditor *auditlog.Logger, orgID, clusterID uuid.UUID, ev admission.DenyEvent, logger *slog.Logger) {
+func evaluateAdmissionResponseRules(ctx context.Context, pool *pgxpool.Pool, auditor *auditlog.Logger, orgID, clusterID uuid.UUID, ev admission.DenyEvent, logger *slog.Logger) (suppressed bool) {
 	defer func() {
-		if rec := recover(); rec != nil && logger != nil {
-			logger.Warn("admission response-rule dispatch panic", "recover", rec)
+		if rec := recover(); rec != nil {
+			suppressed = false
+			if logger != nil {
+				logger.Warn("admission response-rule dispatch panic", "recover", rec)
+			}
 		}
 	}()
 	rules, err := loadAdmissionResponseRules(ctx, pool, orgID)
@@ -161,12 +161,19 @@ func evaluateAdmissionResponseRules(ctx context.Context, pool *pgxpool.Pool, aud
 	rev := admissionResponseRuleEvent(ev)
 	matched := responserule.MatchRules(rules, rev)
 	order := 0
+	actionAuditFailed := false
 	for i := range matched {
 		for _, a := range matched[i].Actions {
-			applyAdmissionResponseRuleAction(ctx, pool, auditor, orgID, clusterID, ev, rev, a, order, logger)
+			if err := applyAdmissionResponseRuleAction(ctx, pool, auditor, orgID, clusterID, ev, rev, a, order, logger); err != nil {
+				actionAuditFailed = true
+			}
+			if a.Type == responserule.ActionSuppressLog {
+				suppressed = true
+			}
 			order++
 		}
 	}
+	return suppressed && !actionAuditFailed
 }
 
 // loadAdmissionResponseRules reads the org's enabled event_type='admission' response rules,
@@ -191,8 +198,27 @@ SELECT id, name, enabled, priority, event_type, conditions, actions
 			return nil, err
 		}
 		rule.OrgID = orgID
-		_ = json.Unmarshal(conds, &rule.Conditions)
-		_ = json.Unmarshal(acts, &rule.Actions)
+		if err := json.Unmarshal(conds, &rule.Conditions); err != nil {
+			return nil, fmt.Errorf("decode conditions for response rule %s: %w", rule.ID, err)
+		}
+		if err := json.Unmarshal(acts, &rule.Actions); err != nil {
+			return nil, fmt.Errorf("decode actions for response rule %s: %w", rule.ID, err)
+		}
+		for _, condition := range rule.Conditions {
+			switch condition.Op {
+			case responserule.OpEq, responserule.OpNe, responserule.OpContains:
+			case responserule.OpRegex:
+				if _, err := regexp.Compile(condition.Value); err != nil {
+					return nil, fmt.Errorf("response rule %s condition: %w", rule.ID, err)
+				}
+			case responserule.OpGt, responserule.OpLt:
+				if _, err := strconv.ParseFloat(strings.TrimSpace(condition.Value), 64); err != nil {
+					return nil, fmt.Errorf("response rule %s condition: %w", rule.ID, err)
+				}
+			default:
+				return nil, fmt.Errorf("response rule %s has unsupported condition op %q", rule.ID, condition.Op)
+			}
+		}
 		out = append(out, rule)
 	}
 	return out, rows.Err()
@@ -226,8 +252,8 @@ func admissionResponseRuleEvent(ev admission.DenyEvent) *responserule.Event {
 
 // applyAdmissionResponseRuleAction applies one ordered E1 action. quarantine records an
 // origin='auto' quarantine_entries row (scope=workload when a pod is known, else namespace),
-// reusing the same schema the runtime bridge uses; suppress_log/tag stay audit-recorded.
-func applyAdmissionResponseRuleAction(ctx context.Context, pool *pgxpool.Pool, auditor *auditlog.Logger, orgID, clusterID uuid.UUID, ev admission.DenyEvent, rev *responserule.Event, a responserule.Action, order int, logger *slog.Logger) {
+// reusing the same schema the runtime bridge uses; legacy tag actions report unsupported.
+func applyAdmissionResponseRuleAction(ctx context.Context, pool *pgxpool.Pool, auditor *auditlog.Logger, orgID, clusterID uuid.UUID, ev admission.DenyEvent, rev *responserule.Event, a responserule.Action, order int, logger *slog.Logger) error {
 	oid := orgID
 	after := map[string]any{
 		"action":    string(a.Type),
@@ -239,6 +265,13 @@ func applyAdmissionResponseRuleAction(ctx context.Context, pool *pgxpool.Pool, a
 	}
 	for k, v := range a.Params {
 		after["param_"+k] = v
+	}
+	if a.Type == responserule.ActionSuppressLog {
+		after["enforced"] = "suppressed_log"
+	}
+	if a.Type == responserule.ActionTag {
+		after["enforced"] = "unsupported"
+		after["enforce_error"] = "tag action has no pod or workload label side effect"
 	}
 	if a.Type == responserule.ActionQuarantine {
 		scope, matchKey := admissionQuarantineTarget(ev)
@@ -265,9 +298,13 @@ func applyAdmissionResponseRuleAction(ctx context.Context, pool *pgxpool.Pool, a
 		TargetKind: "pod",
 		TargetID:   targetID,
 		After:      after,
-	}); err != nil && logger != nil {
-		logger.Warn("admission response-rule audit failed", "err", err)
+	}); err != nil {
+		if logger != nil {
+			logger.Warn("admission response-rule audit failed", "err", err)
+		}
+		return err
 	}
+	return nil
 }
 
 // admissionQuarantineTarget picks the quarantine scope + match key for a deny: a concrete pod

@@ -4,7 +4,7 @@
 # Singleton (leader-elected). Reconciles ConstellationCluster CRs into Deployments,
 # DaemonSets, Services, CronJobs. No scanner CLIs, no API code — pure controller-runtime.
 
-ARG GO_VERSION=1.26
+ARG GO_VERSION=1.26.8
 ARG RUNTIME_IMAGE=debian:bookworm-slim
 
 FROM golang:${GO_VERSION}-bookworm AS build

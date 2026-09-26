@@ -83,6 +83,10 @@ func (h *HostPackagesHandler) Report(w http.ResponseWriter, r *http.Request) {
 	// clusterID is also threaded into the scan-target upsert below.
 	clusterID, err := ResolveAgentClusterID(r.Context(), h.db, tok)
 	if err != nil {
+		if errors.Is(err, ErrAgentClusterScope) {
+			jsonError(w, http.StatusForbidden, "agent token cluster scope mismatch")
+			return
+		}
 		jsonError(w, http.StatusInternalServerError, "resolve cluster: "+err.Error())
 		return
 	}

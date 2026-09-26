@@ -223,6 +223,22 @@ func ApplyConfig(ctx context.Context, pool *pgxpool.Pool, orgID string, doc *Con
 	// Rollback is a no-op after a successful Commit; on any early return it undoes
 	// every table written and every replace-delete performed so far.
 	defer func() { _ = tx.Rollback(ctx) }()
+	clusters, err := tx.Query(ctx, `SELECT id::text FROM clusters WHERE org_id=$1`, orgID)
+	if err != nil {
+		return res, fmt.Errorf("resolve import clusters: %w", err)
+	}
+	for clusters.Next() {
+		var clusterID string
+		if err := clusters.Scan(&clusterID); err != nil {
+			clusters.Close()
+			return res, err
+		}
+		clusterMap[clusterID] = clusterID
+	}
+	clusters.Close()
+	if err := clusters.Err(); err != nil {
+		return res, err
+	}
 
 	for _, tbl := range ConfigTables {
 		// Identity tables require the manage-users verb. Without it the import neither

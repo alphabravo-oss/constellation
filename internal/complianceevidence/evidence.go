@@ -700,13 +700,14 @@ func (c Collector) applyExemptions(ctx context.Context, q Query, items []Item) e
 		items[i].EffectiveStatus = items[i].Status
 	}
 	rows, err := c.Pool.Query(ctx, `
-SELECT framework, control_id, id::text, reason, expires_at
-  FROM compliance_exemptions
- WHERE org_id = $1
-   AND revoked_at IS NULL
-   AND expires_at > NOW()
-   AND ($2::uuid IS NULL OR cluster_id IS NULL OR cluster_id = $2)
- ORDER BY (cluster_id IS NULL), created_at DESC`, q.OrgID, uuidArg(q.ClusterID))
+SELECT framework, control_id, id::text, reason, expires_at, cluster_id
+  FROM compliance_exemptions ce
+ WHERE ce.org_id = $1
+   AND ce.revoked_at IS NULL
+   AND ce.expires_at > NOW()
+   AND (ce.cluster_id IS NULL OR EXISTS (SELECT 1 FROM clusters WHERE id = ce.cluster_id AND org_id = $1))
+   AND ($2::uuid IS NULL OR ce.cluster_id IS NULL OR ce.cluster_id = $2)
+ ORDER BY ce.created_at DESC`, q.OrgID, uuidArg(q.ClusterID))
 	if err != nil {
 		if strings.Contains(err.Error(), "compliance_exemptions") {
 			return nil
@@ -718,10 +719,14 @@ SELECT framework, control_id, id::text, reason, expires_at
 	for rows.Next() {
 		var framework, controlID string
 		var ex Exemption
-		if err := rows.Scan(&framework, &controlID, &ex.ID, &ex.Reason, &ex.ExpiresAt); err != nil {
+		var clusterID *uuid.UUID
+		if err := rows.Scan(&framework, &controlID, &ex.ID, &ex.Reason, &ex.ExpiresAt, &clusterID); err != nil {
 			return err
 		}
-		key := framework + "\x00" + controlID
+		key := framework + "\x00" + controlID + "\x00"
+		if clusterID != nil {
+			key += clusterID.String()
+		}
 		if _, ok := exemptions[key]; !ok {
 			exemptions[key] = ex
 		}
@@ -733,7 +738,15 @@ SELECT framework, control_id, id::text, reason, expires_at
 		if items[i].Status != "fail" {
 			continue
 		}
-		ex, ok := exemptions[items[i].Framework+"\x00"+items[i].ControlID]
+		key := items[i].Framework + "\x00" + items[i].ControlID + "\x00"
+		var ex Exemption
+		var ok bool
+		if items[i].ClusterID != nil {
+			ex, ok = exemptions[key+items[i].ClusterID.String()]
+		}
+		if !ok {
+			ex, ok = exemptions[key]
+		}
 		if !ok {
 			continue
 		}

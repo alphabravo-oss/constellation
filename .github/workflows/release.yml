@@ -8,7 +8,14 @@ permissions:
   contents: read
 
 jobs:
+  security-and-quality:
+    permissions:
+      contents: read
+      security-events: write
+    uses: ./.github/workflows/ci.yml
+
   verify:
+    needs: security-and-quality
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -19,10 +26,12 @@ jobs:
       - uses: azure/setup-helm@bf6a7d304bc2fdb57e0331155b7ebf2c504acf0a # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 24
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: go test ./...
+      - run: go install github.com/pressly/goose/v3/cmd/goose@v3.27.1
+      - run: make test-clean-database
       - run: go vet ./...
       - run: npm ci
         working-directory: frontend
@@ -64,6 +73,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9 # v3
+      - name: Read runtime pins
+        id: runtime
+        run: echo "node-version=$(cat .node-version)" >> "$GITHUB_OUTPUT"
       - id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
@@ -72,7 +84,9 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ghcr.io/alphabravo-oss/constellation/${{ matrix.role }}:${{ matrix.tag_prefix }}${{ github.ref_name }}
-          build-args: VERSION=${{ github.ref_name }}
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            NODE_VERSION=${{ steps.runtime.outputs.node-version }}
           provenance: mode=max
           sbom: true
           cache-from: type=gha,scope=${{ matrix.role }}

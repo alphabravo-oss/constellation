@@ -52,15 +52,16 @@ func (h *ResponseRuleDefs) WithDispatcher(d *notify.Dispatcher) *ResponseRuleDef
 }
 
 type responseRuleDefDTO struct {
-	ID         uuid.UUID                `json:"id"`
-	Name       string                   `json:"name"`
-	Enabled    bool                     `json:"enabled"`
-	Priority   int                      `json:"priority"`
-	EventType  responserule.EventType   `json:"event_type"`
-	Conditions []responserule.Condition `json:"conditions"`
-	Actions    []responserule.Action    `json:"actions"`
-	CreatedAt  time.Time                `json:"created_at"`
-	UpdatedAt  time.Time                `json:"updated_at"`
+	ID                 uuid.UUID                 `json:"id"`
+	Name               string                    `json:"name"`
+	Enabled            bool                      `json:"enabled"`
+	Priority           int                       `json:"priority"`
+	EventType          responserule.EventType    `json:"event_type"`
+	Conditions         []responserule.Condition  `json:"conditions"`
+	Actions            []responserule.Action     `json:"actions"`
+	UnsupportedActions []responserule.ActionType `json:"unsupported_actions,omitempty"`
+	CreatedAt          time.Time                 `json:"created_at"`
+	UpdatedAt          time.Time                 `json:"updated_at"`
 }
 
 type responseRuleDefBody struct {
@@ -127,6 +128,7 @@ SELECT id, name, enabled, priority, event_type, conditions, actions, created_at,
 	}
 	_ = json.Unmarshal(conds, &d.Conditions)
 	_ = json.Unmarshal(acts, &d.Actions)
+	d.UnsupportedActions = unsupportedResponseActions(d.EventType, d.Actions)
 	httpx.WriteJSON(w, http.StatusOK, d)
 }
 
@@ -236,8 +238,8 @@ func (h *ResponseRuleDefs) Delete(w http.ResponseWriter, r *http.Request) {
 // ----------------------------- agent :sync bundle ----------------------------
 
 type responseRuleSyncBundle struct {
-	GeneratedAt string                        `json:"generated_at"`
-	Rules       []responseRuleDefDTO          `json:"rules"`
+	GeneratedAt string               `json:"generated_at"`
+	Rules       []responseRuleDefDTO `json:"rules"`
 }
 
 // AgentSyncBundle serves the org's ENABLED response rules to the runtime-agent, ordered by
@@ -260,7 +262,20 @@ func (h *ResponseRuleDefs) AgentSyncBundle(w http.ResponseWriter, r *http.Reques
 		Rules:       make([]responseRuleDefDTO, 0, len(rules)),
 	}
 	for i := range rules {
-		bundle.Rules = append(bundle.Rules, toDTO(rules[i]))
+		dto := toDTO(rules[i])
+		if len(dto.UnsupportedActions) > 0 {
+			acts := make([]responserule.Action, 0, len(dto.Actions))
+			for _, action := range dto.Actions {
+				if !unsupportedResponseAction(dto.EventType, action.Type) {
+					acts = append(acts, action)
+				}
+			}
+			if len(acts) == 0 {
+				continue
+			}
+			dto.Actions = acts
+		}
+		bundle.Rules = append(bundle.Rules, dto)
 	}
 	httpx.WriteJSON(w, http.StatusOK, bundle)
 }
@@ -270,7 +285,8 @@ func (h *ResponseRuleDefs) AgentSyncBundle(w http.ResponseWriter, r *http.Reques
 // Evaluate is the server-side evaluation entry point. It loads the org's enabled rules,
 // returns the ordered matching actions (priority-ordered, pure pkg/responserule), and
 // fires any webhook actions through the notify dispatcher. The returned actions let the
-// caller (the ingest path) apply quarantine/suppress_log/tag effects in its own data plane.
+// caller (the ingest path) apply quarantine/suppress_log effects in its own data plane.
+// Legacy tag actions are returned for an explicit unsupported audit outcome.
 func (h *ResponseRuleDefs) Evaluate(ctx context.Context, orgID uuid.UUID, ev *responserule.Event) ([]responserule.Action, error) {
 	rules, err := h.loadRules(ctx, orgID, true)
 	if err != nil {
@@ -397,6 +413,21 @@ func toDTO(r responserule.ResponseRule) responseRuleDefDTO {
 	}
 	return responseRuleDefDTO{
 		ID: r.ID, Name: r.Name, Enabled: r.Enabled, Priority: r.Priority,
-		EventType: r.EventType, Conditions: conds, Actions: acts,
+		EventType: r.EventType, Conditions: conds, Actions: acts, UnsupportedActions: unsupportedResponseActions(r.EventType, acts),
 	}
+}
+
+func unsupportedResponseActions(eventType responserule.EventType, actions []responserule.Action) []responserule.ActionType {
+	var unsupported []responserule.ActionType
+	for _, action := range actions {
+		if unsupportedResponseAction(eventType, action.Type) {
+			unsupported = append(unsupported, action.Type)
+		}
+	}
+	return unsupported
+}
+
+func unsupportedResponseAction(eventType responserule.EventType, actionType responserule.ActionType) bool {
+	return actionType == responserule.ActionTag ||
+		(eventType == responserule.EventScan && actionType == responserule.ActionSuppressLog)
 }

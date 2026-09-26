@@ -10,6 +10,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
   LayoutDashboard,
@@ -355,7 +356,7 @@ export function AppShell() {
           clusterId={clusterId}
           theme={theme}
           onToggleTheme={toggle}
-          onLogout={logout}
+          onLogout={() => { void logout().catch(() => toast.error("Sign out could not be confirmed. Please try again.")); }}
           userEmail={me?.email}
           userRole={me?.roles?.[0]}
           onLaunchPalette={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))}

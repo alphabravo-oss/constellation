@@ -126,7 +126,7 @@ All env files live under `/etc/constellation/` (mode 0640, owner root, group `co
 | `LISTEN_ADDR` | no | `:8080` | HTTP bind address. |
 | `JWT_ISSUER` | no | `constellation` | JWT `iss` claim. |
 | `JWT_AUDIENCE` | no | `constellation-api` | JWT `aud` claim. |
-| `JWT_TTL` | no | `1h` | Token lifetime. |
+| `JWT_TTL` | no | `15m` | Access-token lifetime, capped at 15 minutes. Browser refresh and revocation are documented in [browser sessions](browser-sessions.md). |
 | `CORS_ORIGINS` | no | `http://localhost:5173` | Comma-list. |
 | `ASTRONOMER_JWKS_URL` | no | – | External JWKS for SSO. |
 | `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URL` | no | – | OIDC SSO (set all four to enable). |
@@ -207,7 +207,7 @@ signer; **all** entries are accepted as verifiers. To rotate without downtime:
    JWT_KEYS=<NEW>,<OLD>
    ```
 3. `sudo systemctl restart constellation-api` (or `bash reconfigure.sh api`).
-4. Wait until the longest possible token lifetime (`JWT_TTL`, default 1h) plus a safety
+4. Wait until the longest possible previously issued token lifetime (including pre-upgrade settings; new access tokens are capped at 15 minutes) plus a safety
    margin so all old tokens have expired.
 5. Remove `<OLD>` from `JWT_KEYS`, restart again.
 

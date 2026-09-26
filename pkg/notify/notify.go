@@ -415,6 +415,13 @@ func (s *Syslog) Send(ctx context.Context, alerts []Alert) error {
 	if s.Addr == "" {
 		return errors.New("syslog: Addr empty")
 	}
+	network := s.Network
+	if network == "" {
+		network = "udp"
+	}
+	if network != "tls" && (strings.TrimSpace(s.CACertPEM) != "" || strings.TrimSpace(s.ClientCertPEM) != "" || strings.TrimSpace(s.ClientKeyPEM) != "" || strings.TrimSpace(s.ServerName) != "") {
+		return errors.New("syslog: TLS transport required when TLS settings are configured")
+	}
 	// Apply level/category filtering first; if nothing survives, don't even dial.
 	shipped := alerts[:0:0]
 	for _, a := range alerts {
@@ -424,10 +431,6 @@ func (s *Syslog) Send(ctx context.Context, alerts []Alert) error {
 	}
 	if len(shipped) == 0 {
 		return nil
-	}
-	network := s.Network
-	if network == "" {
-		network = "udp"
 	}
 	conn, err := s.dial(ctx, network)
 	if err != nil {

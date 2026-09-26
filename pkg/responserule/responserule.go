@@ -3,7 +3,7 @@
 //
 // A ResponseRule binds a runtime event_type (process|file|network|admission|scan|compliance) to an
 // ordered set of conditions (generic field/op/value clauses) and an ordered set of actions
-// (quarantine|suppress_log|webhook|tag). The engine is storage-agnostic and pure: rules are
+// (quarantine|suppress_log|webhook). The engine is storage-agnostic and pure: rules are
 // passed in by the API layer (which loads them from the response_rules table), so condition
 // matching, priority ordering, and the enabled filter are trivially unit-testable and reused
 // from both the ingest evaluator and the agent :sync bundle serializer.
@@ -69,7 +69,7 @@ const (
 )
 
 var validActionTypes = map[ActionType]bool{
-	ActionQuarantine: true, ActionSuppressLog: true, ActionWebhook: true, ActionTag: true,
+	ActionQuarantine: true, ActionSuppressLog: true, ActionWebhook: true,
 }
 
 // Condition is one match clause on a runtime event. Field names the event attribute
@@ -138,6 +138,12 @@ func (r *ResponseRule) Validate() error {
 		}
 	}
 	for _, a := range r.Actions {
+		if a.Type == ActionTag {
+			return fmt.Errorf("responserule: tag action is unsupported")
+		}
+		if r.EventType == EventScan && a.Type == ActionSuppressLog {
+			return fmt.Errorf("responserule: suppress_log is unsupported for scan events")
+		}
 		if !validActionTypes[a.Type] {
 			return fmt.Errorf("responserule: invalid action type %q", a.Type)
 		}

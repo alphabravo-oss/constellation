@@ -1,13 +1,88 @@
 package k8saudit
 
 import (
+	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/internal/db"
+	"github.com/alphabravocompany/constellation/pkg/audit"
+	"github.com/alphabravocompany/constellation/pkg/response"
+	"github.com/alphabravocompany/constellation/pkg/responserule"
 )
+
+func TestLegacyTagOutcomePreservesSuppressLog(t *testing.T) {
+	databaseURL := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		databaseURL = "postgres://test:test@localhost:15433/constellation_test?sslmode=disable"
+	}
+	database, err := db.Connect(context.Background(), databaseURL)
+	if err != nil {
+		t.Skipf("skipping: cannot reach test DB (%v)", err)
+	}
+	t.Cleanup(database.Close)
+	ctx := context.Background()
+	pool := database.Pool()
+	orgID := uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, display_name) VALUES ($1, $2, $2)`, orgID, "legacy-tag-k8saudit-"+orgID.String()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id=$1`, orgID) })
+
+	for _, suppressed := range []bool{false, true} {
+		name := "unsuppressed"
+		if suppressed {
+			name = "suppressed"
+		}
+		t.Run(name, func(t *testing.T) {
+			auditID := uuid.NewString()
+			responded := 0
+			h := NewIngest(database).WithAudit(audit.New(pool)).WithResponseRuleEngine(func(_ context.Context, _ uuid.UUID, ev *responserule.Event) ([]responserule.Action, error) {
+				if ev.Type != responserule.EventAdmission || ev.Fields["kind"] != "k8s_audit" {
+					t.Fatalf("unexpected rule event: %+v", ev)
+				}
+				actions := []responserule.Action{{Type: responserule.ActionTag, Params: map[string]string{"key": "team", "value": "sec"}}}
+				if suppressed {
+					actions = append([]responserule.Action{{Type: responserule.ActionSuppressLog}}, actions...)
+				}
+				return actions, nil
+			})
+			h.WithResponseEngine(func(_ context.Context, _, _ uuid.UUID, _ response.Event) { responded++ })
+			pending := &pendingAlert{ev: &AuditEvent{AuditID: auditID, Verb: "get"}, signal: SignalSecretAccess, severity: "high"}
+			alerted := h.fanOutOne(ctx, orgID, pending)
+			if alerted == suppressed || responded != 1 {
+				t.Fatalf("alerted=%v responded=%d, suppressed=%v", alerted, responded, suppressed)
+			}
+			var enforced, reason, key, value string
+			var order int
+			if err := pool.QueryRow(ctx, `
+SELECT after->>'enforced', after->>'enforce_error', after->>'param_key', after->>'param_value', (after->>'order')::int
+  FROM audit_events WHERE org_id=$1 AND target_id=$2 AND action='response_rule.action.tag'`, orgID, auditID).
+				Scan(&enforced, &reason, &key, &value, &order); err != nil {
+				t.Fatalf("query tag outcome: %v", err)
+			}
+			wantOrder := 0
+			if suppressed {
+				wantOrder = 1
+			}
+			if enforced != "unsupported" || reason == "" || key != "team" || value != "sec" || order != wantOrder {
+				t.Fatalf("tag outcome=(%q,%q,%q,%q,%d), want unsupported with reason, params and order %d", enforced, reason, key, value, order, wantOrder)
+			}
+			var signalRows int
+			if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM audit_events WHERE org_id=$1 AND target_id=$2 AND action=$3`, orgID, auditID, "k8s.audit."+SignalSecretAccess).Scan(&signalRows); err != nil {
+				t.Fatal(err)
+			}
+			if (signalRows == 0) != suppressed {
+				t.Fatalf("signal audit rows=%d, suppressed=%v", signalRows, suppressed)
+			}
+		})
+	}
+}
 
 // mkEvent builds a minimal AuditEvent for classify() tests.
 func mkEvent(verb, group, resource, sub string) *AuditEvent {

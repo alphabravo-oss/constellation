@@ -120,8 +120,11 @@ INSERT INTO image_workload_links (
 	_, _ = pool.Exec(ctx, `DELETE FROM runtime_agent_tokens WHERE name = 'workload-evidence-test'`)
 	_, _ = pool.Exec(ctx, `DELETE FROM scanner_tokens WHERE name = 'workload-evidence-test'`)
 
-	runtimeToken, _, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, "workload-evidence-test", time.Hour)
+	runtimeToken, tokenID, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, "workload-evidence-test", time.Hour)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO cluster_init_bundles (org_id, cluster_id, name, expires_at, runtime_agent_token_id, kek_fingerprint, contents_encrypted) VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`, orgID, clusterID, "workload-evidence-"+uuid.NewString(), tokenID); err != nil {
 		t.Fatal(err)
 	}
 	body, _ := json.Marshal(WorkloadPackagesPayload{

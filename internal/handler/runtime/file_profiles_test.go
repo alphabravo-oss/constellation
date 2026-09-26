@@ -452,6 +452,293 @@ INSERT INTO events (
 	}
 }
 
+func TestFileProfileAgentRulesBundleClusterBinding(t *testing.T) {
+	d := openTestDB(t)
+	t.Cleanup(d.Close)
+	ctx := context.Background()
+	pool := d.Pool()
+	for _, table := range []string{"cluster_init_bundles", "file_profile_rules", "file_profile_states", "file_profile_exceptions"} {
+		var exists bool
+		if err := pool.QueryRow(ctx, `SELECT to_regclass('public.' || $1) IS NOT NULL`, table).Scan(&exists); err != nil || !exists {
+			t.Skipf("skipping: %s migration not applied (%v)", table, err)
+		}
+	}
+
+	createOrg := func() uuid.UUID {
+		t.Helper()
+		var id uuid.UUID
+		name := "file-bundle-scope-" + uuid.NewString()
+		if err := pool.QueryRow(ctx, `INSERT INTO orgs (name, display_name) VALUES ($1, $1) RETURNING id`, name).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	orgID, foreignOrgID := createOrg(), createOrg()
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id IN ($1, $2)`, orgID, foreignOrgID)
+	})
+	createCluster := func(ownerID uuid.UUID) uuid.UUID {
+		t.Helper()
+		var id uuid.UUID
+		if err := pool.QueryRow(ctx, `INSERT INTO clusters (org_id, name) VALUES ($1, $2) RETURNING id`, ownerID, "file-bundle-scope-"+uuid.NewString()).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	clusterA, clusterB := createCluster(orgID), createCluster(orgID)
+	foreignCluster := createCluster(foreignOrgID)
+	createRule := func(clusterID uuid.UUID, filter string) uuid.UUID {
+		t.Helper()
+		var id uuid.UUID
+		if err := pool.QueryRow(ctx, `
+INSERT INTO file_profile_rules (org_id, cluster_id, workload_id, filter, path, behavior)
+VALUES ($1, $2, 'default/api', $3, $3, 'monitor_change') RETURNING id`, orgID, clusterID, filter).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	ruleA := createRule(clusterA, "/etc/passwd")
+	ruleB := createRule(clusterB, "/etc/shadow")
+	createToken := func(ownerID uuid.UUID) *handler.RuntimeAgentToken {
+		t.Helper()
+		_, id, err := handler.IssueRuntimeAgentToken(ctx, pool, ownerID, "file-bundle-scope-"+uuid.NewString(), time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &handler.RuntimeAgentToken{ID: id, OrgID: ownerID}
+	}
+	bind := func(token *handler.RuntimeAgentToken, bundleOrgID, clusterID uuid.UUID) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `
+INSERT INTO cluster_init_bundles
+  (org_id, cluster_id, name, expires_at, runtime_agent_token_id, kek_fingerprint, contents_encrypted)
+VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`,
+			bundleOrgID, clusterID, "file-bundle-scope-"+uuid.NewString(), token.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tokenA, tokenB := createToken(orgID), createToken(orgID)
+	bind(tokenA, orgID, clusterA)
+	bind(tokenB, orgID, clusterB)
+	ambiguousToken := createToken(orgID)
+	foreignClusterToken := createToken(orgID)
+	bind(foreignClusterToken, orgID, foreignCluster)
+	foreignOrgToken := createToken(orgID)
+	bind(foreignOrgToken, foreignOrgID, foreignCluster)
+	conflictingToken := createToken(orgID)
+	bind(conflictingToken, orgID, clusterA)
+	bind(conflictingToken, orgID, clusterB)
+
+	h := NewFileProfiles(d, nil)
+	get := func(token *handler.RuntimeAgentToken, clusterID uuid.UUID) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/runtime/file-profile-rules:bundle?cluster_id="+clusterID.String(), nil)
+		req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(), token))
+		rec := httptest.NewRecorder()
+		h.AgentRulesBundle(rec, req)
+		return rec
+	}
+	for _, allowed := range []struct {
+		name      string
+		token     *handler.RuntimeAgentToken
+		clusterID uuid.UUID
+		ruleID    uuid.UUID
+	}{
+		{"bound cluster A", tokenA, clusterA, ruleA},
+		{"bound cluster B", tokenB, clusterB, ruleB},
+	} {
+		t.Run(allowed.name, func(t *testing.T) {
+			rec := get(allowed.token, allowed.clusterID)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("bundle status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			var bundle fileProfileRuleBundleDTO
+			if err := json.NewDecoder(rec.Body).Decode(&bundle); err != nil {
+				t.Fatal(err)
+			}
+			if bundle.ClusterID != allowed.clusterID.String() || len(bundle.Rules) != 1 || bundle.Rules[0].ID != allowed.ruleID.String() {
+				t.Fatalf("unexpected bundle: %+v", bundle)
+			}
+		})
+	}
+	for _, rejected := range []struct {
+		name      string
+		token     *handler.RuntimeAgentToken
+		clusterID uuid.UUID
+	}{
+		{"same-org mismatch", tokenA, clusterB},
+		{"foreign cluster", tokenA, foreignCluster},
+		{"ambiguous token", ambiguousToken, clusterA},
+		{"foreign cluster bundle", foreignClusterToken, clusterA},
+		{"foreign org bundle", foreignOrgToken, clusterA},
+		{"conflicting bundles", conflictingToken, clusterA},
+	} {
+		t.Run(rejected.name, func(t *testing.T) {
+			rec := get(rejected.token, rejected.clusterID)
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("bundle status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			if strings.Contains(rec.Body.String(), ruleA.String()) || strings.Contains(rec.Body.String(), ruleB.String()) || strings.Contains(rec.Body.String(), `"rules"`) {
+				t.Fatalf("rejected bundle leaked rules: %s", rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestFileProfileWatchReportClusterBinding(t *testing.T) {
+	d := openTestDB(t)
+	t.Cleanup(d.Close)
+	ctx := context.Background()
+	pool := d.Pool()
+	for _, table := range []string{"cluster_init_bundles", "file_profile_rules", "file_profile_watch_inventory"} {
+		var exists bool
+		if err := pool.QueryRow(ctx, `SELECT to_regclass('public.' || $1) IS NOT NULL`, table).Scan(&exists); err != nil || !exists {
+			t.Skipf("skipping: %s migration not applied (%v)", table, err)
+		}
+	}
+
+	createOrg := func() uuid.UUID {
+		t.Helper()
+		var id uuid.UUID
+		name := "file-watch-scope-" + uuid.NewString()
+		if err := pool.QueryRow(ctx, `INSERT INTO orgs (name, display_name) VALUES ($1, $1) RETURNING id`, name).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	orgID, foreignOrgID := createOrg(), createOrg()
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id IN ($1, $2)`, orgID, foreignOrgID)
+	})
+	createCluster := func(ownerID uuid.UUID) uuid.UUID {
+		t.Helper()
+		var id uuid.UUID
+		if err := pool.QueryRow(ctx, `INSERT INTO clusters (org_id, name) VALUES ($1, $2) RETURNING id`, ownerID, "file-watch-scope-"+uuid.NewString()).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	clusterA, clusterB := createCluster(orgID), createCluster(orgID)
+	foreignCluster := createCluster(foreignOrgID)
+	createRule := func(clusterID uuid.UUID) uuid.UUID {
+		t.Helper()
+		var id uuid.UUID
+		if err := pool.QueryRow(ctx, `
+INSERT INTO file_profile_rules (org_id, cluster_id, workload_id, filter, path, behavior)
+VALUES ($1, $2, 'default/api', '/etc/passwd', '/etc/passwd', 'monitor_change')
+RETURNING id`, orgID, clusterID).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	ruleA, ruleB := createRule(clusterA), createRule(clusterB)
+	createToken := func() *handler.RuntimeAgentToken {
+		t.Helper()
+		_, id, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, "file-watch-scope-"+uuid.NewString(), time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &handler.RuntimeAgentToken{ID: id, OrgID: orgID}
+	}
+	bind := func(token *handler.RuntimeAgentToken, bundleOrgID, clusterID uuid.UUID) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `
+INSERT INTO cluster_init_bundles
+  (org_id, cluster_id, name, expires_at, runtime_agent_token_id, kek_fingerprint, contents_encrypted)
+VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`,
+			bundleOrgID, clusterID, "file-watch-scope-"+uuid.NewString(), token.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tokenA, tokenB := createToken(), createToken()
+	bind(tokenA, orgID, clusterA)
+	bind(tokenB, orgID, clusterB)
+	ambiguousToken := createToken()
+	foreignClusterToken := createToken()
+	bind(foreignClusterToken, orgID, foreignCluster)
+	foreignOrgToken := createToken()
+	bind(foreignOrgToken, foreignOrgID, foreignCluster)
+	conflictingToken := createToken()
+	bind(conflictingToken, orgID, clusterA)
+	bind(conflictingToken, orgID, clusterB)
+
+	h := NewFileProfiles(d, nil)
+	node := "file-watch-scope-" + uuid.NewString()
+	post := func(token *handler.RuntimeAgentToken, clusterID uuid.UUID, rules []fileProfileWatchReportRule) *httptest.ResponseRecorder {
+		t.Helper()
+		body, err := json.Marshal(fileProfileWatchReportBody{
+			ClusterID: clusterID.String(), Node: node, BundleFingerprint: "scope-test", Rules: rules,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/runtime/file-profile-watches:report", bytes.NewReader(body))
+		req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(), token))
+		rec := httptest.NewRecorder()
+		h.ReportWatchInventory(rec, req)
+		return rec
+	}
+	ruleReport := func(id uuid.UUID) []fileProfileWatchReportRule {
+		return []fileProfileWatchReportRule{{ID: id.String(), Files: []fileProfileWatchFile{{Path: "/etc/passwd"}}}}
+	}
+	for _, seeded := range []struct {
+		name      string
+		token     *handler.RuntimeAgentToken
+		clusterID uuid.UUID
+		ruleID    uuid.UUID
+	}{
+		{"bound cluster A", tokenA, clusterA, ruleA},
+		{"bound cluster B", tokenB, clusterB, ruleB},
+	} {
+		t.Run(seeded.name, func(t *testing.T) {
+			rec := post(seeded.token, seeded.clusterID, ruleReport(seeded.ruleID))
+			if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"accepted":1`) {
+				t.Fatalf("report status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			var count int
+			if err := pool.QueryRow(ctx, `SELECT count(*) FROM file_profile_watch_inventory WHERE org_id=$1 AND cluster_id=$2 AND node=$3 AND rule_id=$4`,
+				orgID, seeded.clusterID, node, seeded.ruleID).Scan(&count); err != nil || count != 1 {
+				t.Fatalf("bound inventory count=%d error=%v", count, err)
+			}
+		})
+	}
+	snapshot := func() string {
+		t.Helper()
+		var inventory string
+		if err := pool.QueryRow(ctx, `
+SELECT COALESCE(jsonb_agg(to_jsonb(i) ORDER BY i.cluster_id, i.rule_id), '[]'::jsonb)::text
+  FROM file_profile_watch_inventory i WHERE i.org_id=$1 AND i.node=$2`, orgID, node).Scan(&inventory); err != nil {
+			t.Fatal(err)
+		}
+		return inventory
+	}
+	before := snapshot()
+	for _, rejected := range []struct {
+		name      string
+		token     *handler.RuntimeAgentToken
+		clusterID uuid.UUID
+		rules     []fileProfileWatchReportRule
+	}{
+		{"same-org mismatch upsert", tokenA, clusterB, ruleReport(ruleB)},
+		{"same-org mismatch delete", tokenA, clusterB, nil},
+		{"foreign cluster", tokenA, foreignCluster, nil},
+		{"ambiguous token", ambiguousToken, clusterA, nil},
+		{"foreign cluster bundle", foreignClusterToken, clusterA, nil},
+		{"foreign org bundle", foreignOrgToken, clusterA, nil},
+		{"conflicting bundles", conflictingToken, clusterA, nil},
+	} {
+		t.Run(rejected.name, func(t *testing.T) {
+			rec := post(rejected.token, rejected.clusterID, rejected.rules)
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("report status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			if after := snapshot(); after != before {
+				t.Fatalf("inventory changed on rejected report: before=%s after=%s", before, after)
+			}
+		})
+	}
+}
+
 func fileProfileRuleRequest(method, target, workloadID, ruleID string, body *bytes.Reader, orgID, userID uuid.UUID) *http.Request {
 	req := baselineRequest(method, target, workloadID, body, orgID, userID)
 	rctx := chi.RouteContext(req.Context())

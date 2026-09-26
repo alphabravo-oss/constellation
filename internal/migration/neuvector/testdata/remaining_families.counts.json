@@ -1,0 +1,32 @@
+{
+  "source": {
+    "policies": 0,
+    "admission_rules": 0,
+    "response_rules": 0,
+    "file_profiles": 0,
+    "process_profiles": 0,
+    "groups": 0,
+    "network_rules": 0,
+    "dpi_rules": 0,
+    "dpi_bindings": 0,
+    "vulnerability_profiles": 3,
+    "registries": 2,
+    "remaining_unsupported": 11
+  },
+  "source_total": 16,
+  "converted_vulnerability_profiles": 2,
+  "converted_registries": 1,
+  "unsupported_source_objects": 13,
+  "unsupported_diagnostics": 15,
+  "omission_diagnostics": 2,
+  "applied": {
+    "vulnerability_profiles": 2,
+    "registries": 1,
+    "created": 3,
+    "updated": 0
+  },
+  "rolled_back": {
+    "deleted": 3,
+    "restored": 0
+  }
+}

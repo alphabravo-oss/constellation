@@ -112,16 +112,17 @@ func (b *FlowBackfiller) runOnce(ctx context.Context) {
 
 // candidate is one raw flow row that still carries a "cluster/<ip>" label.
 type candidate struct {
-	id      uuid.UUID
-	orgID   uuid.UUID
-	src     string
-	dst     string
-	srcAddr string
-	dstAddr string
-	at      time.Time
+	id        uuid.UUID
+	orgID     uuid.UUID
+	clusterID uuid.UUID
+	src       string
+	dst       string
+	srcAddr   string
+	dstAddr   string
+	at        time.Time
 }
 
-// backfill runs one pass: scan recent cluster/<ip> rows, re-resolve them per org
+// backfill runs one pass: scan recent cluster/<ip> rows, re-resolve them per cluster
 // via the handler IP resolver, and UPDATE the movers. Returns the number of rows
 // rewritten and the [from, to] `at` span they covered (for the caller's refold).
 func (b *FlowBackfiller) backfill(ctx context.Context) (rewritten int, from, to time.Time, err error) {
@@ -132,17 +133,19 @@ func (b *FlowBackfiller) backfill(ctx context.Context) (rewritten int, from, to 
 	// volume) and never reaching the resolvable stragglers. Newest-first so the
 	// most recently-observed misses heal first.
 	rows, err := b.db.Pool().Query(ctx, `
-SELECT f.id, f.org_id, f.src_workload, f.dst_workload,
+SELECT f.id, f.org_id, f.cluster_id, f.src_workload, f.dst_workload,
        COALESCE(f.src_addr, ''), COALESCE(f.dst_addr, ''), f.at
   FROM network_flows f
  WHERE f.at >= now() - ($1::text || ' seconds')::interval
    AND (f.src_workload LIKE 'cluster/%' OR f.dst_workload LIKE 'cluster/%')
    AND (
      EXISTS (SELECT 1 FROM pod_ips p
-              WHERE p.org_id = f.org_id
+             WHERE p.org_id = f.org_id
+                AND p.cluster_id = f.cluster_id
                 AND host(p.ip) IN (substring(f.src_workload from 9), substring(f.dst_workload from 9)))
      OR EXISTS (SELECT 1 FROM cluster_services s
                  WHERE s.org_id = f.org_id
+                   AND s.cluster_id = f.cluster_id
                    AND host(s.cluster_ip) IN (substring(f.src_workload from 9), substring(f.dst_workload from 9)))
    )
  ORDER BY f.at DESC
@@ -154,7 +157,7 @@ SELECT f.id, f.org_id, f.src_workload, f.dst_workload,
 	var all []candidate
 	for rows.Next() {
 		var c candidate
-		if err := rows.Scan(&c.id, &c.orgID, &c.src, &c.dst, &c.srcAddr, &c.dstAddr, &c.at); err != nil {
+		if err := rows.Scan(&c.id, &c.orgID, &c.clusterID, &c.src, &c.dst, &c.srcAddr, &c.dstAddr, &c.at); err != nil {
 			rows.Close()
 			return 0, time.Time{}, time.Time{}, err
 		}
@@ -168,11 +171,12 @@ SELECT f.id, f.org_id, f.src_workload, f.dst_workload,
 		return 0, time.Time{}, time.Time{}, nil
 	}
 
-	// Group by org so the resolver's batched pod_ips/cluster_services lookup runs
-	// once per org (usually one org in single-tenant deployments).
-	byOrg := map[uuid.UUID][]int{}
+	// Group by org and cluster so overlapping pod/service IPs never cross
+	// cluster boundaries during a historical relabel pass.
+	byScope := map[struct{ orgID, clusterID uuid.UUID }][]int{}
 	for i := range all {
-		byOrg[all[i].orgID] = append(byOrg[all[i].orgID], i)
+		key := struct{ orgID, clusterID uuid.UUID }{all[i].orgID, all[i].clusterID}
+		byScope[key] = append(byScope[key], i)
 	}
 
 	updates := make([]flowRelabel, 0, b.batch)
@@ -188,8 +192,8 @@ SELECT f.id, f.org_id, f.src_workload, f.dst_workload,
 		return nil
 	}
 
-	for _, idxs := range byOrg {
-		// Feed the org's rows to the resolver as synthetic ingest rows; it collects
+	for scope, idxs := range byScope {
+		// Feed the cluster's rows to the resolver as synthetic ingest rows; it collects
 		// their distinct addresses (and IPs embedded in cluster/<ip> labels) and
 		// resolves them in two batched SELECTs.
 		req := make(handler.FlowIngestRequest, len(idxs))
@@ -203,7 +207,7 @@ SELECT f.id, f.org_id, f.src_workload, f.dst_workload,
 				At:          c.at,
 			}
 		}
-		resolver := handler.NewIPResolver(ctx, b.db, all[idxs[0]].orgID, req)
+		resolver := handler.NewIPResolverForCluster(ctx, b.db, scope.orgID, scope.clusterID, req)
 		for _, i := range idxs {
 			c := all[i]
 			newSrc, newDst, changed := relabelFlow(resolver.Resolve, c.src, c.dst, c.srcAddr, c.dstAddr, c.at)

@@ -1,6 +1,6 @@
 # Network Enforcement Model (D-1 resolution / NET-INLINE-22)
 
-> Resolves decision **D-1** from `NEUVECTOR-PARITY-PLAN-2026-08.md` and closes
+> Records decision **D-1** from the [canonical parity plan](NEUVECTOR-PARITY-PLAN.md) and closes
 > **NET-INLINE-22** ("no inline enforcement on Cilium/eBPF CNIs").
 
 ## The two backends

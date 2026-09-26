@@ -2,10 +2,12 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/pkg/audit"
@@ -119,15 +121,16 @@ func (h *Users) Delete(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = tx.Rollback(r.Context()) }()
 
 	// Verify the target is in the caller's org before touching anything.
-	var exists bool
-	if err := tx.QueryRow(r.Context(),
-		`SELECT EXISTS (SELECT 1 FROM users WHERE id = $1 AND org_id = $2)`,
-		targetID, subj.OrgID).Scan(&exists); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup user"})
+	var lockedID uuid.UUID
+	err = tx.QueryRow(r.Context(),
+		`SELECT id FROM users WHERE id = $1 AND org_id = $2 FOR UPDATE`,
+		targetID, subj.OrgID).Scan(&lockedID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
-	if !exists {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup user"})
 		return
 	}
 	if err := RevokeUserSessions(r.Context(), tx, targetID); err != nil {

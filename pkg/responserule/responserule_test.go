@@ -61,13 +61,23 @@ func TestValidate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "bad action type",
-			rule: ResponseRule{Name: "r", EventType: EventProcess, Actions: []Action{{Type: ActionType("nuke")}}},
+			name:    "bad action type",
+			rule:    ResponseRule{Name: "r", EventType: EventProcess, Actions: []Action{{Type: ActionType("nuke")}}},
 			wantErr: true,
 		},
 		{
-			name: "webhook missing receiver",
-			rule: ResponseRule{Name: "r", EventType: EventProcess, Actions: []Action{{Type: ActionWebhook}}},
+			name:    "unsupported tag action",
+			rule:    ResponseRule{Name: "r", EventType: EventProcess, Actions: []Action{{Type: ActionTag, Params: map[string]string{"key": "team", "value": "sec"}}}},
+			wantErr: true,
+		},
+		{
+			name:    "scan suppress log has no security event",
+			rule:    ResponseRule{Name: "r", EventType: EventScan, Actions: []Action{{Type: ActionSuppressLog}}},
+			wantErr: true,
+		},
+		{
+			name:    "webhook missing receiver",
+			rule:    ResponseRule{Name: "r", EventType: EventProcess, Actions: []Action{{Type: ActionWebhook}}},
 			wantErr: true,
 		},
 		{

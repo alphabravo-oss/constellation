@@ -69,6 +69,17 @@ func (t *SecurityTimeline) List(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if clusterArg != nil {
+		var owned bool
+		if err := t.db.Pool().QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM clusters WHERE id = $1 AND org_id = $2)`, clusterArg, subj.OrgID).Scan(&owned); err != nil {
+			jsonError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if !owned {
+			jsonError(w, http.StatusNotFound, "cluster not found")
+			return
+		}
+	}
 
 	// Time window. Defaults to the last 7 days so the first page is bounded.
 	to := time.Now().Add(time.Minute)
@@ -161,7 +172,7 @@ SELECT source, id, severity, at, title, workload_id, namespace, cluster_id, ref
            COALESCE(d.name,''), COALESCE(d.namespace,''),
            COALESCE(d.cluster_id::text,''), COALESCE(v.policy_name,'')
       FROM violations v
-      LEFT JOIN deployments d ON d.id = v.deployment_id
+      LEFT JOIN deployments d ON d.id = v.deployment_id AND d.org_id = v.org_id
      WHERE $10 AND v.org_id = $1 AND ($2::uuid IS NULL OR d.cluster_id = $2)
        AND v.at >= $3 AND v.at < $4
     UNION ALL

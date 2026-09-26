@@ -49,6 +49,11 @@ import (
 	"github.com/alphabravocompany/constellation/pkg/observability"
 	"github.com/alphabravocompany/constellation/pkg/sigverify"
 	"github.com/alphabravocompany/constellation/pkg/version"
+	"github.com/google/go-containerregistry/pkg/authn"
+	"github.com/google/go-containerregistry/pkg/name"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/google/go-containerregistry/pkg/v1/types"
 )
 
 const defaultWorkerMaxConcurrent = 1
@@ -131,11 +136,11 @@ func main() {
 			}
 			res.Signature = verifyImageSignature(ctx, *oneShotRef, *cosignBin, roots)
 		}
-		res.Layers = inspectImageLayers(ctx, *oneShotRef, "")
+		res.Layers = inspectImageLayers(ctx, *oneShotRef, "", registryAuth{})
 		scanner.AttributeLayers(res.Layers, res.Packages, res.Findings)
 		if *fileRiskEnabled {
-			res.FileRisks = inspectImageFileRisks(ctx, *oneShotRef, "", *fileRiskMaxFindings)
-			res.ConfigChecks = inspectImageConfigChecks(ctx, *oneShotRef, "")
+			res.FileRisks = inspectImageFileRisks(ctx, *oneShotRef, "", *fileRiskMaxFindings, registryAuth{}, nil)
+			res.ConfigChecks = inspectImageConfigChecks(ctx, *oneShotRef, "", registryAuth{}, nil)
 		}
 		if *oneShotJSON != "" {
 			b, _ := json.MarshalIndent(res, "", "  ")
@@ -524,8 +529,9 @@ func (w *worker) lastError() string {
 func (w *worker) executeJob(ctx context.Context, j *scanJob) {
 	w.logger.Info("scan start", "job_id", j.ID, "target_id", j.TargetID, "target_type", j.TargetType, "target_ref", j.TargetRef)
 	var (
-		res *scanner.ScanResult
-		err error
+		res     *scanner.ScanResult
+		err     error
+		regAuth registryAuth
 	)
 	switch j.TargetType {
 	case "image":
@@ -539,7 +545,8 @@ func (w *worker) executeJob(ctx context.Context, j *scanJob) {
 		// docker config.json + TRIVY_/GRYPE_/SYFT_ env) for the scan tools, and
 		// clean them up when the job returns. Best-effort: a fetch failure logs
 		// and proceeds unauthenticated (public images still scan).
-		regAuth, releaseRegAuth := w.resolveRegistryAuth(ctx, j, imageRef)
+		var releaseRegAuth func()
+		regAuth, releaseRegAuth = w.resolveRegistryAuth(ctx, j, imageRef)
 		defer releaseRegAuth()
 		hasEvidence := j.EvidenceID != nil && strings.TrimSpace(*j.EvidenceID) != ""
 		// scanFromEvidence scans the image's pre-collected package inventory
@@ -577,7 +584,7 @@ func (w *worker) executeJob(ctx context.Context, j *scanJob) {
 		// Otherwise prefer a full registry scan; fall back to collected package
 		// evidence when the image can't be resolved from a registry — e.g. a
 		// node-local image built on the cluster and never pushed anywhere.
-		pinnedRef, digest, resolveErr := resolveImageDigestRef(ctx, imageRef)
+		pinnedRef, digest, resolveErr := resolveImageDigestRef(ctx, imageRef, regAuth)
 		if resolveErr != nil {
 			if scanFromEvidence("image not resolvable from registry: " + resolveErr.Error()) {
 				break
@@ -668,11 +675,11 @@ func (w *worker) executeJob(ctx context.Context, j *scanJob) {
 		res.Signature = verifyImageSignature(ctx, imageRef, w.cosignBin, signatureRootsForJob(w.signatureRoots, j.SignatureRoots))
 	}
 	if j.TargetType == "image" {
-		res.Layers = inspectImageLayers(ctx, imageRef, j.Platform)
+		res.Layers = inspectImageLayers(ctx, imageRef, j.Platform, regAuth)
 		scanner.AttributeLayers(res.Layers, res.Packages, res.Findings)
 		if w.fileRiskEnabled {
-			res.FileRisks = inspectImageFileRisks(ctx, imageRef, j.Platform, w.fileRiskMaxFindings)
-			res.ConfigChecks = inspectImageConfigChecks(ctx, imageRef, j.Platform)
+			res.FileRisks = inspectImageFileRisks(ctx, imageRef, j.Platform, w.fileRiskMaxFindings, regAuth, nil)
+			res.ConfigChecks = inspectImageConfigChecks(ctx, imageRef, j.Platform, regAuth, nil)
 		}
 	}
 	payload := scanResultPayload{
@@ -789,7 +796,7 @@ func (w *worker) scanServerlessArtifact(ctx context.Context, j *scanJob, source 
 	return res, nil
 }
 
-func resolveImageDigestRef(ctx context.Context, ref string) (string, string, error) {
+func resolveImageDigestRef(ctx context.Context, ref string, auth registryAuth) (string, string, error) {
 	identity := imageid.Parse(ref)
 	if identity.Digest != "" {
 		return identity.Normalized, identity.Digest, nil
@@ -798,7 +805,13 @@ func resolveImageDigestRef(ctx context.Context, ref string) (string, string, err
 	if resolveRef == "" {
 		resolveRef = strings.TrimSpace(ref)
 	}
-	resolvedRef, err := registry.ResolveDigestReference(ctx, resolveRef)
+	var resolvedRef string
+	var err error
+	if auth.Username != "" || auth.Password != "" {
+		resolvedRef, err = resolvePrivateDigest(ctx, resolveRef, auth, nil)
+	} else {
+		resolvedRef, err = registry.ResolveDigestReference(ctx, resolveRef)
+	}
 	if err != nil {
 		return "", "", fmt.Errorf("resolve image digest for %s: %w", ref, err)
 	}
@@ -807,6 +820,58 @@ func resolveImageDigestRef(ctx context.Context, ref string) (string, string, err
 		return "", "", fmt.Errorf("resolve image digest for %s: registry returned unpinned ref", ref)
 	}
 	return resolved.Normalized, resolved.Digest, nil
+}
+
+type scopedRegistryTransport struct {
+	base      http.RoundTripper
+	authority string
+}
+
+func (transport scopedRegistryTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	allowed := request.URL.Scheme == "https" && strings.EqualFold(request.URL.Host, transport.authority)
+	if transport.authority == "docker.io" {
+		allowed = request.URL.Scheme == "https" && (strings.EqualFold(request.URL.Host, "index.docker.io") || strings.EqualFold(request.URL.Host, "registry-1.docker.io"))
+	}
+	if !allowed {
+		request = request.Clone(request.Context())
+		request.Header.Del("Authorization")
+	}
+	return transport.base.RoundTrip(request)
+}
+
+func privateRegistryOptions(ctx context.Context, ref string, auth registryAuth, base http.RoundTripper) (name.Reference, []remote.Option, error) {
+	authority := registryAuthority(ref, "")
+	if authority == "" || !strings.EqualFold(authority, auth.Authority) {
+		return nil, nil, errors.New("registry credentials do not match image authority")
+	}
+	reference, err := name.ParseReference(ref, name.StrictValidation)
+	if err != nil {
+		return nil, nil, err
+	}
+	if reference.Context().Registry.Scheme() != "https" {
+		return nil, nil, errors.New("private registry metadata requires HTTPS")
+	}
+	if base == nil {
+		base = remote.DefaultTransport
+	}
+	options := []remote.Option{
+		remote.WithContext(ctx),
+		remote.WithAuth(&authn.Basic{Username: auth.Username, Password: auth.Password}),
+		remote.WithTransport(scopedRegistryTransport{base: base, authority: authority}),
+	}
+	return reference, options, nil
+}
+
+func resolvePrivateDigest(ctx context.Context, ref string, auth registryAuth, base http.RoundTripper) (string, error) {
+	reference, options, err := privateRegistryOptions(ctx, ref, auth, base)
+	if err != nil {
+		return "", err
+	}
+	descriptor, err := remote.Head(reference, options...)
+	if err != nil {
+		return "", err
+	}
+	return registryAuthority(ref, "") + "/" + reference.Context().RepositoryStr() + "@" + descriptor.Digest.String(), nil
 }
 
 func scanResultIdentity(j *scanJob, res *scanner.ScanResult) (string, string) {
@@ -923,7 +988,7 @@ func verifyImageSignature(ctx context.Context, imageRef, cosignBin string, roots
 	return out
 }
 
-func inspectImageLayers(ctx context.Context, imageRef, platform string) *scanner.ImageLayerMetadata {
+func inspectImageLayers(ctx context.Context, imageRef, platform string, auth registryAuth) *scanner.ImageLayerMetadata {
 	ref := strings.TrimSpace(imageRef)
 	identity := imageid.Parse(ref)
 	if identity.Repository == "" || identity.Digest == "" {
@@ -932,7 +997,13 @@ func inspectImageLayers(ctx context.Context, imageRef, platform string) *scanner
 	if identity.Normalized != "" {
 		ref = identity.Normalized
 	}
-	meta, err := registry.InspectManifestReference(ctx, ref, platform)
+	var meta *registry.ManifestMetadata
+	var err error
+	if auth.Username != "" || auth.Password != "" {
+		meta, err = inspectPrivateManifest(ctx, ref, platform, auth, nil)
+	} else {
+		meta, err = registry.InspectManifestReference(ctx, ref, platform)
+	}
 	if err != nil {
 		return &scanner.ImageLayerMetadata{
 			ImageRef: ref,
@@ -968,7 +1039,14 @@ func inspectImageLayers(ctx context.Context, imageRef, platform string) *scanner
 	// layers so each layer carries its Dockerfile instruction and the diff_id
 	// used to join packages/vulns. This reads only the small config object, no
 	// layer blobs; a failure here is non-fatal (layers keep manifest-only data).
-	if history, diffIDs, err := scanner.FetchLayerHistory(ctx, ref, platform, false); err == nil {
+	var history []scanner.LayerHistoryEntry
+	var diffIDs []string
+	if auth.Username != "" || auth.Password != "" {
+		history, diffIDs, err = fetchPrivateLayerHistory(ctx, ref, platform, auth, nil)
+	} else {
+		history, diffIDs, err = scanner.FetchLayerHistory(ctx, ref, platform, false)
+	}
+	if err == nil {
 		scanner.EnrichLayerHistory(out, history, diffIDs)
 	} else if out.Reason == "" {
 		out.Reason = "config history unavailable"
@@ -976,9 +1054,115 @@ func inspectImageLayers(ctx context.Context, imageRef, platform string) *scanner
 	return out
 }
 
+func fetchPrivateLayerHistory(ctx context.Context, ref, platform string, auth registryAuth, base http.RoundTripper) ([]scanner.LayerHistoryEntry, []string, error) {
+	reference, options, err := privateRegistryOptions(ctx, ref, auth, base)
+	if err != nil {
+		return nil, nil, err
+	}
+	if strings.TrimSpace(platform) != "" {
+		parsed, err := v1.ParsePlatform(platform)
+		if err != nil {
+			return nil, nil, err
+		}
+		options = append(options, remote.WithPlatform(*parsed))
+	}
+	image, err := remote.Image(reference, options...)
+	if err != nil {
+		return nil, nil, err
+	}
+	config, err := image.ConfigFile()
+	if err != nil {
+		return nil, nil, err
+	}
+	history := make([]scanner.LayerHistoryEntry, 0, len(config.History))
+	for _, entry := range config.History {
+		created := ""
+		if !entry.Created.Time.IsZero() {
+			created = entry.Created.Time.UTC().Format("2006-01-02T15:04:05Z")
+		}
+		history = append(history, scanner.LayerHistoryEntry{
+			CreatedBy: entry.CreatedBy, Comment: entry.Comment, Author: entry.Author,
+			Created: created, EmptyLayer: entry.EmptyLayer,
+		})
+	}
+	diffIDs := make([]string, 0, len(config.RootFS.DiffIDs))
+	for _, digest := range config.RootFS.DiffIDs {
+		diffIDs = append(diffIDs, digest.String())
+	}
+	return history, diffIDs, nil
+}
+
+func inspectPrivateManifest(ctx context.Context, ref, platform string, auth registryAuth, base http.RoundTripper) (*registry.ManifestMetadata, error) {
+	reference, options, err := privateRegistryOptions(ctx, ref, auth, base)
+	if err != nil {
+		return nil, err
+	}
+	descriptor, err := remote.Get(reference, options...)
+	if err != nil {
+		return nil, err
+	}
+	meta := &registry.ManifestMetadata{ImageRef: ref, ManifestDigest: descriptor.Digest.String()}
+	if descriptor.MediaType == types.OCIImageIndex || descriptor.MediaType == types.DockerManifestList {
+		var index v1.IndexManifest
+		if err := json.Unmarshal(descriptor.Manifest, &index); err != nil {
+			return nil, err
+		}
+		meta.IndexDigest = meta.ManifestDigest
+		var selected *v1.Descriptor
+		for entry := range index.Manifests {
+			candidate := &index.Manifests[entry]
+			if candidate.Platform != nil {
+				meta.Architectures = append(meta.Architectures, candidate.Platform.String())
+			}
+			if selected == nil && candidate.Platform != nil && platform != "" && (candidate.Platform.String() == platform || candidate.Platform.Variant == "" && candidate.Platform.OS+"/"+candidate.Platform.Architecture == platform) {
+				selected = candidate
+			}
+		}
+		if selected == nil && platform == "" && len(index.Manifests) == 1 {
+			selected = &index.Manifests[0]
+		}
+		if selected == nil {
+			return nil, fmt.Errorf("registry: platform required or unavailable for multi-platform manifest %s", meta.IndexDigest)
+		}
+		if selected.Platform != nil {
+			meta.SelectedPlatform = selected.Platform.String()
+		}
+		childRef, err := name.NewDigest(reference.Context().Name()+"@"+selected.Digest.String(), name.StrictValidation)
+		if err != nil {
+			return nil, err
+		}
+		descriptor, err = remote.Get(childRef, options...)
+		if err != nil {
+			return nil, err
+		}
+		meta.ManifestDigest = descriptor.Digest.String()
+	}
+	var manifest v1.Manifest
+	if err := json.Unmarshal(descriptor.Manifest, &manifest); err != nil {
+		return nil, err
+	}
+	meta.MediaType = string(descriptor.MediaType)
+	meta.Config = &registry.ManifestDescriptor{
+		MediaType:   string(manifest.Config.MediaType),
+		Digest:      manifest.Config.Digest.String(),
+		SizeBytes:   manifest.Config.Size,
+		Annotations: manifest.Config.Annotations,
+	}
+	for _, layer := range manifest.Layers {
+		meta.Layers = append(meta.Layers, registry.ManifestDescriptor{
+			MediaType:   string(layer.MediaType),
+			Digest:      layer.Digest.String(),
+			SizeBytes:   layer.Size,
+			Annotations: layer.Annotations,
+		})
+		meta.TotalSizeBytes += layer.Size
+	}
+	return meta, nil
+}
+
 // inspectImageConfigChecks evaluates the CIS-Docker image-config controls. Cheap (config
 // only, no layer walk) so it always runs alongside the file-risk pass.
-func inspectImageConfigChecks(ctx context.Context, imageRef, platform string) *scanner.ImageConfigCheckReport {
+func inspectImageConfigChecks(ctx context.Context, imageRef, platform string, auth registryAuth, base http.RoundTripper) *scanner.ImageConfigCheckReport {
 	ref := strings.TrimSpace(imageRef)
 	identity := imageid.Parse(ref)
 	if identity.Repository == "" {
@@ -987,14 +1171,24 @@ func inspectImageConfigChecks(ctx context.Context, imageRef, platform string) *s
 	if identity.Normalized != "" {
 		ref = identity.Normalized
 	}
-	report, err := scanner.ScanImageConfigChecks(ctx, ref, platform, false)
+	var report *scanner.ImageConfigCheckReport
+	var err error
+	if auth.Username != "" || auth.Password != "" {
+		var options []remote.Option
+		_, options, err = privateRegistryOptions(ctx, ref, auth, base)
+		if err == nil {
+			report, err = scanner.ScanImageConfigChecks(ctx, ref, platform, false, options...)
+		}
+	} else {
+		report, err = scanner.ScanImageConfigChecks(ctx, ref, platform, false)
+	}
 	if err != nil {
 		return &scanner.ImageConfigCheckReport{ImageRef: ref, Platform: strings.TrimSpace(platform), Status: "error", Reason: "image config unavailable", Error: err.Error()}
 	}
 	return report
 }
 
-func inspectImageFileRisks(ctx context.Context, imageRef, platform string, maxFindings int) *scanner.ImageFileRiskReport {
+func inspectImageFileRisks(ctx context.Context, imageRef, platform string, maxFindings int, auth registryAuth, base http.RoundTripper) *scanner.ImageFileRiskReport {
 	ref := strings.TrimSpace(imageRef)
 	identity := imageid.Parse(ref)
 	if identity.Repository == "" || identity.Digest == "" {
@@ -1003,10 +1197,21 @@ func inspectImageFileRisks(ctx context.Context, imageRef, platform string, maxFi
 	if identity.Normalized != "" {
 		ref = identity.Normalized
 	}
-	report, err := scanner.ScanImageFileRisks(ctx, ref, scanner.FileRiskOptions{
+	opts := scanner.FileRiskOptions{
 		Platform:    platform,
 		MaxFindings: maxFindings,
-	})
+	}
+	var report *scanner.ImageFileRiskReport
+	var err error
+	if auth.Username != "" || auth.Password != "" {
+		var options []remote.Option
+		_, options, err = privateRegistryOptions(ctx, ref, auth, base)
+		if err == nil {
+			report, err = scanner.ScanImageFileRisks(ctx, ref, opts, options...)
+		}
+	} else {
+		report, err = scanner.ScanImageFileRisks(ctx, ref, opts)
+	}
 	if err != nil {
 		return &scanner.ImageFileRiskReport{
 			ImageRef:     ref,
@@ -1097,12 +1302,17 @@ func (w *worker) resolveRegistryAuth(ctx context.Context, j *scanJob, imageRef s
 			username = "x-access-token"
 		}
 	}
-	if username == "" && password == "" {
+	if username == "" || password == "" {
 		// Registry configured with auth_kind=none (or empty secret): nothing to do.
 		return registryAuth{}, noop
 	}
 
-	authority := registryAuthority(imageRef, creds.Endpoint)
+	authority := registryAuthority(imageRef, "")
+	endpointAuthority := registryAuthority("", creds.Endpoint)
+	if authority == "" || endpointAuthority == "" || !sameRegistryAuthority(authority, endpointAuthority) {
+		w.logger.Warn("registry credentials do not match image authority", "job_id", j.ID, "registry_id", registryID)
+		return registryAuth{}, noop
+	}
 
 	dir, err := os.MkdirTemp("", "constellation-scan-dockercfg-")
 	if err != nil {
@@ -1129,6 +1339,18 @@ func (w *worker) resolveRegistryAuth(ctx context.Context, j *scanJob, imageRef s
 	}, cleanup
 }
 
+func sameRegistryAuthority(left, right string) bool {
+	canonical := func(authority string) string {
+		switch strings.ToLower(authority) {
+		case "docker.io", "index.docker.io", "registry-1.docker.io":
+			return "docker.io"
+		default:
+			return authority
+		}
+	}
+	return strings.EqualFold(canonical(left), canonical(right))
+}
+
 // fetchRegistryCredentials calls the control-plane endpoint that unseals the
 // registry's stored credentials for this scanner's org (scanner-token auth).
 func (w *worker) fetchRegistryCredentials(ctx context.Context, registryID string) (*registryCredentials, error) {
@@ -1145,8 +1367,7 @@ func (w *worker) fetchRegistryCredentials(ctx context.Context, registryID string
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, fmt.Errorf("status %d", resp.StatusCode)
 	}
 	var creds registryCredentials
 	if err := json.NewDecoder(resp.Body).Decode(&creds); err != nil {
@@ -1198,7 +1419,15 @@ func writeDockerConfig(dir, authority, username, password string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, "config.json"), body, 0o600)
+	file, err := os.OpenFile(filepath.Join(dir, "config.json"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write(body); err != nil {
+		_ = file.Close()
+		return err
+	}
+	return file.Close()
 }
 
 func (w *worker) reportSuccess(ctx context.Context, p scanResultPayload) error {

@@ -98,6 +98,7 @@ func (c *Connector) ScanIAM(ctx context.Context) ([]Finding, error) {
 	// IAM ListRoles returns ≤100 roles/page; loop until IsTruncated is false so
 	// a wildcard-grant role beyond the first page is not silently skipped.
 	var rolesMarker *string
+	seenRoles := map[string]bool{}
 	for {
 		rolesOut, err := c.IAM.ListRoles(ctx, &iam.ListRolesInput{Marker: rolesMarker})
 		if err != nil {
@@ -108,10 +109,11 @@ func (c *Connector) ScanIAM(ctx context.Context) ([]Finding, error) {
 
 			// Attached managed policies — flag AdministratorAccess + similar.
 			var attMarker *string
+			seenAttached := map[string]bool{}
 			for {
 				attached, err := c.IAM.ListAttachedRolePolicies(ctx, &iam.ListAttachedRolePoliciesInput{RoleName: role.RoleName, Marker: attMarker})
 				if err != nil {
-					break
+					return out, fmt.Errorf("aws: list attached policies for role %q: %w", roleName, err)
 				}
 				for _, p := range attached.AttachedPolicies {
 					name := awssdk.ToString(p.PolicyName)
@@ -131,18 +133,22 @@ func (c *Connector) ScanIAM(ctx context.Context) ([]Finding, error) {
 						})
 					}
 				}
-				if !attached.IsTruncated || attached.Marker == nil {
+				if !attached.IsTruncated {
 					break
+				}
+				if err := checkNextPage(attached.Marker, seenAttached); err != nil {
+					return out, fmt.Errorf("aws: list attached policies for role %q: %w", roleName, err)
 				}
 				attMarker = attached.Marker
 			}
 
 			// Inline policies — flag wildcard Action+Resource.
 			var inlineMarker *string
+			seenInline := map[string]bool{}
 			for {
 				inline, err := c.IAM.ListRolePolicies(ctx, &iam.ListRolePoliciesInput{RoleName: role.RoleName, Marker: inlineMarker})
 				if err != nil {
-					break
+					return out, fmt.Errorf("aws: list inline policies for role %q: %w", roleName, err)
 				}
 				for _, polName := range inline.PolicyNames {
 					doc, err := c.IAM.GetRolePolicy(ctx, &iam.GetRolePolicyInput{
@@ -150,10 +156,14 @@ func (c *Connector) ScanIAM(ctx context.Context) ([]Finding, error) {
 						PolicyName: awssdk.String(polName),
 					})
 					if err != nil {
-						continue
+						return out, fmt.Errorf("aws: get inline policy %q for role %q: %w", polName, roleName, err)
 					}
 					body := awssdk.ToString(doc.PolicyDocument)
-					if isWildcardGrant(body) {
+					wildcard, err := wildcardGrant(body)
+					if err != nil {
+						return out, fmt.Errorf("aws: decode inline policy %q for role %q: %w", polName, roleName, err)
+					}
+					if wildcard {
 						out = append(out, Finding{
 							ExternalID:  fmt.Sprintf("aws-iam-wildcard-%s-%s", roleName, polName),
 							Title:       fmt.Sprintf("IAM role %q has wildcard-grant inline policy %q", roleName, polName),
@@ -169,14 +179,20 @@ func (c *Connector) ScanIAM(ctx context.Context) ([]Finding, error) {
 						})
 					}
 				}
-				if !inline.IsTruncated || inline.Marker == nil {
+				if !inline.IsTruncated {
 					break
+				}
+				if err := checkNextPage(inline.Marker, seenInline); err != nil {
+					return out, fmt.Errorf("aws: list inline policies for role %q: %w", roleName, err)
 				}
 				inlineMarker = inline.Marker
 			}
 		}
-		if !rolesOut.IsTruncated || rolesOut.Marker == nil {
+		if !rolesOut.IsTruncated {
 			break
+		}
+		if err := checkNextPage(rolesOut.Marker, seenRoles); err != nil {
+			return out, fmt.Errorf("aws: list roles: %w", err)
 		}
 		rolesMarker = rolesOut.Marker
 	}
@@ -193,6 +209,7 @@ func (c *Connector) ScanS3(ctx context.Context) ([]Finding, error) {
 	// buckets beyond the first page are still evaluated.
 	var buckets []s3types.Bucket
 	var contToken *string
+	seenBuckets := map[string]bool{}
 	for {
 		bucketsOut, err := c.S3.ListBuckets(ctx, &s3.ListBucketsInput{ContinuationToken: contToken})
 		if err != nil {
@@ -202,6 +219,9 @@ func (c *Connector) ScanS3(ctx context.Context) ([]Finding, error) {
 		if bucketsOut.ContinuationToken == nil || *bucketsOut.ContinuationToken == "" {
 			break
 		}
+		if err := checkNextPage(bucketsOut.ContinuationToken, seenBuckets); err != nil {
+			return out, fmt.Errorf("aws: list buckets: %w", err)
+		}
 		contToken = bucketsOut.ContinuationToken
 	}
 	for _, b := range buckets {
@@ -209,6 +229,9 @@ func (c *Connector) ScanS3(ctx context.Context) ([]Finding, error) {
 
 		// ACL: read all grants and flag AllUsers/AuthenticatedUsers grantees.
 		acl, err := c.S3.GetBucketAcl(ctx, &s3.GetBucketAclInput{Bucket: b.Name})
+		if err != nil {
+			return out, fmt.Errorf("aws: get ACL for bucket %q: %w", name, err)
+		}
 		if err == nil {
 			for _, g := range acl.Grants {
 				uri := ""
@@ -235,7 +258,7 @@ func (c *Connector) ScanS3(ctx context.Context) ([]Finding, error) {
 		// PublicAccessBlock: any of the four flags being false = at-risk.
 		block, err := c.S3.GetPublicAccessBlock(ctx, &s3.GetPublicAccessBlockInput{Bucket: b.Name})
 		switch {
-		case err != nil:
+		case isMissingPublicAccessBlock(err):
 			// No PAB config at all → flag as the lowest-cost remediation suggestion.
 			out = append(out, Finding{
 				ExternalID:  fmt.Sprintf("aws-s3-no-pab-%s", name),
@@ -244,8 +267,12 @@ func (c *Connector) ScanS3(ctx context.Context) ([]Finding, error) {
 				Severity:    "medium",
 				Resource:    fmt.Sprintf("arn:aws:s3:::%s", name),
 				Detected:    now,
-				Evidence:    map[string]any{"err": err.Error()},
+				Evidence:    map[string]any{"configuration": "absent"},
 			})
+		case err != nil:
+			return out, fmt.Errorf("aws: get Public Access Block for bucket %q: %w", name, err)
+		case block == nil || block.PublicAccessBlockConfiguration == nil:
+			return out, fmt.Errorf("aws: empty Public Access Block response for bucket %q", name)
 		case block.PublicAccessBlockConfiguration != nil:
 			cfg := block.PublicAccessBlockConfiguration
 			if cfg.BlockPublicAcls == nil || !*cfg.BlockPublicAcls ||
@@ -286,6 +313,9 @@ func isOverPrivilegedManagedPolicy(name string) bool {
 // inline policy document URL-encoded; AWS only decodes it for you in some SDKs, so
 // we decode defensively. A non-encoded document round-trips unchanged.
 func decodePolicyDoc(body string) string {
+	if json.Valid([]byte(body)) {
+		return body
+	}
 	if decoded, err := url.QueryUnescape(body); err == nil {
 		return decoded
 	}
@@ -298,9 +328,17 @@ func decodePolicyDoc(body string) string {
 // Statement/Action/Resource are all handled — a substring match against the
 // percent-escaped JSON never fires, which is the fail-open this replaces.
 func isWildcardGrant(body string) bool {
+	wildcard, _ := wildcardGrant(body)
+	return wildcard
+}
+
+func wildcardGrant(body string) (bool, error) {
 	var doc map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(decodePolicyDoc(body)), &doc); err != nil {
-		return false
+		return false, errors.New("invalid policy JSON")
+	}
+	if len(doc) == 0 {
+		return false, errors.New("empty policy document")
 	}
 	var stmts []map[string]json.RawMessage
 	switch stmtRaw := jsonField(doc, "statement"); {
@@ -308,23 +346,46 @@ func isWildcardGrant(body string) bool {
 		// Bare statement object with no "Statement" wrapper.
 		stmts = []map[string]json.RawMessage{doc}
 	case len(stmtRaw) > 0 && stmtRaw[0] == '[':
-		_ = json.Unmarshal(stmtRaw, &stmts)
+		if err := json.Unmarshal(stmtRaw, &stmts); err != nil {
+			return false, errors.New("invalid policy statements")
+		}
 	default:
 		var single map[string]json.RawMessage
-		if json.Unmarshal(stmtRaw, &single) == nil {
-			stmts = []map[string]json.RawMessage{single}
+		if err := json.Unmarshal(stmtRaw, &single); err != nil {
+			return false, errors.New("invalid policy statement")
 		}
+		stmts = []map[string]json.RawMessage{single}
 	}
+	wildcard := false
 	for _, s := range stmts {
-		effect := strings.Trim(strings.ToLower(string(jsonField(s, "effect"))), `"`)
-		if effect != "allow" {
+		var effect string
+		if err := json.Unmarshal(jsonField(s, "effect"), &effect); err != nil || (!strings.EqualFold(effect, "allow") && !strings.EqualFold(effect, "deny")) {
+			return false, errors.New("invalid policy statement effect")
+		}
+		if !strings.EqualFold(effect, "allow") {
 			continue
 		}
 		if jsonValueHasWildcard(jsonField(s, "action")) && jsonValueHasWildcard(jsonField(s, "resource")) {
-			return true
+			wildcard = true
 		}
 	}
-	return false
+	return wildcard, nil
+}
+
+func checkNextPage(marker *string, seen map[string]bool) error {
+	if marker == nil || *marker == "" {
+		return errors.New("truncated response has no continuation token")
+	}
+	if seen[*marker] {
+		return errors.New("pagination returned a repeated continuation token")
+	}
+	seen[*marker] = true
+	return nil
+}
+
+func isMissingPublicAccessBlock(err error) bool {
+	var apiError interface{ ErrorCode() string }
+	return errors.As(err, &apiError) && apiError.ErrorCode() == "NoSuchPublicAccessBlockConfiguration"
 }
 
 // jsonField does a case-insensitive key lookup in a decoded JSON object. IAM

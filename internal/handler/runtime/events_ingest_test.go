@@ -10,11 +10,33 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/runtime/baseline"
 )
+
+func issueBoundRuntimeEventToken(t *testing.T, pool *pgxpool.Pool, orgID, clusterID uuid.UUID, name string) string {
+	t.Helper()
+	raw, tokenID, err := handler.IssueRuntimeAgentToken(context.Background(), pool, orgID, name, time.Hour)
+	if err != nil {
+		t.Fatalf("issue token: %v", err)
+	}
+	var bundleID uuid.UUID
+	if err := pool.QueryRow(context.Background(), `
+INSERT INTO cluster_init_bundles
+  (org_id, cluster_id, name, expires_at, runtime_agent_token_id, kek_fingerprint, contents_encrypted)
+VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)
+RETURNING id`, orgID, clusterID, name, tokenID).Scan(&bundleID); err != nil {
+		t.Fatalf("insert bundle: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM cluster_init_bundles WHERE id=$1`, bundleID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM runtime_agent_tokens WHERE id=$1`, tokenID)
+	})
+	return raw
+}
 
 // These tests exercise the pure-logic branches of the events-ingest handler — the
 // classify() severity heuristic, the techniquesFor() ATT&CK mapping, the payload
@@ -455,7 +477,7 @@ func TestEventsIngest_TechniquesFor(t *testing.T) {
 
 func TestEventsIngest_BulkHappyPath(t *testing.T) {
 	d := openTestDB(t)
-	defer d.Close()
+	t.Cleanup(d.Close)
 
 	ctx := context.Background()
 	pool := d.Pool()
@@ -465,15 +487,16 @@ func TestEventsIngest_BulkHappyPath(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT id FROM orgs ORDER BY created_at LIMIT 1`).Scan(&orgID); err != nil {
 		t.Skipf("no seed org: %v", err)
 	}
+	var clusterID uuid.UUID
+	if err := pool.QueryRow(ctx, `SELECT id FROM clusters WHERE org_id=$1 ORDER BY created_at LIMIT 1`, orgID).Scan(&clusterID); err != nil {
+		t.Skipf("no cluster for org: %v", err)
+	}
 	// Per-run unique workload id so the audit_events trigger doesn't carry rows from
 	// prior runs into our assertions (audit_events is append-only by design).
 	workloadID := "ingest-test/" + uuid.New().String()
 	tokenName := "ingest-test-" + uuid.New().String()
 
-	raw, _, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, tokenName, time.Hour)
-	if err != nil {
-		t.Fatalf("issue token: %v", err)
-	}
+	raw := issueBoundRuntimeEventToken(t, pool, orgID, clusterID, tokenName)
 
 	// Build a batch with one shell exec (high), one tcp_connect to public, one ordinary exec.
 	batch := []IngestEvent{

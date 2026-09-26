@@ -19,9 +19,273 @@
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "JWT"
+      },
+      "browserSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Host-constellation-session",
+        "description": "HttpOnly Secure SameSite=Strict access cookie. Browser mutations additionally require X-Constellation-Client: browser and a validated same-origin or explicitly allowed Origin. Explicit Authorization takes precedence."
+      },
+      "browserRefresh": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Host-constellation-refresh"
       }
     },
     "schemas": {
+      "SessionResponse": {
+        "type": "object",
+        "required": [
+          "expires_at"
+        ],
+        "properties": {
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "token": {
+            "type": "string",
+            "description": "Bearer JWT returned only to non-browser login clients; never returned in browser or refresh responses."
+          }
+        }
+      },
+      "ConfigProvenance": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "required": [
+            "source",
+            "redacted"
+          ],
+          "properties": {
+            "source": {
+              "type": "string",
+              "enum": [
+                "default",
+                "environment_bootstrap",
+                "database"
+              ]
+            },
+            "redacted": {
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "ConfigApplied": {
+        "type": "object",
+        "required": [
+          "provider"
+        ],
+        "properties": {
+          "provider": {
+            "type": "object",
+            "required": [
+              "component",
+              "scope",
+              "revision",
+              "status"
+            ],
+            "properties": {
+              "component": {
+                "type": "string",
+                "const": "system_config_provider"
+              },
+              "scope": {
+                "type": "string",
+                "const": "serving_replica"
+              },
+              "revision": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "current",
+                  "behind",
+                  "ahead",
+                  "unavailable"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "ConfigFieldErrors": {
+        "type": "object",
+        "required": [
+          "error",
+          "field_errors"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "const": "invalid system config"
+          },
+          "field_errors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "field",
+                "code",
+                "message"
+              ],
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string",
+                  "description": "Safe validation message without submitted values."
+                }
+              }
+            }
+          }
+        }
+      },
+      "BackupManifest": {
+        "type": "object",
+        "required": [
+          "format_version",
+          "org_id",
+          "org_name",
+          "generated_at",
+          "tables",
+          "root_hash"
+        ],
+        "properties": {
+          "format_version": {
+            "type": "string",
+            "const": "constellation-orgbackup/v1"
+          },
+          "org_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "org_name": {
+            "type": "string"
+          },
+          "generated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "generated_by": {
+            "type": "string"
+          },
+          "source_instance": {
+            "type": "string"
+          },
+          "root_hash": {
+            "type": "string"
+          },
+          "signer_identity": {
+            "type": "string"
+          },
+          "tables": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "name",
+                "rows",
+                "bytes",
+                "sha256"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "rows": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "bytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "sha256": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "BackupVerification": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/BackupManifest"
+          },
+          {
+            "type": "object",
+            "required": [
+              "verified"
+            ],
+            "properties": {
+              "verified": {
+                "type": "boolean",
+                "description": "Cryptographic verification result, never inferred from uploaded signer metadata. Format, integrity, counts and caller organization are validated even when false."
+              }
+            }
+          }
+        ]
+      },
+      "BackupRestoreResult": {
+        "type": "object",
+        "required": [
+          "manifest",
+          "verified",
+          "tables"
+        ],
+        "properties": {
+          "manifest": {
+            "$ref": "#/components/schemas/BackupManifest"
+          },
+          "verified": {
+            "type": "boolean"
+          },
+          "signer_identity": {
+            "type": "string"
+          },
+          "tables": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "name",
+                "new",
+                "updated",
+                "skipped"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "new": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "updated": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "skipped": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      },
       "ResponseRuleDef": {
         "type": "object",
         "description": "E1 declarative response rule: binds a runtime event_type + condition set to an ordered set of actions. Evaluated server-side and pulled by the runtime-agent via the :sync bundle.",
@@ -99,8 +363,7 @@
                   "enum": [
                     "quarantine",
                     "suppress_log",
-                    "webhook",
-                    "tag"
+                    "webhook"
                   ]
                 },
                 "params": {
@@ -290,6 +553,489 @@
             "type": "string"
           }
         }
+      },
+      "MigrationFamilyCounts": {
+        "type": "object",
+        "properties": {
+          "vulnerability_profiles": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "registries": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "unchanged": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "policies": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "groups": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "file_profiles": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "process_profiles": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "network_rules": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "dpi_rules": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "dpi_bindings": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "created": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "updated": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": {
+          "type": "integer"
+        }
+      },
+      "MigrationDiffAction": {
+        "type": "string",
+        "enum": [
+          "create",
+          "update",
+          "unchanged"
+        ]
+      },
+      "MigrationVulnerabilityProfile": {
+        "type": "object",
+        "required": [
+          "name",
+          "description",
+          "active",
+          "entries",
+          "domain_scope",
+          "diff_action"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "name",
+                "action"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "name_regex": {
+                  "type": "string"
+                },
+                "images": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "action": {
+                  "type": "string",
+                  "const": "suppress"
+                },
+                "comment": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "domain_scope": {
+            "type": "object",
+            "properties": {
+              "clusters": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "namespaces": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "imported_from": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "diff_action": {
+            "$ref": "#/components/schemas/MigrationDiffAction"
+          }
+        }
+      },
+      "MigrationRegistry": {
+        "type": "object",
+        "required": [
+          "name",
+          "kind",
+          "endpoint",
+          "image_globs",
+          "auth_kind",
+          "scan_cadence",
+          "credentials_required",
+          "diff_action"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "endpoint": {
+            "type": "string",
+            "format": "uri"
+          },
+          "image_globs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "auth_kind": {
+            "type": "string",
+            "const": "none"
+          },
+          "scan_cadence": {
+            "type": "string",
+            "const": "manual"
+          },
+          "credentials_required": {
+            "type": "boolean"
+          },
+          "imported_from": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "diff_action": {
+            "$ref": "#/components/schemas/MigrationDiffAction"
+          }
+        }
+      },
+      "MigrationVulnerabilityRollback": {
+        "type": "object",
+        "required": [
+          "id",
+          "action",
+          "applied_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "create",
+              "update"
+            ]
+          },
+          "applied_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "before": {
+            "$ref": "#/components/schemas/MigrationVulnerabilityProfile"
+          },
+          "before_entries": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "before_domain_scope": {
+            "type": "object"
+          }
+        }
+      },
+      "MigrationRegistryRollback": {
+        "type": "object",
+        "required": [
+          "id",
+          "action",
+          "applied_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "action": {
+            "type": "string",
+            "const": "create"
+          },
+          "applied_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MigrationUnsupported": {
+        "type": "object",
+        "required": [
+          "kind",
+          "name",
+          "reason"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "suggestion": {
+            "type": "string"
+          },
+          "source": {
+            "type": "object",
+            "description": "Redacted diagnostics; never raw omitted credentials."
+          }
+        }
+      },
+      "MigrationSummary": {
+        "type": "object",
+        "properties": {
+          "vulnerability_profiles": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "registries": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "unchanged": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "policies": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "groups": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "file_profiles": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "process_profiles": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "network_rules": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "dpi_rules": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "dpi_bindings": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "created": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "updated": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "source": {
+            "type": "string"
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "source_total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "source_counts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "unaccounted_source": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "create": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "update": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "enforce": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "monitor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "enabled": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "unsupported": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "read_only": {
+            "type": "boolean"
+          },
+          "rollback_hint": {
+            "type": "string"
+          },
+          "engines": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "categories": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      },
+      "MigrationPreview": {
+        "type": "object",
+        "required": [
+          "summary",
+          "vulnerability_profiles",
+          "registries",
+          "rollback_bundle"
+        ],
+        "properties": {
+          "import_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/MigrationSummary"
+          },
+          "vulnerability_profiles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MigrationVulnerabilityProfile"
+            }
+          },
+          "registries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MigrationRegistry"
+            }
+          },
+          "policies": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "file_profiles": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "process_profiles": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "network_rules": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "dpi_rules": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "dpi_bindings": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "unsupported": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MigrationUnsupported"
+            }
+          },
+          "rollback_bundle": {
+            "type": "string"
+          }
+        }
       }
     },
     "responses": {
@@ -308,6 +1054,9 @@
   "security": [
     {
       "bearer": []
+    },
+    {
+      "browserSession": []
     }
   ],
   "paths": {
@@ -766,12 +1515,58 @@
     "/api/v1/auth/login": {
       "post": {
         "summary": "Local login (Argon2id)",
-        "security": []
+        "description": "Browser clients send X-Constellation-Client: browser with a validated Origin and receive secure HttpOnly cookies, not a JSON token. Non-browser clients receive a bearer token. Access tokens expire within 15 minutes. Responses are never cacheable.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "password"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string",
+                    "writeOnly": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Session established.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credentials."
+          },
+          "403": {
+            "description": "Browser origin or CSRF header rejected."
+          },
+          "429": {
+            "description": "Login rate limit exceeded."
+          }
+        }
       }
     },
     "/api/v1/auth/logout": {
       "post": {
-        "summary": "Logout (audited)"
+        "summary": "Logout (audited)",
+        "description": "Revokes all user sessions and refresh families and expires both browser cookies. Cookie-authenticated requests require browser CSRF headers."
       }
     },
     "/api/v1/auth/me": {
@@ -791,18 +1586,71 @@
         "security": []
       }
     },
+    "/api/v1/auth/refresh": {
+      "post": {
+        "summary": "Rotate browser session",
+        "description": "Requires the secure HttpOnly refresh cookie, X-Constellation-Client: browser and a validated Origin. Atomically consumes the old refresh secret and issues new cookies without extending the absolute session lifetime. Reuse revokes the entire session family, including issued access tokens. No credentials are returned in JSON.",
+        "security": [
+          {
+            "browserRefresh": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-Constellation-Client",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "const": "browser"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cookies rotated; response is not cacheable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Refresh session missing, expired, revoked or reused; cookies cleared."
+          },
+          "403": {
+            "description": "Browser origin or CSRF header rejected."
+          },
+          "429": {
+            "description": "Refresh rate limit exceeded."
+          }
+        }
+      }
+    },
     "/api/v1/auth/saml/acs": {
       "post": {
+        "description": "Validates the signed SAML response. Browser requests additionally require a single-use five-minute SP-login cookie matching POST RelayState; unsolicited IdP-initiated browser ACS is rejected. The cookie is HttpOnly/Secure/SameSite=None for the cross-site IdP POST. Pending requests require serving-replica login affinity. Non-browser bearer responses remain supported; form bodies are limited to one MiB.",
         "responses": {
           "200": {
             "description": "ok"
+          },
+          "400": {
+            "description": "Invalid SAML form; submitted assertion data is not echoed."
+          },
+          "403": {
+            "description": "Missing, expired, mismatched or consumed browser login binding; restart SP login."
+          },
+          "413": {
+            "description": "SAML form body exceeds one MiB."
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
         },
         "security": [],
-        "summary": "Create acs"
+        "summary": "Validate SAML assertion and browser login binding"
       }
     },
     "/api/v1/auth/saml/login": {
@@ -869,15 +1717,54 @@
     },
     "/api/v1/backups/restore": {
       "post": {
+        "description": "Requires manage-org. Restores only into the authenticated organization; identity tables additionally require manage-users. All writes commit atomically. Deployment policy controls signature trust; query parameters cannot bypass it. Invalid format, table integrity, row counts or unresolved cluster scope are always rejected.",
+        "parameters": [
+          {
+            "name": "on_conflict",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "skip",
+                "overwrite"
+              ],
+              "default": "skip"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "application/gzip": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Committed restore counts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupRestoreResult"
+                }
+              }
+            }
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Create restore"
+        "summary": "Validate and atomically restore a backup"
       }
     },
     "/api/v1/backups/schedule": {
@@ -906,15 +1793,40 @@
     },
     "/api/v1/backups/verify": {
       "post": {
+        "description": "Requires manage-org. Uses the same signature, integrity and organization checks as restore, without writing imported tables. Signature policy is deployment-controlled. signer_identity is returned only when cryptographically verified, not copied from the upload.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "application/gzip": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Validated manifest and cryptographic verification status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupVerification"
+                }
+              }
+            }
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Create verify"
+        "summary": "Verify backup contents and trust without applying"
       }
     },
     "/api/v1/backups/{id}": {
@@ -3477,20 +4389,15 @@
                             ]
                           },
                           "summary": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/components/schemas/MigrationSummary"
                           },
                           "applied_summary": {
-                            "type": "object",
-                            "additionalProperties": {
-                              "type": "integer"
-                            }
+                            "$ref": "#/components/schemas/MigrationFamilyCounts"
                           },
                           "unsupported": {
                             "type": "array",
                             "items": {
-                              "type": "object",
-                              "additionalProperties": true
+                              "$ref": "#/components/schemas/MigrationUnsupported"
                             }
                           },
                           "error": {
@@ -3604,6 +4511,18 @@
                         "type": "object",
                         "additionalProperties": true
                       }
+                    },
+                    "vulnerability_profiles": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MigrationVulnerabilityRollback"
+                      }
+                    },
+                    "registries": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MigrationRegistryRollback"
+                      }
                     }
                   },
                   "additionalProperties": true
@@ -3626,7 +4545,7 @@
     },
     "/api/v1/migration/imports/{id}:apply": {
       "post": {
-        "description": "Applies the converted policies from a saved migration preview, records rollback snapshots, and returns partial_applied when converted file-profile items still require workload mapping.",
+        "description": "Applies reviewed equivalents from a saved preview atomically with rollback snapshots. Registry metadata requires registry-management permission, imports no credentials, uses manual cadence and disables automatic database-update rescans. Unsupported source semantics remain explicit and are never represented as imported.",
         "parameters": [
           {
             "name": "id",
@@ -3665,10 +4584,7 @@
                       "type": "boolean"
                     },
                     "applied": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "type": "integer"
-                      }
+                      "$ref": "#/components/schemas/MigrationFamilyCounts"
                     },
                     "unsupported": {
                       "type": "array",
@@ -3682,11 +4598,14 @@
               }
             }
           },
+          "403": {
+            "description": "Missing policy or registry-management permission."
+          },
           "404": {
             "$ref": "#/components/responses/Error"
           },
           "409": {
-            "$ref": "#/components/responses/Error"
+            "description": "Conflicting source/current objects or unsupported import state; transaction is not partially committed."
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -3736,17 +4655,23 @@
                     },
                     "deleted": {
                       "type": "integer"
+                    },
+                    "already_rolled_back": {
+                      "type": "boolean"
                     }
                   }
                 }
               }
             }
           },
+          "403": {
+            "description": "Missing policy or registry-management permission."
+          },
           "404": {
             "$ref": "#/components/responses/Error"
           },
           "409": {
-            "$ref": "#/components/responses/Error"
+            "description": "An imported object changed after apply; rollback refuses to overwrite it."
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -3757,7 +4682,56 @@
     },
     "/api/v1/migration/preview": {
       "post": {
-        "summary": "Read-only migration dry-run conversion with policy diff and rollback preview"
+        "summary": "Preview reviewed migration equivalents and explicit unsupported objects",
+        "description": "Validates an export and persists its redacted preview/history. Does not mutate policy, registry, identity or privilege objects. Cluster-dependent families require an owned target cluster. Credentials and token secrets require reissue and are never imported.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "source",
+                  "export"
+                ],
+                "properties": {
+                  "source": {
+                    "type": "string"
+                  },
+                  "export": {
+                    "type": "string",
+                    "maxLength": 2097152
+                  },
+                  "cluster_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Conversion counts, diffs, unsupported diagnostics and rollback preview.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MigrationPreview"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid, oversized, unsupported or cross-organization input."
+          },
+          "403": {
+            "description": "Caller cannot manage policy."
+          },
+          "413": {
+            "description": "Request exceeds the two-megabyte limit."
+          }
+        }
       }
     },
     "/api/v1/migration/sources": {
@@ -6606,6 +7580,12 @@
                       "type": "string",
                       "description": "Effective source for the returned config: system_config when persisted, default when no row exists."
                     },
+                    "provenance": {
+                      "$ref": "#/components/schemas/ConfigProvenance"
+                    },
+                    "applied": {
+                      "$ref": "#/components/schemas/ConfigApplied"
+                    },
                     "updated_at": {
                       "type": "string",
                       "format": "date-time",
@@ -6658,6 +7638,12 @@
                     "config": {
                       "$ref": "#/components/schemas/SystemConfig"
                     },
+                    "provenance": {
+                      "$ref": "#/components/schemas/ConfigProvenance"
+                    },
+                    "applied": {
+                      "$ref": "#/components/schemas/ConfigApplied"
+                    },
                     "revision": {
                       "type": "integer",
                       "format": "int64"
@@ -6668,7 +7654,14 @@
             }
           },
           "400": {
-            "description": "Invalid patch body or a field that failed validation."
+            "description": "Invalid patch body or a field that failed validation; rejected values are never echoed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigFieldErrors"
+                }
+              }
+            }
           },
           "401": {
             "description": "Missing or invalid bearer token."

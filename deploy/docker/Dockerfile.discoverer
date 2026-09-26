@@ -11,7 +11,7 @@
 # Compose runs ONE replica per cluster; in K8s the chart fans this out via a Deployment-
 # per-managed-cluster pattern.
 
-ARG GO_VERSION=1.26
+ARG GO_VERSION=1.26.8
 ARG RUNTIME_IMAGE=debian:bookworm-slim
 
 FROM golang:${GO_VERSION}-bookworm AS build

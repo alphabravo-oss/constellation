@@ -52,6 +52,7 @@ import (
 // Config is the typed view of a system_config row's JSONB blob. Every field is
 // validated by Validate(); secret-bearing fields are stripped by Redacted().
 type Config struct {
+	origins map[string]configOrigin
 	// EgressProxy controls outbound HTTP(S) routing for shared clients.
 	EgressProxy EgressProxy `json:"egress_proxy"`
 	// TLSVerify toggles verification of upstream TLS certs for shared outbound clients.
@@ -167,82 +168,91 @@ func (t SyslogTarget) Addr() string {
 // Default returns the zero-value-safe baseline config: TLS verification on, no
 // proxy/syslog. Used when an org has no row yet.
 func Default() Config {
-	return Config{
+	return trackConfig(Config{
 		TLSVerify: true,
-	}
+	}, nil, SourceDefault)
 }
 
 // Validate enforces the field invariants. Called on every PATCH (after merge) and on
 // every load from the DB so a malformed row can never become the live config.
 func (c Config) Validate() error {
+	var validation ValidationError
 	if p := strings.TrimSpace(c.EgressProxy.HTTPSProxy); p != "" {
 		u, err := url.Parse(p)
 		if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
-			return fmt.Errorf("egress_proxy.https_proxy must be an http(s) URL: %q", p)
+			validation.add("egress_proxy.https_proxy", "invalid_url", "Value must be an HTTP or HTTPS URL.")
 		}
 	}
 	if pem := strings.TrimSpace(c.CABundlePEM); pem != "" {
 		if !validCABundle(pem) {
-			return errors.New("ca_bundle_pem is not a valid PEM certificate bundle")
+			validation.add("ca_bundle_pem", "invalid_pem", "Value must be a valid PEM certificate bundle.")
 		}
 	}
 	if c.SyslogSIEM.Host != "" {
 		if c.SyslogSIEM.Port <= 0 || c.SyslogSIEM.Port > 65535 {
-			return fmt.Errorf("syslog_siem_target.port out of range: %d", c.SyslogSIEM.Port)
+			validation.add("syslog_siem_target.port", "out_of_range", "Port must be between 1 and 65535.")
 		}
 		switch c.SyslogSIEM.Protocol {
-		case "", "udp", "tcp", "tls":
+		case "tls":
+		case "", "udp", "tcp":
+			if !c.SyslogSIEM.TLS && (strings.TrimSpace(c.SyslogSIEM.CACert) != "" || strings.TrimSpace(c.SyslogSIEM.ClientCert) != "" || strings.TrimSpace(c.SyslogSIEM.ClientKey) != "") {
+				validation.add("syslog_siem_target.tls", "required", "TLS must be enabled when a CA or client certificate is configured.")
+			}
 		default:
-			return fmt.Errorf("syslog_siem_target.protocol must be udp, tcp, or tls: %q", c.SyslogSIEM.Protocol)
+			validation.add("syslog_siem_target.protocol", "invalid_value", "Protocol must be udp, tcp, or tls.")
 		}
 		switch strings.ToLower(c.SyslogSIEM.Format) {
 		case "", "rfc5424", "json", "cef":
 		default:
-			return fmt.Errorf("syslog_siem_target.format must be rfc5424, json, or cef: %q", c.SyslogSIEM.Format)
+			validation.add("syslog_siem_target.format", "invalid_value", "Format must be rfc5424, json, or cef.")
 		}
 		if ml := strings.ToLower(strings.TrimSpace(c.SyslogSIEM.MinLevel)); ml != "" {
 			switch ml {
 			case "critical", "high", "medium", "low", "info":
 			default:
-				return fmt.Errorf("syslog_siem_target.min_level must be critical, high, medium, low, or info: %q", c.SyslogSIEM.MinLevel)
+				validation.add("syslog_siem_target.min_level", "invalid_value", "Minimum level must be critical, high, medium, low, or info.")
 			}
 		}
 		if ca := strings.TrimSpace(c.SyslogSIEM.CACert); ca != "" && !validCABundle(ca) {
-			return errors.New("syslog_siem_target.ca_cert is not a valid PEM certificate bundle")
+			validation.add("syslog_siem_target.ca_cert", "invalid_pem", "Value must be a valid PEM certificate bundle.")
 		}
-		// mTLS requires both halves of the client keypair (a redacted-echo key is
-		// restored to its stored value by ApplyPatch before Validate runs).
 		hasCert := strings.TrimSpace(c.SyslogSIEM.ClientCert) != ""
 		hasKey := strings.TrimSpace(c.SyslogSIEM.ClientKey) != ""
 		if hasCert != hasKey {
-			return errors.New("syslog_siem_target.client_cert and client_key must both be set for mTLS")
+			if !hasCert {
+				validation.add("syslog_siem_target.client_cert", "required", "Client certificate is required when a client key is set.")
+			} else {
+				validation.add("syslog_siem_target.client_key", "required", "Client key is required when a client certificate is set.")
+			}
 		}
 	}
-	// 0 = use scanner env default; otherwise clamp to a sane window (15 min .. 30 days).
 	if c.ScannerDBRefreshMinutes != 0 && (c.ScannerDBRefreshMinutes < 15 || c.ScannerDBRefreshMinutes > 30*24*60) {
-		return fmt.Errorf("scanner_db_refresh_minutes must be 0 or between 15 and 43200: %d", c.ScannerDBRefreshMinutes)
+		validation.add("scanner_db_refresh_minutes", "out_of_range", "Value must be 0 or between 15 and 43200.")
 	}
 	if strings.TrimSpace(c.SMTP.Host) != "" {
 		if c.SMTP.Port <= 0 || c.SMTP.Port > 65535 {
-			return fmt.Errorf("smtp.port out of range: %d", c.SMTP.Port)
+			validation.add("smtp.port", "out_of_range", "Port must be between 1 and 65535.")
 		}
 		if strings.TrimSpace(c.SMTP.From) == "" {
-			return errors.New("smtp.from is required when an SMTP host is set")
+			validation.add("smtp.from", "required", "From address is required when an SMTP host is set.")
 		}
 	}
-	for name, d := range map[string]int{
-		"network_flow_retention_days": c.NetworkFlowRetentionDays,
-		"events_retention_days":       c.EventsRetentionDays,
-		"scan_job_retention_days":     c.ScanJobRetentionDays,
+	for _, retention := range []struct {
+		field string
+		days  int
+	}{
+		{"network_flow_retention_days", c.NetworkFlowRetentionDays},
+		{"events_retention_days", c.EventsRetentionDays},
+		{"scan_job_retention_days", c.ScanJobRetentionDays},
 	} {
-		if d < 0 || d > 3650 {
-			return fmt.Errorf("%s must be between 0 and 3650: %d", name, d)
+		if retention.days < 0 || retention.days > 3650 {
+			validation.add(retention.field, "out_of_range", "Value must be between 0 and 3650.")
 		}
 	}
 	if c.AutoScanRescanHours < 0 || c.AutoScanRescanHours > 24*365 {
-		return fmt.Errorf("auto_scan_rescan_hours out of range: %d", c.AutoScanRescanHours)
+		validation.add("auto_scan_rescan_hours", "out_of_range", "Value must be between 0 and 8760.")
 	}
-	return nil
+	return validation.err()
 }
 
 func validCABundle(b string) bool {
@@ -289,35 +299,53 @@ func (c Config) Redacted() Config {
 		out.SyslogSIEM.ClientKey = redactedMarker
 	}
 	out.EgressProxy.HTTPSProxy = redactProxyUserinfo(c.EgressProxy.HTTPSProxy)
+	out.NVDMirrorURL = redactProxyUserinfo(c.NVDMirrorURL)
 	return out
 }
 
-// redactProxyUserinfo replaces any embedded userinfo in a proxy URL with the redaction
-// marker, preserving the rest of the URL. A URL without credentials is returned unchanged;
-// an unparseable value is returned as-is (Validate() rejects bad URLs before persist).
+// redactProxyUserinfo masks URL credentials, query strings, and fragments. Malformed
+// URLs are masked in full so redaction never depends on successful validation.
 func redactProxyUserinfo(raw string) string {
 	if strings.TrimSpace(raw) == "" {
 		return raw
 	}
-	u, err := url.Parse(raw)
-	if err != nil || u.User == nil {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return redactedMarker
+	}
+	if _, err := url.ParseQuery(u.RawQuery); err != nil {
+		return redactedMarker
+	}
+	if u.User == nil && u.RawQuery == "" && u.Fragment == "" {
 		return raw
 	}
-	u.User = url.User(redactedMarker)
+	if u.User != nil {
+		u.User = url.User(redactedMarker)
+	}
+	if u.RawQuery != "" {
+		u.RawQuery = url.QueryEscape(redactedMarker)
+	}
+	if u.Fragment != "" {
+		u.Fragment = redactedMarker
+		u.RawFragment = ""
+	}
 	return u.String()
 }
 
-// proxyUserinfoIsRedacted reports whether raw is a proxy URL whose userinfo is the
-// redaction marker (i.e. a redacted value echoed back unmodified).
+// proxyUserinfoIsRedacted reports whether a URL contains a redaction marker.
 func proxyUserinfoIsRedacted(raw string) bool {
+	if raw == redactedMarker {
+		return true
+	}
 	if strings.TrimSpace(raw) == "" {
 		return false
 	}
 	u, err := url.Parse(raw)
-	if err != nil || u.User == nil {
+	if err != nil {
 		return false
 	}
-	return u.User.Username() == redactedMarker
+	return (u.User != nil && u.User.Username() == redactedMarker) ||
+		u.RawQuery == url.QueryEscape(redactedMarker) || u.Fragment == redactedMarker
 }
 
 // ApplyPatch merges a partial JSON patch (only the keys present in `patch` are changed)
@@ -325,36 +353,36 @@ func proxyUserinfoIsRedacted(raw string) bool {
 // for a secret is treated as "leave unchanged" so a GET→edit→PATCH round-trip of the
 // redacted body does not wipe the stored secret.
 func (c Config) ApplyPatch(patch json.RawMessage) (Config, error) {
-	// Round-trip the current config through JSON, then overlay the patch object. Unknown
-	// keys are rejected so typos surface as 400s rather than silent no-ops.
+	if err := validateConfigPatch(patch); err != nil {
+		return Config{}, err
+	}
 	merged := c
-	dec := json.NewDecoder(strings.NewReader(string(patch)))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&merged); err != nil {
-		return Config{}, fmt.Errorf("invalid config patch: %w", err)
+	merged.SyslogSIEM.Categories = append([]string(nil), c.SyslogSIEM.Categories...)
+	if err := json.Unmarshal(patch, &merged); err != nil {
+		return Config{}, &ValidationError{Fields: []FieldError{{Field: "$", Code: "invalid_json", Message: "Patch must contain one valid JSON object."}}}
 	}
 	if merged.CABundlePEM == redactedMarker {
-		merged.CABundlePEM = c.CABundlePEM // preserve the existing secret on redacted echo
+		merged.CABundlePEM = c.CABundlePEM
 	}
 	if merged.NVDAPIKey == redactedMarker {
-		merged.NVDAPIKey = c.NVDAPIKey // preserve the existing key on redacted echo
+		merged.NVDAPIKey = c.NVDAPIKey
 	}
 	if merged.SMTP.Password == redactedMarker {
-		merged.SMTP.Password = c.SMTP.Password // preserve the existing SMTP password on redacted echo
+		merged.SMTP.Password = c.SMTP.Password
 	}
 	if merged.SyslogSIEM.ClientKey == redactedMarker {
-		merged.SyslogSIEM.ClientKey = c.SyslogSIEM.ClientKey // preserve the existing mTLS key on redacted echo
+		merged.SyslogSIEM.ClientKey = c.SyslogSIEM.ClientKey
 	}
-	// If the proxy URL was echoed back with its userinfo still redacted (a GET→edit→PATCH
-	// round-trip of the masked value), restore the original credentialed URL so the secret
-	// is not wiped or persisted as the literal marker.
 	if proxyUserinfoIsRedacted(merged.EgressProxy.HTTPSProxy) {
 		merged.EgressProxy.HTTPSProxy = c.EgressProxy.HTTPSProxy
+	}
+	if proxyUserinfoIsRedacted(merged.NVDMirrorURL) {
+		merged.NVDMirrorURL = c.NVDMirrorURL
 	}
 	if err := merged.Validate(); err != nil {
 		return Config{}, err
 	}
-	return merged, nil
+	return c.withPatchProvenance(merged, patch), nil
 }
 
 // --------------------------------- store ------------------------------------
@@ -379,9 +407,9 @@ func Load(ctx context.Context, s store, orgID uuid.UUID) (Config, int64, error) 
 	if err != nil {
 		return Config{}, 0, fmt.Errorf("syscfg: load: %w", err)
 	}
-	cfg := Default()
-	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return Config{}, 0, fmt.Errorf("syscfg: unmarshal: %w", err)
+	cfg, err := unmarshalStoredConfig(raw)
+	if err != nil {
+		return Config{}, 0, errors.New("syscfg: invalid stored config encoding")
 	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, 0, fmt.Errorf("syscfg: stored config invalid: %w", err)
@@ -396,7 +424,7 @@ func Seed(ctx context.Context, s store, orgID uuid.UUID, defaults Config) (Confi
 	if err := defaults.Validate(); err != nil {
 		return Config{}, 0, fmt.Errorf("syscfg: seed defaults invalid: %w", err)
 	}
-	blob, err := json.Marshal(defaults)
+	blob, err := marshalStoredConfig(defaults)
 	if err != nil {
 		return Config{}, 0, err
 	}
@@ -427,7 +455,7 @@ func Save(ctx context.Context, s store, orgID uuid.UUID, cfg Config, expectedRev
 	if err := cfg.Validate(); err != nil {
 		return 0, err
 	}
-	blob, err := json.Marshal(cfg)
+	blob, err := marshalStoredConfig(cfg)
 	if err != nil {
 		return 0, err
 	}
@@ -484,24 +512,29 @@ func (p *Provider) Get(ctx context.Context, orgID uuid.UUID) Config {
 	c, ok := p.cache[orgID]
 	p.mu.RUnlock()
 	if ok {
-		return c.cfg
+		return cloneConfig(c.cfg)
 	}
 	cfg, rev, err := Load(ctx, p.store, orgID)
 	if err != nil {
 		return Default()
 	}
-	p.mu.Lock()
-	p.cache[orgID] = cachedConfig{cfg: cfg, rev: rev}
-	p.mu.Unlock()
-	return cfg
+	p.set(orgID, cfg, rev)
+	p.mu.RLock()
+	c = p.cache[orgID]
+	p.mu.RUnlock()
+	return cloneConfig(c.cfg)
 }
 
 // set replaces the cached config for org (used by the reloader and right after a PATCH
 // so the writing replica sees its own change immediately, before the next poll tick).
-func (p *Provider) set(orgID uuid.UUID, cfg Config, rev int64) {
+func (p *Provider) set(orgID uuid.UUID, cfg Config, rev int64) bool {
 	p.mu.Lock()
-	p.cache[orgID] = cachedConfig{cfg: cfg, rev: rev}
-	p.mu.Unlock()
+	defer p.mu.Unlock()
+	if current, ok := p.cache[orgID]; ok && current.rev >= rev {
+		return false
+	}
+	p.cache[orgID] = cachedConfig{cfg: cloneConfig(cfg), rev: rev}
+	return true
 }
 
 // Refresh re-reads every cached org's row and swaps the cache entry when the revision
@@ -520,11 +553,12 @@ func (p *Provider) Refresh(ctx context.Context) int {
 	changed := 0
 	for _, id := range orgs {
 		cfg, rev, err := Load(ctx, p.store, id)
-		if err != nil || rev == revs[id] {
+		if err != nil || rev <= revs[id] {
 			continue
 		}
-		p.set(id, cfg, rev)
-		changed++
+		if p.set(id, cfg, rev) {
+			changed++
+		}
 	}
 	return changed
 }

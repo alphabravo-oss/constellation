@@ -1,5 +1,9 @@
 # NeuVector vs Constellation — Visual & API Capability Assessment
 
+> Historical point-in-time evidence, not an active backlog. The progress notes
+> and gap rows below intentionally preserve the original assessment. Current
+> work is tracked only in [the canonical parity plan](NEUVECTOR-PARITY-PLAN.md).
+
 _Generated 2026-08-19 · 207 gaps across 12 functional areas · produced by a 12-agent deep-research workflow (each agent diffed NeuVector's core + UI docs against Constellation's frontend + API)._
 
 **Severity breakdown:** 3 critical · 57 high · 96 medium · 51 low.
@@ -1099,7 +1103,7 @@ _(16 gaps in this area)_
 |9|SAML cert introspection + SLO + AuthnRequest signing|SAML config|`RESTServerSAML`|medium|Extend `ServerConfig`+form|
 
 #### Where Constellation leads
-API tokens are materially stronger: **rotate-in-place**, an enforced **max-lifetime cap** (A7) that even bounds grandfathered never-expiring tokens, sha256-at-rest hashing, per-verb scopes intersected with role grants, and a machine-readable verb catalog for the UI picker — NV api-keys are a static role+domain grant shown once with no rotation. Constellation also has DB-backed hot-reloadable IdP CRUD with at-rest KEK sealing of secrets, per-org security policy with optimistic-concurrency revisions, dedicated **federation mTLS** (per-joint CA-minted client certs) and a Guardrails concept NV lacks. It is structurally CSRF-immune (bearer-only) with per-IP login rate-limits and a global per-token abuse ceiling.
+API tokens are materially stronger: **rotate-in-place**, an enforced **max-lifetime cap** (A7) that even bounds grandfathered never-expiring tokens, sha256-at-rest hashing, per-verb scopes intersected with role grants, and a machine-readable verb catalog for the UI picker — NV api-keys are a static role+domain grant shown once with no rotation. Constellation also has DB-backed hot-reloadable IdP CRUD with at-rest KEK sealing of secrets, per-org security policy with optimistic-concurrency revisions, dedicated **federation mTLS** (per-joint CA-minted client certs) and a Guardrails concept NV lacks. Browser sessions now use secure HttpOnly cookies and rotating refresh tokens, with explicit origin/header CSRF enforcement; bearer automation remains supported. Per-IP login/refresh limits and an API abuse ceiling also apply. See [browser sessions](browser-sessions.md) and the canonical plan for validation status.
 
 _(17 gaps in this area)_
 

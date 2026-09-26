@@ -16,7 +16,7 @@ func jsonError(w http.ResponseWriter, status int, msg string) {
 
 // namespaceOf returns the namespace segment of a "<namespace>/<name>" workload
 // identity, or "" when the identity is not namespaced (eg. "external"). Mirrors
-// the parent handler's splitNamespacedName without exporting it.
+// the same namespace/name convention used by the shared IP resolver.
 func namespaceOf(workload string) string {
 	if i := strings.IndexByte(workload, '/'); i > 0 {
 		return workload[:i]

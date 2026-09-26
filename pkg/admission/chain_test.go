@@ -172,6 +172,48 @@ func TestChainEngine_CELDenyFiresOnDeny(t *testing.T) {
 	}
 }
 
+func TestChainEngine_CompiledPolicyFailureFiresDenyHook(t *testing.T) {
+	ctx := context.Background()
+	rego, regoErrs, err := NewRegoEngine(ctx, map[string]string{"broken-rego": "not actually rego"}, nil)
+	if err != nil || regoErrs["broken-rego"] == nil {
+		t.Fatalf("rego diagnostic missing: %v %v", err, regoErrs)
+	}
+	cel, celErrs, err := NewCELEngine([]*CELRule{{ID: "broken-cel", Expression: "object.", Mode: "enforce"}})
+	if err != nil || celErrs["broken-cel"] == nil {
+		t.Fatalf("cel diagnostic missing: %v %v", err, celErrs)
+	}
+	for _, tc := range []struct {
+		name string
+		want string
+		set  func(*ChainEngine)
+	}{
+		{name: "rego", want: "broken-rego", set: func(chain *ChainEngine) { chain.SetRego(rego) }},
+		{name: "cel", want: "broken-cel", set: func(chain *ChainEngine) { chain.SetCEL(cel) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := make(chan DenyEvent, 1)
+			chain := NewChainEngine(NewEngine())
+			chain.SetOnDeny(func(_ context.Context, event DenyEvent) { got <- event })
+			tc.set(chain)
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "safe", Namespace: "team-a", Annotations: map[string]string{SignatureAnnotation: "true"}},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "alpine:3"}}},
+			}
+			if resp := chain.Evaluate(ctx, reviewFor(pod)); resp.Allowed {
+				t.Fatal("unavailable enforce policy admitted a pod")
+			}
+			select {
+			case event := <-got:
+				if event.RuleID != tc.want || event.Pod != "safe" {
+					t.Fatalf("deny hook received %+v", event)
+				}
+			default:
+				t.Fatal("deny hook was not invoked")
+			}
+		})
+	}
+}
+
 // TestChainEngine_PolicyDenyDoesNotDoubleFire guards against the chain
 // re-firing OnDeny for a built-in PolicyEngine deny — the PolicyEngine already
 // fires its own OnDeny, so the chain must stay silent on that path (exactly one

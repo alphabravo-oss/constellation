@@ -129,11 +129,12 @@ type PlatformFindingRow struct {
 }
 
 func (h *PlatformFactsHandler) Report(w http.ResponseWriter, r *http.Request) {
-	orgID, ok := orgFromTokenContext(r.Context())
-	if !ok {
-		jsonError(w, http.StatusUnauthorized, "service token required")
+	tok, ok := runtimeAgentTokenFrom(r.Context())
+	if !ok || tok == nil {
+		jsonError(w, http.StatusUnauthorized, "runtime-agent token required")
 		return
 	}
+	orgID := tok.OrgID
 	r.Body = http.MaxBytesReader(w, r.Body, 4<<20)
 
 	var body PlatformFactsReport
@@ -158,6 +159,32 @@ SELECT name, distro
 	}
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, "cluster lookup: "+err.Error())
+		return
+	}
+	boundCluster, err := ResolveAgentClusterID(r.Context(), h.db, tok)
+	if errors.Is(err, ErrAgentClusterScope) {
+		jsonError(w, http.StatusForbidden, "agent token cluster scope mismatch")
+		return
+	}
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "resolve agent cluster failed")
+		return
+	}
+	if boundCluster == nil || *boundCluster != body.ClusterID {
+		jsonError(w, http.StatusForbidden, "agent token cannot report this cluster")
+		return
+	}
+	var tokenBound bool
+	if err := h.db.Pool().QueryRow(r.Context(), `
+SELECT EXISTS (
+    SELECT 1 FROM cluster_init_bundles
+     WHERE runtime_agent_token_id = $1 AND org_id = $2 AND cluster_id = $3
+)`, tok.ID, orgID, body.ClusterID).Scan(&tokenBound); err != nil {
+		jsonError(w, http.StatusInternalServerError, "verify agent cluster binding failed")
+		return
+	}
+	if !tokenBound {
+		jsonError(w, http.StatusForbidden, "agent token cannot report this cluster")
 		return
 	}
 	if body.ClusterName == "" {

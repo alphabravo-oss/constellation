@@ -8,7 +8,7 @@
 # rather than reimplementing the benchmark. Pin KUBE_BENCH_IMAGE for a known
 # kube-bench version.
 
-ARG GO_VERSION=1.26
+ARG GO_VERSION=1.26.8
 ARG RUNTIME_IMAGE=debian:bookworm-slim
 ARG KUBE_BENCH_IMAGE=docker.io/aquasec/kube-bench:v0.10.7
 

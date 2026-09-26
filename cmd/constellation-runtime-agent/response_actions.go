@@ -22,14 +22,10 @@
 // STATUS (RT-KILL-02): the responder EXECUTION layer below (killProcess SIGKILL,
 // killSession conntrack-delete, decision logic) is complete and unit-tested, and
 // the poller is gated OFF by default and 404s harmlessly until a producer exists.
-// Pre-exec/inline BLOCKING of a policy violation is already delivered end-to-end
-// by the enforcer path (set runtimeAgent.enforcement.mode=protect — RT-ENFORCE-01,
-// network/L7 inline shipped). What remains for full parity is the server-side
-// PRODUCER — GET /api/v1/runtime/response-actions:pending + a :complete sink + a
-// pkg/response ActionKill that enqueues onto them — so a response RULE can kill an
-// already-RUNNING process/session on a threat. The responder here is that
-// producer's ready-made execution half. Tracked as RT-KILL-02 in
-// docs/NEUVECTOR-PARITY-PLAN-2026-08.md.
+// Pre-exec/inline blocking is delivered by the enforcer path. Response-rule
+// kill actions use the server-side pending/result endpoints and this worker to
+// act on already-running processes or sessions. End-to-end live validation is
+// tracked as RUN-1 in docs/NEUVECTOR-PARITY-PLAN.md.
 package main
 
 import (
@@ -328,14 +324,11 @@ func (w *responseActionWorker) pollOnce(ctx context.Context) {
 
 // fetch pulls pending response actions for this node.
 //
-// NOTE (RT-KILL-02): this poller only runs when kill-process/kill-session is
-// explicitly enabled (CONSTELLATION_RESPONSE_KILL_PROCESS/_SESSION, default off).
-// The server-side producer endpoint (/api/v1/runtime/response-actions:pending)
-// is NOT yet implemented, so an opted-in agent stays inert (empty on 404) rather
-// than erroring. Pre-exec BLOCKING is instead delivered by the enforcer path
-// (RT-ENFORCE-01: set runtimeAgent.enforcement.mode=protect). Building the full
-// response-action kill pipeline (server producer + result sink + response-rule
-// wiring) is tracked as RT-KILL-02 in docs/NEUVECTOR-PARITY-PLAN-2026-08.md.
+// This poller only runs when kill-process/kill-session is explicitly enabled
+// (CONSTELLATION_RESPONSE_KILL_PROCESS/_SESSION, default off). The server queues
+// response-rule kill actions through /runtime/response-actions:pending and this
+// worker reports the outcome to /runtime/response-actions:result. Live delivery
+// validation is tracked as RUN-1 in docs/NEUVECTOR-PARITY-PLAN.md.
 func (w *responseActionWorker) fetch(ctx context.Context) ([]responseAction, error) {
 	url := strings.TrimRight(w.APIBaseURL, "/") +
 		"/api/v1/runtime/response-actions:pending?cluster_id=" + w.ClusterID +

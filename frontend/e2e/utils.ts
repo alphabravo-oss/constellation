@@ -39,19 +39,25 @@ export async function login(
   page: Page,
   options: { creds?: Credentials; fallbackToDemo?: boolean; theme?: "dark" | "light" } = {},
 ) {
-  // Hit the API directly and stash the token in localStorage; matches how the SPA stores it.
+  let credentials = options.creds ?? CREDS;
   let token: string;
   try {
-    token = await getAuthToken(page, options.creds ?? CREDS);
+    token = await getAuthToken(page, credentials);
   } catch (err) {
     if (!options.fallbackToDemo || !options.creds || options.creds.email === CREDS.email) {
       throw err;
     }
-    token = await getAuthToken(page, CREDS);
+    credentials = CREDS;
+    token = await getAuthToken(page, credentials);
   }
-  await page.addInitScript(({ token: t, theme }) => {
-    localStorage.setItem("constellation.token", t);
+  const response = await page.request.post(`${API}/api/v1/auth/login`, {
+    data: credentials,
+    headers: { "X-Constellation-Client": "browser", Origin: new URL(API).origin },
+  });
+  if (!response.ok()) throw new Error(`browser login failed: ${response.status()}`);
+  await page.addInitScript(({ theme }) => {
+    localStorage.removeItem("constellation.token");
     if (theme) localStorage.setItem("constellation.theme", theme);
-  }, { token, theme: options.theme });
+  }, { theme: options.theme });
   return token;
 }

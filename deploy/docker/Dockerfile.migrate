@@ -1,7 +1,7 @@
 # constellation-migrate — one-shot init image that bundles goose + every
 # db/migrations/*.sql file. Used as a pre-install Helm hook so the api
 # pod boots into a populated schema. Tiny (~30 MB).
-FROM golang:1.26-alpine AS goose
+FROM golang:1.26.8-alpine AS goose
 RUN apk add --no-cache git
 RUN go install github.com/pressly/goose/v3/cmd/goose@v3.27.1
 

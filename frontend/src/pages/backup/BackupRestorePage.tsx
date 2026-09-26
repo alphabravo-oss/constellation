@@ -8,7 +8,7 @@ import { backupsApi, type BackupManifestDTO } from "@/api/client";
 import { PageHeader } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Field, Select, Switch } from "@/components/ui/form";
+import { Field, Select } from "@/components/ui/form";
 
 /**
  * BackupRestorePage — /settings/backup/restore. A dedicated form page (the
@@ -21,22 +21,27 @@ export function BackupRestorePage() {
   const [file, setFile] = useState<File | null>(null);
   const [manifest, setManifest] = useState<BackupManifestDTO | null>(null);
   const [policy, setPolicy] = useState<"skip" | "overwrite">("skip");
-  const [allowUnverified, setAllowUnverified] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const selectedFileRef = useRef<File | null>(null);
 
   const verifyMutation = useMutation({
     mutationFn: (f: File) => backupsApi.verify(f),
-    onSuccess: (m) => {
+    onSuccess: (m, verifiedFile) => {
+      if (selectedFileRef.current !== verifiedFile) return;
       setManifest(m);
-      toast.success(`Manifest valid: org=${m.org_name}, tables=${m.tables.length}`);
+      toast.success(`Archive validated: org=${m.org_name}, tables=${m.tables.length}`);
     },
-    onError: (e: Error) => toast.error(`Verify failed: ${e.message}`),
+    onError: (error: Error, verifiedFile) => {
+      if (selectedFileRef.current !== verifiedFile) return;
+      setManifest(null);
+      toast.error(`Verify failed: ${error.message}`);
+    },
   });
 
   const restoreMutation = useMutation({
     mutationFn: () => {
-      if (!file) throw new Error("no file");
-      return backupsApi.restore(file, { on_conflict: policy, allow_unverified: allowUnverified });
+      if (!file || !manifest) throw new Error("Validate the archive before restoring");
+      return backupsApi.restore(file, { on_conflict: policy });
     },
     onSuccess: () => {
       toast.success("Restore applied. Reload the dashboard to see new rows.");
@@ -63,12 +68,14 @@ export function BackupRestorePage() {
               ref={inputRef}
               type="file"
               accept=".tar.gz,.tgz,application/gzip"
+              disabled={restoreMutation.isPending}
               onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) {
-                  setFile(f);
-                  setManifest(null);
-                  verifyMutation.mutate(f);
+                const selectedFile = e.target.files?.[0] ?? null;
+                selectedFileRef.current = selectedFile;
+                setFile(selectedFile);
+                setManifest(null);
+                if (selectedFile) {
+                  verifyMutation.mutate(selectedFile);
                 }
               }}
               className="block w-full text-sm text-muted-foreground file:mr-3 file:rounded-md file:border file:border-border file:bg-background file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-foreground hover:file:bg-accent"
@@ -78,9 +85,9 @@ export function BackupRestorePage() {
             <div className="rounded-lg border border-border bg-muted/30 p-4 text-sm">
               <p className="mb-2 flex items-center gap-2 font-medium">
                 <ShieldCheck className="h-4 w-4 text-status-success" aria-hidden />
-                {manifest.signer_identity
+                {manifest.verified && manifest.signer_identity
                   ? <span>Signed by <code className="font-mono">{manifest.signer_identity}</code></span>
-                  : <span className="text-status-warning">Unsigned manifest</span>}
+                  : <span className="text-status-warning">Signature unverified — permitted by deployment policy. Content integrity validated.</span>}
               </p>
               <dl className="grid grid-cols-2 gap-1 text-xs md:grid-cols-3">
                 <div><dt className="text-muted-foreground">Org</dt><dd className="font-mono">{manifest.org_name}</dd></div>
@@ -107,18 +114,13 @@ export function BackupRestorePage() {
             </Select>
           </Field>
           <div className="rounded-lg border border-border bg-muted/30 px-4 py-3">
-            <Switch
-              checked={allowUnverified}
-              onCheckedChange={setAllowUnverified}
-              label="Allow unverified"
-              description="DEV ONLY — apply a backup whose signature could not be verified."
-            />
+            <p className="text-sm text-muted-foreground">Signature trust is controlled by deployment policy, not this form. Integrity, format, and organization checks are always required. A failed restore leaves all tables unchanged.</p>
           </div>
           <div className="flex items-center gap-3">
             <Button
               variant="destructive"
               size="lg"
-              disabled={!file || restoreMutation.isPending}
+              disabled={!file || !manifest || verifyMutation.isPending || restoreMutation.isPending}
               onClick={() => {
                 if (!window.confirm(`Apply backup of org "${manifest?.org_name ?? "?"}" to THIS instance? Existing rows will be ${policy === "overwrite" ? "OVERWRITTEN" : "preserved"}.`)) return;
                 restoreMutation.mutate();

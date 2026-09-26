@@ -3,7 +3,7 @@
 # initial admin org + user. See cmd/constellation-bootstrap/main.go for
 # behaviour (idempotent: re-running on an already-bootstrapped org is a
 # no-op).
-FROM golang:1.26-bookworm AS build
+FROM golang:1.26.8-bookworm AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

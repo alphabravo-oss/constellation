@@ -61,7 +61,8 @@ var errAmazon404 = error404{}
 
 type error404 struct{}
 
-func (error404) Error() string { return "NoSuchPublicAccessBlockConfiguration" }
+func (error404) Error() string     { return "NoSuchPublicAccessBlockConfiguration" }
+func (error404) ErrorCode() string { return "NoSuchPublicAccessBlockConfiguration" }
 
 func TestScanIAM_FlagsOverPrivilegedAndWildcard(t *testing.T) {
 	roleA := iamtypes.Role{RoleName: awssdk.String("admin-role"), Arn: awssdk.String("arn:aws:iam::123:role/admin-role")}

@@ -33,7 +33,7 @@ import (
 
 // FormatVersion is the on-disk schema identifier. Bump on any non-backward-compatible
 // change to the file layout, manifest fields, or table exports. Restore refuses to
-// process unfamiliar versions unless --allow-unverified is passed.
+// process unfamiliar versions, including when signature verification is waived.
 const FormatVersion = "constellation-orgbackup/v1"
 
 // Manifest is the top-level JSON document inside every backup tarball.

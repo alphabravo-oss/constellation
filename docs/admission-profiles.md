@@ -31,8 +31,9 @@ level=WARN msg="admission profile name is deprecated" requested=restricted use=s
 ```
 
 Update any automation that imports/exports profiles by ID to use the new names.
-A real, full PSS engine is tracked separately (parity plan task C1); when it
-lands, dedicated PSS-conformant profiles can adopt the official names.
+The full PSS engine is available separately through the `pss-baseline` and
+`pss-restricted` profiles. The targeted hardening profiles retain their honest
+names because they intentionally enforce a smaller, opinionated control set.
 
 ## `basic-hardening`
 
@@ -103,6 +104,6 @@ profiles:
 
 For the full control set, see the upstream
 [Pod Security Standards](https://kubernetes.io/docs/concepts/security/pod-security-standards/).
-A complete PSS admission engine is planned (see
-`docs/neuvector-parity-implementation-plan.md`, task C1); until it lands, treat
-these profiles as targeted hardening, not PSS conformance.
+Use the `pss-baseline` or `pss-restricted` built-in profile when PSS conformance
+is required. Continue to treat `basic-hardening` and `strict-hardening` as
+targeted hardening rather than PSS profiles.

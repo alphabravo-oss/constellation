@@ -1,6 +1,6 @@
 import type { SavedViewBase } from "@/hooks/useSavedViews";
 
-export const NETWORK_SAVED_VIEW_SCHEMA_VERSION = 1;
+export const NETWORK_SAVED_VIEW_SCHEMA_VERSION = 2;
 export const NETWORK_SAVED_VIEW_KIND = "constellation.networkActivity.savedViews";
 
 export const NETWORK_SAVED_WORKSPACE_TABS = ["map", "conversations", "sessions", "pcap", "rules", "threats"] as const;
@@ -25,7 +25,7 @@ export interface NetworkSavedViewSnapshot {
   verdicts_visible: Record<NetworkSavedVerdictGroup, boolean>;
   protocols: string[];
   namespaces: string[];
-  hide_kube_system: boolean;
+  hide_platform_components: boolean;
   hidden_kinds: NetworkSavedNodeKind[];
   scope_mode: NetworkSavedScopeMode;
   session_filters: NetworkSessionSavedFilters;
@@ -82,7 +82,7 @@ export function buildNetworkSavedViewSnapshot(input: {
   verdictsVisible: Record<NetworkSavedVerdictGroup, boolean>;
   protocolFilter: Iterable<string>;
   namespaceFilter: Iterable<string>;
-  hideKubeSystem: boolean;
+  hidePlatformComponents: boolean;
   hiddenKinds: Iterable<string>;
   scopeMode: NetworkSavedScopeMode;
   sessionFilters?: Partial<NetworkSessionSavedFilters>;
@@ -98,7 +98,7 @@ export function buildNetworkSavedViewSnapshot(input: {
     verdicts_visible: normalizeVerdictsVisible(input.verdictsVisible),
     protocols: normalizeTokenList(Array.from(input.protocolFilter), { upper: true }),
     namespaces: normalizeTokenList(Array.from(input.namespaceFilter)),
-    hide_kube_system: input.hideKubeSystem,
+    hide_platform_components: input.hidePlatformComponents,
     hidden_kinds: normalizeNodeKinds(Array.from(input.hiddenKinds)),
     scope_mode: normalizeScopeMode(input.scopeMode),
     session_filters: normalizeSessionSavedFilters(input.sessionFilters),
@@ -118,7 +118,12 @@ export function normalizeNetworkSavedViewSnapshot(value: unknown): NetworkSavedV
     verdicts_visible: normalizeVerdictsVisible(value.verdicts_visible),
     protocols: normalizeTokenList(Array.isArray(value.protocols) ? value.protocols : [], { upper: true }),
     namespaces: normalizeTokenList(Array.isArray(value.namespaces) ? value.namespaces : []),
-    hide_kube_system: typeof value.hide_kube_system === "boolean" ? value.hide_kube_system : true,
+    hide_platform_components:
+      typeof value.hide_platform_components === "boolean"
+        ? value.hide_platform_components
+        : typeof value.hide_kube_system === "boolean"
+          ? value.hide_kube_system
+          : true,
     hidden_kinds: normalizeNodeKinds(Array.isArray(value.hidden_kinds) ? value.hidden_kinds : ["unmanaged"]),
     scope_mode: normalizeScopeMode(value.scope_mode),
     session_filters: normalizeSessionSavedFilters(value.session_filters),

@@ -41,6 +41,16 @@ on a short interval so out-of-band edits to a declarative row are corrected with
 a finalizer (`constellation.alphabravo.io/policy-finalizer`) deletes the backing row when the CR is
 removed.
 
+Legacy `ConstellationResponseRule` objects containing unsupported E1 `tag`, or
+scan-event `suppress_log` (which has no scan security-event log to suppress),
+are not reconciled as working rules. The controller reports `InvalidSpec`
+and, when status records the last applied org, removes the operator-owned backing
+row so an old rule cannot keep firing silently. Replace unsupported actions with supported
+actions or delete the CR, then confirm its status and backing rule. For objects
+created before `status.lastAppliedOrgID` was recorded, inspect any prior
+`source='declarative'` row for that org/name during remediation; the controller
+cannot safely infer a different historical org from an invalid spec.
+
 Operator-managed rows are tagged `source='declarative'` — the existing StackRox-inspired provenance
 value (migration 027) meaning "committed as YAML and reconciled by the operator". Provenance is
 enforced **symmetrically**: the finalizer only deletes `declarative` rows, **and** the upsert's
@@ -94,7 +104,7 @@ them as CRs would adopt them into the operator's delete-on-removal lifecycle (an
 colliding with a still-imperative row is refused with `Conflict`), so exporting them would be unsafe
 rather than helpful. To bring an imperative policy under GitOps, recreate it as a CR deliberately.
 
-For the declarative rows it does emit, export then apply is **lossless**: a stored row exported to a
+For supported declarative rows it emits, export then apply is **lossless**: a stored row exported to a
 CR (`policydb.AdmissionCR` / `policydb.ResponseCR`) and fed back through the reconciler's mapping
 (`mapAdmissionRule` / `mapResponseRule`) reproduces the identical row. This is exact precisely
 because declarative rows only ever carry the operator-managed columns (admission:
@@ -105,4 +115,6 @@ conditions, actions`) — the imperative-only `policies` columns (`cluster_id`, 
 symmetry is enforced by `deploy/operator/controllers/policy_export_roundtrip_test.go`, and the
 declarative-only DB read path by `deploy/operator/policydb/store_export_db_test.go`. The re-applied
 row matches column-for-column, modulo the DB-assigned `id` (not part of a CR's `(org, name)`
-identity).
+identity). Legacy declarative rows with an unsupported `tag` or scan
+`suppress_log` action must be
+remediated before export; they cannot round-trip through the current CRD.

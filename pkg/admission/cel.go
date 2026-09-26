@@ -26,8 +26,9 @@ type CELRule struct {
 	MessageExpression string // string expression returning the deny message; optional
 	Mode              string // monitor | enforce
 
-	program           cel.Program
-	messageProgram    cel.Program
+	program        cel.Program
+	messageProgram cel.Program
+	compileError   error
 }
 
 // CELEngine compiles a set of CELRule entries and evaluates each on incoming requests.
@@ -35,12 +36,12 @@ type CELEngine struct {
 	Rules []*CELRule
 }
 
-// NewCELEngine compiles the supplied rules. Returns per-rule compile errors so the caller
-// can surface them in the UI without rejecting the whole set.
+// NewCELEngine compiles the supplied rules. Invalid enforce-mode rules stay in
+// the engine as fail-closed sentinels rather than silently disappearing.
 func NewCELEngine(rules []*CELRule) (*CELEngine, map[string]error, error) {
 	env, err := cel.NewEnv(
 		cel.Variable("request", cel.DynType),
-		cel.Variable("object",  cel.DynType),
+		cel.Variable("object", cel.DynType),
 		cel.Variable("oldObject", cel.DynType),
 	)
 	if err != nil {
@@ -49,14 +50,24 @@ func NewCELEngine(rules []*CELRule) (*CELEngine, map[string]error, error) {
 	errs := map[string]error{}
 	out := &CELEngine{}
 	for _, r := range rules {
+		r.compileError = nil
+		r.program = nil
+		r.messageProgram = nil
+		if r.Mode == "" {
+			r.Mode = "enforce"
+		}
 		ast, iss := env.Compile(r.Expression)
 		if iss != nil && iss.Err() != nil {
 			errs[r.ID] = iss.Err()
+			r.compileError = iss.Err()
+			out.Rules = append(out.Rules, r)
 			continue
 		}
 		prg, err := env.Program(ast)
 		if err != nil {
 			errs[r.ID] = err
+			r.compileError = err
+			out.Rules = append(out.Rules, r)
 			continue
 		}
 		r.program = prg
@@ -67,9 +78,6 @@ func NewCELEngine(rules []*CELRule) (*CELEngine, map[string]error, error) {
 					r.messageProgram = prg2
 				}
 			}
-		}
-		if r.Mode == "" {
-			r.Mode = "enforce"
 		}
 		out.Rules = append(out.Rules, r)
 	}
@@ -95,6 +103,16 @@ func (e *CELEngine) evaluate(_ context.Context, req *admissionv1.AdmissionReques
 	inputs := buildCELInputs(req)
 	var warnings []string
 	for _, r := range e.Rules {
+		if r.compileError != nil {
+			if r.Mode != "monitor" {
+				resp.Allowed = false
+				resp.Result = &metav1.Status{Message: fmt.Sprintf("CEL policy %q unavailable (denied fail-closed)", r.ID)}
+				resp.Warnings = warnings
+				return resp, r.ID
+			}
+			warnings = append(warnings, fmt.Sprintf("cel/%s (monitor) unavailable", r.ID))
+			continue
+		}
 		val, _, err := r.program.Eval(inputs)
 		if err != nil {
 			// Fail CLOSED on an enforce-mode eval error. A CEL expression that
@@ -102,7 +120,7 @@ func (e *CELEngine) evaluate(_ context.Context, req *admissionv1.AdmissionReques
 			// pass — treating it as a warning would admit the very pod the rule
 			// is meant to reject. Monitor-mode rules keep warning so a broken
 			// expression can't start blocking traffic before it's promoted.
-			if r.Mode == "enforce" {
+			if r.Mode != "monitor" {
 				resp.Allowed = false
 				resp.Result = &metav1.Status{Message: fmt.Sprintf("CEL policy %q evaluation error (denied fail-closed): %s", r.ID, err)}
 				resp.Warnings = warnings
@@ -123,7 +141,7 @@ func (e *CELEngine) evaluate(_ context.Context, req *admissionv1.AdmissionReques
 				}
 			}
 		}
-		if r.Mode == "enforce" {
+		if r.Mode != "monitor" {
 			resp.Allowed = false
 			resp.Result = &metav1.Status{Message: msg}
 			resp.Warnings = warnings
@@ -139,15 +157,15 @@ func (e *CELEngine) evaluate(_ context.Context, req *admissionv1.AdmissionReques
 func buildCELInputs(req *admissionv1.AdmissionRequest) map[string]any {
 	in := map[string]any{
 		"request": map[string]any{
-			"uid":  string(req.UID),
+			"uid": string(req.UID),
 			"kind": map[string]any{
 				"group":   req.Kind.Group,
 				"version": req.Kind.Version,
 				"kind":    req.Kind.Kind,
 			},
-			"namespace":   req.Namespace,
-			"operation":   string(req.Operation),
-			"userInfo":    map[string]any{"username": req.UserInfo.Username, "groups": req.UserInfo.Groups},
+			"namespace": req.Namespace,
+			"operation": string(req.Operation),
+			"userInfo":  map[string]any{"username": req.UserInfo.Username, "groups": req.UserInfo.Groups},
 		},
 	}
 	if len(req.Object.Raw) > 0 {

@@ -17,6 +17,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -122,7 +123,7 @@ const maxThreatBatchSize = 500
 const maxThreatPacketBytes = 4096
 
 // Bulk inserts a batch of threats. Auth is runtime-agent-token; cluster_id
-// is resolved best-effort against the agent's org.
+// comes from the issuing token's cluster binding.
 func (h *RuntimeThreats) Bulk(w http.ResponseWriter, r *http.Request) {
 	tok, ok := handler.RuntimeAgentTokenFrom(r.Context())
 	if !ok {
@@ -146,18 +147,21 @@ func (h *RuntimeThreats) Bulk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve the org's primary cluster_id as the fallback when we can't
-	// map a row to a specific cluster. The agent doesn't know its cluster
-	// — we trust the token's org and pick the agent's connected cluster.
-	var defaultCluster uuid.UUID
-	_ = h.db.Pool().QueryRow(r.Context(),
-		`SELECT id FROM clusters WHERE org_id = $1
-		 ORDER BY CASE WHEN state = 'connected' THEN 0 ELSE 1 END,
-		          last_heartbeat_at DESC NULLS LAST, created_at ASC
-		 LIMIT 1`, tok.OrgID).
-		Scan(&defaultCluster)
+	boundCluster, err := handler.ResolveAgentClusterID(r.Context(), h.db, tok)
+	if err != nil {
+		if errors.Is(err, handler.ErrAgentClusterScope) {
+			jsonError(w, http.StatusForbidden, "agent token cluster scope mismatch")
+			return
+		}
+		jsonError(w, http.StatusInternalServerError, "resolve cluster: "+err.Error())
+		return
+	}
+	if boundCluster == nil {
+		jsonError(w, http.StatusForbidden, "agent token cluster scope is ambiguous")
+		return
+	}
 
-	ipResolver := handler.NewIPResolver(r.Context(), h.db, tok.OrgID, flowRowsForThreatAttribution(rows))
+	ipResolver := handler.NewIPResolverForCluster(r.Context(), h.db, tok.OrgID, *boundCluster, flowRowsForThreatAttribution(rows))
 
 	tx, err := h.db.Pool().Begin(r.Context())
 	if err != nil {
@@ -211,15 +215,7 @@ VALUES ($1,$2, NULLIF($3,''), NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), NULLI
 		if len(pkt) > maxThreatPacketBytes {
 			pkt = pkt[:maxThreatPacketBytes]
 		}
-		// Cluster resolution: best-effort lookup via ep_mac → pod_ips →
-		// deployment.cluster_id is more than this wave needs; we fall back
-		// to the org's primary cluster. Future wave (when the operator's
-		// pod resolver lands) can plumb a real per-flow lookup here.
-		cid := defaultCluster
-		if cid == uuid.Nil {
-			rejected++
-			continue
-		}
+		cid := *boundCluster
 		workloadID, namespace, podName := runtimeThreatAttribution(row, ipResolver)
 		pendingAlert := pendingThreatAlert{
 			row:        row,

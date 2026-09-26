@@ -4,7 +4,7 @@
 # Stateless ValidatingWebhook target. 2-3 replicas behind a Service; TLS material is
 # mounted at /etc/webhook/certs (cert-manager Certificate or operator-bootstrapped).
 
-ARG GO_VERSION=1.26
+ARG GO_VERSION=1.26.8
 ARG RUNTIME_IMAGE=debian:bookworm-slim
 
 FROM golang:${GO_VERSION}-bookworm AS build

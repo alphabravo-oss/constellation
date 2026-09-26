@@ -222,7 +222,7 @@ For Kubernetes deployments, use the Helm chart and configure ingress, TLS, authe
 - Docker Compose deployment: [`docs/deployment-compose.md`](docs/deployment-compose.md)
 - Helm chart: [`deploy/charts/constellation`](deploy/charts/constellation/)
 - VulnDB producer repository: `../constellation-vulndb`
-- Enterprise parity and roadmap planning: [`docs/constellation-neuvector-vulndb-review-plan.md`](docs/constellation-neuvector-vulndb-review-plan.md)
+- NeuVector parity and switchability plan: [`docs/NEUVECTOR-PARITY-PLAN.md`](docs/NEUVECTOR-PARITY-PLAN.md)
 
 ## The Constellation Promise
 

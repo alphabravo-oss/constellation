@@ -212,11 +212,10 @@ func (d *Dispatcher) Dispatch(ctx context.Context, ev Event) ([]uuid.UUID, error
 	return ids, nil
 }
 
-// DispatchSynchronous is the test/operator hook used by /test-fire: same path as
-// Dispatch but waits for the single receiver to actually fire (or fail) and returns
-// the resulting delivery id. Honours retries.
+// DispatchTo queues a delivery to one named receiver and returns its receipt id.
+// The caller can poll the receipt for the final outcome, including retries.
 func (d *Dispatcher) DispatchTo(ctx context.Context, receiverID uuid.UUID, ev Event) (uuid.UUID, error) {
-	rec, err := d.loadReceiver(ctx, receiverID)
+	rec, err := d.loadReceiver(ctx, receiverID, ev.OrgID)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("notify: load receiver: %w", err)
 	}
@@ -328,14 +327,14 @@ SELECT id, org_id, name, kind, endpoint,
 	return out, rows.Err()
 }
 
-func (d *Dispatcher) loadReceiver(ctx context.Context, id uuid.UUID) (receiverRow, error) {
+func (d *Dispatcher) loadReceiver(ctx context.Context, id, orgID uuid.UUID) (receiverRow, error) {
 	var r receiverRow
 	err := d.pool.QueryRow(ctx, `
 SELECT id, org_id, name, kind, endpoint,
        COALESCE(secret_key,''), COALESCE(rate_per_min,60),
        COALESCE(template_id,'default'), COALESCE(paused,false),
        COALESCE(config,'{}'::jsonb)
-  FROM receivers WHERE id = $1`, id).Scan(
+  FROM receivers WHERE id = $1 AND org_id = $2 AND paused = false`, id, orgID).Scan(
 		&r.ID, &r.OrgID, &r.Name, &r.Kind, &r.Endpoint,
 		&r.SecretKey, &r.RatePerMin, &r.TemplateID, &r.Paused, &r.Config)
 	return r, err
@@ -377,6 +376,25 @@ func (d *Dispatcher) worker(ctx context.Context, idx int) {
 }
 
 func (d *Dispatcher) process(ctx context.Context, j *job) {
+	var paused bool
+	err := d.pool.QueryRow(ctx, `
+SELECT r.paused
+  FROM receiver_deliveries d
+  JOIN receivers r ON r.id = d.receiver_id
+ WHERE d.id = $1 AND d.final_state IS NULL`, j.deliveryID).Scan(&paused)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return
+	}
+	if err != nil {
+		d.cfg.Logger.Warn("notify: check receiver pause failed", slog.String("err", err.Error()))
+		d.markDeferred(ctx, j.deliveryID, "receiver pause check failed")
+		return
+	}
+	if paused {
+		d.markPaused(ctx, j.deliveryID)
+		return
+	}
+
 	// Rate-limit gate.
 	if !d.tryConsume(j.receiver) {
 		// Watermark check: if queued for >5min, drop.
@@ -454,6 +472,7 @@ UPDATE receiver_deliveries
        latency_ms  = $2,
        signed_at   = $3,
        delivered_at = NOW(),
+       error = NULL,
        next_retry_at = NULL
  WHERE id = $1`, j.deliveryID, latencyMs, signedAt)
 	_, _ = d.pool.Exec(ctx, `
@@ -562,6 +581,21 @@ UPDATE receiver_deliveries
  WHERE id = $1`, id, state, truncate(msg, 1024))
 }
 
+func (d *Dispatcher) markPaused(ctx context.Context, id uuid.UUID) {
+	_, _ = d.pool.Exec(ctx, `
+UPDATE receiver_deliveries
+   SET status = 'paused', final_state = 'paused',
+       next_retry_at = NULL, error = 'receiver paused'
+ WHERE id = $1 AND final_state IS NULL`, id)
+}
+
+func (d *Dispatcher) markDeferred(ctx context.Context, id uuid.UUID, reason string) {
+	_, _ = d.pool.Exec(ctx, `
+UPDATE receiver_deliveries
+   SET status = 'retrying', next_retry_at = $2, error = $3
+ WHERE id = $1 AND final_state IS NULL`, id, d.cfg.Now().Add(d.cfg.BackoffSchedule[0]), reason)
+}
+
 // markQueueFull is the non-terminal counterpart to markFailed for an over-capacity queue:
 // it keeps final_state NULL and sets next_retry_at so the sweeper re-enqueues the delivery
 // rather than dropping it forever (the sweeper selects final_state IS NULL AND next_retry_at
@@ -606,6 +640,10 @@ func (d *Dispatcher) sweeper(ctx context.Context) {
 }
 
 func (d *Dispatcher) sweepOnce(ctx context.Context) {
+	d.sweepDue(ctx, nil)
+}
+
+func (d *Dispatcher) sweepDue(ctx context.Context, deliveryID *uuid.UUID) {
 	rows, err := d.pool.Query(ctx, `
 SELECT d.id, d.receiver_id, d.idempotency_key, d.attempts, d.event_type, d.severity,
        COALESCE(d.payload, '{}'::jsonb),
@@ -618,7 +656,8 @@ SELECT d.id, d.receiver_id, d.idempotency_key, d.attempts, d.event_type, d.sever
  WHERE d.final_state IS NULL
    AND d.next_retry_at IS NOT NULL
    AND d.next_retry_at <= NOW()
- LIMIT 64`)
+   AND ($1::uuid IS NULL OR d.id = $1)
+ LIMIT 64`, deliveryID)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			d.cfg.Logger.Debug("notify: sweep query", slog.String("err", err.Error()))
@@ -642,7 +681,7 @@ SELECT d.id, d.receiver_id, d.idempotency_key, d.attempts, d.event_type, d.sever
 		}
 		r.ID = rcvID
 		if r.Paused {
-			d.markFailed(ctx, dlvID, "paused", "receiver paused")
+			d.markPaused(ctx, dlvID)
 			continue
 		}
 		// Replay the exact original event from the persisted payload so the retry body

@@ -38,9 +38,12 @@ func TestNetworkFlowsIngest_DPFields(t *testing.T) {
 	}
 
 	tokenName := "wave4-test-" + uuid.New().String()
-	raw, _, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, tokenName, time.Hour)
+	raw, tokenID, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, tokenName, time.Hour)
 	if err != nil {
 		t.Fatalf("issue token: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO cluster_init_bundles (org_id, cluster_id, name, expires_at, runtime_agent_token_id, kek_fingerprint, contents_encrypted) VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`, orgID, clusterID, "flow-test-"+uuid.NewString(), tokenID); err != nil {
+		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(),
@@ -157,8 +160,11 @@ func TestNetworkFlowsIngest_HubbleSource(t *testing.T) {
 	}
 
 	tokenName := "net3-hubble-" + uuid.New().String()
-	raw, _, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, tokenName, time.Hour)
+	raw, tokenID, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, tokenName, time.Hour)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO cluster_init_bundles (org_id, cluster_id, name, expires_at, runtime_agent_token_id, kek_fingerprint, contents_encrypted) VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`, orgID, clusterID, "flow-test-"+uuid.NewString(), tokenID); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -245,8 +251,11 @@ func TestNetworkFlowsIngest_LegacyBPFStillWorks(t *testing.T) {
 	}
 
 	tokenName := "wave4-legacy-" + uuid.New().String()
-	raw, _, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, tokenName, time.Hour)
+	raw, tokenID, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, tokenName, time.Hour)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO cluster_init_bundles (org_id, cluster_id, name, expires_at, runtime_agent_token_id, kek_fingerprint, contents_encrypted) VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`, orgID, clusterID, "flow-test-"+uuid.NewString(), tokenID); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {

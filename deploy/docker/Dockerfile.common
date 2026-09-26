@@ -7,7 +7,7 @@
 # This file is NOT used directly as a Dockerfile target — it's `docker buildx build -f`'d
 # as a base by the role images via the buildkit `# syntax = ` heredoc.
 
-ARG GO_VERSION=1.26
+ARG GO_VERSION=1.26.8
 
 FROM golang:${GO_VERSION}-bookworm AS go-builder
 WORKDIR /src

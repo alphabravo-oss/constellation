@@ -4,7 +4,7 @@
 # Scales 2-3 replicas behind a Service for HA. Does NOT bundle syft/trivy/grype — those
 # live in the scanner image, which receives jobs over HTTP from this API.
 
-ARG GO_VERSION=1.26
+ARG GO_VERSION=1.26.8
 ARG RUNTIME_IMAGE=debian:bookworm-slim
 
 # -----------------------------------------------------------------------------

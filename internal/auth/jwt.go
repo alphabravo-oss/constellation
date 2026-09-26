@@ -27,7 +27,8 @@ type Claims struct {
 	// when Epoch < users.session_epoch — the DB-backed revocation primitive that
 	// invalidates prior sessions on logout / disable / delete / password-change /
 	// role-change, consistently across API replicas.
-	Epoch int64 `json:"epoch"`
+	Epoch   int64 `json:"epoch"`
+	Tracked bool  `json:"tracked,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -37,8 +38,8 @@ type Claims struct {
 // hold just the public key. For the legacy HS256 symmetric case both fields hold the
 // same []byte secret.
 type signingKey struct {
-	method   jwt.SigningMethod
-	signKey  any // private key (or HMAC secret); nil for verify-only keys
+	method    jwt.SigningMethod
+	signKey   any // private key (or HMAC secret); nil for verify-only keys
 	verifyKey any // public key (or HMAC secret)
 }
 
@@ -177,17 +178,31 @@ func (s *Signer) TTL() time.Duration { return s.ttl }
 // per-org SecurityPolicy.SessionTTL without mutating the shared signer (A1). A non-positive ttl
 // falls back to the signer's configured default.
 func (s *Signer) IssueWithTTL(ttl time.Duration, userID, orgID uuid.UUID, email string, roles []string, epoch int64) (string, uuid.UUID, error) {
+	return s.issueWithSession(ttl, uuid.New(), userID, orgID, email, roles, epoch, false)
+}
+
+func (s *Signer) IssueTracked(ttl time.Duration, sessionID, userID, orgID uuid.UUID, email string, roles []string, epoch int64) (string, uuid.UUID, error) {
+	if ttl <= 0 || ttl > 15*time.Minute {
+		ttl = 15 * time.Minute
+	}
+	if sessionID == uuid.Nil {
+		return "", uuid.Nil, errors.New("auth: tracked session ID required")
+	}
+	return s.issueWithSession(ttl, sessionID, userID, orgID, email, roles, epoch, true)
+}
+
+func (s *Signer) issueWithSession(ttl time.Duration, sessionID, userID, orgID uuid.UUID, email string, roles []string, epoch int64, tracked bool) (string, uuid.UUID, error) {
 	if ttl <= 0 {
 		ttl = s.ttl
 	}
 	now := time.Now()
-	sessionID := uuid.New()
 	c := Claims{
-		UserID: userID,
-		OrgID:  orgID,
-		Email:  email,
-		Roles:  roles,
-		Epoch:  epoch,
+		UserID:  userID,
+		OrgID:   orgID,
+		Email:   email,
+		Roles:   roles,
+		Epoch:   epoch,
+		Tracked: tracked,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    s.issuer,
 			Audience:  jwt.ClaimStrings{s.audience},
@@ -233,7 +248,7 @@ func (s *Signer) Verify(raw string) (*Claims, error) {
 				return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
 			}
 			return key.verifyKey, nil
-		}, jwt.WithIssuer(s.issuer), jwt.WithAudience(s.audience))
+		}, jwt.WithIssuer(s.issuer), jwt.WithAudience(s.audience), jwt.WithExpirationRequired())
 		if err == nil && tok.Valid {
 			return c, nil
 		}

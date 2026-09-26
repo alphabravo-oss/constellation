@@ -1,0 +1,60 @@
+{
+  "import_id": "remaining-import-1",
+  "summary": {
+    "source": "neuvector", "total": 3, "source_total": 4,
+    "source_counts": { "vulnerability_profiles": 3, "registries": 1 },
+    "unaccounted_source": 0, "create": 1, "update": 1, "unchanged": 1,
+    "enforce": 0, "monitor": 0, "enabled": 0,
+    "file_profiles": 0, "process_profiles": 0, "groups": 0,
+    "network_rules": 0, "dpi_rules": 0, "dpi_bindings": 0,
+    "vulnerability_profiles": 2, "registries": 1, "unsupported": 3,
+    "engines": {}, "categories": {}, "read_only": true,
+    "rollback_hint": "Preview only; rollback becomes available after apply."
+  },
+  "policies": [], "file_profiles": [], "process_profiles": [], "groups": [],
+  "network_rules": [], "dpi_rules": [], "dpi_bindings": [],
+  "vulnerability_profiles": [
+    {
+      "name": "reviewed-cves", "description": "Reviewed exact CVE suppression",
+      "active": true, "domain_scope": {},
+      "entries": [{ "name": "CVE-2026-1234", "name_regex": "(?i)^CVE-2026-1234$", "action": "suppress" }],
+      "imported_from": { "source": "neuvector", "source_kind": "vulnerability_profile" },
+      "diff_action": "update"
+    },
+    {
+      "name": "existing-cves", "description": "Already matches live storage",
+      "active": true, "domain_scope": {}, "entries": [],
+      "imported_from": { "source": "neuvector", "source_kind": "vulnerability_profile" },
+      "diff_action": "unchanged"
+    }
+  ],
+  "registries": [
+    {
+      "name": "internal-images", "kind": "generic", "endpoint": "https://registry.example.test",
+      "image_globs": [], "auth_kind": "none", "scan_cadence": "manual",
+      "credentials_required": true, "diff_action": "create",
+      "imported_from": { "source": "neuvector", "source_kind": "registry" }
+    }
+  ],
+  "unsupported": [
+    {
+      "kind": "credentials", "name": "REDACTED",
+      "reason": "Registry credentials were omitted and must be reissued.",
+      "suggestion": "Keep auth_kind=none and manual cadence until fresh credentials are configured.",
+      "source": { "redacted": true }
+    },
+    {
+      "kind": "credentials", "name": "REDACTED",
+      "reason": "Identity tokens cannot be imported.",
+      "suggestion": "Reissue tokens through the reviewed identity workflow.",
+      "source": { "redacted": true }
+    },
+    {
+      "kind": "vulnerability_profile", "name": "REDACTED",
+      "reason": "Scoped vulnerability rules cannot be represented exactly.",
+      "suggestion": "Review the rejected profile manually.",
+      "source": { "redacted": true }
+    }
+  ],
+  "rollback_bundle": "{\"vulnerability_profiles\":[],\"registries\":[]}"
+}

@@ -1,14 +1,14 @@
 // Restorer — applies a signed backup tarball to a Postgres instance.
 //
 // Algorithm:
-//   1. Read the entire tar/gz into memory (operator data is small; convenience >
-//      streaming complexity).
-//   2. Verify the cosign signature over manifest.json. Abort unless --allow-unverified.
-//   3. Recompute each table's sha256 from the tar bytes and confirm against the manifest.
-//   4. For each table in OrderedTables, UPSERT rows in dependency order. Natural-key
-//      conflict targets per table; FK columns (org_id, cluster_id, project_id) are
-//      remapped to the destination's org row by name.
-//   5. Audit-log a 'backup.restore' event with per-table counts.
+//  1. Read the entire tar/gz into memory (operator data is small; convenience >
+//     streaming complexity).
+//  2. Verify the cosign signature over manifest.json. Abort unless --allow-unverified.
+//  3. Recompute each table's sha256 from the tar bytes and confirm against the manifest.
+//  4. For each table in OrderedTables, UPSERT rows in dependency order. Natural-key
+//     conflict targets per table; FK columns (org_id, cluster_id, project_id) are
+//     remapped to the destination's org row by name.
+//  5. Audit-log a 'backup.restore' event with per-table counts.
 //
 // Conflict policy:
 //   - "skip" (default): if a row already exists by natural key, skip it.
@@ -95,62 +95,26 @@ type RestoreResult struct {
 	Tables         []TableRestoreStats `json:"tables"`
 }
 
-// Restore reads a backup tarball from opts.In and applies it to pool. Returns per-table
-// stats. The transaction is per-table (not whole-archive) so a partial failure leaves the
-// destination in a defined state and the operator can re-run with --on-conflict=skip.
+// Restore validates a backup and applies every table in one transaction.
 func Restore(ctx context.Context, pool *pgxpool.Pool, opts RestoreOptions) (*RestoreResult, error) {
 	if opts.OnConflict == "" {
 		opts.OnConflict = ConflictSkip
 	}
-	// Read tar.gz fully into a map[name][]byte for random access.
-	files, err := readTarGz(opts.In)
+	if opts.OnConflict != ConflictSkip && opts.OnConflict != ConflictOverwrite {
+		return nil, errors.New("on_conflict must be skip or overwrite")
+	}
+	res, files, err := readAndVerifyArchive(opts)
 	if err != nil {
-		return nil, fmt.Errorf("read archive: %w", err)
+		return nil, err
 	}
-	mBytes, ok := files["manifest.json"]
-	if !ok {
-		return nil, errors.New("manifest.json missing")
+	if opts.DestOrgID != "" && !orgIdentityMatches(res.Manifest, files["tables/orgs.jsonl"], opts.DestOrgName) {
+		return nil, errors.New("restore refused: archive org does not match caller org")
 	}
-	var manifest Manifest
-	if err := json.Unmarshal(mBytes, &manifest); err != nil {
-		return nil, fmt.Errorf("unmarshal manifest: %w", err)
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin restore: %w", err)
 	}
-
-	// Verify signature unless allowed to skip.
-	res := &RestoreResult{Manifest: manifest}
-	sig := files["manifest.json.sig"]
-	cert := files["manifest.json.cert"]
-	if len(sig) > 0 && opts.Verify.Mode == "" {
-		// Infer mode from cert presence.
-		if len(cert) > 0 {
-			opts.Verify.Mode = SignModeKeyless
-		} else {
-			opts.Verify.Mode = SignModeStaticKey
-		}
-	}
-	if opts.Verify.Mode != SignModeNone && opts.Verify.Mode != "" {
-		identity, err := Verify(mBytes, sig, cert, opts.Verify)
-		if err != nil {
-			if !opts.AllowUnverified {
-				return nil, fmt.Errorf("signature verify: %w", err)
-			}
-			res.Verified = false
-		} else {
-			res.Verified = true
-			res.SignerIdentity = identity
-		}
-	} else if !opts.AllowUnverified {
-		return nil, errors.New("no signature found; pass --allow-unverified to apply anyway")
-	}
-
-	// Recompute table digests for integrity. This also asserts the archive carries no
-	// table file outside the signed manifest (completeness), so a validly-signed backup
-	// can't be padded with an unsigned table.
-	if err := verifyTableDigests(files, manifest); err != nil {
-		if !opts.AllowUnverified {
-			return nil, err
-		}
-	}
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	// Resolve the destination org. When DestOrgID is set (the multi-tenant API path),
 	// the write-target is pinned to the AUTHENTICATED caller's org — never to an org
@@ -158,13 +122,17 @@ func Restore(ctx context.Context, pool *pgxpool.Pool, opts RestoreOptions) (*Res
 	// identity to match the caller, refusing a cross-tenant restore outright.
 	var destOrgID string
 	if opts.DestOrgID != "" {
-		if !orgIdentityMatches(manifest, files["tables/orgs.jsonl"], opts.DestOrgName) {
-			return nil, fmt.Errorf("restore refused: archive org %q does not match caller org %q", manifest.OrgName, opts.DestOrgName)
+		var orgName string
+		if err := tx.QueryRow(ctx, `SELECT name FROM orgs WHERE id=$1 FOR UPDATE`, opts.DestOrgID).Scan(&orgName); err != nil {
+			return nil, fmt.Errorf("resolve destination org: %w", err)
+		}
+		if orgName != opts.DestOrgName {
+			return nil, errors.New("restore refused: destination org identity changed")
 		}
 		destOrgID = opts.DestOrgID
 	} else {
 		// Trusted CLI path: locate or create the destination org row from the archive.
-		destOrgID, err = upsertOrg(ctx, pool, files["tables/orgs.jsonl"], opts.OnConflict)
+		destOrgID, err = upsertOrg(ctx, tx, files["tables/orgs.jsonl"], opts.OnConflict)
 		if err != nil {
 			return nil, fmt.Errorf("orgs: %w", err)
 		}
@@ -199,45 +167,48 @@ func Restore(ctx context.Context, pool *pgxpool.Pool, opts RestoreOptions) (*Res
 				stats = TableRestoreStats{New: 1}
 			}
 		case "users":
-			stats, err = restoreUsers(ctx, pool, body, destOrgID, opts.OnConflict)
+			stats, err = restoreUsers(ctx, tx, body, destOrgID, opts.OnConflict)
 		case "org_settings":
-			stats, err = restoreOrgSettings(ctx, pool, body, destOrgID, opts.OnConflict)
+			stats, err = restoreOrgSettings(ctx, tx, body, destOrgID, opts.OnConflict)
 		case "role_bindings":
-			stats, err = restoreRoleBindings(ctx, pool, body, destOrgID, opts.OnConflict)
+			stats, err = restoreRoleBindings(ctx, tx, body, destOrgID, opts.OnConflict)
 		case "registries":
-			stats, err = restoreRegistries(ctx, pool, body, destOrgID, opts.OnConflict)
+			stats, err = restoreRegistries(ctx, tx, body, destOrgID, opts.OnConflict)
 		case "api_tokens":
 			// Tokens are metadata-only in the export and not restorable by design (the
 			// hash never leaves the source). Record a no-op so the manifest table is
 			// accounted for without mutating credentials on the destination.
 			stats = TableRestoreStats{}
 		case "clusters":
-			stats, err = restoreClusters(ctx, pool, body, destOrgID, opts.OnConflict, clusterMap)
+			stats, err = restoreClusters(ctx, tx, body, destOrgID, opts.OnConflict, clusterMap)
 		case "deployments":
-			stats, err = restoreDeployments(ctx, pool, body, destOrgID, opts.OnConflict, clusterMap)
+			stats, err = restoreDeployments(ctx, tx, body, destOrgID, opts.OnConflict, clusterMap)
 		case "assets":
-			stats, err = restoreAssets(ctx, pool, body, destOrgID, opts.OnConflict, clusterMap)
+			stats, err = restoreAssets(ctx, tx, body, destOrgID, opts.OnConflict, clusterMap)
 		case "audit_events_recent":
-			stats, err = restoreAuditEvents(ctx, pool, body, destOrgID, opts.OnConflict)
+			stats, err = restoreAuditEvents(ctx, tx, body, destOrgID, opts.OnConflict)
 		case "federation_state":
-			stats, err = restoreFederationState(ctx, pool, body, destOrgID, opts.OnConflict)
+			stats, err = restoreFederationState(ctx, tx, body, destOrgID, opts.OnConflict)
 		case "fed_members":
-			stats, err = restoreFedMembers(ctx, pool, body, destOrgID, opts.OnConflict)
+			stats, err = restoreFedMembers(ctx, tx, body, destOrgID, opts.OnConflict)
 		case "image_acceptances":
-			stats, err = restoreImageAcceptances(ctx, pool, body, destOrgID, opts.OnConflict)
+			stats, err = restoreImageAcceptances(ctx, tx, body, destOrgID, opts.OnConflict)
 		case "custom_frameworks":
-			stats, err = restoreCustomFrameworks(ctx, pool, body, destOrgID, opts.OnConflict)
+			stats, err = restoreCustomFrameworks(ctx, tx, body, destOrgID, opts.OnConflict)
 		default:
 			// All the (org_id, name)-keyed tables share the generic shape.
-			stats, err = restoreOrgNameKeyed(ctx, pool, tbl, body, destOrgID, opts.OnConflict, clusterMap)
+			stats, err = restoreOrgNameKeyed(ctx, tx, tbl, body, destOrgID, opts.OnConflict, clusterMap)
 		}
 		if err != nil {
-			return res, fmt.Errorf("%s: %w", tbl, err)
+			return nil, fmt.Errorf("%s: %w", tbl, err)
 		}
 		stats.Name = tbl
 		res.Tables = append(res.Tables, stats)
 	}
 
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit restore: %w", err)
+	}
 	return res, nil
 }
 
@@ -268,6 +239,9 @@ func readTarGz(r io.Reader) (map[string][]byte, error) {
 		}
 		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeRegA {
 			continue
+		}
+		if _, exists := out[hdr.Name]; exists {
+			return nil, fmt.Errorf("duplicate archive member %q", hdr.Name)
 		}
 		// hdr.Size is attacker-controlled and unverified here. Never pre-allocate the
 		// advertised size: cap the initial capacity to the remaining budget, and enforce the
@@ -302,6 +276,12 @@ func readTarGz(r io.Reader) (map[string][]byte, error) {
 func verifyTableDigests(files map[string][]byte, m Manifest) error {
 	listed := make(map[string]bool, len(m.Tables))
 	for _, t := range m.Tables {
+		if listed[t.Name] {
+			return fmt.Errorf("duplicate manifest table %q", t.Name)
+		}
+		if t.Name == "" || strings.ContainsAny(t.Name, `/\\.`) {
+			return errors.New("invalid manifest table name")
+		}
 		listed[t.Name] = true
 		body, ok := files["tables/"+t.Name+".jsonl"]
 		if !ok {
@@ -311,6 +291,13 @@ func verifyTableDigests(files map[string][]byte, m Manifest) error {
 		if hex.EncodeToString(got[:]) != t.SHA256 {
 			return fmt.Errorf("table %s digest mismatch: archive=%s manifest=%s",
 				t.Name, hex.EncodeToString(got[:]), t.SHA256)
+		}
+		rows, err := rowsFromJSONL(body)
+		if err != nil {
+			return fmt.Errorf("table %s contains invalid JSON rows", t.Name)
+		}
+		if int64(len(rows)) != t.Rows || int64(len(body)) != t.Bytes {
+			return fmt.Errorf("table %s row or byte count mismatch", t.Name)
 		}
 	}
 	// Reject any table file the signed manifest does not cover.
@@ -338,10 +325,16 @@ func verifyTableDigests(files map[string][]byte, m Manifest) error {
 func rowsFromJSONL(body []byte) ([]map[string]any, error) {
 	var out []map[string]any
 	dec := json.NewDecoder(bytes.NewReader(body))
-	for dec.More() {
+	for {
 		var row map[string]any
 		if err := dec.Decode(&row); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
 			return nil, err
+		}
+		if row == nil {
+			return nil, errors.New("table row must be a JSON object")
 		}
 		out = append(out, row)
 	}
@@ -405,10 +398,8 @@ func orgIdentityMatches(m Manifest, orgsJSONL []byte, wantName string) bool {
 	}
 	if len(orgsJSONL) > 0 {
 		rows, err := rowsFromJSONL(orgsJSONL)
-		if err == nil && len(rows) == 1 {
-			if name, _ := rows[0]["name"].(string); name != "" && name != wantName {
-				return false
-			}
+		if err != nil || len(rows) != 1 || rows[0]["name"] != wantName {
+			return false
 		}
 	}
 	return true
@@ -483,7 +474,10 @@ func restoreDeployments(ctx context.Context, pool Querier, body []byte, orgID st
 			stats.Skipped++
 			continue
 		}
-		clusterID := remapCluster(r, clusterMap)
+		clusterID, err := remapCluster(r, clusterMap)
+		if err != nil {
+			return stats, err
+		}
 		labels := jsonValue(r, "labels", "{}")
 		imageRefs, _ := r["image_refs"].([]any)
 		var refs []string
@@ -534,7 +528,10 @@ func restoreAssets(ctx context.Context, pool Querier, body []byte, orgID string,
 			stats.Skipped++
 			continue
 		}
-		clusterID := remapCluster(r, clusterMap)
+		clusterID, err := remapCluster(r, clusterMap)
+		if err != nil {
+			return stats, err
+		}
 		labels := jsonValue(r, "labels", "{}")
 		ai, _ := r["ai_workload"].(bool)
 		crit := stringOr(r, "criticality", "medium")
@@ -592,15 +589,27 @@ func restoreOrgNameKeyed(ctx context.Context, pool Querier, table string, body [
 			continue
 		}
 		// Existence check (for new vs updated accounting). All these tables have org_id+name unique.
+		r["org_id"] = orgID
+		clusterID, err := remapCluster(r, clusterMap)
+		if err != nil {
+			return stats, err
+		}
 		var existing string
-		_ = pool.QueryRow(ctx, fmt.Sprintf(`SELECT id FROM %s WHERE org_id=$1 AND name=$2`, table), orgID, name).Scan(&existing)
+		if _, scoped := colTypes["cluster_id"]; scoped {
+			err = pool.QueryRow(ctx, fmt.Sprintf(`SELECT id FROM %s WHERE org_id=$1 AND name=$2 AND cluster_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid`, table), orgID, name, clusterID).Scan(&existing)
+		} else {
+			err = pool.QueryRow(ctx, fmt.Sprintf(`SELECT id FROM %s WHERE org_id=$1 AND name=$2`, table), orgID, name).Scan(&existing)
+		}
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return stats, err
+		}
 		if existing != "" && conflict == ConflictSkip {
 			stats.Skipped++
 			continue
 		}
 
 		// Compose column list intersection: destCols ∩ keys(r), minus PK/timestamps we can't copy.
-		excluded := map[string]bool{"id": true, "created_at": true, "updated_at": true, "created_by": true}
+		excluded := map[string]bool{"id": true, "created_at": true, "updated_at": true, "created_by": true, "updated_by": true}
 		cols := make([]string, 0, len(destCols))
 		for _, c := range destCols {
 			if excluded[c] {
@@ -623,14 +632,13 @@ func restoreOrgNameKeyed(ctx context.Context, pool Querier, table string, body [
 			case "org_id":
 				vals2[i] = orgID
 			case "cluster_id":
-				if v, ok := r[c]; ok {
-					if remap := remapClusterByID(v, clusterMap); remap != "" {
-						vals2[i] = remap
-					} else {
-						vals2[i] = nil
-					}
+				if clusterID != "" {
+					vals2[i] = clusterID
 				}
 			case "project_id":
+				if r[c] != nil && r[c] != "" {
+					return stats, errors.New("project-scoped restore is unsupported; refusing to broaden scope")
+				}
 				vals2[i] = nil
 			default:
 				vals2[i] = encodeForColumn(r[c], colTypes[c])
@@ -777,7 +785,7 @@ func restoreImageAcceptances(ctx context.Context, pool Querier, body []byte, org
 		approver, _ := r["approver_id"].(string)
 		if approver != "" {
 			var hit string
-			_ = pool.QueryRow(ctx, `SELECT id FROM users WHERE id=$1`, approver).Scan(&hit)
+			_ = pool.QueryRow(ctx, `SELECT id FROM users WHERE id=$1 AND org_id=$2`, approver, orgID).Scan(&hit)
 			if hit == "" {
 				stats.Skipped++
 				continue
@@ -1144,25 +1152,19 @@ func jsonValue(r map[string]any, key, def string) []byte {
 // remapCluster returns the destination cluster id (string UUID) for a row that has a
 // source cluster_id and/or cluster_name attribute. Returns "" when the source row had no
 // cluster (cluster_id was null).
-func remapCluster(r map[string]any, clusterMap map[string]string) string {
-	if s, ok := r["cluster_id"].(string); ok && s != "" {
-		if dest, hit := clusterMap[s]; hit {
-			return dest
-		}
+func remapCluster(row map[string]any, clusterMap map[string]string) (string, error) {
+	value := row["cluster_id"]
+	if value == nil || value == "" {
+		return "", nil
 	}
-	return ""
-}
-
-// remapClusterByID coerces v (assumed a UUID string) to a destination cluster id.
-func remapClusterByID(v any, clusterMap map[string]string) string {
-	s, ok := v.(string)
-	if !ok || s == "" {
-		return ""
+	source, ok := value.(string)
+	if !ok {
+		return "", errors.New("invalid cluster scope")
 	}
-	if dest, hit := clusterMap[s]; hit {
-		return dest
+	if destination := clusterMap[source]; destination != "" {
+		return destination, nil
 	}
-	return ""
+	return "", errors.New("unresolved cluster scope; refusing to broaden scope")
 }
 
 // encodeForColumn coerces a JSON-decoded value into the form pgx expects for the given
@@ -1171,10 +1173,11 @@ func remapClusterByID(v any, clusterMap map[string]string) string {
 // "bigint", "ARRAY", "timestamp with time zone", and friends.
 //
 // Rules:
-//   jsonb / json    -> []byte of JSON-marshaled value (handles null, [], {}, nested objects)
-//   ARRAY           -> []string when caller-supplied a []any of strings; else JSON bytes
-//   uuid            -> the string (NULLIF-handled by SQL when "")
-//   anything else   -> pass-through (driver will coerce numbers / strings / bools).
+//
+//	jsonb / json    -> []byte of JSON-marshaled value (handles null, [], {}, nested objects)
+//	ARRAY           -> []string when caller-supplied a []any of strings; else JSON bytes
+//	uuid            -> the string (NULLIF-handled by SQL when "")
+//	anything else   -> pass-through (driver will coerce numbers / strings / bools).
 func encodeForColumn(v any, dataType string) any {
 	if v == nil {
 		// For jsonb columns, persist the JSON null literal rather than SQL NULL: the

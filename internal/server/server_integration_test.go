@@ -27,6 +27,7 @@ import (
 // TestEndToEndSmoke boots the server against a real Postgres, seeds a user, logs in via
 // /api/v1/auth/login, hits /api/v1/auth/me, and lists findings.
 func TestEndToEndSmoke(t *testing.T) {
+	t.Setenv("CONSTELLATION_ALLOW_HS256_JWT", "true")
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
 		t.Skip("DATABASE_URL not set")
@@ -160,6 +161,7 @@ ON CONFLICT DO NOTHING`, userID, orgID); err != nil {
 }
 
 func TestAstronomerJWKSRouteIntegration(t *testing.T) {
+	t.Setenv("CONSTELLATION_ALLOW_HS256_JWT", "true")
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
 		t.Skip("DATABASE_URL not set")

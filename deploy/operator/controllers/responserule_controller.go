@@ -81,6 +81,16 @@ func (r *ResponseRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	rule, verr := mapResponseRule(crr)
 	if verr != nil {
+		if lastOrgID, err := uuid.Parse(strings.TrimSpace(crr.Status.LastAppliedOrgID)); err == nil {
+			if _, err := r.Store.DeleteResponseRule(ctx, lastOrgID, crr.Name); err != nil {
+				markError(&crr.Status, crr.Generation, "StoreError", err.Error(), false)
+				if serr := r.Status().Update(ctx, crr); serr != nil {
+					logger.Error(serr, "status update")
+				}
+				return ctrl.Result{}, fmt.Errorf("remove invalid response rule row: %w", err)
+			}
+			crr.Status.LastAppliedOrgID = ""
+		}
 		markError(&crr.Status, crr.Generation, "InvalidSpec", verr.Error(), true)
 		if err := r.Status().Update(ctx, crr); err != nil {
 			logger.Error(err, "status update")

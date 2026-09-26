@@ -18,9 +18,8 @@
 //
 // Authn:
 //   - Uses the same RuntimeAgentTokenMiddleware as /api/v1/events:bulk.
-//   - The token is org-scoped; we resolve cluster_id by best-effort against
-//     `deployments` (matching the src or dst workload) and fall back to the
-//     org's primary connected cluster, mirroring events_ingest's heuristic.
+//   - Cluster attribution comes from the reporting token's init-bundle binding,
+//     not a workload-name match or the first cluster in the org.
 //
 // Byte counts:
 //   - BPF tcp_connect/accept probes do not emit byte counters today; the
@@ -37,6 +36,7 @@ package netpolicy
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -112,17 +112,19 @@ func (h *NetworkFlowsIngest) Bulk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Pre-resolve the org's default cluster_id (used when neither workload
-	// matches a deployment row). Mirrors events_ingest.go.
-	var defaultCluster uuid.UUID
-	_ = h.db.Pool().QueryRow(r.Context(),
-		`SELECT id FROM clusters WHERE org_id = $1
-		 ORDER BY CASE WHEN state = 'connected' THEN 0 ELSE 1 END,
-		          last_heartbeat_at DESC NULLS LAST, created_at ASC
-		 LIMIT 1`, tok.OrgID).
-		Scan(&defaultCluster)
-
-	resolver := handler.NewClusterResolver(h.db, tok.OrgID, defaultCluster)
+	boundCluster, err := handler.ResolveAgentClusterID(r.Context(), h.db, tok)
+	if err != nil {
+		if errors.Is(err, handler.ErrAgentClusterScope) {
+			jsonError(w, http.StatusForbidden, "agent token cluster scope mismatch")
+			return
+		}
+		jsonError(w, http.StatusInternalServerError, "resolve cluster: "+err.Error())
+		return
+	}
+	if boundCluster == nil {
+		jsonError(w, http.StatusForbidden, "agent token cluster scope is ambiguous")
+		return
+	}
 
 	// Wave M2: batched IP resolution. Build the set of distinct addresses in
 	// this batch and look them up against pod_ips + cluster_services in two
@@ -130,7 +132,7 @@ func (h *NetworkFlowsIngest) Bulk(w http.ResponseWriter, r *http.Request) {
 	// into "<ns>/<deployment>" or "<ns>/<service>" before insert. Well-known
 	// IPs (loopback / metadata / CGNAT / multicast / link-local) are mapped
 	// without a DB hit.
-	ipResolver := handler.NewIPResolver(r.Context(), h.db, tok.OrgID, rows)
+	ipResolver := handler.NewIPResolverForCluster(r.Context(), h.db, tok.OrgID, *boundCluster, rows)
 
 	tx, err := h.db.Pool().Begin(r.Context())
 	if err != nil {
@@ -208,13 +210,7 @@ VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),
 		if verdict == "" {
 			verdict = "allow"
 		}
-		cid := resolver.Lookup(r.Context(), row.SrcWorkload, row.DstWorkload)
-		if cid == uuid.Nil {
-			// network_flows.cluster_id is NOT NULL — drop the row rather
-			// than insert a synthetic zero UUID and pollute the index.
-			rejected++
-			continue
-		}
+		cid := *boundCluster
 		source := strings.ToLower(strings.TrimSpace(row.Source))
 		switch source {
 		case "dp", "bpf", "hubble", "synthetic", "declared":

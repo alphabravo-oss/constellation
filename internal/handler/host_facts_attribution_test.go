@@ -158,3 +158,65 @@ VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`,
 		t.Fatalf("null-cluster node cluster_id = %v, want NULL", nullCID)
 	}
 }
+
+func TestHostFactsRejectsCrossTenantBundleAttribution(t *testing.T) {
+	d := openTestDB(t)
+	defer d.Close()
+
+	ctx := httptest.NewRequest(http.MethodGet, "/", nil).Context()
+	pool := d.Pool()
+	orgA, orgB := uuid.New(), uuid.New()
+	clusterA, clusterB := uuid.New(), uuid.New()
+	for _, orgID := range []uuid.UUID{orgA, orgB} {
+		if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, display_name) VALUES ($1, $2, $2)`, orgID, "host-scope-"+orgID.String()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM orgs WHERE id IN ($1, $2)`, orgA, orgB)
+	})
+	if _, err := pool.Exec(ctx, `INSERT INTO clusters (id, org_id, name) VALUES ($1, $2, 'own'), ($3, $4, 'foreign')`, clusterA, orgA, clusterB, orgB); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, test := range []struct {
+		name      string
+		bundleOrg uuid.UUID
+	}{
+		{name: "foreign bundle org", bundleOrg: orgB},
+		{name: "foreign cluster org", bundleOrg: orgA},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			raw, tokenID, err := IssueRuntimeAgentToken(ctx, pool, orgA, "host-scope-"+uuid.NewString(), time.Hour)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := pool.Exec(ctx, `
+INSERT INTO cluster_init_bundles
+  (org_id, cluster_id, name, expires_at, runtime_agent_token_id, kek_fingerprint, contents_encrypted)
+VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`,
+				test.bundleOrg, clusterB, "host-scope-"+uuid.NewString(), tokenID); err != nil {
+				t.Fatal(err)
+			}
+			node := "host-scope-" + uuid.NewString()
+			body, err := json.Marshal(HostFacts{Node: node})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/host-facts:report", bytes.NewReader(body))
+			req.Header.Set("Authorization", "Bearer "+raw)
+			rec := httptest.NewRecorder()
+			RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(NewHostFacts(d).Report)).ServeHTTP(rec, req)
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("report status = %d, want 403: %s", rec.Code, rec.Body.String())
+			}
+			var count int
+			if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM host_facts WHERE node = $1`, node).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if count != 0 {
+				t.Fatalf("cross-tenant report persisted %d host_facts rows", count)
+			}
+		})
+	}
+}

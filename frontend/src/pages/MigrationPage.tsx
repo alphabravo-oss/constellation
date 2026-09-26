@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, CheckCircle2, Download, RotateCcw, ShieldCheck, Wand2 } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -19,6 +19,8 @@ import {
   MIGRATION_RECOMMENDED_ACTIONS,
   migrationAppliedSummaryLabel,
   migrationSourceLabel,
+  migrationSummaryLabel,
+  migrationVulnerabilityScopeLabel,
   type MigrationReadinessCategory,
 } from "@/lib/migration-readiness";
 import { downloadJson } from "@/lib/download";
@@ -30,6 +32,57 @@ type MigrationGroup = MigrationPreview["groups"][number];
 type MigrationDPIRule = MigrationPreview["dpi_rules"][number];
 type MigrationDPIBinding = MigrationPreview["dpi_bindings"][number];
 type MigrationNetworkRule = MigrationPreview["network_rules"][number];
+type MigrationVulnerabilityProfile = NonNullable<MigrationPreview["vulnerability_profiles"]>[number];
+type MigrationRegistry = NonNullable<MigrationPreview["registries"]>[number];
+type MigrationDiagnostic = MigrationUnsupported & { diagnosticIndex: number };
+
+const MAX_EXPORT_BYTES = 2 * 1024 * 1024;
+
+const vulnerabilityProfileColumns: Column<MigrationVulnerabilityProfile>[] = [
+  {
+    id: "profile",
+    header: "Vulnerability profile",
+    exportValue: (profile) => profile.name,
+    cell: (profile) => (
+      <div data-testid="migration-preview-vulnerability-profile">
+        <div className="font-medium">{profile.name}</div>
+        {profile.description ? <div className="text-muted-foreground">{profile.description}</div> : null}
+      </div>
+    ),
+  },
+  { id: "action", header: "Action", cell: (profile) => profile.diff_action, exportValue: (profile) => profile.diff_action },
+  { id: "active", header: "State", cell: (profile) => profile.active ? "Active" : "Inactive", exportValue: (profile) => profile.active ? "Active" : "Inactive" },
+  { id: "scope", header: "Effective scope", cell: migrationVulnerabilityScopeLabel, exportValue: migrationVulnerabilityScopeLabel },
+  { id: "entries", header: "Entries", cell: (profile) => profile.entries.length, exportValue: (profile) => profile.entries.length },
+];
+
+const registryColumns: Column<MigrationRegistry>[] = [
+  {
+    id: "registry",
+    header: "Registry",
+    exportValue: (registry) => `${registry.name} (${registry.kind}) ${registry.endpoint}`,
+    cell: (registry) => (
+      <div data-testid="migration-preview-registry">
+        <div className="font-medium">{registry.name}</div>
+        <div className="break-all text-muted-foreground">{registry.kind} · {registry.endpoint}</div>
+      </div>
+    ),
+  },
+  { id: "action", header: "Action", cell: (registry) => registry.diff_action, exportValue: (registry) => registry.diff_action },
+  { id: "scope", header: "Effective image scope", cell: (registry) => registry.image_globs.join(", ") || "All images", exportValue: (registry) => registry.image_globs.join(", ") || "All images" },
+  { id: "filters", header: "Image filters", cell: (registry) => registry.image_globs.length, exportValue: (registry) => registry.image_globs.length },
+  {
+    id: "scanning",
+    header: "Scanning and credentials",
+    exportValue: (registry) => `Manual scans; no credentials imported${registry.credentials_required ? "; reissue credentials before scanning" : ""}`,
+    cell: (registry) => (
+      <div className="text-xs">
+        <div>{registry.scan_cadence} scans · no credentials imported</div>
+        {registry.credentials_required ? <div className="mt-1 text-status-warning">Reissue credentials before scanning.</div> : null}
+      </div>
+    ),
+  },
+];
 
 const dpiRuleProvenance = (rule: MigrationDPIRule) => {
   const parts = [`${rule.source_sensor || "NeuVector sensor"} · ${String(rule.category).toUpperCase()}`];
@@ -247,20 +300,17 @@ export function MigrationPage() {
   const [targetClusterID, setTargetClusterID] = useState("");
   const [selectedPolicy, setSelectedPolicy] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!targetClusterID && clusterOptions.length === 1) {
-      setTargetClusterID(clusterOptions[0].id);
-    }
-  }, [clusterOptions, targetClusterID]);
-
   const preview = useMutation({
-    mutationFn: () => enterprise.migrationPreview({ source, export: exportText, cluster_id: targetClusterID || undefined }),
+    mutationFn: () => {
+      if (new Blob([exportText]).size > MAX_EXPORT_BYTES) throw new Error("Export exceeds the 2 MiB limit.");
+      return enterprise.migrationPreview({ source, export: exportText, cluster_id: targetClusterID || undefined });
+    },
     onSuccess: (data) => {
       setSelectedPolicy(data.policies[0]?.name ?? null);
       void qc.invalidateQueries({ queryKey: ["migration-imports"] });
       toast.success(data.import_id ? "Migration preview saved" : "Migration preview generated");
     },
-    onError: () => toast.error("Migration preview failed"),
+    onError: (error) => toast.error(migrationErrorMessage(error, "Migration preview failed")),
   });
 
   const applyImport = useMutation({
@@ -277,9 +327,16 @@ export function MigrationPage() {
       void qc.invalidateQueries({ queryKey: ["groups"] });
       void qc.invalidateQueries({ queryKey: ["group-usage"] });
       void qc.invalidateQueries({ queryKey: ["network-rules"] });
-      toast.success(res.already_applied ? "Migration import already applied" : "Migration import applied");
+      void qc.invalidateQueries({ queryKey: ["registries"] });
+      void qc.invalidateQueries({ queryKey: ["registry"] });
+      void qc.invalidateQueries({ queryKey: ["vuln-profiles"] });
+      if (res.status === "partial_applied" || (res.unsupported?.length ?? 0) > 0) {
+        toast.warning("Migration partially applied. Unsupported records or omitted fields were not imported or queued. Review diagnostics and credential reissue instructions.");
+      } else {
+        toast.success(res.already_applied ? "Migration import already applied" : "Migration import applied");
+      }
     },
-    onError: () => toast.error("Migration apply failed"),
+    onError: (error) => toast.error(migrationErrorMessage(error, "Migration apply failed")),
   });
 
   const rollbackImport = useMutation({
@@ -296,9 +353,12 @@ export function MigrationPage() {
       void qc.invalidateQueries({ queryKey: ["groups"] });
       void qc.invalidateQueries({ queryKey: ["group-usage"] });
       void qc.invalidateQueries({ queryKey: ["network-rules"] });
-      toast.success(`Migration rollback complete (${res.restored} restored, ${res.deleted} deleted)`);
+      void qc.invalidateQueries({ queryKey: ["registries"] });
+      void qc.invalidateQueries({ queryKey: ["registry"] });
+      void qc.invalidateQueries({ queryKey: ["vuln-profiles"] });
+      toast.success(res.already_rolled_back ? "Migration import already rolled back" : `Migration rollback complete (${res.restored ?? 0} restored, ${res.deleted ?? 0} deleted)`);
     },
-    onError: () => toast.error("Migration rollback failed"),
+    onError: (error) => toast.error(migrationErrorMessage(error, "Migration rollback failed")),
   });
 
   const rollbackBundleDownload = useMutation({
@@ -307,7 +367,7 @@ export function MigrationPage() {
       downloadJson(`constellation-migration-rollback-${id}.json`, bundle);
       toast.success("Rollback bundle downloaded");
     },
-    onError: () => toast.error("Rollback bundle download failed"),
+    onError: (error) => toast.error(migrationErrorMessage(error, "Rollback bundle download failed")),
   });
 
   const data = preview.data;
@@ -316,6 +376,9 @@ export function MigrationPage() {
   const groups = data?.groups ?? [];
   const dpiBindings = data?.dpi_bindings ?? [];
   const networkRules = data?.network_rules ?? [];
+  const vulnerabilityProfiles = data?.vulnerability_profiles ?? [];
+  const registries = data?.registries ?? [];
+  const unsupportedRows = useMemo(() => (data?.unsupported ?? []).map((item, diagnosticIndex) => ({ ...item, diagnosticIndex })), [data?.unsupported]);
   const imports = importsQ.data ?? [];
   const activeImport = data?.import_id ? imports.find((item) => item.id === data.import_id) : imports[0];
   const activeStatus = activeImport?.status ?? (data?.import_id ? "previewed" : "preview");
@@ -353,11 +416,25 @@ export function MigrationPage() {
     {
       id: "summary",
       header: "Summary",
-      exportValue: (item) => `${item.summary.total} items; ${item.summary.create} create; ${item.summary.update} update; ${item.applied_summary ? migrationAppliedSummaryLabel(item.applied_summary) : "not applied"}`,
+      exportValue: (item) => `${migrationSummaryLabel(item.summary)}; ${item.applied_summary ? migrationAppliedSummaryLabel(item.applied_summary) : "not applied"}${item.status === "rolled_back" ? "; subsequently rolled back" : ""}; ${(item.unsupported ?? []).map((diagnostic) => `${diagnostic.kind}: ${diagnostic.reason} ${diagnostic.suggestion ?? ""}`).join("; ")}`,
       cell: (item) => (
-        <div className="text-xs text-muted-foreground">
-          <div>{item.summary.total} items · {item.summary.create} create · {item.summary.update} update</div>
-          <div>{item.applied_summary ? migrationAppliedSummaryLabel(item.applied_summary) : "Not applied"}</div>
+        <div className="max-w-xl whitespace-normal text-xs text-muted-foreground">
+          <div>{migrationSummaryLabel(item.summary)}</div>
+          <div>{item.applied_summary ? migrationAppliedSummaryLabel(item.applied_summary) : "Not applied"}{item.status === "rolled_back" ? " (subsequently rolled back)" : ""}</div>
+          {item.error ? <div className="mt-1 text-destructive">{item.error}</div> : null}
+          {(item.unsupported?.length ?? 0) > 0 ? (
+            <details className="mt-2">
+              <summary className="cursor-pointer font-medium text-foreground">Unsupported diagnostics and reissue instructions ({item.unsupported?.length})</summary>
+              <p className="mt-2">Unsupported records and omitted fields are not imported or queued.</p>
+              {item.unsupported?.map((diagnostic, index) => (
+                <div key={`${diagnostic.kind}:${diagnostic.name}:${index}`} className="mt-2">
+                  <div className="font-medium">{diagnostic.kind} · {diagnostic.name}</div>
+                  <div>{diagnostic.reason}</div>
+                  {diagnostic.suggestion ? <div>{diagnostic.suggestion}</div> : null}
+                </div>
+              ))}
+            </details>
+          ) : null}
         </div>
       ),
     },
@@ -414,7 +491,7 @@ export function MigrationPage() {
     <div className="space-y-6">
       <PageHeader
         title="Migration Imports"
-        description="Import policies, process profiles, DLP/WAF rules, and file profiles from another security tool. Preview the diff and rollback bundle before applying."
+        description="Preview policies, runtime profiles, groups, network rules, vulnerability profiles, and registry metadata from another security tool before applying."
       />
 
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]" data-testid="migration-switch-readiness">
@@ -454,14 +531,14 @@ export function MigrationPage() {
         >
           <div className="space-y-3" data-testid="migration-report-panel">
             <div className="rounded-md bg-muted p-3 text-xs text-muted-foreground">
-                <div className="font-medium text-foreground">{migrationSourceLabel(data?.summary.source ?? source)} report</div>
+                <div className="font-medium text-foreground">{migrationSourceLabel(data?.summary.source ?? activeImport?.source ?? source)} report</div>
               <div className="mt-1">
-                {(data?.summary.total ?? activeImport?.summary.total ?? 0)} previewed items · {(data?.summary.unsupported ?? activeImport?.summary.unsupported ?? 0)} need mapping · {imports.length} saved imports
+                {(data?.summary.total ?? activeImport?.summary.total ?? 0)} previewed items · {(data?.summary.unsupported ?? activeImport?.summary.unsupported ?? 0)} unsupported diagnostics · {imports.length} saved imports
               </div>
             </div>
             <Button
               variant="outline"
-              onClick={() => downloadMigrationReport(reportText, data?.summary.source ?? source)}
+              onClick={() => downloadMigrationReport(reportText, data?.summary.source ?? activeImport?.source ?? source)}
               data-testid="migration-report-export"
             >
               <Download className="h-4 w-4" aria-hidden />
@@ -496,8 +573,8 @@ export function MigrationPage() {
 
       <div data-testid="migration-preview-wizard">
         <Card
-          title="Paste an export"
-          description="Choose the source tool and target cluster, then paste its exported configuration to preview generated policies, process profiles, DLP/WAF rules, file profiles, and rollback metadata."
+          title="Paste or upload an export"
+          description="Choose the source tool and preview its exported configuration. The target cluster is optional; the server validates families that require a cluster."
         >
           <div className="space-y-5">
             <div className="flex flex-wrap items-end gap-3">
@@ -513,14 +590,14 @@ export function MigrationPage() {
                   ))}
                 </Select>
               </Field>
-              <Field label="Target cluster" className="w-64">
+              <Field label="Target cluster (optional)" className="w-64">
                 <Select
                   value={targetClusterID}
                   onChange={(e) => setTargetClusterID(e.target.value)}
                   disabled={clustersQ.isLoading || clusterOptions.length === 0}
                   data-testid="migration-target-cluster-select"
                 >
-                  <option value="">{clustersQ.isLoading ? "Loading clusters..." : "Select cluster"}</option>
+                  <option value="">{clustersQ.isLoading ? "Loading clusters..." : "No target cluster"}</option>
                   {clusterOptions.map((cluster) => (
                     <option key={cluster.id} value={cluster.id}>{cluster.name || cluster.id}</option>
                   ))}
@@ -529,7 +606,7 @@ export function MigrationPage() {
               <Button
                 variant="primary"
                 onClick={() => preview.mutate()}
-                disabled={preview.isPending || exportText.trim().length < 8 || !targetClusterID}
+                disabled={preview.isPending || exportText.trim().length === 0}
                 data-testid="migration-preview-submit"
               >
                 <Wand2 className="h-4 w-4" aria-hidden />
@@ -537,6 +614,29 @@ export function MigrationPage() {
               </Button>
             </div>
 
+            <p className="text-xs text-muted-foreground">Preview is read-only for live configuration: it saves an import preview but does not write live policies, profiles, or registries. Apply is a separate action.</p>
+            <Field label="Upload export (maximum 2 MiB)">
+              <input
+                type="file"
+                accept=".json,.yaml,.yml,.txt,application/json,application/yaml,text/plain"
+                data-testid="migration-export-upload"
+                className="text-xs"
+                onChange={async (event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  if (!file) return;
+                  if (file.size > MAX_EXPORT_BYTES) {
+                    toast.error("Export exceeds the 2 MiB limit.");
+                    return;
+                  }
+                  try {
+                    setExportText(await file.text());
+                  } catch {
+                    toast.error("Could not read the export file.");
+                  }
+                }}
+              />
+            </Field>
             <Textarea
               value={exportText}
               onChange={(e) => setExportText(e.target.value)}
@@ -556,7 +656,7 @@ export function MigrationPage() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span>Preview persisted</span>
+                  <span>{data.import_id ? "Preview persisted" : "Preview not persisted"}</span>
                   <StatusPill label={activeStatus.replace("_", " ")} tone={migrationStatusTone(activeStatus)} />
                 </div>
                 <div className="mt-1 truncate font-mono" data-testid="migration-import-id">
@@ -579,6 +679,7 @@ export function MigrationPage() {
             <StatCard label="Policies" value={data.policies.length} />
             <StatCard label="Create" value={data.summary.create} tone="low" />
             <StatCard label="Update" value={data.summary.update} tone="medium" />
+            <StatCard label="Unchanged" value={data.summary.unchanged ?? 0} />
             <StatCard label="Enforce" value={data.summary.enforce} tone="high" />
             <StatCard label="File Profiles" value={data.summary.file_profiles} />
             <StatCard label="Process Profiles" value={data.summary.process_profiles ?? processProfiles.length} />
@@ -586,7 +687,9 @@ export function MigrationPage() {
             <StatCard label="Network Rules" value={data.summary.network_rules ?? networkRules.length} />
             <StatCard label="DLP / WAF" value={data.summary.dpi_rules} />
             <StatCard label="Group Scopes" value={data.summary.dpi_bindings ?? dpiBindings.length} />
-            <StatCard label="Needs Mapping" value={data.summary.unsupported} tone={data.summary.unsupported > 0 ? "medium" : "neutral"} />
+            <StatCard label="Vulnerability Profiles" value={data.summary.vulnerability_profiles ?? vulnerabilityProfiles.length} />
+            <StatCard label="Registries" value={data.summary.registries ?? registries.length} />
+            <StatCard label="Unsupported Diagnostics" value={data.summary.unsupported} tone={data.summary.unsupported > 0 ? "medium" : "neutral"} />
           </div>
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
             <DataTable
@@ -676,23 +779,45 @@ export function MigrationPage() {
               />
             </div>
           ) : null}
+          {vulnerabilityProfiles.length > 0 ? (
+            <DataTable
+              rows={vulnerabilityProfiles}
+              columns={vulnerabilityProfileColumns}
+              rowKey={(profile) => `${profile.cluster_id ?? ""}:${profile.name}`}
+              showDensityToggle={false}
+              testId="migration-preview-vulnerability-profiles"
+              exportFileName={`constellation-${data.summary.source}-vulnerability-profiles`}
+            />
+          ) : null}
+          {registries.length > 0 ? (
+            <Card title="Registry metadata" description="Imported registries use manual scan cadence and no credentials. No scans are queued. Reissue required credentials and review image scope before scanning." padded={false}>
+              <DataTable
+                rows={registries}
+                columns={registryColumns}
+                rowKey={(registry) => registry.name}
+                showDensityToggle={false}
+                testId="migration-preview-registries"
+                exportFileName={`constellation-${data.summary.source}-registries`}
+              />
+            </Card>
+          ) : null}
           {(data.unsupported?.length ?? 0) > 0 ? (
             <Card
-              title="Queued or Unsupported Items"
-              description="These records were converted and saved in the preview, but require extra target mapping before an automated apply can mutate live objects."
+              title="Unsupported Diagnostics"
+              description="Unsupported records and omitted fields are not imported or queued. Diagnostics can overlap supported object counts. Review reasons and reissue instructions before cutover."
               padded={false}
             >
-              <DataTable
-                rows={data.unsupported ?? []}
+              <DataTable<MigrationDiagnostic>
+                rows={unsupportedRows}
                 columns={unsupportedColumns}
-                rowKey={(item) => `${item.kind}:${item.name}`}
+                rowKey={(item) => `${item.kind}:${item.name}:${item.diagnosticIndex}`}
                 showDensityToggle={false}
                 testId="migration-preview-unsupported"
                 exportFileName={`constellation-${data.summary.source}-unsupported`}
               />
             </Card>
           ) : null}
-          <Card title="Rollback bundle preview" description="Apply this bundle to revert the import if needed.">
+          <Card title="Rollback bundle preview" description="This preview bundle is nonreplayable and cannot restore live objects. After apply, download the saved rollback bundle from import history. Later changes may block rollback.">
             <pre className="max-h-40 overflow-auto rounded bg-muted p-2 text-xs" data-testid="migration-rollback-bundle">
               {data.rollback_bundle}
             </pre>
@@ -717,6 +842,15 @@ export function MigrationPage() {
       </Card>
     </div>
   );
+}
+
+function migrationErrorMessage(error: unknown, fallback: string) {
+  if (error && typeof error === "object" && "response" in error) {
+    const response = error.response as { data?: { error?: unknown; message?: unknown } } | undefined;
+    const reason = response?.data?.error ?? response?.data?.message;
+    if (typeof reason === "string" && reason.trim()) return `${fallback}: ${reason}`;
+  }
+  return error instanceof Error && error.message ? `${fallback}: ${error.message}` : fallback;
 }
 
 function canApplyImport(item: MigrationImportListItem) {

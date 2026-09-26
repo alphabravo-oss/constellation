@@ -11,18 +11,27 @@ import { deployments, type Deployment } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
+import { PlatformVisibilityToggle } from "@/components/ui/platform-visibility-toggle";
 import { downloadCsv } from "@/lib/csv";
+import { isPlatformNamespace } from "@/lib/platform-components";
 import { StatCard } from "@/components/ui/stat-card";
+import { usePlatformComponentVisibility } from "@/hooks/usePlatformComponentVisibility";
 
 export function DeploymentsPage() {
   const { clusterId } = useCluster();
   const [namespace, setNamespace] = useState("");
+  const [hidePlatformComponents, setHidePlatformComponents] = usePlatformComponentVisibility();
   const q = useQuery({
     queryKey: ["deployments", namespace, clusterId],
     queryFn: () => deployments.list({ namespace: namespace || undefined, cluster_id: clusterId }),
   });
 
-  const rows = useMemo(() => q.data?.deployments ?? [], [q.data?.deployments]);
+  const allRows = useMemo(() => q.data?.deployments ?? [], [q.data?.deployments]);
+  const platformCount = useMemo(() => allRows.filter((row) => isPlatformNamespace(row.namespace)).length, [allRows]);
+  const rows = useMemo(
+    () => hidePlatformComponents ? allRows.filter((row) => !isPlatformNamespace(row.namespace)) : allRows,
+    [allRows, hidePlatformComponents],
+  );
   const summary = useMemo(
     () =>
       rows.reduce(
@@ -111,6 +120,11 @@ export function DeploymentsPage() {
         description="Your riskiest deployments first. The score blends open vulnerabilities, exploit signals (CVSS, KEV), runtime exposure, and workload posture."
         actions={
           <div className="flex items-center gap-2">
+            <PlatformVisibilityToggle
+              hidden={hidePlatformComponents}
+              onHiddenChange={setHidePlatformComponents}
+              hiddenCount={platformCount}
+            />
             <label className="flex items-center gap-2 text-xs">
               <span className="text-muted-foreground">Namespace</span>
               <input
@@ -152,8 +166,9 @@ export function DeploymentsPage() {
             <div className="px-3 py-6" />
           ) : (
             <div className="px-3 py-6 text-center text-xs text-muted-foreground">
-              No deployments yet. The operator's reconciler discovers deployments per
-              ConstellationCluster + persists risk into the deployments table.
+              {hidePlatformComponents && platformCount > 0 && allRows.length === platformCount
+                ? `${platformCount} platform ${platformCount === 1 ? "deployment is" : "deployments are"} hidden. Use Platform hidden to show them.`
+                : "No deployments yet. The operator's reconciler discovers deployments per ConstellationCluster and persists risk into the deployments table."}
             </div>
           )
         }

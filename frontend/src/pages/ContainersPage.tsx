@@ -13,24 +13,45 @@ import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { StatCard } from "@/components/ui/stat-card";
 import { EmptyState } from "@/components/ui/empty-state";
+import { PlatformVisibilityToggle } from "@/components/ui/platform-visibility-toggle";
 import { cn } from "@/lib/cn";
 import { downloadCsv } from "@/lib/csv";
+import { isPlatformNamespace } from "@/lib/platform-components";
+import { usePlatformComponentVisibility } from "@/hooks/usePlatformComponentVisibility";
 
 export function ContainersPage() {
   const { clusterId } = useCluster();
   const [search, setSearch] = useState("");
+  const [hidePlatformComponents, setHidePlatformComponents] = usePlatformComponentVisibility();
   const q = useQuery({
     queryKey: ["containers", clusterId],
     queryFn: () => containers.list(clusterId!),
     enabled: !!clusterId,
   });
   const items = useMemo(() => q.data?.items ?? [], [q.data?.items]);
-  const summary = q.data?.summary ?? { total: 0, running: 0, privileged: 0, run_as_root: 0 };
+  const platformCount = useMemo(() => items.filter((item) => isPlatformNamespace(item.namespace)).length, [items]);
+  const visibleItems = useMemo(
+    () => hidePlatformComponents ? items.filter((item) => !isPlatformNamespace(item.namespace)) : items,
+    [hidePlatformComponents, items],
+  );
+  const summary = useMemo(
+    () => visibleItems.reduce(
+      (acc, item) => {
+        acc.total += 1;
+        if (item.state.replace("CONTAINER_", "").toLowerCase() === "running") acc.running += 1;
+        if (item.privileged) acc.privileged += 1;
+        if (item.run_as_root) acc.run_as_root += 1;
+        return acc;
+      },
+      { total: 0, running: 0, privileged: 0, run_as_root: 0 },
+    ),
+    [visibleItems],
+  );
   const rows = useMemo(() => {
     const n = search.trim().toLowerCase();
-    if (!n) return items;
-    return items.filter((c) => [c.name, c.namespace, c.pod_name, c.image, c.node, c.workload ?? ""].some((v) => v.toLowerCase().includes(n)));
-  }, [items, search]);
+    if (!n) return visibleItems;
+    return visibleItems.filter((c) => [c.name, c.namespace, c.pod_name, c.image, c.node, c.workload ?? ""].some((v) => v.toLowerCase().includes(n)));
+  }, [visibleItems, search]);
 
   const columns: Column<ContainerRow>[] = [
     { id: "name", header: "Container", cell: (c) => (
@@ -67,12 +88,19 @@ export function ContainersPage() {
         title="Containers"
         description="Every running container across the cluster's nodes, with its pod, image, node, and workload security posture."
         actions={
-          <button
-            type="button"
-            onClick={() => downloadCsv("constellation-containers", ["Container", "Namespace", "Pod", "Image", "Node", "State", "Privileged", "RunAsRoot", "Critical", "High"],
-              rows.map((c) => [c.name, c.namespace, c.pod_name, c.image, c.node, c.state, c.privileged ? "yes" : "", c.run_as_root ? "yes" : "", c.critical, c.high]))}
-            className="rounded-md border border-border bg-card px-3 py-2 text-sm hover:bg-accent"
-          >Export CSV</button>
+          <div className="flex flex-wrap items-center gap-2">
+            <PlatformVisibilityToggle
+              hidden={hidePlatformComponents}
+              onHiddenChange={setHidePlatformComponents}
+              hiddenCount={platformCount}
+            />
+            <button
+              type="button"
+              onClick={() => downloadCsv("constellation-containers", ["Container", "Namespace", "Pod", "Image", "Node", "State", "Privileged", "RunAsRoot", "Critical", "High"],
+                rows.map((c) => [c.name, c.namespace, c.pod_name, c.image, c.node, c.state, c.privileged ? "yes" : "", c.run_as_root ? "yes" : "", c.critical, c.high]))}
+              className="rounded-md border border-border bg-card px-3 py-2 text-sm hover:bg-accent"
+            >Export CSV</button>
+          </div>
         }
       />
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -90,7 +118,16 @@ export function ContainersPage() {
       {q.isPending ? (
         <p className="text-sm text-muted-foreground">Loading containers…</p>
       ) : rows.length === 0 ? (
-        <EmptyState title="No containers" hint="The runtime-agent reports each node's running containers; none are recorded yet." />
+        <EmptyState
+          title="No containers"
+          hint={
+            hidePlatformComponents && platformCount > 0 && visibleItems.length === 0
+              ? `${platformCount} platform ${platformCount === 1 ? "container is" : "containers are"} hidden. Use Platform hidden to show them.`
+              : search.trim()
+                ? "No containers match the current search."
+                : "The runtime-agent reports each node's running containers; none are recorded yet."
+          }
+        />
       ) : (
         <DataTable rows={rows} columns={columns} rowKey={(c) => `${c.node}-${c.id || c.pod_name + c.name}`} defaultSort={{ id: "risk", dir: "desc" }} />
       )}

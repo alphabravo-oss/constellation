@@ -43,15 +43,18 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page";
+import { PlatformVisibilityToggle } from "@/components/ui/platform-visibility-toggle";
 import { StatusPill } from "@/components/ui/status-pill";
 import { Sparkline } from "@/components/ui/sparkline";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCluster } from "@/hooks/useCluster";
 import { useSavedViews } from "@/hooks/useSavedViews";
+import { usePlatformComponentVisibility } from "@/hooks/usePlatformComponentVisibility";
 import { cn } from "@/lib/cn";
 import { downloadJson } from "@/lib/download";
 import { fmtBytes } from "@/lib/format";
+import { isPlatformNamespace, isPlatformWorkloadID } from "@/lib/platform-components";
 import {
   buildNetworkSavedViewSnapshot,
   buildNetworkSavedViewsExport,
@@ -172,12 +175,14 @@ const VERDICT_ICON: Record<VerdictGroup, typeof CheckCircle2> = {
   block: Ban,
 };
 
-const KUBE_SYSTEM_NS = new Set(["kube-system", "kube-public", "kube-node-lease"]);
-
 type ScopeMode = "both" | "internal" | "external";
 
 const EMPTY_WORKLOADS: NetworkWorkload[] = [];
 const EMPTY_FLOWS: NetworkFlow[] = [];
+const EMPTY_SESSIONS: NetworkSession[] = [];
+const EMPTY_LIFECYCLE_ITEMS: NetworkPolicyLifecycle[] = [];
+const EMPTY_THREATS: RuntimeThreat[] = [];
+const EMPTY_CONVERSATIONS: NetworkConversation[] = [];
 const EMPTY_NODE_KINDS: Record<string, NetworkNodeKind> = {};
 const EMPTY_SESSION_FILTERS: NetworkSessionSavedFilters = {
   protocol: "",
@@ -258,7 +263,7 @@ function NetworkMapInner() {
   });
   const [protocolFilter, setProtocolFilter] = useState<Set<string>>(() => new Set());
   const [namespaceFilter, setNamespaceFilter] = useState<Set<string>>(() => new Set());
-  const [hideKubeSystem, setHideKubeSystem] = useState(true);
+  const [hidePlatformComponents, setHidePlatformComponents] = usePlatformComponentVisibility();
   const [hiddenKinds, setHiddenKinds] = useState<Set<NetworkNodeKind>>(() => new Set<NetworkNodeKind>(["unmanaged"]));
   const [scopeMode, setScopeMode] = useState<ScopeMode>("both");
   const [popoverOpen, setPopoverOpen] = useState(false);
@@ -300,13 +305,13 @@ function NetworkMapInner() {
       verdictsVisible,
       protocolFilter,
       namespaceFilter,
-      hideKubeSystem,
+      hidePlatformComponents,
       hiddenKinds,
       scopeMode,
       sessionFilters,
       pcapFilters,
     }),
-    [workspaceTab, hours, namespace, effectiveGroupFilter, verdict, verdictsVisible, protocolFilter, namespaceFilter, hideKubeSystem, hiddenKinds, scopeMode, sessionFilters, pcapFilters],
+    [workspaceTab, hours, namespace, effectiveGroupFilter, verdict, verdictsVisible, protocolFilter, namespaceFilter, hidePlatformComponents, hiddenKinds, scopeMode, sessionFilters, pcapFilters],
   );
 
   const applySavedViewSnapshot = useCallback((snapshot: NetworkSavedViewSnapshot) => {
@@ -318,7 +323,7 @@ function NetworkMapInner() {
     setVerdictsVisible(snapshot.verdicts_visible);
     setProtocolFilter(new Set(snapshot.protocols));
     setNamespaceFilter(new Set(snapshot.namespaces));
-    setHideKubeSystem(snapshot.hide_kube_system);
+    setHidePlatformComponents(snapshot.hide_platform_components);
     setHiddenKinds(new Set(snapshot.hidden_kinds));
     setScopeMode(snapshot.scope_mode);
     setSessionFilters(snapshot.session_filters);
@@ -326,7 +331,7 @@ function NetworkMapInner() {
     setSelectedFlowID(null);
     setSelectedWorkloadID(null);
     setPopoverOpen(false);
-  }, []);
+  }, [setHidePlatformComponents]);
 
   const q = useQuery({
     queryKey: ["network-map", hours, clusterID, namespace, effectiveGroupFilter, verdict],
@@ -429,12 +434,36 @@ function NetworkMapInner() {
   const workloads = q.data?.workloads ?? EMPTY_WORKLOADS;
   const flowsRaw = q.data?.flows ?? EMPTY_FLOWS;
   const liveFlows = q.data?.recent_flows ?? [];
-  const sessions = sessionsQ.data?.sessions ?? [];
-  const sessionsTotal = sessionsQ.data?.total ?? sessions.length;
+  const sessionsRaw = sessionsQ.data?.sessions ?? EMPTY_SESSIONS;
+  const sessions = useMemo(
+    () => hidePlatformComponents ? sessionsRaw.filter((item) => !isPlatformWorkloadID(item.workload_id)) : sessionsRaw,
+    [hidePlatformComponents, sessionsRaw],
+  );
+  const sessionsTotal = hidePlatformComponents ? sessions.length : (sessionsQ.data?.total ?? sessions.length);
   const sessionsHasMore = sessionsQ.data?.has_more ?? false;
   // Cluster list was used by the dropped select; URL-driven now.
   // const clusters = q.data?.summary.clusters ?? [];
-  const lifecycleItems = lifecycleQ.data?.items ?? [];
+  const lifecycleItemsRaw = lifecycleQ.data?.items ?? EMPTY_LIFECYCLE_ITEMS;
+  const lifecycleItems = useMemo(
+    () => hidePlatformComponents ? lifecycleItemsRaw.filter((item) => !isPlatformNamespace(item.namespace)) : lifecycleItemsRaw,
+    [hidePlatformComponents, lifecycleItemsRaw],
+  );
+  const threatsRaw = threatsQ.data ?? EMPTY_THREATS;
+  const threats = useMemo(
+    () => hidePlatformComponents ? threatsRaw.filter((item) => !isPlatformNamespace(item.namespace)) : threatsRaw,
+    [hidePlatformComponents, threatsRaw],
+  );
+  const conversationsRaw = conversationsQ.data?.conversations ?? EMPTY_CONVERSATIONS;
+  const conversations = useMemo(
+    () => hidePlatformComponents
+      ? conversationsRaw.filter((item) => !isPlatformWorkloadID(item.from) && !isPlatformWorkloadID(item.to))
+      : conversationsRaw,
+    [conversationsRaw, hidePlatformComponents],
+  );
+  const platformWorkloadCount = useMemo(
+    () => workloads.filter((item) => isPlatformNamespace(item.namespace)).length,
+    [workloads],
+  );
 
   // Drop self-loops (workload→workload) up front; they clutter the canvas and
   // are usually intra-pod retries.
@@ -466,11 +495,11 @@ function NetworkMapInner() {
   }, []);
 
   const isExternal = useCallback((f: NetworkFlow) => f.src.startsWith("external/") || f.dst.startsWith("external/"), []);
-  const isKubeSystem = useCallback(
+  const isPlatformFlow = useCallback(
     (f: NetworkFlow) => {
       const srcNS = workloadNS.get(f.src) ?? f.src.split("/")[0];
       const dstNS = workloadNS.get(f.dst) ?? f.dst.split("/")[0];
-      return KUBE_SYSTEM_NS.has(srcNS) || KUBE_SYSTEM_NS.has(dstNS);
+      return isPlatformNamespace(srcNS) || isPlatformNamespace(dstNS);
     },
     [workloadNS],
   );
@@ -482,7 +511,7 @@ function NetworkMapInner() {
     return flowsNoSelf.filter((f) => {
       const vg = verdictGroupFromState(f.state, f.verdict);
       if (vg && !verdictsVisible[vg]) return false;
-      if (hideKubeSystem && isKubeSystem(f)) return false;
+      if (hidePlatformComponents && isPlatformFlow(f)) return false;
       if (scopeMode === "external" && !isExternal(f)) return false;
       if (scopeMode === "internal" && isExternal(f)) return false;
       if (protocolFilter.size > 0) {
@@ -505,7 +534,7 @@ function NetworkMapInner() {
       }
       return true;
     });
-  }, [flowsNoSelf, verdictsVisible, hideKubeSystem, scopeMode, protocolFilter, namespaceFilter, workloadNS, isKubeSystem, isExternal, flowProtocols, hiddenKinds, nodeKinds]);
+  }, [flowsNoSelf, verdictsVisible, hidePlatformComponents, scopeMode, protocolFilter, namespaceFilter, workloadNS, isPlatformFlow, isExternal, flowProtocols, hiddenKinds, nodeKinds]);
 
   // Hide nodes that have no visible edges once chip filters are applied so the
   // canvas declutters in lockstep.
@@ -518,12 +547,15 @@ function NetworkMapInner() {
     return s;
   }, [flows]);
   const visibleWorkloads = useMemo(
-    () => workloads.filter((w) => visibleWorkloadIDs.size === 0 || visibleWorkloadIDs.has(w.id)),
-    [workloads, visibleWorkloadIDs],
+    () => workloads.filter((w) =>
+      (!hidePlatformComponents || !isPlatformNamespace(w.namespace))
+      && (flowsNoSelf.length === 0 || visibleWorkloadIDs.has(w.id)),
+    ),
+    [flowsNoSelf.length, hidePlatformComponents, workloads, visibleWorkloadIDs],
   );
 
   const selectedFlow = flows.find((f) => f.id === selectedFlowID) ?? null;
-  const selectedWorkload = workloads.find((w) => w.id === selectedWorkloadID) ?? null;
+  const selectedWorkload = visibleWorkloads.find((w) => w.id === selectedWorkloadID) ?? null;
   // Mutually-exclusive inspectors — NeuVector-style:
   //   - edge click  -> FlowInspector popover (selectedFlow is set)
   //   - node click  -> Workload panel       (selectedWorkload is set)
@@ -671,18 +703,19 @@ function NetworkMapInner() {
   // NeuVector-style compact header: full-bleed canvas, inline stat pills
   // (no 5-tile row), no right-rail (the L2 edge-popover replaces it),
   // single-row filter strip. Canvas fills the viewport.
-  const workloadCount = q.data?.summary.workloads ?? workloads.length;
+  const workloadCount = visibleWorkloads.length;
   // Whether this cluster's CNI can enforce a per-IP deny (Cilium/Calico). Gates the
   // "Block IP" affordance — on flannel/native it can't apply, so we hide it.
   const denyCapable = q.data?.summary.deny_capable_cni ?? false;
-  const flowCount = q.data?.summary.flows ?? flowsRaw.length;
-  const volume = fmtBytes(q.data?.summary.total_bytes ?? 0);
-  const blocked = flowsRaw.filter((f) => f.state === "denied").length;
-  const ready = lifecycleQ.data?.summary.ready ?? 0;
+  const flowCount = flows.length;
+  const volume = fmtBytes(flows.reduce((total, flow) => total + flow.bytes, 0));
+  const blocked = flows.filter((f) => f.state === "denied").length;
+  const ready = lifecycleItems.filter((item) => Boolean(item.target_mode)).length;
 
   // B2: canvas-level states. A successful fetch with zero workloads AND zero
   // flows means nothing was tapped in the window (no runtime-agent dp data).
   const noData = q.isSuccess && workloads.length === 0 && flowsRaw.length === 0;
+  const noVisibleData = q.isSuccess && !noData && visibleWorkloads.length === 0 && flows.length === 0;
 
   return (
     <div className="flex h-[calc(100vh-72px)] flex-col gap-2">
@@ -698,8 +731,8 @@ function NetworkMapInner() {
             <StatPill
               icon={<AlertTriangle className="h-3 w-3" />}
               label="threats"
-              value={threatsQ.data?.length ?? 0}
-              tone={(threatsQ.data?.length ?? 0) > 0 ? "critical" : "neutral"}
+              value={threats.length}
+              tone={threats.length > 0 ? "critical" : "neutral"}
               data-testid="netstat-threats"
             />
             <StatPill icon={<GitCompareArrows className="h-3 w-3" />} label="ready" value={ready} tone="accent" />
@@ -830,9 +863,12 @@ function NetworkMapInner() {
           onToggle={toggleNamespace}
           onClear={() => setNamespaceFilter(new Set())}
         />
-        <Chip active={hideKubeSystem} onClick={() => setHideKubeSystem((v) => !v)} data-testid="netchip-hide-kubesystem">
-          Hide kube-system
-        </Chip>
+        <PlatformVisibilityToggle
+          hidden={hidePlatformComponents}
+          onHiddenChange={setHidePlatformComponents}
+          hiddenCount={platformWorkloadCount}
+          compact
+        />
         <div className="inline-flex overflow-hidden rounded-md border border-border" data-testid="netchip-scope">
           {(["both", "internal", "external"] as ScopeMode[]).map((m) => (
             <button
@@ -900,6 +936,21 @@ function NetworkMapInner() {
                   >
                     View cluster health →
                   </a>
+                ) : undefined
+              }
+            />
+          </div>
+        ) : noVisibleData ? (
+          <div className="flex h-full items-center justify-center" data-testid="network-map-filtered-empty">
+            <EmptyState
+              icon={<EyeOff className="h-8 w-8" aria-hidden />}
+              title="No traffic matches this view"
+              hint="Platform components or the active network filters are hiding all observed workloads and flows. Collection and protection remain active."
+              action={
+                hidePlatformComponents ? (
+                  <Button size="sm" variant="outline" onClick={() => setHidePlatformComponents(false)}>
+                    Show platform components
+                  </Button>
                 ) : undefined
               }
             />
@@ -993,7 +1044,7 @@ function NetworkMapInner() {
             happening. Clicking a threat tries to pivot to the matching flow
             on the canvas. */}
         <ThreatsCard
-          threats={threatsQ.data ?? []}
+          threats={threats}
           flows={flows}
           weakTLS={dpiSettingsQ.data?.weak_tls_enabled ?? false}
           onToggleWeakTLS={(v) => dpiToggleMut.mutate(v)}
@@ -1092,7 +1143,7 @@ function NetworkMapInner() {
         hours={hours}
         denyCapable={denyCapable}
         recentFlows={liveFlows}
-        threats={threatsQ.data ?? []}
+        threats={threats}
         lifecycle={lifecycleItems}
         onOpenChange={(o) => {
           setPopoverOpen(o);
@@ -1104,7 +1155,7 @@ function NetworkMapInner() {
 
         <RadixTabs.Content value="conversations" className="min-h-0 flex-1 overflow-auto outline-none" data-testid="network-workspace-panel-conversations">
           <NetworkConversationsWorkspaceTab
-            conversations={conversationsQ.data?.conversations ?? []}
+            conversations={conversations}
             loading={conversationsQ.isPending}
             hours={hours}
             onSelect={(conversation) => {
@@ -1155,7 +1206,7 @@ function NetworkMapInner() {
 
         <RadixTabs.Content value="threats" className="min-h-0 flex-1 overflow-auto outline-none" data-testid="network-workspace-panel-threats">
           <NetworkThreatsWorkspaceTab
-            threats={threatsQ.data ?? []}
+            threats={threats}
             weakTLS={dpiSettingsQ.data?.weak_tls_enabled ?? false}
             toggling={dpiToggleMut.isPending}
             onToggleWeakTLS={(value) => dpiToggleMut.mutate(value)}

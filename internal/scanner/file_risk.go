@@ -25,7 +25,7 @@ type FileRiskOptions struct {
 
 // ScanImageFileRisks inspects the final layer-applied filesystem metadata for a
 // registry image. It reads tar headers only; file contents are skipped.
-func ScanImageFileRisks(ctx context.Context, ref string, opts FileRiskOptions) (*ImageFileRiskReport, error) {
+func ScanImageFileRisks(ctx context.Context, ref string, opts FileRiskOptions, registryOptions ...remote.Option) (*ImageFileRiskReport, error) {
 	parseOpts := []name.Option{}
 	if opts.Insecure {
 		parseOpts = append(parseOpts, name.Insecure)
@@ -36,8 +36,12 @@ func ScanImageFileRisks(ctx context.Context, ref string, opts FileRiskOptions) (
 	}
 	remoteOpts := []remote.Option{
 		remote.WithContext(ctx),
-		remote.WithAuthFromKeychain(authn.DefaultKeychain),
 		remote.WithUserAgent("constellation-scanner"),
+	}
+	if len(registryOptions) == 0 {
+		remoteOpts = append(remoteOpts, remote.WithAuthFromKeychain(authn.DefaultKeychain))
+	} else {
+		remoteOpts = append(remoteOpts, registryOptions...)
 	}
 	if strings.TrimSpace(opts.Platform) != "" {
 		platform, err := v1.ParsePlatform(opts.Platform)

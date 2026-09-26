@@ -1,5 +1,9 @@
 # Constellation Deficiency Audit
 
+> Evidence ledger, not a second roadmap. Release ordering and parity status are
+> maintained in [the canonical parity plan](NEUVECTOR-PARITY-PLAN.md). Reverify
+> each finding against the current tree before changing its status.
+
 Adversarially-confirmed deficiencies (medium+ severity that survived a refute pass). Severities use the verifier's `verify_severity`. Near-duplicates have been merged (56 raw confirmed findings → **52 distinct deficiencies**).
 
 ## Summary

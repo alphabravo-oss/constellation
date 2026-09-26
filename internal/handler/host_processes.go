@@ -84,6 +84,10 @@ func (h *HostProcessesHandler) Report(w http.ResponseWriter, r *http.Request) {
 	// bundle mapping; the upsert stays NULL-safe (dedups on (org_id, node)).
 	clusterID, err := ResolveAgentClusterID(r.Context(), h.db, tok)
 	if err != nil {
+		if errors.Is(err, ErrAgentClusterScope) {
+			jsonError(w, http.StatusForbidden, "agent token cluster scope mismatch")
+			return
+		}
 		jsonError(w, http.StatusInternalServerError, "resolve cluster: "+err.Error())
 		return
 	}

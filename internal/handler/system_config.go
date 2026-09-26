@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -47,13 +48,18 @@ func (h *SystemConfig) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	cfg, rev, err := syscfg.Load(r.Context(), h.db.Pool(), subj.OrgID)
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		jsonError(w, http.StatusInternalServerError, "system config could not be loaded")
 		return
 	}
 	resp := map[string]any{
-		"config":   cfg.Redacted(),
-		"revision": rev,
-		"source":   "default",
+		"config":     cfg.Redacted(),
+		"revision":   rev,
+		"source":     "default",
+		"provenance": cfg.Provenance(),
+		"applied":    map[string]any{"provider": h.provider.Applied(subj.OrgID, rev)},
+	}
+	if rev > 0 {
+		resp["source"] = "system_config"
 	}
 	var updatedAt time.Time
 	var updatedBy sql.NullString
@@ -62,7 +68,7 @@ func (h *SystemConfig) Get(w http.ResponseWriter, r *http.Request) {
 SELECT sc.updated_at, sc.updated_by::text, u.email
   FROM system_config sc
   LEFT JOIN users u ON u.id = sc.updated_by
- WHERE sc.org_id = $1`, subj.OrgID).Scan(&updatedAt, &updatedBy, &updatedByEmail)
+ WHERE sc.org_id = $1 AND sc.revision = $2`, subj.OrgID, rev).Scan(&updatedAt, &updatedBy, &updatedByEmail)
 	if err == nil {
 		resp["source"] = "system_config"
 		resp["updated_at"] = updatedAt
@@ -73,7 +79,7 @@ SELECT sc.updated_at, sc.updated_by::text, u.email
 			resp["updated_by_email"] = updatedByEmail.String
 		}
 	} else if !errors.Is(err, pgx.ErrNoRows) {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		jsonError(w, http.StatusInternalServerError, "system config metadata could not be loaded")
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -90,8 +96,14 @@ func (h *SystemConfig) Patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var patch json.RawMessage
-	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
-		jsonError(w, http.StatusBadRequest, "invalid JSON body")
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&patch); err != nil {
+		writeConfigFieldErrors(w, []syscfg.FieldError{{Field: "$", Code: "invalid_json", Message: "must be a JSON object"}})
+		return
+	}
+	var trailing json.RawMessage
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		writeConfigFieldErrors(w, []syscfg.FieldError{{Field: "$", Code: "invalid_json", Message: "must contain a single JSON object"}})
 		return
 	}
 
@@ -116,12 +128,12 @@ func (h *SystemConfig) Patch(w http.ResponseWriter, r *http.Request) {
 		var err error
 		current, baseRev, err = syscfg.Load(r.Context(), h.db.Pool(), subj.OrgID)
 		if err != nil {
-			jsonError(w, http.StatusInternalServerError, err.Error())
+			jsonError(w, http.StatusInternalServerError, "system config could not be loaded")
 			return
 		}
 		merged, err = current.ApplyPatch(patch)
 		if err != nil {
-			jsonError(w, http.StatusBadRequest, err.Error())
+			writeConfigValidationError(w, err)
 			return
 		}
 		rev, err = syscfg.Save(r.Context(), h.db.Pool(), subj.OrgID, merged, baseRev, updatedBy)
@@ -135,7 +147,7 @@ func (h *SystemConfig) Patch(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, http.StatusConflict, "system config changed concurrently; please retry")
 			return
 		}
-		jsonError(w, http.StatusBadRequest, err.Error())
+		jsonError(w, http.StatusInternalServerError, "system config could not be saved")
 		return
 	}
 
@@ -155,9 +167,28 @@ func (h *SystemConfig) Patch(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"config":   merged.Redacted(),
-		"revision": rev,
+		"config":     merged.Redacted(),
+		"revision":   rev,
+		"source":     "system_config",
+		"provenance": merged.Provenance(),
+		"applied":    map[string]any{"provider": h.provider.Applied(subj.OrgID, rev)},
 	})
+}
+
+func writeConfigFieldErrors(w http.ResponseWriter, fields []syscfg.FieldError) {
+	writeJSON(w, http.StatusBadRequest, map[string]any{
+		"error":        "invalid system config",
+		"field_errors": fields,
+	})
+}
+
+func writeConfigValidationError(w http.ResponseWriter, err error) {
+	var validation *syscfg.ValidationError
+	if errors.As(err, &validation) {
+		writeConfigFieldErrors(w, validation.Fields)
+		return
+	}
+	writeConfigFieldErrors(w, []syscfg.FieldError{{Field: "$", Code: "invalid_value", Message: "invalid configuration"}})
 }
 
 // RefreshScanner sets scanner_db_refresh_now to the current unix time, signaling
@@ -177,12 +208,12 @@ func (h *SystemConfig) RefreshScanner(w http.ResponseWriter, r *http.Request) {
 	for attempt := 0; ; attempt++ {
 		current, baseRev, err := syscfg.Load(r.Context(), h.db.Pool(), subj.OrgID)
 		if err != nil {
-			jsonError(w, http.StatusInternalServerError, err.Error())
+			jsonError(w, http.StatusInternalServerError, "system config could not be loaded")
 			return
 		}
 		merged, err = current.ApplyPatch(patch)
 		if err != nil {
-			jsonError(w, http.StatusBadRequest, err.Error())
+			writeConfigValidationError(w, err)
 			return
 		}
 		rev, err = syscfg.Save(r.Context(), h.db.Pool(), subj.OrgID, merged, baseRev, nil)
@@ -192,7 +223,7 @@ func (h *SystemConfig) RefreshScanner(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, syscfg.ErrRevisionConflict) && attempt < maxAttempts-1 {
 			continue
 		}
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		jsonError(w, http.StatusInternalServerError, "scanner refresh config could not be saved")
 		return
 	}
 	if h.provider != nil {

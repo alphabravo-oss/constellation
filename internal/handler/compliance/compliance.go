@@ -48,7 +48,7 @@ func (c *Compliance) WithResponseAlerts(
 	eval func(ctx context.Context, orgID uuid.UUID, ev *responserule.Event) ([]responserule.Action, error),
 	dispatcher *notify.Dispatcher,
 ) *Compliance {
-	c.alerts = complianceResponder{respond: respond, evalRules: eval, dispatcher: dispatcher}
+	c.alerts = complianceResponder{respond: respond, evalRules: eval, dispatcher: dispatcher, audit: c.audit}
 	return c
 }
 
@@ -69,6 +69,17 @@ func (c *Compliance) Checks(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	if clusterArg != nil {
+		var owned bool
+		if err := c.db.Pool().QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM clusters WHERE id = $1 AND org_id = $2)`, clusterArg, subj.OrgID).Scan(&owned); err != nil {
+			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if !owned {
+			httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found"})
+			return
+		}
+	}
 
 	rows, err := c.db.Pool().Query(r.Context(), `
 SELECT cc.framework, cc.control_id, cc.title, COALESCE(cc.description,''), cc.status, cc.severity,
@@ -83,12 +94,14 @@ SELECT cc.framework, cc.control_id, cc.title, COALESCE(cc.description,''), cc.st
            AND ce.framework = cc.framework
            AND ce.control_id = cc.control_id
            AND (ce.cluster_id IS NULL OR ce.cluster_id = cc.cluster_id)
+           AND (ce.cluster_id IS NULL OR EXISTS (SELECT 1 FROM clusters WHERE id = ce.cluster_id AND org_id = cc.org_id))
            AND ce.revoked_at IS NULL
            AND ce.expires_at > NOW()
          ORDER BY (ce.cluster_id IS NULL), ce.created_at DESC
          LIMIT 1
        ) ce ON TRUE
  WHERE cc.org_id = $1
+   AND (cc.cluster_id IS NULL OR EXISTS (SELECT 1 FROM clusters WHERE id = cc.cluster_id AND org_id = cc.org_id))
    AND ($2::text = '' OR cc.framework = $2)
    AND ($3::text = '' OR cc.tags_v2 ? $3)
    AND ($4::uuid IS NULL OR cc.cluster_id = $4)
@@ -159,6 +172,17 @@ func (c *Compliance) Summary(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	if clusterArg != nil {
+		var owned bool
+		if err := c.db.Pool().QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM clusters WHERE id = $1 AND org_id = $2)`, clusterArg, subj.OrgID).Scan(&owned); err != nil {
+			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if !owned {
+			httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found"})
+			return
+		}
+	}
 	rows, err := c.db.Pool().Query(r.Context(), `
 WITH checks AS (
     SELECT cc.framework,
@@ -172,12 +196,14 @@ WITH checks AS (
                AND ce.framework = cc.framework
                AND ce.control_id = cc.control_id
                AND (ce.cluster_id IS NULL OR ce.cluster_id = cc.cluster_id)
+               AND (ce.cluster_id IS NULL OR EXISTS (SELECT 1 FROM clusters WHERE id = ce.cluster_id AND org_id = cc.org_id))
                AND ce.revoked_at IS NULL
                AND ce.expires_at > NOW()
              ORDER BY (ce.cluster_id IS NULL), ce.created_at DESC
              LIMIT 1
            ) ce ON TRUE
      WHERE cc.org_id = $1
+       AND (cc.cluster_id IS NULL OR EXISTS (SELECT 1 FROM clusters WHERE id = cc.cluster_id AND org_id = cc.org_id))
        AND ($2::uuid IS NULL OR cc.cluster_id = $2)
 )
 SELECT framework,
@@ -255,6 +281,17 @@ func (c *Compliance) writeEvidence(w http.ResponseWriter, r *http.Request, scope
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
+	}
+	if clusterID != nil {
+		var owned bool
+		if err := c.db.Pool().QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM clusters WHERE id = $1 AND org_id = $2)`, clusterID, subj.OrgID).Scan(&owned); err != nil {
+			jsonError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if !owned {
+			jsonError(w, http.StatusNotFound, "cluster not found")
+			return
+		}
 	}
 	limit := 1000
 	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {

@@ -32,7 +32,11 @@ type auditDTO struct {
 }
 
 func (a *Audit) List(w http.ResponseWriter, r *http.Request) {
-	subj, _ := SubjectFrom(r.Context())
+	subj, ok := SubjectFrom(r.Context())
+	if !ok {
+		jsonError(w, http.StatusUnauthorized, "no subject")
+		return
+	}
 	action := r.URL.Query().Get("action")
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit <= 0 || limit > 500 {
@@ -50,6 +54,17 @@ func (a *Audit) List(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
+	}
+	if clusterArg != nil {
+		var owned bool
+		if err := a.db.Pool().QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM clusters WHERE id = $1 AND org_id = $2)`, clusterArg, subj.OrgID).Scan(&owned); err != nil {
+			jsonError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if !owned {
+			jsonError(w, http.StatusNotFound, "cluster not found")
+			return
+		}
 	}
 	// E2: ?framework=<id>&control=<id> filters by compliance mapping. We
 	// translate (framework, control) → action-prefix list at request time

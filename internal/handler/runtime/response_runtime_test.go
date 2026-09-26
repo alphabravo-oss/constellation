@@ -62,7 +62,7 @@ func TestEventsIngest_DispatchResponseHook(t *testing.T) {
 // when no DB is reachable.
 func TestEventsIngest_AutoQuarantineFromCriticalEvent(t *testing.T) {
 	d := openTestDB(t)
-	defer d.Close()
+	t.Cleanup(d.Close)
 
 	ctx := context.Background()
 	pool := d.Pool()
@@ -92,10 +92,7 @@ VALUES ($1, $2, $3, '', true, 'runtime', $4, $5, $6) RETURNING id`,
 		t.Fatalf("insert rule: %v", err)
 	}
 
-	raw, _, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, tokenName, time.Hour)
-	if err != nil {
-		t.Fatalf("issue token: %v", err)
-	}
+	raw := issueBoundRuntimeEventToken(t, pool, orgID, clusterID, tokenName)
 
 	// nc exec -> suspicious-binary -> high regardless of baseline.
 	batch := []IngestEvent{{
@@ -139,7 +136,7 @@ SELECT count(*) FROM quarantine_entries
 
 func TestEventsIngest_V2SuppressLogSkipsRuntimeEventRow(t *testing.T) {
 	d := openTestDB(t)
-	defer d.Close()
+	t.Cleanup(d.Close)
 
 	ctx := context.Background()
 	pool := d.Pool()
@@ -168,10 +165,7 @@ VALUES ($1, $2, $3, '', true, 'runtime', $4, $5, $6) RETURNING id`,
 		t.Fatalf("insert rule: %v", err)
 	}
 
-	raw, _, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, tokenName, time.Hour)
-	if err != nil {
-		t.Fatalf("issue token: %v", err)
-	}
+	raw := issueBoundRuntimeEventToken(t, pool, orgID, clusterID, tokenName)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM events WHERE org_id=$1 AND workload_id=$2`, orgID, workloadID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM audit_events WHERE org_id=$1 AND target_id=$2`, orgID, workloadID)
@@ -230,7 +224,7 @@ SELECT COALESCE(after->>'enforced','')
 
 func TestEventsIngest_V2GroupSelectorUsesCachedMembersAndPodOwnerLinks(t *testing.T) {
 	d := openTestDB(t)
-	defer d.Close()
+	t.Cleanup(d.Close)
 
 	ctx := context.Background()
 	pool := d.Pool()
@@ -280,10 +274,7 @@ VALUES ($1, $2, $3, '', true, 'runtime', $4, $5, $6) RETURNING id`,
 		t.Fatalf("insert rule: %v", err)
 	}
 
-	raw, _, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, tokenName, time.Hour)
-	if err != nil {
-		t.Fatalf("issue token: %v", err)
-	}
+	raw := issueBoundRuntimeEventToken(t, pool, orgID, clusterID, tokenName)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM events WHERE org_id=$1 AND workload_id=$2`, orgID, podWorkloadID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM audit_events WHERE org_id=$1 AND target_id=$2`, orgID, podWorkloadID)

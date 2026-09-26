@@ -2,6 +2,7 @@ package network
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -19,9 +20,11 @@ import (
 )
 
 // sessionIngestRow is the wire shape the runtime-agent POSTs to /network-sessions:bulk.
-// One row per live dp session (NV RESTSession). Field tags match the agent's dp_session.go.
+// One row per live dp session (NV RESTSession). Fields match the agent's dp_session.go;
+// cluster_id is an optional claim checked against the token binding.
 type sessionIngestRow struct {
 	ID             int64  `json:"id"`
+	ClusterID      string `json:"cluster_id,omitempty"`
 	Node           string `json:"node,omitempty"`
 	EPMAC          string `json:"ep_mac,omitempty"`
 	WorkloadID     string `json:"workload_id,omitempty"`
@@ -83,21 +86,57 @@ func (h *Network) IngestSessions(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": fmt.Sprintf("batch > %d", maxSessionBatchSize)})
 		return
 	}
-	// Resolve the agent's cluster (org primary connected cluster), same fallback as
-	// runtime-threats ingest.
-	var clusterID uuid.UUID
-	if err := h.db.Pool().QueryRow(r.Context(),
-		`SELECT id FROM clusters WHERE org_id = $1
-		 ORDER BY CASE WHEN state = 'connected' THEN 0 ELSE 1 END,
-		          last_heartbeat_at DESC NULLS LAST, created_at ASC
-		 LIMIT 1`, tok.OrgID).Scan(&clusterID); err != nil {
-		httpx.WriteJSON(w, http.StatusOK, map[string]any{"accepted": 0, "note": "no cluster"})
+	boundCluster, err := handler.ResolveAgentClusterID(r.Context(), h.db, tok)
+	if err != nil {
+		if errors.Is(err, handler.ErrAgentClusterScope) {
+			httpx.WriteJSON(w, http.StatusForbidden, map[string]string{"error": "agent token cluster scope mismatch"})
+			return
+		}
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "resolve cluster failed"})
 		return
 	}
-	// The reporting node — all rows in a snapshot share it (the agent sets it per row).
-	node := ""
-	if len(rows) > 0 {
-		node = rows[0].Node
+	if boundCluster == nil {
+		httpx.WriteJSON(w, http.StatusForbidden, map[string]string{"error": "agent token cluster scope is ambiguous"})
+		return
+	}
+	clusterID := *boundCluster
+	for _, requested := range r.URL.Query()["cluster_id"] {
+		requestedID, err := uuid.Parse(strings.TrimSpace(requested))
+		if err != nil {
+			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster_id"})
+			return
+		}
+		if requestedID != clusterID {
+			httpx.WriteJSON(w, http.StatusForbidden, map[string]string{"error": "agent token cluster scope mismatch"})
+			return
+		}
+	}
+	if len(rows) == 0 {
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"accepted": 0})
+		return
+	}
+	// A snapshot replaces one node's rows; validate the entire batch before deleting.
+	node := rows[0].Node
+	if strings.TrimSpace(node) == "" {
+		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "node required"})
+		return
+	}
+	for _, row := range rows {
+		if row.Node != node {
+			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "snapshot contains multiple nodes"})
+			return
+		}
+		if row.ClusterID != "" {
+			rowClusterID, err := uuid.Parse(row.ClusterID)
+			if err != nil {
+				httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster_id"})
+				return
+			}
+			if rowClusterID != clusterID {
+				httpx.WriteJSON(w, http.StatusForbidden, map[string]string{"error": "agent token cluster scope mismatch"})
+				return
+			}
+		}
 	}
 
 	tx, err := h.db.Pool().Begin(r.Context())

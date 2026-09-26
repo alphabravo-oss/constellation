@@ -329,54 +329,29 @@ SELECT COALESCE(local_path,''), status FROM backups
 	})
 }
 
-// Verify parses an uploaded tarball and returns the manifest summary without applying.
-// Used by the UI's restore wizard's preview step. Body is raw tar.gz bytes; signature
-// verification is best-effort (the operator can still proceed via Restore with the same
-// posture).
+// Verify validates the archive using the same trust and tenant policy as Restore.
 func (h *Backups) Verify(w http.ResponseWriter, r *http.Request) {
 	subj, ok := SubjectFrom(r.Context())
 	if !ok {
 		jsonError(w, http.StatusUnauthorized, "no subject")
 		return
 	}
-	// Buffer the upload (small files only; cap at 256 MiB).
-	const maxSize = 256 << 20
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxSize))
+	var orgName string
+	if err := h.db.Pool().QueryRow(r.Context(), `SELECT name FROM orgs WHERE id=$1`, subj.OrgID).Scan(&orgName); err != nil {
+		jsonError(w, http.StatusInternalServerError, "resolve caller org")
+		return
+	}
+	result, err := backup.VerifyArchive(backup.RestoreOptions{
+		In: http.MaxBytesReader(w, r.Body, 256<<20),
+		Verify: backup.VerifierOptions{
+			KeyPath:  os.Getenv("CONSTELLATION_BACKUP_VERIFY_KEY"),
+			Identity: os.Getenv("CONSTELLATION_BACKUP_VERIFY_IDENTITY"),
+		},
+		AllowUnverified: os.Getenv("CONSTELLATION_BACKUP_ALLOW_UNVERIFIED") == "true",
+		DestOrgID:       subj.OrgID.String(), DestOrgName: orgName,
+	})
 	if err != nil {
-		jsonError(w, http.StatusBadRequest, "read body: "+err.Error())
-		return
-	}
-	tmp, err := os.CreateTemp("", "cnstl-verify-*.tar.gz")
-	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(body); err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	tmp.Close()
-
-	// Use Restore-without-applying: re-open the tarball, extract manifest, recompute
-	// table digests, verify signature. We re-implement here rather than calling Restore
-	// since Restore needs a destination pool.
-	f, err := os.Open(tmp.Name())
-	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	defer f.Close()
-	// Restore needs a destination pool, so verification walks the archive manually
-	// and delegates to the backup package's readTarGz-equivalent helper.
-	manifestBytes, _, _, err := extractFromArchive(f)
-	if err != nil {
-		jsonError(w, http.StatusBadRequest, "parse archive: "+err.Error())
-		return
-	}
-	var m backup.Manifest
-	if err := json.Unmarshal(manifestBytes, &m); err != nil {
-		jsonError(w, http.StatusBadRequest, "parse manifest: "+err.Error())
+		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	_, _, _ = h.audit.Log(r.Context(), audit.Event{
@@ -384,10 +359,15 @@ func (h *Backups) Verify(w http.ResponseWriter, r *http.Request) {
 		ActorID:    &subj.UserID,
 		Action:     "backup.verify",
 		TargetKind: "backup",
-		TargetID:   m.RootHash,
-		After:      map[string]any{"org_name": m.OrgName, "tables": len(m.Tables)},
+		TargetID:   result.Manifest.RootHash,
+		After:      map[string]any{"org_name": result.Manifest.OrgName, "tables": len(result.Manifest.Tables), "verified": result.Verified},
 	})
-	writeJSON(w, 200, m)
+	manifest := result.Manifest
+	manifest.SignerIdentity = result.SignerIdentity
+	writeJSON(w, http.StatusOK, struct {
+		backup.Manifest
+		Verified bool `json:"verified"`
+	}{Manifest: manifest, Verified: result.Verified})
 }
 
 // Restore accepts a tarball upload and applies it to the destination. Conflict policy is
@@ -434,7 +414,7 @@ func (h *Backups) Restore(w http.ResponseWriter, r *http.Request) {
 	allowUnverified := os.Getenv("CONSTELLATION_BACKUP_ALLOW_UNVERIFIED") == "true"
 
 	res, err := backup.Restore(r.Context(), h.db.Pool(), backup.RestoreOptions{
-		In:              r.Body,
+		In:              http.MaxBytesReader(w, r.Body, 256<<20),
 		Verify:          verify,
 		AllowUnverified: allowUnverified,
 		OnConflict:      policy,

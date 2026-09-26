@@ -16,16 +16,18 @@ import (
 
 // RT-KILL-02: the :pending endpoint must return only the calling node's pending rows,
 // org-scoped by the token — never another org's rows, another node's rows, or terminal
-// rows; node='' rows are broadcast to every node.
+// rows; actions without a node are broadcast to every node.
 func TestResponseActions_PendingNodeAndOrgScoped(t *testing.T) {
 	d := openTestDB(t)
-	defer d.Close()
+	t.Cleanup(d.Close)
 
 	ctx := context.Background()
 	pool := d.Pool()
 
 	orgA, orgB := uuid.New(), uuid.New()
-	clusterID := uuid.New()
+	clusterID, otherClusterID := uuid.New(), uuid.New()
+	tokenA := seedBoundRuntimeAgentScope(t, d, orgA, clusterID)
+	seedBoundRuntimeAgentScope(t, d, orgB, otherClusterID)
 	wantWL := "ns/target-" + uuid.New().String()
 
 	// org A / node-a / pending  -> WANT
@@ -49,7 +51,7 @@ func TestResponseActions_PendingNodeAndOrgScoped(t *testing.T) {
 		if _, err := pool.Exec(ctx, `
 INSERT INTO runtime_response_actions (org_id, cluster_id, node, type, workload_id, state)
 VALUES ($1, $2, $3, 'kill_process', $4, $5)`,
-			s.org, clusterID, s.node, s.wl, s.state); err != nil {
+			s.org, map[uuid.UUID]uuid.UUID{orgA: clusterID, orgB: otherClusterID}[s.org], s.node, s.wl, s.state); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
 	}
@@ -61,7 +63,7 @@ VALUES ($1, $2, $3, 'kill_process', $4, $5)`,
 	h := NewResponseActions(d)
 	req := httptest.NewRequest(http.MethodGet,
 		"/api/v1/runtime/response-actions:pending?cluster_id="+clusterID.String()+"&node=node-a", nil)
-	req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(), &handler.RuntimeAgentToken{OrgID: orgA}))
+	req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(), tokenA))
 	w := httptest.NewRecorder()
 	h.Pending(w, req)
 	if w.Code != http.StatusOK {
@@ -90,13 +92,14 @@ VALUES ($1, $2, $3, 'kill_process', $4, $5)`,
 // completed_at, and only touches the token org's rows.
 func TestResponseActions_ResultFlipsState(t *testing.T) {
 	d := openTestDB(t)
-	defer d.Close()
+	t.Cleanup(d.Close)
 
 	ctx := context.Background()
 	pool := d.Pool()
 
 	orgID := uuid.New()
 	clusterID := uuid.New()
+	token := seedBoundRuntimeAgentScope(t, d, orgID, clusterID)
 
 	var id uuid.UUID
 	if err := pool.QueryRow(ctx, `
@@ -114,7 +117,7 @@ VALUES ($1, $2, 'node-a', 'kill_process', 'ns/api', 'pending') RETURNING id`,
 	})
 	h := NewResponseActions(d)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/runtime/response-actions:result", bytes.NewReader(body))
-	req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(), &handler.RuntimeAgentToken{OrgID: orgID}))
+	req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(), token))
 	w := httptest.NewRecorder()
 	h.Result(w, req)
 	if w.Code != http.StatusOK {
@@ -157,7 +160,7 @@ VALUES ($1, $2, 'kill_process', 'ns/api2', 'pending') RETURNING id`, orgID, clus
 // kill_process row scoped to the workload/org/cluster.
 func TestQuarantineRuntime_KillEnqueues(t *testing.T) {
 	d := openTestDB(t)
-	defer d.Close()
+	t.Cleanup(d.Close)
 
 	ctx := context.Background()
 	pool := d.Pool()

@@ -1,5 +1,7 @@
 SHELL := /bin/bash
 GO ?= go
+GOLANGCI_LINT ?= golangci-lint
+NODE_VERSION ?= $(shell cat .node-version)
 
 # Container image build settings.
 #
@@ -48,11 +50,52 @@ build:
 test:
 	$(GO) test ./...
 
+.PHONY: test-clean-database
+test-clean-database:
+	bash scripts/test-clean-database.sh
+
+.PHONY: test-browser
+test-browser:
+	bash scripts/test-browser.sh
+
 vet:
 	$(GO) vet ./...
 
 lint:
-	@command -v golangci-lint >/dev/null && golangci-lint run || echo "golangci-lint not installed; skipping"
+	@command -v "$(GOLANGCI_LINT)" >/dev/null || { echo "golangci-lint is required; run make tools" >&2; exit 1; }
+	@mkdir -p "$${ARTIFACT_DIR:-test-results/tooling}"
+	$(GOLANGCI_LINT) run --output.json.path="$${ARTIFACT_DIR:-test-results/tooling}/golangci-lint.json" ./...
+
+.PHONY: tools fmt lint-shell test-tooling check-endpoint-mapping test-race test-integration security check vet frontend-test
+tools:
+	bash scripts/install-ci-tools.sh
+
+fmt:
+	@mkdir -p "$${ARTIFACT_DIR:-test-results/tooling}"
+	$(GOLANGCI_LINT) fmt --diff ./... > "$${ARTIFACT_DIR:-test-results/tooling}/format.diff"
+	@test ! -s "$${ARTIFACT_DIR:-test-results/tooling}/format.diff" || { cat "$${ARTIFACT_DIR:-test-results/tooling}/format.diff"; exit 1; }
+
+lint-shell:
+	bash scripts/lint-shell.sh
+
+test-tooling:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -v
+
+check-endpoint-mapping:
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_endpoint_mapping.py
+
+test-race:
+	bash scripts/test-go.sh unit
+
+test-integration:
+	bash scripts/test-go.sh integration
+
+security:
+	bash scripts/security-scan.sh gosec
+	bash scripts/security-scan.sh govulncheck
+	bash scripts/security-scan.sh gitleaks
+
+check: lint vet fmt test-tooling check-endpoint-mapping test-race
 
 migrate:
 	@command -v goose >/dev/null || (echo "install goose: https://github.com/pressly/goose" && exit 1)
@@ -150,7 +193,7 @@ image-audit-archiver:
 	$(DOCKER_BUILD) -f deploy/docker/Dockerfile.archiver -t $(REGISTRY)/audit-archiver:$(VERSION) --load .
 
 image-frontend:
-	$(DOCKER_BUILD) -f deploy/docker/Dockerfile.frontend -t $(REGISTRY)/frontend:$(VERSION) --load .
+	$(DOCKER_BUILD) --build-arg NODE_VERSION=$(NODE_VERSION) -f deploy/docker/Dockerfile.frontend -t $(REGISTRY)/frontend:$(VERSION) --load .
 
 # image-admission builds the constellation-admission ValidatingAdmissionWebhook
 # server image. Deployed by the Helm chart's admission-deployment template;
@@ -234,7 +277,7 @@ images-push:
 	$(DOCKER_BUILD) -f deploy/docker/Dockerfile.operator      -t $(REGISTRY)/operator:$(VERSION)       --push .
 	$(DOCKER_BUILD) -f deploy/docker/Dockerfile.discoverer    -t $(REGISTRY)/discoverer:$(VERSION)     --push .
 	$(DOCKER_BUILD) -f deploy/docker/Dockerfile.archiver      -t $(REGISTRY)/audit-archiver:$(VERSION) --push .
-	$(DOCKER_BUILD) -f deploy/docker/Dockerfile.frontend      -t $(REGISTRY)/frontend:$(VERSION)       --push .
+	$(DOCKER_BUILD) --build-arg NODE_VERSION=$(NODE_VERSION) -f deploy/docker/Dockerfile.frontend      -t $(REGISTRY)/frontend:$(VERSION)       --push .
 	$(DOCKER_BUILD) -f deploy/docker/Dockerfile.admission     -t $(REGISTRY)/admission:$(VERSION)      --push .
 	$(DOCKER_BUILD) -f deploy/docker/Dockerfile.migrate       -t $(REGISTRY)/migrate:$(VERSION)        --push .
 	$(DOCKER_BUILD) -f deploy/docker/Dockerfile.bootstrap     -t $(REGISTRY)/bootstrap:$(VERSION)      --push .
@@ -289,7 +332,7 @@ compose-image-operator:
 	$(COMPOSE_BUILD) -f deploy/docker/Dockerfile.operator -t constellation/operator:dev .
 
 compose-image-frontend:
-	$(COMPOSE_BUILD) -f deploy/docker/Dockerfile.frontend -t constellation/frontend:dev .
+	$(COMPOSE_BUILD) --build-arg NODE_VERSION=$(NODE_VERSION) -f deploy/docker/Dockerfile.frontend -t constellation/frontend:dev .
 
 compose-image-seed:
 	$(COMPOSE_BUILD) -f deploy/docker/Dockerfile.seed             -t constellation/seed:dev             .
