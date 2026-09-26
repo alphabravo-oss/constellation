@@ -303,6 +303,120 @@ func TestOrgWideGroupReferencesCannotBeHiddenByClusterFilter(t *testing.T) {
 	}
 }
 
+func TestGroupMutationWaitsForConcurrentReferenceWrite(t *testing.T) {
+	for _, method := range []string{http.MethodPut, http.MethodDelete} {
+		for _, referenceKind := range []string{"network", "dpi", "response", "admission"} {
+			t.Run(method+"/"+referenceKind, func(t *testing.T) {
+				database := openTestDB(t)
+				t.Cleanup(database.Close)
+				ctx := context.Background()
+				pool := database.Pool()
+				orgID, userID, clusterID, groupID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+				groupName := "concurrent-" + groupID.String()[:8]
+				t.Cleanup(func() {
+					_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id=$1`, orgID)
+				})
+				for _, statement := range []struct {
+					query string
+					args  []any
+				}{
+					{`INSERT INTO orgs (id, name, display_name) VALUES ($1, $2, 'Concurrent Group Test')`, []any{orgID, "concurrent-group-" + orgID.String()}},
+					{`INSERT INTO users (id, org_id, email, display_name) VALUES ($1, $2, $3, 'Concurrent Group User')`, []any{userID, orgID, "concurrent-group-" + userID.String() + "@example.com"}},
+					{`INSERT INTO clusters (id, org_id, name, state) VALUES ($1, $2, 'concurrent-cluster', 'connected')`, []any{clusterID, orgID}},
+					{`INSERT INTO groups (id, org_id, name, kind, criteria, members, policy_mode, profile_mode) VALUES ($1, $2, $3, 'ground', '[]'::jsonb, '[]'::jsonb, 'monitor', 'monitor')`, []any{groupID, orgID, groupName}},
+				} {
+					if _, err := pool.Exec(ctx, statement.query, statement.args...); err != nil {
+						t.Fatal(err)
+					}
+				}
+				writer, err := pool.Begin(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer writer.Rollback(ctx)
+				var referenceQuery string
+				var referenceArgs []any
+				switch referenceKind {
+				case "network":
+					referenceQuery = `
+INSERT INTO group_rule_edges (org_id, cluster_id, from_group, to_group, ports, mode)
+VALUES ($1, $2, $3, 'peer', '[]'::jsonb, 'monitor')`
+					referenceArgs = []any{orgID, clusterID, groupName}
+				case "dpi":
+					referenceQuery = `INSERT INTO group_dpi_sensor_bindings (org_id, group_id, sensor_kind, sensor_id) VALUES ($1, $2, 'dlp', $3)`
+					referenceArgs = []any{orgID, groupID, uuid.New()}
+				case "response":
+					referenceQuery = `INSERT INTO response_rules_v2 (org_id, cluster_id, name, description, enabled, event_type, conditions, actions, workload_match)
+VALUES ($1, $2, 'concurrent response', '', true, 'runtime', '[]'::jsonb, '[]'::jsonb, $3::jsonb)`
+					referenceArgs = []any{orgID, clusterID, `{"group":"` + groupName + `"}`}
+				case "admission":
+					referenceQuery = `INSERT INTO policies (org_id, cluster_id, name, description, engine, category, spec_yaml, enabled, mode)
+VALUES ($1, $2, 'concurrent admission', '', 'constellation-admission', 'admission', $3, true, 'enforce')`
+					referenceArgs = []any{orgID, clusterID, "spec:\n  match:\n    groups: [" + groupName + "]\n"}
+				}
+				if _, err := writer.Exec(ctx, referenceQuery, referenceArgs...); err != nil {
+					t.Fatal(err)
+				}
+				handler := NewGroups(database, audit.New(pool))
+				router := chi.NewRouter()
+				router.Put("/groups/{id}", handler.Update)
+				router.Delete("/groups/{id}", handler.Delete)
+				body := ""
+				if method == http.MethodPut {
+					body = `{"name":"` + groupName + `-renamed","kind":"ground","criteria":[],"policy_mode":"monitor","profile_mode":"monitor"}`
+				}
+				request := httptest.NewRequest(method, "/groups/"+groupID.String(), strings.NewReader(body))
+				request = request.WithContext(WithSubject(request.Context(), Subject{UserID: userID, OrgID: orgID}))
+				result := make(chan *httptest.ResponseRecorder, 1)
+				go func() {
+					response := httptest.NewRecorder()
+					router.ServeHTTP(response, request)
+					result <- response
+				}()
+				deadline := time.Now().Add(5 * time.Second)
+				for {
+					select {
+					case response := <-result:
+						t.Fatalf("mutation completed before reference commit: %d %s", response.Code, response.Body.String())
+					default:
+					}
+					var waiting int
+					if err := pool.QueryRow(ctx, `
+SELECT COUNT(*) FROM pg_stat_activity
+ WHERE pid <> pg_backend_pid()
+   AND datname = current_database()
+   AND query LIKE 'LOCK TABLE group_rule_edges, group_dpi_sensor_bindings, response_rules_v2, policies IN SHARE MODE%'
+   AND wait_event_type = 'Lock'`).Scan(&waiting); err != nil {
+						t.Fatal(err)
+					}
+					if waiting > 0 {
+						break
+					}
+					if time.Now().After(deadline) {
+						t.Fatal("group mutation did not wait for the uncommitted reference")
+					}
+					time.Sleep(10 * time.Millisecond)
+				}
+				if err := writer.Commit(ctx); err != nil {
+					t.Fatal(err)
+				}
+				select {
+				case response := <-result:
+					if response.Code != http.StatusConflict {
+						t.Fatalf("mutation status=%d body=%s, want 409", response.Code, response.Body.String())
+					}
+				case <-time.After(5 * time.Second):
+					t.Fatal("group mutation did not finish after reference commit")
+				}
+				var storedName string
+				if err := pool.QueryRow(ctx, `SELECT name FROM groups WHERE id=$1`, groupID).Scan(&storedName); err != nil || storedName != groupName {
+					t.Fatalf("group changed despite reference: name=%q err=%v", storedName, err)
+				}
+			})
+		}
+	}
+}
+
 func TestGroupsListIncludesMembershipPreview(t *testing.T) {
 	d := openTestDB(t)
 	defer d.Close()

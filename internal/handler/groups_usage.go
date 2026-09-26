@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"gopkg.in/yaml.v3"
 )
 
@@ -285,7 +286,16 @@ SELECT id::text, COALESCE(cluster_id::text, '') AS cluster_id, name, event_type,
 }
 
 func (h *Groups) groupAdmissionRuleUsage(ctx context.Context, orgID uuid.UUID, clusterArg any, groupID uuid.UUID, groupName string) ([]groupUsageReferenceDTO, error) {
-	rows, err := h.db.Pool().Query(ctx, `
+	return groupAdmissionRuleUsage(ctx, h.db.Pool(), orgID, clusterArg, groupID, groupName)
+}
+
+type groupReferenceQuerier interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+func groupAdmissionRuleUsage(ctx context.Context, queryer groupReferenceQuerier, orgID uuid.UUID, clusterArg any, groupID uuid.UUID, groupName string) ([]groupUsageReferenceDTO, error) {
+	rows, err := queryer.Query(ctx, `
 SELECT id::text,
        COALESCE(cluster_id::text, '') AS cluster_id,
        name,
@@ -471,10 +481,10 @@ func normalizeGroupMembers(in []string) []string {
 	return out
 }
 
-func (h *Groups) groupBlockingReferenceCount(ctx context.Context, orgID uuid.UUID, groupID uuid.UUID, groupName string) (int, error) {
+func groupBlockingReferenceCount(ctx context.Context, queryer groupReferenceQuerier, orgID uuid.UUID, groupID uuid.UUID, groupName string) (int, error) {
 	total := 0
 	var networkCount int
-	if err := h.db.Pool().QueryRow(ctx, `
+	if err := queryer.QueryRow(ctx, `
 SELECT COUNT(*)
   FROM group_rule_edges
  WHERE org_id = $1
@@ -483,7 +493,7 @@ SELECT COUNT(*)
 	}
 	total += networkCount
 	var dpiCount int
-	if err := h.db.Pool().QueryRow(ctx, `
+	if err := queryer.QueryRow(ctx, `
 SELECT COUNT(*)
   FROM group_dpi_sensor_bindings
  WHERE org_id = $1
@@ -492,7 +502,7 @@ SELECT COUNT(*)
 	}
 	total += dpiCount
 	var responseCount int
-	if err := h.db.Pool().QueryRow(ctx, `
+	if err := queryer.QueryRow(ctx, `
 SELECT COUNT(*)
   FROM response_rules_v2
  WHERE org_id = $1
@@ -501,7 +511,7 @@ SELECT COUNT(*)
 		return 0, err
 	}
 	total += responseCount
-	admissionRefs, err := h.groupAdmissionRuleUsage(ctx, orgID, nil, groupID, groupName)
+	admissionRefs, err := groupAdmissionRuleUsage(ctx, queryer, orgID, nil, groupID, groupName)
 	if err != nil {
 		return 0, err
 	}

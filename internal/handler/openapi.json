@@ -33,6 +33,66 @@
       }
     },
     "schemas": {
+      "DPISensorBinding": {
+        "type": "object",
+        "required": [
+          "id",
+          "org_id",
+          "group_id",
+          "sensor_kind",
+          "sensor_id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "org_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "group_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sensor_kind": {
+            "type": "string",
+            "enum": [
+              "dlp",
+              "waf"
+            ]
+          },
+          "sensor_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "CreateDPISensorBindingRequest": {
+        "type": "object",
+        "required": [
+          "group_id",
+          "sensor_kind"
+        ],
+        "properties": {
+          "group_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sensor_kind": {
+            "type": "string",
+            "enum": [
+              "dlp",
+              "waf"
+            ]
+          },
+          "sensor_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Optional. When omitted, the server uses the stable all-current-rules sensor ID for the selected kind."
+          }
+        }
+      },
       "SupportBundleJob": {
         "type": "object",
         "required": [
@@ -3655,6 +3715,7 @@
           {
             "name": "cluster_id",
             "in": "query",
+            "description": "Selects the group and scopes member-derived profile references to this cluster. Direct policy and sensor references are reported across the organization.",
             "schema": {
               "type": "string",
               "format": "uuid"
@@ -3692,6 +3753,8 @@
                         "dpi_sensor_bindings",
                         "process_profiles",
                         "file_profiles",
+                        "response_rules",
+                        "admission_rules",
                         "derived_references",
                         "member_targets",
                         "delete_blocked"
@@ -3713,6 +3776,12 @@
                           "type": "integer"
                         },
                         "file_profiles": {
+                          "type": "integer"
+                        },
+                        "response_rules": {
+                          "type": "integer"
+                        },
+                        "admission_rules": {
                           "type": "integer"
                         },
                         "derived_references": {
@@ -3807,11 +3876,18 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
           "default": {
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Get group usage"
+        "summary": "Get group usage",
+        "description": "Returns references to a group, summary counts, and coverage status. Blocking references prevent group deletion. Requires read_findings."
       }
     },
     "/api/v1/groups:export": {
@@ -6586,37 +6662,111 @@
       "get": {
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Bindings in the caller's organization.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "bindings"
+                  ],
+                  "properties": {
+                    "bindings": {
+                      "type": [
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "$ref": "#/components/schemas/DPISensorBinding"
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Get dpi-sensor-bindings"
+        "summary": "List DLP/WAF group bindings",
+        "description": "Lists all DLP and WAF sensor bindings in the caller's organization. Requires read_findings."
       },
       "post": {
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDPISensorBindingRequest"
+              }
+            }
+          }
+        },
         "responses": {
-          "200": {
-            "description": "ok"
+          "201": {
+            "description": "Created or existing binding. Repeated requests for the same group, kind, and sensor return the existing binding ID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DPISensorBinding"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Create dpi-sensor-bindings"
+        "summary": "Bind a DLP/WAF sensor to a group",
+        "description": "Attaches a DLP or WAF sensor to a group in the caller's organization. Requires manage_policies."
       }
     },
     "/api/v1/runtime/dpi-sensor-bindings/{id}": {
       "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Binding ID processed. An absent ID also returns success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "deleted"
+                  ],
+                  "properties": {
+                    "deleted": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Delete dpi-sensor-bindings"
+        "summary": "Unbind a DLP/WAF sensor from a group",
+        "description": "Deletes the binding with this ID in the caller's organization. Requires manage_policies."
       }
     },
     "/api/v1/runtime/file-profile-rules:bundle": {

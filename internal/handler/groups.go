@@ -347,35 +347,37 @@ func (h *Groups) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	subj, _ := SubjectFrom(r.Context())
-	// Fed (master-authored) groups are read-only on a joint; reject local edits so
-	// they cannot drift from the master before the next sync overwrites them.
-	if isFed, err := groupIsFed(r.Context(), h.db.Pool(), id, subj.OrgID); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	} else if isFed {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": errFedReadOnly.Error()})
-		return
-	}
 	clusterArg, err := parseClusterIDParam(r)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	tx, err := h.beginGroupReferenceMutation(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	defer tx.Rollback(r.Context())
 	var currentName, currentLearnedFrom, currentCfgType string
 	var currentKind group.Kind
 	var currentCriteriaRaw, currentMembersRaw []byte
-	if err := h.db.Pool().QueryRow(r.Context(), `
+	if err := tx.QueryRow(r.Context(), `
 SELECT name, kind, criteria, members, learned_from, cfg_type
   FROM groups
  WHERE id=$1
    AND org_id=$2
-   AND ($3::uuid IS NULL OR cluster_id IS NULL OR cluster_id = $3)`,
+   AND ($3::uuid IS NULL OR cluster_id IS NULL OR cluster_id = $3)
+ FOR UPDATE`,
 		id, subj.OrgID, clusterArg).Scan(&currentName, &currentKind, &currentCriteriaRaw, &currentMembersRaw, &currentLearnedFrom, &currentCfgType); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 			return
 		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if currentCfgType == "fed" {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": errFedReadOnly.Error()})
 		return
 	}
 	var currentMembers []string
@@ -394,7 +396,7 @@ SELECT name, kind, criteria, members, learned_from, cfg_type
 		}
 	}
 	if len(changedFields) > 0 {
-		blockingRefs, err := h.groupBlockingReferenceCount(r.Context(), subj.OrgID, id, currentName)
+		blockingRefs, err := groupBlockingReferenceCount(r.Context(), tx, subj.OrgID, id, currentName)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -410,7 +412,7 @@ SELECT name, kind, criteria, members, learned_from, cfg_type
 	}
 	criteria, _ := json.Marshal(body.Criteria)
 	members, _ := json.Marshal(memberIDs)
-	tag, err := h.db.Pool().Exec(r.Context(), `
+	tag, err := tx.Exec(r.Context(), `
 UPDATE groups SET name=$1, kind=$2, comment=$3, criteria=$4, members=$5, learned_from=$6, cfg_type=$7, policy_mode=$8, profile_mode=$9, updated_at=NOW()
  WHERE id=$10 AND org_id=$11`,
 		g.Name, body.Kind, body.Comment, criteria, members, body.LearnedFrom, body.CfgType, g.PolicyMode, g.ProfileMode, id, subj.OrgID)
@@ -420,6 +422,10 @@ UPDATE groups SET name=$1, kind=$2, comment=$3, criteria=$4, members=$5, learned
 	}
 	if tag.RowsAffected() == 0 {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	h.maybePropagateGroupMode(r.Context(), subj.OrgID, clusterArg, memberIDs, g.ProfileMode)
@@ -480,11 +486,15 @@ func (h *Groups) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	subj, _ := SubjectFrom(r.Context())
-	// Capture name + fed status before deleting: reject local deletes of fed rows,
-	// and emit a delete tombstone for master-owned ones so joints drop their copy.
+	tx, err := h.beginGroupReferenceMutation(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	defer tx.Rollback(r.Context())
 	var name, cfgType string
-	if err := h.db.Pool().QueryRow(r.Context(),
-		`SELECT name, cfg_type FROM groups WHERE id=$1 AND org_id=$2`, id, subj.OrgID).
+	if err := tx.QueryRow(r.Context(),
+		`SELECT name, cfg_type FROM groups WHERE id=$1 AND org_id=$2 FOR UPDATE`, id, subj.OrgID).
 		Scan(&name, &cfgType); err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
@@ -493,7 +503,7 @@ func (h *Groups) Delete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": errFedReadOnly.Error()})
 		return
 	}
-	blockingRefs, err := h.groupBlockingReferenceCount(r.Context(), subj.OrgID, id, name)
+	blockingRefs, err := groupBlockingReferenceCount(r.Context(), tx, subj.OrgID, id, name)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -505,7 +515,11 @@ func (h *Groups) Delete(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if _, err := h.db.Pool().Exec(r.Context(), `DELETE FROM groups WHERE id=$1 AND org_id=$2`, id, subj.OrgID); err != nil {
+	if _, err := tx.Exec(r.Context(), `DELETE FROM groups WHERE id=$1 AND org_id=$2`, id, subj.OrgID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -516,4 +530,16 @@ func (h *Groups) Delete(w http.ResponseWriter, r *http.Request) {
 	// G3a: propagate the deletion to joints via a tombstone revision (master only).
 	logFedRevision(r.Context(), h.db.Pool(), oid, "group_delete", id.String(), fedSyncPayload{OrgID: oid, Name: name})
 	writeJSON(w, http.StatusNoContent, nil)
+}
+
+func (h *Groups) beginGroupReferenceMutation(ctx context.Context) (pgx.Tx, error) {
+	tx, err := h.db.Pool().Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `LOCK TABLE group_rule_edges, group_dpi_sensor_bindings, response_rules_v2, policies IN SHARE MODE`); err != nil {
+		_ = tx.Rollback(ctx)
+		return nil, err
+	}
+	return tx, nil
 }

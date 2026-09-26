@@ -159,6 +159,45 @@ func TestGroupSensorBindings_HTTP_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestGroupSensorBindings_RejectForeignOrgGroup(t *testing.T) {
+	database := openTestDB(t)
+	t.Cleanup(database.Close)
+	ctx := context.Background()
+	pool := database.Pool()
+	ownerOrgID, otherOrgID, otherUserID, groupID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id=ANY($1)`, []uuid.UUID{ownerOrgID, otherOrgID})
+	})
+	for _, statement := range []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO orgs (id, name, display_name) VALUES ($1, $2, 'Binding Owner')`, []any{ownerOrgID, "binding-owner-" + ownerOrgID.String()}},
+		{`INSERT INTO orgs (id, name, display_name) VALUES ($1, $2, 'Binding Other')`, []any{otherOrgID, "binding-other-" + otherOrgID.String()}},
+		{`INSERT INTO users (id, org_id, email, display_name) VALUES ($1, $2, $3, 'Binding Other User')`, []any{otherUserID, otherOrgID, "binding-other-" + otherUserID.String() + "@example.com"}},
+		{`INSERT INTO groups (id, org_id, name, kind, criteria) VALUES ($1, $2, $3, 'ground', '[]'::jsonb)`, []any{groupID, ownerOrgID, "binding-owner-group-" + groupID.String()}},
+	} {
+		if _, err := pool.Exec(ctx, statement.query, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	body, err := json.Marshal(BindRequest{GroupID: groupID, SensorKind: SensorKindDLP})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/runtime/dpi-sensor-bindings", bytes.NewReader(body))
+	request = request.WithContext(authctx.WithSubject(request.Context(), authctx.Subject{UserID: otherUserID, OrgID: otherOrgID}))
+	response := httptest.NewRecorder()
+	NewGroupSensorBindingsHTTP(database, nil).Bind(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("foreign group bind status=%d body=%s", response.Code, response.Body.String())
+	}
+	var count int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM group_dpi_sensor_bindings WHERE group_id=$1`, groupID).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("foreign group binding count=%d err=%v", count, err)
+	}
+}
+
 // TestGroupSensorBindings_BoundGroupDefs asserts the bundle helper returns the
 // selector of a bound group and omits an unbound one.
 func TestGroupSensorBindings_BoundGroupDefs(t *testing.T) {

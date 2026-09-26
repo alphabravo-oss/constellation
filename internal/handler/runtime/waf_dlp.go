@@ -3,11 +3,13 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"sort"
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler"
@@ -256,8 +258,9 @@ func (s *GroupSensorBindingStore) Bind(ctx context.Context, orgID, groupID uuid.
 	var id uuid.UUID
 	err := s.db.Pool().QueryRow(ctx, `
 INSERT INTO group_dpi_sensor_bindings (org_id, group_id, sensor_kind, sensor_id, created_by)
-VALUES ($1,$2,$3,$4,$5)
+SELECT $1, g.id, $3, $4, $5 FROM groups g WHERE g.id = $2 AND g.org_id = $1
 ON CONFLICT (group_id, sensor_kind, sensor_id) DO UPDATE SET sensor_id = EXCLUDED.sensor_id
+WHERE group_dpi_sensor_bindings.org_id = EXCLUDED.org_id
 RETURNING id`, orgID, groupID, string(kind), sensorID, by).Scan(&id)
 	return id, err
 }
@@ -449,8 +452,10 @@ func (h *GroupSensorBindingsHTTP) Bind(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := h.store.Bind(r.Context(), sub.OrgID, req.GroupID, req.SensorKind, req.SensorID, &sub.UserID)
 	if err != nil {
-		// A group_id that isn't in this org trips the FK; surface it as a 400
-		// rather than a 500 so the caller can correct it.
+		if errors.Is(err, pgx.ErrNoRows) {
+			jsonError(w, http.StatusBadRequest, "group not found")
+			return
+		}
 		if strings.Contains(err.Error(), "foreign key") || strings.Contains(err.Error(), "violates") {
 			jsonError(w, http.StatusBadRequest, "group not found")
 			return
