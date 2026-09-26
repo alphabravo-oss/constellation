@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import type { ReactNode } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
   BellRing,
@@ -33,6 +33,22 @@ interface PolicyFamily {
   ordered?: boolean;
   portable?: "network-rules" | "dlp" | "signatures" | "groups" | "vuln-profiles";
 }
+
+type ChangeFamily = Exclude<NonNullable<PolicyFamily["portable"]>, "network-rules">;
+
+const changeQueryKeys: Record<ChangeFamily, string> = {
+  dlp: "runtime-dlp-rules",
+  signatures: "runtime-signatures",
+  groups: "groups",
+  "vuln-profiles": "vuln-profiles",
+};
+
+const changeScopes: Record<ChangeFamily, string> = {
+  dlp: "Active listed cluster rules only",
+  signatures: "Active listed cluster signatures only",
+  groups: "Visible cluster and org-wide groups",
+  "vuln-profiles": "Visible cluster and org-wide profiles",
+};
 
 const policyFamilies: PolicyFamily[] = [
   {
@@ -158,16 +174,20 @@ function diagnosticFamily(item: MigrationUnsupported): string | null {
   return diagnosticFamilies[item.kind] ?? null;
 }
 
-function MigrationDiagnostics({ diagnostics }: { diagnostics: MigrationDiagnostic[] }) {
+function MigrationDiagnostics({ diagnostics, clusterId }: { diagnostics: MigrationDiagnostic[]; clusterId?: string }) {
   return (
-    <div className="space-y-2 border-t pt-3 text-xs" aria-label="Org migration diagnostics">
+    <div className="space-y-2 border-t pt-3 text-xs" aria-label="Saved NeuVector migration diagnostics">
       <div className="font-medium text-foreground">NeuVector migration diagnostics · org history</div>
       {diagnostics.map(({ item, importRecord }, index) => (
         <div key={`${importRecord.id}:${index}`} className="rounded border bg-muted/30 p-2">
           <div className="font-medium text-foreground">{item.kind} · {item.name}</div>
           <div>{item.reason}</div>
           {item.suggestion ? <div>Suggestion: {item.suggestion}</div> : null}
-          <div className="mt-1 text-muted-foreground">Import {importRecord.id} · {importRecord.status} · {importRecord.created_at}</div>
+          <div className="mt-1 text-muted-foreground">
+            Import {importRecord.id} · {importRecord.status} · {importRecord.created_at} · {importRecord.target_cluster_id
+              ? importRecord.target_cluster_id === clusterId ? "Target: selected cluster" : `Target: other cluster (${importRecord.target_cluster_id})`
+              : "Target: unknown or unspecified (including legacy imports)"}
+          </div>
         </div>
       ))}
     </div>
@@ -177,11 +197,18 @@ function MigrationDiagnostics({ diagnostics }: { diagnostics: MigrationDiagnosti
 export function PolicyCenterPage() {
   const { clusterId } = useCluster();
   const queryClient = useQueryClient();
-  const importsQuery = useQuery({ queryKey: ["migration-imports"], queryFn: () => enterprise.migrationImports() });
-  const diagnostics: MigrationDiagnostic[] = (importsQuery.isError ? [] : importsQuery.data ?? [])
+  const importsQuery = useInfiniteQuery({
+    queryKey: ["migration-imports-pages"],
+    queryFn: ({ pageParam }) => enterprise.migrationImportsPage({ limit: 25, offset: pageParam }),
+    initialPageParam: 0,
+    getNextPageParam: (page) => page.has_more ? page.next_offset : undefined,
+  });
+  const diagnostics: MigrationDiagnostic[] = (importsQuery.data?.pages.flatMap((page) => page.imports) ?? [])
     .filter((importRecord) => importRecord.source === "neuvector")
     .flatMap((importRecord) => (importRecord.unsupported ?? []).map((item) => ({ item, importRecord })));
-  const generalDiagnostics = diagnostics.filter(({ item }) => diagnosticFamily(item) === null);
+  const relevantDiagnostics = diagnostics.filter(({ importRecord }) => !importRecord.target_cluster_id || importRecord.target_cluster_id === clusterId);
+  const otherClusterDiagnostics = diagnostics.filter(({ importRecord }) => importRecord.target_cluster_id && importRecord.target_cluster_id !== clusterId);
+  const generalDiagnostics = relevantDiagnostics.filter(({ item }) => diagnosticFamily(item) === null);
   const to = (route: string) => clusterId ? `/clusters/${clusterId}/${route}` : "/clusters";
 
   return (
@@ -209,7 +236,7 @@ export function PolicyCenterPage() {
 
       <PageSection
         title="Policy Families"
-        description="Every enforcement and detection surface reachable from one place. Migration diagnostics below are org history; import records do not identify a target cluster. They do not describe this cluster's current policies."
+        description="Every enforcement and detection surface reachable from one place. Saved migration diagnostics are import-time findings, not this cluster's current policies. Selected-cluster and unknown-target records are labeled separately; other-cluster records appear below."
       >
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3" data-testid="policy-family-grid">
           {policyFamilies.map((family) => (
@@ -232,8 +259,13 @@ export function PolicyCenterPage() {
                     ))}
                     {family.ordered ? <span className="rounded bg-muted px-2 py-1">ordered</span> : null}
                     {family.portable ? <span className="rounded bg-muted px-2 py-1">yaml</span> : null}
-                    <span className="rounded bg-muted px-2 py-1">cluster scoped</span>
+                    <span className="rounded bg-muted px-2 py-1">
+                      {family.portable === "groups" || family.portable === "vuln-profiles" ? "cluster + org scoped" : "cluster scoped"}
+                    </span>
                   </div>
+                  {family.portable && family.portable !== "network-rules" ? (
+                    <PolicyFamilyLastChanged family={family.portable} clusterId={clusterId} />
+                  ) : null}
                   <div className="flex flex-wrap gap-2">
                     <Button asChild size="sm" variant="primary">
                       <Link to={to(family.route)} aria-label={`Open ${family.title}`}>Open</Link>
@@ -251,25 +283,71 @@ export function PolicyCenterPage() {
                   </div>
                 </div>
               </Card>
-              {diagnostics.some(({ item }) => diagnosticFamily(item) === family.route) ? (
-                <MigrationDiagnostics diagnostics={diagnostics.filter(({ item }) => diagnosticFamily(item) === family.route)} />
+              {relevantDiagnostics.some(({ item }) => diagnosticFamily(item) === family.route) ? (
+                <MigrationDiagnostics diagnostics={relevantDiagnostics.filter(({ item }) => diagnosticFamily(item) === family.route)} clusterId={clusterId} />
               ) : null}
             </div>
           ))}
         </div>
       </PageSection>
-      <PageSection title="Migration Diagnostics" description="Org-wide saved NeuVector imports. These records are not attributed to the selected cluster.">
+      <PageSection title="Migration Diagnostics" description="Org-wide saved NeuVector import history. Only records with a matching target ID are attributed to the selected cluster; missing IDs remain unknown or unspecified. Loaded pages may not cover all history.">
         {importsQuery.isPending ? <p role="status">Loading migration diagnostics…</p> : null}
-        {importsQuery.isError ? <p role="alert">Migration diagnostics are unavailable. Review saved imports on the Migration Imports page.</p> : null}
-        {importsQuery.isSuccess && diagnostics.length === 0 ? <p>No saved NeuVector unsupported diagnostics in the available import history.</p> : null}
+        {importsQuery.isError && !importsQuery.isFetchNextPageError ? (
+          <p role="alert">{importsQuery.data
+            ? "Could not refresh migration diagnostics; showing previously loaded history."
+            : "Migration diagnostics are unavailable. Review saved imports on the Migration Imports page."}</p>
+        ) : null}
+        {importsQuery.data && !importsQuery.isError && diagnostics.length === 0 ? <p>No saved NeuVector unsupported diagnostics in loaded import history.</p> : null}
         {generalDiagnostics.length > 0 ? (
           <div data-testid="migration-general-diagnostics">
             <h3 className="text-sm font-medium">Other unsupported objects</h3>
-            <MigrationDiagnostics diagnostics={generalDiagnostics} />
+            <MigrationDiagnostics diagnostics={generalDiagnostics} clusterId={clusterId} />
           </div>
+        ) : null}
+        {otherClusterDiagnostics.length > 0 ? (
+          <div data-testid="migration-other-cluster-diagnostics">
+            <h3 className="text-sm font-medium">Other cluster imports</h3>
+            <MigrationDiagnostics diagnostics={otherClusterDiagnostics} clusterId={clusterId} />
+          </div>
+        ) : null}
+        {importsQuery.isFetchNextPageError ? <p role="alert">Could not load more migration history. Try again.</p> : null}
+        {importsQuery.hasNextPage ? (
+          <Button variant="outline" disabled={importsQuery.isFetchingNextPage} onClick={() => void importsQuery.fetchNextPage()}>
+            {importsQuery.isFetchingNextPage ? "Loading more…" : "Load more imports"}
+          </Button>
         ) : null}
       </PageSection>
     </PageContainer>
+  );
+}
+
+async function listedChangeTimes(family: ChangeFamily, clusterId: string): Promise<Array<string | undefined>> {
+  if (family === "dlp") return (await runtimeDLP.list(clusterId)).map((rule) => rule.updated_at);
+  if (family === "signatures") return (await runtimeSignatures.list(clusterId)).map((rule) => rule.updated_at);
+  if (family === "groups") return (await groupsApi.list({ cluster_id: clusterId })).groups.map((group) => group.updated_at);
+  return (await vulnProfiles.list({ cluster_id: clusterId })).profiles.map((profile) => profile.updated_at);
+}
+
+function PolicyFamilyLastChanged({ family, clusterId }: { family: ChangeFamily; clusterId?: string }) {
+  const changes = useQuery({
+    queryKey: [changeQueryKeys[family], clusterId, "policy-center-last-changed"],
+    queryFn: () => listedChangeTimes(family, clusterId ?? ""),
+    enabled: Boolean(clusterId),
+  });
+  const latest = changes.data?.reduce((mostRecent, value) => {
+    const timestamp = Date.parse(value ?? "");
+    return Number.isFinite(timestamp) ? Math.max(mostRecent, timestamp) : mostRecent;
+  }, Number.NEGATIVE_INFINITY);
+
+  return (
+    <div className="text-xs text-muted-foreground" data-testid={`policy-family-${family}-last-changed`}>
+      <div>
+        Latest listed change: {!clusterId ? "Select a cluster" : changes.isPending ? "Loading…" : changes.isError ? "Unavailable" : latest !== undefined && Number.isFinite(latest) ? (
+          <time dateTime={new Date(latest).toISOString()}>{new Date(latest).toLocaleString()}</time>
+        ) : changes.data?.length ? "Unavailable" : "No listed items"}
+      </div>
+      <div>{changeScopes[family]}</div>
+    </div>
   );
 }
 

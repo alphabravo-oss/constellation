@@ -11,6 +11,7 @@ import (
 	"path"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -187,6 +188,7 @@ type migrationPreviewDTO struct {
 	VulnerabilityProfiles []migrationPreviewVulnerabilityProfileDTO `json:"vulnerability_profiles"`
 	Registries            []migrationPreviewRegistryDTO             `json:"registries"`
 	ImportID              string                                    `json:"import_id,omitempty"`
+	TargetClusterID       string                                    `json:"target_cluster_id,omitempty"`
 	Summary               migrationPreviewSummaryDTO                `json:"summary"`
 	Policies              []migrationPreviewPolicyDTO               `json:"policies"`
 	FileProfiles          []migrationPreviewFileProfileDTO          `json:"file_profiles"`
@@ -208,16 +210,17 @@ type migrationUnsupportedDTO struct {
 }
 
 type migrationImportListItemDTO struct {
-	ID             string                     `json:"id"`
-	Source         string                     `json:"source"`
-	Status         string                     `json:"status"`
-	Summary        migrationPreviewSummaryDTO `json:"summary"`
-	AppliedSummary map[string]int             `json:"applied_summary,omitempty"`
-	Unsupported    []migrationUnsupportedDTO  `json:"unsupported,omitempty"`
-	Error          string                     `json:"error,omitempty"`
-	CreatedAt      string                     `json:"created_at"`
-	AppliedAt      string                     `json:"applied_at,omitempty"`
-	RolledBackAt   string                     `json:"rolled_back_at,omitempty"`
+	ID              string                     `json:"id"`
+	Source          string                     `json:"source"`
+	Status          string                     `json:"status"`
+	TargetClusterID string                     `json:"target_cluster_id,omitempty"`
+	Summary         migrationPreviewSummaryDTO `json:"summary"`
+	AppliedSummary  map[string]int             `json:"applied_summary,omitempty"`
+	Unsupported     []migrationUnsupportedDTO  `json:"unsupported,omitempty"`
+	Error           string                     `json:"error,omitempty"`
+	CreatedAt       string                     `json:"created_at"`
+	AppliedAt       string                     `json:"applied_at,omitempty"`
+	RolledBackAt    string                     `json:"rolled_back_at,omitempty"`
 }
 
 type policyRollbackSnapshot struct {
@@ -529,12 +532,13 @@ func (h *Enterprise) MigrationPreview(w http.ResponseWriter, r *http.Request) {
 	}
 	clusterIDRaw := strings.TrimSpace(req.ClusterID)
 	needsCluster := len(groups) > 0 || len(processProfiles) > 0 || len(dpiRules) > 0 || len(dpiBindings) > 0 || len(networkRules) > 0
-	if needsCluster || (len(fileProfiles) > 0 && clusterIDRaw != "") {
+	if needsCluster || clusterIDRaw != "" {
 		clusterID, err := uuid.Parse(strings.TrimSpace(req.ClusterID))
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "target cluster_id is required for NeuVector group, process profile, network rule, and DLP/WAF imports"})
 			return
 		}
+		clusterIDRaw = clusterID.String()
 		if h != nil && h.db != nil {
 			ok, err := h.migrationClusterExists(r, subj.OrgID, clusterID)
 			if err != nil {
@@ -657,6 +661,7 @@ func (h *Enterprise) MigrationPreview(w http.ResponseWriter, r *http.Request) {
 	out := migrationPreviewDTO{
 		VulnerabilityProfiles: vulnerabilityProfiles,
 		Registries:            registries,
+		TargetClusterID:       clusterIDRaw,
 		Summary:               summarizeMigrationPreview(source, sourceCounts, policies, fileProfiles, processProfiles, groups, dpiRules, dpiBindings, networkRules),
 		Policies:              policies,
 		FileProfiles:          fileProfiles,
@@ -710,8 +715,26 @@ func (h *Enterprise) MigrationPreview(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Enterprise) MigrationImports(w http.ResponseWriter, r *http.Request) {
+	limit := 25
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 100 {
+			jsonError(w, http.StatusBadRequest, "limit must be between 1 and 100")
+			return
+		}
+		limit = parsed
+	}
+	offset := 0
+	if raw := r.URL.Query().Get("offset"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 || parsed > 1000000 {
+			jsonError(w, http.StatusBadRequest, "offset must be between 0 and 1000000")
+			return
+		}
+		offset = parsed
+	}
 	if h == nil || h.db == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"imports": []migrationImportListItemDTO{}})
+		writeJSON(w, http.StatusOK, map[string]any{"imports": []migrationImportListItemDTO{}, "has_more": false})
 		return
 	}
 	subj, ok := SubjectFrom(r.Context())
@@ -724,8 +747,8 @@ SELECT id, source, status, preview_json, applied_json, unsupported_json, error,
        created_at, applied_at, rolled_back_at
   FROM migration_imports
  WHERE org_id = $1
- ORDER BY created_at DESC
- LIMIT 25`, subj.OrgID)
+ ORDER BY created_at DESC, id DESC
+ LIMIT $2 OFFSET $3`, subj.OrgID, limit+1, offset)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -757,7 +780,8 @@ SELECT id, source, status, preview_json, applied_json, unsupported_json, error,
 		_ = json.Unmarshal(unsupportedRaw, &unsupported)
 		item := migrationImportListItemDTO{
 			ID: id.String(), Source: source, Status: status, Summary: preview.Summary,
-			AppliedSummary: applied, Unsupported: unsupported, Error: errorText,
+			TargetClusterID: preview.TargetClusterID,
+			AppliedSummary:  applied, Unsupported: unsupported, Error: errorText,
 			CreatedAt: createdAt.UTC().Format(time.RFC3339),
 		}
 		if appliedAt != nil {
@@ -772,7 +796,12 @@ SELECT id, source, status, preview_json, applied_json, unsupported_json, error,
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"imports": out})
+	response := map[string]any{"imports": out, "has_more": len(out) > limit}
+	if len(out) > limit {
+		response["imports"] = out[:limit]
+		response["next_offset"] = offset + limit
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h *Enterprise) MigrationRollbackBundle(w http.ResponseWriter, r *http.Request) {

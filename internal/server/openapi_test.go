@@ -360,6 +360,97 @@ func TestOpenAPIDPISensorBindingSchemas(t *testing.T) {
 	}
 }
 
+func TestOpenAPINetworkRuleContracts(t *testing.T) {
+	basePath := "/api/v1/clusters/{id}/network-rules"
+	rule := openAPISchemaAt(t, "components", "schemas", "NetworkRule")
+	assertOpenAPIFields(t, rule,
+		[]string{"id", "comment", "from", "to", "ports", "action", "applications", "learned", "disable", "cfg_type", "priority", "match_counter", "last_match_timestamp"},
+		[]string{"id", "comment", "from", "to", "ports", "action", "applications", "learned", "disable", "cfg_type", "priority", "match_counter", "last_match_timestamp"})
+	mutation := openAPISchemaAt(t, "components", "schemas", "NetworkRuleMutation")
+	assertOpenAPIFields(t, mutation,
+		[]string{"from", "to", "ports", "applications", "action", "disable", "comment", "priority"},
+		[]string{"from", "to"})
+	list := openAPISchemaAt(t, "paths", basePath, "get", "responses", "200", "content", "application/json", "schema")
+	assertOpenAPIFields(t, list, []string{"cluster_id", "rules", "summary"}, []string{"cluster_id", "rules", "summary"})
+	if list["properties"].(map[string]any)["rules"].(map[string]any)["items"].(map[string]any)["$ref"] != "#/components/schemas/NetworkRule" {
+		t.Error("network rule list must use NetworkRule")
+	}
+	for _, method := range []string{"post", "put"} {
+		request := openAPISchemaAt(t, "paths", basePath, method, "requestBody", "content", "application/json", "schema")
+		if request["$ref"] != "#/components/schemas/NetworkRuleMutation" {
+			t.Errorf("%s request must use NetworkRuleMutation", method)
+		}
+		response := openAPISchemaAt(t, "paths", basePath, method, "responses", "200", "content", "application/json", "schema")
+		assertOpenAPIFields(t, response, []string{"ok", "id", "cfg_type"}, []string{"ok", "id", "cfg_type"})
+		if _, ok := openAPISchemaAt(t, "paths", basePath, method, "responses")["201"]; ok {
+			t.Errorf("%s documents 201, but handler returns 200", method)
+		}
+	}
+	deleteOperation := openAPISchemaAt(t, "paths", basePath, "delete")
+	parameters := deleteOperation["parameters"].([]any)
+	if len(parameters) != 3 || parameters[1].(map[string]any)["name"] != "from" || parameters[2].(map[string]any)["name"] != "to" {
+		t.Errorf("delete parameters = %v", parameters)
+	}
+	movePath := basePath + ":move-top"
+	moveRequest := openAPISchemaAt(t, "paths", movePath, "post", "requestBody", "content", "application/json", "schema")
+	assertOpenAPIFields(t, moveRequest, []string{"from", "to"}, []string{"from", "to"})
+	moveResponse := openAPISchemaAt(t, "paths", movePath, "post", "responses", "200", "content", "application/json", "schema")
+	assertOpenAPIFields(t, moveResponse, []string{"ok", "priority"}, []string{"ok", "priority"})
+	export := openAPISchemaAt(t, "paths", basePath+":export", "get", "responses", "200", "content", "application/x-yaml", "schema")
+	if export["type"] != "string" {
+		t.Errorf("network rule export must be YAML text, got %v", export)
+	}
+	importRequest := openAPISchemaAt(t, "paths", basePath+":import", "post", "requestBody", "content", "application/x-yaml", "schema")
+	if importRequest["type"] != "string" {
+		t.Errorf("network rule import must accept YAML text, got %v", importRequest)
+	}
+	importResult := openAPISchemaAt(t, "paths", basePath+":import", "post", "responses", "200", "content", "application/json", "schema")
+	assertOpenAPIFields(t, importResult, []string{"created", "updated", "results"}, []string{"created", "updated", "results"})
+	for _, operation := range []map[string]any{
+		openAPISchemaAt(t, "paths", basePath, "delete"),
+		openAPISchemaAt(t, "paths", basePath, "get"),
+		openAPISchemaAt(t, "paths", basePath, "post"),
+		openAPISchemaAt(t, "paths", basePath, "put"),
+		openAPISchemaAt(t, "paths", movePath, "post"),
+	} {
+		if _, ok := operation["responses"].(map[string]any)["400"]; !ok {
+			t.Errorf("%s missing 400 response", operation["summary"])
+		}
+	}
+}
+
+func TestOpenAPIAdmissionAssessmentContracts(t *testing.T) {
+	assessPath := "/api/v1/policies/assess"
+	request := openAPISchemaAt(t, "paths", assessPath, "post", "requestBody", "content", "application/json", "schema")
+	if request["$ref"] != "#/components/schemas/AdmissionAssessRequest" {
+		t.Error("assessment request must use AdmissionAssessRequest")
+	}
+	assertOpenAPIFields(t, openAPISchemaAt(t, "components", "schemas", "AdmissionAssessRequest"),
+		[]string{"image", "namespace", "labels"}, []string{"image"})
+	result := openAPISchemaAt(t, "components", "schemas", "AdmissionAssessResult")
+	assertOpenAPIFields(t, result,
+		[]string{"image", "namespace", "decision", "enforcement_mode", "dry_run_id", "assessed_at", "current_outcome", "protect_outcome", "matches"},
+		[]string{"image", "namespace", "decision", "enforcement_mode", "matches"})
+	if openAPISchemaAt(t, "paths", assessPath, "post", "responses", "200", "content", "application/json", "schema")["$ref"] != "#/components/schemas/AdmissionAssessResult" {
+		t.Error("assessment response must use AdmissionAssessResult")
+	}
+	match := openAPISchemaAt(t, "components", "schemas", "AdmissionAssessMatch")
+	assertOpenAPIFields(t, match,
+		[]string{"policy_id", "policy_name", "category", "engine", "mode", "action", "severity", "reason", "evidence", "evidence_details", "remediation"},
+		[]string{"policy_id", "policy_name", "category", "engine", "mode", "action", "severity", "reason", "evidence", "remediation"})
+	if match["properties"].(map[string]any)["evidence_details"].(map[string]any)["items"].(map[string]any)["$ref"] != "#/components/schemas/AdmissionEvidenceDetail" {
+		t.Error("evidence details must use AdmissionEvidenceDetail")
+	}
+	historyPath := "/api/v1/policies/admission/dry-runs"
+	history := openAPISchemaAt(t, "paths", historyPath, "get", "responses", "200", "content", "application/json", "schema")
+	assertOpenAPIFields(t, history, []string{"history", "total"}, []string{"history", "total"})
+	if history["properties"].(map[string]any)["history"].(map[string]any)["items"].(map[string]any)["$ref"] != "#/components/schemas/AdmissionDryRunHistoryRow" {
+		t.Error("history rows must use AdmissionDryRunHistoryRow")
+	}
+	clear := openAPISchemaAt(t, "paths", historyPath, "delete", "responses", "200", "content", "application/json", "schema")
+	assertOpenAPIFields(t, clear, []string{"deleted"}, []string{"deleted"})
+}
+
 func TestOpenAPIMigrationContracts(t *testing.T) {
 	previewPath := "/api/v1/migration/preview"
 	request := openAPISchemaAt(t, "paths", previewPath, "post", "requestBody", "content", "application/json", "schema")
@@ -369,8 +460,11 @@ func TestOpenAPIMigrationContracts(t *testing.T) {
 	}
 	preview := openAPISchemaAt(t, "components", "schemas", "MigrationPreview")
 	assertOpenAPIFields(t, preview,
-		[]string{"import_id", "summary", "vulnerability_profiles", "registries", "policies", "groups", "file_profiles", "process_profiles", "network_rules", "dpi_rules", "dpi_bindings", "unsupported", "rollback_bundle"},
+		[]string{"import_id", "target_cluster_id", "summary", "vulnerability_profiles", "registries", "policies", "groups", "file_profiles", "process_profiles", "network_rules", "dpi_rules", "dpi_bindings", "unsupported", "rollback_bundle"},
 		[]string{"summary", "vulnerability_profiles", "registries", "policies", "groups", "file_profiles", "process_profiles", "network_rules", "dpi_rules", "dpi_bindings", "rollback_bundle"})
+	if preview["properties"].(map[string]any)["target_cluster_id"].(map[string]any)["format"] != "uuid" {
+		t.Error("preview target_cluster_id must be a UUID")
+	}
 	if openAPISchemaAt(t, "paths", previewPath, "post", "responses", "200", "content", "application/json", "schema")["$ref"] != "#/components/schemas/MigrationPreview" {
 		t.Error("preview response must use MigrationPreview")
 	}
@@ -418,11 +512,34 @@ func TestOpenAPIMigrationContracts(t *testing.T) {
 
 	importsPath := "/api/v1/migration/imports"
 	imports := openAPISchemaAt(t, "paths", importsPath, "get", "responses", "200", "content", "application/json", "schema")
-	assertOpenAPIFields(t, imports, []string{"imports"}, []string{"imports"})
+	assertOpenAPIFields(t, imports, []string{"imports", "has_more", "next_offset"}, []string{"imports", "has_more"})
 	importItem := imports["properties"].(map[string]any)["imports"].(map[string]any)["items"].(map[string]any)
 	assertOpenAPIFields(t, importItem,
-		[]string{"id", "source", "status", "summary", "applied_summary", "unsupported", "error", "created_at", "applied_at", "rolled_back_at"},
+		[]string{"id", "source", "status", "target_cluster_id", "summary", "applied_summary", "unsupported", "error", "created_at", "applied_at", "rolled_back_at"},
 		[]string{"id", "source", "status", "summary", "created_at"})
+	if importItem["properties"].(map[string]any)["target_cluster_id"].(map[string]any)["format"] != "uuid" {
+		t.Error("history target_cluster_id must be a UUID")
+	}
+	parameters := openAPISchemaAt(t, "paths", importsPath, "get")["parameters"].([]any)
+	if len(parameters) != 2 || parameters[0].(map[string]any)["name"] != "limit" || parameters[1].(map[string]any)["name"] != "offset" {
+		t.Errorf("migration history pagination parameters = %v", parameters)
+	}
+	for _, parameter := range parameters {
+		if parameter.(map[string]any)["in"] != "query" {
+			t.Errorf("migration history pagination parameter is not a query: %v", parameter)
+		}
+	}
+	limit := parameters[0].(map[string]any)["schema"].(map[string]any)
+	if limit["minimum"] != float64(1) || limit["maximum"] != float64(100) || limit["default"] != float64(25) {
+		t.Errorf("migration history limit = %v", limit)
+	}
+	offset := parameters[1].(map[string]any)["schema"].(map[string]any)
+	if offset["minimum"] != float64(0) || offset["maximum"] != float64(1000000) || offset["default"] != float64(0) {
+		t.Errorf("migration history offset = %v", offset)
+	}
+	if _, ok := openAPISchemaAt(t, "paths", importsPath, "get", "responses")["400"]; !ok {
+		t.Error("migration history must document invalid pagination as 400")
+	}
 
 	bundlePath := importsPath + "/{id}/rollback-bundle"
 	bundle := openAPISchemaAt(t, "paths", bundlePath, "get", "responses", "200", "content", "application/json", "schema")

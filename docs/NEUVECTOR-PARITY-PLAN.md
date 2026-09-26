@@ -92,8 +92,9 @@ Acceptance backlog: **102 open**. Since the `800b0ef` baseline of 107 open,
 POL-1 item), and three new items were added: vendor interoperability, legacy
 DPI binding tenant validation, and registration/proof of the unreachable
 group-edge HTTP workflow.
-The checklist contains **47 checked bounded rows** (39 at baseline). This round
-adds verified bounded POL-1 and POL-2 fixes but closes no parent acceptance item.
+The checklist contains **47 checked bounded rows** (39 at baseline). Recent
+rounds add bounded POL-1, POL-2 and API-1 fixes but close no additional parent
+acceptance item.
 Partial scanner, registry and POL-1 fixes are recorded in the review table, not counted as
 closures. A checked child does not close its unchecked parent or replace live
 deployment evidence.
@@ -138,8 +139,10 @@ deployment evidence.
 | POL-1 expanded edge edit guard | Atomic transition source/race verified; deployed transition open | Mode/port edits to an expanded edge now verify ownership, retract prior policies, update the edge and re-expand within one transaction; ambiguous legacy or mixed policies still return 409 without mutation. Fresh migration-166 PostgreSQL tests cover standalone upsert and create-with-expand, mode/port replacement, ownership denial and forced later-policy failure rollback with a successful retry. The earlier Helm API returned 409 for protect-to-monitor and port changes under the previous guard, 201 for a comment-only edit, and retracted five policies on delete. That deployment predates this transition; deployed edit and dataplane proof remain open. |
 | POL-1 DPI binding tenant guard | Source, deployed API and validated-schema upgrade verified; real legacy inventory open | A DLP/WAF binding previously accepted a foreign-org `group_id` because its FK checked only the group ID. Bind now inserts only from a group row in the authenticated org and refuses a conflicting stale binding owned by another org. PostgreSQL HTTP and Helm API negatives return 400/zero rows for foreign groups, while same-org binding returns 201. Migration 165 adds a composite `(org_id, group_id)` FK marked `NOT VALID` and rejects new invalid writes. The read-only preflight reports legacy mismatches; migration 166 validates the FK and stops without deleting rows when a mismatch exists. A genuine 164→165→166 fixture preserved its invalid row and stayed at version 165 until explicit repair, after which preflight and validation passed. The [upgrade runbook](group-dpi-binding-upgrade.md) requires audited API repair. Actual installation inventories, audited repair receipts, and broader import-writer proof remain open. |
 | API-1 group/DPI/edge OpenAPI contracts | Source schemas and focused tests verified; parent open | Group usage now documents response/admission counters, org-wide direct references, and error responses. DLP/WAF binding list/create/delete document typed requests, responses and actual status codes. Group-edge list/upsert/expand/delete now use typed row, port and expansion schemas with cluster-grant/transactional-edit semantics and a focused spec test. Other API-1 endpoint families and live contract smoke remain open. |
-| API-1 migration OpenAPI contracts | Focused source contract test passed; parent open | Migration preview, saved-import history, apply, rollback and rollback-bundle operations now document typed request/response families, diagnostics, optional replay fields and actual error statuses. The generated-router ratchet and targeted schema assertions pass. Network rules, admission assessment, registry sync/cancel, event export, PCAP, support bundles and deployed contract smoke remain open. |
-| POL-2 saved migration diagnostics | Frontend component/build verified; precise scope and deployed UI open | Policy Center renders saved NeuVector unsupported objects with reasons and suggestions beside mapped families; ambiguous or unknown kinds remain in a general diagnostic area. The UI explicitly labels records as org history rather than attributing them to the selected cluster. Five mocked-query component tests, all 96 frontend tests and a production build pass. The API exposes only 25 recent imports without target-cluster metadata; complete history, cluster attribution and deployed browser proof remain open, so the checklist item stays unchecked. |
+| API-1 migration OpenAPI contracts | Fresh migration-166 PostgreSQL and focused contract tests verified; parent open | Migration preview, saved-import history, apply, rollback and rollback-bundle operations document typed contracts. History now accepts bounded limit/offset pages with `has_more`/`next_offset`; preview and history expose a validated target-cluster ID for new imports, while legacy records retain unknown target scope. PostgreSQL tests cover page boundaries, tenant isolation, validation and persisted attribution; the full handler and server race suites pass. Registry sync/cancel, event export, PCAP, support bundles and deployed contract smoke remain open. |
+| API-1 network/admission OpenAPI contracts | Focused source contract tests passed; parent open | Network-rule list, mutation, deletion and move-top contracts and admission assessment/dry-run history have typed schemas reflecting handler response statuses. Focused spec tests, JSON validation and `go vet` pass. Registry sync/cancel, event export, PCAP, support bundles and live contract smoke remain open. |
+| POL-2 saved migration diagnostics | Source API and frontend component/build verified; deployed UI proof open | Policy Center shows saved NeuVector unsupported reasons and suggestions beside mapped families; ambiguous/unknown kinds stay general. New previews persist validated target-cluster metadata, while legacy or unspecified targets remain explicitly unknown. The history API serves bounded pages instead of silently truncating at 25; Policy Center and Migration Imports offer Load more, and the latter labels target scope. Policy Center separates selected-cluster, other-cluster and unknown-target records. Ten focused Policy Center tests, eight Migration Page tests, all 102 frontend tests and the production build pass. This is import-time diagnostic history, not current enforcement health. Snapshot-stable paging under concurrent imports, all-history export, deployed browser proof and historical target backfill remain open, so the checklist item stays unchecked. |
+| POL-2 listed change metadata | Frontend component tests verified; full family health open | Policy Center uses existing DLP, signature, group and vulnerability-profile list timestamps to show a clearly scoped latest *listed* change, with unavailable/empty states. The focused component tests and TypeScript check pass. Network/admission/response and other families, authoritative all-item last-changed, per-family hits/last-hit, enforcement health and deployed proof remain open. |
 | POL-1 group workflow | API and production-browser control plane verified; enforcement open | A PostgreSQL-backed server test creates groups, previews/applies a NeuVector fixture containing a network edge and DLP/WAF bindings, checks usage and mode promotion, verifies RBAC/audit, and rejects unsafe delete without losing the group or references. A Chromium Playwright run against both an isolated production stack and a Helm-deployed API with a production frontend build creates a group, uses it in a network rule and DLP/WAF bindings, inspects usage, promotes mode, gets 409 on unsafe delete and cleans up. The UI-authored network rule is a network override, not a `group_rule_edges` row, so the usage blocker count is two (DLP/WAF). Live network and DPI enforcement remain unproven; the item stays open. |
 
 | REG-1 kind validation | Source fix verified; connector matrix open | Registry create rejects unknown kinds with an explicit 400; PATCH rejects any supplied `kind` (including null/empty/non-string) rather than silently ignoring an attempted type change. Unit/HTTP tests cover all 13 accepted kinds, unknown create and immutable update. This does not prove per-kind discovery/auth against real registries or endpoint/credential validation. |
@@ -625,9 +628,10 @@ row saying `enforced`.
 - [ ] Complete OpenAPI request/response schemas for migration, network rules,
   admission assessment, registry sync/cancel, event export, PCAP, support
   bundles, group usage, and DLP/WAF bindings. Migration preview/history/apply/
-  rollback/bundle schemas and group-edge schemas are now typed with focused
-  contract tests; the other listed families and deployed contract proof remain
-  open.
+  rollback/bundle, network-rule, admission-assessment, group-edge, group-usage
+  and DLP/WAF binding schemas are now typed with focused contract tests.
+  Registry sync/cancel, event export, PCAP, support bundles and deployed
+  contract proof remain open.
 - [x] Add a link/route checker for the endpoint mapping document.
   `make check-endpoint-mapping` validates 107 explicit API references and local
   links against OpenAPI, then runs the registered-router/OpenAPI tests; CI gates
@@ -772,6 +776,10 @@ row saying `enforced`.
 ### POL-2 Policy Center completion
 
 - [ ] Add per-family hit counts and last-hit/last-changed/enforcement health.
+  Policy Center now shows the latest *listed* change for DLP, signatures,
+  groups and vulnerability profiles only; it does not invent missing hit or
+  enforcement data. Other families, complete pagination and live health proof
+  remain open.
 - [ ] Add reorder controls only where runtime precedence exists, with RBAC and
   audit tests.
 - [ ] Add real family-specific import/export actions; do not link placeholders.
@@ -782,9 +790,12 @@ row saying `enforced`.
 - [ ] Show unsupported migration objects and their remediation beside the
   relevant policy family. Policy Center now shows reason and suggestion from
   saved NeuVector imports beside mapped families, with unknown/ambiguous kinds
-  in a general area and explicit org-history labeling. The API lists only the
-  latest 25 imports and does not expose target-cluster attribution; full
-  history, precise cluster scope and deployed browser proof remain open.
+  in a general area. New imports persist validated target-cluster scope and
+  history supports explicit bounded pages with Load more; legacy/missing targets
+  stay labeled unknown, other-cluster imports remain separately visible, and
+  diagnostics are not presented as current enforcement. Snapshot-stable paging,
+  all-history export, deployed browser proof and historical target backfill
+  remain open.
 
 ### POL-3 Admission, DLP, WAF, and response depth
 

@@ -2962,6 +2962,7 @@ export interface MigrationAppliedSummary extends Record<string, number | undefin
 
 export interface MigrationPreview {
   import_id?: string;
+  target_cluster_id?: string;
   summary: {
     source: string;
     total: number;
@@ -3097,6 +3098,7 @@ export interface MigrationImportListItem {
   id: string;
   source: string;
   status: "previewed" | "applied" | "partial_applied" | "rolled_back" | "failed" | string;
+  target_cluster_id?: string;
   summary: MigrationPreview["summary"];
   applied_summary?: MigrationAppliedSummary;
   unsupported?: MigrationUnsupported[];
@@ -3104,6 +3106,12 @@ export interface MigrationImportListItem {
   created_at: string;
   applied_at?: string;
   rolled_back_at?: string;
+}
+
+export interface MigrationImportPage {
+  imports: MigrationImportListItem[];
+  has_more: boolean;
+  next_offset?: number;
 }
 
 export interface MigrationApplyResponse {
@@ -3155,8 +3163,8 @@ export const enterprise = {
   migration: () => api.get<MigrationOverview>("/migration/sources").then((r) => r.data),
   migrationPreview: (body: { source: string; export: string; cluster_id?: string }) =>
     api.post<MigrationPreview>("/migration/preview", body).then((r) => r.data),
-  migrationImports: () =>
-    api.get<{ imports: MigrationImportListItem[] }>("/migration/imports").then((r) => r.data.imports),
+  migrationImportsPage: (params: { limit?: number; offset?: number } = {}) =>
+    api.get<MigrationImportPage>("/migration/imports", { params }).then((r) => r.data),
   migrationApply: (id: string) =>
     api.post<MigrationApplyResponse>(`/migration/imports/${id}:apply`).then((r) => r.data),
   migrationRollback: (id: string) =>

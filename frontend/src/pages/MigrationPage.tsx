@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, CheckCircle2, Download, RotateCcw, ShieldCheck, Wand2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -290,7 +290,12 @@ const unsupportedColumns: Column<MigrationUnsupported>[] = [
 export function MigrationPage() {
   const qc = useQueryClient();
   const sourcesQ = useQuery({ queryKey: ["migration-sources"], queryFn: () => enterprise.migration() });
-  const importsQ = useQuery({ queryKey: ["migration-imports"], queryFn: () => enterprise.migrationImports() });
+  const importsQ = useInfiniteQuery({
+    queryKey: ["migration-imports-pages"],
+    queryFn: ({ pageParam }) => enterprise.migrationImportsPage({ limit: 25, offset: pageParam }),
+    initialPageParam: 0,
+    getNextPageParam: (page) => page.has_more ? page.next_offset : undefined,
+  });
   const clustersQ = useQuery({ queryKey: ["clusters"], queryFn: () => clustersApi.list(), staleTime: 30_000 });
   const sources = sourcesQ.data?.sources ?? [];
   const clusterOptions = useMemo(() => clustersQ.data?.clusters ?? [], [clustersQ.data?.clusters]);
@@ -307,7 +312,7 @@ export function MigrationPage() {
     },
     onSuccess: (data) => {
       setSelectedPolicy(data.policies[0]?.name ?? null);
-      void qc.invalidateQueries({ queryKey: ["migration-imports"] });
+      void qc.invalidateQueries({ queryKey: ["migration-imports-pages"] });
       toast.success(data.import_id ? "Migration preview saved" : "Migration preview generated");
     },
     onError: (error) => toast.error(migrationErrorMessage(error, "Migration preview failed")),
@@ -316,7 +321,7 @@ export function MigrationPage() {
   const applyImport = useMutation({
     mutationFn: (id: string) => enterprise.migrationApply(id),
     onSuccess: (res) => {
-      void qc.invalidateQueries({ queryKey: ["migration-imports"] });
+      void qc.invalidateQueries({ queryKey: ["migration-imports-pages"] });
       if (targetClusterID) {
         void qc.invalidateQueries({ queryKey: ["runtime-dlp-rules", targetClusterID] });
         void qc.invalidateQueries({ queryKey: ["runtime-signatures", targetClusterID] });
@@ -342,7 +347,7 @@ export function MigrationPage() {
   const rollbackImport = useMutation({
     mutationFn: (id: string) => enterprise.migrationRollback(id),
     onSuccess: (res) => {
-      void qc.invalidateQueries({ queryKey: ["migration-imports"] });
+      void qc.invalidateQueries({ queryKey: ["migration-imports-pages"] });
       if (targetClusterID) {
         void qc.invalidateQueries({ queryKey: ["runtime-dlp-rules", targetClusterID] });
         void qc.invalidateQueries({ queryKey: ["runtime-signatures", targetClusterID] });
@@ -379,7 +384,7 @@ export function MigrationPage() {
   const vulnerabilityProfiles = data?.vulnerability_profiles ?? [];
   const registries = data?.registries ?? [];
   const unsupportedRows = useMemo(() => (data?.unsupported ?? []).map((item, diagnosticIndex) => ({ ...item, diagnosticIndex })), [data?.unsupported]);
-  const imports = importsQ.data ?? [];
+  const imports = importsQ.data?.pages.flatMap((page) => page.imports) ?? [];
   const activeImport = data?.import_id ? imports.find((item) => item.id === data.import_id) : imports[0];
   const activeStatus = activeImport?.status ?? (data?.import_id ? "previewed" : "preview");
   const canApplyActive = Boolean(data?.import_id) && (activeStatus === "previewed" || activeStatus === "rolled_back");
@@ -404,6 +409,7 @@ export function MigrationPage() {
         <div>
           <div className="font-medium">{migrationSourceLabel(item.source)}</div>
           <div className="font-mono text-[11px] text-muted-foreground">{item.id}</div>
+          <div className="text-[11px] text-muted-foreground">Target: {item.target_cluster_id ?? "unknown or unspecified"}</div>
         </div>
       ),
     },
@@ -827,9 +833,11 @@ export function MigrationPage() {
 
       <Card
         title="Import History"
-        description="Persisted previews, applied imports, partial imports, failures, and rollback state for the current organization."
+        description="Persisted previews, applied imports, partial imports, failures, and rollback state for the current organization. Load more to inspect older records."
         padded={false}
       >
+        {importsQ.isPending ? <p className="px-6 pt-4 text-xs" role="status">Loading import history…</p> : null}
+        {importsQ.isError && !importsQ.data ? <p className="px-6 pt-4 text-xs text-destructive" role="alert">Import history is unavailable.</p> : null}
         <DataTable
           rows={imports}
           columns={historyColumns}
@@ -837,8 +845,16 @@ export function MigrationPage() {
           showDensityToggle={false}
           testId="migration-import-history"
           exportFileName="constellation-migration-import-history"
-          emptyState={<div className="px-6 py-10 text-center text-xs text-muted-foreground">No migration imports yet.</div>}
+          emptyState={<div className="px-6 py-10 text-center text-xs text-muted-foreground">{importsQ.isPending ? "Loading import history…" : importsQ.isError ? "Import history is unavailable." : "No migration imports yet."}</div>}
         />
+        {importsQ.isFetchNextPageError ? <p className="px-6 py-2 text-xs text-destructive" role="alert">Could not load older imports. Try again.</p> : null}
+        {importsQ.hasNextPage ? (
+          <div className="px-6 py-4">
+            <Button variant="outline" data-testid="migration-import-history-load-more" disabled={importsQ.isFetchingNextPage} onClick={() => void importsQ.fetchNextPage()}>
+              {importsQ.isFetchingNextPage ? "Loading more…" : "Load more imports"}
+            </Button>
+          </div>
+        ) : null}
       </Card>
     </div>
   );
