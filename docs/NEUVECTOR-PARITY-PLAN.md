@@ -87,12 +87,13 @@ Unchecked parent items remain open until **all** their acceptance requirements
 are met. Code present is not the same as verified or release-ready. The older
 deficiency ledger includes findings that already have fixes; do not use its
 historical counts as a count of currently open defects.
-Acceptance backlog: **101 open**. Since the `800b0ef` baseline of 107 open,
-**seven existing items closed** (four OPS-1 items and three SIEM-1 items), and
-one new vendor-interoperability item was added. The checklist contains **46 checked
-bounded rows** (39 at baseline). Partial scanner and registry fixes are recorded
-in the review table, not counted as closures. A checked child does not close its
-unchecked parent or replace live deployment evidence.
+Acceptance backlog: **100 open**. Since the `800b0ef` baseline of 107 open,
+**eight existing items closed** (four OPS-1 items, three SIEM-1 items and one
+POL-1 item), and one new vendor-interoperability item was added.
+The checklist contains **47 checked bounded rows** (39 at baseline). Partial scanner,
+registry and POL-1 fixes are recorded in the review table, not counted as
+closures. A checked child does not close its unchecked parent or replace live
+deployment evidence.
 
 | Acceptance item closed since `800b0ef` | Closure evidence |
 |---|---|
@@ -118,19 +119,15 @@ unchecked parent or replace live deployment evidence.
 | SIEM-1 syslog TLS with CA/client material | Closed; source and deployed collector passed | A Helm-deployed API connected to a strict mTLS collector using configured CA and client material. The collector verified the client certificate and captured a policy event. Replacing the CA or removing the client pair produced no payload; restoring the pair resumed delivery. In-process tests separately cover plaintext rejection and TLS 1.2/1.3. This does not claim interoperability with a branded SIEM. |
 | SIEM-1 wire formats and filters | Closed; deployed matrix passed | The same live API emitted RFC5424, JSON and CEF policy events, then a critical finding event. An `info` policy event was excluded by a `high` floor, and a critical finding was excluded by a nonmatching category; switching the category delivered the finding. The collector captured the expected lines and no filtered lines. |
 | SIEM-1 named receiver routing and receipts | Closed; source, API and deployed receiver passed | PostgreSQL tests prove named-only dispatch, retry/terminal receipts, org/paused rejection and concurrent pause/send ordering. API tests prove delivery-history visibility and audit linkage, including cross-org isolation. A rebuilt Helm-deployed API sent a test-fire to the first of two named SMTP receivers; only that recipient was reached, its receipt became `delivered`, and the audit event linked its delivery ID. Pausing returned 409 without another send; unpausing restored delivery. A vendor SIEM integration remains a separate open item. |
+| POL-1 shared GroupPicker coverage | Closed; editor audit and save-path test passed | Network-rule, admission-rule and response-rule editors use `GroupPicker`; DLP/WAF group bindings use `GroupPickerView`. The remaining runtime-policy and file-monitor editors select workloads rather than groups, so replacing those selectors would change their meaning. A response-rule form integration test selects a real group option and verifies the saved `workload_match.group`; all 92 frontend tests and the production build pass. The full group enforcement/browser workflow remains open separately. |
 | REG-1 scanner DB and capacity surfaces | Source and production-browser UI verified; deployed scanner proof open | Scanner heartbeats now report per-engine Trivy/Grype applied revisions from installed DB metadata and download revisions only after a successful explicit refresh; offline preloads report applied but not downloaded. Dashboard, System Health and Scanner & CVE Sources show revisions separately from the host VulnDB bundle and show worker capacity, missing/partial/stale states. Scanner race/unit tests, frontend component/type tests and PostgreSQL-backed overview/cluster health API tests pass. A production-build Playwright test verifies dashboard, System Health and scanner-source rendering with deterministic heartbeat revisions. A deployed scanner refresh and real heartbeat-to-dashboard smoke is still required before closing the existing REG-1 item. Download history is in memory and resets on scanner restart; installed applied revisions are recovered from the local DB. |
 | P0 audit/timeline/exemption scope | Source fixes and direct PostgreSQL tests verified; deployed matrix open | Audit, timeline, compliance checks/summary and evidence cluster filters reject clusters outside the subject org; timeline violation attribution cannot join a foreign-org deployment. Exemption create/list/revoke tests cover cross-org/foreign-cluster and no-write behavior. The evidence overlay applies cluster-specific exemptions only to matching-cluster items, falls back to org-wide exemptions and rejects misattributed exemptions; checks/summary exclude misattributed foreign-cluster check and exemption rows. Remaining aggregation and agent-write inventory, route-level cluster-grant RBAC, and deployed multi-cluster paths are open. |
 | SIEM-1 TLS material guard | Source and deployed mTLS collector verified | Validation and sender guards refuse TLS material on plaintext transport. In-process tests cover TLS 1.2/1.3, wrong CA, absent/untrusted clients and plaintext rejection. A Helm-deployed API additionally passed strict client-certificate verification and rejected wrong-CA/missing-client attempts before resuming after restoration. Vendor-specific interoperability is separately open. |
 | SIEM-1 severity floor | Source and deployed wire/filter matrix verified | An unknown configured minimum level denies all alerts rather than silently shipping; an unknown alert severity falls below an `info` floor. Source tests cover all three formatters and filter-before-dial. A live collector captured RFC5424/JSON/CEF, excluded an info event under a high floor and excluded a critical event under a mismatched category. |
 | SIEM-1 named delivery receipts | Source, API and deployed SMTP receiver verified | `DispatchTo` scopes receiver lookup to the event org and rejects paused receivers before queueing. Workers and sweepers terminate queued/retry deliveries paused later. PostgreSQL tests cover named-only send, pending/delivered/retrying/failed/paused receipts, exact retry payload/idempotency and concurrent in-flight pause ordering. API tests cover history, audit linkage and cross-org isolation. A deployed API delivered only to its named SMTP recipient, exposed the delivered receipt and audit link, and returned 409 for a paused test-fire. A named vendor SIEM remains separately open. |
+| POL-1 reference scope guard | Source, race and deployed API smoke verified; concurrent writer proof open | An org-wide group could be updated under a `cluster_id` filter while its network/response/admission references existed in another cluster. Update now counts blocking references across the org, matching delete; the usage view shows all explicit blockers even with a cluster filter, while derived member profiles remain scoped to that filter. A PostgreSQL regression and a Helm-deployed API smoke prove cross-cluster reference visibility, 409 unsafe update/delete, allowed update after unlink and an audit event. Concurrent reference creation versus group mutation and schema-level integrity remain unverified, so the conflict item stays open. |
+| POL-1 group workflow | API integration verified; enforcement/browser workflow open | A PostgreSQL-backed server test creates groups, previews/applies a NeuVector fixture containing a network edge and DLP/WAF bindings, checks usage and mode promotion, verifies RBAC/audit, and rejects unsafe delete without losing the group or references. This proves persisted configuration and control-plane behavior, not live network or DPI enforcement or a production-browser round-trip. |
 
-SIEM closure used migration 164 on a disposable PostgreSQL database and a Helm
-deployment in disposable k3d. The rebuilt API image was
-`sha256:d30da81cea257830d6ba39beb297f45199c317c881f924c1b44f192af335c2d7`.
-Captured synthetic collector traffic is in `/tmp/constellation-siem-parity-0926/wire.log`
-and `/tmp/constellation-siem-parity-0926/smtp.log`; private test keys are not
-retained. Affected Go packages passed `go test -race` and `go vet`; the plan-count
-and endpoint-mapping tooling gates passed.
 | REG-1 kind validation | Source fix verified; connector matrix open | Registry create rejects unknown kinds with an explicit 400; PATCH rejects any supplied `kind` (including null/empty/non-string) rather than silently ignoring an attempted type change. Unit/HTTP tests cover all 13 accepted kinds, unknown create and immutable update. This does not prove per-kind discovery/auth against real registries or endpoint/credential validation. |
 | REG-1 scanner credential isolation | Bounded private-registry source tests verified; live connector proof open | Each scanner job uses a separate Docker config directory with 0700/0600 modes; tests cover simultaneous jobs and cleanup on success, failure and cancellation. Digest resolution, manifest inspection, config-history, file-risk and config-check reads use job credentials with HTTPS and authority checks. Configured-credential fetch, missing credentials, authority or isolated-config failures now fail the job before scanning rather than silently falling back to ambient auth; only explicit `auth_kind=none` is accepted without credentials. The credential endpoint now refuses to disclose a decrypted secret if its audit append fails; DB tests verify a redacted receipt and the no-secret fail path. An opt-in one-shot `--registry-id` path fetches configured credentials, fails before scanning on retrieval/validation errors and passes an isolated config to engines and image metadata reads; its legacy `--ref` path is unchanged. Isolated engine subprocesses drop inherited Trivy/Grype/Syft auth variables. Fake-registry tests cover authenticated metadata, wrong credentials despite ambient Docker config, TLS failure, platform selection and cross-authority blob, bearer-realm or plaintext non-forwarding. Credential issuance is still org-scoped rather than bound to a claimed job; legacy one-shot ambient auth, signature verification, other ambient cloud credentials, live private registries and end-to-end credential lifetime remain open. |
 | API-1 CLI recipe smoke | Four GET recipes, nonapplying preview and fixed apply/rollback fixture verified locally; complete runbook smoke open | `scripts/smoke_api_recipes.py` keeps the default four bounded GET recipes and explicit nonapplying preview. New `--apply-rollback-fixture` is loopback-only, opt-in, refuses an existing profile, checks conversion/apply/idempotency/rollback and attempts cleanup on failure without printing tokens or response bodies. Mock tests and an opt-in disposable local API run passed. Other migration families, mutation recipes and deployed-API smoke remain open; the API-1 parent item remains open. |
@@ -143,6 +140,21 @@ and endpoint-mapping tooling gates passed.
 | TSG-4 blocking gates | Implemented; remaining baseline findings block release | PR and tag-release CI enforce lint/format, history secret scans, gosec, govulncheck/SARIF, dependency audits and race/JUnit runners. Tooling regressions pass. Initial scans found 1,895 lint issues, 256 gosec findings, 18 historical secret detections and ShellCheck/format failures; these need triage, not blanket suppression. Dependency remediation reduced 37 reachable Go vulnerabilities to zero under the actual Go 1.26.8 toolchain, and both npm lockfile audits now report zero. Nine non-reachable imported/module Go advisories remain recorded. Hosted checks/branch protection and source/secret baseline remediation are open. See `security-testing.md`. |
 | Security review follow-ups | Source fixes and targeted race tests verified | Foreign-org role-binding subjects/scopes are now rejected and epoch mutations are tenant-scoped. Refresh access is bounded by its absolute family deadline, tracked idle expiry preserves sibling sessions, activity timestamps are monotonic, and stale idle reads cannot delete newly active rows. Browser SAML uses a bounded, expiring, single-use cookie/RelayState binding and rejects unsolicited browser ACS; four new tests include 13 rejection cases and existing SAML tests pass with races/repetition/shuffle. Login/logout clear cached identity data and notify other tabs. Live signed-IdP/multi-replica SAML and exact browser/AuthnRequest assertion-correlation validation remain open. |
 | Verification artifacts | Current affected-package fresh-DB and production API/browser gate passed; deployment matrix open | Full-suite JUnit/JSON: `/tmp/constellation-parity-final-integration/`; seeded follow-up JUnit: `/tmp/constellation-parity-seeded.xml`; latest fresh affected-package log: `/tmp/parity-agent-writes-final-fresh.log` (nine packages twice, migration 163 plus second no-op); final PCAP/runtime recheck: `/tmp/parity-runtime-final-fresh.log`; earlier IP/audit logs: `/tmp/parity-ip-scope-fresh.log`, `/tmp/parity-agent-audit-fresh.log`. Current production-image/build/migration/API smoke evidence: `/tmp/parity-agent-writes-browser-current-evidence/`; runner log: `/tmp/parity-agent-writes-browser-current.log` (four live GET recipes, nonapplying preview, opt-in fixed apply/idempotency/rollback and 10 Playwright tests passed). Current API image `sha256:b29668f72e6a20fc150bd30da5857a3250cca4f60e50b60bed604edf78651ff2`; frontend image `sha256:6db10e05f71e7a3fd20c05726098f5ffe5be44476c93b45e7dfd0f6ea6ec395c`. Scanner private-registry tests and 47 tooling tests passed separately; the API image does not contain the scanner worker. Disposable services were cleaned up; no existing Kubernetes deployment was changed. This is local source/container evidence, not live private-registry, CNI/cloud/HA/hosted-CI proof. |
+
+SIEM closure used migration 164 on a disposable PostgreSQL database and a Helm
+deployment in disposable k3d. The rebuilt API image was
+`sha256:d30da81cea257830d6ba39beb297f45199c317c881f924c1b44f192af335c2d7`.
+Captured synthetic collector traffic is in `/tmp/constellation-siem-parity-0926/wire.log`
+and `/tmp/constellation-siem-parity-0926/smtp.log`; private test keys are not
+retained. Affected Go packages passed `go test -race` and `go vet`; the plan-count
+and endpoint-mapping tooling gates passed.
+
+POL-1 scope smoke used migration 164 and Helm-deployed API image
+`sha256:4c11072fb93ff451759d3799df1b903f93f7a30dc02e980b29d8d650f2cf7902`
+on disposable k3d. A filtered group-usage GET surfaced another cluster's
+network edge; unsafe update and delete returned 409, removal enabled update,
+and the audit API recorded it. Focused handler/server races and the frontend
+suite/build passed; this did not exercise the data plane.
 
 Latest affected-package validation: `GOOSE_BIN=/root/go/bin/goose bash
 scripts/test-clean-database.sh ./internal/handler ./internal/handler/compliance
@@ -553,11 +565,15 @@ row saying `enforced`.
 
 ### POL-1 Groups as the policy anchor
 
-- [ ] Finish shared GroupPicker use in remaining runtime/file/response editors.
+- [x] Use the shared GroupPicker in every editor with a group selector: network,
+  admission, response and DLP/WAF bindings. Runtime-policy and file-monitor
+  editors select workloads, not groups; a response-rule save-path test passes.
 - [ ] Keep referenced-group update/delete conflict detection deny-by-default;
-  any future cascade must be explicit and audited.
+  any future cascade must be explicit and audited. Filtered updates/usage now
+  see org-wide blockers, but concurrent reference writes still need proof.
 - [ ] Add an end-to-end group workflow: create, use in network and DLP/WAF,
-  inspect usage, promote mode, attempt unsafe delete.
+  inspect usage, promote mode, attempt unsafe delete. Source API tests cover
+  the persisted workflow; live enforcement and production-browser proof remain.
 
 ### POL-2 Policy Center completion
 

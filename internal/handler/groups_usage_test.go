@@ -229,6 +229,80 @@ VALUES ($1, $2, 'prod/web', 'log-writer', '/var/log/app.log', ARRAY['logger'], $
 	}
 }
 
+func TestOrgWideGroupReferencesCannotBeHiddenByClusterFilter(t *testing.T) {
+	database := openTestDB(t)
+	t.Cleanup(database.Close)
+	ctx := context.Background()
+	pool := database.Pool()
+	orgID, userID, firstClusterID, secondClusterID, groupID := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	groupName := "org-wide-" + groupID.String()[:8]
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id=$1`, orgID)
+	})
+	for _, statement := range []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO orgs (id, name, display_name) VALUES ($1, $2, 'Group Scope Test')`, []any{orgID, "group-scope-" + orgID.String()}},
+		{`INSERT INTO users (id, org_id, email, display_name) VALUES ($1, $2, $3, 'Group Scope User')`, []any{userID, orgID, "group-scope-" + userID.String() + "@example.com"}},
+		{`INSERT INTO clusters (id, org_id, name, state) VALUES ($1, $2, 'scope-first', 'connected')`, []any{firstClusterID, orgID}},
+		{`INSERT INTO clusters (id, org_id, name, state) VALUES ($1, $2, 'scope-second', 'connected')`, []any{secondClusterID, orgID}},
+		{`INSERT INTO groups (id, org_id, name, kind, criteria, members, policy_mode, profile_mode) VALUES ($1, $2, $3, 'ground', '[]'::jsonb, '[]'::jsonb, 'monitor', 'monitor')`, []any{groupID, orgID, groupName}},
+		{`INSERT INTO group_rule_edges (org_id, cluster_id, from_group, to_group, ports, mode, comment) VALUES ($1, $2, $3, 'peer', '[]'::jsonb, 'monitor', 'other cluster')`, []any{orgID, secondClusterID, groupName}},
+	} {
+		if _, err := pool.Exec(ctx, statement.query, statement.args...); err != nil {
+			t.Fatalf("seed group scope: %v", err)
+		}
+	}
+
+	handler := NewGroups(database, audit.New(pool))
+	router := chi.NewRouter()
+	router.Get("/groups/{id}/usage", handler.Usage)
+	router.Put("/groups/{id}", handler.Update)
+	router.Delete("/groups/{id}", handler.Delete)
+	request := func(method, path, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, req)
+		return response
+	}
+	path := "/groups/" + groupID.String()
+	usage := request(http.MethodGet, path+"/usage?cluster_id="+firstClusterID.String(), "")
+	if usage.Code != http.StatusOK {
+		t.Fatalf("filtered usage status=%d body=%s", usage.Code, usage.Body.String())
+	}
+	var result groupUsageDTO
+	if err := json.NewDecoder(usage.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Summary.BlockingReferences != 1 || len(result.References) != 1 || result.References[0].ClusterID != secondClusterID.String() {
+		t.Fatalf("org-wide group omitted other-cluster reference: %+v", result)
+	}
+
+	updateBody := `{"name":"` + groupName + `-renamed","kind":"ground","criteria":[],"members":[],"policy_mode":"monitor","profile_mode":"monitor"}`
+	updated := request(http.MethodPut, path+"?cluster_id="+firstClusterID.String(), updateBody)
+	if updated.Code != http.StatusConflict {
+		t.Fatalf("filtered update status=%d body=%s, want 409", updated.Code, updated.Body.String())
+	}
+	deleted := request(http.MethodDelete, path, "")
+	if deleted.Code != http.StatusConflict {
+		t.Fatalf("delete status=%d body=%s, want 409", deleted.Code, deleted.Body.String())
+	}
+	var storedName string
+	if err := pool.QueryRow(ctx, `SELECT name FROM groups WHERE id=$1`, groupID).Scan(&storedName); err != nil || storedName != groupName {
+		t.Fatalf("guard changed group name=%q err=%v", storedName, err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM group_rule_edges WHERE org_id=$1 AND cluster_id=$2`, orgID, secondClusterID); err != nil {
+		t.Fatal(err)
+	}
+	updated = request(http.MethodPut, path+"?cluster_id="+firstClusterID.String(), updateBody)
+	if updated.Code != http.StatusOK {
+		t.Fatalf("unreferenced update status=%d body=%s", updated.Code, updated.Body.String())
+	}
+}
+
 func TestGroupsListIncludesMembershipPreview(t *testing.T) {
 	d := openTestDB(t)
 	defer d.Close()

@@ -394,7 +394,7 @@ SELECT name, kind, criteria, members, learned_from, cfg_type
 		}
 	}
 	if len(changedFields) > 0 {
-		blockingRefs, err := h.groupBlockingReferenceCount(r.Context(), subj.OrgID, clusterArg, id, currentName)
+		blockingRefs, err := h.groupBlockingReferenceCount(r.Context(), subj.OrgID, id, currentName)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -493,7 +493,7 @@ func (h *Groups) Delete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": errFedReadOnly.Error()})
 		return
 	}
-	blockingRefs, err := h.groupBlockingReferenceCount(r.Context(), subj.OrgID, nil, id, name)
+	blockingRefs, err := h.groupBlockingReferenceCount(r.Context(), subj.OrgID, id, name)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

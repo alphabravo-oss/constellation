@@ -88,25 +88,25 @@ SELECT name, members
 	members = normalizeGroupMembers(members)
 
 	refs := []groupUsageReferenceDTO{}
-	networkRefs, err := h.groupNetworkEdgeUsage(r, subj.OrgID, clusterArg, name)
+	networkRefs, err := h.groupNetworkEdgeUsage(r, subj.OrgID, nil, name)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	refs = append(refs, networkRefs...)
-	dpiRefs, err := h.groupDPIBindingUsage(r, subj.OrgID, clusterArg, id)
+	dpiRefs, err := h.groupDPIBindingUsage(r, subj.OrgID, nil, id)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	refs = append(refs, dpiRefs...)
-	responseRefs, err := h.groupResponseRuleUsage(r, subj.OrgID, clusterArg, id, name)
+	responseRefs, err := h.groupResponseRuleUsage(r, subj.OrgID, nil, id, name)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	refs = append(refs, responseRefs...)
-	admissionRefs, err := h.groupAdmissionRuleUsage(r.Context(), subj.OrgID, clusterArg, id, name)
+	admissionRefs, err := h.groupAdmissionRuleUsage(r.Context(), subj.OrgID, nil, id, name)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -471,15 +471,14 @@ func normalizeGroupMembers(in []string) []string {
 	return out
 }
 
-func (h *Groups) groupBlockingReferenceCount(ctx context.Context, orgID uuid.UUID, clusterArg any, groupID uuid.UUID, groupName string) (int, error) {
+func (h *Groups) groupBlockingReferenceCount(ctx context.Context, orgID uuid.UUID, groupID uuid.UUID, groupName string) (int, error) {
 	total := 0
 	var networkCount int
 	if err := h.db.Pool().QueryRow(ctx, `
 SELECT COUNT(*)
   FROM group_rule_edges
  WHERE org_id = $1
-   AND ($2::uuid IS NULL OR cluster_id = $2)
-   AND (from_group = $3 OR to_group = $3)`, orgID, clusterArg, groupName).Scan(&networkCount); err != nil {
+   AND (from_group = $2 OR to_group = $2)`, orgID, groupName).Scan(&networkCount); err != nil {
 		return 0, err
 	}
 	total += networkCount
@@ -497,13 +496,12 @@ SELECT COUNT(*)
 SELECT COUNT(*)
   FROM response_rules_v2
  WHERE org_id = $1
-   AND ($2::uuid IS NULL OR cluster_id IS NULL OR cluster_id = $2)
-   AND (workload_match->>'group' = $3 OR workload_match->>'group' = $4)`,
-		orgID, clusterArg, groupName, groupID.String()).Scan(&responseCount); err != nil {
+   AND (workload_match->>'group' = $2 OR workload_match->>'group' = $3)`,
+		orgID, groupName, groupID.String()).Scan(&responseCount); err != nil {
 		return 0, err
 	}
 	total += responseCount
-	admissionRefs, err := h.groupAdmissionRuleUsage(ctx, orgID, clusterArg, groupID, groupName)
+	admissionRefs, err := h.groupAdmissionRuleUsage(ctx, orgID, nil, groupID, groupName)
 	if err != nil {
 		return 0, err
 	}
