@@ -1,0 +1,35 @@
+{
+  "source": "neuvector",
+  "fixture": "neuvector-cutover-export.json",
+  "scope": "fresh organization and one owned cluster",
+  "source_objects": {
+    "groups": 2,
+    "network_rules": 1,
+    "vulnerability_profiles": 1,
+    "total": 4
+  },
+  "converted": {
+    "groups": 2,
+    "network_rules": 1,
+    "vulnerability_profiles": 1,
+    "total": 4
+  },
+  "unsupported": 0,
+  "applied": {
+    "groups": 2,
+    "network_rules": 1,
+    "vulnerability_profiles": 1,
+    "created": 4,
+    "updated": 0
+  },
+  "rolled_back": {
+    "deleted": 4,
+    "restored": 0
+  },
+  "names": {
+    "groups": ["cutover.api.default", "cutover.db.default"],
+    "network_edge": ["cutover.api.default", "cutover.db.default"],
+    "vulnerability_profile": "cutover-vuln-profile"
+  },
+  "ui_routes": ["/settings/migration", "/clusters/{cluster_id}/policy-center"]
+}

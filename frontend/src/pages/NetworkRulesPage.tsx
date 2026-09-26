@@ -62,7 +62,8 @@ export function NetworkRulesPage() {
   }, [all, search]);
 
   const columns: Column<NetworkRule>[] = [
-    { id: "id", header: "ID", width: "72px", numeric: true, cell: (r) => <span className="text-mono text-[11px] text-muted-foreground">{r.id}</span>, sort: (a, b) => a.priority - b.priority },
+    { id: "id", header: "ID", width: "72px", numeric: true, cell: (r) => <span className="text-mono text-[11px] text-muted-foreground">{r.id}</span>, sort: (a, b) => a.id - b.id },
+    { id: "priority", header: "Priority", width: "82px", numeric: true, cell: (r) => <span className="text-mono text-xs">{r.priority}</span>, sort: (a, b) => a.priority - b.priority },
     { id: "from", header: "From", cell: (r) => <span className="text-mono text-xs">{endpointLabel(r.from)}</span>, sort: (a, b) => a.from.localeCompare(b.from) },
     { id: "to", header: "To", cell: (r) => <span className="text-mono text-xs">{endpointLabel(r.to)}</span>, sort: (a, b) => a.to.localeCompare(b.to) },
     { id: "apps", header: "Applications", cell: (r) => (
@@ -81,7 +82,7 @@ export function NetworkRulesPage() {
     { id: "actions", header: "", width: "160px", cell: (r) => {
         const busy = upsert.isPending || remove.isPending || moveTop.isPending;
         const overridden = r.cfg_type !== "learned"; // has a persisted override / manual rule
-        const isTop = rows.length > 0 && r.id === rows[0].id;
+        const isTop = all.length > 0 && r.id === all[0].id;
         return (
           <div className="flex items-center justify-end gap-1">
             <button type="button" title={isTop ? "Already highest precedence" : "Move to top (evaluate first)"} disabled={busy || isTop}
@@ -159,7 +160,10 @@ export function NetworkRulesPage() {
       ) : rows.length === 0 ? (
         <EmptyState title="No network rules" hint="Rules are learned from observed traffic; none have been recorded for this cluster yet." />
       ) : (
-        <DataTable rows={rows} columns={columns} rowKey={(r) => String(r.id)} defaultSort={{ id: "matches", dir: "desc" }} />
+        <div>
+          <p className="mb-2 text-xs text-muted-foreground">Initially shown in server evaluation order. Column sorting changes only the view; Move to top changes rule precedence.</p>
+          <DataTable rows={rows} columns={columns} rowKey={(r) => String(r.id)} />
+        </div>
       )}
     </div>
   );

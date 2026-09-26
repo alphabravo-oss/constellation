@@ -1,0 +1,35 @@
+{
+  "groups": [
+    {
+      "name": "cutover.api.default",
+      "criteria": [
+        {"key": "service", "op": "=", "value": "api.default"},
+        {"key": "domain", "op": "=", "value": "default"}
+      ]
+    },
+    {
+      "name": "cutover.db.default",
+      "criteria": [
+        {"key": "service", "op": "=", "value": "db.default"},
+        {"key": "domain", "op": "=", "value": "default"}
+      ]
+    }
+  ],
+  "network_rules": [
+    {
+      "id": 1001,
+      "comment": "Cutover API to database",
+      "from": "cutover.api.default",
+      "to": "cutover.db.default",
+      "ports": "tcp/5432",
+      "action": "allow",
+      "priority": 10
+    }
+  ],
+  "vulnerability_profiles": [
+    {
+      "name": "cutover-vuln-profile",
+      "entries": [{"name": "CVE-2026-1234"}]
+    }
+  ]
+}

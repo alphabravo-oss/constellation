@@ -396,16 +396,6 @@ func TestOpenAPINetworkRuleContracts(t *testing.T) {
 	assertOpenAPIFields(t, moveRequest, []string{"from", "to"}, []string{"from", "to"})
 	moveResponse := openAPISchemaAt(t, "paths", movePath, "post", "responses", "200", "content", "application/json", "schema")
 	assertOpenAPIFields(t, moveResponse, []string{"ok", "priority"}, []string{"ok", "priority"})
-	export := openAPISchemaAt(t, "paths", basePath+":export", "get", "responses", "200", "content", "application/x-yaml", "schema")
-	if export["type"] != "string" {
-		t.Errorf("network rule export must be YAML text, got %v", export)
-	}
-	importRequest := openAPISchemaAt(t, "paths", basePath+":import", "post", "requestBody", "content", "application/x-yaml", "schema")
-	if importRequest["type"] != "string" {
-		t.Errorf("network rule import must accept YAML text, got %v", importRequest)
-	}
-	importResult := openAPISchemaAt(t, "paths", basePath+":import", "post", "responses", "200", "content", "application/json", "schema")
-	assertOpenAPIFields(t, importResult, []string{"created", "updated", "results"}, []string{"created", "updated", "results"})
 	for _, operation := range []map[string]any{
 		openAPISchemaAt(t, "paths", basePath, "delete"),
 		openAPISchemaAt(t, "paths", basePath, "get"),
@@ -416,6 +406,92 @@ func TestOpenAPINetworkRuleContracts(t *testing.T) {
 		if _, ok := operation["responses"].(map[string]any)["400"]; !ok {
 			t.Errorf("%s missing 400 response", operation["summary"])
 		}
+	}
+}
+
+func TestOpenAPINetworkRuleYAMLContracts(t *testing.T) {
+	basePath := "/api/v1/clusters/{id}/network-rules"
+	portableRule := openAPISchemaAt(t, "components", "schemas", "PortableNetworkRule")
+	properties := portableRule["properties"].(map[string]any)
+	wantFields := []string{"from", "to", "ports", "applications", "action", "disable", "comment", "priority", "cfg_type"}
+	gotFields := make([]string, 0, len(properties))
+	for field := range properties {
+		gotFields = append(gotFields, field)
+	}
+	sort.Strings(gotFields)
+	sort.Strings(wantFields)
+	if !reflect.DeepEqual(gotFields, wantFields) {
+		t.Errorf("portable rule fields = %v, want %v", gotFields, wantFields)
+	}
+	if properties["applications"].(map[string]any)["items"].(map[string]any)["type"] != "string" ||
+		properties["disable"].(map[string]any)["type"] != "boolean" ||
+		properties["priority"].(map[string]any)["type"] != "integer" {
+		t.Errorf("portable rule field types = %v", properties)
+	}
+	if _, ok := portableRule["required"]; ok {
+		t.Error("individual import rules may omit endpoints and return row-level errors")
+	}
+
+	exportBundle := openAPISchemaAt(t, "components", "schemas", "NetworkRuleExportBundle")
+	assertOpenAPIFields(t, exportBundle, []string{"apiVersion", "kind", "rules"}, []string{"apiVersion", "kind", "rules"})
+	if exportBundle["properties"].(map[string]any)["apiVersion"].(map[string]any)["const"] != "constellation/v1" ||
+		exportBundle["properties"].(map[string]any)["kind"].(map[string]any)["const"] != "NetworkRuleBundle" ||
+		exportBundle["properties"].(map[string]any)["rules"].(map[string]any)["items"].(map[string]any)["$ref"] != "#/components/schemas/PortableNetworkRule" {
+		t.Errorf("export bundle shape = %v", exportBundle)
+	}
+	importBundle := openAPISchemaAt(t, "components", "schemas", "NetworkRuleImportBundle")
+	assertOpenAPIFields(t, importBundle, []string{"apiVersion", "kind", "rules"}, []string{"rules"})
+	if importBundle["properties"].(map[string]any)["rules"].(map[string]any)["minItems"] != float64(1) ||
+		importBundle["properties"].(map[string]any)["rules"].(map[string]any)["items"].(map[string]any)["$ref"] != "#/components/schemas/PortableNetworkRule" {
+		t.Errorf("import bundle rules = %v", importBundle)
+	}
+	importResult := openAPISchemaAt(t, "components", "schemas", "NetworkRuleImportResult")
+	assertOpenAPIFields(t, importResult, []string{"created", "updated", "results"}, []string{"created", "updated", "results"})
+	rowResult := importResult["properties"].(map[string]any)["results"].(map[string]any)["items"].(map[string]any)
+	assertOpenAPIFields(t, rowResult, []string{"from", "to", "status", "error"}, []string{"from", "to", "status"})
+	if !reflect.DeepEqual(rowResult["properties"].(map[string]any)["status"].(map[string]any)["enum"], []any{"created", "updated", "error"}) {
+		t.Errorf("import result statuses = %v", rowResult)
+	}
+
+	for _, contract := range []struct {
+		path, method, mediaType, schemaRef string
+		statuses                           []string
+	}{
+		{basePath + ":export", "get", "application/x-yaml", "#/components/schemas/NetworkRuleExportBundle", []string{"200", "400", "401", "403", "500", "default"}},
+		{basePath + ":import", "post", "application/json", "#/components/schemas/NetworkRuleImportResult", []string{"200", "400", "401", "403", "default"}},
+	} {
+		operation := openAPISchemaAt(t, "paths", contract.path, contract.method)
+		parameters := operation["parameters"].([]any)
+		if len(parameters) != 1 || parameters[0].(map[string]any)["name"] != "id" || parameters[0].(map[string]any)["required"] != true ||
+			parameters[0].(map[string]any)["schema"].(map[string]any)["format"] != "uuid" {
+			t.Errorf("%s path parameters = %v", contract.path, parameters)
+		}
+		response := openAPISchemaAt(t, "paths", contract.path, contract.method, "responses", "200", "content")
+		if len(response) != 1 || response[contract.mediaType].(map[string]any)["schema"].(map[string]any)["$ref"] != contract.schemaRef {
+			t.Errorf("%s 200 response content = %v", contract.path, response)
+		}
+		statuses := openAPISchemaAt(t, "paths", contract.path, contract.method, "responses")
+		if len(statuses) != len(contract.statuses) {
+			t.Errorf("%s response statuses = %v, want %v", contract.path, statuses, contract.statuses)
+		}
+		for _, status := range contract.statuses {
+			response, ok := statuses[status].(map[string]any)
+			if !ok {
+				t.Errorf("%s missing %s response", contract.path, status)
+			} else if status != "200" && response["$ref"] != "#/components/responses/Error" {
+				t.Errorf("%s %s must return JSON error response: %v", contract.path, status, response)
+			}
+		}
+		if _, ok := statuses["201"]; ok {
+			t.Errorf("%s must not document 201", contract.path)
+		}
+	}
+	importOperation := openAPISchemaAt(t, "paths", basePath+":import", "post")
+	requestBody := importOperation["requestBody"].(map[string]any)
+	requestContent := requestBody["content"].(map[string]any)
+	if requestBody["required"] != true || len(requestContent) != 1 ||
+		requestContent["application/x-yaml"].(map[string]any)["schema"].(map[string]any)["$ref"] != "#/components/schemas/NetworkRuleImportBundle" {
+		t.Errorf("import request body = %v", requestBody)
 	}
 }
 

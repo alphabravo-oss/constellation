@@ -149,6 +149,21 @@ describe("PolicyCenterPage", () => {
     }
   });
 
+  it("links only supported precedence controls with their actual scope", () => {
+    render(<PolicyCenterPage />);
+
+    const network = familyElement("network-rules").querySelector('[data-testid="policy-family-network-rules-reorder"]');
+    const response = familyElement("response-rules").querySelector('[data-testid="policy-family-response-rules-reorder"]');
+    expect(network?.querySelector('a[aria-label="Manage Network Rules precedence"]')?.getAttribute("href"))
+      .toBe("/clusters/cluster-1/network-rules");
+    expect(network?.textContent).toContain("Move a network rule to the top; arbitrary positions are not supported");
+    expect(network?.textContent).toContain("initially follows evaluation order");
+    expect(response?.querySelector('a[aria-label="Manage Response Rules precedence"]')?.getAttribute("href"))
+      .toBe("/clusters/cluster-1/response-rules");
+    expect(response?.textContent).toContain("Move response rules up or down in the visible cluster and org-wide list");
+    expect(familyElement("admission").querySelector('[data-testid$="-reorder"]')).toBeNull();
+  });
+
   it("places saved NeuVector diagnostics beside matching families without claiming cluster ownership", async () => {
     vi.mocked(enterprise.migrationImportsPage).mockResolvedValue({ imports: [
       savedImport([

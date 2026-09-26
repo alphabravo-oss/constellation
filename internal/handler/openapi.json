@@ -158,6 +158,140 @@
           }
         }
       },
+      "PortableNetworkRule": {
+        "type": "object",
+        "description": "An authored rule or learned-rule override. An import row with a missing or blank endpoint is reported as a per-row error, not a request-level error.",
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "ports": {
+            "type": "string",
+            "description": "Omitted when empty on export; blank values default to any on import."
+          },
+          "applications": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "action": {
+            "type": "string",
+            "description": "Only deny is treated as deny on import; other values default to allow."
+          },
+          "disable": {
+            "type": "boolean"
+          },
+          "comment": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer",
+            "description": "Non-positive values default to 1000 on import."
+          },
+          "cfg_type": {
+            "type": "string",
+            "description": "Advisory on import; the target cluster's learned-flow history determines the stored value."
+          }
+        }
+      },
+      "NetworkRuleExportBundle": {
+        "type": "object",
+        "required": [
+          "apiVersion",
+          "kind",
+          "rules"
+        ],
+        "properties": {
+          "apiVersion": {
+            "type": "string",
+            "const": "constellation/v1"
+          },
+          "kind": {
+            "type": "string",
+            "const": "NetworkRuleBundle"
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PortableNetworkRule"
+            }
+          }
+        }
+      },
+      "NetworkRuleImportBundle": {
+        "type": "object",
+        "required": [
+          "rules"
+        ],
+        "description": "The importer requires at least one rule but does not validate apiVersion or kind. Rules may fail individually while the request still returns 200.",
+        "properties": {
+          "apiVersion": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "rules": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/PortableNetworkRule"
+            }
+          }
+        }
+      },
+      "NetworkRuleImportResult": {
+        "type": "object",
+        "required": [
+          "created",
+          "updated",
+          "results"
+        ],
+        "properties": {
+          "created": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "updated": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "from",
+                "to",
+                "status"
+              ],
+              "properties": {
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "created",
+                    "updated",
+                    "error"
+                  ]
+                },
+                "error": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
       "AdmissionAssessRequest": {
         "type": "object",
         "required": [
@@ -4629,6 +4763,8 @@
     },
     "/api/v1/clusters/{id}/network-rules:export": {
       "get": {
+        "summary": "Export network rules",
+        "description": "Exports authored network rules and learned-rule overrides for this cluster, excluding pure learned observations.",
         "parameters": [
           {
             "name": "id",
@@ -4646,20 +4782,33 @@
             "content": {
               "application/x-yaml": {
                 "schema": {
-                  "type": "string"
+                  "$ref": "#/components/schemas/NetworkRuleExportBundle"
                 }
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
           "default": {
             "$ref": "#/components/responses/Error"
           }
-        },
-        "summary": "Export network rules"
+        }
       }
     },
     "/api/v1/clusters/{id}/network-rules:import": {
       "post": {
+        "summary": "Import network rules",
+        "description": "Upserts rules into the target cluster. Individual invalid or failed rules appear in results with status error; successful and partially successful imports return 200. The request body is limited to 1 MiB.",
         "parameters": [
           {
             "name": "id",
@@ -4676,70 +4825,35 @@
           "content": {
             "application/x-yaml": {
               "schema": {
-                "type": "string"
+                "$ref": "#/components/schemas/NetworkRuleImportBundle"
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Network rule import summary.",
+            "description": "Per-rule import summary, including any row-level errors.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "required": [
-                    "created",
-                    "updated",
-                    "results"
-                  ],
-                  "properties": {
-                    "created": {
-                      "type": "integer"
-                    },
-                    "updated": {
-                      "type": "integer"
-                    },
-                    "results": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "required": [
-                          "from",
-                          "to",
-                          "status"
-                        ],
-                        "properties": {
-                          "from": {
-                            "type": "string"
-                          },
-                          "to": {
-                            "type": "string"
-                          },
-                          "status": {
-                            "type": "string",
-                            "enum": [
-                              "created",
-                              "updated",
-                              "error"
-                            ]
-                          },
-                          "error": {
-                            "type": "string"
-                          }
-                        }
-                      }
-                    }
-                  }
+                  "$ref": "#/components/schemas/NetworkRuleImportResult"
                 }
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
           "default": {
             "$ref": "#/components/responses/Error"
           }
-        },
-        "summary": "Import network rules"
+        }
       }
     },
     "/api/v1/clusters/{id}/network-rules:move-top": {

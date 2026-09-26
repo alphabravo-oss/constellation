@@ -31,6 +31,7 @@ interface PolicyFamily {
   icon: ReactNode;
   mode?: "learn" | "monitor" | "enforce";
   ordered?: boolean;
+  reorder?: "move-top" | "up-down";
   portable?: "network-rules" | "dlp" | "signatures" | "groups" | "vuln-profiles";
 }
 
@@ -59,6 +60,7 @@ const policyFamilies: PolicyFamily[] = [
     icon: <Network className="h-4 w-4" aria-hidden />,
     mode: "monitor",
     ordered: true,
+    reorder: "move-top",
     portable: "network-rules",
   },
   {
@@ -120,6 +122,7 @@ const policyFamilies: PolicyFamily[] = [
     createRoute: "response-rules/new",
     icon: <BellRing className="h-4 w-4" aria-hidden />,
     ordered: true,
+    reorder: "up-down",
   },
   {
     title: "Vulnerability Profiles",
@@ -267,6 +270,16 @@ export function PolicyCenterPage() {
                     <PolicyFamilyLastChanged family={family.portable} clusterId={clusterId} />
                   ) : null}
                   {family.portable === "network-rules" ? <NetworkRuleMatchStats clusterId={clusterId} /> : null}
+                  {family.reorder && clusterId ? (
+                    <div className="text-xs text-muted-foreground" data-testid={`policy-family-${familySlug(family.route)}-reorder`}>
+                      <Link to={to(family.route)} className="font-medium text-primary underline underline-offset-2" aria-label={`Manage ${family.title} precedence`}>
+                        Manage precedence
+                      </Link>
+                      <div>{family.reorder === "move-top"
+                        ? "Move a network rule to the top; arbitrary positions are not supported. The rule table initially follows evaluation order."
+                        : "Move response rules up or down in the visible cluster and org-wide list."}</div>
+                    </div>
+                  ) : null}
                   <div className="flex flex-wrap gap-2">
                     <Button asChild size="sm" variant="primary">
                       <Link to={to(family.route)} aria-label={`Open ${family.title}`}>Open</Link>

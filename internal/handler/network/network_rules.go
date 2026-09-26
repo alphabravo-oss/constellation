@@ -10,9 +10,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
+	"github.com/alphabravocompany/constellation/pkg/audit"
 )
 
 // networkRuleDTO mirrors NeuVector's RESTPolicyRule so the Network Rules page is a
@@ -32,7 +34,7 @@ type networkRuleDTO struct {
 	Learned      bool     `json:"learned"`
 	Disable      bool     `json:"disable"`
 	CfgType      string   `json:"cfg_type"`
-	Priority     uint32   `json:"priority"`
+	Priority     int64    `json:"priority"`
 	MatchCounter int64    `json:"match_counter"`
 	LastMatchTS  int64    `json:"last_match_timestamp"`
 }
@@ -142,7 +144,7 @@ SELECT src_workload, dst_workload, verdict,
 			}
 			seen[key] = true
 			d.ID = ruleID(d.From, d.To)
-			d.Priority = d.ID
+			d.Priority = int64(d.ID)
 			d.Applications = apps
 			if d.Applications == nil {
 				d.Applications = []string{}
@@ -168,7 +170,7 @@ SELECT src_workload, dst_workload, verdict,
 				d.Action = o.action
 				d.Disable = o.disable
 				d.Comment = o.comment
-				d.Priority = uint32(o.priority)
+				d.Priority = int64(o.priority)
 				d.CfgType = "learned_override"
 			}
 			out = append(out, d)
@@ -194,7 +196,7 @@ SELECT src_workload, dst_workload, verdict,
 			Action:       o.action,
 			Disable:      o.disable,
 			Comment:      o.comment,
-			Priority:     uint32(o.priority),
+			Priority:     int64(o.priority),
 			CfgType:      "user_created",
 		}
 		if d.Ports == "" {
@@ -339,23 +341,67 @@ func (h *Network) MoveNetworkRuleToTop(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "from and to are required"})
 		return
 	}
-	// New top priority: below every existing override. Default 990 when none exist so a first
-	// move still lands above the 1000-default upsert baseline.
-	var newPri int
-	_ = h.db.Pool().QueryRow(r.Context(),
-		`SELECT COALESCE(MIN(priority), 1000) - 10 FROM network_rule_overrides WHERE org_id = $1 AND cluster_id = $2`,
-		subj.OrgID, clusterID).Scan(&newPri)
-	var learned bool
-	_ = h.db.Pool().QueryRow(r.Context(), `
+	if h.audit == nil {
+		httpx.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "audit unavailable"})
+		return
+	}
+	tx, err := h.db.Pool().Begin(r.Context())
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to begin rule transition"})
+		return
+	}
+	defer tx.Rollback(r.Context())
+	var lockedCluster uuid.UUID
+	if err := tx.QueryRow(r.Context(), `SELECT id FROM clusters WHERE id=$1 AND org_id=$2 FOR UPDATE`, clusterID, subj.OrgID).Scan(&lockedCluster); err != nil {
+		if err == pgx.ErrNoRows {
+			httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found"})
+		} else {
+			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify cluster"})
+		}
+		return
+	}
+	var overridden, learned bool
+	if err := tx.QueryRow(r.Context(), `
 SELECT EXISTS (
+  SELECT 1 FROM network_rule_overrides
+   WHERE org_id=$1 AND cluster_id=$2 AND from_ep=$3 AND to_ep=$4),
+ EXISTS (
   SELECT 1 FROM network_flow_rollups
-   WHERE org_id = $1 AND cluster_id = $2 AND src_workload = $3 AND dst_workload = $4)`,
-		subj.OrgID, clusterID, body.From, body.To).Scan(&learned)
+   WHERE org_id=$1 AND cluster_id=$2 AND src_workload=$3 AND dst_workload=$4)`,
+		subj.OrgID, clusterID, body.From, body.To).Scan(&overridden, &learned); err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify rule"})
+		return
+	}
+	if !overridden && !learned {
+		httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "network rule not found"})
+		return
+	}
+	var minPriority int
+	if err := tx.QueryRow(r.Context(), `SELECT COALESCE(MIN(priority), 1000) FROM network_rule_overrides WHERE org_id=$1 AND cluster_id=$2`, subj.OrgID, clusterID).Scan(&minPriority); err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to read precedence"})
+		return
+	}
+	if minPriority < -2147483638 {
+		httpx.WriteJSON(w, http.StatusConflict, map[string]string{"error": "network rule priority range exhausted"})
+		return
+	}
+	newPri := minPriority - 10
+	targetID := clusterID.String() + "/" + body.From + "/" + body.To
+	before := map[string]any{"cluster_id": clusterID, "from": body.From, "to": body.To}
+	auditID, _, err := h.audit.Log(r.Context(), audit.Event{
+		OrgID: &subj.OrgID, ActorID: &subj.UserID, ActorIP: networkActorIP(r),
+		Action: "network_rule.move_top_attempt", TargetKind: "network_rule", TargetID: targetID,
+		Before: before, After: map[string]any{"priority": newPri},
+	})
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "audit unavailable"})
+		return
+	}
 	cfgType := "user_created"
 	if learned {
 		cfgType = "learned_override"
 	}
-	if _, err := h.db.Pool().Exec(r.Context(), `
+	if _, err := tx.Exec(r.Context(), `
 INSERT INTO network_rule_overrides
   (org_id, cluster_id, from_ep, to_ep, priority, cfg_type, updated_by, updated_at)
 VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
@@ -365,7 +411,20 @@ ON CONFLICT (org_id, cluster_id, from_ep, to_ep) DO UPDATE SET
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "priority": newPri})
+	if err := tx.Commit(r.Context()); err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to commit precedence"})
+		return
+	}
+	completionID, _, completionErr := h.audit.Log(r.Context(), audit.Event{
+		OrgID: &subj.OrgID, ActorID: &subj.UserID, ActorIP: networkActorIP(r),
+		Action: "network_rule.move_top", TargetKind: "network_rule", TargetID: targetID,
+		Before: before, After: map[string]any{"priority": newPri, "audit_attempt_id": auditID},
+	})
+	response := map[string]any{"ok": true, "priority": newPri, "audit_attempt_id": auditID, "completion_audit_recorded": completionErr == nil}
+	if completionErr == nil {
+		response["completion_audit_id"] = completionID
+	}
+	httpx.WriteJSON(w, http.StatusOK, response)
 }
 
 // DeleteNetworkRule drops the override for a pair. A manual rule vanishes; a learned rule
