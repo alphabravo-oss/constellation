@@ -102,17 +102,18 @@ INSERT INTO scan_evidence (
     org_id, scan_target_id, cluster_id, target_type, target_ref,
     source_type, source_ref, evidence_type, inventory_hash, package_count,
     payload, observed_at
-) VALUES ($1, $2, $3, $4, $5,
-          $6, NULLIF($7,''), $8, $9, $10,
-          $11::jsonb, $12)
+) SELECT st.org_id, st.id, st.cluster_id, st.type, st.ref,
+         st.source_type, st.source_ref, $3, $4, $5,
+         $6::jsonb, $7
+    FROM scan_targets st
+   WHERE st.id = $1 AND st.org_id = $2
 ON CONFLICT (org_id, scan_target_id, evidence_type, inventory_hash) DO UPDATE SET
     package_count = EXCLUDED.package_count,
     payload       = EXCLUDED.payload,
     observed_at   = EXCLUDED.observed_at,
     created_at    = NOW()
 RETURNING id`,
-		orgID, target.ID, target.ClusterID, target.Type, target.Ref,
-		target.SourceType, target.SourceRef, packageInventoryEvidence, inventoryHash, len(payload.Packages),
+		target.ID, orgID, packageInventoryEvidence, inventoryHash, len(payload.Packages),
 		string(raw), observedAt).Scan(&id)
 	return id, err
 }
@@ -120,13 +121,14 @@ RETURNING id`,
 func latestPackageEvidenceID(ctx context.Context, q scanEvidenceWriter, orgID, targetID uuid.UUID, inventoryHash string) (*uuid.UUID, error) {
 	var id uuid.UUID
 	err := q.QueryRow(ctx, `
-SELECT id
-  FROM scan_evidence
- WHERE org_id = $1
-   AND scan_target_id = $2
-   AND evidence_type = $3
-   AND ($4 = '' OR inventory_hash = $4)
- ORDER BY observed_at DESC
+SELECT ev.id
+  FROM scan_evidence ev
+  JOIN scan_targets st ON st.id = ev.scan_target_id AND st.org_id = ev.org_id
+ WHERE ev.org_id = $1
+   AND ev.scan_target_id = $2
+   AND ev.evidence_type = $3
+   AND ($4 = '' OR ev.inventory_hash = $4)
+ ORDER BY ev.observed_at DESC
  LIMIT 1`, orgID, targetID, packageInventoryEvidence, inventoryHash).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil

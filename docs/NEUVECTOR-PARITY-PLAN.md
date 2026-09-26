@@ -30,6 +30,9 @@ first-class.
 - An export is either round-trip importable or clearly labeled as evidence.
 - Backend and chart changes require a deployable artifact and live-cluster smoke.
 - New parity work is added here instead of creating another roadmap document.
+- Record partial fixes in the implementation review, not as newly checked
+  checklist items. Close an existing open item only when its acceptance is met;
+  add a new open item when newly discovered work expands the scope.
 - Technology Selection Guide requirements are tracked in TSG-1 through TSG-7
   below. Matching some library choices is not evidence of full conformance.
   Record approved deviations explicitly; do not silently treat them as compliant.
@@ -84,9 +87,16 @@ Unchecked parent items remain open until **all** their acceptance requirements
 are met. Code present is not the same as verified or release-ready. The older
 deficiency ledger includes findings that already have fixes; do not use its
 historical counts as a count of currently open defects.
-Checklist state after this continuation: **48 checked bounded items, 106 open
-items**. A checked child does not close its unchecked parent or replace live
-deployment evidence.
+Acceptance backlog: **106 open**. Since the `800b0ef` baseline of 107 open,
+**one existing item closed** (OPS-1 heartbeat fixtures); no other open item
+has closed. The checklist also contains **40 checked bounded rows** (39 at
+baseline). Partial scanner, registry and SIEM fixes are recorded in the review
+table, not counted as closures. A checked child does not close its unchecked
+parent or replace live deployment evidence.
+
+| Acceptance item closed since `800b0ef` | Closure evidence |
+|---|---|
+| OPS-1 heartbeat fixtures | API-level tests ingest all 15 required and optional roles and check empty, partial and healthy org/cluster rollups. The separate OPS-1 diagnostics and E2E item remains open. |
 
 | Slice | Current status | Evidence / remaining work |
 |---|---|---|
@@ -98,6 +108,7 @@ deployment evidence.
 | P0 agent/heartbeat tenant scope | Source fixes and fresh-DB package tests verified; broader attribution audit open | Host facts/packages/processes/containers, host-CIS, workload packages, runtime events/threats/flows, Kubernetes audit, network sessions, platform facts and file-profile watches now use resolved token cluster attribution; file-profile bundle, response-action queue/result and PCAP claim/upload/status reads or writes reject cross-cluster use. The shared resolver rejects conflicting multi-cluster bundle mappings; absent a bundle it retains a legacy fallback only when the token org has exactly one cluster (platform facts requires an explicit bundle). Live flow/threat IP resolution and flow backfill select pod/service metadata only from the reporting cluster. Fresh-DB affected packages passed twice, with targeted valid and negative no-write tests. Remaining scanner-originated writes, per-node binding, legacy single-cluster fallback review and deployed multi-cluster proof remain open. |
 | P0 scanner-job/heartbeat tenant scope | Bounded source and DB tests verified; scanner-token cluster binding remains open | Claim, renew, complete and fail reject scan jobs whose target belongs to another org; claim also ignores package evidence linked to a foreign-org target. Scanner-token heartbeat accepts owned clusters by ID or name, rejects foreign clusters and conflicting ID/name pairs. Scanner tokens remain org-scoped and can report any owned cluster; these checks do not prove node identity or deployed multi-cluster behavior. Schema-level composite foreign keys and remaining scanner-originated writes still need audit. |
 | P0 scanner read scope | Bounded source and DB tests verified; wider scanner inventory open | Job list, attempts and status exclude rows whose target belongs to another org. Shared queue metrics apply the same target-org check for both scan-job and compliance consumers. Scanner-token package-evidence GET also requires its linked target to share the evidence org. Direct DB tests inject mismatched links and verify no cross-org target metadata, attempt ledger, status bundle, queue metric or evidence payload is surfaced. Schema-level composite foreign keys, other scanner reads/writes and deployment proof remain open. |
+| P0 scanner target-link integrity | Bounded source and DB tests verified; parent tenant-scope item open | Package-evidence upsert now selects canonical target metadata from an owned target and writes nothing for a foreign target; latest-evidence lookup also ignores mismatched links. Scan-object evidence/jobs/finding counts/vulnerabilities exclude mismatched links, and enqueue rechecks and locks the owned target. Attestation report, read and verification paths reject or hide foreign-org target/evidence/image-result links. Direct DB tests cover valid and negative paths. Schema-level composite foreign keys, other consumers, transactional verification history and deployed multi-cluster proof remain open. |
 | OPS-1 component role fixtures | API-level tests verified; diagnostics/E2E coverage open | Heartbeat fixtures cover all 15 declared required and optional component roles, with empty, partial and healthy inventories, org/cluster rollups and instance-scope assertions. This is local API/DB proof only; role aliases, diagnostics and browser filtering remain open. |
 | P0 audit/timeline/exemption scope | Source fixes and direct PostgreSQL tests verified; deployed matrix open | Audit, timeline, compliance checks/summary and evidence cluster filters reject clusters outside the subject org; timeline violation attribution cannot join a foreign-org deployment. Exemption create/list/revoke tests cover cross-org/foreign-cluster and no-write behavior. The evidence overlay applies cluster-specific exemptions only to matching-cluster items, falls back to org-wide exemptions and rejects misattributed exemptions; checks/summary exclude misattributed foreign-cluster check and exemption rows. Remaining aggregation and agent-write inventory, route-level cluster-grant RBAC, and deployed multi-cluster paths are open. |
 | SIEM-1 TLS material guard | Source fix and in-process mTLS tests verified; broader SIEM slice open | Syslog target validation rejects configured CA/client-key material on plaintext transports, and the delivery sender independently refuses plaintext when TLS credentials or a server name are present. In-process collector tests cover verified TLS 1.2/1.3, wrong server CA, absent/untrusted client credentials and plaintext rejection. Full wire-format/filter matrix and deployed collector validation remain open. |
@@ -230,6 +241,13 @@ evidence, credential-audit and syslog cases passed twice with races; `go vet
 ./...` and whitespace checks passed. The touched `pkg/notify/notify.go` retains
 pre-existing whole-file `gofmt` differences outside this bounded change.
 
+The scanner target-link continuation passed twice in handler and scanning
+packages against a fresh database through migration 163, with a second
+migration no-op (`/tmp/parity-evidence-link-scope-fresh.log`). Focused evidence,
+scan-object and attestation cases passed twice with races; `go vet ./...`,
+formatting on touched Go files and whitespace checks passed. This is a partial
+tenant-scope fix, not a closure of the P0.2 parent or deployed proof.
+
 This table records the current review, not completion of other unchecked
 workstreams. Update rows with actual test results as each slice is verified.
 
@@ -296,22 +314,6 @@ row saying `enforced`.
   The shared resolver still permits a legacy single-cluster fallback for
   tokens without init-bundle mappings; review whether to retire that fallback.
   Do not treat bounded source fixes as deployed multi-cluster proof.
-- [x] Require a same-org scan target across scanner-job claim, lease renewal,
-  completion and failure; reject cross-org-linked package evidence at claim.
-  Direct DB tests cover rejected no-write paths and normal owned-target claim.
-  Schema-level composite foreign keys and remaining scanner writes are open.
-- [x] Exclude scan jobs linked to foreign-org targets from user-facing list,
-  attempts and status, including shared queue metrics and bundle metadata.
-  Direct DB tests cover mismatched rows; other scanner read surfaces and
-  schema-level referential enforcement remain open.
-- [x] Reject scanner-token evidence GET when its evidence row references a
-  target in another org; direct DB tests cover an owned response and a
-  mismatched-link no-payload response. Other scanner evidence paths and
-  schema-level referential enforcement remain open.
-- [x] Reject scanner-token heartbeats with a foreign cluster or conflicting
-  cluster ID/name; direct DB tests cover two owned clusters, a foreign cluster,
-  malformed IDs and rejected no-write paths. Scanner tokens remain org-scoped,
-  not pinned to a cluster or node.
 - [x] Reject foreign cluster filters in audit and timeline; prevent foreign-org
   deployment metadata from joining a violation. PostgreSQL tests cover org and
   cluster isolation. Exemption create/list/revoke tests cover cross-org and
@@ -503,21 +505,6 @@ row saying `enforced`.
   plaintext rejection and cross-authority blob redirects. Opt-in one-shot
   scans now have a configured-registry path below; signature verification
   still lacks this per-job path.
-- [x] Fail configured-credential registry jobs before scanning when credential
-  retrieval, missing credentials, image authority validation or isolated Docker-config creation
-  fails; do not silently fall back to a process-wide keychain. Local tests
-  cover mismatched authority, missing credentials, a failed job receipt and no scanner invocation.
-  Credential-free jobs and legacy one-shot mode still need full ambient-auth isolation.
-- [x] Add opt-in one-shot `--registry-id` with control-plane/token credential
-  fetch, fail-before-scan behavior and isolated Docker config for engines and
-  metadata readers. Strip inherited Trivy/Grype/Syft registry-auth variables
-  when a scan uses an isolated config. Local tests cover rejected credentials,
-  explicit anonymous config, cleanup and unchanged legacy `--ref` behavior.
-  Signature tooling and other ambient cloud credentials remain open.
-- [x] Refuse registry credential disclosure when its audit append fails; local
-  DB tests cover the redacted success receipt, unavailable audit logger and
-  failed audit database without returning the decrypted secret. Issuance is
-  still org-scoped, not bound to a claimed scan job.
 - [ ] Complete and validate ECR, GCR/Artifact Registry, ACR, Harbor, GitLab,
   JFrog/Nexus, IBM Cloud, and OpenShift discovery/auth flows that are advertised.
 - [ ] Add tag/repository selection policies, refreshable cloud tokens, and
@@ -535,9 +522,6 @@ row saying `enforced`.
   collector, including wrong CA, missing/untrusted client certificates and
   plaintext rejection. Deployed SIEM interoperability remains open.
 - [ ] Support RFC5424, JSON, and CEF output plus minimum level/category filters.
-- [x] Fail closed for an unknown syslog minimum severity, and keep unknown alert
-  severities below an `info` floor. Local tests prove filtering happens before
-  dialing; collector interoperability and full format/filter coverage remain open.
 - [ ] Verify a named receiver receives only its routed events and delivery results
   remain visible and auditable.
 - [x] Verify named-only delivery, retry/terminal receipts, cross-org and paused
