@@ -259,7 +259,7 @@ export function SystemHealthPage() {
       {/* ------------- VERDICT ------------- */}
       <VerdictBanner status={verdictStatus} title={verdictTitle} detail={verdictDetail} />
 
-      <Card title="Scanner database and capacity" description="Capacity and applied host VulnDB bundles from scanner heartbeats; Trivy/Grype download and apply revisions are not reported.">
+      <Card title="Scanner database and capacity" description="Scanner heartbeat capacity, host VulnDB bundles, and reported Trivy/Grype download and applied revisions.">
         <ScannerDbCapacity heartbeats={heartbeats} />
       </Card>
 

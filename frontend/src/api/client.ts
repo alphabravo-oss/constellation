@@ -1582,6 +1582,12 @@ export const vulnerabilityExceptions = {
   list: () => api.get<VulnerabilityExceptionsResponse>("/vulnerability-exceptions").then((r) => r.data),
 };
 
+export interface ScannerEngineDbRevision {
+  download_revision?: string;
+  applied_revision?: string;
+  status?: string;
+}
+
 export interface SystemHealthHeartbeat {
   component: string;
   cluster_id?: string;
@@ -1603,6 +1609,7 @@ export interface SystemHealthHeartbeat {
     engines?: Record<string, boolean>;
     cache_dirs?: Record<string, string>;
     cache_health?: Record<string, ScannerCacheHealthEntry>;
+    engine_db?: { trivy?: ScannerEngineDbRevision; grype?: ScannerEngineDbRevision };
     vulndb?: { enabled?: boolean; ready?: boolean; status?: string; path?: string; bundle_version?: string; payload_hash?: string; exported_at?: string; record_count?: number; error?: string };
   };
   last_seen_at: string;

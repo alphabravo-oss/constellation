@@ -345,7 +345,7 @@ export function ScannerSourcesPage() {
         <StatCard label="Scanners" value={workers.length.toLocaleString()} icon={<Database className="h-3.5 w-3.5" />} hint="last 24h" />
       </section>
 
-      <Card title="Scanner database and capacity" description="Live heartbeat capacity and host VulnDB bundle reports. Trivy/Grype download and apply revisions are not reported by the current API.">
+      <Card title="Scanner database and capacity" description="Live heartbeat capacity, host VulnDB bundles, and reported Trivy/Grype download and applied revisions.">
         <ScannerDbCapacity heartbeats={scannerHealth.data?.heartbeats} unavailable={scannerHealth.isError} loading={scannerHealth.isPending} />
       </Card>
 

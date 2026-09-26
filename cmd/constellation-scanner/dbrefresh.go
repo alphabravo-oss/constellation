@@ -3,12 +3,131 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
+
+type engineDBStatus struct {
+	DownloadRevision string `json:"download_revision,omitempty"`
+	AppliedRevision  string `json:"applied_revision,omitempty"`
+	Status           string `json:"status"`
+}
+
+const maxEngineDBMetadataBytes = 64 * 1024
+
+type limitedDBStatusOutput struct {
+	data     []byte
+	overflow bool
+}
+
+func (output *limitedDBStatusOutput) Write(chunk []byte) (int, error) {
+	written := len(chunk)
+	remaining := maxEngineDBMetadataBytes - len(output.data)
+	if len(chunk) > remaining {
+		output.overflow = true
+		chunk = chunk[:remaining]
+	}
+	output.data = append(output.data, chunk...)
+	return written, nil
+}
+
+func (w *worker) engineDBSnapshot(ctx context.Context) map[string]engineDBStatus {
+	w.engineDBMu.Lock()
+	downloads := make(map[string]string, len(w.engineDBDownloads))
+	for engine, revision := range w.engineDBDownloads {
+		downloads[engine] = revision
+	}
+	w.engineDBMu.Unlock()
+
+	out := make(map[string]engineDBStatus, 2)
+	for _, engine := range []string{"trivy", "grype"} {
+		status := engineDBStatus{DownloadRevision: downloads[engine]}
+		if w.engines != nil && !w.engines[engine] {
+			status.Status = "disabled"
+		} else {
+			status.AppliedRevision, status.Status = w.installedDBRevision(ctx, engine)
+		}
+		out[engine] = status
+	}
+	return out
+}
+
+func (w *worker) installedDBRevision(ctx context.Context, engine string) (string, string) {
+	switch engine {
+	case "trivy":
+		cacheDir := w.cacheDirs["trivy"]
+		if cacheDir == "" {
+			cacheDir = os.Getenv("TRIVY_CACHE_DIR")
+		}
+		if cacheDir == "" {
+			userCacheDir, err := os.UserCacheDir()
+			if err != nil {
+				return "", "unavailable"
+			}
+			cacheDir = filepath.Join(userCacheDir, "trivy")
+		}
+		metadataPath := filepath.Join(cacheDir, "db", "metadata.json")
+		info, err := os.Lstat(metadataPath)
+		if os.IsNotExist(err) {
+			return "", "missing"
+		}
+		if err != nil {
+			return "", "unavailable"
+		}
+		if !info.Mode().IsRegular() || info.Size() > maxEngineDBMetadataBytes {
+			return "", "invalid"
+		}
+		file, err := os.Open(metadataPath)
+		if err != nil {
+			return "", "unavailable"
+		}
+		defer file.Close()
+		var metadata struct {
+			UpdatedAt string `json:"UpdatedAt"`
+		}
+		if err := json.NewDecoder(io.LimitReader(file, maxEngineDBMetadataBytes)).Decode(&metadata); err != nil {
+			return "", "invalid"
+		}
+		return normalizedDBRevision(metadata.UpdatedAt)
+	case "grype":
+		commandCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		command := exec.CommandContext(commandCtx, "grype", "db", "status", "-o", "json", "-q")
+		command.Env = append(os.Environ(), "GRYPE_DB_AUTO_UPDATE=false")
+		var output limitedDBStatusOutput
+		command.Stdout = &output
+		command.Stderr = io.Discard
+		err := command.Run()
+		if err != nil && len(output.data) == 0 {
+			return "", "unavailable"
+		}
+		var status struct {
+			Built string `json:"built"`
+			Valid bool   `json:"valid"`
+		}
+		if output.overflow || json.Unmarshal(output.data, &status) != nil {
+			return "", "invalid"
+		}
+		if !status.Valid || err != nil {
+			return "", "invalid"
+		}
+		return normalizedDBRevision(status.Built)
+	}
+	return "", "unavailable"
+}
+
+func normalizedDBRevision(value string) (string, string) {
+	parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(value))
+	if err != nil || parsed.IsZero() {
+		return "", "invalid"
+	}
+	return parsed.UTC().Format(time.RFC3339Nano), "ready"
+}
 
 // scannerRuntimeConfig mirrors GET /api/v1/scanner/config — UI-settable knobs
 // (system_config) the scanner polls so admins can change them without a redeploy.
@@ -56,6 +175,15 @@ func (w *worker) refreshVulnDBs(ctx context.Context, offline bool) {
 		if err := c.Run(); err != nil {
 			w.logger.Warn("vuln DB refresh failed", "engine", name, "err", err.Error())
 			return
+		}
+		revision, status := w.installedDBRevision(ctx, name)
+		if status == "ready" {
+			w.engineDBMu.Lock()
+			if w.engineDBDownloads == nil {
+				w.engineDBDownloads = make(map[string]string, 2)
+			}
+			w.engineDBDownloads[name] = revision
+			w.engineDBMu.Unlock()
 		}
 		w.logger.Info("vuln DB refreshed", "engine", name)
 	}

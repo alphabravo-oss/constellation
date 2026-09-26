@@ -90,6 +90,64 @@ test("Dashboard exposes operator health and scanner freshness links", async ({ p
   await expect(page.getByTestId("dashboard-network-denies")).toBeVisible();
 });
 
+test("Dashboard and System Health show reported scanner engine DB revisions", async ({ page }) => {
+  await page.goto("/dashboard");
+  await page.waitForURL(/\/clusters\/[^/]+\/dashboard/);
+  const clusterID = page.url().match(/\/clusters\/([^/]+)\//)?.[1];
+  expect(clusterID).toBeTruthy();
+
+  await page.route("**/api/v1/system-health**", async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.heartbeats = [
+      ...(body.heartbeats ?? []).filter((heartbeat: { component: string }) => heartbeat.component !== "scanner"),
+      {
+        component: "scanner",
+        cluster_id: clusterID,
+        hostname: "scanner-revision-test",
+        status: "healthy",
+        version: "1.0.0",
+        commit: "revision-test",
+        commit_short: "revision",
+        uptime_seconds: 3600,
+        restart_count: 0,
+        last_seen_at: new Date().toISOString(),
+        metadata: {
+          max_concurrent: 4,
+          active_jobs: 1,
+          idle_capacity: 3,
+          vulndb: { bundle_version: "host-bundle-test" },
+          engine_db: {
+            trivy: { download_revision: "trivy-download-test", applied_revision: "trivy-applied-test" },
+            grype: { download_revision: "grype-download-test", applied_revision: "grype-applied-test" },
+          },
+        },
+      },
+    ];
+    await route.fulfill({ response, json: body });
+  });
+
+  await page.goto(`/clusters/${clusterID}/dashboard`);
+  const dashboard = page.getByTestId("dashboard-scanner-freshness");
+  await expect(dashboard).toContainText("3 idle / 4 slots");
+  await expect(dashboard).toContainText("host-bundle-test");
+  for (const revision of ["trivy-download-test", "trivy-applied-test", "grype-download-test", "grype-applied-test"]) {
+    await expect(dashboard).toContainText(revision);
+  }
+
+  await page.goto("/settings/health");
+  const health = page.getByTestId("scanner-db-capacity");
+  await expect(health).toContainText("3 idle / 4 slots");
+  for (const revision of ["trivy-download-test", "trivy-applied-test", "grype-download-test", "grype-applied-test"]) {
+    await expect(health).toContainText(revision);
+  }
+
+  await page.goto("/settings/scanner");
+  const scannerSources = page.getByTestId("scanner-db-capacity");
+  await expect(scannerSources).toContainText("3 idle / 4 slots");
+  await expect(scannerSources).toContainText("trivy-applied-test");
+});
+
 test("Network Activity exposes NeuVector-style workspace tabs", async ({ page }) => {
   await page.goto("/dashboard");
   await page.waitForURL(/\/clusters\/[^/]+\/dashboard/);

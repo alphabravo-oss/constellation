@@ -305,6 +305,8 @@ type worker struct {
 	agg                   *scanner.Aggregator
 	engines               map[string]bool
 	cacheDirs             map[string]string
+	engineDBMu            sync.Mutex
+	engineDBDownloads     map[string]string
 	lastErrMu             sync.Mutex
 	lastErr               string
 	signatureEnabled      bool
@@ -518,7 +520,9 @@ func (w *worker) releaseTarget(targetType string) {
 }
 
 func (w *worker) statusSnapshot() map[string]any {
-	return w.statusSnapshotWithCacheUsage(true)
+	status := w.statusSnapshotWithCacheUsage(true)
+	status["engine_db"] = w.engineDBSnapshot(context.Background())
+	return status
 }
 
 func (w *worker) statusSnapshotWithCacheUsage(includeCacheUsage bool) map[string]any {
