@@ -194,6 +194,10 @@ func TestGroupSensorBindings_RejectForeignOrgGroup(t *testing.T) {
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("foreign group bind status=%d body=%s", response.Code, response.Body.String())
 	}
+	var validated bool
+	if err := pool.QueryRow(ctx, `SELECT convalidated FROM pg_constraint WHERE conname='group_dpi_bindings_org_group_fk'`).Scan(&validated); err != nil || !validated {
+		t.Fatalf("group DPI tenant FK validated=%t err=%v", validated, err)
+	}
 	_, err = pool.Exec(ctx, `INSERT INTO group_dpi_sensor_bindings (org_id, group_id, sensor_kind, sensor_id) VALUES ($1, $2, 'dlp', $3)`, otherOrgID, groupID, uuid.New())
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) || pgErr.Code != "23503" || pgErr.ConstraintName != "group_dpi_bindings_org_group_fk" {

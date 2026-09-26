@@ -21,22 +21,6 @@ func (p *Policies) admissionGroupResolver(ctx context.Context, orgID uuid.UUID, 
 	return resolver, nil
 }
 
-func (p *Policies) admissionGroupExists(ctx context.Context, orgID uuid.UUID, clusterArg any, selector string) (bool, error) {
-	if p == nil || p.db == nil {
-		return true, nil
-	}
-	var ok bool
-	err := p.db.Pool().QueryRow(ctx, `
-SELECT EXISTS (
-  SELECT 1
-    FROM groups
-   WHERE org_id = $1
-     AND (id::text = $2 OR name = $2)
-     AND ($3::uuid IS NULL OR cluster_id IS NULL OR cluster_id = $3)
-)`, orgID, selector, nullableClusterID(clusterArg)).Scan(&ok)
-	return ok, err
-}
-
 func clusterIDFromArg(clusterArg any) uuid.UUID {
 	if clusterID, ok := clusterArg.(uuid.UUID); ok {
 		return clusterID

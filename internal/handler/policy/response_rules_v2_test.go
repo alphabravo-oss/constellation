@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -97,6 +98,7 @@ func responseRuleV2Router(d *db.DB, pool *pgxpool.Pool) *chi.Mux {
 	r.Get("/api/v1/response-rules-v2", h.List)
 	r.Get("/api/v1/response-rules-v2/options", h.Options)
 	r.Post("/api/v1/response-rules-v2", h.Create)
+	r.Put("/api/v1/response-rules-v2/{id}", h.Update)
 	r.Patch("/api/v1/response-rules-v2:reorder", h.Reorder)
 	return r
 }
@@ -320,6 +322,9 @@ func TestResponseRulesV2_CreatePreservesGroupSelector(t *testing.T) {
 	pool := d.Pool()
 	ensureResponseRulesV2Table(t, pool)
 	orgID, userID := seedOrgUser(t, pool)
+	if _, err := pool.Exec(context.Background(), `INSERT INTO groups (org_id, name, kind) VALUES ($1, 'nv.api', 'ground')`, orgID); err != nil {
+		t.Fatalf("group: %v", err)
+	}
 	router := responseRuleV2Router(d, pool)
 
 	body := `{"name":"nv-threat-group","description":"","enabled":true,"event_type":"threat","conditions":[{"type":"level","value":"high"}],"actions":[{"kind":"suppress-log"}],"workload_match":{"group":"nv.api","namespace":"prod"}}`
@@ -339,5 +344,295 @@ func TestResponseRulesV2_CreatePreservesGroupSelector(t *testing.T) {
 	}
 	if selector.Group != "nv.api" || selector.Namespace != "prod" {
 		t.Fatalf("selector = %+v", selector)
+	}
+}
+
+func responseRuleV2GroupBody(name, selector string) []byte {
+	body, _ := json.Marshal(responseRuleV2Body{
+		Name: name, Enabled: true, EventType: "threat",
+		Conditions:    []response.Condition{{Type: response.CondLevel, Value: "high"}},
+		Actions:       []response.Action{{Kind: response.ActionSuppressLog}},
+		WorkloadMatch: response.WorkloadSelector{Group: selector},
+	})
+	return body
+}
+
+func sendResponseRuleV2Group(r http.Handler, method, path string, orgID, userID uuid.UUID, body []byte) *httptest.ResponseRecorder {
+	req := withSubj(httptest.NewRequest(method, path, strings.NewReader(string(body))), orgID, userID)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w
+}
+
+func TestResponseRulesV2_GroupSelectorRequiresScopedGroup(t *testing.T) {
+	d := openTestDB(t)
+	defer d.Close()
+	pool := d.Pool()
+	ensureResponseRulesV2Table(t, pool)
+	orgID, userID := seedOrgUser(t, pool)
+	otherOrgID, _ := seedOrgUser(t, pool)
+	clusterID := seedResponseRuleV2Cluster(t, pool, orgID, "group-scope-a")
+	otherClusterID := seedResponseRuleV2Cluster(t, pool, orgID, "group-scope-b")
+	globalGroupID := uuid.New()
+	clusterGroupID := uuid.New()
+	for _, group := range []struct {
+		id        uuid.UUID
+		orgID     uuid.UUID
+		clusterID any
+		name      string
+	}{
+		{globalGroupID, orgID, nil, "global-group"},
+		{clusterGroupID, orgID, clusterID, "cluster-group"},
+		{uuid.New(), otherOrgID, nil, "foreign-group"},
+	} {
+		if _, err := pool.Exec(context.Background(), `INSERT INTO groups (id, org_id, cluster_id, name, kind) VALUES ($1,$2,$3,$4,'ground')`,
+			group.id, group.orgID, group.clusterID, group.name); err != nil {
+			t.Fatalf("group %s: %v", group.name, err)
+		}
+	}
+	router := responseRuleV2Router(d, pool)
+	basePath := "/api/v1/response-rules-v2?cluster_id=" + clusterID.String()
+	for _, tc := range []struct {
+		name     string
+		selector string
+		path     string
+		status   int
+	}{
+		{"missing", "missing-group", basePath, http.StatusBadRequest},
+		{"foreign", "foreign-group", basePath, http.StatusBadRequest},
+		{"other-cluster", "cluster-group", "/api/v1/response-rules-v2?cluster_id=" + otherClusterID.String(), http.StatusBadRequest},
+		{"org-wide-rejects-cluster", "cluster-group", "/api/v1/response-rules-v2", http.StatusBadRequest},
+		{"org-wide-global", "global-group", "/api/v1/response-rules-v2", http.StatusCreated},
+		{"global-name", "global-group", basePath, http.StatusCreated},
+		{"global-id", globalGroupID.String(), basePath, http.StatusCreated},
+		{"cluster-name", "cluster-group", basePath, http.StatusCreated},
+		{"cluster-id", clusterGroupID.String(), basePath, http.StatusCreated},
+	} {
+		resp := sendResponseRuleV2Group(router, http.MethodPost, tc.path, orgID, userID, responseRuleV2GroupBody(tc.name, tc.selector))
+		if resp.Code != tc.status {
+			t.Fatalf("create %s status=%d body=%s", tc.name, resp.Code, resp.Body.String())
+		}
+		if tc.status == http.StatusBadRequest && !strings.Contains(resp.Body.String(), "workload_match.group") {
+			t.Fatalf("create %s error=%s", tc.name, resp.Body.String())
+		}
+	}
+	var count int
+	if err := pool.QueryRow(context.Background(), `SELECT COUNT(*) FROM response_rules_v2 WHERE org_id=$1`, orgID).Scan(&count); err != nil || count != 5 {
+		t.Fatalf("created rules=%d err=%v", count, err)
+	}
+
+	ruleID := insertResponseRuleV2(t, pool, orgID, clusterID, "update-group", 100)
+	updatePath := "/api/v1/response-rules-v2/" + ruleID.String() + "?cluster_id=" + clusterID.String()
+	for _, tc := range []struct {
+		selector string
+		status   int
+	}{
+		{"missing-group", http.StatusBadRequest},
+		{"foreign-group", http.StatusBadRequest},
+		{"cluster-group", http.StatusOK},
+		{clusterGroupID.String(), http.StatusOK},
+	} {
+		resp := sendResponseRuleV2Group(router, http.MethodPut, updatePath, orgID, userID, responseRuleV2GroupBody("update-group", tc.selector))
+		if resp.Code != tc.status {
+			t.Fatalf("update %q status=%d body=%s", tc.selector, resp.Code, resp.Body.String())
+		}
+		if tc.status == http.StatusBadRequest && !strings.Contains(resp.Body.String(), "workload_match.group") {
+			t.Fatalf("update %q error=%s", tc.selector, resp.Body.String())
+		}
+	}
+	otherRuleID := insertResponseRuleV2(t, pool, orgID, otherClusterID, "update-other-cluster", 100)
+	resp := sendResponseRuleV2Group(router, http.MethodPut,
+		"/api/v1/response-rules-v2/"+otherRuleID.String()+"?cluster_id="+clusterID.String(),
+		orgID, userID, responseRuleV2GroupBody("update-other-cluster", "cluster-group"))
+	if resp.Code != http.StatusBadRequest || !strings.Contains(resp.Body.String(), "workload_match.group") {
+		t.Fatalf("update against misleading cluster status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	orgWideRuleID := insertResponseRuleV2(t, pool, orgID, nil, "update-org-wide", 100)
+	orgWidePath := "/api/v1/response-rules-v2/" + orgWideRuleID.String()
+	resp = sendResponseRuleV2Group(router, http.MethodPut, orgWidePath,
+		orgID, userID, responseRuleV2GroupBody("update-org-wide", "cluster-group"))
+	if resp.Code != http.StatusBadRequest || !strings.Contains(resp.Body.String(), "workload_match.group") {
+		t.Fatalf("org-wide update with cluster group status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	resp = sendResponseRuleV2Group(router, http.MethodPut, orgWidePath,
+		orgID, userID, responseRuleV2GroupBody("update-org-wide", "global-group"))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("org-wide update with global group status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	var savedSelector response.WorkloadSelector
+	var selectorJSON []byte
+	if err := pool.QueryRow(context.Background(), `SELECT workload_match FROM response_rules_v2 WHERE id=$1`, ruleID).Scan(&selectorJSON); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(selectorJSON, &savedSelector); err != nil || savedSelector.Group != clusterGroupID.String() {
+		t.Fatalf("saved update selector=%+v err=%v", savedSelector, err)
+	}
+}
+
+func TestResponseRulesV2_GroupMutationWinsBeforeCreateAndUpdate(t *testing.T) {
+	d := openTestDB(t)
+	defer d.Close()
+	pool := d.Pool()
+	ensureResponseRulesV2Table(t, pool)
+	orgID, userID := seedOrgUser(t, pool)
+	router := responseRuleV2Router(d, pool)
+	for _, tc := range []struct {
+		name   string
+		method string
+		change string
+	}{
+		{"create-after-rename", http.MethodPost, "rename"},
+		{"update-after-delete", http.MethodPut, "delete"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			groupID := uuid.New()
+			groupName := "race-" + groupID.String()
+			if _, err := pool.Exec(context.Background(), `INSERT INTO groups (id, org_id, name, kind) VALUES ($1,$2,$3,'ground')`, groupID, orgID, groupName); err != nil {
+				t.Fatal(err)
+			}
+			path := "/api/v1/response-rules-v2"
+			if tc.method == http.MethodPut {
+				ruleID := insertResponseRuleV2(t, pool, orgID, nil, tc.name, 100)
+				path += "/" + ruleID.String()
+			}
+			tx, err := pool.Begin(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback(context.Background())
+			var lockedOrgID uuid.UUID
+			if err := tx.QueryRow(context.Background(), `SELECT id FROM orgs WHERE id=$1 FOR KEY SHARE`, orgID).Scan(&lockedOrgID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tx.Exec(context.Background(), `LOCK TABLE response_rules_v2 IN SHARE MODE`); err != nil {
+				t.Fatal(err)
+			}
+			if tc.change == "rename" {
+				_, err = tx.Exec(context.Background(), `UPDATE groups SET name=$1 WHERE id=$2`, groupName+"-renamed", groupID)
+			} else {
+				_, err = tx.Exec(context.Background(), `DELETE FROM groups WHERE id=$1`, groupID)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			result := make(chan *httptest.ResponseRecorder, 1)
+			go func() {
+				result <- sendResponseRuleV2Group(router, tc.method, path, orgID, userID, responseRuleV2GroupBody(tc.name, groupName))
+			}()
+			select {
+			case resp := <-result:
+				t.Fatalf("%s completed before group mutation committed: %d %s", tc.name, resp.Code, resp.Body.String())
+			case <-time.After(100 * time.Millisecond):
+			}
+			if err := tx.Commit(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case resp := <-result:
+				if resp.Code != http.StatusBadRequest || !strings.Contains(resp.Body.String(), "workload_match.group") {
+					t.Fatalf("%s status=%d body=%s", tc.name, resp.Code, resp.Body.String())
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("rule mutation deadlocked with group mutation")
+			}
+			var count int
+			if err := pool.QueryRow(context.Background(), `SELECT COUNT(*) FROM response_rules_v2 WHERE org_id=$1 AND workload_match->>'group'=$2`, orgID, groupName).Scan(&count); err != nil || count != 0 {
+				t.Fatalf("stale group references=%d err=%v", count, err)
+			}
+		})
+	}
+}
+
+func TestResponseRulesV2_GroupRowLockReturnsConflict(t *testing.T) {
+	d := openTestDB(t)
+	defer d.Close()
+	pool := d.Pool()
+	ensureResponseRulesV2Table(t, pool)
+	orgID, userID := seedOrgUser(t, pool)
+	groupID := uuid.New()
+	groupName := "locked-" + groupID.String()
+	if _, err := pool.Exec(context.Background(), `INSERT INTO groups (id, org_id, name, kind) VALUES ($1,$2,$3,'ground')`, groupID, orgID, groupName); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := pool.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(context.Background())
+	var lockedID uuid.UUID
+	if err := tx.QueryRow(context.Background(), `SELECT id FROM groups WHERE id=$1 FOR UPDATE`, groupID).Scan(&lockedID); err != nil {
+		t.Fatal(err)
+	}
+	router := responseRuleV2Router(d, pool)
+	resp := sendResponseRuleV2Group(router, http.MethodPost, "/api/v1/response-rules-v2", orgID, userID, responseRuleV2GroupBody("locked-create", groupName))
+	if resp.Code != http.StatusConflict || !strings.Contains(resp.Body.String(), "workload_match.group") {
+		t.Fatalf("locked group create status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	ruleID := insertResponseRuleV2(t, pool, orgID, nil, "locked-update", 100)
+	resp = sendResponseRuleV2Group(router, http.MethodPut, "/api/v1/response-rules-v2/"+ruleID.String(), orgID, userID, responseRuleV2GroupBody("locked-update", groupName))
+	if resp.Code != http.StatusConflict || !strings.Contains(resp.Body.String(), "workload_match.group") {
+		t.Fatalf("locked group update status=%d body=%s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestResponseRulesV2_GroupUpdateDoesNotDeadlockReorder(t *testing.T) {
+	d := openTestDB(t)
+	defer d.Close()
+	pool := d.Pool()
+	ensureResponseRulesV2Table(t, pool)
+	orgID, userID := seedOrgUser(t, pool)
+	groupName := "reorder-group-" + uuid.NewString()
+	if _, err := pool.Exec(context.Background(), `INSERT INTO groups (org_id, name, kind) VALUES ($1,$2,'ground')`, orgID, groupName); err != nil {
+		t.Fatal(err)
+	}
+	ruleID := insertResponseRuleV2(t, pool, orgID, nil, "reorder-lock", 100)
+	tx, err := pool.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(context.Background())
+	var lockedID uuid.UUID
+	if err := tx.QueryRow(context.Background(), `SELECT id FROM response_rules_v2 WHERE id=$1 FOR UPDATE`, ruleID).Scan(&lockedID); err != nil {
+		t.Fatal(err)
+	}
+	router := responseRuleV2Router(d, pool)
+	result := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		result <- sendResponseRuleV2Group(router, http.MethodPut,
+			"/api/v1/response-rules-v2/"+ruleID.String(), orgID, userID,
+			responseRuleV2GroupBody("reorder-lock", groupName))
+	}()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		var waiting bool
+		if err := pool.QueryRow(context.Background(), `
+SELECT EXISTS (SELECT 1 FROM pg_locks
+ WHERE relation='response_rules_v2'::regclass
+   AND mode='ExclusiveLock' AND NOT granted)`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("group update did not wait behind reorder row lock")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if _, err := tx.Exec(ctx, `UPDATE response_rules_v2 SET priority=110 WHERE id=$1`, ruleID); err != nil {
+		t.Fatalf("reorder update blocked by group update: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case resp := <-result:
+		if resp.Code != http.StatusOK {
+			t.Fatalf("group update status=%d body=%s", resp.Code, resp.Body.String())
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("group update did not resume after reorder commit")
 	}
 }

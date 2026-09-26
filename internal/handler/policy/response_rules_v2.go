@@ -2,12 +2,15 @@ package policy
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
@@ -262,10 +265,19 @@ func (h *ResponseRulesV2) Create(w http.ResponseWriter, r *http.Request) {
 	conds, _ := json.Marshal(body.Conditions)
 	acts, _ := json.Marshal(body.Actions)
 	sel, _ := json.Marshal(body.WorkloadMatch)
+	tx, err := h.db.Pool().Begin(r.Context())
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	defer tx.Rollback(r.Context())
+	if !h.validateGroupSelector(w, r, tx, subj.OrgID, clusterArg, nil, body.WorkloadMatch.Group) {
+		return
+	}
 	var id uuid.UUID
 	// New rules append to the end of the current evaluation scope (lowest precedence) so
 	// adding a cluster-scoped rule never silently reshuffles existing precedence.
-	if err := h.db.Pool().QueryRow(r.Context(), `
+	if err := tx.QueryRow(r.Context(), `
 INSERT INTO response_rules_v2 (org_id, cluster_id, name, description, enabled, priority, event_type, conditions, actions, workload_match, created_by)
 VALUES ($1,$2,$3,$4,$5,
         (SELECT COALESCE(MAX(priority),0)+10
@@ -274,6 +286,10 @@ VALUES ($1,$2,$3,$4,$5,
             AND ($2::uuid IS NULL OR cluster_id IS NULL OR cluster_id=$2)),
         $6,$7,$8,$9,$10) RETURNING id`,
 		subj.OrgID, clusterArg, rule.Name, body.Description, body.Enabled, body.EventType, conds, acts, sel, subj.UserID).Scan(&id); err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -306,7 +322,16 @@ func (h *ResponseRulesV2) Update(w http.ResponseWriter, r *http.Request) {
 	conds, _ := json.Marshal(body.Conditions)
 	acts, _ := json.Marshal(body.Actions)
 	sel, _ := json.Marshal(body.WorkloadMatch)
-	tag, err := h.db.Pool().Exec(r.Context(), `
+	tx, err := h.db.Pool().Begin(r.Context())
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	defer tx.Rollback(r.Context())
+	if !h.validateGroupSelector(w, r, tx, subj.OrgID, nil, &id, body.WorkloadMatch.Group) {
+		return
+	}
+	tag, err := tx.Exec(r.Context(), `
 UPDATE response_rules_v2 SET name=$1, description=$2, enabled=$3, event_type=$4,
        conditions=$5, actions=$6, workload_match=$7, updated_at=NOW()
  WHERE id=$8 AND org_id=$9`,
@@ -319,11 +344,66 @@ UPDATE response_rules_v2 SET name=$1, description=$2, enabled=$3, event_type=$4,
 		httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
+	if err := tx.Commit(r.Context()); err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
 	oid := subj.OrgID
 	uid := subj.UserID
 	_, _, _ = h.auditLog.Log(r.Context(), audit.Event{OrgID: &oid, ActorID: &uid,
 		Action: "response_rule_v2.update", TargetKind: "response-rule-v2", TargetID: id.String()})
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"id": id})
+}
+
+func (h *ResponseRulesV2) validateGroupSelector(w http.ResponseWriter, r *http.Request, tx pgx.Tx, orgID uuid.UUID, clusterArg any, ruleID *uuid.UUID, selector string) bool {
+	if strings.TrimSpace(selector) == "" {
+		return true
+	}
+	var lockedOrgID uuid.UUID
+	if err := tx.QueryRow(r.Context(), `SELECT id FROM orgs WHERE id=$1 FOR KEY SHARE`, orgID).Scan(&lockedOrgID); err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return false
+	}
+	if _, err := tx.Exec(r.Context(), `LOCK TABLE response_rules_v2 IN EXCLUSIVE MODE`); err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return false
+	}
+	if ruleID != nil {
+		var ruleClusterID *uuid.UUID
+		err := tx.QueryRow(r.Context(), `SELECT cluster_id FROM response_rules_v2 WHERE id=$1 AND org_id=$2`, *ruleID, orgID).Scan(&ruleClusterID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			return false
+		}
+		if err != nil {
+			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return false
+		}
+		if ruleClusterID != nil {
+			clusterArg = *ruleClusterID
+		}
+	}
+	var groupID uuid.UUID
+	err := tx.QueryRow(r.Context(), `
+SELECT id FROM groups
+ WHERE org_id=$1
+   AND (id::text=$2 OR name=$2)
+   AND (cluster_id IS NULL OR ($3::uuid IS NOT NULL AND cluster_id=$3))
+ FOR SHARE NOWAIT`, orgID, selector, clusterArg).Scan(&groupID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "workload_match.group does not reference a group in this scope"})
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "55P03" {
+		httpx.WriteJSON(w, http.StatusConflict, map[string]string{"error": "workload_match.group is being modified; retry"})
+		return false
+	}
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return false
+	}
+	return true
 }
 
 func (h *ResponseRulesV2) Delete(w http.ResponseWriter, r *http.Request) {

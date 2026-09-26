@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler/netutil"
@@ -352,9 +353,9 @@ func (h *Groups) Update(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	tx, err := h.beginGroupReferenceMutation(r.Context(), subj.OrgID)
+	tx, err := h.beginGroupReferenceMutation(r.Context(), subj.OrgID, id)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeJSON(w, groupMutationBeginErrorStatus(err), map[string]string{"error": err.Error()})
 		return
 	}
 	defer tx.Rollback(r.Context())
@@ -366,8 +367,7 @@ SELECT name, kind, criteria, members, learned_from, cfg_type
   FROM groups
  WHERE id=$1
    AND org_id=$2
-   AND ($3::uuid IS NULL OR cluster_id IS NULL OR cluster_id = $3)
- FOR UPDATE`,
+   AND ($3::uuid IS NULL OR cluster_id IS NULL OR cluster_id = $3)`,
 		id, subj.OrgID, clusterArg).Scan(&currentName, &currentKind, &currentCriteriaRaw, &currentMembersRaw, &currentLearnedFrom, &currentCfgType); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
@@ -486,15 +486,15 @@ func (h *Groups) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	subj, _ := SubjectFrom(r.Context())
-	tx, err := h.beginGroupReferenceMutation(r.Context(), subj.OrgID)
+	tx, err := h.beginGroupReferenceMutation(r.Context(), subj.OrgID, id)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeJSON(w, groupMutationBeginErrorStatus(err), map[string]string{"error": err.Error()})
 		return
 	}
 	defer tx.Rollback(r.Context())
 	var name, cfgType string
 	if err := tx.QueryRow(r.Context(),
-		`SELECT name, cfg_type FROM groups WHERE id=$1 AND org_id=$2 FOR UPDATE`, id, subj.OrgID).
+		`SELECT name, cfg_type FROM groups WHERE id=$1 AND org_id=$2`, id, subj.OrgID).
 		Scan(&name, &cfgType); err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
@@ -532,19 +532,44 @@ func (h *Groups) Delete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusNoContent, nil)
 }
 
-func (h *Groups) beginGroupReferenceMutation(ctx context.Context, orgID uuid.UUID) (pgx.Tx, error) {
-	tx, err := h.db.Pool().Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var lockedOrgID uuid.UUID
-	if err := tx.QueryRow(ctx, `SELECT id FROM orgs WHERE id=$1 FOR KEY SHARE`, orgID).Scan(&lockedOrgID); err != nil {
+func (h *Groups) beginGroupReferenceMutation(ctx context.Context, orgID, groupID uuid.UUID) (pgx.Tx, error) {
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		tx, err := h.db.Pool().Begin(ctx)
+		if err != nil {
+			return nil, err
+		}
+		var lockedOrgID uuid.UUID
+		if err = tx.QueryRow(ctx, `SELECT id FROM orgs WHERE id=$1 FOR KEY SHARE`, orgID).Scan(&lockedOrgID); err == nil {
+			_, err = tx.Exec(ctx, `LOCK TABLE group_rule_edges, group_dpi_sensor_bindings, response_rules_v2, policies IN SHARE MODE NOWAIT`)
+		}
+		if err == nil {
+			var lockedGroupID uuid.UUID
+			err = tx.QueryRow(ctx, `SELECT id FROM groups WHERE id=$1 AND org_id=$2 FOR UPDATE NOWAIT`, groupID, orgID).Scan(&lockedGroupID)
+		}
+		if err == nil {
+			return tx, nil
+		}
 		_ = tx.Rollback(ctx)
-		return nil, err
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "55P03" || time.Now().After(deadline) {
+			return nil, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(20 * time.Millisecond):
+		}
 	}
-	if _, err := tx.Exec(ctx, `LOCK TABLE group_rule_edges, group_dpi_sensor_bindings, response_rules_v2, policies IN SHARE MODE`); err != nil {
-		_ = tx.Rollback(ctx)
-		return nil, err
+}
+
+func groupMutationBeginErrorStatus(err error) int {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return http.StatusNotFound
 	}
-	return tx, nil
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "55P03" {
+		return http.StatusConflict
+	}
+	return http.StatusInternalServerError
 }

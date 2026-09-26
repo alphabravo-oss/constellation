@@ -373,29 +373,10 @@ VALUES ($1, $2, 'concurrent admission', '', 'constellation-admission', 'admissio
 					router.ServeHTTP(response, request)
 					result <- response
 				}()
-				deadline := time.Now().Add(5 * time.Second)
-				for {
-					select {
-					case response := <-result:
-						t.Fatalf("mutation completed before reference commit: %d %s", response.Code, response.Body.String())
-					default:
-					}
-					var waiting int
-					if err := pool.QueryRow(ctx, `
-SELECT COUNT(*) FROM pg_stat_activity
- WHERE pid <> pg_backend_pid()
-   AND datname = current_database()
-   AND query LIKE 'LOCK TABLE group_rule_edges, group_dpi_sensor_bindings, response_rules_v2, policies IN SHARE MODE%'
-   AND wait_event_type = 'Lock'`).Scan(&waiting); err != nil {
-						t.Fatal(err)
-					}
-					if waiting > 0 {
-						break
-					}
-					if time.Now().After(deadline) {
-						t.Fatal("group mutation did not wait for the uncommitted reference")
-					}
-					time.Sleep(10 * time.Millisecond)
+				select {
+				case response := <-result:
+					t.Fatalf("mutation completed before reference commit: %d %s", response.Code, response.Body.String())
+				case <-time.After(120 * time.Millisecond):
 				}
 				if err := writer.Commit(ctx); err != nil {
 					t.Fatal(err)
@@ -491,6 +472,81 @@ SELECT COUNT(*) FROM pg_stat_activity
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("group delete did not finish after org rollback")
+	}
+}
+
+func TestGroupDeleteReleasesPartialReferenceLocksWhileRetrying(t *testing.T) {
+	database := openTestDB(t)
+	t.Cleanup(database.Close)
+	ctx := context.Background()
+	pool := database.Pool()
+	orgID, userID, groupID := uuid.New(), uuid.New(), uuid.New()
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id=$1`, orgID)
+	})
+	for _, statement := range []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO orgs (id, name, display_name) VALUES ($1, $2, 'Reference Lock Test')`, []any{orgID, "reference-lock-" + orgID.String()}},
+		{`INSERT INTO users (id, org_id, email, display_name) VALUES ($1, $2, $3, 'Reference Lock User')`, []any{userID, orgID, "reference-lock-" + userID.String() + "@example.com"}},
+		{`INSERT INTO groups (id, org_id, name, kind, criteria, members, policy_mode, profile_mode) VALUES ($1, $2, $3, 'ground', '[]'::jsonb, '[]'::jsonb, 'monitor', 'monitor')`, []any{groupID, orgID, "reference-lock-" + groupID.String()}},
+	} {
+		if _, err := pool.Exec(ctx, statement.query, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	blocker, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocker.Rollback(ctx)
+	if _, err := blocker.Exec(ctx, `LOCK TABLE group_dpi_sensor_bindings IN ROW EXCLUSIVE MODE`); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewGroups(database, audit.New(pool))
+	router := chi.NewRouter()
+	router.Delete("/groups/{id}", handler.Delete)
+	request := httptest.NewRequest(http.MethodDelete, "/groups/"+groupID.String(), nil)
+	request = request.WithContext(WithSubject(request.Context(), Subject{UserID: userID, OrgID: orgID}))
+	result := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		result <- response
+	}()
+	select {
+	case response := <-result:
+		t.Fatalf("group delete completed while reference table was locked: %d %s", response.Code, response.Body.String())
+	case <-time.After(100 * time.Millisecond):
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if _, err := blocker.Exec(ctx, `SAVEPOINT lock_attempt`); err != nil {
+			t.Fatal(err)
+		}
+		_, err := blocker.Exec(ctx, `LOCK TABLE group_rule_edges IN ROW EXCLUSIVE MODE NOWAIT`)
+		if err == nil {
+			break
+		}
+		if _, rollbackErr := blocker.Exec(ctx, `ROLLBACK TO SAVEPOINT lock_attempt`); rollbackErr != nil {
+			t.Fatal(rollbackErr)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("group mutation retained a partial table lock: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := blocker.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case response := <-result:
+		if response.Code != http.StatusNoContent {
+			t.Fatalf("group delete after lock release status=%d body=%s", response.Code, response.Body.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("group delete did not finish after lock release")
 	}
 }
 

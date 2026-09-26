@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -68,8 +69,36 @@ func (s *GroupEdgeStore) Upsert(ctx context.Context, orgID, clusterID uuid.UUID,
 	if err != nil {
 		return GroupEdgeRow{}, err
 	}
+	tx, err := s.db.Pool().Begin(ctx)
+	if err != nil {
+		return GroupEdgeRow{}, err
+	}
+	defer tx.Rollback(ctx)
+	var lockedOrgID uuid.UUID
+	if err := tx.QueryRow(ctx, `SELECT id FROM orgs WHERE id=$1 FOR KEY SHARE`, orgID).Scan(&lockedOrgID); err != nil {
+		return GroupEdgeRow{}, err
+	}
+	if _, err := tx.Exec(ctx, `LOCK TABLE group_rule_edges IN ROW EXCLUSIVE MODE`); err != nil {
+		return GroupEdgeRow{}, err
+	}
+	for _, name := range []string{e.FromGroup, e.ToGroup} {
+		if name == "external" || name == "nodes" {
+			continue
+		}
+		var groupID uuid.UUID
+		err := tx.QueryRow(ctx, `
+SELECT id FROM groups
+ WHERE org_id = $1 AND name = $2 AND (cluster_id IS NULL OR cluster_id = $3)
+ FOR KEY SHARE`, orgID, name, clusterID).Scan(&groupID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return GroupEdgeRow{}, fmt.Errorf("group %q does not exist in cluster", name)
+		}
+		if err != nil {
+			return GroupEdgeRow{}, err
+		}
+	}
 	var id uuid.UUID
-	err = s.db.Pool().QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 INSERT INTO group_rule_edges (org_id, cluster_id, from_group, to_group, ports, mode, comment, created_by, updated_by)
 VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$8)
 ON CONFLICT (org_id, cluster_id, from_group, to_group) DO UPDATE
@@ -80,7 +109,16 @@ RETURNING id`,
 	if err != nil {
 		return GroupEdgeRow{}, err
 	}
-	return s.get(ctx, orgID, id)
+	row, err := scanGroupEdge(tx.QueryRow(ctx, `
+SELECT id, cluster_id, from_group, to_group, ports, mode, comment, updated_at
+  FROM group_rule_edges WHERE id = $1 AND org_id = $2`, id, orgID))
+	if err != nil {
+		return GroupEdgeRow{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return GroupEdgeRow{}, err
+	}
+	return row, nil
 }
 
 func (s *GroupEdgeStore) get(ctx context.Context, orgID, id uuid.UUID) (GroupEdgeRow, error) {
