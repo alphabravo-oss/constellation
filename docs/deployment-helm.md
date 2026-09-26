@@ -524,6 +524,18 @@ public key or fingerprint through a separate trusted channel; a key carried in
 the bundle alone does **not** authenticate who signed it. Retain old public
 keys when rotating the Secret so older bundles remain verifiable.
 
+From the repository root, verify a downloaded bundle with the standalone
+offline command and a fingerprint obtained independently of the bundle:
+
+```bash
+GOWORK=off go run ./cmd/constellation-support-bundle-verify \
+  --file support-bundle.json --key-id "$PINNED_SUPPORT_BUNDLE_KEY_ID"
+```
+
+The verifier checks the redacted sections hash, signing-key fingerprint,
+bundle identity signature, and Ed25519 signature. It rejects unsigned bundles,
+untrusted keys, malformed input, and tampering.
+
 ## Values reference
 
 | Key                                   | Default                                              | When to change                                                  |
