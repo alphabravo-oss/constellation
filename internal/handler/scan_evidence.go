@@ -162,11 +162,12 @@ func (h *ScanEvidence) Get(w http.ResponseWriter, r *http.Request) {
 		observedAt    time.Time
 	)
 	err = h.db.Pool().QueryRow(r.Context(), `
-SELECT scan_target_id, target_type, target_ref, source_type, COALESCE(source_ref, ''),
-       evidence_type, inventory_hash, package_count, payload, observed_at
-  FROM scan_evidence
- WHERE id = $1
-   AND org_id = $2`, id, token.OrgID).Scan(&targetID, &targetType, &targetRef, &sourceType, &sourceRef,
+SELECT ev.scan_target_id, ev.target_type, ev.target_ref, ev.source_type, COALESCE(ev.source_ref, ''),
+       ev.evidence_type, ev.inventory_hash, ev.package_count, ev.payload, ev.observed_at
+  FROM scan_evidence ev
+  JOIN scan_targets st ON st.id = ev.scan_target_id AND st.org_id = ev.org_id
+ WHERE ev.id = $1
+   AND ev.org_id = $2`, id, token.OrgID).Scan(&targetID, &targetType, &targetRef, &sourceType, &sourceRef,
 		&evidenceType, &inventoryHash, &packageCount, &payloadRaw, &observedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		jsonError(w, http.StatusNotFound, "evidence not found")

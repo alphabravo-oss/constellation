@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/alphabravocompany/constellation/pkg/audit"
 )
@@ -19,6 +21,7 @@ import (
 // unreachable (see openTestDB).
 func TestRegistryCredentialsGetIsOrgScoped(t *testing.T) {
 	d := openTestDB(t)
+	t.Cleanup(d.Close)
 	pool := d.Pool()
 	ctx := context.Background()
 
@@ -49,17 +52,17 @@ VALUES ($1, $2, 'privreg', 'ghcr', 'ghcr.io', 'static', $3)`,
 
 	h := NewRegistryCredentials(d, audit.New(pool))
 
-	call := func(orgID uuid.UUID, registryID string) *httptest.ResponseRecorder {
+	call := func(handler *RegistryCredentials, orgID uuid.UUID, registryID string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/scanner/registry-credentials?registry_id="+registryID, nil)
 		tok := &ScannerToken{ID: uuid.New(), OrgID: orgID, Name: "test-scanner"}
 		req = req.WithContext(context.WithValue(req.Context(), scannerTokenKey{}, tok))
 		rr := httptest.NewRecorder()
-		h.Get(rr, req)
+		handler.Get(rr, req)
 		return rr
 	}
 
 	// Owning org: 200 with decrypted credentials.
-	rr := call(orgA, regID.String())
+	rr := call(h, orgA, regID.String())
 	if rr.Code != http.StatusOK {
 		t.Fatalf("orgA status=%d body=%s want 200", rr.Code, rr.Body.String())
 	}
@@ -73,14 +76,46 @@ VALUES ($1, $2, 'privreg', 'ghcr', 'ghcr.io', 'static', $3)`,
 	if dto.Kind != "ghcr" || dto.AuthKind != "static" {
 		t.Fatalf("kind/auth_kind=%q/%q want ghcr/static", dto.Kind, dto.AuthKind)
 	}
+	var issuedCount int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM audit_events WHERE org_id = $1 AND action = 'registry.credentials-issued' AND target_id = $2`, orgA, regID.String()).Scan(&issuedCount); err != nil {
+		t.Fatal(err)
+	}
+	if issuedCount != 1 {
+		t.Fatalf("successful credential reads wrote %d audit events, want 1", issuedCount)
+	}
+	var auditAfter string
+	if err := pool.QueryRow(ctx, `SELECT after::text FROM audit_events WHERE org_id = $1 AND action = 'registry.credentials-issued' AND target_id = $2`, orgA, regID.String()).Scan(&auditAfter); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(auditAfter, dto.Password) || !strings.Contains(auditAfter, `"has_credentials": true`) {
+		t.Fatalf("credential audit payload is missing the redacted receipt: %s", auditAfter)
+	}
 
 	// Different org, same registry id: 404 (org-scoped, no leak).
-	if rr := call(orgB, regID.String()); rr.Code != http.StatusNotFound {
+	if rr := call(h, orgB, regID.String()); rr.Code != http.StatusNotFound {
 		t.Fatalf("orgB status=%d body=%s want 404", rr.Code, rr.Body.String())
 	}
 
 	// Missing registry_id: 400.
-	if rr := call(orgA, ""); rr.Code != http.StatusBadRequest {
+	if rr := call(h, orgA, ""); rr.Code != http.StatusBadRequest {
 		t.Fatalf("missing registry_id status=%d want 400", rr.Code)
+	}
+
+	closedPool, err := pgxpool.NewWithConfig(ctx, pool.Config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	closedPool.Close()
+	for _, failedAudit := range []*audit.Logger{nil, audit.New(closedPool)} {
+		rr := call(NewRegistryCredentials(d, failedAudit), orgA, regID.String())
+		if rr.Code != http.StatusServiceUnavailable || !json.Valid(rr.Body.Bytes()) || strings.Contains(rr.Body.String(), dto.Password) {
+			t.Fatalf("audit failure status=%d body=%s", rr.Code, rr.Body.String())
+		}
+		if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM audit_events WHERE org_id = $1 AND action = 'registry.credentials-issued' AND target_id = $2`, orgA, regID.String()).Scan(&issuedCount); err != nil {
+			t.Fatal(err)
+		}
+		if issuedCount != 1 {
+			t.Fatalf("failed audit changed issued count to %d", issuedCount)
+		}
 	}
 }

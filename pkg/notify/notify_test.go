@@ -464,6 +464,13 @@ func TestSyslog_LevelAndCategoryFilter(t *testing.T) {
 		{"min high ships high", "high", nil, Alert{Severity: "high", Kind: "finding"}, true},
 		{"min high ships critical", "high", nil, Alert{Severity: "critical", Kind: "runtime"}, true},
 		{"min low drops empty sev", "low", nil, Alert{Severity: "", Kind: "finding"}, false},
+		{"min info drops unknown severity", "info", nil, Alert{Severity: "unexpected", Kind: "finding"}, false},
+		{"unknown min level drops high", "urgent", nil, Alert{Severity: "high", Kind: "finding"}, false},
+		{"unknown min level drops critical", "urgent", nil, Alert{Severity: "critical", Kind: "finding"}, false},
+		{"unknown min level with whitespace drops high", " urgent ", nil, Alert{Severity: "high", Kind: "finding"}, false},
+		{"no filter ships unknown severity", "", nil, Alert{Severity: "unexpected", Kind: "finding"}, true},
+		{"min info ships info", "info", nil, Alert{Severity: "info", Kind: "finding"}, true},
+		{"min level trims whitespace", " HIGH ", nil, Alert{Severity: "high", Kind: "finding"}, true},
 		{"category allow match", "", []string{"runtime"}, Alert{Severity: "high", Kind: "runtime"}, true},
 		{"category allow miss", "", []string{"runtime"}, Alert{Severity: "high", Kind: "finding"}, false},
 		{"category case-insensitive", "", []string{"Runtime"}, Alert{Severity: "high", Kind: "runtime"}, true},
@@ -496,6 +503,14 @@ func TestSyslog_FilterSkipsSendWhenEmpty(t *testing.T) {
 	_ = pc.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
 	if n, _, err := pc.ReadFrom(buf); err == nil {
 		t.Fatalf("expected no datagram, got %q", buf[:n])
+	}
+}
+
+func TestSyslog_UnknownMinLevelSkipsDial(t *testing.T) {
+	s := NewSyslog("tcp", "127.0.0.1:1")
+	s.MinLevel = "urgent"
+	if err := s.Send(context.Background(), []Alert{testAlert("critical", "prod", "api")}); err != nil {
+		t.Fatalf("unknown MinLevel must filter before dialing: %v", err)
 	}
 }
 

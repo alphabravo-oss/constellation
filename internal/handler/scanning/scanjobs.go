@@ -389,7 +389,7 @@ SELECT sj.id, sj.org_id, st.id, st.type, st.ref, st.cluster_id,
        sj.bundle_metadata, sj.requested_at, sj.claimed_at, sj.lease_expires_at,
        sj.next_attempt_at, sj.last_attempt_at, sj.last_error_at, sj.finished_at
   FROM scan_jobs sj
-  JOIN scan_targets st ON st.id = sj.target_id
+  JOIN scan_targets st ON st.id = sj.target_id AND st.org_id = sj.org_id
  WHERE sj.org_id = $1
    AND ($2 = '' OR st.type = $2)
    AND ($3 = '' OR sj.status = $3)
@@ -447,7 +447,11 @@ func (h *ScanJobs) Attempts(w http.ResponseWriter, r *http.Request) {
 	}
 	var exists bool
 	if err := h.db.Pool().QueryRow(r.Context(), `
-SELECT EXISTS (SELECT 1 FROM scan_jobs WHERE id = $1 AND org_id = $2)`, id, subj.OrgID).Scan(&exists); err != nil {
+SELECT EXISTS (
+    SELECT 1 FROM scan_jobs sj
+    JOIN scan_targets st ON st.id = sj.target_id AND st.org_id = sj.org_id
+    WHERE sj.id = $1 AND sj.org_id = $2
+)`, id, subj.OrgID).Scan(&exists); err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -498,8 +502,9 @@ SELECT COUNT(*) FILTER (WHERE status = 'completed')::int,
        COUNT(*) FILTER (WHERE status = 'failed')::int,
        COUNT(*) FILTER (WHERE status = 'paused')::int,
        COUNT(*) FILTER (WHERE status = 'canceled')::int
-  FROM scan_jobs
- WHERE org_id = $1`, subj.OrgID).Scan(&out.Scanned, &out.Scheduled, &out.Scanning, &out.Failed, &out.Paused, &out.Canceled); err != nil {
+  FROM scan_jobs sj
+  JOIN scan_targets st ON st.id = sj.target_id AND st.org_id = sj.org_id
+ WHERE sj.org_id = $1`, subj.OrgID).Scan(&out.Scanned, &out.Scheduled, &out.Scanning, &out.Failed, &out.Paused, &out.Canceled); err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -511,6 +516,7 @@ SELECT COALESCE(bundle_version, ''), COALESCE(exported_at, '')
                COALESCE(sj.finished_at, sj.requested_at) AS observed_at,
                1 AS priority
           FROM scan_jobs sj
+          JOIN scan_targets st ON st.id = sj.target_id AND st.org_id = sj.org_id
          WHERE sj.org_id = $1
            AND sj.bundle_metadata IS NOT NULL
            AND sj.bundle_metadata <> '{}'::jsonb

@@ -493,8 +493,11 @@ func (s *Syslog) tlsConfig() (*tls.Config, error) {
 // shouldShip applies the min-level floor and the category allow-list. An empty MinLevel
 // keeps every level; an empty Categories keeps every category (backward-compatible).
 func (s *Syslog) shouldShip(a Alert) bool {
-	if s.MinLevel != "" && severityRank(a.Severity) < severityRank(s.MinLevel) {
-		return false
+	if minLevel := strings.TrimSpace(s.MinLevel); minLevel != "" {
+		minRank := severityRank(minLevel)
+		if minRank == 0 || severityRank(a.Severity) < minRank {
+			return false
+		}
 	}
 	if len(s.Categories) > 0 {
 		for _, c := range s.Categories {
@@ -641,16 +644,18 @@ func (s *Syslog) formatCEF(a Alert) string {
 }
 
 // severityRank orders Constellation severities so higher = more severe (for MinLevel
-// comparisons). Unknown/empty ranks lowest.
+// comparisons). Unknown/empty ranks below info.
 func severityRank(sev string) int {
 	switch strings.ToLower(strings.TrimSpace(sev)) {
 	case "critical":
-		return 4
+		return 5
 	case "high":
-		return 3
+		return 4
 	case "medium":
-		return 2
+		return 3
 	case "low":
+		return 2
+	case "info":
 		return 1
 	}
 	return 0

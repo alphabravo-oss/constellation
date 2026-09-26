@@ -396,7 +396,7 @@ SELECT st.type,
              AND (sj.next_attempt_at IS NULL OR sj.next_attempt_at <= NOW())
        ))::int, 0)
   FROM scan_jobs sj
-  JOIN scan_targets st ON st.id = sj.target_id
+  JOIN scan_targets st ON st.id = sj.target_id AND st.org_id = sj.org_id
  WHERE sj.org_id = $1
  GROUP BY st.type
  ORDER BY
