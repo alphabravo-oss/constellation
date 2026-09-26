@@ -66,7 +66,7 @@ lint:
 	@mkdir -p "$${ARTIFACT_DIR:-test-results/tooling}"
 	$(GOLANGCI_LINT) run --output.json.path="$${ARTIFACT_DIR:-test-results/tooling}/golangci-lint.json" ./...
 
-.PHONY: tools fmt lint-shell test-tooling check-endpoint-mapping test-race test-integration security check vet frontend-test
+.PHONY: tools fmt lint-shell test-tooling check-endpoint-mapping check-parity-plan test-race test-integration security check vet frontend-test
 tools:
 	bash scripts/install-ci-tools.sh
 
@@ -84,6 +84,9 @@ test-tooling:
 check-endpoint-mapping:
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_endpoint_mapping.py
 
+check-parity-plan:
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_parity_plan.py
+
 test-race:
 	bash scripts/test-go.sh unit
 
@@ -95,7 +98,7 @@ security:
 	bash scripts/security-scan.sh govulncheck
 	bash scripts/security-scan.sh gitleaks
 
-check: lint vet fmt test-tooling check-endpoint-mapping test-race
+check: lint vet fmt test-tooling check-endpoint-mapping check-parity-plan test-race
 
 migrate:
 	@command -v goose >/dev/null || (echo "install goose: https://github.com/pressly/goose" && exit 1)

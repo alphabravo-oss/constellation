@@ -4436,6 +4436,9 @@
           "200": {
             "description": "ok"
           },
+          "409": {
+            "description": "Receiver is paused"
+          },
           "default": {
             "$ref": "#/components/responses/Error"
           }

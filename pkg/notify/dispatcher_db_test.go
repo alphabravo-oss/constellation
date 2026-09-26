@@ -3,6 +3,7 @@ package notify
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -219,6 +220,97 @@ SELECT status, final_state, attempts, next_retry_at, delivered_at, signed_at, er
 	}
 }
 
+func TestDispatchTo_PausedDuringInFlightSend(t *testing.T) {
+	for _, testCase := range []struct {
+		name       string
+		statusCode int
+		finalState string
+		attempts   int
+	}{
+		{name: "successful in-flight send", statusCode: http.StatusNoContent, finalState: "delivered", attempts: 1},
+		{name: "failed in-flight send", statusCode: http.StatusServiceUnavailable, finalState: "paused", attempts: 1},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			pool := openNotifyTestPool(t)
+			t.Cleanup(pool.Close)
+			ctx := context.Background()
+			orgID, receiverID := seedReceiver(t, pool)
+			requestStarted := make(chan struct{})
+			releaseRequest := make(chan struct{})
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				close(requestStarted)
+				<-releaseRequest
+				w.WriteHeader(testCase.statusCode)
+			}))
+			t.Cleanup(server.Close)
+			if _, err := pool.Exec(ctx, `UPDATE receivers SET endpoint=$2 WHERE id=$1`, receiverID, server.URL); err != nil {
+				t.Fatal(err)
+			}
+			dispatcher := NewDispatcher(pool, DispatcherConfig{
+				HTTPClient: server.Client(), BackoffSchedule: []time.Duration{time.Millisecond},
+			})
+			deliveryID, err := dispatcher.DispatchTo(ctx, receiverID, Event{
+				Kind: "response_rule.webhook", OrgID: orgID, IdempotencyKey: uuid.New(),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			jobDone := make(chan struct{})
+			go func() {
+				defer close(jobDone)
+				select {
+				case job := <-dispatcher.queue:
+					dispatcher.process(ctx, job)
+				case <-ctx.Done():
+				}
+			}()
+			select {
+			case <-requestStarted:
+			case <-time.After(5 * time.Second):
+				close(releaseRequest)
+				t.Fatal("delivery did not reach receiver")
+			}
+			if _, err := pool.Exec(ctx, `UPDATE receivers SET paused=true WHERE id=$1`, receiverID); err != nil {
+				close(releaseRequest)
+				t.Fatal(err)
+			}
+			close(releaseRequest)
+			select {
+			case <-jobDone:
+			case <-time.After(5 * time.Second):
+				t.Fatal("in-flight delivery did not finish")
+			}
+			if testCase.statusCode >= 300 {
+				var nextRetryAt time.Time
+				if err := pool.QueryRow(ctx, `SELECT next_retry_at FROM receiver_deliveries WHERE id=$1`, deliveryID).Scan(&nextRetryAt); err != nil {
+					t.Fatal(err)
+				}
+				for time.Now().Before(nextRetryAt) {
+					time.Sleep(time.Millisecond)
+				}
+				dispatcher.sweepDue(ctx, &deliveryID)
+			}
+			var status, finalState string
+			var attempts int
+			var paused bool
+			var nextRetryAt *time.Time
+			if err := pool.QueryRow(ctx, `
+SELECT d.status, d.final_state, d.attempts, d.next_retry_at, r.paused
+  FROM receiver_deliveries d JOIN receivers r ON r.id=d.receiver_id
+ WHERE d.id=$1`, deliveryID).Scan(&status, &finalState, &attempts, &nextRetryAt, &paused); err != nil {
+				t.Fatal(err)
+			}
+			if !paused || status != testCase.finalState || finalState != testCase.finalState ||
+				attempts != testCase.attempts || nextRetryAt != nil || calls.Load() != 1 || len(dispatcher.queue) != 0 {
+				t.Fatalf("in-flight pause: paused=%t status=%s final=%s attempts=%d next=%v calls=%d queued=%d",
+					paused, status, finalState, attempts, nextRetryAt, calls.Load(), len(dispatcher.queue))
+			}
+		})
+	}
+}
+
 func TestDispatchTo_NamedReceiverReceipt(t *testing.T) {
 	pool := openNotifyTestPool(t)
 	defer pool.Close()
@@ -381,6 +473,9 @@ func TestDispatchTo_RejectsOtherOrgAndPausedReceiver(t *testing.T) {
 			deliveryID, err := d.DispatchTo(ctx, receiverID, event)
 			if err == nil || deliveryID != uuid.Nil {
 				t.Fatalf("disallowed dispatch: delivery=%s err=%v", deliveryID, err)
+			}
+			if name == "paused" && !errors.Is(err, ErrReceiverPaused) {
+				t.Fatalf("paused dispatch error=%v, want ErrReceiverPaused", err)
 			}
 			var receipts int
 			if err := pool.QueryRow(ctx, `SELECT count(*) FROM receiver_deliveries WHERE receiver_id=$1 AND idempotency_key=$2`, receiverID, event.IdempotencyKey).Scan(&receipts); err != nil {

@@ -35,6 +35,7 @@ jobs:
           python-version: "3.12.14"
       - run: make test-tooling
       - run: make check-endpoint-mapping
+      - run: make check-parity-plan
       - run: golangci-lint config verify
       - run: make lint
       - if: ${{ !cancelled() }}

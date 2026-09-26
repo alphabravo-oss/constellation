@@ -511,6 +511,14 @@ func (h *Receivers) TestFire(w http.ResponseWriter, r *http.Request) {
 	}
 	dlvID, err := h.dispatcher.DispatchTo(r.Context(), id, ev)
 	if err != nil {
+		if errors.Is(err, notify.ErrReceiverPaused) {
+			jsonError(w, http.StatusConflict, "receiver paused")
+			return
+		}
+		if errors.Is(err, pgx.ErrNoRows) {
+			jsonError(w, http.StatusNotFound, "receiver not found")
+			return
+		}
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

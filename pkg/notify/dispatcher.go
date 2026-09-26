@@ -38,6 +38,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+var ErrReceiverPaused = errors.New("notify: receiver paused")
+
 // Event is the high-level happening that fans out to receivers. Kinds follow a
 // dotted hierarchy (e.g. "finding.triage", "policy.create", "admission.deny",
 // "runtime.alert.exec") so routes can match on prefixes.
@@ -334,9 +336,12 @@ SELECT id, org_id, name, kind, endpoint,
        COALESCE(secret_key,''), COALESCE(rate_per_min,60),
        COALESCE(template_id,'default'), COALESCE(paused,false),
        COALESCE(config,'{}'::jsonb)
-  FROM receivers WHERE id = $1 AND org_id = $2 AND paused = false`, id, orgID).Scan(
+  FROM receivers WHERE id = $1 AND org_id = $2`, id, orgID).Scan(
 		&r.ID, &r.OrgID, &r.Name, &r.Kind, &r.Endpoint,
 		&r.SecretKey, &r.RatePerMin, &r.TemplateID, &r.Paused, &r.Config)
+	if err == nil && r.Paused {
+		return receiverRow{}, ErrReceiverPaused
+	}
 	return r, err
 }
 
