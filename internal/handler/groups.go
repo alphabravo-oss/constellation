@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 	"reflect"
 	"strings"
@@ -153,16 +152,6 @@ func propagateGroupModeTx(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, clust
 		return nil // org-wide group: cross-cluster propagation is ambiguous
 	}
 	return propagateGroupProfileMode(ctx, tx, orgID, cid, members, gmode)
-}
-
-func (h *Groups) maybePropagateGroupMode(ctx context.Context, orgID uuid.UUID, clusterArg any, members []string, gmode group.Mode) {
-	clusterID, ok := clusterArg.(uuid.UUID)
-	if !ok {
-		return
-	}
-	if err := propagateGroupProfileMode(ctx, h.db.Pool(), orgID, clusterID, members, gmode); err != nil {
-		slog.Default().Warn("group profile_mode propagation failed", "cluster", clusterID, "error", err)
-	}
 }
 
 func (h *Groups) List(w http.ResponseWriter, r *http.Request) {

@@ -152,7 +152,6 @@ func (h *Groups) Import(w http.ResponseWriter, r *http.Request) {
 			results = append(results, res)
 			continue
 		}
-		h.maybePropagateGroupMode(r.Context(), subj.OrgID, clusterArg, memberIDs, g.ProfileMode)
 		if wasInsert {
 			res.Status = "created"
 			created++
@@ -182,7 +181,12 @@ func (h *Groups) importPortableGroup(r *http.Request, orgID, userID uuid.UUID, c
 		}
 	}
 	var groupID uuid.UUID
-	err := h.db.Pool().QueryRow(r.Context(), `
+	insertTx, err := h.db.Pool().Begin(r.Context())
+	if err != nil {
+		return false, err
+	}
+	defer insertTx.Rollback(r.Context())
+	err = insertTx.QueryRow(r.Context(), `
 INSERT INTO groups (org_id, cluster_id, name, kind, comment, criteria, members, cfg_type, policy_mode, profile_mode, created_by)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 ON CONFLICT (org_id, name) DO NOTHING
@@ -190,9 +194,19 @@ RETURNING id`,
 		orgID, clusterArg, groupValue.Name, groupValue.Kind, groupValue.Comment, criteriaJSON, membersJSON,
 		groupValue.CfgType, groupValue.PolicyMode, groupValue.ProfileMode, userID).Scan(&groupID)
 	if err == nil {
-		return true, nil
+		var memberIDs []string
+		if err := json.Unmarshal(membersJSON, &memberIDs); err != nil {
+			return false, err
+		}
+		if err := propagateGroupModeTx(r.Context(), insertTx, orgID, clusterArg, memberIDs, groupValue.ProfileMode); err != nil {
+			return false, err
+		}
+		return true, insertTx.Commit(r.Context())
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
+		return false, err
+	}
+	if err := insertTx.Rollback(r.Context()); err != nil {
 		return false, err
 	}
 	if err := h.db.Pool().QueryRow(r.Context(), `SELECT id FROM groups WHERE org_id=$1 AND name=$2`, orgID, groupValue.Name).Scan(&groupID); err != nil {
@@ -252,6 +266,9 @@ UPDATE groups SET kind=$1, comment=$2, criteria=$3, members=$4,
  WHERE id=$7 AND org_id=$8`,
 		groupValue.Kind, groupValue.Comment, criteriaJSON, membersJSON, groupValue.PolicyMode, groupValue.ProfileMode,
 		groupID, orgID); err != nil {
+		return false, err
+	}
+	if err := propagateGroupModeTx(r.Context(), tx, orgID, clusterArg, nextMembers, groupValue.ProfileMode); err != nil {
 		return false, err
 	}
 	return false, tx.Commit(r.Context())

@@ -120,3 +120,78 @@ func TestGroupImportCannotChangeReferencedCriteria(t *testing.T) {
 		t.Fatalf("unreferenced criteria import: code=%d result=%v", code, result)
 	}
 }
+
+func TestGroupImportRollsBackFailedProfilePropagation(t *testing.T) {
+	database := openTestDB(t)
+	t.Cleanup(database.Close)
+	pool := database.Pool()
+	ctx := context.Background()
+	orgID, userID, clusterID := uuid.New(), uuid.New(), uuid.New()
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id=$1`, orgID) })
+	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, display_name) VALUES ($1,$2,'Portable Atomic')`, orgID, "portable-atomic-"+orgID.String()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO users (id, org_id, email, display_name) VALUES ($1,$2,$3,'Portable Atomic User')`, userID, orgID, "portable-atomic-"+userID.String()+"@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO clusters (id, org_id, name) VALUES ($1,$2,$3)`, clusterID, orgID, "portable-atomic-"+clusterID.String()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO deployments (org_id, cluster_id, namespace, name, kind, labels) VALUES ($1,$2,'default','a','Deployment','{}'), ($1,$2,'default','b','Deployment','{}')`, orgID, clusterID); err != nil {
+		t.Fatal(err)
+	}
+	constraint := "portable_atomic_" + orgID.String()[:8]
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `ALTER TABLE process_baseline_states DROP CONSTRAINT IF EXISTS `+constraint)
+	})
+	if _, err := pool.Exec(ctx, `ALTER TABLE process_baseline_states ADD CONSTRAINT `+constraint+` CHECK (NOT (org_id='`+orgID.String()+`'::uuid AND workload_id='default/b' AND mode='enforce')) NOT VALID`); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewGroups(database, nil)
+	importMode := func(mode string) map[string]any {
+		t.Helper()
+		bundle := groupBundle{APIVersion: "constellation/v1", Kind: "GroupBundle", Groups: []portableGroup{{
+			Name: "portable-atomic", Kind: "ground", PolicyMode: "monitor", ProfileMode: mode,
+			Criteria: []portableGroupCriterion{{Key: "namespace", Op: "eq", Value: "default"}},
+		}}}
+		encoded, err := json.Marshal(bundle)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest(http.MethodPost, "/groups:import?cluster_id="+clusterID.String(), strings.NewReader(string(encoded)))
+		request = request.WithContext(WithSubject(request.Context(), Subject{OrgID: orgID, UserID: userID}))
+		response := httptest.NewRecorder()
+		handler.Import(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("import status=%d body=%s", response.Code, response.Body.String())
+		}
+		var result map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	if result := importMode("protect"); result["created"] != float64(0) {
+		t.Fatalf("failed create counted as success: %+v", result)
+	}
+	var count int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM groups WHERE org_id=$1 AND name='portable-atomic'`, orgID).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("partial imported group=%d err=%v", count, err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM process_baseline_states WHERE org_id=$1`, orgID).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("partial create baselines=%d err=%v", count, err)
+	}
+	if result := importMode("monitor"); result["created"] != float64(1) {
+		t.Fatalf("monitor create: %+v", result)
+	}
+	if result := importMode("protect"); result["updated"] != float64(0) {
+		t.Fatalf("failed update counted as success: %+v", result)
+	}
+	var mode string
+	if err := pool.QueryRow(ctx, `SELECT profile_mode FROM groups WHERE org_id=$1 AND name='portable-atomic'`, orgID).Scan(&mode); err != nil || mode != "monitor" {
+		t.Fatalf("group mode after failed update=%q err=%v", mode, err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM process_baseline_states WHERE org_id=$1 AND mode='enforce'`, orgID).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("partial update baselines=%d err=%v", count, err)
+	}
+}
