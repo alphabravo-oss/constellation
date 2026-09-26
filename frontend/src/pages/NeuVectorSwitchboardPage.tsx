@@ -48,7 +48,7 @@ function statusLabel(status: Mapping["status"]) {
 
 function statusClass(status: Mapping["status"]) {
   if (status === "better") return "border-primary/30 bg-primary/10 text-primary";
-  if (status === "partial") return "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300";
+  if (status === "partial") return "border-status-warning/30 bg-status-warning/10 text-status-warning";
   return "border-border bg-muted text-foreground";
 }
 

@@ -791,7 +791,7 @@ function ScheduleRow({
             <p className="text-xs text-muted-foreground">No runs recorded yet.</p>
           )}
           {runs.data && runs.data.runs.length > 0 && (
-            <table className="w-full text-xs">
+            <table className="app-semantic-table w-full text-xs">
               <thead className="text-muted-foreground">
                 <tr className="border-b border-border">
                   <th className="px-1.5 py-1 text-left">Started</th>

@@ -26,6 +26,8 @@ export interface Column<T> {
   width?: string;
   className?: string;
   numeric?: boolean;
+  /** Use for image refs, node names, versions, IPs, and other machine identifiers. */
+  code?: boolean;
   sticky?: boolean;
   hideable?: boolean;
   exportHeader?: string;
@@ -269,7 +271,7 @@ export function DataTable<T>({
   const shouldShowToolbar = showDensityToggle || shouldShowColumnChooser || shouldShowExport;
 
   return (
-    <div className={cn("rounded-md border border-border bg-card overflow-hidden", className)} data-testid={testId}>
+    <div className={cn("app-data-table rounded-md border border-border bg-card overflow-hidden", className)} data-testid={testId}>
       {shouldShowToolbar && (
         <div className="flex items-center justify-end gap-2 border-b border-border px-2 py-1">
           {shouldShowExport && (
@@ -307,8 +309,8 @@ export function DataTable<T>({
       )}
       <div className="overflow-auto">
         <table className="w-full text-sm">
-          <thead className="sticky top-0 z-10 bg-card/95 backdrop-blur">
-            <tr className="border-b border-border text-[10px] uppercase tracking-wider text-muted-foreground">
+          <thead className="sticky top-0 z-10">
+            <tr className="border-b border-border text-xs">
               {selectable && (
                 <th className="w-8 px-2 py-2 text-left">
                   <input
@@ -328,7 +330,7 @@ export function DataTable<T>({
                     key={h.id}
                     scope="col"
                     className={cn(
-                      "py-2 font-medium select-none",
+                      "h-10 py-2 font-semibold select-none",
                       cellPad,
                       c?.numeric && "text-right",
                       c?.sticky && "sticky left-0 bg-card",
@@ -373,16 +375,22 @@ export function DataTable<T>({
                   data-testid={rowTestId?.(row)}
                   {...(rowAttrs?.(row) ?? {})}
                   data-selected={isSel || undefined}
+                  tabIndex={onRowClick ? 0 : undefined}
                   className={cn(
                     "accent-slide border-b border-border last:border-b-0 transition-colors",
-                    onRowClick && "cursor-pointer",
-                    isSel ? "bg-[color-mix(in_oklab,var(--color-primary)_8%,transparent)]" : "hover:bg-muted/40",
+                    onRowClick && "app-data-table-row-clickable cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--color-primary)]",
+                    !isSel && "hover:bg-[var(--table-row-hover)]",
                     rowH,
                   )}
                   onClick={onRowClick ? (e) => {
                     // Ignore clicks on inputs/buttons/anchors inside the row.
                     const tgt = e.target as HTMLElement;
                     if (tgt.closest("input,button,a,[role='button']")) return;
+                    onRowClick(row);
+                  } : undefined}
+                  onKeyDown={onRowClick ? (event) => {
+                    if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return;
+                    event.preventDefault();
                     onRowClick(row);
                   } : undefined}
                 >
@@ -398,12 +406,14 @@ export function DataTable<T>({
                       />
                     </td>
                   )}
-                  {visibleColumns.map((c) => (
+                      {visibleColumns.map((c) => (
                     <td
                       key={c.id}
                       className={cn(
                         cellPad,
                         c.numeric && "text-right text-mono",
+                        c.code && "app-table-code",
+                        c.numeric && "app-table-numeric",
                         c.sticky && "sticky left-0 bg-card",
                         c.className,
                       )}

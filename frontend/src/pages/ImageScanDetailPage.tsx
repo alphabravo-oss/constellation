@@ -174,7 +174,7 @@ function PackagesEvidenceCard({
       {loading ? (
         <p className="p-3 text-xs text-muted-foreground">Loading package provenance...</p>
       ) : (
-        <table className="w-full text-sm">
+        <table className="app-semantic-table w-full text-sm">
           <thead className="bg-muted text-xs uppercase text-muted-foreground">
             <tr>
               <th className="px-3 py-2 text-left">Layer</th>
@@ -309,7 +309,7 @@ function SecretsEvidenceCard({ loading, secrets, count }: { loading: boolean; se
       {loading ? (
         <p className="p-3 text-xs text-muted-foreground">Loading secret evidence...</p>
       ) : (
-        <table className="w-full text-sm">
+        <table className="app-semantic-table w-full text-sm">
           <thead className="bg-muted text-xs uppercase text-muted-foreground">
             <tr>
               <th className="px-3 py-2 text-left">Rule</th>
@@ -360,7 +360,7 @@ function ConfigChecksEvidenceCard({ loading, checks }: { loading: boolean; check
       ) : checks.length === 0 ? (
         <p className="px-3 py-6 text-center text-xs text-muted-foreground">No config checks (image predates this scan feature — rescan to populate).</p>
       ) : (
-        <table className="w-full text-sm">
+        <table className="app-semantic-table w-full text-sm">
           <thead className="bg-muted text-xs uppercase text-muted-foreground">
             <tr><th className="px-3 py-2 text-left">Check</th><th className="px-3 py-2 text-left">Status</th><th className="px-3 py-2 text-left">Detail</th></tr>
           </thead>
@@ -392,7 +392,7 @@ function FileRisksEvidenceCard({ loading, findings, count }: { loading: boolean;
       {loading ? (
         <p className="p-3 text-xs text-muted-foreground">Loading file risk evidence...</p>
       ) : (
-        <table className="w-full text-sm">
+        <table className="app-semantic-table w-full text-sm">
           <thead className="bg-muted text-xs uppercase text-muted-foreground">
             <tr>
               <th className="px-3 py-2 text-left">Path</th>

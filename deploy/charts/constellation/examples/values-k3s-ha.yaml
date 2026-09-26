@@ -47,6 +47,8 @@ networkPolicies:
     ports: [5432]
   frontendIngressCIDRs: [10.42.0.0/16, 10.1.82.0/23]
   admissionIngressCIDRs: [10.1.82.0/23]
+  # runtimeAgent uses hostNetwork, so its source is a node/private-network IP.
+  apiIngressCIDRs: [10.1.82.0/23]
 
 tls:
   certManager:
@@ -72,13 +74,6 @@ postgres:
       podAntiAffinityType: required
     # Backups remain disabled until S3 credentials and a bucket are supplied.
     # Production readiness requires enabling ScheduledBackup and testing PITR.
-
-vulndb:
-  storage:
-    type: pvc
-    size: 20Gi
-    storageClassName: longhorn
-    accessModes: [ReadWriteMany]
 
 ingress:
   enabled: false

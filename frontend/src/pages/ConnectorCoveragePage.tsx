@@ -329,7 +329,7 @@ export function ConnectorCoveragePage() {
               </dl>
               {pool.scanners && pool.scanners.length > 0 ? (
                 <div className="mt-3 overflow-hidden rounded-md border border-border bg-background" data-testid="scanner-workers">
-                  <table className="w-full text-[11px]">
+                  <table className="app-semantic-table w-full text-[11px]">
                     <thead className="bg-muted/60 text-left text-muted-foreground">
                       <tr>
                         <th className="px-2 py-1.5">Scanner</th>
@@ -430,7 +430,7 @@ export function ConnectorCoveragePage() {
                         <div className="mt-3 text-muted-foreground">No cache records reported by this scanner.</div>
                       ) : (
                         <div className="mt-3 max-h-56 overflow-auto rounded-md border border-border">
-                          <table className="w-full text-[11px]">
+                          <table className="app-semantic-table w-full text-[11px]">
                             <thead className="bg-muted/60 text-left text-muted-foreground">
                               <tr>
                                 <th className="px-2 py-1.5">Cache</th>
@@ -460,7 +460,7 @@ export function ConnectorCoveragePage() {
               ) : null}
               {pool.queue_by_target_type && pool.queue_by_target_type.length > 0 ? (
                 <div className="mt-3 overflow-hidden rounded-md border border-border bg-background" data-testid="scanner-queue-by-target">
-                  <table className="w-full text-[11px]">
+                  <table className="app-semantic-table w-full text-[11px]">
                     <thead className="bg-muted/60 text-left text-muted-foreground">
                       <tr>
                         <th className="px-2 py-1.5">Target</th>

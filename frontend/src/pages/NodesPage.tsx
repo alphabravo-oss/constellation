@@ -12,7 +12,6 @@ import {
 import { nodes as nodesApi, type NodeSummary } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { PageHeader } from "@/components/ui/page";
-import { downloadCsv } from "@/lib/csv";
 import { StatCard } from "@/components/ui/stat-card";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { cn } from "@/lib/cn";
@@ -67,55 +66,85 @@ export function NodesPage() {
       id: "node",
       header: "Node",
       cell: (item) => (
-        <>
-          <div className="flex flex-wrap items-center gap-1.5">
-            <NodeBadge item={item} />
-            {item.coverage_gaps?.length ? <Pill tone="warn">{item.coverage_gaps.length} gap{item.coverage_gaps.length === 1 ? "" : "s"}</Pill> : null}
-          </div>
-          <Link to={`/clusters/${clusterId}/nodes/${encodeURIComponent(item.node)}`} className="mt-2 block break-all font-mono text-xs font-medium hover:underline">
+        <div>
+          <Link to={`/clusters/${clusterId}/nodes/${encodeURIComponent(item.node)}`} className="block break-all font-mono text-xs font-medium hover:underline">
             {item.node}
           </Link>
-          <div className="mt-1 text-xs text-muted-foreground">{displayOS(item)} · {item.arch || "arch unknown"}</div>
-        </>
+          {item.coverage_gaps?.length ? <div className="mt-1 text-[11px] text-status-warn">{item.coverage_gaps.length} coverage gap{item.coverage_gaps.length === 1 ? "" : "s"}</div> : null}
+        </div>
       ),
+      sort: (a, b) => a.node.localeCompare(b.node),
+      sticky: true,
+      exportValue: (item) => item.node,
     },
     {
       id: "agent",
       header: "Agent",
-      cell: (item) => (
-        <>
-          <StatusPill status={item.runtime_agent_status} />
-          <div className="mt-1 font-mono text-[11px] text-muted-foreground">{item.runtime_agent_version || "version unknown"}</div>
-          <div className="mt-1 text-[11px] text-muted-foreground">{formatDate(item.runtime_agent_last_seen_at)}</div>
-        </>
-      ),
+      cell: (item) => <StatusPill status={item.runtime_agent_status} />,
+      sort: (a, b) => a.runtime_agent_status.localeCompare(b.runtime_agent_status),
+      exportValue: (item) => item.runtime_agent_status,
     },
     {
-      id: "risk",
-      header: "Risk",
-      cell: (item) => <RiskStack item={item} />,
+      id: "os",
+      header: "Operating system",
+      cell: (item) => <span className="text-xs">{displayOS(item)}</span>,
+      sort: (a, b) => displayOS(a).localeCompare(displayOS(b)),
+      exportValue: displayOS,
     },
     {
-      id: "inventory",
-      header: "Inventory",
-      cell: (item) => (
-        <div className="text-xs">
-          <div className="font-medium">{item.package_count} packages</div>
-          <div className="mt-1 text-muted-foreground">{item.container_count} containers · {item.process_count} processes</div>
-          <div className="mt-1 font-mono text-[10px] text-muted-foreground">{item.package_source || "source unknown"}</div>
-        </div>
-      ),
+      id: "critical",
+      header: "Critical",
+      cell: (item) => item.last_scanned_at ? <RiskCount value={item.critical_vulns} tone="danger" /> : <NotCollected label="Not scanned" />,
+      sort: (a, b) => a.critical_vulns - b.critical_vulns,
+      numeric: true,
+      exportValue: (item) => item.critical_vulns,
     },
     {
-      id: "scan",
-      header: "Scan",
-      cell: (item) => (
-        <div className="text-xs">
-          <StatusPill status={item.scan_status || "missing"} />
-          <div className="mt-1 text-muted-foreground">{formatDate(item.last_scanned_at)}</div>
-          <div className="mt-1 font-mono text-[10px] text-muted-foreground">{item.inventory_hash || "inventory hash missing"}</div>
-        </div>
-      ),
+      id: "high",
+      header: "High",
+      cell: (item) => item.last_scanned_at ? <RiskCount value={item.high_vulns} tone="warn" /> : <NotCollected label="Not scanned" />,
+      sort: (a, b) => a.high_vulns - b.high_vulns,
+      numeric: true,
+      exportValue: (item) => item.high_vulns,
+    },
+    {
+      id: "open",
+      header: "Open",
+      cell: (item) => item.last_scanned_at ? item.open_vulns.toLocaleString() : <NotCollected label="Not scanned" />,
+      sort: (a, b) => a.open_vulns - b.open_vulns,
+      numeric: true,
+      exportValue: (item) => item.open_vulns,
+    },
+    {
+      id: "packages",
+      header: "Packages",
+      cell: (item) => item.packages_observed_at ? item.package_count.toLocaleString() : <NotCollected />,
+      sort: (a, b) => a.package_count - b.package_count,
+      numeric: true,
+      exportValue: (item) => item.package_count,
+    },
+    {
+      id: "containers",
+      header: "Containers",
+      cell: (item) => item.containers_observed_at ? item.container_count.toLocaleString() : <NotCollected />,
+      sort: (a, b) => a.container_count - b.container_count,
+      numeric: true,
+      exportValue: (item) => item.container_count,
+    },
+    {
+      id: "cis",
+      header: "CIS failed",
+      cell: (item) => item.cis_observed_at ? <RiskCount value={item.cis_failed} tone="warn" /> : <NotCollected />,
+      sort: (a, b) => a.cis_failed - b.cis_failed,
+      numeric: true,
+      exportValue: (item) => item.cis_failed,
+    },
+    {
+      id: "last_scan",
+      header: "Last scan",
+      cell: (item) => formatDate(item.last_scanned_at),
+      sort: (a, b) => timestamp(a.last_scanned_at) - timestamp(b.last_scanned_at),
+      exportValue: (item) => item.last_scanned_at ?? "",
     },
   ];
 
@@ -126,12 +155,6 @@ export function NodesPage() {
         description="Host posture, package evidence, runtime-agent health, and node CVEs."
         actions={
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => downloadCsv("constellation-nodes", ["Node", "OS", "Kernel", "Arch", "OpenCVEs", "Critical", "High", "Packages", "Containers", "CISFailed", "AgentStatus"],
-                filtered.map((n) => [n.node, displayOS(n), n.kernel_release ?? "", n.arch ?? "", n.open_vulns, n.critical_vulns, n.high_vulns, n.package_count, n.container_count, n.cis_failed, n.runtime_agent_status]))}
-              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-2 text-sm hover:bg-accent"
-            >Export CSV</button>
             <Link
               to={selected ? `/clusters/${clusterId}/nodes/${encodeURIComponent(selected.node)}` : `/clusters/${clusterId}/nodes`}
               className={cn(
@@ -196,6 +219,9 @@ export function NodesPage() {
             rowKey={(item) => item.node}
             onRowClick={(item) => setSelectedName(item.node)}
             selected={selected ? new Set([selected.node]) : new Set()}
+            defaultSort={{ id: "critical", dir: "desc" }}
+            preferencesKey="cluster-nodes"
+            exportFileName="constellation-nodes"
             emptyState={
               nodesQ.isPending ? (
                 <div className="px-3 py-8 text-center text-xs text-muted-foreground">Loading nodes...</div>
@@ -210,6 +236,18 @@ export function NodesPage() {
       </section>
     </div>
   );
+}
+
+function RiskCount({ value, tone }: { value: number; tone: "warn" | "danger" }) {
+  return <span className={cn("tabular-nums", value > 0 && (tone === "danger" ? "font-semibold text-status-error" : "font-medium text-status-warn"))}>{value.toLocaleString()}</span>;
+}
+
+function NotCollected({ label = "Not collected" }: { label?: string }) {
+  return <span className="text-xs italic text-muted-foreground">{label}</span>;
+}
+
+function timestamp(value?: string | null): number {
+  return value ? Date.parse(value) || 0 : 0;
 }
 
 function NodePreview({ node, clusterId }: { node: NodeSummary | null; clusterId?: string }) {
@@ -299,24 +337,6 @@ function Field({ label, value, wide }: { label: string; value: ReactNode; wide?:
   );
 }
 
-function RiskStack({ item }: { item: NodeSummary }) {
-  const rows = [
-    ["critical", item.critical_vulns],
-    ["high", item.high_vulns],
-    ["medium", item.medium_vulns],
-    ["low", item.low_vulns],
-  ] as const;
-  return (
-    <div className="flex flex-wrap gap-1">
-      {rows.map(([label, value]) => (
-        <Pill key={label} tone={label === "critical" && value > 0 ? "danger" : label === "high" && value > 0 ? "warn" : "neutral"}>
-          {label[0].toUpperCase()}: {value}
-        </Pill>
-      ))}
-    </div>
-  );
-}
-
 function NodeBadge({ item }: { item: NodeSummary }) {
   const healthy = item.runtime_agent_status === "healthy" && item.scan_status === "completed" && !(item.coverage_gaps?.length);
   return (
@@ -400,7 +420,7 @@ function displayOS(item: NodeSummary): string {
 }
 
 function formatDate(value?: string): string {
-  if (!value) return "-";
+  if (!value) return "Not collected";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString();

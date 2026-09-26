@@ -52,6 +52,7 @@ func hostPackagesLoop(ctx context.Context, cfg hostPackagesConfig) {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
+			nextInterval := cfg.Interval
 			// Re-detect distro each tick — cheap and lets the loop
 			// recover if hostScanLoop hadn't run yet on the first call.
 			distro := cfg.Distro
@@ -74,11 +75,12 @@ func hostPackagesLoop(ctx context.Context, cfg hostPackagesConfig) {
 			if err != nil && snap.Count == 0 {
 				cfg.Logger.Warn("host-packages: collect failed",
 					slog.String("err", err.Error()))
-				tick.Reset(cfg.Interval)
+				tick.Reset(hostPackagesRetryInterval(cfg.Interval))
 				continue
 			}
 			if err := postPackages(ctx, cli, url, cfg.Token, snap); err != nil {
 				cfg.Logger.Error("host-packages: report failed", slog.String("err", err.Error()))
+				nextInterval = hostPackagesRetryInterval(cfg.Interval)
 			} else {
 				cfg.Logger.Info("host-packages: reported",
 					slog.String("node", snap.Node),
@@ -88,9 +90,17 @@ func hostPackagesLoop(ctx context.Context, cfg hostPackagesConfig) {
 					slog.Int("count", snap.Count),
 				)
 			}
-			tick.Reset(cfg.Interval)
+			tick.Reset(nextInterval)
 		}
 	}
+}
+
+func hostPackagesRetryInterval(configured time.Duration) time.Duration {
+	const retry = 30 * time.Second
+	if configured > 0 && configured < retry {
+		return configured
+	}
+	return retry
 }
 
 func postPackages(ctx context.Context, cli *http.Client, url, token string, p hostscan.Packages) error {

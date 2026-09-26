@@ -37,6 +37,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -72,6 +73,11 @@ func main() {
 	password := os.Getenv("BOOTSTRAP_PASSWORD")
 	if password == "" {
 		logger.Error("BOOTSTRAP_PASSWORD is required (passed via Secret env)")
+		os.Exit(2)
+	}
+	forcePasswordChange, err := strconv.ParseBool(env("BOOTSTRAP_FORCE_PASSWORD_CHANGE", "false"))
+	if err != nil {
+		logger.Error("BOOTSTRAP_FORCE_PASSWORD_CHANGE must be a boolean", "err", err)
 		os.Exit(2)
 	}
 
@@ -136,16 +142,14 @@ RETURNING id`, orgName, orgDisplay).Scan(&orgID); err != nil {
 	// the existing-count check above should prevent ever hitting it, but
 	// belt-and-suspenders against a parallel run.
 	//
-	// The bootstrap password remains usable after first login. The web client does not
-	// currently implement the forced-password-change flow; setting the flag here would
-	// make login succeed and then immediately fail on its /auth/me session probe. Operators
-	// can rotate the generated credential through the normal password-change flow.
+	// Forced rotation is an explicit install-time policy. It defaults off because clients
+	// must implement the password-change-required response flow before they can use it.
 	var userID uuid.UUID
 	if err := pool.QueryRow(ctx, `
 INSERT INTO users (org_id, email, display_name, password_hash, must_change_password)
-VALUES ($1, $2, $3, $4, FALSE)
+VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (org_id, email) DO UPDATE SET password_hash = EXCLUDED.password_hash
-RETURNING id`, orgID, email, display, hash).Scan(&userID); err != nil {
+RETURNING id`, orgID, email, display, hash, forcePasswordChange).Scan(&userID); err != nil {
 		logger.Error("upsert user", "err", err)
 		os.Exit(1)
 	}

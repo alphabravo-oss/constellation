@@ -509,7 +509,7 @@ export function DashboardPage() {
                     return (
                       <div className="border-t border-border pt-2 space-y-1 text-xs">
                         <div className="text-muted-foreground">Risk by mode <span className="text-muted-foreground/70">(CVEs · exposed workloads)</span></div>
-                        <table className="w-full">
+                        <table className="app-semantic-table w-full">
                           <tbody>
                             <tr className="text-muted-foreground"><td>Discover <span className="text-muted-foreground/70">(unprotected)</span></td><td className="text-right">{cell(cm.discover ?? 0, true)} CVEs</td><td className="text-right">{cell(em.discover ?? 0, true)} exp.</td></tr>
                             <tr className="text-muted-foreground"><td>Monitor</td><td className="text-right">{cell(cm.monitor ?? 0)} CVEs</td><td className="text-right">{cell(em.monitor ?? 0)} exp.</td></tr>

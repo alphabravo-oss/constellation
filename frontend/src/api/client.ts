@@ -381,6 +381,7 @@ export interface ContainerRow {
   risk_score: number;
   critical: number;
   high: number;
+  observed_at: string;
 }
 export interface ContainerListResponse {
   cluster_id: string;

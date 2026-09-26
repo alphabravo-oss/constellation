@@ -70,7 +70,6 @@ The role name used in the default path is the kebab-case form of the key.
 {{- $rolePath := $role -}}
 {{- if eq $role "runtimeAgent" -}}{{- $rolePath = "runtime-agent" -}}{{- end -}}
 {{- if eq $role "auditArchiver" -}}{{- $rolePath = "audit-archiver" -}}{{- end -}}
-{{- if eq $role "vulndbImporter" -}}{{- $rolePath = "vulndb-importer" -}}{{- end -}}
 {{- $registry := $ctx.Values.image.registry | default "ghcr.io/alphabravo-oss/constellation" -}}
 {{- if $ctx.Values.fips.enabled -}}{{- $registry = $ctx.Values.fips.registry -}}{{- end -}}
 {{- $repo := printf "%s/%s" $registry $rolePath -}}
@@ -307,34 +306,6 @@ unless overridden by .Values.<role>.tokenSecret.
 {{- else -}}
 {{- printf "%s-runtime-agent-token" (include "constellation.fullname" .) -}}
 {{- end -}}
-{{- end -}}
-
-{{- define "constellation.vulndbPath" -}}
-{{- printf "%s/%s" (.Values.vulndb.mountPath | trimSuffix "/") .Values.vulndb.dbFile -}}
-{{- end -}}
-
-{{- define "constellation.vulndbPVCName" -}}
-{{- if .Values.vulndb.storage.existingClaim -}}
-{{- .Values.vulndb.storage.existingClaim -}}
-{{- else -}}
-{{- printf "%s-vulndb" (include "constellation.fullname" .) -}}
-{{- end -}}
-{{- end -}}
-
-{{- define "constellation.vulndbVolume" -}}
-- name: vulndb
-{{- if or (eq .Values.vulndb.storage.type "pvc") .Values.vulndb.storage.existingClaim }}
-  persistentVolumeClaim:
-    claimName: {{ include "constellation.vulndbPVCName" . }}
-{{- else if eq .Values.vulndb.storage.type "hostPath" }}
-  hostPath:
-    path: {{ .Values.vulndb.storage.hostPath | quote }}
-    type: DirectoryOrCreate
-{{- else if eq .Values.vulndb.storage.type "emptyDir" }}
-  emptyDir: {}
-{{- else }}
-  {{- fail "vulndb.storage.type must be pvc, hostPath, or emptyDir" }}
-{{- end }}
 {{- end -}}
 
 {{/*
