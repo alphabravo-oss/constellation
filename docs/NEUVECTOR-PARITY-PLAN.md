@@ -129,7 +129,12 @@ deployment evidence.
 | SIEM-1 named delivery receipts | Source, API and deployed SMTP receiver verified | `DispatchTo` scopes receiver lookup to the event org and rejects paused receivers before queueing. Workers and sweepers terminate queued/retry deliveries paused later. PostgreSQL tests cover named-only send, pending/delivered/retrying/failed/paused receipts, exact retry payload/idempotency and concurrent in-flight pause ordering. API tests cover history, audit linkage and cross-org isolation. A deployed API delivered only to its named SMTP recipient, exposed the delivered receipt and audit link, and returned 409 for a paused test-fire. A named vendor SIEM remains separately open. |
 | POL-1 reference scope guard | Source races and deployed API concurrency smoke verified; writer integrity open | An org-wide group could be updated under a `cluster_id` filter while its network/response/admission references existed in another cluster. Update now counts blocking references across the org, matching delete; the usage view shows all explicit blockers even with a cluster filter, while derived member profiles remain scoped to that filter. A prior PostgreSQL regression and Helm-deployed API smoke prove cross-cluster visibility, 409 unsafe update/delete, allowed update after unlink and audit. Update/delete lock the org row first, acquire all four reference-table locks with `NOWAIT` and retry in fresh transactions so a blocked table does not hold partial locks against concurrent deletes; they then lock the group and count references. A fresh PostgreSQL `-race` matrix covers each uncommitted reference writer, org deletion, and release of partial locks. A rebuilt Helm-deployed API waited 1.7 seconds for an in-flight network-edge insert, then returned 409; unlinking allowed 204. Some raw group and reference writers still bypass validated paths, so referent integrity remains open. |
 | POL-1 name-based writer guard | Bounded source and deployed API smoke verified; raw-writer inventory open | `GroupEdgeStore.Upsert` validates both endpoint group names in the same org/cluster transaction and permits only the built-in `external`/`nodes` names without a group row; PostgreSQL races cover rename/delete and org deletion. The structured admission-rule builder and response-rule-v2 create/update validate nonempty group selectors in the same transaction as their writes; tests cover tenant, cluster and org-wide scope, including rejection of cluster-only groups from org-wide rules, plus rename interleavings. The migration-166 Helm API returned 400 for org-wide rules targeting cluster-only groups, 201 for valid org-wide and cluster-scoped selectors, and 409 for referenced-group delete. Generic raw admission-policy create/update now validate every parsed `spec.match.groups` selector against the resulting policy scope in the same transaction; source races cover rename/delete. Portable group import now locks existing groups and all reference tables before changing reference-sensitive fields, rejects cross-cluster updates and waits for in-flight edge writes; a repeated PostgreSQL race test covers the import outcomes. A subsequent Helm API rejected missing edge groups and raw-policy selectors, expanded a protect edge into five enforcing runtime policies, rejected a referenced-group delete and a sensitive portable import, and listed/deleted the edge. Federation group sync, migration apply/rollback, and learned-group refresh now guard reference-sensitive group changes and scoped edge/admission writes with transactional locking; focused PostgreSQL races and the serial affected-package race suite pass. Direct SQL/other raw-writer inventory and deployed federation/migration/learned-path proof remain open; no name-based referential FK exists. The parent POL-1 conflict item stays open. |
-| POL-1 group-edge HTTP workflow | Registered, documented and deployed control-plane path; cleanup and dataplane proof open | The route now requires read-findings for list and manage-policies for upsert/expand/delete, checks org-owned clusters and scoped groups, and requires a durable audit *attempt* before mutations. Source tests cover RBAC, cross-org/cluster rejection, protect expansion and audit-outage no-write; the OpenAPI operation-stub ratchet passes. A disposable Helm API created, listed, re-expanded and deleted an edge with normal audit receipts. `expand=true` produced six flows and five `enforce` runtime policies for the seeded demo members. Expansion now writes all runtime policies in one transaction: a PostgreSQL test and a second Helm API's forced second-policy failure left zero partial policies, then retry produced six flows and five enforcing policies. Create-with-expand now uses the same transaction for edge upsert and policy expansion; fresh-DB race tests force a later policy failure and prove both new-edge and existing-edge updates roll back. Both audit attempts precede this mutation. **Deleting the edge does not retract its expanded policies**; completion audit is best-effort after commit. Deployed proof of atomic create-with-expand, live network dataplane proof and cluster-grant RBAC remain open. The new checklist item stays open. |
+| POL-1 live membership guard | Bounded source race verified; future-member parity open | The deployment-driven membership reconciler previously updated `groups.members` without checking references, then tried best-effort edge re-expansion. It now locks the org, reference tables and current group row, computes from the current selector, and refuses referenced member changes. PostgreSQL race tests cover network, DPI, response and admission references plus an in-flight edge insert. This is fail-closed integrity, **not** automatic application of authored policies to newly joined workloads: referenced groups remain stale until an explicit atomic membership-and-policy transition exists. The POL-1 workflow stays open. |
+| POL-1 group profile propagation | Source and deployed create rollback verified; other paths open | Bulk profile-mode promotion/demotion and ordinary group create/update now update group rows and member process-baseline states in one transaction rather than persisting the group first and ignoring a propagation failure. PostgreSQL check-constraint tests force later member writes to fail and verify no partial group or baseline-state change survives. A Helm API returned 500 under a forced later-member failure with zero created groups and the prior baseline unchanged, then 201 after constraint removal with three enforcing default-namespace baselines. Portable import still uses best-effort propagation, and org-wide propagation remains undefined; this does not close POL-1. |
+| POL-1 operator group writer | Bounded PostgreSQL races verified; safe membership transition open | Direct operator group writes now lock the org, reference tables and group row; they reject reference-sensitive updates/deletes, imperative-owner or cluster-scope collisions, and scoped edge endpoints outside the org/cluster. Operator edge mode/port changes and deletes refuse existing expanded policies rather than silently leaving stale enforcement. Tests cover all four group-reference families, scope collisions, expanded-policy conflict and an in-flight edge insert. The operator does not expand/retract policies itself; safe future-member propagation and deployed CR reconciliation proof remain open. |
+| POL-1 admission bulk writer | Bounded PostgreSQL races verified; wider policy inventory open | Bulk admission-policy create/update/enable now validate resulting group selectors inside the batch transaction with org/cluster scope and row/table locks; a failed operation rolls back earlier writes. Tests cover foreign/missing groups, org-wide versus cluster scope, foreign clusters, and concurrent rename/delete. Single-policy create now checks cluster ownership in the same transaction even when no group selector is present. Other raw/import writers and deployed negatives remain open. |
+| POL-1 group-edge HTTP workflow | Registered, documented and deployed control-plane path; legacy cleanup and dataplane proof open | The route requires read-findings for list and manage-policies for upsert/expand/delete, checks org-owned clusters and scoped groups, and requires durable audit *attempts* before mutations. Source tests cover RBAC, cross-org/cluster rejection, protect expansion and audit-outage no-write; the OpenAPI operation-stub ratchet passes. A Helm API created, listed, re-expanded and deleted an edge with normal audit receipts. Expansion writes runtime policies in one transaction; a forced later-policy failure left zero partial policies, then retry produced six flows and five enforcing policies. Create-with-expand uses one edge/policy transaction; a later Helm API returned 500 with zero edges and policies under injected failure, then 201 with six flows and five enforcing policies on retry. New expansions mark generated rules with the edge ID; PostgreSQL tests prove deletion atomically retracts only fully edge-owned policies and returns 409 without mutation for mixed authored rules, edited posture or unmarked legacy policies. A deployed API also returned 409 for a pre-marker edge, then created an edge with five marked policies and deleted it with zero edge/policy rows left. Legacy/mixed-policy resolution, reliable completion receipts, safe edge edits after expansion, live network dataplane proof and cluster-grant RBAC remain open. The checklist item stays open. |
+| POL-1 expanded edge edit guard | Source and Helm API verified; safe transition still open | An edge with expanded runtime policies now rejects mode or port changes with 409 rather than leaving persisted policy mode/rules stale; comment-only edits remain allowed. PostgreSQL tests cover both standalone upsert and create-with-expand. A rebuilt Helm API returned 409 for protect-to-monitor and port changes, 201 for a comment-only edit, retained the authored protect/5432 edge and then retracted its five policies on delete. An explicit atomic mode/port transition, not merely rejection, remains open. |
 | POL-1 DPI binding tenant guard | Source, deployed API and validated-schema upgrade verified; real legacy inventory open | A DLP/WAF binding previously accepted a foreign-org `group_id` because its FK checked only the group ID. Bind now inserts only from a group row in the authenticated org and refuses a conflicting stale binding owned by another org. PostgreSQL HTTP and Helm API negatives return 400/zero rows for foreign groups, while same-org binding returns 201. Migration 165 adds a composite `(org_id, group_id)` FK marked `NOT VALID` and rejects new invalid writes. The read-only preflight reports legacy mismatches; migration 166 validates the FK and stops without deleting rows when a mismatch exists. A genuine 164→165→166 fixture preserved its invalid row and stayed at version 165 until explicit repair, after which preflight and validation passed. The [upgrade runbook](group-dpi-binding-upgrade.md) requires audited API repair. Actual installation inventories, audited repair receipts, and broader import-writer proof remain open. |
 | API-1 group/DPI OpenAPI contracts | Source schemas and focused tests verified; parent open | Group usage now documents response/admission counters, org-wide direct references, and error responses. DLP/WAF binding list/create/delete document typed requests, responses and actual status codes. Other API-1 endpoint families and live contract smoke remain open. |
 | POL-1 group workflow | API and production-browser control plane verified; enforcement open | A PostgreSQL-backed server test creates groups, previews/applies a NeuVector fixture containing a network edge and DLP/WAF bindings, checks usage and mode promotion, verifies RBAC/audit, and rejects unsafe delete without losing the group or references. A Chromium Playwright run against both an isolated production stack and a Helm-deployed API with a production frontend build creates a group, uses it in a network rule and DLP/WAF bindings, inspects usage, promotes mode, gets 409 on unsafe delete and cleans up. The UI-authored network rule is a network override, not a `group_rule_edges` row, so the usage blocker count is two (DLP/WAF). Live network and DPI enforcement remain unproven; the item stays open. |
@@ -250,8 +255,52 @@ edge and policies. Fresh migration-166 PostgreSQL `-race -count=2` tests force a
 later policy insert failure and verify neither a new edge nor an update to an
 existing edge survives, with no partial policies. An HTTP handler test also
 returns 500 with zero edges and policies after the same injected failure. The
-expand audit attempt now precedes either write. This create-with-expand change has not been deployed;
-the previous Helm image proves only standalone expansion atomicity.
+expand audit attempt now precedes either write. API image
+`sha256:92099ebb446336ea33234d9c306819eecc17092550df0c4b888d668ffb1d2bec`
+ran in a disposable migration-166 Helm release. A temporary constraint forced
+the second policy insert during create-with-expand: HTTP returned 500 and both
+edge and policy counts remained zero. After removing the constraint, the same
+request returned 201 with six flows and five persisted `enforce` policies.
+The release reached deployed status and the disposable constraint was removed.
+This is control-plane rollback proof, not packet-level enforcement proof.
+The membership reconciler's direct writer is guarded separately: it refuses
+reference-sensitive member changes instead of persisting a new member set before
+best-effort edge expansion. This preserves referenced-policy scope but does not
+meet NeuVector's future-member behavior; an atomic safe transition is still open.
+Bulk profile-mode changes and ordinary group create/update now use a transaction
+for each group change and its member process-baseline states; forced later-member
+failures roll back both. Portable import propagation is still best-effort, and
+org-wide propagation is not defined.
+The operator's direct SQL group and edge paths and the bulk admission-policy
+endpoint now guard tenant/scope and referenced mutations in source tests. A
+single admission-policy create also rejects foreign-org clusters even without
+group selectors. These do not prove deployed operator reconciliation or every
+raw writer.
+API image
+`sha256:5091072f176c1f0ba46a9fb788f2de1f0b9d0d21b721c8dc73daf73fa10b0022`
+was deployed by Helm against migration 166. It returned 409 when deleting a
+pre-marker edge whose five enforcing policies were unmarked. A newly created
+protect edge yielded six flows and five policies with its `edge_id`; deleting
+it returned 204, leaving zero edge and policy rows. A separate forced
+second-member baseline failure returned 500 on group create with zero new group
+rows and the existing baseline unchanged; retry returned 201 with three
+enforcing member baselines. The temporary constraint was removed.
+New group-edge expansions now mark learned rules with the owning edge ID.
+Deletion atomically removes policies only when all their rules and policy-level
+posture still belong to that edge; otherwise it returns 409 with no mutation.
+PostgreSQL tests cover tenant isolation, mixed user/federated rules, edited
+posture, unmarked legacy rules and rollback after a blocked policy delete.
+The deployed check covers fully owned and pre-marker paths, not mixed-policy
+deletion. Legacy/mixed policies need an
+explicit audited resolution path rather than unsafe automatic cleanup.
+Source tests now reject mode/port edits to an already-expanded edge with 409
+instead of leaving persisted runtime policies stale; comment-only edits remain
+allowed. An atomic replacement transition for mode/port edits remains open.
+API image
+`sha256:71bfacdfd3ab91d1ea59da5b9053dcb51523b41d45f5efdc7e4d0dba7ffc10e4`
+repeated the edit guard on the disposable Helm release: mode and port changes
+returned 409, comment-only returned 201, the protect/5432 edge remained intact,
+and delete returned 204. This is not a packet-level enforcement drill.
 
 Latest affected-package validation: `GOOSE_BIN=/root/go/bin/goose bash
 scripts/test-clean-database.sh ./internal/handler ./internal/handler/compliance
@@ -677,16 +726,20 @@ row saying `enforced`.
   admission, response-v2, raw admission policies and the group-edge store now
   validate group selectors atomically; portable import blocks referenced
   changes. Federation sync, migration apply/rollback and learned-group refresh
-  now guard sensitive writes, with PostgreSQL race coverage. Complete the raw
+  now guard sensitive writes, with PostgreSQL race coverage. The live membership
+  reconciler and operator writer also refuse referenced member changes, while
+  bulk admission-policy writes validate selectors atomically. Future-member
+  policy propagation remains open. Complete the raw
   writer inventory, deployed writer-path checks and live network/DPI
   enforcement before closing this item.
 - [ ] Complete the now-registered group-edge HTTP workflow: source and deployed
   API smoke prove RBAC, audit attempts/ordinary receipts, scope rejection,
   protect-mode expansion and edge deletion. Runtime-policy expansion is now
   transactional, including a deployed mid-expansion failure/retry check;
-  create-with-expand edge/policy rollback is source-verified on a fresh DB.
-  Deploy and verify the combined transaction, define retraction/ownership of
-  expanded policies on edge deletion, require reliable completion receipts,
+  create-with-expand edge/policy rollback is source- and Helm-verified.
+  Source tests and deployed API smoke verify deletion of fully edge-owned
+  policies and 409/no-write for legacy ownership; define an
+  audited resolution for ambiguous rows. Require reliable completion receipts,
   and prove the operator result and actual network dataplane effect before closing.
 - [ ] Add an end-to-end group workflow: create, use in network and DLP/WAF,
   inspect usage, promote mode, attempt unsafe delete. Source API tests cover

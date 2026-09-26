@@ -89,13 +89,20 @@ UPDATE groups
 	} else {
 		// Profile mode: change each affected group AND push the new baseline mode down to
 		// its member workloads (matching the per-group Update propagation).
-		rows, err := h.db.Pool().Query(r.Context(), `
+		tx, err := h.db.Pool().Begin(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		defer tx.Rollback(r.Context())
+		rows, err := tx.Query(r.Context(), `
 SELECT id, cluster_id, members
   FROM groups
  WHERE org_id = $1
    AND ($2::uuid IS NULL OR cluster_id IS NULL OR cluster_id = $2)
    AND profile_mode = $3
-   AND cfg_type <> 'learned'`, subj.OrgID, clusterArg, string(from))
+   AND cfg_type <> 'learned'
+ ORDER BY id FOR UPDATE`, subj.OrgID, clusterArg, string(from))
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -118,18 +125,30 @@ SELECT id, cluster_id, members
 			a.members = normalizeGroupMembers(a.members)
 			groups = append(groups, a)
 		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
 		rows.Close()
 		for _, a := range groups {
-			if _, err := h.db.Pool().Exec(r.Context(),
+			if _, err := tx.Exec(r.Context(),
 				`UPDATE groups SET profile_mode = $2, updated_at = NOW() WHERE id = $1 AND org_id = $3`,
 				a.id, string(to), subj.OrgID); err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return
 			}
 			if a.clusterID != nil {
-				_ = h.propagateGroupProfileMode(r.Context(), subj.OrgID, *a.clusterID, a.members, to)
+				if err := propagateGroupProfileMode(r.Context(), tx, subj.OrgID, *a.clusterID, a.members, to); err != nil {
+					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+					return
+				}
 			}
 			changed++
+		}
+		if err := tx.Commit(r.Context()); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
 		}
 	}
 

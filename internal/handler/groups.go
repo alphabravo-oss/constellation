@@ -114,14 +114,18 @@ func baselineModeForGroupMode(m group.Mode) string {
 // control point that drives member enforcement. Cluster-scoped only. The process
 // enforcer is opt-in (default OFF), so this updates the recorded mode without
 // killing anything until the agent flag is enabled.
-func (h *Groups) propagateGroupProfileMode(ctx context.Context, orgID, clusterID uuid.UUID, members []string, gmode group.Mode) error {
+type groupModeWriter interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+}
+
+func propagateGroupProfileMode(ctx context.Context, writer groupModeWriter, orgID, clusterID uuid.UUID, members []string, gmode group.Mode) error {
 	bmode := baselineModeForGroupMode(gmode)
 	if bmode == "" || len(members) == 0 {
 		return nil
 	}
 	for _, wid := range members {
 		ns, name := netutil.SplitWorkload(wid)
-		if _, err := h.db.Pool().Exec(ctx, `
+		if _, err := writer.Exec(ctx, `
 INSERT INTO process_baseline_states (org_id, cluster_id, workload_id, namespace, name, mode,
        learn_started_at, monitor_started_at, enforce_started_at, updated_at)
 VALUES ($1,$2,$3,$4,$5,$6, NOW(),
@@ -143,16 +147,21 @@ ON CONFLICT (org_id, cluster_id, workload_id) DO UPDATE SET
 	return nil
 }
 
-// maybePropagateGroupMode propagates profile_mode to members when the group is
-// cluster-scoped. Best-effort: a failure is logged, not fatal to the group write.
-func (h *Groups) maybePropagateGroupMode(ctx context.Context, orgID uuid.UUID, clusterArg any, members []string, gmode group.Mode) {
+func propagateGroupModeTx(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, clusterArg any, members []string, gmode group.Mode) error {
 	cid, ok := clusterArg.(uuid.UUID)
 	if !ok {
-		return // org-wide group: cross-cluster propagation is ambiguous, skip
+		return nil // org-wide group: cross-cluster propagation is ambiguous
 	}
-	if err := h.propagateGroupProfileMode(ctx, orgID, cid, members, gmode); err != nil {
-		slog.Default().Warn("group profile_mode propagation failed",
-			slog.String("cluster", cid.String()), slog.String("err", err.Error()))
+	return propagateGroupProfileMode(ctx, tx, orgID, cid, members, gmode)
+}
+
+func (h *Groups) maybePropagateGroupMode(ctx context.Context, orgID uuid.UUID, clusterArg any, members []string, gmode group.Mode) {
+	clusterID, ok := clusterArg.(uuid.UUID)
+	if !ok {
+		return
+	}
+	if err := propagateGroupProfileMode(ctx, h.db.Pool(), orgID, clusterID, members, gmode); err != nil {
+		slog.Default().Warn("group profile_mode propagation failed", "cluster", clusterID, "error", err)
 	}
 }
 
@@ -309,17 +318,28 @@ func (h *Groups) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	criteria, _ := json.Marshal(body.Criteria)
 	members, _ := json.Marshal(memberIDs)
+	tx, err := h.db.Pool().Begin(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	defer tx.Rollback(r.Context())
 	var id uuid.UUID
-	if err := h.db.Pool().QueryRow(r.Context(), `
+	if err := tx.QueryRow(r.Context(), `
 INSERT INTO groups (org_id, cluster_id, name, kind, comment, criteria, members, learned_from, cfg_type, policy_mode, profile_mode, created_by)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
 		subj.OrgID, clusterArg, g.Name, g.Kind, g.Comment, criteria, members, g.LearnedFrom, g.CfgType, g.PolicyMode, g.ProfileMode, subj.UserID).Scan(&id); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	// NeuVector model: the group drives member enforcement. Push profile_mode
-	// down to member workloads' process-baseline mode (cluster-scoped groups).
-	h.maybePropagateGroupMode(r.Context(), subj.OrgID, clusterArg, memberIDs, g.ProfileMode)
+	if err := propagateGroupModeTx(r.Context(), tx, subj.OrgID, clusterArg, memberIDs, g.ProfileMode); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
 	oid := subj.OrgID
 	uid := subj.UserID
 	_, _, _ = h.auditLog.Log(r.Context(), audit.Event{OrgID: &oid, ActorID: &uid,
@@ -424,11 +444,14 @@ UPDATE groups SET name=$1, kind=$2, comment=$3, criteria=$4, members=$5, learned
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
+	if err := propagateGroupModeTx(r.Context(), tx, subj.OrgID, clusterArg, memberIDs, g.ProfileMode); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
 	if err := tx.Commit(r.Context()); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	h.maybePropagateGroupMode(r.Context(), subj.OrgID, clusterArg, memberIDs, g.ProfileMode)
 	oid := subj.OrgID
 	uid := subj.UserID
 	_, _, _ = h.auditLog.Log(r.Context(), audit.Event{OrgID: &oid, ActorID: &uid,

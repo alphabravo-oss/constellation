@@ -120,3 +120,44 @@ SELECT mode
 		t.Fatalf("baseline mode = %s, want monitor", baselineMode)
 	}
 }
+
+func TestGroupsPromoteRollsBackGroupAndBaselinesOnPropagationFailure(t *testing.T) {
+	database := openTestDB(t)
+	t.Cleanup(database.Close)
+	ctx := context.Background()
+	pool := database.Pool()
+	orgID, clusterID := uuid.New(), uuid.New()
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id=$1`, orgID) })
+	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, display_name) VALUES ($1,$2,'Promote Atomic')`, orgID, "promote-atomic-"+orgID.String()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO clusters (id, org_id, name) VALUES ($1,$2,$3)`, clusterID, orgID, "promote-atomic-"+clusterID.String()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO groups (org_id, cluster_id, name, kind, members, policy_mode, profile_mode) VALUES ($1,$2,'promote-atomic','ground','["default/a","default/b"]'::jsonb,'monitor','monitor')`, orgID, clusterID); err != nil {
+		t.Fatal(err)
+	}
+	constraint := "promote_atomic_" + orgID.String()[:8]
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `ALTER TABLE process_baseline_states DROP CONSTRAINT IF EXISTS `+constraint)
+	})
+	if _, err := pool.Exec(ctx, `ALTER TABLE process_baseline_states ADD CONSTRAINT `+constraint+` CHECK (NOT (org_id='`+orgID.String()+`'::uuid AND workload_id='default/b')) NOT VALID`); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewGroups(database, audit.New(pool))
+	request := httptest.NewRequest(http.MethodPost, "/groups:promote?cluster_id="+clusterID.String(), strings.NewReader(`{"dimension":"profile","from":"monitor","to":"protect"}`))
+	request = request.WithContext(WithSubject(request.Context(), Subject{OrgID: orgID, UserID: uuid.New()}))
+	response := httptest.NewRecorder()
+	handler.Promote(response, request)
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("failure status=%d body=%s", response.Code, response.Body.String())
+	}
+	var mode string
+	if err := pool.QueryRow(ctx, `SELECT profile_mode FROM groups WHERE org_id=$1 AND name='promote-atomic'`, orgID).Scan(&mode); err != nil || mode != "monitor" {
+		t.Fatalf("group mode=%q err=%v", mode, err)
+	}
+	var count int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM process_baseline_states WHERE org_id=$1`, orgID).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("partial baseline states=%d err=%v", count, err)
+	}
+}

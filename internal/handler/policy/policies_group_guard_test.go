@@ -86,6 +86,40 @@ func rawPolicyID(t *testing.T, response *httptest.ResponseRecorder) uuid.UUID {
 	return body.ID
 }
 
+func TestPolicyCreateRejectsForeignClusterWithAndWithoutSelectors(t *testing.T) {
+	database := openTestDB(t)
+	defer database.Close()
+	pool := database.Pool()
+	orgID, userID := seedOrgUser(t, pool)
+	foreignOrgID, _ := seedOrgUser(t, pool)
+	foreignClusterID := seedRawPolicyCluster(t, pool, foreignOrgID)
+	ownedClusterID := seedRawPolicyCluster(t, pool, orgID)
+	groupName := "policy-create-scope-" + uuid.NewString()
+	seedRawPolicyGroup(t, pool, orgID, nil, groupName)
+	policies := NewPolicies(database, audit.New(pool), nil)
+	for _, selectors := range [][]string{nil, {groupName}} {
+		name := "foreign-cluster-" + uuid.NewString()
+		request, response := rawPolicyRequest(t, http.MethodPost, "/policies?cluster_id="+foreignClusterID.String(), createPolicyBody{
+			Name: name, Engine: "constellation-admission", Category: "admission", SpecYAML: rawAdmissionSpec(selectors...), Mode: "monitor",
+		}, orgID, userID, uuid.Nil)
+		policies.Create(response, request)
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("foreign cluster selectors=%v status=%d body=%s", selectors, response.Code, response.Body.String())
+		}
+		var count int
+		if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM policies WHERE org_id=$1 AND name=$2`, orgID, name).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("foreign cluster policy persisted: count=%d err=%v", count, err)
+		}
+	}
+	request, response := rawPolicyRequest(t, http.MethodPost, "/policies?cluster_id="+ownedClusterID.String(), createPolicyBody{
+		Name: "owned-cluster-" + uuid.NewString(), Engine: "constellation-admission", Category: "admission", SpecYAML: rawAdmissionSpec(groupName), Mode: "monitor",
+	}, orgID, userID, uuid.Nil)
+	policies.Create(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("owned cluster status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestRawAdmissionPolicyCreateScopesAllGroupSelectors(t *testing.T) {
 	database := openTestDB(t)
 	defer database.Close()

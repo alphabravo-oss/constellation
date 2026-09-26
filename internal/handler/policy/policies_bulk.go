@@ -6,10 +6,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
+	"github.com/alphabravocompany/constellation/internal/handler/sqlx"
 
 	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/notify"
@@ -97,6 +99,11 @@ func (p *Policies) Bulk(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "max 200 operations per batch")
 		return
 	}
+	clusterArg, err := sqlx.ParseClusterIDParam(r)
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	tx, err := p.db.Pool().Begin(r.Context())
 	if err != nil {
@@ -104,6 +111,26 @@ func (p *Policies) Bulk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
+	var lockedOrgID uuid.UUID
+	if err := tx.QueryRow(r.Context(), `SELECT id FROM orgs WHERE id=$1 FOR KEY SHARE`, subj.OrgID).Scan(&lockedOrgID); err != nil {
+		jsonError(w, http.StatusInternalServerError, "org: "+err.Error())
+		return
+	}
+	if _, err := tx.Exec(r.Context(), `LOCK TABLE policies IN ROW EXCLUSIVE MODE`); err != nil {
+		jsonError(w, http.StatusInternalServerError, "policies: "+err.Error())
+		return
+	}
+	if clusterArg != nil {
+		var clusterID uuid.UUID
+		if err := tx.QueryRow(r.Context(), `SELECT id FROM clusters WHERE id=$1 AND org_id=$2 FOR KEY SHARE`, clusterArg, subj.OrgID).Scan(&clusterID); err != nil {
+			if err == pgx.ErrNoRows {
+				jsonError(w, http.StatusBadRequest, "cluster not found")
+			} else {
+				jsonError(w, http.StatusInternalServerError, "cluster: "+err.Error())
+			}
+			return
+		}
+	}
 
 	// fedRevisions collects one revision intent per persisted op; emitted after the
 	// tx commits (recordFedRevision is a no-op unless this org is a master). Kept
@@ -114,16 +141,25 @@ func (p *Policies) Bulk(w http.ResponseWriter, r *http.Request) {
 	}
 	var fedRevisions []fedRev
 
-	// isFedTx reports whether a policy row is fed (read-only) within the tx, so a
-	// bulk op cannot smuggle a local mutation past the single-handler guard.
-	isFedTx := func(id uuid.UUID) (bool, error) {
-		var cfg string
+	// Lock the current row before checking its resulting admission selectors.
+	policyTx := func(id uuid.UUID) (string, string, *uuid.UUID, string, error) {
+		var cfg, engine, specYAML string
+		var clusterID *uuid.UUID
 		err := tx.QueryRow(r.Context(),
-			`SELECT cfg_type FROM policies WHERE id=$1 AND org_id=$2`, id, subj.OrgID).Scan(&cfg)
-		if err != nil {
-			return false, err
+			`SELECT cfg_type, engine, spec_yaml, cluster_id FROM policies WHERE id=$1 AND org_id=$2 FOR UPDATE`, id, subj.OrgID).
+			Scan(&cfg, &engine, &specYAML, &clusterID)
+		return cfg, engine, clusterID, specYAML, err
+	}
+	lockGroups := func(engine, specYAML string, clusterID any) bool {
+		if err := p.lockAdmissionPolicyGroups(r.Context(), tx, subj.OrgID, clusterID, admissionPolicyGroupSelectors(engine, specYAML)); err != nil {
+			if err == pgx.ErrNoRows {
+				jsonError(w, http.StatusBadRequest, "group not found")
+			} else {
+				jsonError(w, http.StatusInternalServerError, "group: "+err.Error())
+			}
+			return false
 		}
-		return cfg == "fed", nil
+		return true
 	}
 
 	results := make([]bulkPolicyResult, 0, len(req.Operations))
@@ -139,11 +175,14 @@ func (p *Policies) Bulk(w http.ResponseWriter, r *http.Request) {
 			if body.Mode == "" {
 				body.Mode = "monitor"
 			}
+			if !lockGroups(body.Engine, body.SpecYAML, clusterArg) {
+				return
+			}
 			id := uuid.New()
 			if _, err := tx.Exec(r.Context(), `
-INSERT INTO policies (id, org_id, name, description, engine, category, spec_yaml, enabled, mode)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-				id, subj.OrgID, body.Name, body.Description, body.Engine, body.Category,
+INSERT INTO policies (id, org_id, cluster_id, name, description, engine, category, spec_yaml, enabled, mode)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+				id, subj.OrgID, clusterArg, body.Name, body.Description, body.Engine, body.Category,
 				body.SpecYAML, body.Enabled, body.Mode); err != nil {
 				jsonError(w, http.StatusInternalServerError, "create: "+err.Error())
 				return
@@ -158,16 +197,23 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
 				jsonError(w, http.StatusBadRequest, "update requires id")
 				return
 			}
-			if isFed, err := isFedTx(*op.ID); err != nil {
-				jsonError(w, http.StatusInternalServerError, "update: "+err.Error())
+			cfg, engine, policyClusterID, specYAML, err := policyTx(*op.ID)
+			if err != nil {
+				jsonError(w, http.StatusNotFound, "update: policy not found")
 				return
-			} else if isFed {
+			} else if cfg == "fed" {
 				jsonError(w, http.StatusForbidden, "update: "+handler.ErrFedReadOnly().Error())
 				return
 			}
 			var body updatePolicyBody
 			if err := json.Unmarshal(op.Body, &body); err != nil {
 				jsonError(w, http.StatusBadRequest, "bad update body: "+err.Error())
+				return
+			}
+			if body.SpecYAML != nil {
+				specYAML = *body.SpecYAML
+			}
+			if !lockGroups(engine, specYAML, policyClusterID) {
 				return
 			}
 			if _, err := tx.Exec(r.Context(), `
@@ -199,7 +245,7 @@ UPDATE policies SET
 			}
 			var name, cfg string
 			if err := tx.QueryRow(r.Context(),
-				`SELECT name, cfg_type FROM policies WHERE id=$1 AND org_id=$2`, *op.ID, subj.OrgID).
+				`SELECT name, cfg_type FROM policies WHERE id=$1 AND org_id=$2 FOR UPDATE`, *op.ID, subj.OrgID).
 				Scan(&name, &cfg); err != nil {
 				jsonError(w, http.StatusNotFound, "delete: policy not found")
 				return
@@ -222,11 +268,15 @@ UPDATE policies SET
 				jsonError(w, http.StatusBadRequest, op.Op+" requires id")
 				return
 			}
-			if isFed, err := isFedTx(*op.ID); err != nil {
-				jsonError(w, http.StatusInternalServerError, op.Op+": "+err.Error())
+			cfg, engine, policyClusterID, specYAML, err := policyTx(*op.ID)
+			if err != nil {
+				jsonError(w, http.StatusNotFound, op.Op+": policy not found")
 				return
-			} else if isFed {
+			} else if cfg == "fed" {
 				jsonError(w, http.StatusForbidden, op.Op+": "+handler.ErrFedReadOnly().Error())
+				return
+			}
+			if !lockGroups(engine, specYAML, policyClusterID) {
 				return
 			}
 			enabled := op.Op == "enable"

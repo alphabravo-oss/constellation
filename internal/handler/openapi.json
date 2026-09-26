@@ -6416,7 +6416,7 @@
           }
         },
         "summary": "Upsert a group-to-group network edge",
-        "description": "Requires manage_policies. A durable audit attempt is required before saving or expanding; expansion can partially apply if a later policy write fails."
+        "description": "Requires manage_policies. Durable audit attempts precede mutation. Create-with-expand commits the edge and its runtime policies together or rolls back both; expanded mode/port edits require an explicit policy transition."
       }
     },
     "/api/v1/runtime-policies/group-edges/{id}": {
@@ -6434,9 +6434,12 @@
         ],
         "responses": {
           "204": {
-            "description": "Edge deleted. Already expanded runtime policies are not retracted."
+            "description": "Edge deleted with any fully edge-owned expanded runtime policies retracted."
           },
           "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
             "$ref": "#/components/responses/Error"
           },
           "503": {

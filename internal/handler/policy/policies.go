@@ -108,6 +108,8 @@ type createPolicyBody struct {
 	Mode        string `json:"mode"`
 }
 
+var errPolicyClusterNotFound = errors.New("policy cluster not found in organization")
+
 func (p *Policies) Create(w http.ResponseWriter, r *http.Request) {
 	var body createPolicyBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -125,16 +127,12 @@ func (p *Policies) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	var id uuid.UUID
 	selectors := admissionPolicyGroupSelectors(body.Engine, body.SpecYAML)
-	if len(selectors) == 0 {
-		err = p.db.Pool().QueryRow(r.Context(),
-			`INSERT INTO policies (org_id, cluster_id, name, description, engine, category, spec_yaml, enabled, mode)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-			subj.OrgID, clusterArg, body.Name, body.Description, body.Engine, body.Category,
-			body.SpecYAML, body.Enabled, body.Mode).Scan(&id)
-	} else {
-		err = p.createGroupPolicy(r.Context(), subj.OrgID, clusterArg, body, selectors, &id)
-	}
+	err = p.createGroupPolicy(r.Context(), subj.OrgID, clusterArg, body, selectors, &id)
 	if err != nil {
+		if errors.Is(err, errPolicyClusterNotFound) {
+			httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found"})
+			return
+		}
 		if errors.Is(err, pgx.ErrNoRows) {
 			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "group not found"})
 			return
@@ -309,6 +307,14 @@ func (p *Policies) createGroupPolicy(ctx context.Context, orgID uuid.UUID, clust
 	var lockedOrgID uuid.UUID
 	if err := tx.QueryRow(ctx, `SELECT id FROM orgs WHERE id=$1 FOR KEY SHARE`, orgID).Scan(&lockedOrgID); err != nil {
 		return err
+	}
+	if clusterID, ok := clusterArg.(uuid.UUID); ok {
+		var lockedClusterID uuid.UUID
+		if err := tx.QueryRow(ctx, `SELECT id FROM clusters WHERE id=$1 AND org_id=$2 FOR KEY SHARE`, clusterID, orgID).Scan(&lockedClusterID); errors.Is(err, pgx.ErrNoRows) {
+			return errPolicyClusterNotFound
+		} else if err != nil {
+			return err
+		}
 	}
 	if _, err := tx.Exec(ctx, `LOCK TABLE policies IN ROW EXCLUSIVE MODE`); err != nil {
 		return err
