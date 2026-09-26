@@ -4,7 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { enterprise, groupsApi, networkRules, runtimeDLP, runtimeSignatures, vulnProfiles, type DLPRule, type Group, type MigrationImportListItem, type MigrationImportPage, type MigrationUnsupported, type VulnProfile } from "@/api/client";
+import { enterprise, groupsApi, networkRules, runtimeDLP, runtimeSignatures, vulnProfiles, type DLPRule, type Group, type MigrationImportListItem, type MigrationImportPage, type MigrationUnsupported, type NetworkRule, type VulnProfile } from "@/api/client";
 import { PolicyCenterPage } from "./PolicyCenterPage";
 
 vi.mock("@/hooks/useCluster", () => ({
@@ -28,7 +28,7 @@ beforeEach(() => {
   vi.spyOn(runtimeSignatures, "list").mockResolvedValue([]);
   vi.spyOn(groupsApi, "list").mockResolvedValue({ groups: [] });
   vi.spyOn(vulnProfiles, "list").mockResolvedValue({ profiles: [] });
-  vi.spyOn(networkRules, "list");
+  vi.spyOn(networkRules, "list").mockResolvedValue({ cluster_id: "cluster-1", rules: [], summary: { total: 0, allow: 0, deny: 0, learned: 0, disabled: 0 } });
 });
 
 afterEach(() => {
@@ -71,8 +71,9 @@ describe("PolicyCenterPage", () => {
     expect(groupsApi.list).toHaveBeenCalledWith({ cluster_id: "cluster-1" });
     expect(vulnProfiles.list).toHaveBeenCalledWith({ cluster_id: "cluster-1" });
     expect(queryClient?.getQueryData(["groups", "cluster-1"])).toBeUndefined();
-    expect(networkRules.list).not.toHaveBeenCalled();
-    expect(familyElement("network-rules").textContent).not.toMatch(/latest listed change|hits|last hit/i);
+    expect(networkRules.list).toHaveBeenCalledWith("cluster-1");
+    expect(familyElement("network-rules").textContent).toContain("Listed matches: 0");
+    expect(familyElement("network-rules").textContent).toContain("Last listed match: Never");
   });
 
   it("does not invent change times for empty, invalid, or failed lists", async () => {
@@ -87,6 +88,32 @@ describe("PolicyCenterPage", () => {
     expect(changeTime("dlp")).toBeNull();
     expect(changeTime("signatures")).toBeNull();
     expect(changeTime("groups")).toBeNull();
+  });
+
+  it("shows only listed network match totals and last-hit time", async () => {
+    vi.mocked(networkRules.list).mockResolvedValue({ cluster_id: "cluster-1", rules: [
+      { match_counter: 7, last_match_timestamp: 1700000000 } as NetworkRule,
+      { match_counter: 3, last_match_timestamp: 1700000100 } as NetworkRule,
+    ], summary: { total: 2, allow: 2, deny: 0, learned: 2, disabled: 0 } });
+    render(<PolicyCenterPage />);
+    await settle();
+
+    const stats = familyElement("network-rules").querySelector('[data-testid="policy-family-network-rules-match-stats"]');
+    expect(stats?.textContent).toContain("Listed matches: 10");
+    expect(stats?.querySelector("time")?.getAttribute("datetime")).toBe("2023-11-14T22:15:00.000Z");
+    expect(stats?.textContent).toContain("do not prove enforcement health");
+  });
+
+  it("does not present invalid network counters as trustworthy hits", async () => {
+    vi.mocked(networkRules.list).mockResolvedValue({ cluster_id: "cluster-1", rules: [
+      { match_counter: -1, last_match_timestamp: -1 } as NetworkRule,
+    ], summary: { total: 1, allow: 1, deny: 0, learned: 1, disabled: 0 } });
+    render(<PolicyCenterPage />);
+    await settle();
+
+    const stats = familyElement("network-rules").querySelector('[data-testid="policy-family-network-rules-match-stats"]');
+    expect(stats?.textContent).toContain("Listed matches: Unavailable");
+    expect(stats?.textContent).toContain("Last listed match: Unavailable");
   });
 
   it("renders mode vocabulary and portable policy family controls", () => {
@@ -208,7 +235,7 @@ describe("PolicyCenterPage", () => {
         { ...savedImport([diagnostic("network_rule", "selected")], "neuvector", "cluster-1"), id: "selected-import" },
         { ...savedImport([diagnostic("network_rule", "legacy")]), id: "legacy-import" },
         { ...savedImport([diagnostic("network_rule", "sibling")], "neuvector", "cluster-2"), id: "sibling-import" },
-      ], has_more: true, next_offset: 25 })
+      ], has_more: true, next_cursor: "cursor-25" })
       .mockResolvedValueOnce({ imports: [
         { ...savedImport([diagnostic("group", "next-page")], "neuvector", "cluster-1"), id: "next-import" },
       ], has_more: false });
@@ -222,21 +249,21 @@ describe("PolicyCenterPage", () => {
     expect(familyElement("network-rules").textContent).not.toContain("sibling");
     expect(host?.querySelector('[data-testid="migration-other-cluster-diagnostics"]')?.textContent).toContain("Target: other cluster (cluster-2)");
     expect(host?.querySelector('[data-testid="migration-other-cluster-diagnostics"]')?.textContent).toContain("sibling");
-    expect(enterprise.migrationImportsPage).toHaveBeenCalledWith({ limit: 25, offset: 0 });
+    expect(enterprise.migrationImportsPage).toHaveBeenCalledWith({ limit: 25 });
 
     const button = Array.from(host?.querySelectorAll("button") ?? []).find((candidate) => candidate.textContent === "Load more imports");
     expect(button).toBeTruthy();
     await act(async () => { button?.click(); });
     await settle();
 
-    expect(enterprise.migrationImportsPage).toHaveBeenCalledWith({ limit: 25, offset: 25 });
+    expect(enterprise.migrationImportsPage).toHaveBeenCalledWith({ limit: 25, cursor: "cursor-25" });
     expect(familyElement("groups").textContent).toContain("next-page");
     expect(text()).not.toContain("Load more imports");
   });
 
   it("keeps loaded diagnostics visible when another page fails", async () => {
     vi.mocked(enterprise.migrationImportsPage)
-      .mockResolvedValueOnce({ imports: [savedImport([diagnostic("network_rule", "saved")], "neuvector", "cluster-1")], has_more: true, next_offset: 25 })
+      .mockResolvedValueOnce({ imports: [savedImport([diagnostic("network_rule", "saved")], "neuvector", "cluster-1")], has_more: true, next_cursor: "cursor-25" })
       .mockRejectedValueOnce(new Error("next page unavailable"));
     render(<PolicyCenterPage />);
     await settle();

@@ -199,9 +199,9 @@ export function PolicyCenterPage() {
   const queryClient = useQueryClient();
   const importsQuery = useInfiniteQuery({
     queryKey: ["migration-imports-pages"],
-    queryFn: ({ pageParam }) => enterprise.migrationImportsPage({ limit: 25, offset: pageParam }),
-    initialPageParam: 0,
-    getNextPageParam: (page) => page.has_more ? page.next_offset : undefined,
+    queryFn: ({ pageParam }) => enterprise.migrationImportsPage(pageParam ? { limit: 25, cursor: pageParam } : { limit: 25 }),
+    initialPageParam: "",
+    getNextPageParam: (page) => page.has_more ? page.next_cursor : undefined,
   });
   const diagnostics: MigrationDiagnostic[] = (importsQuery.data?.pages.flatMap((page) => page.imports) ?? [])
     .filter((importRecord) => importRecord.source === "neuvector")
@@ -266,6 +266,7 @@ export function PolicyCenterPage() {
                   {family.portable && family.portable !== "network-rules" ? (
                     <PolicyFamilyLastChanged family={family.portable} clusterId={clusterId} />
                   ) : null}
+                  {family.portable === "network-rules" ? <NetworkRuleMatchStats clusterId={clusterId} /> : null}
                   <div className="flex flex-wrap gap-2">
                     <Button asChild size="sm" variant="primary">
                       <Link to={to(family.route)} aria-label={`Open ${family.title}`}>Open</Link>
@@ -347,6 +348,30 @@ function PolicyFamilyLastChanged({ family, clusterId }: { family: ChangeFamily; 
         ) : changes.data?.length ? "Unavailable" : "No listed items"}
       </div>
       <div>{changeScopes[family]}</div>
+    </div>
+  );
+}
+
+function NetworkRuleMatchStats({ clusterId }: { clusterId?: string }) {
+  const rules = useQuery({
+    queryKey: ["network-rules", clusterId, "policy-center-match-stats"],
+    queryFn: () => networkRules.list(clusterId ?? ""),
+    enabled: Boolean(clusterId),
+  });
+  const counts = rules.data?.rules.map((rule) => rule.match_counter);
+  const total = counts?.reduce((sum, count) => sum + count, 0);
+  const validTotal = counts?.every((count) => Number.isSafeInteger(count) && count >= 0) && Number.isSafeInteger(total);
+  const timestamps = rules.data?.rules.map((rule) => rule.last_match_timestamp);
+  const validTimestamps = timestamps?.every((value) => Number.isSafeInteger(value) && value >= 0);
+  const lastMatch = Math.max(0, ...(timestamps ?? []));
+  const lastDate = validTimestamps ? new Date(lastMatch * 1000) : null;
+  const validDate = lastDate && !Number.isNaN(lastDate.getTime()) ? lastDate : null;
+
+  return (
+    <div className="text-xs text-muted-foreground" data-testid="policy-family-network-rules-match-stats">
+      <div>Listed matches: {!clusterId ? "Select a cluster" : rules.isPending ? "Loading…" : rules.isError || !validTotal ? "Unavailable" : total?.toLocaleString()}</div>
+      <div>Last listed match: {!clusterId ? "Select a cluster" : rules.isPending ? "Loading…" : rules.isError || !validDate ? "Unavailable" : lastMatch === 0 ? "Never" : <time dateTime={validDate.toISOString()}>{validDate.toLocaleString()}</time>}</div>
+      <div>Listed network rules only; match counts do not prove enforcement health.</div>
     </div>
   );
 }

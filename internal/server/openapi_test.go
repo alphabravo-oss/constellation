@@ -451,6 +451,127 @@ func TestOpenAPIAdmissionAssessmentContracts(t *testing.T) {
 	assertOpenAPIFields(t, clear, []string{"deleted"}, []string{"deleted"})
 }
 
+func TestOpenAPIRegistryOperations(t *testing.T) {
+	syncPath := "/api/v1/registries/{id}/sync-now"
+	sync := openAPISchemaAt(t, "components", "schemas", "RegistrySyncResult")
+	assertOpenAPIFields(t, sync,
+		[]string{"registry_id", "status", "images_seen", "scan_jobs_enqueued", "error"},
+		[]string{"registry_id", "status", "images_seen", "scan_jobs_enqueued"})
+	if got := openAPISchemaAt(t, "paths", syncPath, "post", "responses", "200", "content", "application/json", "schema")["$ref"]; got != "#/components/schemas/RegistrySyncResult" {
+		t.Errorf("sync result ref = %v", got)
+	}
+	for _, status := range []string{"400", "401", "403", "500"} {
+		if _, ok := openAPISchemaAt(t, "paths", syncPath, "post", "responses")[status]; !ok {
+			t.Errorf("sync missing %s", status)
+		}
+	}
+	cancelPath := "/api/v1/registries/{id}/cancel-scans"
+	cancel := openAPISchemaAt(t, "components", "schemas", "RegistryCancelScansResponse")
+	assertOpenAPIFields(t, cancel,
+		[]string{"registry_id", "canceled", "active_remaining"},
+		[]string{"registry_id", "canceled", "active_remaining"})
+	if got := openAPISchemaAt(t, "paths", cancelPath, "post", "responses", "200", "content", "application/json", "schema")["$ref"]; got != "#/components/schemas/RegistryCancelScansResponse" {
+		t.Errorf("cancel result ref = %v", got)
+	}
+}
+
+func TestOpenAPIEventsExportContract(t *testing.T) {
+	path := "/api/v1/events:export"
+	operation := openAPISchemaAt(t, "paths", path, "get")
+	params := operation["parameters"].([]any)
+	if len(params) != 1 || params[0].(map[string]any)["name"] != "hours" || params[0].(map[string]any)["in"] != "query" {
+		t.Errorf("export parameters = %v", params)
+	}
+	media := openAPISchemaAt(t, "paths", path, "get", "responses", "200", "content", "application/x-ndjson")
+	if media["x-ndjson-item-schema"].(map[string]any)["$ref"] != "#/components/schemas/EventsExportRecord" {
+		t.Errorf("export record schema = %v", media)
+	}
+	assertOpenAPIFields(t, openAPISchemaAt(t, "components", "schemas", "EventsExportRecord"),
+		[]string{"event", "data"}, []string{"event", "data"})
+	if _, ok := openAPISchemaAt(t, "paths", path, "get", "responses", "500", "content")["text/plain"]; !ok {
+		t.Error("initial export failure should document text/plain 500")
+	}
+}
+
+func TestOpenAPIPcapContracts(t *testing.T) {
+	capture := openAPISchemaAt(t, "components", "schemas", "PcapCapture")
+	assertOpenAPIFields(t, capture,
+		[]string{"id", "org_id", "cluster_id", "workload", "namespace", "requested_by", "requested_at", "duration_s", "src_ip", "dst_ip", "dst_port", "protocol", "bpf_filter", "interface", "file_count", "file_size_mb", "status", "claimed_by_node", "claimed_at", "completed_at", "error_message", "file_size_bytes", "sha256", "packet_count", "expires_at"},
+		[]string{"id", "org_id", "cluster_id", "workload", "namespace", "requested_by", "requested_at", "duration_s", "status", "expires_at"})
+	assertOpenAPIFields(t, openAPISchemaAt(t, "components", "schemas", "PcapStartRequest"),
+		[]string{"cluster_id", "workload", "namespace", "duration_s", "src_ip", "dst_ip", "dst_port", "protocol", "bpf_filter", "interface", "file_count", "file_size_mb"},
+		[]string{"cluster_id", "workload"})
+	assertOpenAPIFields(t, openAPISchemaAt(t, "components", "schemas", "PcapStatusUpdate"),
+		[]string{"status", "error_message", "packet_count"}, []string{"status"})
+	for _, check := range []struct {
+		path, method, status string
+	}{
+		{"/api/v1/runtime-pcap/start", "post", "201"},
+		{"/api/v1/runtime-pcap/claim", "get", "200"},
+		{"/api/v1/runtime-pcap/{id}", "get", "200"},
+		{"/api/v1/runtime-pcap/{id}/status", "post", "200"},
+		{"/api/v1/runtime-pcap/{id}/upload", "post", "200"},
+	} {
+		if got := openAPISchemaAt(t, "paths", check.path, check.method, "responses", check.status, "content", "application/json", "schema")["$ref"]; got != "#/components/schemas/PcapCapture" {
+			t.Errorf("%s %s response ref = %v", check.method, check.path, got)
+		}
+	}
+	list := openAPISchemaAt(t, "paths", "/api/v1/runtime-pcap", "get", "responses", "200", "content", "application/json", "schema")
+	assertOpenAPIFields(t, list, []string{"captures", "selected_group", "selected_group_members"}, []string{"captures"})
+	if list["properties"].(map[string]any)["captures"].(map[string]any)["items"].(map[string]any)["$ref"] != "#/components/schemas/PcapCapture" {
+		t.Error("list captures must use PcapCapture")
+	}
+	for _, path := range []string{"/api/v1/runtime-pcap/claim", "/api/v1/runtime-pcap/{id}/status", "/api/v1/runtime-pcap/{id}/upload"} {
+		method := "post"
+		if strings.HasSuffix(path, "/claim") {
+			method = "get"
+		}
+		security := openAPISchemaAt(t, "paths", path, method)["security"].([]any)
+		if len(security) != 1 || security[0].(map[string]any)["runtimeAgent"] == nil {
+			t.Errorf("%s agent security = %v", path, security)
+		}
+	}
+	if _, ok := openAPISchemaAt(t, "paths", "/api/v1/runtime-pcap/claim", "get", "responses")["204"]; !ok {
+		t.Error("claim must document empty queue as 204")
+	}
+	if _, ok := openAPISchemaAt(t, "paths", "/api/v1/runtime-pcap/start", "post", "responses")["200"]; ok {
+		t.Error("start incorrectly documents 200 instead of 201")
+	}
+	if _, ok := openAPISchemaAt(t, "paths", "/api/v1/runtime-pcap/{id}/upload", "post", "responses")["413"]; !ok {
+		t.Error("upload must document oversize 413")
+	}
+	if _, ok := openAPISchemaAt(t, "paths", "/api/v1/runtime-pcap/{id}/download", "get", "responses", "200", "content")["application/vnd.tcpdump.pcap"]; !ok {
+		t.Error("download must document pcap bytes")
+	}
+}
+
+func TestOpenAPISupportBundleContracts(t *testing.T) {
+	bundle := openAPISchemaAt(t, "components", "schemas", "SupportBundle")
+	assertOpenAPIFields(t, bundle,
+		[]string{"schema_version", "bundle_id", "generated_at", "org_id", "format", "redaction", "integrity", "sections"},
+		[]string{"schema_version", "bundle_id", "generated_at", "org_id", "format", "redaction", "integrity", "sections"})
+	if got := openAPISchemaAt(t, "paths", "/api/v1/support/bundle", "get", "responses", "200", "content", "application/json", "schema")["$ref"]; got != "#/components/schemas/SupportBundle" {
+		t.Errorf("synchronous bundle ref = %v", got)
+	}
+	job := openAPISchemaAt(t, "components", "schemas", "SupportBundleJob")
+	assertOpenAPIFields(t, job,
+		[]string{"id", "status", "created_at", "started_at", "finished_at", "expires_at", "bundle_id", "error", "audit_event_id"},
+		[]string{"id", "status", "created_at"})
+	if got := openAPISchemaAt(t, "paths", "/api/v1/support/bundle/jobs/{id}/download", "get", "responses", "200", "content", "application/json", "schema")["$ref"]; got != "#/components/schemas/SupportBundle" {
+		t.Errorf("job download bundle ref = %v", got)
+	}
+	if got := openAPISchemaAt(t, "paths", "/api/v1/support/bundle/jobs", "post", "responses", "202", "content", "application/json", "schema")["$ref"]; got != "#/components/schemas/SupportBundleJob" {
+		t.Errorf("job create ref = %v", got)
+	}
+	list := openAPISchemaAt(t, "paths", "/api/v1/support/bundle/jobs", "get", "responses", "200", "content", "application/json", "schema")
+	assertOpenAPIFields(t, list, []string{"items", "next_cursor"}, []string{"items", "next_cursor"})
+	for _, status := range []string{"404", "409", "410", "503"} {
+		if _, ok := openAPISchemaAt(t, "paths", "/api/v1/support/bundle/jobs/{id}/download", "get", "responses")[status]; !ok {
+			t.Errorf("job download missing %s", status)
+		}
+	}
+}
+
 func TestOpenAPIMigrationContracts(t *testing.T) {
 	previewPath := "/api/v1/migration/preview"
 	request := openAPISchemaAt(t, "paths", previewPath, "post", "requestBody", "content", "application/json", "schema")
@@ -512,7 +633,7 @@ func TestOpenAPIMigrationContracts(t *testing.T) {
 
 	importsPath := "/api/v1/migration/imports"
 	imports := openAPISchemaAt(t, "paths", importsPath, "get", "responses", "200", "content", "application/json", "schema")
-	assertOpenAPIFields(t, imports, []string{"imports", "has_more", "next_offset"}, []string{"imports", "has_more"})
+	assertOpenAPIFields(t, imports, []string{"imports", "has_more", "next_offset", "next_cursor"}, []string{"imports", "has_more"})
 	importItem := imports["properties"].(map[string]any)["imports"].(map[string]any)["items"].(map[string]any)
 	assertOpenAPIFields(t, importItem,
 		[]string{"id", "source", "status", "target_cluster_id", "summary", "applied_summary", "unsupported", "error", "created_at", "applied_at", "rolled_back_at"},
@@ -521,7 +642,7 @@ func TestOpenAPIMigrationContracts(t *testing.T) {
 		t.Error("history target_cluster_id must be a UUID")
 	}
 	parameters := openAPISchemaAt(t, "paths", importsPath, "get")["parameters"].([]any)
-	if len(parameters) != 2 || parameters[0].(map[string]any)["name"] != "limit" || parameters[1].(map[string]any)["name"] != "offset" {
+	if len(parameters) != 3 || parameters[0].(map[string]any)["name"] != "limit" || parameters[1].(map[string]any)["name"] != "offset" || parameters[2].(map[string]any)["name"] != "cursor" {
 		t.Errorf("migration history pagination parameters = %v", parameters)
 	}
 	for _, parameter := range parameters {
@@ -536,6 +657,9 @@ func TestOpenAPIMigrationContracts(t *testing.T) {
 	offset := parameters[1].(map[string]any)["schema"].(map[string]any)
 	if offset["minimum"] != float64(0) || offset["maximum"] != float64(1000000) || offset["default"] != float64(0) {
 		t.Errorf("migration history offset = %v", offset)
+	}
+	if parameters[2].(map[string]any)["schema"].(map[string]any)["type"] != "string" {
+		t.Errorf("migration history cursor = %v", parameters[2])
 	}
 	if _, ok := openAPISchemaAt(t, "paths", importsPath, "get", "responses")["400"]; !ok {
 		t.Error("migration history must document invalid pagination as 400")

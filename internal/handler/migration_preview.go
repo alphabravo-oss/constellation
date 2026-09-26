@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -733,6 +734,36 @@ func (h *Enterprise) MigrationImports(w http.ResponseWriter, r *http.Request) {
 		}
 		offset = parsed
 	}
+	var cursorTime *time.Time
+	var cursorID *uuid.UUID
+	if raw := r.URL.Query().Get("cursor"); raw != "" {
+		if r.URL.Query().Has("offset") {
+			jsonError(w, http.StatusBadRequest, "cursor and offset cannot be combined")
+			return
+		}
+		if len(raw) > 200 {
+			jsonError(w, http.StatusBadRequest, "invalid cursor")
+			return
+		}
+		decoded, err := base64.RawURLEncoding.DecodeString(raw)
+		if err != nil || len(decoded) > 100 {
+			jsonError(w, http.StatusBadRequest, "invalid cursor")
+			return
+		}
+		stamp, idText, ok := strings.Cut(string(decoded), "|")
+		if !ok {
+			jsonError(w, http.StatusBadRequest, "invalid cursor")
+			return
+		}
+		parsedTime, timeErr := time.Parse(time.RFC3339Nano, stamp)
+		parsedID, idErr := uuid.Parse(idText)
+		if timeErr != nil || idErr != nil {
+			jsonError(w, http.StatusBadRequest, "invalid cursor")
+			return
+		}
+		cursorTime = &parsedTime
+		cursorID = &parsedID
+	}
 	if h == nil || h.db == nil {
 		writeJSON(w, http.StatusOK, map[string]any{"imports": []migrationImportListItemDTO{}, "has_more": false})
 		return
@@ -747,14 +778,16 @@ SELECT id, source, status, preview_json, applied_json, unsupported_json, error,
        created_at, applied_at, rolled_back_at
   FROM migration_imports
  WHERE org_id = $1
+   AND ($2::timestamptz IS NULL OR (created_at, id) < ($2::timestamptz, $3::uuid))
  ORDER BY created_at DESC, id DESC
- LIMIT $2 OFFSET $3`, subj.OrgID, limit+1, offset)
+ LIMIT $4 OFFSET $5`, subj.OrgID, cursorTime, cursorID, limit+1, offset)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer rows.Close()
 	out := []migrationImportListItemDTO{}
+	lastCursor := ""
 	for rows.Next() {
 		var (
 			id             uuid.UUID
@@ -791,6 +824,9 @@ SELECT id, source, status, preview_json, applied_json, unsupported_json, error,
 			item.RolledBackAt = rolledBackAt.UTC().Format(time.RFC3339)
 		}
 		out = append(out, item)
+		if len(out) == limit {
+			lastCursor = base64.RawURLEncoding.EncodeToString([]byte(createdAt.UTC().Format(time.RFC3339Nano) + "|" + id.String()))
+		}
 	}
 	if err := rows.Err(); err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
@@ -799,7 +835,10 @@ SELECT id, source, status, preview_json, applied_json, unsupported_json, error,
 	response := map[string]any{"imports": out, "has_more": len(out) > limit}
 	if len(out) > limit {
 		response["imports"] = out[:limit]
-		response["next_offset"] = offset + limit
+		response["next_cursor"] = lastCursor
+		if cursorTime == nil {
+			response["next_offset"] = offset + limit
+		}
 	}
 	writeJSON(w, http.StatusOK, response)
 }

@@ -46,11 +46,14 @@ beforeEach(() => {
   imports = [];
   vi.mocked(clusters.list).mockResolvedValue({ clusters: [] });
   vi.mocked(enterprise.migration).mockResolvedValue({ sources: [], workflow: [] });
-  vi.mocked(enterprise.migrationImportsPage).mockImplementation(async ({ limit = 25, offset = 0 } = {}) => ({
-    imports: imports.slice(offset, offset + limit),
-    has_more: offset + limit < imports.length,
-    next_offset: offset + limit < imports.length ? offset + limit : undefined,
-  }));
+  vi.mocked(enterprise.migrationImportsPage).mockImplementation(async ({ limit = 25, cursor } = {}) => {
+    const offset = cursor ? Number(cursor.slice("cursor-".length)) : 0;
+    return {
+      imports: imports.slice(offset, offset + limit),
+      has_more: offset + limit < imports.length,
+      next_cursor: offset + limit < imports.length ? `cursor-${offset + limit}` : undefined,
+    };
+  });
   vi.mocked(enterprise.migrationPreview).mockImplementation(async () => {
     const preview = fixture();
     imports = [history(preview)];
@@ -154,12 +157,12 @@ it("loads older import history pages without silently truncating at 25", async (
   imports = Array.from({ length: 27 }, (_, index) => ({ ...history(fixture()), id: `history-${index}` }));
   imports[0].target_cluster_id = "00000000-0000-0000-0000-000000000001";
   await render();
-  expect(enterprise.migrationImportsPage).toHaveBeenCalledWith({ limit: 25, offset: 0 });
+  expect(enterprise.migrationImportsPage).toHaveBeenCalledWith({ limit: 25 });
   expect(element("migration-import-history").textContent).toContain("history-24");
   expect(element("migration-import-history").textContent).toContain("Target: 00000000-0000-0000-0000-000000000001");
   expect(element("migration-import-history").textContent).not.toContain("history-26");
   await click("migration-import-history-load-more");
-  expect(enterprise.migrationImportsPage).toHaveBeenCalledWith({ limit: 25, offset: 25 });
+  expect(enterprise.migrationImportsPage).toHaveBeenCalledWith({ limit: 25, cursor: "cursor-25" });
   expect(element("migration-import-history").textContent).toContain("history-26");
   expect(host.querySelector('[data-testid="migration-import-history-load-more"]')).toBeNull();
 });

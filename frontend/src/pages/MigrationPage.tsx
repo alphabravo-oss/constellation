@@ -292,9 +292,9 @@ export function MigrationPage() {
   const sourcesQ = useQuery({ queryKey: ["migration-sources"], queryFn: () => enterprise.migration() });
   const importsQ = useInfiniteQuery({
     queryKey: ["migration-imports-pages"],
-    queryFn: ({ pageParam }) => enterprise.migrationImportsPage({ limit: 25, offset: pageParam }),
-    initialPageParam: 0,
-    getNextPageParam: (page) => page.has_more ? page.next_offset : undefined,
+    queryFn: ({ pageParam }) => enterprise.migrationImportsPage(pageParam ? { limit: 25, cursor: pageParam } : { limit: 25 }),
+    initialPageParam: "",
+    getNextPageParam: (page) => page.has_more ? page.next_cursor : undefined,
   });
   const clustersQ = useQuery({ queryKey: ["clusters"], queryFn: () => clustersApi.list(), staleTime: 30_000 });
   const sources = sourcesQ.data?.sources ?? [];

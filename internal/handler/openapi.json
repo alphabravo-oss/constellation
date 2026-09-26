@@ -20,6 +20,11 @@
         "scheme": "bearer",
         "bearerFormat": "JWT"
       },
+      "runtimeAgent": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Runtime-agent service-principal token (cra_ prefix), not a user JWT."
+      },
       "browserSession": {
         "type": "apiKey",
         "in": "cookie",
@@ -681,6 +686,396 @@
             "type": "string",
             "format": "uuid",
             "description": "Optional. When omitted, the server uses the stable all-current-rules sensor ID for the selected kind."
+          }
+        }
+      },
+      "RegistrySyncResult": {
+        "type": "object",
+        "required": [
+          "registry_id",
+          "status",
+          "images_seen",
+          "scan_jobs_enqueued"
+        ],
+        "properties": {
+          "registry_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "failed",
+              "partial"
+            ]
+          },
+          "images_seen": {
+            "type": "integer"
+          },
+          "scan_jobs_enqueued": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "RegistryCancelScansResponse": {
+        "type": "object",
+        "required": [
+          "registry_id",
+          "canceled",
+          "active_remaining"
+        ],
+        "properties": {
+          "registry_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "canceled": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "active_remaining": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "EventsExportRecord": {
+        "type": "object",
+        "required": [
+          "event",
+          "data"
+        ],
+        "properties": {
+          "event": {
+            "type": "string",
+            "enum": [
+              "finding",
+              "threat",
+              "error"
+            ]
+          },
+          "data": {
+            "description": "Source table row for finding/threat; string message for an in-stream error.",
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": true
+              },
+              {
+                "type": "string"
+              }
+            ]
+          }
+        }
+      },
+      "PcapCapture": {
+        "type": "object",
+        "required": [
+          "id",
+          "org_id",
+          "cluster_id",
+          "workload",
+          "namespace",
+          "requested_by",
+          "requested_at",
+          "duration_s",
+          "status",
+          "expires_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "org_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "workload": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "requested_by": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "requested_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "duration_s": {
+            "type": "integer"
+          },
+          "src_ip": {
+            "type": "string",
+            "description": "IPv4 or IPv6 address."
+          },
+          "dst_ip": {
+            "type": "string",
+            "description": "IPv4 or IPv6 address."
+          },
+          "dst_port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "tcp",
+              "udp",
+              "icmp"
+            ]
+          },
+          "bpf_filter": {
+            "type": "string"
+          },
+          "interface": {
+            "type": "string"
+          },
+          "file_count": {
+            "type": "integer"
+          },
+          "file_size_mb": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "completed",
+              "failed",
+              "expired"
+            ]
+          },
+          "claimed_by_node": {
+            "type": "string"
+          },
+          "claimed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "error_message": {
+            "type": "string"
+          },
+          "file_size_bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "packet_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PcapStartRequest": {
+        "type": "object",
+        "required": [
+          "cluster_id",
+          "workload"
+        ],
+        "properties": {
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "workload": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "duration_s": {
+            "type": "integer",
+            "description": "Defaults to 30 seconds; clamped to 5–300 seconds."
+          },
+          "src_ip": {
+            "type": "string"
+          },
+          "dst_ip": {
+            "type": "string"
+          },
+          "dst_port": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 65535
+          },
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "tcp",
+              "udp",
+              "icmp"
+            ]
+          },
+          "bpf_filter": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "interface": {
+            "type": "string"
+          },
+          "file_count": {
+            "type": "integer"
+          },
+          "file_size_mb": {
+            "type": "integer"
+          }
+        }
+      },
+      "PcapStatusUpdate": {
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "completed",
+              "failed"
+            ]
+          },
+          "error_message": {
+            "type": "string"
+          },
+          "packet_count": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "SupportBundle": {
+        "type": "object",
+        "required": [
+          "schema_version",
+          "bundle_id",
+          "generated_at",
+          "org_id",
+          "format",
+          "redaction",
+          "integrity",
+          "sections"
+        ],
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "example": "constellation.support_bundle.v1"
+          },
+          "bundle_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "generated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "org_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json"
+            ]
+          },
+          "redaction": {
+            "type": "object",
+            "required": [
+              "applied",
+              "marker",
+              "rules"
+            ],
+            "properties": {
+              "applied": {
+                "type": "boolean"
+              },
+              "marker": {
+                "type": "string"
+              },
+              "rules": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "integrity": {
+            "type": "object",
+            "required": [
+              "algorithm",
+              "scope",
+              "sha256",
+              "signed",
+              "note"
+            ],
+            "properties": {
+              "algorithm": {
+                "type": "string",
+                "enum": [
+                  "sha256"
+                ]
+              },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "sections"
+                ]
+              },
+              "sha256": {
+                "type": "string"
+              },
+              "signed": {
+                "type": "boolean"
+              },
+              "signature_algorithm": {
+                "type": "string",
+                "enum": [
+                  "ed25519"
+                ]
+              },
+              "signature": {
+                "type": "string"
+              },
+              "public_key": {
+                "type": "string"
+              },
+              "key_id": {
+                "type": "string"
+              },
+              "note": {
+                "type": "string"
+              }
+            }
+          },
+          "sections": {
+            "type": "object",
+            "additionalProperties": true
           }
         }
       },
@@ -5125,15 +5520,50 @@
     },
     "/api/v1/events:export": {
       "get": {
+        "summary": "Stream recent finding and threat events",
+        "description": "Organization-scoped NDJSON stream. A threat-query failure after findings have streamed is emitted as an error record, not a new HTTP status.",
+        "parameters": [
+          {
+            "name": "hours",
+            "in": "query",
+            "description": "Defaults to 24; invalid or out-of-range values also fall back to 24.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2160,
+              "default": 24
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "One EventsExportRecord JSON object per line.",
+            "content": {
+              "application/x-ndjson": {
+                "schema": {
+                  "type": "string",
+                  "description": "Newline-delimited EventsExportRecord JSON objects."
+                },
+                "x-ndjson-item-schema": {
+                  "$ref": "#/components/schemas/EventsExportRecord"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Plain-text error when the initial findings query fails before streaming begins.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
-        },
-        "summary": "Get events:export"
+        }
       }
     },
     "/api/v1/federation/clusters/{id}": {
@@ -6653,7 +7083,7 @@
     },
     "/api/v1/migration/imports": {
       "get": {
-        "description": "Returns persisted migration previews and their apply/rollback state for the authenticated organization, newest first.",
+        "description": "Returns persisted migration previews and their apply/rollback state for the authenticated organization, newest first. Use the returned next_cursor for keyset paging that is not shifted by newer imports; cursor and offset cannot be combined.",
         "parameters": [
           {
             "name": "limit",
@@ -6676,6 +7106,14 @@
               "maximum": 1000000,
               "default": 0
             }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque keyset cursor returned as next_cursor. Cannot be combined with offset.",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -6696,7 +7134,11 @@
                     "next_offset": {
                       "type": "integer",
                       "minimum": 0,
-                      "description": "Present only when has_more is true."
+                      "description": "Present when has_more is true and cursor was not supplied."
+                    },
+                    "next_cursor": {
+                      "type": "string",
+                      "description": "Present when has_more is true; pass as cursor for the next page."
                     },
                     "imports": {
                       "type": "array",
@@ -7784,26 +8226,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "required": [
-                    "registry_id",
-                    "canceled",
-                    "active_remaining"
-                  ],
-                  "properties": {
-                    "registry_id": {
-                      "type": "string",
-                      "format": "uuid"
-                    },
-                    "canceled": {
-                      "type": "integer",
-                      "format": "int64"
-                    },
-                    "active_remaining": {
-                      "type": "integer",
-                      "format": "int64"
-                    }
-                  }
+                  "$ref": "#/components/schemas/RegistryCancelScansResponse"
                 }
               }
             }
@@ -7841,15 +8264,46 @@
     },
     "/api/v1/registries/{id}/sync-now": {
       "post": {
+        "summary": "Synchronize a registry now",
+        "description": "Runs one registry walker pass inline. HTTP 200 can contain status failed or partial; inspect the response status and optional error.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Registry walker result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistrySyncResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
-        },
-        "summary": "Create sync-now"
+        }
       }
     },
     "/api/v1/registries/{id}/test": {
@@ -8352,104 +8806,456 @@
     },
     "/api/v1/runtime-pcap": {
       "get": {
+        "summary": "List runtime packet captures",
+        "description": "Returns up to 200 organization-scoped captures, newest first. A group filter also returns selected_group metadata.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "workload",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "group",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "running",
+                "completed",
+                "failed",
+                "expired"
+              ]
+            }
+          },
+          {
+            "name": "protocol",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "tcp",
+                "udp",
+                "icmp"
+              ]
+            }
+          },
+          {
+            "name": "src_ip",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "dst_ip",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "dst_port",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Capture list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "captures"
+                  ],
+                  "properties": {
+                    "captures": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PcapCapture"
+                      }
+                    },
+                    "selected_group": {
+                      "type": "string"
+                    },
+                    "selected_group_members": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
-        },
-        "summary": "Get runtime-pcap"
+        }
       }
     },
     "/api/v1/runtime-pcap/claim": {
       "get": {
+        "summary": "Claim the next pending packet capture",
+        "description": "Runtime-agent token only. Atomically claims one pending capture in the token's bound cluster.",
+        "security": [
+          {
+            "runtimeAgent": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "node",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Claimed capture",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PcapCapture"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "No pending capture."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
-        },
-        "summary": "Get claim"
+        }
       }
     },
     "/api/v1/runtime-pcap/start": {
       "post": {
+        "summary": "Queue a runtime packet capture",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PcapStartRequest"
+              }
+            }
+          }
+        },
         "responses": {
-          "200": {
-            "description": "ok"
+          "201": {
+            "description": "Queued capture",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PcapCapture"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
-        },
-        "summary": "Create start"
+        }
       }
     },
     "/api/v1/runtime-pcap/{id}": {
       "delete": {
+        "summary": "Delete a runtime packet capture",
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Deleted capture ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "deleted"
+                  ],
+                  "properties": {
+                    "deleted": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
-        },
-        "summary": "Delete runtime-pcap"
+        }
       },
       "get": {
+        "summary": "Get a runtime packet capture",
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Capture metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PcapCapture"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
-        },
-        "summary": "Get runtime-pcap"
-      }
+        }
+      },
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ]
     },
     "/api/v1/runtime-pcap/{id}/download": {
       "get": {
+        "summary": "Download a completed packet capture",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Raw pcap bytes",
+            "content": {
+              "application/vnd.tcpdump.pcap": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
-        },
-        "summary": "Get download"
+        }
       }
     },
     "/api/v1/runtime-pcap/{id}/status": {
       "post": {
+        "summary": "Report runtime packet capture status",
+        "security": [
+          {
+            "runtimeAgent": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PcapStatusUpdate"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Updated capture",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PcapCapture"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
-        },
-        "summary": "Create status"
+        }
       }
     },
     "/api/v1/runtime-pcap/{id}/upload": {
       "post": {
+        "summary": "Upload packet capture bytes",
+        "description": "Runtime-agent token only. Despite historical handler comments, the request is raw pcap bytes, not multipart. Maximum 100 MiB.",
+        "security": [
+          {
+            "runtimeAgent": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/vnd.tcpdump.pcap": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Completed capture",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PcapCapture"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
-        },
-        "summary": "Create upload"
+        }
       }
     },
     "/api/v1/runtime-policies": {
@@ -10192,105 +10998,22 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "required": [
-                    "schema_version",
-                    "bundle_id",
-                    "generated_at",
-                    "org_id",
-                    "format",
-                    "redaction",
-                    "integrity",
-                    "sections"
-                  ],
-                  "properties": {
-                    "schema_version": {
-                      "type": "string",
-                      "example": "constellation.support_bundle.v1"
-                    },
-                    "bundle_id": {
-                      "type": "string",
-                      "format": "uuid"
-                    },
-                    "generated_at": {
-                      "type": "string",
-                      "format": "date-time"
-                    },
-                    "org_id": {
-                      "type": "string",
-                      "format": "uuid"
-                    },
-                    "format": {
-                      "type": "string",
-                      "example": "json"
-                    },
-                    "redaction": {
-                      "type": "object",
-                      "properties": {
-                        "applied": {
-                          "type": "boolean"
-                        },
-                        "marker": {
-                          "type": "string",
-                          "example": "***REDACTED***"
-                        },
-                        "rules": {
-                          "type": "array",
-                          "items": {
-                            "type": "string"
-                          }
-                        }
-                      }
-                    },
-                    "integrity": {
-                      "type": "object",
-                      "properties": {
-                        "algorithm": {
-                          "type": "string",
-                          "example": "sha256"
-                        },
-                        "scope": {
-                          "type": "string",
-                          "example": "sections"
-                        },
-                        "sha256": {
-                          "type": "string"
-                        },
-                        "signed": {
-                          "type": "boolean",
-                          "description": "True when a deployment support-bundle Ed25519 key signed the bundle identity and redacted sections hash."
-                        },
-                        "signature_algorithm": {
-                          "type": "string",
-                          "enum": [
-                            "ed25519"
-                          ]
-                        },
-                        "signature": {
-                          "type": "string",
-                          "description": "Base64 Ed25519 signature over the v1 domain-separated payload."
-                        },
-                        "public_key": {
-                          "type": "string",
-                          "description": "Base64 Ed25519 public key; pin this key out of band before trusting the signature."
-                        },
-                        "key_id": {
-                          "type": "string",
-                          "description": "Lowercase hex SHA-256 fingerprint of the Ed25519 public key."
-                        },
-                        "note": {
-                          "type": "string"
-                        }
-                      }
-                    },
-                    "sections": {
-                      "type": "object",
-                      "additionalProperties": true
-                    }
-                  }
+                  "$ref": "#/components/schemas/SupportBundle"
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -10306,6 +11029,7 @@
           {
             "name": "limit",
             "in": "query",
+            "description": "Defaults to 50; values above 100 are clamped to 100.",
             "schema": {
               "type": "integer",
               "minimum": 1,
@@ -10328,7 +11052,8 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "items"
+                    "items",
+                    "next_cursor"
                   ],
                   "properties": {
                     "items": {
@@ -10344,6 +11069,18 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -10363,6 +11100,15 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -10396,6 +11142,21 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
           "default": {
             "$ref": "#/components/responses/Error"
           }
@@ -10423,13 +11184,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "required": [
-                    "schema_version",
-                    "bundle_id",
-                    "integrity",
-                    "sections"
-                  ]
+                  "$ref": "#/components/schemas/SupportBundle"
                 }
               }
             }
@@ -10438,6 +11193,21 @@
             "$ref": "#/components/responses/Error"
           },
           "410": {
+            "$ref": "#/components/responses/Error"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
             "$ref": "#/components/responses/Error"
           },
           "default": {

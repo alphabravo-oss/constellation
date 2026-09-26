@@ -3112,6 +3112,7 @@ export interface MigrationImportPage {
   imports: MigrationImportListItem[];
   has_more: boolean;
   next_offset?: number;
+  next_cursor?: string;
 }
 
 export interface MigrationApplyResponse {
@@ -3163,7 +3164,7 @@ export const enterprise = {
   migration: () => api.get<MigrationOverview>("/migration/sources").then((r) => r.data),
   migrationPreview: (body: { source: string; export: string; cluster_id?: string }) =>
     api.post<MigrationPreview>("/migration/preview", body).then((r) => r.data),
-  migrationImportsPage: (params: { limit?: number; offset?: number } = {}) =>
+  migrationImportsPage: (params: { limit?: number; offset?: number; cursor?: string } = {}) =>
     api.get<MigrationImportPage>("/migration/imports", { params }).then((r) => r.data),
   migrationApply: (id: string) =>
     api.post<MigrationApplyResponse>(`/migration/imports/${id}:apply`).then((r) => r.data),
