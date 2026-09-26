@@ -1744,8 +1744,28 @@ export interface SupportBundle {
   sections: Record<string, unknown>;
 }
 
+export interface SupportBundleJob {
+  id: string;
+  status: "queued" | "running" | "ready" | "failed" | "expired";
+  created_at: string;
+  started_at?: string;
+  finished_at?: string;
+  expires_at?: string;
+  bundle_id?: string;
+  error?: string;
+  audit_event_id?: number;
+}
+
+export interface SupportBundleJobList {
+  items: SupportBundleJob[];
+  next_cursor?: string | null;
+}
+
 export const supportBundles = {
-  download: () => api.get<SupportBundle>("/support/bundle").then((r) => r.data),
+  createJob: () => api.post<SupportBundleJob>("/support/bundle/jobs").then((r) => r.data),
+  listJobs: (cursor?: string) => api.get<SupportBundleJobList>("/support/bundle/jobs", { params: { limit: 50, ...(cursor ? { cursor } : {}) } }).then((r) => r.data),
+  getJob: (id: string) => api.get<SupportBundleJob>(`/support/bundle/jobs/${encodeURIComponent(id)}`).then((r) => r.data),
+  downloadJob: (id: string) => api.get<SupportBundle>(`/support/bundle/jobs/${encodeURIComponent(id)}/download`).then((r) => r.data),
 };
 
 export interface ComponentInventorySummary {

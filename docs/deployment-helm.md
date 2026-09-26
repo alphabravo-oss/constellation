@@ -536,6 +536,35 @@ The verifier checks the redacted sections hash, signing-key fingerprint,
 bundle identity signature, and Ed25519 signature. It rejects unsigned bundles,
 untrusted keys, malformed input, and tampering.
 
+## Asynchronous support-bundle jobs
+
+System Health's **Bundle jobs** tab queues redacted bundles and shows persisted
+job history, expiry, and a link to each job's audit/download history. Component
+diagnostics can queue the same job and link to System Health. The original
+`GET /api/v1/support/bundle` endpoint remains available for synchronous CLI
+downloads.
+
+The job API requires `manage_system_config`:
+
+| Method | Path | Result |
+|---|---|---|
+| `POST` | `/api/v1/support/bundle/jobs` | Persist a queued job; returns `202` with its ID and audit link. |
+| `GET` | `/api/v1/support/bundle/jobs?limit=50` | List newest jobs; follow `next_cursor` for older pages. |
+| `GET` | `/api/v1/support/bundle/jobs/{id}` | Read queued, running, ready, failed, or expired status. |
+| `GET` | `/api/v1/support/bundle/jobs/{id}/download` | Download a ready bundle; returns `409` while pending or `410` after expiry. |
+
+The audit-history link uses
+`GET /api/v1/audit/events?support_bundle_job_id={id}` (requires `read_audit`) to
+show every create, completion and download receipt for that job.
+
+API replicas claim jobs through PostgreSQL, so queued work survives a replica
+restart and stale leases are recovered. Only verified, redacted bundle JSON is
+stored. Ready and failed jobs expire after seven days; expiry clears the stored
+payload. Creation and download fail closed when their audit receipt cannot be
+written. Worker completion waits for a retried audit receipt before advertising
+a bundle as ready for download. The deployment signing key above also signs
+asynchronous bundles.
+
 ## Values reference
 
 | Key                                   | Default                                              | When to change                                                  |

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import { api } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { LoadingState, ErrorState, EmptyState } from "@/components/ui/states";
@@ -33,12 +34,15 @@ export function AuditPage() {
   // deployments/compliance_checks/policies rows of the active cluster so we only
   // surface events that touched something inside this cluster.
   const { clusterId, isLoading: clusterLoading } = useCluster();
+  const [searchParams] = useSearchParams();
+  const eventID = searchParams.get("event_id");
+  const supportBundleJobID = searchParams.get("support_bundle_job_id");
   const [page, setPage] = useState(0);
   const q = useQuery({
-    queryKey: ["audit", clusterId, page],
+    queryKey: ["audit", clusterId, eventID, supportBundleJobID, page],
     queryFn: () =>
       api
-        .get<{ events: AuditEvent[]; has_more: boolean }>("/audit/events", { params: { limit: PAGE, offset: page * PAGE, cluster_id: clusterId } })
+        .get<{ events: AuditEvent[]; has_more: boolean }>("/audit/events", { params: { limit: eventID ? 1 : PAGE, offset: eventID ? 0 : page * PAGE, cluster_id: eventID || supportBundleJobID ? undefined : clusterId, event_id: eventID || undefined, support_bundle_job_id: supportBundleJobID || undefined } })
         .then((r) => r.data),
     placeholderData: keepPreviousData,
   });
@@ -52,7 +56,7 @@ export function AuditPage() {
     <div className="space-y-4" data-testid="audit-page" data-cluster-id={clusterId ?? ""}>
       <PageHeader
         title="Audit Log"
-        description={<>Append-only, hash-chained. Verify integrity with <code className="font-mono">constellationctl audit verify</code>.</>}
+        description={supportBundleJobID ? <>Audit history for support-bundle job {supportBundleJobID}.</> : eventID ? <>Audit event #{eventID}, scoped to your organization.</> : <>Append-only, hash-chained. Verify integrity with <code className="font-mono">constellationctl audit verify</code>.</>}
       />
       {q.isPending ? (
         <LoadingState label="Loading audit events…" />
@@ -63,7 +67,7 @@ export function AuditPage() {
       ) : (
         <>
           <DataTable rows={events} columns={auditColumns} rowKey={(e) => e.id} />
-          <Pager page={page} pageSize={PAGE} hasMore={q.data?.has_more} rowsOnPage={events.length} onPage={setPage} />
+          {!eventID && <Pager page={page} pageSize={PAGE} hasMore={q.data?.has_more} rowsOnPage={events.length} onPage={setPage} />}
         </>
       )}
     </div>

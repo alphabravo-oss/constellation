@@ -129,7 +129,8 @@ type Server struct {
 	bootstrapOrgID uuid.UUID
 	// sealer is the install-KEK cipher (H2) the auth-server CRUD handler seals IdP secret fields
 	// with before persisting them to auth_servers.config. nil when no KEK is available.
-	sealer auth.Sealer
+	sealer            auth.Sealer
+	supportBundleJobs *handler.SupportBundleJobs
 }
 
 // New constructs the server. Caller must Run() and Shutdown().
@@ -271,6 +272,7 @@ func New(ctx context.Context, cfg Config, tel *observability.Telemetry, database
 		authProviders:       authProviders,
 		sealer:              sealer,
 	}
+	s.supportBundleJobs = handler.NewSupportBundleJobs(database, s.auditLog)
 	// B1: seed each existing org's system_config from env BOOTSTRAP DEFAULTS on first
 	// boot (idempotent — a row already present wins), then the DB row is source of
 	// truth. Best-effort: a seed error is logged, not fatal, since the accessor falls
@@ -970,6 +972,10 @@ func (s *Server) buildRouter() chi.Router {
 			r.Post("/scanner/refresh", s.requireVerb(rbac.VerbManageSystemConfig, sysConfig.RefreshScanner))
 			supportBundle := handler.NewSupportBundle(s.db, s.auditLog)
 			r.Get("/support/bundle", s.requireVerb(rbac.VerbManageSystemConfig, supportBundle.Download))
+			r.Post("/support/bundle/jobs", s.requireVerb(rbac.VerbManageSystemConfig, s.supportBundleJobs.CreateJob))
+			r.Get("/support/bundle/jobs", s.requireVerb(rbac.VerbManageSystemConfig, s.supportBundleJobs.ListJobs))
+			r.Get("/support/bundle/jobs/{id}", s.requireVerb(rbac.VerbManageSystemConfig, s.supportBundleJobs.GetJob))
+			r.Get("/support/bundle/jobs/{id}/download", s.requireVerb(rbac.VerbManageSystemConfig, s.supportBundleJobs.DownloadJob))
 
 			// B4: DB-backed auth-provider (IdP) CRUD. GET redacts provider secrets; a mutation
 			// hot-reloads the live verifier set the login endpoints read through. All routes are
@@ -1559,6 +1565,7 @@ func (s *Server) Run(ctx context.Context) error {
 	// — identical to the historical single-replica behavior. With it enabled we
 	// start them only while this replica holds the lease.
 	s.startBackgroundWork(ctx)
+	go s.supportBundleJobs.RunWorker(ctx)
 
 	// A5: hot-reload the session signing keys so a `--rotate-jwt-key` rotation
 	// propagates to this already-running replica without a restart. Only runs on

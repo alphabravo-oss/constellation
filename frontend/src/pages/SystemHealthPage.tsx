@@ -1,4 +1,5 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
   AlertTriangle,
@@ -14,6 +15,7 @@ import { toast } from "sonner";
 import {
   supportBundles,
   systemHealth,
+  type SupportBundleJob,
   type SystemHealthClusterDrift,
   type SystemHealthHeartbeat,
   type SystemHealthLicense,
@@ -69,21 +71,38 @@ const heartbeatColumns: Column<SystemHealthHeartbeat>[] = [
  * signals + Catalog metrics" model was removed — it duplicated the live telemetry.
  */
 export function SystemHealthPage() {
+  const queryClient = useQueryClient();
+  const [tab, setTab] = useTabParam("tab", "clusters");
+  const [cursorStack, setCursorStack] = useState<string[]>([]);
+  const cursor = cursorStack.at(-1);
   const q = useQuery({
     queryKey: ["system-health"],
     queryFn: () => systemHealth.overview(),
     refetchInterval: 30_000,
   });
+  const jobs = useQuery({
+    queryKey: ["support-bundle-jobs", cursor],
+    queryFn: () => supportBundles.listJobs(cursor),
+    refetchInterval: (query) => query.state.data?.items.some((job) => job.status === "queued" || job.status === "running") ? 5_000 : false,
+  });
   const supportBundle = useMutation({
-    mutationFn: supportBundles.download,
+    mutationFn: supportBundles.createJob,
+    onSuccess: () => {
+      setCursorStack([]);
+      setTab("bundles");
+      void queryClient.invalidateQueries({ queryKey: ["support-bundle-jobs"] });
+      toast.success("Support bundle queued. Track it in Bundle jobs.");
+    },
+    onError: () => toast.error("Could not queue support bundle"),
+  });
+  const supportBundleDownload = useMutation({
+    mutationFn: supportBundles.downloadJob,
     onSuccess: (bundle) => {
       downloadJson(supportBundleFileName(bundle.generated_at), bundle);
       toast.success("Support bundle downloaded");
     },
-    onError: () => toast.error("Support bundle download failed"),
+    onError: () => toast.error("Support bundle download failed. Refresh jobs to check its status."),
   });
-
-  const [tab, setTab] = useTabParam("tab", "clusters");
 
   if (q.isPending) return <p className="text-sm text-muted-foreground">Loading system health...</p>;
   const data = q.data;
@@ -177,6 +196,47 @@ export function SystemHealthPage() {
         ),
     },
     {
+      value: "bundles",
+      label: "Bundle jobs",
+      count: jobs.data?.items.length,
+      content: (
+        <Card title="Support bundle jobs" description="Redacted bundles are prepared asynchronously. Ready bundles can be downloaded until they expire." action={
+          <Button type="button" size="sm" variant="outline" onClick={() => void jobs.refetch()} disabled={jobs.isFetching}>Refresh</Button>
+        }>
+          <div data-testid="system-health-bundle-jobs" aria-live="polite" className="space-y-3">
+            {jobs.isPending && <p className="text-xs text-muted-foreground">Loading bundle jobs...</p>}
+            {jobs.isError && <p className="text-xs text-[color:var(--color-severity-critical)]">Could not load bundle jobs. Try Refresh.</p>}
+            {jobs.data?.items.length === 0 && <p className="text-xs text-muted-foreground">No support bundle jobs yet. Create one with the Bundle button.</p>}
+            {jobs.data?.items.map((job) => (
+              <article key={job.id} className="flex flex-wrap items-start justify-between gap-3 rounded-md border border-border p-3 text-xs" data-testid={`support-bundle-job-${job.id}`}>
+                <div className="min-w-0 space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-mono text-foreground">{job.id}</span>
+                    <Status value={job.status} />
+                  </div>
+                  <p className="text-muted-foreground">Created {formatBundleTime(job.created_at)}{job.started_at ? ` · started ${formatBundleTime(job.started_at)}` : ""}{job.finished_at ? ` · finished ${formatBundleTime(job.finished_at)}` : ""}</p>
+                  {job.bundle_id && <p className="font-mono text-muted-foreground">Bundle {job.bundle_id}</p>}
+                  {job.audit_event_id && <Link to={`/audit?support_bundle_job_id=${job.id}`} className="text-[color:var(--color-primary)] hover:underline">Audit history</Link>}
+                  {job.status === "queued" && <p className="text-muted-foreground">Waiting for a worker. Status refreshes automatically.</p>}
+                  {job.status === "running" && <p className="text-muted-foreground">Preparing the redacted bundle. Status refreshes automatically.</p>}
+                  {job.status === "ready" && job.expires_at && <p className="text-muted-foreground">Download before {formatBundleTime(job.expires_at)}.</p>}
+                  {job.status === "failed" && <p className="text-[color:var(--color-severity-critical)]">Generation failed{job.error ? `: ${job.error}` : ". Create a new job to retry."}</p>}
+                  {job.status === "expired" && <p className="text-muted-foreground">This bundle has expired and cannot be downloaded. Create a new job.</p>}
+                </div>
+                {job.status === "ready" && <Button type="button" size="sm" variant="outline" onClick={() => supportBundleDownload.mutate(job.id)} disabled={supportBundleDownload.isPending} data-testid={`support-bundle-download-${job.id}`}>
+                  <Download className="h-3.5 w-3.5" aria-hidden /> Download
+                </Button>}
+              </article>
+            ))}
+            {(cursorStack.length > 0 || jobs.data?.next_cursor) && <div className="flex justify-end gap-2">
+              <Button type="button" size="sm" variant="outline" disabled={cursorStack.length === 0} onClick={() => setCursorStack((stack) => stack.slice(0, -1))}>Newer</Button>
+              <Button type="button" size="sm" variant="outline" disabled={!jobs.data?.next_cursor} onClick={() => { if (jobs.data?.next_cursor) setCursorStack((stack) => [...stack, jobs.data.next_cursor!]); }}>Older</Button>
+            </div>}
+          </div>
+        </Card>
+      ),
+    },
+    {
       value: "incidents",
       label: "Incidents & Actions",
       count: incidents.length + actions.length,
@@ -235,10 +295,10 @@ export function SystemHealthPage() {
               onClick={() => supportBundle.mutate()}
               disabled={supportBundle.isPending}
               data-testid="system-health-support-bundle"
-              title="Download redacted support bundle"
+              title="Queue redacted support bundle"
             >
-              <Download className="h-3.5 w-3.5" aria-hidden />
-              Bundle
+              <Clock className="h-3.5 w-3.5" aria-hidden />
+              {supportBundle.isPending ? "Queuing..." : "Create bundle"}
             </Button>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Sparkles className="h-4 w-4" />
@@ -314,6 +374,11 @@ export function SystemHealthPage() {
 function supportBundleFileName(generatedAt: string) {
   const stamp = generatedAt ? generatedAt.replace(/[^0-9A-Za-z]/g, "-") : new Date().toISOString().replace(/[^0-9A-Za-z]/g, "-");
   return `constellation-support-bundle-${stamp}.json`;
+}
+
+function formatBundleTime(value: SupportBundleJob["created_at"]) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
 // -----------------------------------------------------------------------------
@@ -490,11 +555,11 @@ function Stat({ label, value, tone }: { label: string; value: number; tone: "suc
 }
 
 function Status({ value }: { value: string }) {
-  const cls = value === "healthy" || value === "done"
+  const cls = value === "healthy" || value === "done" || value === "ready"
     ? "bg-[color:var(--color-status-success)]/15 text-[color:var(--color-status-success)]"
-    : value === "warning" || value === "mitigating" || value === "in_progress" || value === "medium"
+    : value === "warning" || value === "mitigating" || value === "in_progress" || value === "medium" || value === "queued" || value === "running"
       ? "bg-[color:var(--color-status-warning)]/15 text-[color:var(--color-status-warning)]"
-      : value === "degraded" || value === "critical" || value === "high"
+      : value === "degraded" || value === "critical" || value === "high" || value === "failed"
         ? "bg-[color:var(--color-status-error)]/15 text-[color:var(--color-status-error)]"
         : "bg-muted text-muted-foreground";
   return <span className={`rounded-md px-2 py-1 text-xs ${cls}`}>{value}</span>;

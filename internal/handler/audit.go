@@ -38,6 +38,24 @@ func (a *Audit) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	action := r.URL.Query().Get("action")
+	var eventID *int64
+	if raw := r.URL.Query().Get("event_id"); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || parsed <= 0 {
+			jsonError(w, http.StatusBadRequest, "invalid event_id")
+			return
+		}
+		eventID = &parsed
+	}
+	var supportBundleJobID *uuid.UUID
+	if raw := r.URL.Query().Get("support_bundle_job_id"); raw != "" {
+		parsed, err := uuid.Parse(raw)
+		if err != nil {
+			jsonError(w, http.StatusBadRequest, "invalid support_bundle_job_id")
+			return
+		}
+		supportBundleJobID = &parsed
+	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit <= 0 || limit > 500 {
 		limit = 100
@@ -107,6 +125,8 @@ SELECT id, org_id, actor_id, action, COALESCE(target_kind,''), COALESCE(target_i
        prev_hash, chain_hash, at
   FROM audit_events
  WHERE org_id = $1
+   AND ($7::bigint IS NULL OR id = $7)
+   AND ($8::uuid IS NULL OR (target_kind = 'support_bundle_job' AND target_id = $8::text))
    AND ($2::text = '' OR action = $2)
    AND ($6::text[] IS NULL OR EXISTS (
         SELECT 1 FROM unnest($6::text[]) AS p WHERE action LIKE p || '%'
@@ -125,7 +145,7 @@ SELECT id, org_id, actor_id, action, COALESCE(target_kind,''), COALESCE(target_i
         SELECT $3::text
        ))
  ORDER BY id DESC
- LIMIT $4 OFFSET $5`, subj.OrgID, action, clusterArg, fetch, offset, controlPrefixes)
+ LIMIT $4 OFFSET $5`, subj.OrgID, action, clusterArg, fetch, offset, controlPrefixes, eventID, supportBundleJobID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

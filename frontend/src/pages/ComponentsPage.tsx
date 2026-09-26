@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
-import { Activity, AlertTriangle, Download, Gauge, Search, ServerCog, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { Link, useSearchParams } from "react-router-dom";
+import { Activity, AlertTriangle, Clock, Gauge, Search, ServerCog, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -22,7 +22,6 @@ import { PageHeader } from "@/components/ui/page";
 import { StatCard } from "@/components/ui/stat-card";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
-import { downloadJson } from "@/lib/download";
 
 const statuses = ["all", "healthy", "degraded", "stale", "drift", "crashlooping", "missing", "not-observed"];
 
@@ -574,13 +573,14 @@ function ComponentPreview({
 }
 
 function DiagnosticsPanel({ diagnostics, loading, error }: { diagnostics: ComponentDiagnostics | null; loading: boolean; error: unknown }) {
+  const [queuedJobId, setQueuedJobId] = useState<string | null>(null);
   const supportBundle = useMutation({
-    mutationFn: supportBundles.download,
-    onSuccess: (bundle) => {
-      downloadJson(supportBundleFileName(bundle.generated_at), bundle);
-      toast.success("Support bundle downloaded");
+    mutationFn: supportBundles.createJob,
+    onSuccess: (job) => {
+      setQueuedJobId(job.id);
+      toast.success("Support bundle queued. Track it in System Health.");
     },
-    onError: () => toast.error("Support bundle download failed"),
+    onError: () => toast.error("Could not queue support bundle"),
   });
   if (isForbidden(error)) {
     return (
@@ -620,14 +620,17 @@ function DiagnosticsPanel({ diagnostics, loading, error }: { diagnostics: Compon
             onClick={() => supportBundle.mutate()}
             disabled={!diagnostics.debug.support_bundle_enabled || supportBundle.isPending}
             data-testid="component-support-bundle"
-            title="Download redacted support bundle"
+            title="Queue redacted support bundle"
           >
-            <Download className="h-3.5 w-3.5" aria-hidden />
-            Bundle
+            <Clock className="h-3.5 w-3.5" aria-hidden />
+            {supportBundle.isPending ? "Queuing..." : "Create bundle"}
           </Button>
           <Pill tone="accent">{diagnostics.admin_gate}</Pill>
         </div>
       </div>
+      {queuedJobId && <p className="text-xs text-muted-foreground" role="status" data-testid="component-support-bundle-feedback">
+        Bundle job <span className="font-mono">{queuedJobId}</span> queued. <Link to="/settings/health?tab=bundles" className="text-[color:var(--color-primary)] hover:underline">View status and download in System Health</Link>.
+      </p>}
       <div className="grid grid-cols-2 gap-2">
         {counters.map((counter) => (
           <CounterCard key={counter.key} counter={counter} />
@@ -653,11 +656,6 @@ function DiagnosticsPanel({ diagnostics, loading, error }: { diagnostics: Compon
       </div>
     </section>
   );
-}
-
-function supportBundleFileName(generatedAt: string) {
-  const stamp = generatedAt ? generatedAt.replace(/[^0-9A-Za-z]/g, "-") : new Date().toISOString().replace(/[^0-9A-Za-z]/g, "-");
-  return `constellation-support-bundle-${stamp}.json`;
 }
 
 function visibleDiagnosticCounters(counters: ComponentDiagnosticCounter[]) {
