@@ -194,6 +194,10 @@ api:
   # own key: a PEM RSA/EC private key (RS256/ES256), or — only with
   # CONSTELLATION_ALLOW_HS256_JWT=true on the api — a 32+ byte HS256 secret.
   jwtKeysSecret: ""
+  # Optional existing Secret containing the support-bundle Ed25519 private key.
+  # The key is mounted read-only; this chart never creates private key material.
+  supportBundleSigningKeySecret: ""
+  supportBundleSigningKeySecretKey: private-key.pem
   # Refuse API startup if JWT_KEYS is absent. Now false by default: the absent
   # JWT_KEYS is the intended RS256 DB-backed path. Set true only when you supply
   # jwtKeysSecret and want startup to hard-fail if it goes missing.

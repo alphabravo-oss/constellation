@@ -485,6 +485,45 @@ astronomer:
 
 ---
 
+## Signed support bundles
+
+Support-bundle signing is optional and uses a dedicated Ed25519 PKCS#8 PEM key,
+not the API's JWT or federation keys. Keep the private key in an existing
+Kubernetes Secret; the chart never creates or embeds it in Helm values.
+
+```bash
+openssl genpkey -algorithm Ed25519 -out support-bundle-signing-key.pem
+kubectl -n constellation-system create secret generic constellation-support-bundle-signing \
+  --from-file=private-key.pem=support-bundle-signing-key.pem
+helm upgrade constellation deploy/charts/constellation -n constellation-system \
+  --reuse-values --set api.supportBundleSigningKeySecret=constellation-support-bundle-signing
+```
+
+The API reads the mounted key from
+`CONSTELLATION_SUPPORT_BUNDLE_SIGNING_KEY_FILE` when generating a bundle. A
+configured but missing or invalid key makes the request fail rather than return
+an unsigned bundle. Without the setting, bundles remain explicitly unsigned.
+The optional `api.supportBundleSigningKeySecretKey` value changes the Secret
+data key from its default `private-key.pem`.
+
+For a signed bundle, first recompute `integrity.sha256` from the redacted
+`sections` object using Go `encoding/json` serialization. Then verify the
+base64 Ed25519 `integrity.signature` over the UTF-8 string formed by joining
+these lines with `\n` and **no trailing newline**:
+
+1. `constellation.support_bundle.signature.v1`
+2. `schema_version`
+3. `bundle_id`
+4. `generated_at` normalized to UTC RFC3339Nano
+5. `org_id`
+6. `integrity.sha256`
+
+`integrity.public_key` is the base64 raw Ed25519 public key and
+`integrity.key_id` is its lowercase SHA-256 hex fingerprint. Pin the expected
+public key or fingerprint through a separate trusted channel; a key carried in
+the bundle alone does **not** authenticate who signed it. Retain old public
+keys when rotating the Secret so older bundles remain verifiable.
+
 ## Values reference
 
 | Key                                   | Default                                              | When to change                                                  |
@@ -505,6 +544,8 @@ astronomer:
 | `networkPolicies.admissionIngressCIDRs` | `["0.0.0.0/0"]`                                      | Kubernetes API/control-plane CIDRs allowed to call the webhook |
 | `api.replicas`                        | `2`                                                  | Bump for HA                                                     |
 | `api.jwtKeysSecret`                   | `""`                                                 | Existing Secret with JWT signing keys at key `keys`; empty renders a chart-managed Secret |
+| `api.supportBundleSigningKeySecret`  | `""`                                                 | Existing Secret with an Ed25519 PKCS#8 PEM signing key; empty leaves support bundles unsigned |
+| `api.supportBundleSigningKeySecretKey` | `private-key.pem`                                  | Data key within that Secret |
 | `api.requireJWTKeys`                  | `true`                                               | Refuse API startup when `JWT_KEYS` is absent; keep true outside one-off dev overrides |
 | `operator.replicas`                   | `1`                                                  | Keep at 1; operator uses leader-election leases                 |
 | `discoverer.enabled`                  | `true`                                               | Populate local cluster workloads, pod/service IPs, and workload risk rollups |

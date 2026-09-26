@@ -2,8 +2,17 @@ package server
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -75,6 +84,73 @@ SELECT COUNT(*)::int
 	}
 	if auditRows == 0 {
 		t.Fatalf("support bundle download was not audited")
+	}
+}
+
+func TestSupportBundle_DownloadSignsRedactedSectionsAndIdentity(t *testing.T) {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encodedKey, err := x509.MarshalPKCS8PrivateKey(privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPath := filepath.Join(t.TempDir(), "support-bundle-key.pem")
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: encodedKey}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CONSTELLATION_SUPPORT_BUNDLE_SIGNING_KEY_FILE", keyPath)
+	_, server, _, signer, adminID, _, orgID := newSysConfigTestServer(t)
+	admin := issueFor(t, signer, adminID, orgID, 0)
+	status, body := doJSON(t, http.MethodGet, server.URL+"/api/v1/support/bundle", admin, nil)
+	if status != http.StatusOK {
+		t.Fatalf("signed support bundle status=%d body=%+v", status, body)
+	}
+	integrity, ok := body["integrity"].(map[string]any)
+	if !ok || integrity["signed"] != true || integrity["signature_algorithm"] != "ed25519" {
+		t.Fatalf("signed integrity = %+v", integrity)
+	}
+	sections, ok := body["sections"].(map[string]any)
+	if !ok {
+		t.Fatalf("sections = %+v", body["sections"])
+	}
+	sectionsJSON, err := json.Marshal(sections)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sectionsHash := sha256.Sum256(sectionsJSON)
+	if integrity["sha256"] != hex.EncodeToString(sectionsHash[:]) {
+		t.Fatalf("signed sections hash = %+v", integrity)
+	}
+	if integrity["public_key"] != base64.StdEncoding.EncodeToString(publicKey) {
+		t.Fatal("bundle public key does not match configured key")
+	}
+	keyHash := sha256.Sum256(publicKey)
+	if integrity["key_id"] != hex.EncodeToString(keyHash[:]) {
+		t.Fatal("bundle key ID does not match configured key")
+	}
+	signature, err := base64.StdEncoding.DecodeString(integrity["signature"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	generatedAt, err := time.Parse(time.RFC3339Nano, body["generated_at"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	signedPayload := strings.Join([]string{
+		"constellation.support_bundle.signature.v1",
+		body["schema_version"].(string),
+		body["bundle_id"].(string),
+		generatedAt.UTC().Format(time.RFC3339Nano),
+		body["org_id"].(string),
+		integrity["sha256"].(string),
+	}, "\n")
+	if !ed25519.Verify(publicKey, []byte(signedPayload), signature) {
+		t.Fatal("support bundle signature failed against configured public key")
+	}
+	if ed25519.Verify(publicKey, []byte(signedPayload+"-tampered"), signature) {
+		t.Fatal("support bundle signature accepted changed identity or sections")
 	}
 }
 

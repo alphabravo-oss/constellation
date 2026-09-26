@@ -1735,6 +1735,10 @@ export interface SupportBundle {
     scope: string;
     sha256: string;
     signed: boolean;
+    signature_algorithm?: "ed25519";
+    signature?: string;
+    public_key?: string;
+    key_id?: string;
     note?: string;
   };
   sections: Record<string, unknown>;

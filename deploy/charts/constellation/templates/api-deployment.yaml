@@ -83,6 +83,10 @@ spec:
 {{- end }}
             - name: CONSTELLATION_REQUIRE_JWT_KEYS
               value: {{ .Values.api.requireJWTKeys | quote }}
+{{- if .Values.api.supportBundleSigningKeySecret }}
+            - name: CONSTELLATION_SUPPORT_BUNDLE_SIGNING_KEY_FILE
+              value: /var/run/constellation/support-bundle-signing-key/private-key.pem
+{{- end }}
 {{- if .Values.api.leaderElection.enabled }}
             - name: LEADER_ELECTION_ENABLED
               value: "true"
@@ -156,6 +160,11 @@ spec:
             - name: runtime-agent-token
               mountPath: /var/run/constellation/runtime-agent-token
               readOnly: true
+{{- if .Values.api.supportBundleSigningKeySecret }}
+            - name: support-bundle-signing-key
+              mountPath: /var/run/constellation/support-bundle-signing-key
+              readOnly: true
+{{- end }}
             - name: tmp
               mountPath: /tmp
       volumes:
@@ -163,6 +172,14 @@ spec:
           secret:
             secretName: {{ include "constellation.runtimeAgentTokenSecret" . }}
             optional: true
+{{- if .Values.api.supportBundleSigningKeySecret }}
+        - name: support-bundle-signing-key
+          secret:
+            secretName: {{ .Values.api.supportBundleSigningKeySecret | quote }}
+            items:
+              - key: {{ .Values.api.supportBundleSigningKeySecretKey | quote }}
+                path: private-key.pem
+{{- end }}
         - name: tmp
           emptyDir: {}
 ---

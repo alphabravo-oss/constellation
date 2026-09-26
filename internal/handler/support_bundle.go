@@ -1,14 +1,21 @@
 package handler
 
 import (
+	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
+	"crypto/x509"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"runtime"
 	"sort"
 	"strings"
@@ -24,8 +31,10 @@ import (
 )
 
 const (
-	supportBundleSchemaVersion = "constellation.support_bundle.v1"
-	supportBundleRedacted      = "***REDACTED***"
+	supportBundleSchemaVersion   = "constellation.support_bundle.v1"
+	supportBundleRedacted        = "***REDACTED***"
+	supportBundleSignatureDomain = "constellation.support_bundle.signature.v1\n"
+	supportBundleSigningKeyEnv   = "CONSTELLATION_SUPPORT_BUNDLE_SIGNING_KEY_FILE"
 )
 
 // SupportBundle generates a downloadable, redacted operations bundle for support
@@ -58,11 +67,15 @@ type supportBundleRedactionDTO struct {
 }
 
 type supportBundleIntegrityDTO struct {
-	Algorithm string `json:"algorithm"`
-	Scope     string `json:"scope"`
-	SHA256    string `json:"sha256"`
-	Signed    bool   `json:"signed"`
-	Note      string `json:"note"`
+	Algorithm          string `json:"algorithm"`
+	Scope              string `json:"scope"`
+	SHA256             string `json:"sha256"`
+	Signed             bool   `json:"signed"`
+	SignatureAlgorithm string `json:"signature_algorithm,omitempty"`
+	Signature          string `json:"signature,omitempty"`
+	PublicKey          string `json:"public_key,omitempty"`
+	KeyID              string `json:"key_id,omitempty"`
+	Note               string `json:"note"`
 }
 
 type supportBundleStatusCount struct {
@@ -155,7 +168,10 @@ func (h *SupportBundle) build(ctx context.Context, subj Subject) (supportBundleD
 	if len(warnings) > 0 {
 		sections["collection_warnings"] = warnings
 	}
+	return newSupportBundle(subj.OrgID.String(), generatedAt, sections)
+}
 
+func newSupportBundle(orgID string, generatedAt time.Time, sections map[string]any) (supportBundleDTO, error) {
 	redactedSections, err := redactSupportBundleSections(sections)
 	if err != nil {
 		return supportBundleDTO{}, err
@@ -164,11 +180,11 @@ func (h *SupportBundle) build(ctx context.Context, subj Subject) (supportBundleD
 	if err != nil {
 		return supportBundleDTO{}, err
 	}
-	return supportBundleDTO{
+	bundle := supportBundleDTO{
 		SchemaVersion: supportBundleSchemaVersion,
 		BundleID:      uuid.NewString(),
 		GeneratedAt:   generatedAt,
-		OrgID:         subj.OrgID.String(),
+		OrgID:         orgID,
 		Format:        "json",
 		Redaction: supportBundleRedactionDTO{
 			Applied: true,
@@ -184,10 +200,14 @@ func (h *SupportBundle) build(ctx context.Context, subj Subject) (supportBundleD
 			Scope:     "sections",
 			SHA256:    sum,
 			Signed:    false,
-			Note:      "Integrity hash covers the redacted sections payload; no deployment signing key is configured for support bundles yet.",
+			Note:      "Integrity hash covers the redacted sections payload; this bundle is unsigned.",
 		},
 		Sections: redactedSections,
-	}, nil
+	}
+	if err := signSupportBundle(&bundle); err != nil {
+		return supportBundleDTO{}, err
+	}
+	return bundle, nil
 }
 
 func (h *SupportBundle) collectEnvironment() map[string]any {
@@ -463,6 +483,79 @@ func supportBundleHash(sections map[string]any) (string, error) {
 	}
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:]), nil
+}
+
+func supportBundleSignaturePayload(bundle supportBundleDTO) []byte {
+	return []byte(supportBundleSignatureDomain + bundle.SchemaVersion + "\n" + bundle.BundleID + "\n" +
+		bundle.GeneratedAt.UTC().Format(time.RFC3339Nano) + "\n" + bundle.OrgID + "\n" + bundle.Integrity.SHA256)
+}
+
+func signSupportBundle(bundle *supportBundleDTO) error {
+	path, configured := os.LookupEnv(supportBundleSigningKeyEnv)
+	if !configured {
+		return nil
+	}
+	invalidKey := errors.New("support bundle signing unavailable")
+	if path == "" {
+		return invalidKey
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return invalidKey
+	}
+	block, remainder := pem.Decode(contents)
+	if !bytes.HasPrefix(bytes.TrimSpace(contents), []byte("-----BEGIN PRIVATE KEY-----")) ||
+		block == nil || block.Type != "PRIVATE KEY" || len(block.Headers) != 0 || len(bytes.TrimSpace(remainder)) != 0 {
+		return invalidKey
+	}
+	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return invalidKey
+	}
+	privateKey, ok := parsed.(ed25519.PrivateKey)
+	if !ok || len(privateKey) != ed25519.PrivateKeySize {
+		return invalidKey
+	}
+	publicKey := privateKey.Public().(ed25519.PublicKey)
+	keyHash := sha256.Sum256(publicKey)
+	bundle.Integrity.Signed = true
+	bundle.Integrity.SignatureAlgorithm = "ed25519"
+	bundle.Integrity.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(privateKey, supportBundleSignaturePayload(*bundle)))
+	bundle.Integrity.PublicKey = base64.StdEncoding.EncodeToString(publicKey)
+	bundle.Integrity.KeyID = hex.EncodeToString(keyHash[:])
+	bundle.Integrity.Note = "Integrity hash covers the redacted sections payload; signature covers bundle identity and that hash."
+	return nil
+}
+
+func verifySupportBundleIntegrity(bundle supportBundleDTO) error {
+	if bundle.Integrity.Algorithm != "sha256" || bundle.Integrity.Scope != "sections" {
+		return errors.New("unsupported support bundle integrity")
+	}
+	sum, err := supportBundleHash(bundle.Sections)
+	if err != nil || sum != bundle.Integrity.SHA256 {
+		return errors.New("support bundle sections hash mismatch")
+	}
+	if !bundle.Integrity.Signed {
+		if bundle.Integrity.SignatureAlgorithm != "" || bundle.Integrity.Signature != "" || bundle.Integrity.PublicKey != "" || bundle.Integrity.KeyID != "" {
+			return errors.New("unsigned support bundle contains signature fields")
+		}
+		return nil
+	}
+	if bundle.Integrity.SignatureAlgorithm != "ed25519" {
+		return errors.New("unsupported support bundle signature")
+	}
+	publicKey, keyErr := base64.StdEncoding.DecodeString(bundle.Integrity.PublicKey)
+	signature, signatureErr := base64.StdEncoding.DecodeString(bundle.Integrity.Signature)
+	if keyErr != nil || signatureErr != nil || len(publicKey) != ed25519.PublicKeySize || len(signature) != ed25519.SignatureSize ||
+		base64.StdEncoding.EncodeToString(publicKey) != bundle.Integrity.PublicKey ||
+		base64.StdEncoding.EncodeToString(signature) != bundle.Integrity.Signature {
+		return errors.New("invalid support bundle signature encoding")
+	}
+	keyHash := sha256.Sum256(publicKey)
+	if bundle.Integrity.KeyID != hex.EncodeToString(keyHash[:]) || !ed25519.Verify(publicKey, supportBundleSignaturePayload(bundle), signature) {
+		return errors.New("support bundle signature verification failed")
+	}
+	return nil
 }
 
 func supportBundleFilename(at time.Time) string {

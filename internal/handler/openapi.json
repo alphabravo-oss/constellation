@@ -7439,7 +7439,7 @@
     "/api/v1/support/bundle": {
       "get": {
         "summary": "Download redacted support bundle",
-        "description": "Returns a redacted JSON diagnostics bundle for support handoff. The bundle includes runtime system configuration with secrets masked, system health, component inventory, scanner queue/capacity state, policy summaries, recent audit metadata, and a SHA-256 integrity hash over the redacted sections. Requires the manage_system_config verb and writes a support.bundle.download audit event.",
+        "description": "Returns a redacted JSON diagnostics bundle for support handoff. The bundle includes runtime system configuration with secrets masked, system health, component inventory, scanner queue/capacity state, policy summaries, recent audit metadata, and a SHA-256 integrity hash over the redacted sections. When CONSTELLATION_SUPPORT_BUNDLE_SIGNING_KEY_FILE points to a valid Ed25519 PKCS#8 PEM key, integrity includes a detached Ed25519 signature and public-key fingerprint; callers must pin the expected public key or key_id out of band. Requires the manage_system_config verb and writes a support.bundle.download audit event.",
         "responses": {
           "200": {
             "description": "The redacted support bundle.",
@@ -7512,7 +7512,25 @@
                         },
                         "signed": {
                           "type": "boolean",
-                          "description": "False until a deployment support-bundle signing key is configured."
+                          "description": "True when a deployment support-bundle Ed25519 key signed the bundle identity and redacted sections hash."
+                        },
+                        "signature_algorithm": {
+                          "type": "string",
+                          "enum": [
+                            "ed25519"
+                          ]
+                        },
+                        "signature": {
+                          "type": "string",
+                          "description": "Base64 Ed25519 signature over the v1 domain-separated payload."
+                        },
+                        "public_key": {
+                          "type": "string",
+                          "description": "Base64 Ed25519 public key; pin this key out of band before trusting the signature."
+                        },
+                        "key_id": {
+                          "type": "string",
+                          "description": "Lowercase hex SHA-256 fingerprint of the Ed25519 public key."
                         },
                         "note": {
                           "type": "string"

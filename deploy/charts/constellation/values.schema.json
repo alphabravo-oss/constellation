@@ -29,6 +29,8 @@
       "additionalProperties": true,
       "properties": {
         "replicas": { "type": "integer", "title": "API replicas", "minimum": 1, "maximum": 20, "default": 2 },
+        "supportBundleSigningKeySecret": { "type": "string", "title": "Existing support-bundle signing key Secret", "default": "" },
+        "supportBundleSigningKeySecretKey": { "type": "string", "title": "Signing key field in Secret", "minLength": 1, "default": "private-key.pem" },
         "leaderElection": {
           "type": "object",
           "title": "Leader election",
