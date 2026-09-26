@@ -69,6 +69,7 @@ func main() {
 		jobTimeout            = flag.Duration("job-timeout", 15*time.Minute, "Per-job timeout")
 		leaseRenewInterval    = flag.Duration("lease-renew-interval", 5*time.Minute, "How often to renew claimed job leases")
 		oneShotRef            = flag.String("ref", "", "If set: run a single scan against this image ref and exit (CLI mode)")
+		oneShotRegistryID     = flag.String("registry-id", "", "CLI mode: configured registry ID; requires --control-plane and --token")
 		oneShotSARIF          = flag.String("sarif", "", "CLI mode: write SARIF to this path")
 		oneShotJSON           = flag.String("json", "", "CLI mode: write JSON to this path")
 		listenAddr            = flag.String("listen", ":8090", "Health + metrics listen address")
@@ -117,11 +118,18 @@ func main() {
 
 	// One-shot CLI mode.
 	if *oneShotRef != "" {
-		res, err := agg.Scan(ctx, *oneShotRef, scanner.ScanOptions{Timeout: *jobTimeout, GoReachability: *goReachabilityEnabled})
+		oneShotWorker := &worker{
+			controlPlane: strings.TrimRight(*controlPlaneURL, "/"),
+			token:        *token,
+			agg:          agg,
+			logger:       logger,
+		}
+		res, regAuth, cleanup, err := oneShotWorker.scanOneShot(ctx, *oneShotRef, *oneShotRegistryID, scanner.ScanOptions{Timeout: *jobTimeout, GoReachability: *goReachabilityEnabled})
 		if err != nil {
 			logger.Error("scan", "err", err)
 			os.Exit(1)
 		}
+		defer cleanup()
 		if *verifySignatures {
 			roots, err := buildSignatureRoots(sigverify.TrustPolicy{
 				Mode:          *signatureMode,
@@ -132,15 +140,16 @@ func main() {
 			}, *signatureRoots)
 			if err != nil {
 				logger.Error("signature-roots", "err", err)
+				cleanup()
 				os.Exit(1)
 			}
 			res.Signature = verifyImageSignature(ctx, *oneShotRef, *cosignBin, roots)
 		}
-		res.Layers = inspectImageLayers(ctx, *oneShotRef, "", registryAuth{})
+		res.Layers = inspectImageLayers(ctx, *oneShotRef, "", regAuth)
 		scanner.AttributeLayers(res.Layers, res.Packages, res.Findings)
 		if *fileRiskEnabled {
-			res.FileRisks = inspectImageFileRisks(ctx, *oneShotRef, "", *fileRiskMaxFindings, registryAuth{}, nil)
-			res.ConfigChecks = inspectImageConfigChecks(ctx, *oneShotRef, "", registryAuth{}, nil)
+			res.FileRisks = inspectImageFileRisks(ctx, *oneShotRef, "", *fileRiskMaxFindings, regAuth, nil)
+			res.ConfigChecks = inspectImageConfigChecks(ctx, *oneShotRef, "", regAuth, nil)
 		}
 		if *oneShotJSON != "" {
 			b, _ := json.MarshalIndent(res, "", "  ")
@@ -243,6 +252,43 @@ func main() {
 	go w.dbRefreshLoop(ctx, *dbRefreshInterval, *offlineDB)
 
 	w.run(ctx, *pollInterval)
+}
+
+func (w *worker) scanOneShot(ctx context.Context, imageRef, registryID string, options scanner.ScanOptions) (*scanner.ScanResult, registryAuth, func(), error) {
+	cleanup := func() {}
+	var auth registryAuth
+	if registryID != "" {
+		if strings.TrimSpace(registryID) == "" || w.controlPlane == "" || w.token == "" {
+			return nil, auth, cleanup, errors.New("--registry-id requires a nonempty ID, --control-plane, and --token")
+		}
+		var err error
+		auth, cleanup, err = w.resolveRegistryAuth(ctx, &scanJob{RegistryID: &registryID}, imageRef)
+		if err != nil {
+			return nil, registryAuth{}, cleanup, fmt.Errorf("one-shot registry credentials: %w", err)
+		}
+		if auth.DockerConfigDir == "" {
+			anonymousDir, err := os.MkdirTemp("", "constellation-scan-dockercfg-")
+			if err != nil {
+				return nil, registryAuth{}, cleanup, fmt.Errorf("isolate anonymous registry config: %w", err)
+			}
+			if err := os.WriteFile(filepath.Join(anonymousDir, "config.json"), []byte(`{"auths":{}}`), 0o600); err != nil {
+				_ = os.RemoveAll(anonymousDir)
+				return nil, registryAuth{}, cleanup, fmt.Errorf("isolate anonymous registry config: %w", err)
+			}
+			auth.DockerConfigDir = anonymousDir
+			cleanup = func() { _ = os.RemoveAll(anonymousDir) }
+		}
+		options.Username = auth.Username
+		options.Password = auth.Password
+		options.RegistryAuthority = auth.Authority
+		options.DockerConfigDir = auth.DockerConfigDir
+	}
+	result, err := w.agg.Scan(ctx, imageRef, options)
+	if err != nil {
+		cleanup()
+		return nil, registryAuth{}, func() {}, err
+	}
+	return result, auth, cleanup, nil
 }
 
 // worker polls the control plane for jobs and runs them on a bounded goroutine pool.

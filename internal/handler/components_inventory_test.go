@@ -206,6 +206,210 @@ INSERT INTO component_heartbeats (
 	}
 }
 
+func TestComponentsInventoryRequiredAndOptionalRoleRollups(t *testing.T) {
+	d := openTestDB(t)
+	t.Cleanup(d.Close)
+
+	ctx := context.Background()
+	pool := d.Pool()
+	var regclass string
+	if err := pool.QueryRow(ctx, `SELECT COALESCE(to_regclass('public.component_heartbeats')::text, '')`).Scan(&regclass); err != nil || regclass == "" {
+		t.Skipf("skipping: component_heartbeats migration not applied (%v)", err)
+	}
+
+	orgID, clusterID, emptyClusterID := uuid.New(), uuid.New(), uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, display_name) VALUES ($1, $2, $2)`, orgID, "inventory-roles-"+orgID.String()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgID); err != nil {
+			t.Errorf("delete inventory roles org: %v", err)
+		}
+	})
+	for _, cluster := range []uuid.UUID{clusterID, emptyClusterID} {
+		if _, err := pool.Exec(ctx, `INSERT INTO clusters (id, org_id, name) VALUES ($1, $2, $3)`, cluster, orgID, "inventory-roles-"+cluster.String()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scannerToken := "inventory-roles-scanner-" + uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO scanner_tokens (org_id, name, token_hash) VALUES ($1, $2, $3)`,
+		orgID, "inventory-roles-scanner", tokenHashForTest(scannerToken)); err != nil {
+		t.Fatal(err)
+	}
+
+	roles := []struct {
+		component string
+		role      string
+		scope     string
+		kind      string
+		required  bool
+	}{
+		{"api", "control-plane", "org", "deployment", false},
+		{"frontend", "control-plane", "org", "deployment", false},
+		{"operator", "controller", "cluster", "deployment", true},
+		{"scanner", "scanner", "cluster", "deployment", true},
+		{"vulndb-importer", "updater", "cluster", "cronjob", true},
+		{"admission", "policy-enforcement", "cluster", "deployment", true},
+		{"runtime-agent", "enforcer", "node", "daemonset", true},
+		{"discoverer", "discovery", "cluster", "deployment", true},
+		{"registry-walker", "registry-scanner", "org", "deployment", false},
+		{"network-policy-applier", "policy-enforcement", "cluster", "deployment", true},
+		{"k8s-compliance-collector", "compliance", "cluster", "cronjob", true},
+		{"compliance-scheduler", "compliance", "org", "deployment", false},
+		{"github-app", "integration", "org", "deployment", false},
+		{"audit-archiver", "audit", "org", "cronjob", false},
+		{"backup", "recovery", "org", "job", false},
+	}
+	subject := Subject{UserID: uuid.New(), OrgID: orgID}
+	inventory := NewComponentsInventory(d)
+	ingestHandler := AnyServiceTokenMiddleware(pool)(http.HandlerFunc(NewHeartbeats(d, nil).Ingest))
+	list := func(t *testing.T, cluster *uuid.UUID) struct {
+		Summary    componentInventorySummaryDTO  `json:"summary"`
+		Rollups    []componentInventoryRollupDTO `json:"rollups"`
+		Components []componentInstanceDTO        `json:"components"`
+	} {
+		t.Helper()
+		path := "/api/v1/components"
+		if cluster != nil {
+			path += "?cluster_id=" + cluster.String()
+		}
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req = req.WithContext(WithSubject(req.Context(), subject))
+		rec := httptest.NewRecorder()
+		inventory.List(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("list %s: status %d body %s", path, rec.Code, rec.Body.String())
+		}
+		var response struct {
+			Summary    componentInventorySummaryDTO  `json:"summary"`
+			Rollups    []componentInventoryRollupDTO `json:"rollups"`
+			Components []componentInstanceDTO        `json:"components"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	assertInventory := func(t *testing.T, cluster *uuid.UUID, observed map[string]bool) {
+		t.Helper()
+		response := list(t, cluster)
+		rollups := make(map[string]componentInventoryRollupDTO, len(response.Rollups))
+		for _, rollup := range response.Rollups {
+			if _, duplicate := rollups[rollup.Component]; duplicate {
+				t.Fatalf("duplicate rollup %q", rollup.Component)
+			}
+			rollups[rollup.Component] = rollup
+		}
+		wantRollups, wantHealthy, wantMissing, wantInstances := 0, 0, 0, 0
+		for _, role := range roles {
+			if cluster != nil && role.scope == "org" {
+				if _, found := rollups[role.component]; found {
+					t.Errorf("org-scoped %q included in cluster rollups", role.component)
+				}
+				continue
+			}
+			wantRollups++
+			rollup, found := rollups[role.component]
+			if !found {
+				t.Errorf("missing rollup for %q", role.component)
+				continue
+			}
+			wantStatus := "not-observed"
+			wantMissingCount, wantInstanceCount := 0, 0
+			if role.required {
+				wantStatus = "missing"
+				wantMissing++
+				wantMissingCount = 1
+			}
+			if observed[role.component] {
+				wantStatus = "healthy"
+				wantHealthy++
+				wantInstances++
+				wantInstanceCount = 1
+				if role.required {
+					wantMissing--
+				}
+				wantMissingCount = 0
+			}
+			if rollup.Status != wantStatus || rollup.Expected != role.required || rollup.Missing != wantMissingCount ||
+				rollup.Instances != wantInstanceCount || rollup.Healthy != wantInstanceCount ||
+				rollup.Role != role.role || rollup.Scope != role.scope || rollup.Kind != role.kind {
+				t.Errorf("%q rollup = %+v; want status=%q expected=%t role=%q scope=%q kind=%q instances=%d missing=%d",
+					role.component, rollup, wantStatus, role.required, role.role, role.scope, role.kind, wantInstanceCount, wantMissingCount)
+			}
+		}
+		if len(rollups) != wantRollups || len(response.Components) != wantInstances || response.Summary.Components != wantRollups ||
+			response.Summary.TotalInstances != wantInstances || response.Summary.Healthy != wantHealthy || response.Summary.Missing != wantMissing ||
+			response.Summary.Degraded != 0 || response.Summary.Stale != 0 || response.Summary.Drift != 0 || response.Summary.Crashlooping != 0 {
+			t.Errorf("inventory rollups=%d instances=%d summary=%+v; want rollups=%d instances=%d healthy=%d missing=%d",
+				len(rollups), len(response.Components), response.Summary, wantRollups, wantInstances, wantHealthy, wantMissing)
+		}
+		for _, component := range response.Components {
+			if !observed[component.Component] || component.Status != "healthy" {
+				t.Errorf("unexpected component instance: %+v", component)
+			}
+			if component.Scope == "org" && component.ClusterID != nil || component.Scope != "org" && (component.ClusterID == nil || *component.ClusterID != clusterID) {
+				t.Errorf("component instance has incorrect scope: %+v", component)
+			}
+			if cluster != nil && (component.ClusterID == nil || *component.ClusterID != *cluster) {
+				t.Errorf("component outside requested cluster: %+v", component)
+			}
+		}
+	}
+	ingest := func(t *testing.T, component string, cluster *uuid.UUID) {
+		t.Helper()
+		body := heartbeatBody{Component: component, Version: "test", Commit: "abcdef123456", Hostname: component + "-fixture", UptimeSeconds: 60}
+		if cluster != nil {
+			body.ClusterID = cluster.String()
+		}
+		payload, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/heartbeats", strings.NewReader(string(payload)))
+		req.Header.Set("Authorization", "Bearer "+scannerToken)
+		rec := httptest.NewRecorder()
+		ingestHandler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("ingest %q: status %d body %s", component, rec.Code, rec.Body.String())
+		}
+	}
+
+	t.Run("not observed", func(t *testing.T) {
+		assertInventory(t, nil, nil)
+		assertInventory(t, &clusterID, nil)
+	})
+	ingest(t, "api", nil)
+	ingest(t, "operator", &clusterID)
+	t.Run("partially ingested", func(t *testing.T) {
+		assertInventory(t, nil, map[string]bool{"api": true, "operator": true})
+		assertInventory(t, &clusterID, map[string]bool{"operator": true})
+	})
+	for _, role := range roles {
+		if role.component == "api" || role.component == "operator" {
+			continue
+		}
+		if role.scope == "org" {
+			ingest(t, role.component, nil)
+		} else {
+			ingest(t, role.component, &clusterID)
+		}
+	}
+	allObserved := make(map[string]bool, len(roles))
+	clusterObserved := make(map[string]bool)
+	for _, role := range roles {
+		allObserved[role.component] = true
+		if role.scope != "org" {
+			clusterObserved[role.component] = true
+		}
+	}
+	t.Run("all roles healthy", func(t *testing.T) {
+		assertInventory(t, nil, allObserved)
+		assertInventory(t, &clusterID, clusterObserved)
+		assertInventory(t, &emptyClusterID, nil)
+	})
+}
+
 func TestComponentDiagnosticsForRuntimeAgentMetadata(t *testing.T) {
 	now := time.Now().UTC()
 	component := componentInstanceDTO{

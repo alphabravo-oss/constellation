@@ -340,9 +340,22 @@ func withTimeout(parent context.Context, requested, fallback time.Duration) (con
 // TRIVY_USERNAME / TRIVY_PASSWORD; Grype reads GRYPE_REGISTRY_AUTH_USERNAME /
 // _PASSWORD (+ _AUTHORITY); Syft reads SYFT_REGISTRY_AUTH_USERNAME / _PASSWORD
 // (+ _AUTHORITY). DOCKER_CONFIG points every go-containerregistry-based pull at
-// the per-job docker config.json the caller wrote.
+// the per-job docker config.json the caller wrote. When that isolated config is
+// present, inherited engine registry-auth variables are dropped before applying
+// explicit credentials; scans without it retain their legacy environment.
 func registryEnv(opts ScanOptions) []string {
 	env := os.Environ()
+	if opts.DockerConfigDir != "" {
+		isolated := env[:0]
+		for _, entry := range env {
+			key, _, _ := strings.Cut(entry, "=")
+			if key == "DOCKER_CONFIG" || key == "DOCKER_AUTH_CONFIG" || key == "TRIVY_USERNAME" || key == "TRIVY_PASSWORD" || strings.HasPrefix(key, "GRYPE_REGISTRY_AUTH_") || strings.HasPrefix(key, "SYFT_REGISTRY_AUTH_") {
+				continue
+			}
+			isolated = append(isolated, entry)
+		}
+		env = isolated
+	}
 	if opts.Username != "" || opts.Password != "" {
 		env = append(env,
 			"TRIVY_USERNAME="+opts.Username,
