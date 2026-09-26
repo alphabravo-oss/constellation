@@ -417,6 +417,83 @@ SELECT COUNT(*) FROM pg_stat_activity
 	}
 }
 
+func TestGroupDeleteWaitsForOrgDeletionBeforeTakingReferenceLocks(t *testing.T) {
+	database := openTestDB(t)
+	t.Cleanup(database.Close)
+	ctx := context.Background()
+	pool := database.Pool()
+	orgID, userID, groupID := uuid.New(), uuid.New(), uuid.New()
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id=$1`, orgID)
+	})
+	for _, statement := range []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO orgs (id, name, display_name) VALUES ($1, $2, 'Delete Lock Test')`, []any{orgID, "delete-lock-" + orgID.String()}},
+		{`INSERT INTO users (id, org_id, email, display_name) VALUES ($1, $2, $3, 'Delete Lock User')`, []any{userID, orgID, "delete-lock-" + userID.String() + "@example.com"}},
+		{`INSERT INTO groups (id, org_id, name, kind, criteria, members, policy_mode, profile_mode) VALUES ($1, $2, $3, 'ground', '[]'::jsonb, '[]'::jsonb, 'monitor', 'monitor')`, []any{groupID, orgID, "delete-lock-" + groupID.String()}},
+	} {
+		if _, err := pool.Exec(ctx, statement.query, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	orgDeletion, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer orgDeletion.Rollback(ctx)
+	if _, err := orgDeletion.Exec(ctx, `DELETE FROM orgs WHERE id=$1`, orgID); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewGroups(database, audit.New(pool))
+	router := chi.NewRouter()
+	router.Delete("/groups/{id}", handler.Delete)
+	request := httptest.NewRequest(http.MethodDelete, "/groups/"+groupID.String(), nil)
+	request = request.WithContext(WithSubject(request.Context(), Subject{UserID: userID, OrgID: orgID}))
+	result := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		result <- response
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		select {
+		case response := <-result:
+			t.Fatalf("group delete completed while org deletion was uncommitted: %d %s", response.Code, response.Body.String())
+		default:
+		}
+		var waiting int
+		if err := pool.QueryRow(ctx, `
+SELECT COUNT(*) FROM pg_stat_activity
+ WHERE pid <> pg_backend_pid()
+   AND datname = current_database()
+   AND query LIKE 'SELECT id FROM orgs WHERE id=$1 FOR KEY SHARE%'
+   AND wait_event_type = 'Lock'`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("group delete did not wait on the org row")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := orgDeletion.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case response := <-result:
+		if response.Code != http.StatusNoContent {
+			t.Fatalf("group delete after org rollback status=%d body=%s", response.Code, response.Body.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("group delete did not finish after org rollback")
+	}
+}
+
 func TestGroupsListIncludesMembershipPreview(t *testing.T) {
 	d := openTestDB(t)
 	defer d.Close()

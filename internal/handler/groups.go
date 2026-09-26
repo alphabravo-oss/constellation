@@ -352,7 +352,7 @@ func (h *Groups) Update(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	tx, err := h.beginGroupReferenceMutation(r.Context())
+	tx, err := h.beginGroupReferenceMutation(r.Context(), subj.OrgID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -486,7 +486,7 @@ func (h *Groups) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	subj, _ := SubjectFrom(r.Context())
-	tx, err := h.beginGroupReferenceMutation(r.Context())
+	tx, err := h.beginGroupReferenceMutation(r.Context(), subj.OrgID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -532,9 +532,14 @@ func (h *Groups) Delete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusNoContent, nil)
 }
 
-func (h *Groups) beginGroupReferenceMutation(ctx context.Context) (pgx.Tx, error) {
+func (h *Groups) beginGroupReferenceMutation(ctx context.Context, orgID uuid.UUID) (pgx.Tx, error) {
 	tx, err := h.db.Pool().Begin(ctx)
 	if err != nil {
+		return nil, err
+	}
+	var lockedOrgID uuid.UUID
+	if err := tx.QueryRow(ctx, `SELECT id FROM orgs WHERE id=$1 FOR KEY SHARE`, orgID).Scan(&lockedOrgID); err != nil {
+		_ = tx.Rollback(ctx)
 		return nil, err
 	}
 	if _, err := tx.Exec(ctx, `LOCK TABLE group_rule_edges, group_dpi_sensor_bindings, response_rules_v2, policies IN SHARE MODE`); err != nil {

@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 )
@@ -191,6 +193,11 @@ func TestGroupSensorBindings_RejectForeignOrgGroup(t *testing.T) {
 	NewGroupSensorBindingsHTTP(database, nil).Bind(response, request)
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("foreign group bind status=%d body=%s", response.Code, response.Body.String())
+	}
+	_, err = pool.Exec(ctx, `INSERT INTO group_dpi_sensor_bindings (org_id, group_id, sensor_kind, sensor_id) VALUES ($1, $2, 'dlp', $3)`, otherOrgID, groupID, uuid.New())
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23503" || pgErr.ConstraintName != "group_dpi_bindings_org_group_fk" {
+		t.Fatalf("direct foreign group binding error=%v, want composite FK violation", err)
 	}
 	var count int
 	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM group_dpi_sensor_bindings WHERE group_id=$1`, groupID).Scan(&count); err != nil || count != 0 {

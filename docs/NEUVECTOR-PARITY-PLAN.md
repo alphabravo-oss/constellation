@@ -87,9 +87,10 @@ Unchecked parent items remain open until **all** their acceptance requirements
 are met. Code present is not the same as verified or release-ready. The older
 deficiency ledger includes findings that already have fixes; do not use its
 historical counts as a count of currently open defects.
-Acceptance backlog: **100 open**. Since the `800b0ef` baseline of 107 open,
+Acceptance backlog: **101 open**. Since the `800b0ef` baseline of 107 open,
 **eight existing items closed** (four OPS-1 items, three SIEM-1 items and one
-POL-1 item), and one new vendor-interoperability item was added.
+POL-1 item), and two new items were added: vendor interoperability and legacy
+DPI binding tenant validation.
 The checklist contains **47 checked bounded rows** (39 at baseline). Partial scanner,
 registry and POL-1 fixes are recorded in the review table, not counted as
 closures. A checked child does not close its unchecked parent or replace live
@@ -125,8 +126,8 @@ deployment evidence.
 | SIEM-1 TLS material guard | Source and deployed mTLS collector verified | Validation and sender guards refuse TLS material on plaintext transport. In-process tests cover TLS 1.2/1.3, wrong CA, absent/untrusted clients and plaintext rejection. A Helm-deployed API additionally passed strict client-certificate verification and rejected wrong-CA/missing-client attempts before resuming after restoration. Vendor-specific interoperability is separately open. |
 | SIEM-1 severity floor | Source and deployed wire/filter matrix verified | An unknown configured minimum level denies all alerts rather than silently shipping; an unknown alert severity falls below an `info` floor. Source tests cover all three formatters and filter-before-dial. A live collector captured RFC5424/JSON/CEF, excluded an info event under a high floor and excluded a critical event under a mismatched category. |
 | SIEM-1 named delivery receipts | Source, API and deployed SMTP receiver verified | `DispatchTo` scopes receiver lookup to the event org and rejects paused receivers before queueing. Workers and sweepers terminate queued/retry deliveries paused later. PostgreSQL tests cover named-only send, pending/delivered/retrying/failed/paused receipts, exact retry payload/idempotency and concurrent in-flight pause ordering. API tests cover history, audit linkage and cross-org isolation. A deployed API delivered only to its named SMTP recipient, exposed the delivered receipt and audit link, and returned 409 for a paused test-fire. A named vendor SIEM remains separately open. |
-| POL-1 reference scope guard | Source races and deployed API concurrency smoke verified; writer integrity open | An org-wide group could be updated under a `cluster_id` filter while its network/response/admission references existed in another cluster. Update now counts blocking references across the org, matching delete; the usage view shows all explicit blockers even with a cluster filter, while derived member profiles remain scoped to that filter. A prior PostgreSQL regression and Helm-deployed API smoke prove cross-cluster visibility, 409 unsafe update/delete, allowed update after unlink and audit. Update/delete now lock all four reference tables in a transaction before reading the group and counting references. A fresh PostgreSQL `-race` matrix proves each mutation waits for an uncommitted network, DPI, response or admission writer, then rejects the mutation after writer commit. A rebuilt Helm-deployed API waited 1.7 seconds for an in-flight network-edge insert, then returned 409; unlinking allowed 204. Name-based writers can still create dangling references after a rename/delete commits, so referent validation remains open. |
-| POL-1 DPI binding tenant guard | Source and deployed API verified; wider tenant matrix open | A DLP/WAF binding previously accepted a foreign-org `group_id` because its FK checked only the group ID. Bind now inserts only from a group row in the authenticated org and refuses a conflicting stale binding owned by another org. A PostgreSQL HTTP negative test creates two real orgs, gets 400 for the foreign group and confirms no binding row. A rebuilt Helm API also returned 400/zero rows for a foreign-org group and 201 for a same-org binding. Other binding/import writers and schema-level tenant integrity remain open. |
+| POL-1 reference scope guard | Source races and deployed API concurrency smoke verified; writer integrity open | An org-wide group could be updated under a `cluster_id` filter while its network/response/admission references existed in another cluster. Update now counts blocking references across the org, matching delete; the usage view shows all explicit blockers even with a cluster filter, while derived member profiles remain scoped to that filter. A prior PostgreSQL regression and Helm-deployed API smoke prove cross-cluster visibility, 409 unsafe update/delete, allowed update after unlink and audit. Update/delete now lock the org row before all four reference tables in a transaction, then read the group and count references. A fresh PostgreSQL `-race` matrix proves each mutation waits for an uncommitted network, DPI, response or admission writer, then rejects the mutation after writer commit; another regression proves org deletion cannot invert the lock order. A rebuilt Helm-deployed API waited 1.7 seconds for an in-flight network-edge insert, then returned 409; unlinking allowed 204. Name-based writers can still create dangling references after a rename/delete commits, so referent validation remains open. |
+| POL-1 DPI binding tenant guard | Source, deployed API and new-write schema guard verified; legacy validation open | A DLP/WAF binding previously accepted a foreign-org `group_id` because its FK checked only the group ID. Bind now inserts only from a group row in the authenticated org and refuses a conflicting stale binding owned by another org. A PostgreSQL HTTP negative test creates two real orgs, gets 400 for the foreign group and confirms no binding row. A rebuilt Helm API also returned 400/zero rows for a foreign-org group and 201 for a same-org binding. Migration 165 adds a composite `(org_id, group_id)` FK marked `NOT VALID`; direct SQL insertion of a new foreign-org binding fails with its named FK violation. A fresh DB migrated through 165 served a Helm API that returned 201 for a same-org binding and 400/zero rows for a foreign one. Existing rows are intentionally not deleted or silently validated; inventory, repair, constraint validation and broader import-writer proof remain open. |
 | API-1 group/DPI OpenAPI contracts | Source schemas and focused tests verified; parent open | Group usage now documents response/admission counters, org-wide direct references, and error responses. DLP/WAF binding list/create/delete document typed requests, responses and actual status codes. Other API-1 endpoint families and live contract smoke remain open. |
 | POL-1 group workflow | API and production-browser control plane verified; enforcement open | A PostgreSQL-backed server test creates groups, previews/applies a NeuVector fixture containing a network edge and DLP/WAF bindings, checks usage and mode promotion, verifies RBAC/audit, and rejects unsafe delete without losing the group or references. A Chromium Playwright run against both an isolated production stack and a Helm-deployed API with a production frontend build creates a group, uses it in a network rule and DLP/WAF bindings, inspects usage, promotes mode, gets 409 on unsafe delete and cleans up. The UI-authored network rule is a network override, not a `group_rule_edges` row, so the usage blocker count is two (DLP/WAF). Live network and DPI enforcement remain unproven; the item stays open. |
 
@@ -172,6 +173,24 @@ an authenticated foreign-org DLP binding returned 400 with no row, while a
 same-org binding returned 201 and was cleaned up. Production-build Chromium
 passed the group control-plane workflow against the prior Helm image and an
 isolated production stack; neither run exercised live network/DPI enforcement.
+Migration 165 subsequently added a `NOT VALID` composite tenant FK for group
+DPI bindings. On a fresh database, migration 165 and a direct-SQL negative FK
+test pass. A downgrade/reapply test with a legacy foreign-org row preserved that
+row, left the constraint unvalidated and rejected a new foreign-org insert.
+The migrated database also served a Helm API: same-org binding returned 201,
+foreign-org binding returned 400 with no row. Existing invalid rows still need
+inventory/remediation and `VALIDATE CONSTRAINT`; the full tenant-scope checklist
+stays open.
+An initial seeded shared-DB race run exposed lock-order inversion between group
+mutation's table locks and org deletion's FK cascade. Group mutation now locks
+the org row first. A deterministic org-delete rollback regression and all eight
+reference-writer interleavings passed twice; the affected handler/runtime/server
+race suites passed on a separate seeded migration-165 database. The final Helm
+API image `sha256:16b6a3f21b737557ce02192a1ae61d668612c62d027ba5efcaef9dc1a2f290bd`
+ran against migration 165: a DLP binding blocked group delete with 409; after
+unbind, an in-flight network-edge insert delayed another delete by 1,309 ms
+and returned 409 with one blocker; unlink enabled 204. This is control-plane
+proof, not live network/DPI enforcement or legacy FK validation.
 
 Latest affected-package validation: `GOOSE_BIN=/root/go/bin/goose bash
 scripts/test-clean-database.sh ./internal/handler ./internal/handler/compliance
@@ -341,6 +360,11 @@ row saying `enforced`.
 
 - [ ] Close all open high-severity org/cluster attribution and restore-scope
   findings before the next parity release claim.
+- [ ] Inventory and remediate legacy DLP/WAF group bindings whose stored org
+  differs from their group's org; validate migration 165's composite FK and
+  prove upgrade behavior without silently deleting policy bindings. New writes
+  are protected by the FK and HTTP negative tests, but old rows are not yet
+  validated.
 - [ ] Add negative cross-tenant tests for backup restore, host/CIS ingestion,
   audit/event aggregation, exemptions, and agent-originated writes.
 - [ ] Derive scope from the authenticated subject and resolved cluster, never an
