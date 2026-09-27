@@ -27,7 +27,7 @@ The chart deploys:
 - scanner (Deployment)
 - runtime-agent (DaemonSet)
 - frontend nginx (Deployment + Service + optional Ingress)
-- vulndb-importer (optional CronJob)
+- optional audit-archiver CronJob
 - embedded pgvector StatefulSet (optional; off in prod)
 - bootstrap Jobs (TLS certs + service tokens)
 - optional namespace NetworkPolicies with default-deny and explicit flows
@@ -67,25 +67,17 @@ provenance.
 
 ## Building Images Locally
 
-Go role images expect the separate `constellation-vulndb` producer checkout as a
-BuildKit named context. From the default `constellation-all` layout this works
-without extra flags:
+The scanner image builds from this repository and includes Syft, Trivy, and
+Grype; it does not require the retired `constellation-vulndb` checkout:
 
 ```bash
 make image-scanner
 make images
 ```
 
-If `constellation-vulndb` lives somewhere else, pass its path explicitly:
-
-```bash
-make image-scanner VULNDB_BUILD_CONTEXT=/path/to/constellation-vulndb
-```
-
-The Dockerfiles create a temporary Go workspace inside the build container and
-replace `github.com/alphabravocompany/constellation-vulndb` with that sibling
-context. This keeps the VulnDB producer separate while avoiding private module
-fetches inside isolated Docker builds.
+The normal scanner image refreshes its Trivy and Grype databases at runtime.
+For a disconnected first boot, build `make image-scanner-airgap` or pre-load
+the scanner caches as described in `docs/offline-scanning.md`.
 
 ---
 
@@ -260,9 +252,8 @@ The post-install bootstrap Job:
 4. Optionally upserts a `ConstellationCluster` CR named after the namespace.
 
 The scanner Deployment reads `CONSTELLATION_SCANNER_TOKEN` + `SCANNER_TOKEN`
-from the first Secret. It also mounts the configured VulnDB volume read-only and
-sets `CONSTELLATION_VULNDB_PATH` so Syft package inventory can be matched by the
-local `constellation-vulndb` store. The runtime-agent DaemonSet reads
+from the first Secret. It uses Syft, Trivy, and Grype, with scanner database
+caches under `/var/lib/scanner-cache`. The runtime-agent DaemonSet reads
 `RUNTIME_AGENT_TOKEN` from the second Secret.
 
 To override the bootstrap mint with a pre-existing token Secret:
@@ -378,61 +369,21 @@ ClusterRole.
 
 ---
 
-## VulnDB Importer
+## Vulnerability Databases
 
-`constellation-vulndb` remains the producer of vulnerability intelligence.
-`vulndbImporter.enabled=true` runs `vulndb-bundle-install` on a schedule to
-consume a delivered artifact and atomically update the shared Constellation
-store. The source can be an OCI ref, mounted files, HTTPS or presigned S3 URLs,
-native `s3://` objects, or a prebuilt bbolt store.
+The active scanner uses Syft for package/SBOM inventory and Trivy plus Grype
+for vulnerability matching. `scanner.engines.*` selects those engines. The
+scanner refreshes its own vulnerability databases according to
+`scanner.vulnDB.refreshInterval`; `scanner.vulnDB.offline=true` disables
+internet refreshes and requires pre-loaded data. With one scanner replica,
+`scanner.cache.persistent=true` mounts a dedicated PVC for the caches. A
+multi-replica scanner uses pod-local caches instead of sharing a RWO claim.
 
-Production installs should disable direct manual API writes and enforce trust
-and freshness:
-
-```yaml
-vulndb:
-  manualUpload:
-    enabled: false
-  readiness:
-    requireBundle: true
-    maxAge: 168h
-  trust:
-    requireSignatures: true
-    publicKeySecret: constellation-vulndb-cosign-public-key
-    publicKeySecretKey: cosign.pub
-  freshness:
-    maxAge: 168h
-vulndbImporter:
-  enabled: true
-  installJob:
-    enabled: true
-  source:
-    kind: oci
-    ref: ghcr.io/alphabravocompany/constellation-vulndb-bundle:latest
-```
-
-The `:latest` ref above is a VulnDB artifact channel, not an application
-container image. Production safety comes from `requireSignatures`, freshness
-limits, and atomic local store replacement. Pin `vulndbImporter.source.ref` to
-an OCI digest when you need exact bundle replay for change-control.
-`vulndbImporter.installJob.enabled=true` runs the same importer once during
-Helm install/upgrade so the API can become ready without waiting for the next
-cron tick.
-
-For large bundles or prebuilt bbolt stores, leave `vulndbImporter.workDir`
-empty unless you have a dedicated larger volume. The empty default stores
-download, extraction, and validation work files under
-`<vulndb.mountPath>/.vulndb-work`, which keeps importer scratch usage on the
-shared VulnDB PVC instead of small pod-local ephemeral storage.
-
-When `requireSignatures=true`, OCI sources are verified with `cosign verify`
-before pull. File, URL, S3, and prebuilt-store sources use detached cosign
-signature bundles beside the artifact (`.sig`) unless explicit signature paths or
-URLs are supplied to the installer image.
-
-When `vulndb.readiness.requireBundle=true`, `/readyz` returns `503` until the
-API can open the local bbolt store. If `vulndb.readiness.maxAge` is set, the
-bundle's `exported_at` metadata must also be within that duration.
+The API's `cve_records` catalog is separate from those scanner caches and is
+updated by the live KEV/EPSS importers; NVD enrichment is opt-in through system
+configuration. The old `constellation-vulndb` bundle importer and its Helm
+values are not part of the active chart. The `scanner.vulnDB` value name refers
+to Trivy/Grype cache refresh settings, not that retired producer.
 
 ---
 
@@ -609,10 +560,13 @@ asynchronous bundles.
 | `admission.webhook.failurePolicy`     | `Ignore`                                             | Switch to `Fail` once you have multi-AZ HA                      |
 | `admission.webhook.namespaceSelector` | `{}`                                                 | Scope enforcement to labeled namespaces only                    |
 | `scanner.replicas`                    | `2`                                                  | Scale with job queue depth                                      |
-| `scanner.engines.syft`                | `true`                                               | Keep enabled for package inventory and VulnDB matching          |
-| `scanner.engines.vulndb`              | `true`                                               | Canonical vulnerability matching from the local VulnDB store    |
-| `scanner.engines.trivy`               | `true`                                               | Disable for VulnDB-only canonical scans; re-enable as evidence  |
-| `scanner.engines.grype`               | `true`                                               | Disable for VulnDB-only canonical scans; re-enable as evidence  |
+| `scanner.engines.syft`                | `true`                                               | Package and SBOM inventory                                       |
+| `scanner.engines.trivy`               | `true`                                               | Trivy image and package vulnerability matching                  |
+| `scanner.engines.grype`               | `true`                                               | Grype image and package vulnerability matching                  |
+| `scanner.vulnDB.refreshInterval`      | `6h`                                                 | Trivy/Grype database refresh cadence                            |
+| `scanner.vulnDB.offline`              | `false`                                              | Disable internet database refreshes; pre-load for offline use   |
+| `scanner.cache.persistent`            | `true`                                               | Use a cache PVC with one non-autoscaled scanner replica         |
+| `scanner.cache.size`                  | `8Gi`                                                | Scanner cache PVC size                                           |
 | `frontend.replicas`                   | `2`                                                  | Behind an ingress controller                                    |
 | `runtimeAgent.tolerations`            | tolerate all NoSchedule/NoExecute                    | DaemonSet must land on every node                               |
 | `postgres.embedded`                   | `true`                                               | **Always set to `false` in prod**                               |
@@ -633,22 +587,6 @@ asynchronous bundles.
 | `auditArchiver.bucket`                | `""`                                                 | Required when audit archiver is enabled                          |
 | `auditArchiver.sign.mode`             | `none`                                               | Set `static-key` or `keyless` to emit signed manifests           |
 | `auditArchiver.sign.keySecretName`    | `""`                                                 | Secret containing the static signing key when `mode=static-key`  |
-| `vulndb.storage.type`                 | `pvc`                                                | Use shared PVC for API, scanner, and importer store access      |
-| `vulndb.storage.size`                 | `20Gi`                                              | PVC size for the active store plus importer scratch files and atomic replacement headroom |
-| `vulndb.storage.accessModes`          | `[ReadWriteMany]`                                    | Required for multi-replica API/scanner shared-store access      |
-| `vulndb.statusFile`                   | `vulndb-import-status.json`                          | Importer status JSON read by `/api/v1/vulndb/status`            |
-| `vulndb.manualUpload.enabled`         | `true`                                               | Allow `POST /api/v1/vulndb:import` to write the store directly; set false for importer-only production installs |
-| `vulndb.readiness.requireBundle`      | `false`                                              | Make `/readyz` fail until a valid local VulnDB store is loaded  |
-| `vulndb.readiness.maxAge`             | `""`                                                 | Make `/readyz` fail when the loaded bundle is older than this Go duration |
-| `vulndb.trust.requireSignatures`      | `false`                                              | Require cosign verification before importer installs artifacts  |
-| `vulndb.trust.publicKeySecret`        | `""`                                                 | Secret containing `cosign.pub` for static-key verification      |
-| `vulndb.trust.certificateIdentity`    | `""`                                                 | Keyless certificate identity regexp when not using a public key |
-| `vulndb.trust.certificateOIDCIssuer`  | `""`                                                 | Keyless certificate OIDC issuer regexp                          |
-| `vulndb.freshness.maxAge`             | `""`                                                 | Reject artifacts older than this Go duration, for example `168h` |
-| `vulndbImporter.installJob.enabled`   | `false`                                             | Run a one-shot importer Job on Helm install/upgrade              |
-| `vulndbImporter.workDir`              | `""`                                                | Importer scratch directory; empty defaults to `<vulndb.mountPath>/.vulndb-work` |
-| `vulndbImporter.source.kind`          | `oci`                                                | Source mode: `oci`, `bundleDir`, `files`, `urls`, `s3`, `store`, `storeUrl`, or `storeS3` |
-| `vulndbImporter.source.ref`           | `ghcr.io/alphabravocompany/constellation-vulndb-bundle:latest` | Signed artifact channel when `source.kind=oci`; pin to digest for exact replay |
 | `astronomer.enabled`                  | `false`                                              | Enable `/api/v1/security/*` routes authenticated with Astronomer JWKS |
 | `astronomer.jwksURL`                  | `""`                                                 | Required when `astronomer.enabled=true`                              |
 | `astronomer.jwtIssuer`                | `""`                                                 | Optional required `iss` claim for Astronomer JWTs                    |

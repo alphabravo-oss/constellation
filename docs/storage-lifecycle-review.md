@@ -1,8 +1,10 @@
 # Storage lifecycle review (2026-09-27)
 
 This review compares the checked-in `../neuvector` source with Constellation's
-current k3s database. It is a design recommendation, not evidence that a new
-retention or archival path is deployed.
+current k3s database and scanner deployment. It corrects the earlier mistaken
+assumption that `../constellation-vulndb` is still the active producer. It is a
+design recommendation, not evidence that a new retention or archival path is
+deployed.
 
 ## What NeuVector actually stores
 
@@ -23,7 +25,7 @@ retention or archival path is deployed.
 
 ## Current Constellation state
 
-On the existing k3s instance, PostgreSQL was 6.8 GiB after the event and raw
+On the existing k3s instance, PostgreSQL was about 6.8 GB after the event and raw
 flow partition cleanup. Events retain seven days and raw flows three days.
 Approximate relation sizes were: `audit_events` 1.6 GiB, `cve_records` 1.1 GiB,
 and `network_flow_rollups` 79 MiB. The CVE table had about 398,000 live rows,
@@ -51,22 +53,30 @@ The current full-chain verifier starts at genesis, and the table's triggers
 forbid DELETE, so enabling a TTL without a chain-anchor design would break
 verification and evidence guarantees.
 
-The product-neutral `../constellation-vulndb` already has canonical `vuln_*`
-PostgreSQL tables, verified JSONL bundles, and a local bbolt scanner query
-store. Constellation's `cve_records` is a separate API read model fed directly
-by KEV/EPSS and optionally NVD, not merely a copy of the scanner bundle;
+The sibling `../constellation-vulndb` repository is a retired producer, not the
+active scanning source. The current `internal/scanner/aggregator.go` attaches
+Syft for package inventory and Trivy plus Grype for vulnerability matching;
+`internal/scanner/grype_matcher.go` fills the package-matcher slot formerly
+owned by the bundle. The running k3s scanner has all three engines enabled,
+refreshed Trivy and Grype on 2026-09-27, and has a separate scanner-cache PVC.
+There is no active VulnDB importer CronJob or bundle requirement in the chart.
+Constellation's `cve_records` API catalog is fed directly by KEV/EPSS and
+optionally NVD, rather than the retired bundle;
 `internal/handler/findings/cve.go` and `internal/handler/clusters_search.go`
-depend on its SQL filters, statistics, detail, and free-text lookup.
+depend on its SQL filters, statistics, detail, and free-text lookup. The local
+table's `sources` include about 378,000 EPSS, 17,000 NVD, and 1,700 KEV
+memberships; these are source labels, not a count of currently enabled feeds.
 
 ## Decision
 
 1. **Do not move CVEs to another PostgreSQL database solely to reduce disk.**
    That changes backup and query topology without reducing bytes. Keep the
-   current table until a versioned replacement meets its API contracts. Then
-   make `constellation-vulndb` the authoritative catalog and publish a compact,
-   rebuildable Constellation read projection or dedicated query service. Keep
-   current KEV/EPSS/NVD freshness, detail, search, and offline behavior during
-   cutover; measure the projection's size and latency before removing columns.
+   existing `cve_records` table as the API catalog while Syft/Trivy/Grype use
+   their own replaceable scanner caches. If CVE storage becomes a real limit,
+   profile the wide columns and indexes, then test a compact, rebuildable
+   read model sourced from the active KEV/EPSS/NVD pipeline. Preserve detail,
+   search, statistics, freshness, and offline behavior. Do not restore the old
+   `constellation-vulndb` bundle merely as a storage workaround.
 2. **Keep control-plane audit writes in PostgreSQL, but separate their lifecycle
    from high-rate detection and job telemetry.** Preserve critical alert/job
    evidence and existing compliance links through a tested replacement receipt

@@ -1086,7 +1086,9 @@ progressive disclosure, while retaining Constellation's security vocabulary.
   catches up missed history nor prunes after verification. Recent audit growth
   is dominated by runtime alerts and scan completions, not control-plane
   mutations. The [storage lifecycle review](storage-lifecycle-review.md)
-  compares the local NeuVector code and proposes a safe split. The event and
+  compares the local NeuVector code and proposes a safe split. The active
+  scanner uses Syft, Trivy and Grype, not the retired `constellation-vulndb`
+  bundle; `cve_records` is fed by KEV/EPSS and optional NVD. The event and
   raw-flow windows are bounded locally but do not close this item.
 - [ ] Seed large datasets and prove every high-volume page either pages or labels
   its render cap. Audit and Timeline now label their loaded 100-row page ranges,
