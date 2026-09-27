@@ -48,6 +48,15 @@ const CARDS: SettingsCard[] = [
   { to: "/openapi.json", title: "API Reference", description: "Download the generated OpenAPI spec for scripts, runbooks, and NeuVector API mapping.", icon: FileCode2, external: true },
 ];
 
+const SETTINGS_SCOPES = ["Organization", "Platform", "Integrations", "Cluster"] as const;
+
+function cardScope(path: string): typeof SETTINGS_SCOPES[number] {
+  if (path === "/settings/clusters/new") return "Cluster";
+  if (path === "/settings/integrations" || path === "/settings/connectors") return "Integrations";
+  if (["/settings/access", "/settings/api-tokens", "/settings/security-policy"].includes(path)) return "Organization";
+  return "Platform";
+}
+
 export function SettingsLanding() {
   return (
     <div className="space-y-6">
@@ -58,39 +67,36 @@ export function SettingsLanding() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {CARDS.map((card) => {
-          const Icon = card.icon;
-          const className = "flex flex-col gap-2 rounded-lg border border-border bg-card p-4 text-left transition-colors hover:border-foreground/20 hover:bg-card/80";
-          const content = (
-            <>
-              <div className="flex items-center gap-2.5">
-                <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-muted">
-                  <Icon className="h-4 w-4 text-foreground" />
-                </div>
-                <p className="text-sm font-medium text-foreground">{card.title}</p>
-              </div>
-              <p className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">{card.description}</p>
-            </>
-          );
-          if (card.external) {
-            return (
-              <a key={card.title} href={card.to} className={className} data-testid="settings-openapi-link">
-                {content}
-              </a>
-            );
-          }
-          return (
-            <Link
-              key={card.title}
-              to={card.to}
-              className={className}
-            >
-              {content}
-            </Link>
-          );
-        })}
-      </div>
+      {SETTINGS_SCOPES.map((scope) => (
+        <section key={scope} aria-label={scope} className="space-y-3">
+          <h2 className="text-sm font-semibold text-foreground">{scope}</h2>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {CARDS.filter((card) => cardScope(card.to) === scope).map((card) => (
+              <SettingsCardLink key={card.title} card={card} />
+            ))}
+          </div>
+        </section>
+      ))}
     </div>
   );
+}
+
+function SettingsCardLink({ card }: { card: SettingsCard }) {
+  const Icon = card.icon;
+  const className = "flex flex-col gap-2 rounded-lg border border-border bg-card p-4 text-left transition-colors hover:border-foreground/20 hover:bg-card/80";
+  const content = (
+    <>
+      <div className="flex items-center gap-2.5">
+        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-muted">
+          <Icon className="h-4 w-4 text-foreground" />
+        </div>
+        <p className="text-sm font-medium text-foreground">{card.title}</p>
+      </div>
+      <p className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">{card.description}</p>
+    </>
+  );
+  if (card.external) {
+    return <a href={card.to} className={className} data-testid="settings-openapi-link">{content}</a>;
+  }
+  return <Link to={card.to} className={className}>{content}</Link>;
 }

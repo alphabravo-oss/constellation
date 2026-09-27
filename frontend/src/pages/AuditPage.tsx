@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery, keepPreviousData } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { api } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
@@ -38,13 +38,13 @@ export function AuditPage() {
   const eventID = searchParams.get("event_id");
   const supportBundleJobID = searchParams.get("support_bundle_job_id");
   const [page, setPage] = useState(0);
+  const pageIndex = eventID ? 0 : page;
   const q = useQuery({
-    queryKey: ["audit", clusterId, eventID, supportBundleJobID, page],
+    queryKey: ["audit", clusterId, eventID, supportBundleJobID, pageIndex],
     queryFn: () =>
       api
-        .get<{ events: AuditEvent[]; has_more: boolean }>("/audit/events", { params: { limit: eventID ? 1 : PAGE, offset: eventID ? 0 : page * PAGE, cluster_id: eventID || supportBundleJobID ? undefined : clusterId, event_id: eventID || undefined, support_bundle_job_id: supportBundleJobID || undefined } })
+        .get<{ events: AuditEvent[]; has_more: boolean }>("/audit/events", { params: { limit: eventID ? 1 : PAGE, offset: pageIndex * PAGE, cluster_id: eventID || supportBundleJobID ? undefined : clusterId, event_id: eventID || undefined, support_bundle_job_id: supportBundleJobID || undefined } })
         .then((r) => r.data),
-    placeholderData: keepPreviousData,
   });
   const events = q.data?.events ?? [];
 
@@ -63,11 +63,17 @@ export function AuditPage() {
       ) : q.isError ? (
         <ErrorState error={q.error} />
       ) : events.length === 0 ? (
-        <EmptyState title={page > 0 ? "No more events" : "No audit events"} hint="Actions taken in this cluster will appear here." />
+        <>
+          <EmptyState title={pageIndex > 0 ? "No events on this page" : "No audit events"} hint="Actions taken in this cluster will appear here." />
+          {pageIndex > 0 && <button type="button" onClick={() => setPage(pageIndex - 1)} className="text-sm text-primary hover:underline">Previous page</button>}
+        </>
       ) : (
         <>
           <DataTable rows={events} columns={auditColumns} rowKey={(e) => e.id} />
-          {!eventID && <Pager page={page} pageSize={PAGE} hasMore={q.data?.has_more} rowsOnPage={events.length} onPage={setPage} />}
+          <p className="text-xs text-muted-foreground" data-testid="audit-page-scope">
+            Showing audit events {pageIndex * PAGE + 1}–{pageIndex * PAGE + events.length} on page {pageIndex + 1}. {q.data?.has_more ? "More pages available." : "No more pages."}
+          </p>
+          {!eventID && <Pager page={pageIndex} pageSize={PAGE} hasMore={q.data?.has_more} rowsOnPage={events.length} onPage={setPage} />}
         </>
       )}
     </div>

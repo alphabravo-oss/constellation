@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import type { BrowserContext, Page } from "@playwright/test";
 
 export const CREDS = {
   email: "admin@demo.test",
@@ -7,8 +7,15 @@ export const CREDS = {
 
 const API = process.env.VITE_API_URL ?? "http://localhost:18080";
 const tokenCache = new Map<string, string>();
+const browserSessionCache = new Map<string, BrowserCookie[]>();
+const browserCookieNames = ["__Host-constellation-session", "__Host-constellation-refresh"];
 
 type Credentials = typeof CREDS;
+type BrowserCookie = Awaited<ReturnType<BrowserContext["cookies"]>>[number];
+
+function credentialsKey(creds: Credentials) {
+  return JSON.stringify([API, creds.email, creds.password]);
+}
 
 async function cachedTokenIsValid(page: Page, token: string) {
   const resp = await page.request.get(`${API}/api/v1/auth/me`, {
@@ -18,7 +25,7 @@ async function cachedTokenIsValid(page: Page, token: string) {
 }
 
 export async function getAuthToken(page: Page, creds: Credentials = CREDS) {
-  const key = `${API}:${creds.email}`;
+  const key = credentialsKey(creds);
   const cached = tokenCache.get(key);
   if (cached && await cachedTokenIsValid(page, cached)) {
     return cached;
@@ -32,6 +39,26 @@ export async function getAuthToken(page: Page, creds: Credentials = CREDS) {
   const { token } = await resp.json();
   tokenCache.set(key, token);
   return token as string;
+}
+
+async function ensureBrowserSession(page: Page, creds: Credentials) {
+  const key = credentialsKey(creds);
+  const cached = browserSessionCache.get(key);
+  if (cached && cached.every((cookie) => cookie.expires > Date.now() / 1000 + 30)) {
+    await page.context().addCookies(cached);
+    const response = await page.request.get(`${API}/api/v1/auth/me`).catch(() => null);
+    if (response?.ok()) return;
+  }
+  browserSessionCache.delete(key);
+  await page.context().clearCookies({ name: /^__Host-constellation-(session|refresh)$/ });
+  const response = await page.request.post(`${API}/api/v1/auth/login`, {
+    data: creds,
+    headers: { "X-Constellation-Client": "browser", Origin: new URL(API).origin },
+  });
+  if (!response.ok()) throw new Error(`browser login failed: ${response.status()}`);
+  const cookies = (await page.context().cookies(API)).filter((cookie) => browserCookieNames.includes(cookie.name));
+  if (cookies.length !== browserCookieNames.length) throw new Error("browser login did not set session cookies");
+  browserSessionCache.set(key, cookies);
 }
 
 /** Programmatic login (faster than UI flow for setup steps in other specs). */
@@ -50,11 +77,7 @@ export async function login(
     credentials = CREDS;
     token = await getAuthToken(page, credentials);
   }
-  const response = await page.request.post(`${API}/api/v1/auth/login`, {
-    data: credentials,
-    headers: { "X-Constellation-Client": "browser", Origin: new URL(API).origin },
-  });
-  if (!response.ok()) throw new Error(`browser login failed: ${response.status()}`);
+  await ensureBrowserSession(page, credentials);
   await page.addInitScript(({ theme }) => {
     localStorage.removeItem("constellation.token");
     if (theme) localStorage.setItem("constellation.theme", theme);

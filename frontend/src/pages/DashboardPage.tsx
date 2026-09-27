@@ -449,7 +449,7 @@ export function DashboardPage() {
           tone={(runtimeThreats?.alerts ?? 0) > 0 ? "critical" : "neutral"} icon={<ShieldAlert className="h-3 w-3" />} href={clusterPath("/runtime")}
           hint={`${runtimeThreats?.blocks ?? 0} blocked`} />
         <StatCard label="Image CVEs" value={posture?.vulns_by_location?.image ?? 0} tone="accent" icon={<AlertTriangle className="h-3 w-3" />} href={clusterPath("/findings")} hint="in container images" />
-        <StatCard label="Host CVEs" value={posture?.vulns_by_location?.host ?? 0} tone={(posture?.vulns_by_location?.host ?? 0) > 0 ? "high" : "neutral"} icon={<AlertTriangle className="h-3 w-3" />} href={clusterPath("/nodes")} hint="on cluster nodes" />
+        <StatCard label="Host CVEs" value={posture?.vulns_by_location?.host ?? 0} tone={(posture?.vulns_by_location?.host ?? 0) > 0 ? "high" : "neutral"} icon={<AlertTriangle className="h-3 w-3" />} href={clusterPath("/nodes?risk=host-cves")} hint="on cluster nodes" />
         <StatCard label="Fixable now" value={posture?.vuln_signals?.fixable ?? 0} tone="low" icon={<ShieldCheck className="h-3 w-3" />} href={clusterPath("/findings")} hint="patched version exists" />
         <StatCard label="Privileged" value={posture?.hardening?.privileged ?? 0} tone={(posture?.hardening?.privileged ?? 0) > 0 ? "critical" : "low"} icon={<ShieldAlert className="h-3 w-3" />} href={clusterPath("/deployments")} hint="privileged workloads" />
         <StatCard label="Run as root" value={posture?.hardening?.run_as_root ?? 0} tone={(posture?.hardening?.run_as_root ?? 0) > 0 ? "high" : "low"} icon={<ShieldAlert className="h-3 w-3" />} href={clusterPath("/deployments")} hint="no non-root enforce" />

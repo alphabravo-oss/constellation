@@ -100,7 +100,7 @@ test("all metric tiles keep cluster scope and link to their source pages", async
     ["Compliance", "/compliance"],
     ["Runtime · 24h", "/runtime"],
     ["Image CVEs", "/findings"],
-    ["Host CVEs", "/nodes"],
+    ["Host CVEs", "/nodes?risk=host-cves"],
     ["Fixable now", "/findings"],
     ["Privileged", "/deployments"],
     ["Run as root", "/deployments"],

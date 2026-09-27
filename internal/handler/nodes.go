@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -88,7 +89,34 @@ func (h *Nodes) List(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	nodes, err := h.nodeSummaries(r, subj.OrgID, clusterID, "")
+	limit, offset := 500, 0
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 500 {
+			jsonError(w, http.StatusBadRequest, "limit must be between 1 and 500")
+			return
+		}
+		limit = parsed
+	}
+	if raw := r.URL.Query().Get("offset"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 {
+			jsonError(w, http.StatusBadRequest, "offset must be nonnegative")
+			return
+		}
+		offset = parsed
+	}
+	hostCVEs := r.URL.Query().Get("host_cves") == "open"
+	if raw := r.URL.Query().Get("host_cves"); raw != "" && raw != "open" {
+		jsonError(w, http.StatusBadRequest, "host_cves must be open")
+		return
+	}
+	total, err := h.countNodes(r, subj.OrgID, clusterID, hostCVEs)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "count nodes: "+err.Error())
+		return
+	}
+	nodes, err := h.nodeSummaries(r, subj.OrgID, clusterID, "", hostCVEs, limit, offset)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, "query nodes: "+err.Error())
 		return
@@ -97,6 +125,9 @@ func (h *Nodes) List(w http.ResponseWriter, r *http.Request) {
 		"cluster_id": clusterID,
 		"items":      nodes,
 		"summary":    summarizeNodes(nodes),
+		"total":      total,
+		"limit":      limit,
+		"offset":     offset,
 	})
 }
 
@@ -116,7 +147,7 @@ func (h *Nodes) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	nodes, err := h.nodeSummaries(r, subj.OrgID, clusterID, node)
+	nodes, err := h.nodeSummaries(r, subj.OrgID, clusterID, node, false, 1, 0)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, "query node: "+err.Error())
 		return
@@ -175,7 +206,29 @@ func (h *Nodes) clusterIDFromRoute(w http.ResponseWriter, r *http.Request, orgID
 	return clusterID, true
 }
 
-func (h *Nodes) nodeSummaries(r *http.Request, orgID, clusterID uuid.UUID, nodeFilter string) ([]NodeSummary, error) {
+func (h *Nodes) countNodes(r *http.Request, orgID, clusterID uuid.UUID, hostCVEs bool) (int, error) {
+	var total int
+	err := h.db.Pool().QueryRow(r.Context(), `
+WITH node_names AS (
+    SELECT node FROM host_facts WHERE org_id = $1 AND cluster_id = $2
+    UNION SELECT node FROM host_packages WHERE org_id = $1 AND cluster_id = $2
+    UNION SELECT node FROM host_cis WHERE org_id = $1 AND cluster_id = $2
+    UNION SELECT node FROM host_containers WHERE org_id = $1 AND cluster_id = $2
+    UNION SELECT node FROM host_processes WHERE org_id = $1 AND cluster_id = $2
+    UNION SELECT ref AS node FROM scan_targets WHERE org_id = $1 AND cluster_id = $2 AND type = 'host'
+    UNION SELECT target_ref AS node FROM findings WHERE org_id = $1 AND cluster_id = $2 AND target_type = 'host'
+    UNION SELECT target_ref AS node FROM findings WHERE org_id = $1 AND COALESCE(target_cluster_id, cluster_id) = $2 AND target_type = 'host'
+)
+SELECT COUNT(*)::int FROM node_names n
+ WHERE NOT $3 OR (NULLIF(BTRIM(n.node), '') IS NOT NULL AND EXISTS (
+    SELECT 1 FROM findings f
+     WHERE f.org_id = $1 AND f.cluster_id = $2 AND f.target_type = 'host'
+       AND f.target_ref = n.node AND f.kind = 'vulnerability' AND f.lifecycle = 'open'
+))`, orgID, clusterID, hostCVEs).Scan(&total)
+	return total, err
+}
+
+func (h *Nodes) nodeSummaries(r *http.Request, orgID, clusterID uuid.UUID, nodeFilter string, hostCVEs bool, limit, offset int) ([]NodeSummary, error) {
 	rows, err := h.db.Pool().Query(r.Context(), `
 WITH node_names AS (
     SELECT node FROM host_facts WHERE org_id = $1 AND cluster_id = $2
@@ -184,6 +237,7 @@ WITH node_names AS (
     UNION SELECT node FROM host_containers WHERE org_id = $1 AND cluster_id = $2
     UNION SELECT node FROM host_processes WHERE org_id = $1 AND cluster_id = $2
     UNION SELECT ref AS node FROM scan_targets WHERE org_id = $1 AND cluster_id = $2 AND type = 'host'
+    UNION SELECT target_ref AS node FROM findings WHERE org_id = $1 AND cluster_id = $2 AND target_type = 'host'
     UNION SELECT target_ref AS node FROM findings WHERE org_id = $1 AND COALESCE(target_cluster_id, cluster_id) = $2 AND target_type = 'host'
 )
 SELECT n.node,
@@ -252,8 +306,9 @@ SELECT n.node,
        WHERE org_id = $1
          AND target_type = 'host'
          AND target_ref = n.node
+         AND kind = 'vulnerability'
          AND lifecycle = 'open'
-         AND COALESCE(target_cluster_id, cluster_id) = $2
+         AND (cluster_id = $2 OR (NOT $4 AND COALESCE(target_cluster_id, cluster_id) = $2))
   ) v ON true
   LEFT JOIN LATERAL (
       SELECT version, last_seen_at
@@ -277,8 +332,13 @@ SELECT n.node,
        ORDER BY requested_at DESC LIMIT 1
   ) sj ON true
  WHERE ($3 = '' OR n.node = $3)
+   AND (NOT $4 OR (NULLIF(BTRIM(n.node), '') IS NOT NULL AND EXISTS (
+       SELECT 1 FROM findings f
+        WHERE f.org_id = $1 AND f.cluster_id = $2 AND f.target_type = 'host'
+          AND f.target_ref = n.node AND f.kind = 'vulnerability' AND f.lifecycle = 'open'
+   )))
  ORDER BY node_last_seen_at DESC, n.node
- LIMIT 500`, orgID, clusterID, nodeFilter)
+ LIMIT $5 OFFSET $6`, orgID, clusterID, nodeFilter, hostCVEs, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -425,7 +485,7 @@ SELECT COALESCE(NULLIF(f.target_ref, ''), a.name, ''),
    AND f.lifecycle = 'open'
    AND f.target_type = 'host'
    AND f.target_ref = $2
-   AND COALESCE(f.target_cluster_id, f.cluster_id) = $3
+   AND (f.cluster_id = $3 OR COALESCE(f.target_cluster_id, f.cluster_id) = $3)
  ORDER BY f.risk_score DESC NULLS LAST, f.last_seen_at DESC
  LIMIT 2000`, orgID, node, clusterID)
 	if err != nil {

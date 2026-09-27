@@ -5,7 +5,7 @@
 // single time-ordered stream with type + severity filters. Backed by
 // GET /api/v1/security/timeline.
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { useQuery, keepPreviousData } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Bookmark, Save, SlidersHorizontal } from "lucide-react";
 
 import { securityTimeline, type TimelineItem, type TimelineSource } from "@/api/client";
@@ -119,10 +119,9 @@ export function TimelinePage() {
       }),
     // No source selected ⇒ nothing to fetch.
     enabled: sources.size > 0,
-    placeholderData: keepPreviousData,
   });
 
-  const items = useMemo<TimelineItem[]>(() => q.data?.items ?? [], [q.data]);
+  const items = useMemo<TimelineItem[]>(() => sources.size > 0 ? q.data?.items ?? [] : [], [q.data, sources]);
 
   const selectCategory = (tabID: string, nextSources: TimelineSource[]) => {
     setCategory(tabID);
@@ -189,7 +188,7 @@ export function TimelinePage() {
               onClick={() => downloadCsv("constellation-security-events", ["Time", "Source", "Severity", "Title", "Namespace", "Workload", "Reference"],
                 items.map((it) => [it.at, it.source, it.severity, it.title, it.namespace ?? "", it.workload_id ?? "", it.ref ?? ""]))}
             >
-              Export CSV
+              Export current page CSV
             </Button>
           </>
         }
@@ -263,7 +262,10 @@ export function TimelinePage() {
       ) : q.isError ? (
         <ErrorState title="Failed to load the incident timeline." error={q.error} />
       ) : items.length === 0 ? (
-        <EmptyState title={page > 0 ? "No more events" : "No events"} hint="No events match the current filters in the selected window." />
+        <>
+          <EmptyState title={page > 0 ? "No events on this page" : "No events"} hint="No events match the current filters in the selected window." />
+          {page > 0 && <Button type="button" size="sm" variant="outline" onClick={() => setPage(page - 1)}>Previous page</Button>}
+        </>
       ) : (
         <>
         <ol className="relative space-y-1 border-l border-border pl-4" data-testid="timeline-list">
@@ -293,6 +295,9 @@ export function TimelinePage() {
             </li>
           ))}
         </ol>
+        <p className="text-xs text-muted-foreground" data-testid="timeline-page-scope">
+          Showing timeline events {page * TIMELINE_PAGE + 1}–{page * TIMELINE_PAGE + items.length} on page {page + 1}. {q.data?.has_more ? "More pages available." : "No more pages."}
+        </p>
         <Pager page={page} pageSize={TIMELINE_PAGE} hasMore={q.data?.has_more} rowsOnPage={items.length} onPage={setPage} />
         <TimelineDetailDrawer item={selected} onClose={() => setSelected(null)} />
         </>

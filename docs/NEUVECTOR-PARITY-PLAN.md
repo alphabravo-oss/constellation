@@ -1,7 +1,7 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-09-26**
+Last reconciled: **2026-09-27**
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -87,12 +87,12 @@ Unchecked parent items remain open until **all** their acceptance requirements
 are met. Code present is not the same as verified or release-ready. The older
 deficiency ledger includes findings that already have fixes; do not use its
 historical counts as a count of currently open defects.
-Acceptance backlog: **99 open**. Since the `800b0ef` baseline of 107 open,
-**eleven existing items closed** (four OPS-1 items, three SIEM-1 items, one
-POL-1 item, one IAM-1 item, one UI-2 item and one UI-3 item), and three new items were added: vendor interoperability, legacy
+Acceptance backlog: **98 open**. Since the `800b0ef` baseline of 107 open,
+**twelve existing items closed** (four OPS-1 items, three SIEM-1 items, one
+POL-1 item, one IAM-1 item, one UI-1 item, one UI-2 item and one UI-3 item), and three new items were added: vendor interoperability, legacy
 DPI binding tenant validation, and registration/proof of the unreachable
 group-edge HTTP workflow.
-The checklist contains **50 checked bounded rows** (39 at baseline). Earlier
+The checklist contains **51 checked bounded rows** (39 at baseline). Earlier
 rounds added bounded POL-1, POL-2 and API-1 fixes without closing their parent
 acceptance item. Those rounds added an eight-object cutover fixture and opt-in
 runner, network precedence guards, and YAML API contracts. A subsequent round added
@@ -125,6 +125,7 @@ coverage remain open.
 | IAM-1 local-user recovery | PostgreSQL/router tests prove scoped unlock and force reset with atomic audit receipts; a deterministic production-browser test exercises the local-only operator controls. Other IAM-1 items remain open. |
 | UI-3 platform-role classification | Source API tests and a deterministic production-browser test prove custom-namespace `core` classification and visibility behavior. The complete API/export and live-install matrix remains open. |
 | UI-2 YAML contract discipline | The six enterprise-table YAML controls (network, DLP, signatures, response, groups, vulnerability profiles) each pair export with a registered import route and typed client call. Generated cluster-init and Kubernetes policy YAML are deployment artifacts, not table configuration imports. The response-rule control has deterministic production-browser coverage; the other families have existing import tests. This closes only the YAML discipline row, not shared-table completeness. |
+| UI-1 scope order | The sidebar, command palette, and Settings hub present Organization, Platform, Integrations, Cluster in that order without changing canonical destinations. Three deterministic production-build browser cases cover ordered groups, route targets, keyboard navigation, and cluster context. Other UI-1 navigation and page-contract items remain open. |
 
 New bounded evidence without a checklist closure: network sessions and
 conversations now return tenant/cluster-scoped platform roles, conversation
@@ -161,10 +162,22 @@ the destination matrix remains incomplete. Findings now applies severity and
 accepted-lifecycle URL filters in the instance view with browser-history tests;
 its list is capped at 500 rows, and the CVE rollup has no severity-aware total.
 Deployments now applies a visible URL-backed name filter to rows, counts and
-CSV, but its API returns only the default first 100 rows. Nodes cannot
-accurately filter Host CVEs from `open_vulns`, which counts all open host
-findings and is capped at 500 nodes. Exact network pair/exposure drill-downs
+CSV, but its API returns only the default first 100 rows. Host CVEs now opens
+a cluster-scoped, paged node view filtered to open host vulnerability findings;
+it labels loaded-only search, sort, and CSV. The tile counts findings, whereas
+the node list counts distinct named hosts, so these are not identical totals.
+Exact network pair/exposure drill-downs
 and the deny/block aggregate link remain open, so UI-4 stays unchecked.
+An attempted 164-case full Playwright run on another isolated migration-166
+database was stopped after 38 cases: 24 failures were HTTP 429 from the
+intentional 10-per-minute per-IP login guard, not verified feature regressions.
+The focused API-backed and deterministic browser gates remain valid, but a
+full-suite auth/setup strategy must preserve the guard and run without retries.
+A worker-local Playwright helper now reuses validated browser cookies and
+re-authenticates after revocation without weakening the guard. Its focused
+reuse/revocation test passed; a four-spec API-backed sample passed 5/6 cases
+without 429s, with one asset-detail test timing out at the revoke control.
+Full-suite proof and a setup-project auth contract remain open.
 
 | Slice | Current status | Evidence / remaining work |
 |---|---|---|
@@ -921,7 +934,9 @@ progressive disclosure, while retaining Constellation's security vocabulary.
   duplicate surface. DLP/WAF legacy routes now redirect to their canonical
   runtime pages and forms, and common aliases retain deep paths, filters and
   fragments. Other duplicate feature routes still need audit.
-- [ ] Order scope consistently: Organization, Platform, Integrations, Cluster.
+- [x] Order scope consistently: Organization, Platform, Integrations, Cluster.
+  Sidebar, command palette, and Settings hub agree; deterministic browser
+  tests cover route targets, keyboard operation, and cluster context.
 - [ ] Resolve remaining duplicate health/settings/token/attestation entry points.
   Token, attestation, access-control and integration aliases now redirect to
   Settings with deep-link preservation and browser coverage. Cluster health
@@ -974,8 +989,10 @@ progressive disclosure, while retaining Constellation's security vocabulary.
   Findings severity/lifecycle URLs now filter instance rows and preserve
   history, but the list caps at 500 and CVE rollups lack a filtered total.
   Deployment name search is URL-backed yet limited to the API's first 100
-  rows. Host-CVE nodes lack an exact per-node source count; network pair and
-  exposure drill-downs remain broad, and the deny-only conversation header
+  rows. Host CVEs now filters open host vulnerabilities using the source
+  cluster and pages matching nodes; its distinct-node total does not equal the
+  tile's finding count, and unnamed findings cannot appear as nodes. Network
+  pair and exposure drill-downs remain broad, and the deny-only conversation header
   cannot represent blocked records too.
 - [ ] Prefer downloadable HTML/CSV/JSON evidence; add PDF only when it materially
   improves a customer workflow.
@@ -996,7 +1013,10 @@ progressive disclosure, while retaining Constellation's security vocabulary.
 ### OPS-2 Scale and test matrix
 
 - [ ] Seed large datasets and prove every high-volume page either pages or labels
-  its render cap.
+  its render cap. Audit and Timeline now label their loaded 100-row page ranges,
+  distinguish current-page CSV, and clear stale rows on page/scope changes;
+  deterministic browser tests cover page two and cluster-scoped requests.
+  Other high-volume pages and a real large-dataset run remain open.
 - [ ] Add performance budgets for network rollups, findings, audit/timeline, and
   dashboard summaries.
 - [ ] Maintain opt-in real-cluster suites for Flannel, Cilium, and Calico plus
@@ -1114,7 +1134,13 @@ custody, threat-model or external-provider release matrix.
   and prove repeated/shuffled execution without shared-fixture leakage.
 - [ ] Run Playwright through production-serving paths with setup-project auth
   state, zero PR retries, configurable base URL and retained failure artifacts;
-  wire browser tests and distinct FIPS builds/status checks into CI.
+  wire browser tests and distinct FIPS builds/status checks into CI. A fresh
+  164-case local suite attempt hit the intentional 10/minute per-IP login guard
+  after 38 cases (24 HTTP 429 failures). A worker-local helper now reuses
+  validated browser cookies; its focused test passed and a four-spec sample
+  had no 429s, but one asset-detail case timed out and the full suite has not
+  rerun. Setup-project auth and full-suite proof remain open; do not loosen
+  production rate limiting merely to pass tests.
 
 ### TSG-5 Typed API and frontend conventions — P1/P2
 

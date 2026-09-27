@@ -205,13 +205,15 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
                 </Group>
               )}
 
-              <Group heading="Navigate">
-                {NAV_ITEMS.map((n) => (
-                  <Item key={`${n.href}:${n.label}`} icon={n.icon} onSelect={() => go(resolveHref(n.href), n.label)} shortcut={n.shortcut} value={navItemSearchValue(n)}>
-                    <span>{n.label}</span>
-                  </Item>
-                ))}
-              </Group>
+              {NAV_SCOPES.map((scope) => (
+                <Group key={scope} heading={scope}>
+                  {NAV_ITEMS.filter((item) => navScope(item.href) === scope).map((item) => (
+                    <Item key={`${item.href}:${item.label}`} icon={item.icon} onSelect={() => go(resolveHref(item.href), item.label)} shortcut={item.shortcut} value={navItemSearchValue(item)}>
+                      <span>{item.label}</span>
+                    </Item>
+                  ))}
+                </Group>
+              ))}
 
               <Group heading="Quick Actions">
                 <Item icon={theme === "dark" ? <Sun /> : <Moon />} onSelect={() => { toggleTheme(); onOpenChange(false); }}>
@@ -388,6 +390,7 @@ interface NavSearchItem {
 }
 
 const NAV_ITEMS: NavSearchItem[] = [
+  { icon: <ServerCog />, label: "Clusters", href: "/clusters", keywords: ["cluster", "fleet", "scope"] },
   { icon: <LayoutDashboard />, label: "Dashboard",   href: "/dashboard",  shortcut: "g d", keywords: ["home", "overview", "risk"] },
   { icon: <ArrowLeftRight />,  label: "NeuVector Switchboard", href: "/neuvector", keywords: ["nv", "migration", "switch", "map", "compatibility"] },
   { icon: <AlertTriangle />,   label: "Findings",    href: "/findings",   shortcut: "g f", keywords: ["security risks", "vulnerabilities", "violations", "cve", "risk"] },
@@ -411,14 +414,27 @@ const NAV_ITEMS: NavSearchItem[] = [
   { icon: <Database />,        label: "CVE Database", href: "/cve",       shortcut: "g v", keywords: ["vulnerability database", "vulndb", "nvd", "kev"] },
   { icon: <ScanSearch />,      label: "Scanner & CVE Sources", href: "/settings/scanner", keywords: ["vulndb", "vulnerability database", "nvd", "feed", "scanner pool", "cache"] },
   { icon: <SlidersHorizontal />, label: "Effective Config", href: "/settings/effective-config", keywords: ["system config", "sysconfig", "configuration", "applied revision", "settings"] },
+  { icon: <KeyRound />,        label: "Access Control", href: "/settings/access", keywords: ["users", "roles", "sso", "service accounts"] },
   { icon: <KeyRound />,        label: "API Tokens",  href: "/settings/api-tokens", keywords: ["tokens", "service account", "automation", "keys"] },
+  { icon: <ShieldCheck />,     label: "Security Policy", href: "/settings/security-policy", keywords: ["password", "session", "idle timeout"] },
   { icon: <BadgeCheck />,      label: "Attestation Trust", href: "/settings/attestation-trust", keywords: ["admission trust", "signatures", "cosign", "provenance"] },
   { icon: <Plug />,            label: "Connectors",  href: "/settings/connectors", keywords: ["registry", "cloud account", "scanner pool", "integrations"] },
+  { icon: <Plug />,            label: "Integrations & Routing", href: "/settings/integrations", keywords: ["alerts", "receivers", "routing", "webhooks"] },
   { icon: <Server />,          label: "System Health", href: "/settings/health", keywords: ["controllers", "enforcers", "scanners", "components", "license", "heartbeat"] },
   { icon: <ClipboardCheck />,  label: "Posture",     href: "/posture", keywords: ["coverage", "configuration posture", "security posture"] },
   { icon: <Sparkles />,        label: "Federation",  href: "/federation", keywords: ["multi cluster", "fed", "remote cluster"] },
   { icon: <Settings />,        label: "Settings",    href: "/settings", keywords: ["system", "configuration", "admin"] },
 ];
+
+const NAV_SCOPES = ["Organization", "Platform", "Integrations", "Cluster"] as const;
+
+function navScope(href: string): typeof NAV_SCOPES[number] {
+  if (href === "/cve" || href === "/posture" || href === "/federation") return "Organization";
+  if (href.startsWith("/settings/integrations") || href.startsWith("/settings/connectors")) return "Integrations";
+  if (["/settings/access", "/settings/api-tokens", "/settings/security-policy"].includes(href)) return "Organization";
+  if (href.startsWith("/settings")) return "Platform";
+  return "Cluster";
+}
 
 function navItemSearchValue(item: NavSearchItem) {
   return [item.label, item.href, ...(item.keywords ?? [])].join(" ");

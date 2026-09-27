@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { useInfiniteQuery } from "@tanstack/react-query";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   Activity,
   CheckCircle2,
@@ -9,7 +9,7 @@ import {
   Server,
   ShieldAlert,
 } from "lucide-react";
-import { nodes as nodesApi, type NodeSummary } from "@/api/client";
+import { api, type NodeListResponse, type NodeSummary } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { PageHeader } from "@/components/ui/page";
 import { StatCard } from "@/components/ui/stat-card";
@@ -17,22 +17,31 @@ import { DataTable, type Column } from "@/components/ui/data-table";
 import { cn } from "@/lib/cn";
 
 const agentStatuses = ["all", "healthy", "stale", "missing"];
-const riskFilters = ["all", "critical", "high", "open", "clean"];
+const riskFilters = ["all", "critical", "high", "open", "clean", "host-cves"];
+const pageSize = 100;
+type NodePage = NodeListResponse & { total: number; limit: number; offset: number };
 
 export function NodesPage() {
   const { clusterId, isLoading: clusterLoading } = useCluster();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState("");
   const [agentStatus, setAgentStatus] = useState("all");
-  const [riskFilter, setRiskFilter] = useState("all");
+  const riskFilter = riskFilters.includes(searchParams.get("risk") ?? "") ? searchParams.get("risk")! : "all";
+  const hostCVEs = riskFilter === "host-cves";
   const [selectedName, setSelectedName] = useState<string | null>(null);
 
-  const nodesQ = useQuery({
-    queryKey: ["nodes", clusterId],
-    queryFn: () => nodesApi.list(clusterId!),
+  const nodesQ = useInfiniteQuery({
+    queryKey: ["nodes", clusterId, hostCVEs],
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) => api.get<NodePage>(`/clusters/${encodeURIComponent(clusterId!)}/nodes`, {
+      params: { limit: pageSize, offset: pageParam, ...(hostCVEs ? { host_cves: "open" } : {}) },
+    }).then((response) => response.data),
+    getNextPageParam: (lastPage) => lastPage.offset + lastPage.items.length < lastPage.total
+      ? lastPage.offset + lastPage.items.length : undefined,
     enabled: !!clusterId,
   });
 
-  const inventory = useMemo(() => nodesQ.data?.items ?? [], [nodesQ.data?.items]);
+  const inventory = useMemo(() => nodesQ.data?.pages.flatMap((page) => page.items) ?? [], [nodesQ.data]);
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return inventory.filter((item) => {
@@ -55,7 +64,8 @@ export function NodesPage() {
   }, [agentStatus, inventory, query, riskFilter]);
 
   const selected = filtered.find((item) => item.node === selectedName) ?? filtered[0] ?? null;
-  const summary = nodesQ.data?.summary ?? summarizeNodes(inventory);
+  const summary = summarizeNodes(inventory);
+  const total = nodesQ.data?.pages[0]?.total ?? 0;
 
   if (clusterLoading) {
     return <p className="text-sm text-muted-foreground" data-testid="nodes-loading">Loading cluster...</p>;
@@ -94,7 +104,7 @@ export function NodesPage() {
     {
       id: "critical",
       header: "Critical",
-      cell: (item) => item.last_scanned_at ? <RiskCount value={item.critical_vulns} tone="danger" /> : <NotCollected label="Not scanned" />,
+      cell: (item) => item.last_scanned_at || item.critical_vulns > 0 ? <RiskCount value={item.critical_vulns} tone="danger" /> : <NotCollected label="Not scanned" />,
       sort: (a, b) => a.critical_vulns - b.critical_vulns,
       numeric: true,
       exportValue: (item) => item.critical_vulns,
@@ -102,7 +112,7 @@ export function NodesPage() {
     {
       id: "high",
       header: "High",
-      cell: (item) => item.last_scanned_at ? <RiskCount value={item.high_vulns} tone="warn" /> : <NotCollected label="Not scanned" />,
+      cell: (item) => item.last_scanned_at || item.high_vulns > 0 ? <RiskCount value={item.high_vulns} tone="warn" /> : <NotCollected label="Not scanned" />,
       sort: (a, b) => a.high_vulns - b.high_vulns,
       numeric: true,
       exportValue: (item) => item.high_vulns,
@@ -110,7 +120,7 @@ export function NodesPage() {
     {
       id: "open",
       header: "Open",
-      cell: (item) => item.last_scanned_at ? item.open_vulns.toLocaleString() : <NotCollected label="Not scanned" />,
+      cell: (item) => item.last_scanned_at || item.open_vulns > 0 ? item.open_vulns.toLocaleString() : <NotCollected label="Not scanned" />,
       sort: (a, b) => a.open_vulns - b.open_vulns,
       numeric: true,
       exportValue: (item) => item.open_vulns,
@@ -152,7 +162,7 @@ export function NodesPage() {
     <div className="space-y-4" data-testid="nodes-page" data-cluster-id={clusterId ?? ""}>
       <PageHeader
         title="Nodes"
-        description="Host posture, package evidence, runtime-agent health, and node CVEs."
+        description="Host posture, package evidence, runtime-agent health, and node CVEs. Search and sorting use loaded nodes."
         actions={
           <div className="flex items-center gap-2">
             <Link
@@ -170,10 +180,10 @@ export function NodesPage() {
       />
 
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4" data-testid="nodes-summary">
-        <StatCard label="Nodes" value={summary.nodes.toLocaleString()} icon={<Server className="h-3.5 w-3.5" />} hint={`${summary.scan_completed} scan-complete`} />
-        <StatCard label="Runtime Agents" value={summary.runtime_agent_healthy.toLocaleString()} icon={<Activity className="h-3.5 w-3.5" />} hint={`${summary.runtime_agent_stale} stale · ${summary.runtime_agent_missing} missing`} />
-        <StatCard label="Critical / High" value={(summary.critical_vulns + summary.high_vulns).toLocaleString()} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={summary.critical_vulns + summary.high_vulns > 0 ? "high" : "neutral"} hint={`${summary.critical_vulns} critical · ${summary.high_vulns} high`} />
-        <StatCard label="CIS Failures" value={summary.cis_failed.toLocaleString()} icon={<CheckCircle2 className="h-3.5 w-3.5" />} tone={summary.cis_failed > 0 ? "medium" : "neutral"} hint={`${summary.scan_gaps} nodes with scan gaps`} />
+        <StatCard label="Nodes" value={total.toLocaleString()} icon={<Server className="h-3.5 w-3.5" />} hint={`${inventory.length} loaded`} />
+        <StatCard label="Loaded agents" value={summary.runtime_agent_healthy.toLocaleString()} icon={<Activity className="h-3.5 w-3.5" />} hint={`${summary.runtime_agent_stale} stale · ${summary.runtime_agent_missing} missing`} />
+        <StatCard label="Loaded critical / high" value={(summary.critical_vulns + summary.high_vulns).toLocaleString()} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={summary.critical_vulns + summary.high_vulns > 0 ? "high" : "neutral"} hint={`${summary.critical_vulns} critical · ${summary.high_vulns} high`} />
+        <StatCard label="Loaded CIS failures" value={summary.cis_failed.toLocaleString()} icon={<CheckCircle2 className="h-3.5 w-3.5" />} tone={summary.cis_failed > 0 ? "medium" : "neutral"} hint={`${summary.scan_gaps} loaded nodes with scan gaps`} />
       </section>
 
       <section className="rounded-lg border border-border bg-card p-3">
@@ -183,7 +193,7 @@ export function NodesPage() {
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search node, OS, kernel, runtime, coverage gap"
+              placeholder="Search loaded nodes, OS, kernel, runtime, coverage gap"
               className="w-full rounded-md border border-border bg-background py-2 pl-9 pr-3 text-sm"
               data-testid="node-search"
             />
@@ -200,12 +210,17 @@ export function NodesPage() {
           </select>
           <select
             value={riskFilter}
-            onChange={(event) => setRiskFilter(event.target.value)}
+            onChange={(event) => setSearchParams((params) => {
+              const next = new URLSearchParams(params);
+              if (event.target.value === "all") next.delete("risk");
+              else next.set("risk", event.target.value);
+              return next;
+            })}
             className="rounded-md border border-border bg-background p-2 text-sm"
             data-testid="node-risk-filter"
           >
             {riskFilters.map((item) => (
-              <option key={item} value={item}>{item === "all" ? "All risk" : item}</option>
+              <option key={item} value={item}>{item === "all" ? "All risk" : item === "host-cves" ? "Open host CVEs" : item}</option>
             ))}
           </select>
         </div>
@@ -230,6 +245,11 @@ export function NodesPage() {
               )
             }
           />
+          {nodesQ.isError && <p role="alert" className="p-3 text-sm text-status-error">Could not load nodes.</p>}
+          <div className="flex items-center justify-between gap-3 p-3 text-xs text-muted-foreground">
+            <span data-testid="nodes-page-count">Showing {inventory.length.toLocaleString()} of {total.toLocaleString()} nodes</span>
+            {nodesQ.hasNextPage && <button type="button" onClick={() => void nodesQ.fetchNextPage()} disabled={nodesQ.isFetchingNextPage} className="rounded-md border border-border px-3 py-1.5 text-foreground hover:bg-accent" data-testid="nodes-load-more">{nodesQ.isFetchingNextPage ? "Loading..." : "Load more"}</button>}
+          </div>
         </div>
 
         <NodePreview node={selected} clusterId={clusterId} />
@@ -378,6 +398,7 @@ function matchesRiskFilter(item: NodeSummary, filter: string): boolean {
     case "high":
       return item.critical_vulns > 0 || item.high_vulns > 0;
     case "open":
+    case "host-cves":
       return item.open_vulns > 0;
     case "clean":
       return item.open_vulns === 0 && item.cis_failed === 0 && !(item.coverage_gaps?.length);

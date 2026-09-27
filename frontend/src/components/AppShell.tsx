@@ -1,13 +1,8 @@
-// AppShell — cluster-first IA, Astronomer-cloned chrome.
-//
-// Two sidebar modes, derived from the URL:
-//   1. ORG MODE (/clusters, /cve, /settings, /federation, …) → ORG_NAV.
-//   2. CLUSTER MODE (/clusters/:id/*) → ClusterSwitcher + CLUSTER_NAV, every
-//      item resolved against the active :id.
+// AppShell — scope navigation and cluster-scoped navigation.
 //
 // Layout (sidebar w-60/w-16, topbar h-14, content p-6 max-w-[1600px] fade-in,
 // collapsible nav groups, user menu, offline banner) mirrors /root/astronomer.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -40,7 +35,6 @@ import {
   Compass,
   Globe2,
   BellRing,
-  ArrowLeft,
   Server,
   ServerCog,
   GitMerge,
@@ -52,6 +46,7 @@ import {
   Search,
   WifiOff,
   Waypoints,
+  Plug,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -157,30 +152,39 @@ export const CLUSTER_NAV: NavGroup[] = [
   },
 ];
 
-// Org-scoped sidebar groups — absolute paths. Admin items moved into the grouped
-// Settings shell (SettingsShell sub-nav) so each feature has exactly one home.
-const ORG_NAV: NavGroup[] = [
+const SCOPE_NAV: NavGroup[] = [
   {
-    id: "fleet",
-    label: "Fleet",
-    items: [
-      { path: "/clusters",     icon: ServerCog,       label: "Clusters", exact: true },
-    ],
-  },
-  {
-    id: "security",
-    label: "Security",
+    id: "organization",
+    label: "Organization",
     items: [
       { path: "/cve",          icon: Database,        label: "CVE Database" },
       { path: "/posture",      icon: ClipboardCheck,  label: "Posture" },
       { path: "/federation",   icon: Globe2,          label: "Federation" },
+      { path: "/settings/access", icon: UsersRound, label: "Access Control" },
+      { path: "/settings/api-tokens", icon: FileText, label: "API Tokens" },
+      { path: "/settings/security-policy", icon: ShieldCheck, label: "Security Policy" },
     ],
   },
   {
-    id: "settings",
-    label: "Settings",
+    id: "platform",
+    label: "Platform",
     items: [
-      { path: "/settings",     icon: Settings,        label: "Settings" },
+      { path: "/settings",     icon: Settings,        label: "Settings", exact: true },
+    ],
+  },
+  {
+    id: "integrations",
+    label: "Integrations",
+    items: [
+      { path: "/settings/integrations", icon: Bell, label: "Integrations & Routing" },
+      { path: "/settings/connectors", icon: Plug, label: "Connectors" },
+    ],
+  },
+  {
+    id: "cluster",
+    label: "Cluster",
+    items: [
+      { path: "/clusters", icon: ServerCog, label: "Clusters", exact: true },
     ],
   },
 ];
@@ -200,6 +204,14 @@ function resolveTo(item: NavItem, clusterId: string | null): string {
 function isItemActive(item: NavItem, pathname: string, clusterId: string | null): boolean {
   const to = resolveTo(item, clusterId);
   return item.exact ? pathname === to : pathname === to || pathname.startsWith(to + "/");
+}
+
+function scopeFromPath(pathname: string, clusterId: string | null): string {
+  if (clusterId || pathname === "/clusters" || pathname.startsWith("/settings/clusters/")) return "cluster";
+  if (pathname.startsWith("/settings/integrations") || pathname.startsWith("/settings/connectors")) return "integrations";
+  if (["/settings/access", "/settings/api-tokens", "/settings/security-policy"].some((path) => pathname === path || pathname.startsWith(`${path}/`))) return "organization";
+  if (pathname.startsWith("/settings")) return "platform";
+  return "organization";
 }
 
 /** navigator.onLine with live online/offline listeners. */
@@ -245,20 +257,17 @@ export function AppShell() {
 
   const clusterId = clusterIDFromPath(pathname);
   const inClusterMode = clusterId !== null;
-  const navGroups = inClusterMode ? CLUSTER_NAV : ORG_NAV;
-
-  // Accordion navigation: keep only the active (or first) group expanded.
-  const [openGroups, setOpenGroups] = useState<Set<string>>(() => {
-    const active = navGroups.find((g) => g.items.some((it) => isItemActive(it, pathname, clusterId)));
-    return new Set(active ? [active.id] : navGroups[0] ? [navGroups[0].id] : []);
-  });
+  const activeScope = scopeFromPath(pathname, clusterId);
+  const [openScope, setOpenScope] = useState(activeScope);
+  const [openClusterGroup, setOpenClusterGroup] = useState(() => CLUSTER_NAV.find((group) =>
+    group.items.some((item) => isItemActive(item, pathname, clusterId)))?.id ?? CLUSTER_NAV[0].id);
   useEffect(() => {
-    const active = navGroups.find((g) => g.items.some((it) => isItemActive(it, pathname, clusterId)));
-    setOpenGroups(new Set(active ? [active.id] : navGroups[0] ? [navGroups[0].id] : []));
-  }, [clusterId, inClusterMode, navGroups, pathname]);
-  function toggleGroup(id: string) {
-    setOpenGroups((s) => s.has(id) ? new Set() : new Set([id]));
-  }
+    setOpenScope(activeScope);
+    if (clusterId) {
+      const activeGroup = CLUSTER_NAV.find((group) => group.items.some((item) => isItemActive(item, pathname, clusterId)));
+      if (activeGroup) setOpenClusterGroup(activeGroup.id);
+    }
+  }, [activeScope, clusterId, pathname]);
 
   return (
     <div className="flex h-full overflow-hidden bg-background">
@@ -291,41 +300,35 @@ export function AppShell() {
           </button>
         </div>
 
-        {/* Cluster context header — cluster mode only. */}
-        {inClusterMode && !collapsed && (
-          <div className="px-2 py-2 border-b border-sidebar-border">
-            <Link
-              to="/clusters"
-              data-testid="back-to-clusters"
-              className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors rounded-md hover:bg-accent/50"
-            >
-              <ArrowLeft className="h-3.5 w-3.5 flex-shrink-0" aria-hidden />
-              <span className="truncate">All Clusters</span>
-            </Link>
-            <div className="px-2 mt-1 min-w-0">
-              <ClusterSwitcher />
-            </div>
-          </div>
-        )}
-        {inClusterMode && collapsed && (
-          <div className="px-1 py-2 border-b border-sidebar-border">
-            <Link to="/clusters" data-testid="back-to-clusters" className="nav-item justify-center px-0" title="All clusters">
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
-          </div>
-        )}
-
-        <nav className="flex-1 overflow-y-auto py-2 px-1 no-scrollbar">
-          {navGroups.map((group) => (
+        <nav className="flex-1 overflow-y-auto py-2 px-1 no-scrollbar" aria-label="Scopes">
+          {SCOPE_NAV.map((group) => (
             <SidebarGroup
               key={group.id}
               group={group}
               pathname={pathname}
               clusterId={clusterId}
               collapsed={collapsed}
-              open={openGroups.has(group.id)}
-              onToggle={() => toggleGroup(group.id)}
-            />
+              open={openScope === group.id}
+              onToggle={() => setOpenScope((current) => current === group.id ? "" : group.id)}
+            >
+              {group.id === "cluster" && inClusterMode && (
+                <>
+                  {!collapsed && <div className="px-3 py-2"><ClusterSwitcher /></div>}
+                  {CLUSTER_NAV.map((clusterGroup) => (
+                    <SidebarGroup
+                      key={clusterGroup.id}
+                      group={clusterGroup}
+                      pathname={pathname}
+                      clusterId={clusterId}
+                      collapsed={collapsed}
+                      open={openClusterGroup === clusterGroup.id}
+                      onToggle={() => setOpenClusterGroup((current) => current === clusterGroup.id ? "" : clusterGroup.id)}
+                      nested
+                    />
+                  ))}
+                </>
+              )}
+            </SidebarGroup>
           ))}
         </nav>
 
@@ -398,6 +401,8 @@ function SidebarGroup({
   collapsed,
   open,
   onToggle,
+  nested = false,
+  children,
 }: {
   group: NavGroup;
   pathname: string;
@@ -405,35 +410,42 @@ function SidebarGroup({
   collapsed: boolean;
   open: boolean;
   onToggle: () => void;
+  nested?: boolean;
+  children?: ReactNode;
 }) {
-  // Collapsed rail: no group header, icon-only rows.
   if (collapsed) {
     return (
-      <div className="space-y-px">
+      <div role="group" aria-label={group.label} className="space-y-px">
         {group.items.map((item) => (
           <SidebarRow key={item.path} item={item} pathname={pathname} clusterId={clusterId} collapsed />
         ))}
+        {children}
       </div>
     );
   }
 
   return (
-    <div className="mb-1">
+    <div role="group" aria-label={group.label} className={cn("mb-1", nested && "ml-2 border-l border-sidebar-border pl-1")}>
       <button
         type="button"
         onClick={onToggle}
-        className="w-full flex items-center justify-between px-3 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors"
+        aria-expanded={open}
+        aria-controls={`nav-group-${nested ? "cluster-" : ""}${group.id}`}
+        className={cn("w-full flex items-center justify-between px-3 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors", nested && "text-xs")}
       >
         <span className="truncate">{group.label}</span>
         {open ? <ChevronUp className="h-3.5 w-3.5 flex-shrink-0" /> : <ChevronDown className="h-3.5 w-3.5 flex-shrink-0" />}
       </button>
-      {open && (
-        <div className="space-y-px">
-          {group.items.map((item) => (
-            <SidebarRow key={item.path} item={item} pathname={pathname} clusterId={clusterId} collapsed={false} />
-          ))}
-        </div>
-      )}
+      <div id={`nav-group-${nested ? "cluster-" : ""}${group.id}`} hidden={!open} className="space-y-px">
+        {open && (
+          <>
+            {group.items.map((item) => (
+              <SidebarRow key={item.path} item={item} pathname={pathname} clusterId={clusterId} collapsed={false} />
+            ))}
+            {children}
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -457,8 +469,11 @@ function SidebarRow({
     return (
       <NavLink
         to={to}
+        data-testid={item.path === "/clusters" && clusterId ? "back-to-clusters" : undefined}
         className={cn("nav-item group justify-center px-0", active && "active")}
         title={item.label}
+        aria-label={item.label}
+        aria-current={active ? "page" : undefined}
       >
         <Icon className={cn("h-4 w-4 flex-shrink-0", active ? "text-foreground" : "text-muted-foreground group-hover:text-foreground")} />
       </NavLink>
@@ -468,7 +483,8 @@ function SidebarRow({
   return (
     <NavLink
       to={to}
-      data-testid={`nav-${item.path.replace(/\//g, "-")}`}
+      data-testid={item.path === "/clusters" && clusterId ? "back-to-clusters" : `nav-${item.path.replace(/\//g, "-")}`}
+      aria-current={active ? "page" : undefined}
       className={cn(
         "group flex items-center gap-2 px-3 py-1.5 mx-1 rounded-md text-sm transition-colors",
         active
