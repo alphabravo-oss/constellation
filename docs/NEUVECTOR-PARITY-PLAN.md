@@ -87,11 +87,11 @@ Unchecked parent items remain open until **all** their acceptance requirements
 are met. Code present is not the same as verified or release-ready. The older
 deficiency ledger includes findings that already have fixes; do not use its
 historical counts as a count of currently open defects.
-Acceptance backlog: **97 open**. Since the `800b0ef` baseline of 107 open,
+Acceptance backlog: **98 open**. Since the `800b0ef` baseline of 107 open,
 **thirteen existing items closed** (four OPS-1 items, three SIEM-1 items, one
-POL-1 item, one IAM-1 item, two UI-1 items, one UI-2 item and one UI-3 item), and three new items were added: vendor interoperability, legacy
-DPI binding tenant validation, and registration/proof of the unreachable
-group-edge HTTP workflow.
+POL-1 item, one IAM-1 item, two UI-1 items, one UI-2 item and one UI-3 item), and four new items were added: vendor interoperability, legacy
+DPI binding tenant validation, registration/proof of the unreachable
+group-edge HTTP workflow, and durable storage-growth controls.
 The checklist contains **53 checked bounded rows** (39 at baseline); one new
 bounded OPS-2 database-reclaim item was added as complete. Earlier
 rounds added bounded POL-1, POL-2 and API-1 fixes without closing their parent
@@ -1075,6 +1075,14 @@ progressive disclosure, while retaining Constellation's security vocabulary.
   the 7-day event and 3-day raw-flow dev retention settings then dropped 34
   expired daily partitions after the Helm rollout. This does not prove
   fleet-wide retention policy or audit-log archival.
+- [ ] Bound all remaining durable storage growth without silently deleting
+  forensic evidence: export and verify hash-chain continuity before any audit
+  archive/prune, define a reviewed retention horizon for network-flow rollups,
+  and alert on per-table growth, retention lag, failed partition drops, and
+  database/PVC free space. On 2026-09-27 the local database was 6.8 GB, with
+  `audit_events` at 1.6 GB (append-only, no archiver), `cve_records` at 1.1 GB,
+  and `network_flow_rollups` at 79 MB (oldest bucket in June). The event and
+  raw-flow windows are bounded locally but do not close this item.
 - [ ] Seed large datasets and prove every high-volume page either pages or labels
   its render cap. Audit and Timeline now label their loaded 100-row page ranges,
   distinguish current-page CSV, and clear stale rows on page/scope changes;
