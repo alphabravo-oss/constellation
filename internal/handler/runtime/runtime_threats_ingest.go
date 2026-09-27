@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -381,19 +382,79 @@ func (h *RuntimeThreats) List(w http.ResponseWriter, r *http.Request) {
 	clusterID := strings.TrimSpace(r.URL.Query().Get("cluster_id"))
 	workloadIDFilter := strings.TrimSpace(r.URL.Query().Get("workload_id"))
 	categoryFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("category")))
+	limit := 500
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 2000 {
+			jsonError(w, http.StatusBadRequest, "invalid limit")
+			return
+		}
+		limit = parsed
+	}
+	offset := 0
+	if raw := strings.TrimSpace(r.URL.Query().Get("offset")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 || parsed > 1000000 {
+			jsonError(w, http.StatusBadRequest, "invalid offset")
+			return
+		}
+		offset = parsed
+	}
+	port := 0
+	if raw := strings.TrimSpace(r.URL.Query().Get("port")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 65535 {
+			jsonError(w, http.StatusBadRequest, "invalid port")
+			return
+		}
+		port = parsed
+	}
+	peer := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("peer")))
+	application := 0
+	if raw := strings.TrimSpace(r.URL.Query().Get("application")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 {
+			jsonError(w, http.StatusBadRequest, "invalid application")
+			return
+		}
+		application = parsed
+	}
 	if categoryFilter != "" && categoryFilter != "dlp" && categoryFilter != "waf" && categoryFilter != "ips" {
 		jsonError(w, http.StatusBadRequest, "category must be dlp, waf, or ips")
 		return
 	}
 	var clusterUUID *uuid.UUID
 	if clusterID != "" {
-		if parsed, err := uuid.Parse(clusterID); err == nil {
-			clusterUUID = &parsed
+		parsed, err := uuid.Parse(clusterID)
+		if err != nil {
+			jsonError(w, http.StatusBadRequest, "invalid cluster_id")
+			return
 		}
+		clusterUUID = &parsed
 	}
 	groupMembers, groupName, groupActive, err := handler.ResolveGroupFilterMembers(r.Context(), h.db.Pool(), sub.OrgID, clusterUUID, r.URL.Query().Get("group"))
 	if err != nil {
 		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	const where = `
+ WHERE org_id = $1
+   AND at >= NOW() - ($2::int * INTERVAL '1 hour')
+   AND ($3::text = '' OR cluster_id::text = $3)
+   AND severity >= $4::smallint
+   AND ($5::text = '' OR workload_id = $5)
+   AND ($6::text = '' OR (CASE
+       WHEN threat_id >= 40000 AND threat_id < 50000 THEN 'waf'
+       WHEN threat_id >= 20000 AND threat_id < 40000 THEN 'dlp'
+       ELSE 'ips' END) = $6)
+   AND (NOT $7::boolean OR workload_id = ANY($8::text[]))
+   AND ($9::int = 0 OR src_port = $9 OR dst_port = $9)
+   AND ($10::text = '' OR strpos(lower(coalesce(src_ip, '')), $10) > 0 OR strpos(lower(coalesce(dst_ip, '')), $10) > 0)
+   AND ($11::int = 0 OR application = $11)`
+	args := []any{sub.OrgID, hours, clusterID, int16(sevMin), workloadIDFilter, categoryFilter, groupActive, groupMembers, port, peer, application}
+	var total int
+	if err := h.db.Pool().QueryRow(r.Context(), `SELECT COUNT(*)::int FROM runtime_threats`+where, args...).Scan(&total); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -408,21 +469,8 @@ SELECT id::text, org_id::text, cluster_id::text,
        COALESCE(pkt_len,0), COALESCE(cap_len,0),
        pkt_ingress, sess_ingress,
        reported_at, at
-  FROM runtime_threats
- WHERE org_id = $1
-   AND at >= NOW() - ($2::text || ' hours')::interval
-   AND ($3::text = '' OR cluster_id::text = $3)
-   AND severity >= $4::smallint
-	   AND ($5::text = '' OR workload_id = $5)
-	   AND ($6::text = '' OR (CASE
-	            WHEN threat_id >= 40000 AND threat_id < 50000 THEN 'waf'
-	            WHEN threat_id >= 20000 AND threat_id < 40000 THEN 'dlp'
-	            ELSE 'ips'
-	        END) = $6)
-	   AND (NOT $7::boolean OR workload_id = ANY($8::text[]))
-	 ORDER BY at DESC
-	 LIMIT 500`,
-		sub.OrgID, fmt.Sprintf("%d", hours), clusterID, int16(sevMin), workloadIDFilter, categoryFilter, groupActive, groupMembers)
+  FROM runtime_threats`+where+`
+ ORDER BY at DESC, id DESC LIMIT $12 OFFSET $13`, append(args, limit, offset)...)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -451,7 +499,7 @@ SELECT id::text, org_id::text, cluster_id::text,
 		t.Category = threatCategory(t.ThreatID)
 		out = append(out, t)
 	}
-	response := map[string]any{"threats": out}
+	response := map[string]any{"threats": out, "total": total, "limit": limit, "offset": offset, "has_more": offset+len(out) < total}
 	if groupActive {
 		response["selected_group"] = groupName
 		response["selected_group_members"] = len(groupMembers)

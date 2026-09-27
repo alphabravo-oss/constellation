@@ -608,7 +608,7 @@ function TopHeader({
               <div className="p-1">
                 <MenuItem onSelect={() => onNavigate("/settings")} icon={<Settings className="h-4 w-4" />}>Settings</MenuItem>
                 <MenuItem onSelect={onOpenHotkeys} icon={<CmdIcon className="h-4 w-4" />} shortcut="?">Keyboard shortcuts</MenuItem>
-                <MenuItem onSelect={() => onNavigate("/coverage")} icon={<Compass className="h-4 w-4" />}>Feature coverage</MenuItem>
+                <MenuItem onSelect={() => onNavigate("/posture")} icon={<Compass className="h-4 w-4" />}>Feature coverage</MenuItem>
                 <DropdownMenu.Separator className="my-1 h-px bg-border" />
                 <MenuItem onSelect={onLogout} icon={<LogOut className="h-4 w-4" />} destructive>Sign out</MenuItem>
               </div>

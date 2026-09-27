@@ -34,6 +34,7 @@ import {
   ScrollText,
   KeyRound,
   BadgeCheck,
+  HeartPulse,
   Plug,
   ArrowLeftRight,
   SlidersHorizontal,
@@ -207,7 +208,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
 
               {NAV_SCOPES.map((scope) => (
                 <Group key={scope} heading={scope}>
-                  {NAV_ITEMS.filter((item) => navScope(item.href) === scope).map((item) => (
+                  {NAV_ITEMS.filter((item) => navScope(item.href) === scope && (item.href !== "/health" || clusterId)).map((item) => (
                     <Item key={`${item.href}:${item.label}`} icon={item.icon} onSelect={() => go(resolveHref(item.href), item.label)} shortcut={item.shortcut} value={navItemSearchValue(item)}>
                       <span>{item.label}</span>
                     </Item>
@@ -395,7 +396,6 @@ const NAV_ITEMS: NavSearchItem[] = [
   { icon: <ArrowLeftRight />,  label: "NeuVector Switchboard", href: "/neuvector", keywords: ["nv", "migration", "switch", "map", "compatibility"] },
   { icon: <AlertTriangle />,   label: "Findings",    href: "/findings",   shortcut: "g f", keywords: ["security risks", "vulnerabilities", "violations", "cve", "risk"] },
   { icon: <Server />,          label: "Nodes",       href: "/nodes",      shortcut: "g h", keywords: ["hosts", "host", "node", "agent", "enforcer"] },
-  { icon: <Server />,          label: "Hosts (NeuVector)", href: "/nodes", keywords: ["nodes", "host", "node", "agent", "enforcer"] },
   { icon: <PackageSearch />,   label: "Images",      href: "/images",     shortcut: "g i", keywords: ["registry images", "containers", "image scan", "vulnerability"] },
   { icon: <Boxes />,           label: "Assets",      href: "/assets",     shortcut: "g a", keywords: ["inventory", "services", "workloads", "containers"] },
   { icon: <Layers />,          label: "Services / Workloads", href: "/deployments", keywords: ["deployment", "deployments", "pod", "pods", "application", "containers"] },
@@ -421,6 +421,7 @@ const NAV_ITEMS: NavSearchItem[] = [
   { icon: <Plug />,            label: "Connectors",  href: "/settings/connectors", keywords: ["registry", "cloud account", "scanner pool", "integrations"] },
   { icon: <Plug />,            label: "Integrations & Routing", href: "/settings/integrations", keywords: ["alerts", "receivers", "routing", "webhooks"] },
   { icon: <Server />,          label: "System Health", href: "/settings/health", keywords: ["controllers", "enforcers", "scanners", "components", "license", "heartbeat"] },
+  { icon: <HeartPulse />,      label: "Sensor Health", href: "/health", keywords: ["cluster", "sensor", "registration", "health gates"] },
   { icon: <ClipboardCheck />,  label: "Posture",     href: "/posture", keywords: ["coverage", "configuration posture", "security posture"] },
   { icon: <Sparkles />,        label: "Federation",  href: "/federation", keywords: ["multi cluster", "fed", "remote cluster"] },
   { icon: <Settings />,        label: "Settings",    href: "/settings", keywords: ["system", "configuration", "admin"] },
@@ -443,7 +444,7 @@ function navItemSearchValue(item: NavSearchItem) {
 const CLUSTER_HREFS = new Set([
   "/dashboard", "/neuvector", "/findings", "/nodes", "/images", "/assets",
   "/deployments", "/compliance", "/network", "/network-rules", "/timeline",
-  "/policy", "/policies", "/runtime", "/runtime-policies", "/response", "/components",
+  "/policy", "/policies", "/runtime", "/runtime-policies", "/response", "/components", "/health",
 ]);
 const CLUSTER_HREF_PREFIXES = ["/findings/", "/nodes/", "/images/", "/assets/", "/deployments/", "/risk/"];
 

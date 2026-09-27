@@ -2,11 +2,14 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -26,16 +29,18 @@ import (
 //
 // The pre-created partitions capture data going FORWARD. Rows already sitting in the
 // DEFAULT partition (history + the current day, before its partition existed) are left
-// to the age-based retention DELETE loops (rollup.go / events_retention.go) and a
-// one-time VACUUM FULL to reclaim; the default stops growing once the forward partitions
-// exist, so it only ever drains.
+// to the age-based retention DELETE loops (rollup.go / events_retention.go). Once a
+// default partition is empty, the manager reclaims its delete bloat with TRUNCATE.
 type PartitionedTable struct {
-	Parent        string                              // "events" | "network_flows"
-	RetentionDays func(ctx context.Context) int       // live retention horizon (0 = keep forever → never drop)
+	Parent        string                        // "events" | "network_flows"
+	RetentionDays func(ctx context.Context) int // live retention horizon (0 = keep forever → never drop)
 }
 
 // partitionNameRe matches a managed daily partition: <parent>_YYYYMMDD.
 var partitionNameRe = regexp.MustCompile(`_(\d{8})$`)
+var partitionParentRe = regexp.MustCompile(`^[a-z][a-z0-9_]{0,40}$`)
+
+const defaultPartitionReclaimMinBytes int64 = 256 << 20
 
 // RunPartitionManager runs the manager until ctx is cancelled. Leader-gated by the
 // caller. Ticks hourly (cheap; the work is idempotent) plus once immediately on start.
@@ -58,6 +63,13 @@ func RunPartitionManager(ctx context.Context, pool *pgxpool.Pool, tables []Parti
 				logger.Info("partition manager: dropped expired partitions",
 					slog.String("table", t.Parent), slog.Int("count", dropped), slog.Int("retention_days", days))
 			}
+			reclaimed, err := reclaimEmptyDefaultPartition(ctx, pool, t.Parent, defaultPartitionReclaimMinBytes)
+			if err != nil && logger != nil {
+				logger.Warn("partition manager: reclaim default", slog.String("table", t.Parent), slog.String("err", err.Error()))
+			}
+			if reclaimed && logger != nil {
+				logger.Info("partition manager: reclaimed empty default partition", slog.String("table", t.Parent))
+			}
 		}
 	}
 	run()
@@ -71,6 +83,108 @@ func RunPartitionManager(ctx context.Context, pool *pgxpool.Pool, tables []Parti
 			run()
 		}
 	}
+}
+
+func reclaimEmptyDefaultPartition(ctx context.Context, pool *pgxpool.Pool, parent string, minBytes int64) (bool, error) {
+	if !partitionParentRe.MatchString(parent) {
+		return false, fmt.Errorf("invalid partition parent %q", parent)
+	}
+	child := parent + "_p_default"
+	identifier := pgx.Identifier{child}.Sanitize()
+	var size int64
+	err := pool.QueryRow(ctx, `
+SELECT pg_total_relation_size(c.oid)
+  FROM pg_inherits i
+  JOIN pg_class c ON c.oid = i.inhrelid
+ WHERE i.inhparent = to_regclass($1)
+   AND i.inhrelid = to_regclass($2)
+   AND pg_get_expr(c.relpartbound, c.oid) = 'DEFAULT'`, parent, child).Scan(&size)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if size < minBytes {
+		return false, nil
+	}
+	var occupied bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ONLY `+identifier+` LIMIT 1)`).Scan(&occupied); err != nil {
+		return false, err
+	}
+	if occupied {
+		return false, nil
+	}
+
+	lockCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	tx, err := pool.Begin(lockCtx)
+	if err != nil {
+		if reclaimLockUnavailable(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	defer tx.Rollback(context.Background())
+	if _, err := tx.Exec(lockCtx, `SET LOCAL lock_timeout = '100ms'`); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(lockCtx, `SET LOCAL statement_timeout = '2s'`); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(lockCtx, `SET LOCAL enable_seqscan = off`); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(lockCtx, `LOCK TABLE `+identifier+` IN ACCESS EXCLUSIVE MODE NOWAIT`); err != nil {
+		if reclaimLockUnavailable(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	var isDefault bool
+	if err := tx.QueryRow(lockCtx, `
+SELECT EXISTS (
+    SELECT 1 FROM pg_inherits i
+    JOIN pg_class c ON c.oid = i.inhrelid
+    WHERE i.inhparent = to_regclass($1)
+      AND i.inhrelid = to_regclass($2)
+      AND pg_get_expr(c.relpartbound, c.oid) = 'DEFAULT'
+)`, parent, child).Scan(&isDefault); err != nil {
+		if reclaimLockUnavailable(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if !isDefault {
+		return false, nil
+	}
+	var marker int
+	err = tx.QueryRow(lockCtx, `SELECT 1 FROM ONLY `+identifier+` ORDER BY id, at LIMIT 1`).Scan(&marker)
+	if err == nil {
+		return false, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		if reclaimLockUnavailable(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if _, err := tx.Exec(lockCtx, `TRUNCATE TABLE ONLY `+identifier); err != nil {
+		if reclaimLockUnavailable(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if err := tx.Commit(lockCtx); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func reclaimLockUnavailable(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.Is(err, context.DeadlineExceeded) ||
+		(errors.As(err, &pgErr) && (pgErr.Code == "55P03" || pgErr.Code == "57014"))
 }
 
 // ensureDailyPartitions creates a daily partition for each of the next `aheadDays` days
@@ -106,7 +220,7 @@ func dropExpiredPartitions(ctx context.Context, pool *pgxpool.Pool, parent strin
 	}
 	// A partition for day D covers [D, D+1). It is fully expired once D+1 <= cutoff,
 	// i.e. D < cutoff-1day. cutoff = midnight(today) - retentionDays.
-	cutoff := time.Now().UTC().Truncate(24 * time.Hour).AddDate(0, 0, -retentionDays)
+	cutoff := time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -retentionDays)
 
 	rows, err := pool.Query(ctx,
 		`SELECT inhrelid::regclass::text FROM pg_inherits WHERE inhparent = $1::regclass`, parent)

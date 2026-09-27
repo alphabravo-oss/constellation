@@ -129,7 +129,7 @@ export function ContainersPage() {
           }
         />
       ) : (
-        <DataTable rows={rows} columns={columns} rowKey={(c) => `${c.node}-${c.id || c.pod_name + c.name}`} defaultSort={{ id: "risk", dir: "desc" }} />
+        <DataTable rows={rows} sourceLimit={3000} sourceCount={items.length} columns={columns} rowKey={(c) => `${c.node}-${c.id || c.pod_name + c.name}`} defaultSort={{ id: "risk", dir: "desc" }} />
       )}
     </div>
   );

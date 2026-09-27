@@ -97,4 +97,11 @@ test("command palette lists navigation scopes in sidebar order", async ({ page }
   await expect(palette).toBeVisible();
   const headings = palette.locator("[cmdk-group-heading]");
   await expect(headings).toContainText(SCOPES);
+  await expect(palette.getByText("Sensor Health", { exact: true })).toBeVisible();
+  await palette.getByText("Sensor Health", { exact: true }).click();
+  await expect(page).toHaveURL(`/clusters/${CLUSTER_ID}/health`);
+
+  await page.goto("/settings");
+  await page.keyboard.press("ControlOrMeta+k");
+  await expect(page.getByRole("dialog", { name: "Command palette" }).getByText("Sensor Health", { exact: true })).toHaveCount(0);
 });

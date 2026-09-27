@@ -152,6 +152,8 @@ export function ServerlessFunctionsPage() {
         <div data-testid="serverless-table">
           <DataTable
             rows={filtered}
+            sourceLimit={500}
+            sourceCount={functions.length}
             columns={columns}
             rowKey={(item) => item.id}
             onRowClick={(item) => setSelectedID(item.id)}

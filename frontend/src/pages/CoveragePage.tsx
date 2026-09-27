@@ -710,7 +710,7 @@ export function CoveragePage() {
               <span className="text-muted-foreground">{[...new Set(rec.map((r) => r.status))].join(", ")}</span>
             </>
           : "No receivers",
-        href: "/integrations",
+        href: "/settings/integrations",
         loading: qReceivers.isPending,
       });
     }

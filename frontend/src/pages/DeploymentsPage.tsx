@@ -25,7 +25,7 @@ export function DeploymentsPage() {
   const [hidePlatformComponents, setHidePlatformComponents] = usePlatformComponentVisibility();
   const q = useQuery({
     queryKey: ["deployments", namespace, clusterId],
-    queryFn: () => deployments.list({ namespace: namespace || undefined, cluster_id: clusterId }),
+    queryFn: () => deployments.list({ namespace: namespace || undefined, cluster_id: clusterId, limit: 500 }),
   });
 
   const allRows = useMemo(() => q.data?.deployments ?? [], [q.data?.deployments]);
@@ -177,6 +177,8 @@ export function DeploymentsPage() {
 
       <DataTable
         rows={rows}
+        sourceLimit={500}
+        sourceCount={allRows.length}
         columns={columns}
         rowKey={(d) => d.id}
         testId="deployments-table"

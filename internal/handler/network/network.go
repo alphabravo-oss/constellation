@@ -40,6 +40,34 @@ func (h *Network) Map(w http.ResponseWriter, r *http.Request) {
 	}
 	namespace := r.URL.Query().Get("namespace")
 	verdict := strings.ToLower(r.URL.Query().Get("verdict"))
+	port := 0
+	if raw := strings.TrimSpace(r.URL.Query().Get("port")); raw != "" {
+		port, _ = strconv.Atoi(raw)
+		if port < 1 || port > 65535 {
+			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid port"})
+			return
+		}
+	}
+	peer := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("peer")))
+	application := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("application")))
+	flowOffset := 0
+	if raw := strings.TrimSpace(r.URL.Query().Get("offset")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 || parsed > 1000000 {
+			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid offset"})
+			return
+		}
+		flowOffset = parsed
+	}
+	recentOffset := 0
+	if raw := strings.TrimSpace(r.URL.Query().Get("recent_offset")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 || parsed > 1000000 {
+			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid recent_offset"})
+			return
+		}
+		recentOffset = parsed
+	}
 	clusterID, err := h.resolveNetworkCluster(r, subj.OrgID)
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -61,12 +89,22 @@ func (h *Network) Map(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	flows, err := h.flows(r, subj.OrgID, clusterID, hours, namespace, verdict, groupActive, groupMembers)
+	flows, err := h.flows(r, subj.OrgID, clusterID, hours, namespace, verdict, groupActive, groupMembers, port, peer, application, flowOffset)
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	recentFlows, err := h.recentFlows(r, subj.OrgID, clusterID, hours, namespace, verdict, groupActive, groupMembers)
+	recentFlows, err := h.recentFlows(r, subj.OrgID, clusterID, hours, namespace, verdict, groupActive, groupMembers, port, peer, application, recentOffset)
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	flowTotal, err := h.flowTotal(r, subj.OrgID, clusterID, hours, namespace, verdict, groupActive, groupMembers, port, peer, application)
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	recentTotal, err := h.recentFlowTotal(r, subj.OrgID, clusterID, hours, namespace, verdict, groupActive, groupMembers, port, peer, application)
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -101,16 +139,24 @@ func (h *Network) Map(w http.ResponseWriter, r *http.Request) {
 	}
 
 	summary := map[string]any{
-		"window_hours":  hours,
-		"workloads":     len(workloads),
-		"flows":         len(flows),
-		"recent_flows":  len(recentFlows),
-		"total_bytes":   sumNetworkMetric(flows, "bytes"),
-		"total_packets": sumNetworkMetric(flows, "packets"),
-		"allowed":       countNetworkFlows(flows, "state", "ok"),
-		"alerted":       countNetworkFlows(flows, "state", "warn"),
-		"blocked":       countNetworkFlows(flows, "state", "denied"),
-		"clusters":      clusters,
+		"window_hours":          hours,
+		"workloads":             len(workloads),
+		"flows":                 len(flows),
+		"flows_total":           flowTotal,
+		"flows_limit":           300,
+		"flows_offset":          flowOffset,
+		"flows_has_more":        flowOffset+len(flows) < flowTotal,
+		"recent_flows":          len(recentFlows),
+		"recent_flows_total":    recentTotal,
+		"recent_flows_limit":    50,
+		"recent_flows_offset":   recentOffset,
+		"recent_flows_has_more": recentOffset+len(recentFlows) < recentTotal,
+		"total_bytes":           sumNetworkMetric(flows, "bytes"),
+		"total_packets":         sumNetworkMetric(flows, "packets"),
+		"allowed":               countNetworkFlows(flows, "state", "ok"),
+		"alerted":               countNetworkFlows(flows, "state", "warn"),
+		"blocked":               countNetworkFlows(flows, "state", "denied"),
+		"clusters":              clusters,
 	}
 	if clusterID != nil {
 		summary["selected_cluster_id"] = clusterID.String()
@@ -229,7 +275,7 @@ SELECT d.cluster_id::text, COALESCE(c.name, ''), d.namespace, d.name, d.kind, d.
 	return out, rows.Err()
 }
 
-func (h *Network) flows(r *http.Request, orgID uuid.UUID, clusterID *uuid.UUID, hours int, namespace, verdict string, groupActive bool, groupMembers []string) ([]map[string]any, error) {
+func (h *Network) flows(r *http.Request, orgID uuid.UUID, clusterID *uuid.UUID, hours int, namespace, verdict string, groupActive bool, groupMembers []string, port int, peer, application string, offset int) ([]map[string]any, error) {
 	// Source precedence (Wave 4 / NET-3): dp > hubble > bpf > declared >
 	// synthetic. dp rows carry real on-wire byte/session counts and L7 from
 	// DPI parsers; hubble rows (Cilium-eBPF clusters where dp is structurally
@@ -265,9 +311,12 @@ SELECT cluster_id::text, src_workload, dst_workload, protocol, l7_protocol, dst_
    AND ($4::text = '' OR src_workload LIKE $4 || '/%' OR dst_workload LIKE $4 || '/%')
    AND ($5::text = '' OR lower(verdict) = $5)
    AND (NOT $6::boolean OR src_workload = ANY($7::text[]) OR dst_workload = ANY($7::text[]))
+   AND ($8::int = 0 OR dst_port = $8 OR min_src_port = $8)
+   AND ($9::text = '' OR strpos(lower(src_workload), $9) > 0 OR strpos(lower(dst_workload), $9) > 0 OR strpos(lower(min_src_addr), $9) > 0 OR strpos(lower(min_dst_addr), $9) > 0)
+   AND ($10::text = '' OR lower(l7_protocol) = $10 OR max_application::text = $10)
  GROUP BY cluster_id, src_workload, dst_workload, protocol, l7_protocol, dst_port, verdict
- ORDER BY MAX(max_at) DESC, SUM(sum_bytes) DESC
- LIMIT 300`, orgID, clusterID, fmt.Sprintf("%d", hours), namespace, verdict, groupActive, groupMembers)
+ ORDER BY MAX(max_at) DESC, SUM(sum_bytes) DESC, cluster_id, src_workload, dst_workload, protocol, l7_protocol, dst_port, verdict
+ LIMIT 300 OFFSET $11`, orgID, clusterID, fmt.Sprintf("%d", hours), namespace, verdict, groupActive, groupMembers, port, peer, application, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -359,7 +408,7 @@ func threatNameForFlow(id int32) string {
 	return fmt.Sprintf("signature %d", id)
 }
 
-func (h *Network) recentFlows(r *http.Request, orgID uuid.UUID, clusterID *uuid.UUID, hours int, namespace, verdict string, groupActive bool, groupMembers []string) ([]map[string]any, error) {
+func (h *Network) recentFlows(r *http.Request, orgID uuid.UUID, clusterID *uuid.UUID, hours int, namespace, verdict string, groupActive bool, groupMembers []string, port int, peer, application string, offset int) ([]map[string]any, error) {
 	rows, err := h.db.Pool().Query(r.Context(), `
 SELECT cluster_id::text, src_workload, dst_workload, protocol, COALESCE(l7_protocol,''), COALESCE(dst_port,0), verdict,
        COALESCE(src_addr, ''), COALESCE(dst_addr, ''), COALESCE(src_port, 0),
@@ -371,8 +420,11 @@ SELECT cluster_id::text, src_workload, dst_workload, protocol, COALESCE(l7_proto
    AND ($4::text = '' OR src_workload LIKE $4 || '/%' OR dst_workload LIKE $4 || '/%')
    AND ($5::text = '' OR lower(verdict) = $5)
    AND (NOT $6::boolean OR src_workload = ANY($7::text[]) OR dst_workload = ANY($7::text[]))
- ORDER BY at DESC
- LIMIT 50`, orgID, clusterID, fmt.Sprintf("%d", hours), namespace, verdict, groupActive, groupMembers)
+   AND ($8::int = 0 OR dst_port = $8 OR src_port = $8)
+   AND ($9::text = '' OR strpos(lower(src_workload), $9) > 0 OR strpos(lower(dst_workload), $9) > 0 OR strpos(lower(coalesce(src_addr,'')), $9) > 0 OR strpos(lower(coalesce(dst_addr,'')), $9) > 0)
+   AND ($10::text = '' OR lower(coalesce(l7_protocol,'')) = $10 OR application::text = $10)
+ ORDER BY at DESC, id DESC
+ LIMIT 50 OFFSET $11`, orgID, clusterID, fmt.Sprintf("%d", hours), namespace, verdict, groupActive, groupMembers, port, peer, application, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -403,6 +455,39 @@ SELECT cluster_id::text, src_workload, dst_workload, protocol, COALESCE(l7_proto
 		})
 	}
 	return out, rows.Err()
+}
+
+func (h *Network) flowTotal(r *http.Request, orgID uuid.UUID, clusterID *uuid.UUID, hours int, namespace, verdict string, groupActive bool, groupMembers []string, port int, peer, application string) (int, error) {
+	var total int
+	err := h.db.Pool().QueryRow(r.Context(), `
+SELECT COUNT(*)::int FROM (
+  SELECT 1 FROM network_flow_rollups
+   WHERE org_id = $1 AND ($2::uuid IS NULL OR cluster_id = $2)
+     AND bucket >= date_trunc('hour', NOW() - ($3::int * INTERVAL '1 hour'))
+     AND ($4::text = '' OR src_workload LIKE $4 || '/%' OR dst_workload LIKE $4 || '/%')
+     AND ($5::text = '' OR lower(verdict) = $5)
+     AND (NOT $6::boolean OR src_workload = ANY($7::text[]) OR dst_workload = ANY($7::text[]))
+     AND ($8::int = 0 OR dst_port = $8 OR min_src_port = $8)
+     AND ($9::text = '' OR strpos(lower(src_workload), $9) > 0 OR strpos(lower(dst_workload), $9) > 0 OR strpos(lower(min_src_addr), $9) > 0 OR strpos(lower(min_dst_addr), $9) > 0)
+     AND ($10::text = '' OR lower(l7_protocol) = $10 OR max_application::text = $10)
+   GROUP BY cluster_id, src_workload, dst_workload, protocol, l7_protocol, dst_port, verdict
+) AS matched`, orgID, clusterID, hours, namespace, verdict, groupActive, groupMembers, port, peer, application).Scan(&total)
+	return total, err
+}
+
+func (h *Network) recentFlowTotal(r *http.Request, orgID uuid.UUID, clusterID *uuid.UUID, hours int, namespace, verdict string, groupActive bool, groupMembers []string, port int, peer, application string) (int, error) {
+	var total int
+	err := h.db.Pool().QueryRow(r.Context(), `
+SELECT COUNT(*)::int FROM network_flows
+ WHERE org_id = $1 AND ($2::uuid IS NULL OR cluster_id = $2)
+   AND at >= NOW() - ($3::int * INTERVAL '1 hour')
+   AND ($4::text = '' OR src_workload LIKE $4 || '/%' OR dst_workload LIKE $4 || '/%')
+   AND ($5::text = '' OR lower(verdict) = $5)
+   AND (NOT $6::boolean OR src_workload = ANY($7::text[]) OR dst_workload = ANY($7::text[]))
+   AND ($8::int = 0 OR dst_port = $8 OR src_port = $8)
+   AND ($9::text = '' OR strpos(lower(src_workload), $9) > 0 OR strpos(lower(dst_workload), $9) > 0 OR strpos(lower(coalesce(src_addr,'')), $9) > 0 OR strpos(lower(coalesce(dst_addr,'')), $9) > 0)
+   AND ($10::text = '' OR lower(coalesce(l7_protocol,'')) = $10 OR application::text = $10)`, orgID, clusterID, hours, namespace, verdict, groupActive, groupMembers, port, peer, application).Scan(&total)
+	return total, err
 }
 
 func sumNetworkMetric(flows []map[string]any, key string) int64 {

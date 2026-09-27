@@ -29,7 +29,7 @@ export default function ProcessTab({ entityId }: { entityType: string; entityId:
   return (
     <div className="space-y-2" data-testid="risk-process-tab">
       <p className="text-xs text-muted-foreground">
-        Recent runtime events for <span className="font-mono">{entityId}</span> ({events.length}).
+        Recent runtime events for <span className="font-mono">{entityId}</span> ({events.length} loaded; showing first {Math.min(50, events.length)}).
       </p>
       <ul className="space-y-1 text-xs">
         {events.slice(0, 50).map((e) => (

@@ -231,6 +231,7 @@ type sessionFilters struct {
 	GroupName    string
 	GroupActive  bool
 	GroupMembers []string
+	Hours        int
 }
 
 // KillSession queues a request to terminate one live session (NV DELETE /v1/session).
@@ -349,6 +350,14 @@ func parseSessionFilters(r *http.Request) (sessionFilters, error) {
 	filters.Workload = strings.ToLower(strings.TrimSpace(q.Get("workload")))
 	filters.Node = strings.ToLower(strings.TrimSpace(q.Get("node")))
 	filters.Group = strings.TrimSpace(q.Get("group"))
+	filters.Hours = 0
+	if raw := strings.TrimSpace(q.Get("hours")); raw != "" {
+		hours, err := strconv.Atoi(raw)
+		if err != nil || hours < 1 || hours > 720 {
+			return filters, fmt.Errorf("invalid hours")
+		}
+		filters.Hours = hours
+	}
 	return filters, nil
 }
 
@@ -409,6 +418,9 @@ func (f sessionFilters) applySessionWhere(where []string, args []any) ([]string,
 		p := add(f.GroupMembers)
 		where = append(where, "workload_id = ANY("+p+"::text[])")
 	}
+	if f.Hours > 0 {
+		where = append(where, "updated_at >= NOW() - ("+add(f.Hours)+"::int * INTERVAL '1 hour')")
+	}
 	return where, args
 }
 
@@ -424,6 +436,12 @@ func appFilterPorts(raw string) []int {
 		return []int{22}
 	case "mysql":
 		return []int{3306}
+	case "postgres", "postgresql":
+		return []int{5432}
+	case "redis":
+		return []int{6379}
+	case "mongodb", "mongo":
+		return []int{27017}
 	default:
 		return nil
 	}
@@ -468,6 +486,14 @@ func (h *Network) Sessions(w http.ResponseWriter, r *http.Request) {
 	if limit <= 0 || limit > 2000 {
 		limit = 500
 	}
+	offset := 0
+	if raw := strings.TrimSpace(r.URL.Query().Get("offset")); raw != "" {
+		offset, err = strconv.Atoi(raw)
+		if err != nil || offset < 0 || offset > 1000000 {
+			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid offset"})
+			return
+		}
+	}
 	filters, err := parseSessionFilters(r)
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -490,11 +516,14 @@ func (h *Network) Sessions(w http.ResponseWriter, r *http.Request) {
 	where, args = filters.applySessionWhere(where, args)
 	whereSQL := strings.Join(where, " AND ")
 	total := 0
-	_ = h.db.Pool().QueryRow(r.Context(), fmt.Sprintf(`
+	if err := h.db.Pool().QueryRow(r.Context(), fmt.Sprintf(`
 SELECT COUNT(*)::int
   FROM network_sessions
- WHERE %s`, whereSQL), args...).Scan(&total)
-	listArgs := append(append([]any{}, args...), limit)
+ WHERE %s`, whereSQL), args...).Scan(&total); err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	listArgs := append(append([]any{}, args...), limit, offset)
 	rows, err := h.db.Pool().Query(r.Context(), fmt.Sprintf(`
 SELECT id, node, workload_id, application, ip_proto,
        client_ip, client_port, server_ip, server_port, client_state, server_state,
@@ -507,10 +536,10 @@ SELECT id, node, workload_id, application, ip_proto,
                   ORDER BY d.last_seen_at DESC LIMIT 1), '{}'::jsonb)
   FROM network_sessions
  WHERE %s
- ORDER BY (client_bytes + server_bytes) DESC, age DESC
- LIMIT $%d`, whereSQL, len(listArgs)), listArgs...)
+ ORDER BY (client_bytes + server_bytes) DESC, age DESC, cluster_id, node, id
+ LIMIT $%d OFFSET $%d`, whereSQL, len(listArgs)-1, len(listArgs)), listArgs...)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusOK, map[string]any{"sessions": []sessionDTO{}, "total": 0, "limit": limit, "has_more": false})
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	defer rows.Close()
@@ -536,7 +565,8 @@ SELECT id, node, workload_id, application, ip_proto,
 		"sessions": out,
 		"total":    total,
 		"limit":    limit,
-		"has_more": total > len(out),
+		"offset":   offset,
+		"has_more": total > offset+len(out),
 	}
 	if clusterID != nil {
 		response["cluster_id"] = clusterID.String()

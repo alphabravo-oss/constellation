@@ -75,7 +75,7 @@ test("Settings exposes onboarding, integrations, migration, and AI controls", as
   await expect(page.getByTestId("migration-preview-wizard")).toContainText("Preview import");
   await page.getByTestId("migration-export-input").fill(NEUVECTOR_EXPORT);
   await page.getByTestId("migration-preview-submit").click();
-  await expect(page.getByTestId("migration-preview-result")).toContainText("Read-only preview");
+  await expect(page.getByTestId("migration-preview-result")).toContainText("Preview persisted");
   await expect(page.getByTestId("migration-preview-policy").filter({ hasText: "nv-1001-block-latest-tag" })).toBeVisible();
   await expect(page.getByTestId("migration-preview-yaml")).toContainText("AdmissionRule");
   await expect(page.getByTestId("migration-rollback-bundle")).toContainText("restore previous policy versions");

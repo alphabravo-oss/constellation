@@ -994,6 +994,7 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/auth-servers", s.requireVerb(rbac.VerbManageAuthServers, authServers.List))
 			r.Post("/auth-servers", s.requireVerb(rbac.VerbManageAuthServers, authServers.Create))
 			r.Get("/auth-servers/{id}", s.requireVerb(rbac.VerbManageAuthServers, authServers.Get))
+			r.Post("/auth-servers/{id}/role-preview", s.requireVerb(rbac.VerbManageAuthServers, authServers.PreviewRoles))
 			r.Post("/auth-servers/{id}/test", s.requireVerb(rbac.VerbManageAuthServers, authServers.TestConnection))
 			r.Put("/auth-servers/{id}", s.requireVerb(rbac.VerbManageAuthServers, authServers.Update))
 			r.Delete("/auth-servers/{id}", s.requireVerb(rbac.VerbManageAuthServers, authServers.Delete))

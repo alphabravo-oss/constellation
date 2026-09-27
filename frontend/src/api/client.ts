@@ -298,7 +298,7 @@ export interface AssetDetail {
 
 export const assets = {
   list: (params: { limit?: number; offset?: number; cluster_id?: string } = {}) =>
-    api.get<{ assets: Asset[]; limit: number; offset: number }>("/assets", { params }).then((r) => r.data),
+    api.get<{ assets: Asset[]; limit: number; offset: number; has_more: boolean }>("/assets", { params }).then((r) => r.data),
   get: (id: string) => api.get<AssetDetail>(`/assets/${id}`).then((r) => r.data),
   createImageAcceptance: (id: string, body: { rationale: string; accepted_until: string }) =>
     api.post<{ id: string; image_acceptances: ImageAcceptance[] }>(`/assets/${id}/image-acceptances`, body).then((r) => r.data),
@@ -2033,6 +2033,7 @@ export interface NetworkSessionsResponse {
   sessions: NetworkSession[];
   total: number;
   limit: number;
+  offset: number;
   has_more: boolean;
   cluster_id?: string;
   selected_group?: string;
@@ -2042,6 +2043,8 @@ export interface NetworkSessionsResponse {
 export interface NetworkSessionFilters {
   cluster_id?: string;
   limit?: number;
+  offset?: number;
+  hours?: number;
   group?: string;
   protocol?: string;
   application?: string;
@@ -2161,7 +2164,15 @@ export interface NetworkMap {
     clusters?: Array<{ id: string; name: string; state: string }>;
     workloads: number;
     flows: number;
+    flows_total?: number;
+    flows_limit?: number;
+    flows_offset?: number;
+    flows_has_more?: boolean;
     recent_flows?: number;
+    recent_flows_total?: number;
+    recent_flows_limit?: number;
+    recent_flows_offset?: number;
+    recent_flows_has_more?: boolean;
     total_bytes?: number;
     total_packets?: number;
     allowed?: number;
@@ -2217,6 +2228,10 @@ export interface NetworkConversation {
 
 export interface NetworkConversations {
   conversations: NetworkConversation[];
+  total?: number;
+  limit?: number;
+  offset?: number;
+  has_more?: boolean;
   nodes: string[];
   node_kinds: Record<string, NetworkNodeKind>;
   edges: NetworkConversationEdge[];
@@ -2343,11 +2358,11 @@ export interface NetworkPolicyLifecycleResponse {
 }
 
 export const network = {
-  map: (params: { hours?: number; namespace?: string; group?: string; verdict?: string; cluster_id?: string } = {}) =>
+  map: (params: { hours?: number; namespace?: string; group?: string; verdict?: string; cluster_id?: string; port?: number; peer?: string; application?: string; offset?: number; recent_offset?: number } = {}) =>
     api.get<NetworkMap>("/network/map", { params }).then((r) => r.data),
   exposure: (params: { hours?: number; cluster_id?: string } = {}) =>
     api.get<ExposureResponse>("/network/exposure", { params }).then((r) => r.data),
-  conversations: (params: { hours?: number; cluster_id?: string; namespace?: string; verdict?: string; group?: string } = {}) =>
+  conversations: (params: { hours?: number; cluster_id?: string; namespace?: string; verdict?: string; group?: string; port?: number; peer?: string; application?: string; limit?: number; offset?: number } = {}) =>
     api.get<NetworkConversations>("/network/conversations", { params }).then((r) => r.data),
   // NV per-conversation drill-down: every protocol/port/app stream between from→to,
   // with directional (in/out) bytes + session counts.
@@ -2362,6 +2377,7 @@ export const network = {
       sessions: r.data.sessions ?? [],
       total: r.data.total ?? r.data.sessions?.length ?? 0,
       limit: r.data.limit ?? params.limit ?? r.data.sessions?.length ?? 0,
+      offset: r.data.offset ?? params.offset ?? 0,
       has_more: r.data.has_more ?? false,
       cluster_id: r.data.cluster_id,
       selected_group: r.data.selected_group,
@@ -2779,8 +2795,10 @@ export interface GeneratePolicyResponse {
 
 /** Wave 5: DPI threats from the NeuVector dp data-plane. */
 export const runtimeThreats = {
-  list: (params: { hours?: number; severity_min?: number; cluster_id?: string; workload_id?: string; group?: string; category?: "dlp" | "waf" | "ips" } = {}) =>
+  list: (params: { hours?: number; severity_min?: number; cluster_id?: string; workload_id?: string; group?: string; category?: "dlp" | "waf" | "ips"; port?: number; peer?: string; application?: number; limit?: number; offset?: number } = {}) =>
     api.get<{ threats: RuntimeThreat[] }>("/runtime-threats", { params }).then((r) => r.data.threats),
+  page: (params: { hours?: number; severity_min?: number; cluster_id?: string; workload_id?: string; group?: string; category?: "dlp" | "waf" | "ips"; port?: number; peer?: string; application?: number; limit?: number; offset?: number } = {}) =>
+    api.get<{ threats: RuntimeThreat[]; total: number; limit: number; offset: number; has_more: boolean }>("/runtime-threats", { params }).then((r) => r.data),
   get: (id: string) =>
     api.get<RuntimeThreatDetail>(`/runtime-threats/${encodeURIComponent(id)}`).then((r) => r.data),
 };
@@ -4853,11 +4871,28 @@ export const securityPolicyApi = {
 export interface AuthServerConfig {
   // LDAP
   url?: string; bind_dn?: string; bind_password?: string; base_dn?: string;
-  user_filter?: string; group_attribute?: string; email_attribute?: string;
+  user_filter?: string; group_attribute?: string; group_base_dn?: string; group_member_attribute?: string; email_attribute?: string;
   // SAML
   idp_metadata_xml?: string; entity_id?: string; acs_url?: string; sp_cert_pem?: string; sp_key_pem?: string;
   // OIDC
-  issuer_url?: string; client_id?: string; client_secret?: string; redirect_url?: string; scopes?: string[];
+  issuer_url?: string; client_id?: string; client_secret?: string; redirect_url?: string; scopes?: string[]; groups_claim?: string;
+}
+
+export interface AuthRolePreview {
+  provider_type: string;
+  input_kind: string;
+  group_count: number;
+  matched_group_count: number;
+  default_applied: boolean;
+  grants: { role: string; scope: "organization" | "cluster" | "namespace"; cluster_id?: string; namespace?: string }[];
+}
+
+export interface AuthScopedMapping {
+  id: string;
+  group: string;
+  role: string;
+  cluster_id?: string;
+  namespace?: string;
 }
 
 export interface AuthServer {
@@ -4875,6 +4910,14 @@ export const authServersApi = {
   list: () => api.get<{ auth_servers: AuthServer[] }>("/auth-servers").then((r) => r.data.auth_servers),
   testConnection: (id: string) =>
     api.post<{ ok: boolean; type: string; message?: string }>(`/auth-servers/${encodeURIComponent(id)}/test`).then((r) => r.data),
+  previewRoles: (id: string, groups: string[]) =>
+    api.post<AuthRolePreview>(`/auth-servers/${encodeURIComponent(id)}/role-preview`, { groups }).then((r) => r.data),
+  listScopedMappings: (id: string) =>
+    api.get<{ scoped_mappings: AuthScopedMapping[] }>(`/auth-servers/${encodeURIComponent(id)}/scoped-mappings`).then((r) => r.data.scoped_mappings),
+  createScopedMapping: (id: string, body: Omit<AuthScopedMapping, "id">) =>
+    api.post<AuthScopedMapping>(`/auth-servers/${encodeURIComponent(id)}/scoped-mappings`, body).then((r) => r.data),
+  deleteScopedMapping: (id: string, mappingId: string) =>
+    api.delete(`/auth-servers/${encodeURIComponent(id)}/scoped-mappings/${encodeURIComponent(mappingId)}`).then((r) => r.data),
   create: (body: Omit<AuthServer, "id" | "revision">) =>
     api.post<AuthServer>("/auth-servers", body).then((r) => r.data),
   update: (id: string, body: AuthServer) =>

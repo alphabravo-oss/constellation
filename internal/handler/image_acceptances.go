@@ -2,12 +2,14 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/pkg/audit"
@@ -93,7 +95,12 @@ func (h *ImageAcceptances) Create(w http.ResponseWriter, r *http.Request) {
 INSERT INTO image_acceptances (org_id, image_digest, rationale, approver_id, accepted_until)
 VALUES ($1, $2, $3, $4, $5)
 RETURNING id`, subj.OrgID, imageDigest, body.Rationale, subj.UserID, acceptedUntil).Scan(&id); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "image_acceptances_active_expiry_key" {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "active image acceptance already exists for this expiry"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "create image acceptance failed"})
 		return
 	}
 	if h.auditLog != nil {

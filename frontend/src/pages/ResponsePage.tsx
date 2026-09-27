@@ -175,7 +175,8 @@ export function ResponsePage() {
       )}
 
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {filtered.map((rule) => (
+        {filtered.length > 100 && <p className="col-span-full text-xs text-muted-foreground">Showing the first 100 of {filtered.length} loaded rule cards. Use the paged table above for remaining rules.</p>}
+        {filtered.slice(0, 100).map((rule) => (
           <RuleCard key={rule.id} rule={rule} onSelect={() => selectRule(rule)} />
         ))}
       </section>

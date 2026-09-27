@@ -138,6 +138,106 @@ func (h *AuthServers) Get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toBody(srv))
 }
 
+type rolePreviewRequest struct {
+	Groups []string `json:"groups"`
+}
+
+type rolePreviewGrant struct {
+	Role      string `json:"role"`
+	Scope     string `json:"scope"`
+	ClusterID string `json:"cluster_id,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
+}
+
+// PreviewRoles resolves supplied, already-extracted group values through the saved provider's
+// exact login mapping. It never contacts an IdP or returns supplied group values or secrets.
+func (h *AuthServers) PreviewRoles(w http.ResponseWriter, r *http.Request) {
+	subj, ok := SubjectFrom(r.Context())
+	if !ok {
+		jsonError(w, http.StatusUnauthorized, "no subject")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	srv, err := auth.GetAuthServer(r.Context(), h.db.Pool(), subj.OrgID, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		jsonError(w, http.StatusNotFound, "auth server not found")
+		return
+	}
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "auth server unavailable")
+		return
+	}
+	var input rolePreviewRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil || input.Groups == nil || len(input.Groups) > 50 {
+		jsonError(w, http.StatusBadRequest, "invalid group values")
+		return
+	}
+	var extra any
+	if decoder.Decode(&extra) != io.EOF {
+		jsonError(w, http.StatusBadRequest, "invalid group values")
+		return
+	}
+	for _, group := range input.Groups {
+		if len(group) > 256 || strings.TrimSpace(group) == "" || strings.ContainsAny(group, "\r\n\x00") {
+			jsonError(w, http.StatusBadRequest, "invalid group values")
+			return
+		}
+	}
+	var invalidScopedRows bool
+	if err := h.db.Pool().QueryRow(r.Context(), `
+SELECT EXISTS(
+  SELECT 1 FROM sso_role_mappings m
+  LEFT JOIN clusters c ON c.id=m.scope_cluster_id AND c.org_id=$2
+  WHERE m.auth_server_id=$1
+    AND (m.org_id<>$2 OR (m.scope_cluster_id IS NOT NULL AND c.id IS NULL))
+)`, srv.ID, subj.OrgID).Scan(&invalidScopedRows); err != nil || invalidScopedRows {
+		jsonError(w, http.StatusConflict, "scoped mapping unavailable")
+		return
+	}
+	scoped, err := auth.LoadScopedRoleMappings(r.Context(), h.db.Pool(), srv.ID)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "role mapping unavailable")
+		return
+	}
+	mapping := srv.RoleMapping.WithScopedRules(scoped)
+	matched := 0
+	orgMatched := false
+	for _, group := range input.Groups {
+		key := strings.ToLower(strings.TrimSpace(group))
+		if mapping.Rules[key] != "" {
+			orgMatched = true
+		}
+		if mapping.Rules[key] != "" || len(mapping.ScopedRules[key]) != 0 {
+			matched++
+		}
+	}
+	grants := make([]rolePreviewGrant, 0)
+	for _, grant := range mapping.MapScopedRoles(input.Groups) {
+		item := rolePreviewGrant{Role: grant.Role, Scope: "organization"}
+		if grant.Scope.ClusterID != "" {
+			item.Scope = "cluster"
+			item.ClusterID = grant.Scope.ClusterID
+			if grant.Scope.Namespace != "" {
+				item.Scope = "namespace"
+				item.Namespace = grant.Scope.Namespace
+			}
+		}
+		grants = append(grants, item)
+	}
+	inputKind := map[string]string{auth.ServerTypeLDAP: "ldap_group_cn", auth.ServerTypeSAML: "saml_group_attribute", auth.ServerTypeOIDC: "oidc_groups_claim"}[srv.Type]
+	writeJSON(w, http.StatusOK, map[string]any{
+		"provider_type": srv.Type, "input_kind": inputKind, "group_count": len(input.Groups),
+		"matched_group_count": matched, "default_applied": !orgMatched && mapping.Default != "",
+		"grants": grants,
+	})
+}
+
 func (h *AuthServers) TestConnection(w http.ResponseWriter, r *http.Request) {
 	subj, ok := SubjectFrom(r.Context())
 	if !ok {
@@ -561,6 +661,17 @@ func (h *AuthServers) CreateScopedMapping(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if model.ClusterID != nil {
+		var exists bool
+		if err := h.db.Pool().QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM clusters WHERE id=$1 AND org_id=$2)`, model.ClusterID, subj.OrgID).Scan(&exists); err != nil {
+			jsonError(w, http.StatusInternalServerError, "cluster unavailable")
+			return
+		}
+		if !exists {
+			jsonError(w, http.StatusBadRequest, "cluster_id not in organization")
+			return
+		}
 	}
 	created, err := auth.CreateScopedRoleMapping(r.Context(), h.db.Pool(), model)
 	if errors.Is(err, auth.ErrScopedMappingExists) {

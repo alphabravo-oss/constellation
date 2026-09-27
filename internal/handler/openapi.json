@@ -3682,7 +3682,72 @@
     },
     "/api/v1/assets": {
       "get": {
-        "summary": "List assets"
+        "summary": "List assets",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Stable risk-ranked asset page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "assets",
+                    "limit",
+                    "offset",
+                    "has_more"
+                  ],
+                  "properties": {
+                    "assets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "limit": {
+                      "type": "integer"
+                    },
+                    "offset": {
+                      "type": "integer"
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/api/v1/assets/{id}": {
@@ -3987,6 +4052,135 @@
           },
           "409": {
             "description": "A provider with that name already exists in the org."
+          }
+        }
+      }
+    },
+    "/api/v1/auth-servers/{id}/role-preview": {
+      "post": {
+        "summary": "Preview saved provider group-to-role and scope resolution",
+        "description": "Requires manage_auth_servers. Resolves up to 50 already-extracted LDAP group CNs, SAML group attribute values, or OIDC groups-claim values against the caller organization's saved provider mapping and scoped grants. Uses the same mapping resolver as sign-in but does not contact an IdP, verify an assertion or token, authenticate a user, or persist an assignment. Response includes only counts and mapped role/scope grants; supplied groups and provider secrets are not echoed. Disabled providers can also be previewed. Unknown request fields (such as credentials or tokens) are rejected.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "groups"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "groups": {
+                    "type": "array",
+                    "maxItems": 50,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Redacted saved-mapping result. Grants are mapping results, not proof of a successful sign-in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "provider_type",
+                    "input_kind",
+                    "group_count",
+                    "matched_group_count",
+                    "default_applied",
+                    "grants"
+                  ],
+                  "properties": {
+                    "provider_type": {
+                      "type": "string",
+                      "enum": [
+                        "ldap",
+                        "saml",
+                        "oidc"
+                      ]
+                    },
+                    "input_kind": {
+                      "type": "string"
+                    },
+                    "group_count": {
+                      "type": "integer"
+                    },
+                    "matched_group_count": {
+                      "type": "integer"
+                    },
+                    "default_applied": {
+                      "type": "boolean"
+                    },
+                    "grants": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "role",
+                          "scope"
+                        ],
+                        "properties": {
+                          "role": {
+                            "type": "string"
+                          },
+                          "scope": {
+                            "type": "string",
+                            "enum": [
+                              "organization",
+                              "cluster",
+                              "namespace"
+                            ]
+                          },
+                          "cluster_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "namespace": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid group values or unsupported input fields."
+          },
+          "401": {
+            "description": "Missing or invalid authentication."
+          },
+          "403": {
+            "description": "Caller lacks manage_auth_servers."
+          },
+          "404": {
+            "description": "Provider not found in caller organization."
+          },
+          "409": {
+            "description": "A saved scoped mapping references a cluster outside the caller organization."
           }
         }
       }

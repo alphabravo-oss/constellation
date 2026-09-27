@@ -440,6 +440,8 @@ export function ScannerSourcesPage() {
 
           <DataTable<ScanJob>
             rows={filteredJobs}
+            sourceLimit={200}
+            sourceCount={allJobs.length}
             columns={jobColumns}
             rowKey={(job) => job.id}
             onRowClick={(job) => setSelectedJobID(job.id)}

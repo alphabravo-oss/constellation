@@ -57,12 +57,13 @@ export CONSTELLATION_KEK
 CONSTELLATION_KEK="$(openssl rand -hex 32)"
 api="$(docker run -d --rm --network "$network" --network-alias constellation-api \
   -e DATABASE_URL='postgres://test:test@database:5432/constellation_test?sslmode=disable' \
-  -e CONSTELLATION_KEK -e CORS_ORIGINS= "$run_id-api")"
+  -e CONSTELLATION_KEK -e CORS_ORIGINS= -e MAX_CONCURRENT_SESSIONS=32 "$run_id-api")"
 frontend="$(docker run -d --rm --network "$network" -p 127.0.0.1::8080 "$run_id-frontend")"
 port="$(docker port "$frontend" 8080/tcp | sed 's/.*://')"
 export PLAYWRIGHT_BASE_URL="http://localhost:$port"
 export VITE_API_URL="$PLAYWRIGHT_BASE_URL"
 export CONSTELLATION_SEED_DB=0
+export PLAYWRIGHT_AUTH_SETUP=1
 ready=0
 for ((attempt=1; attempt<=60; attempt++)); do
   code="$(curl --silent --output /dev/null --write-out '%{http_code}' "$PLAYWRIGHT_BASE_URL/api/v1/auth/me" || true)"

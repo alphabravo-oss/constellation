@@ -107,6 +107,7 @@ export function FindingsPage() {
   const [kind, setKind] = useState<FindingKind | "">("");
   const [query, setQuery] = useState("");
   const [groupBy, setGroupBy] = useState<GroupBy>("none");
+  const [groupPage, setGroupPage] = useState(0);
   const [, startTransition] = useTransition();
 
   // Density
@@ -175,6 +176,7 @@ export function FindingsPage() {
   }, [q.data, query]);
 
   const grouped = useMemo(() => groupRows(rows, groupBy), [rows, groupBy]);
+  const visibleGroupPage = Math.min(groupPage, Math.max(0, Math.ceil(grouped.length / 100) - 1));
 
   // Active filter chips (for the chip rail below the input)
   const activeChips = useMemo(() => {
@@ -513,6 +515,8 @@ export function FindingsPage() {
       ) : groupBy === "none" ? (
         <DataTable
           rows={rows}
+          sourceLimit={500}
+          sourceCount={q.data?.findings.length ?? 0}
           columns={columns}
           rowKey={(f) => f.id}
           density={density}
@@ -537,7 +541,8 @@ export function FindingsPage() {
         />
       ) : (
         <div className="space-y-3">
-          {grouped.map((g) => (
+          <p className="text-xs text-muted-foreground" data-testid="findings-group-scope">Showing groups {grouped.length ? visibleGroupPage * 100 + 1 : 0}–{Math.min(grouped.length, (visibleGroupPage + 1) * 100)} of {grouped.length} from at most 500 loaded findings. Search, grouping, totals, and CSV use loaded findings only.</p>
+          {grouped.slice(visibleGroupPage * 100, (visibleGroupPage + 1) * 100).map((g) => (
             <details key={g.label} open className="rounded-md border border-border bg-card">
               <summary className="flex cursor-pointer items-center justify-between gap-2 border-b border-border px-3 py-2 list-none">
                 <div className="flex items-center gap-2">
@@ -548,6 +553,8 @@ export function FindingsPage() {
               </summary>
               <DataTable
                 rows={g.items}
+                sourceLimit={500}
+                sourceCount={q.data?.findings.length ?? 0}
                 columns={columns}
                 rowKey={(f) => f.id}
                 density={density}
@@ -565,6 +572,7 @@ export function FindingsPage() {
               />
             </details>
           ))}
+          <Pager page={visibleGroupPage} pageSize={100} total={grouped.length} rowsOnPage={Math.min(100, grouped.length - visibleGroupPage * 100)} onPage={setGroupPage} />
         </div>
       )}
 

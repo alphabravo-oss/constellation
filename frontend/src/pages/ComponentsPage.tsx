@@ -353,6 +353,8 @@ export function ComponentsPage() {
       <section className="flex flex-col gap-6">
         <DataTable<ComponentInstance>
           rows={filtered}
+          sourceLimit={1000}
+          sourceCount={instances.length}
           columns={columns}
           rowKey={(item) => item.id}
           onRowClick={(item) => selectComponent(item.id)}

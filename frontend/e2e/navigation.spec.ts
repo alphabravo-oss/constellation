@@ -31,6 +31,23 @@ const ORG_ROUTES: { label: string; heading: RegExp }[] = [
 async function clickNav(page: Page, linkLabel: string) {
   const nav = page.locator('aside[aria-label="Primary"] nav').first();
   await nav.waitFor({ state: "visible" });
+  const clusterGroups: Record<string, string> = {
+    Dashboard: "Dashboard", "NeuVector Switchboard": "Dashboard",
+    Findings: "Security Risks", Compliance: "Security Risks", Exceptions: "Security Risks",
+    Assets: "Assets", Registries: "Assets", "Network Map": "Network Activity", Runtime: "Runtime",
+    "Response Rules": "Response", "Policy Center": "Policy", Policies: "Policy", "Admission Control": "Policy",
+    "Audit Log": "Settings & Activity",
+  };
+  const scope = clusterGroups[linkLabel] || linkLabel === "Clusters" ? "Cluster" : linkLabel === "Settings" ? "Platform" : "Organization";
+  const scopeGroup = nav.getByRole("group", { name: scope, exact: true });
+  const scopeButton = scopeGroup.getByRole("button", { name: scope, exact: true });
+  if (await scopeButton.getAttribute("aria-expanded") !== "true") await scopeButton.click();
+  const clusterGroupName = clusterGroups[linkLabel];
+  if (clusterGroupName) {
+    const clusterGroup = scopeGroup.getByRole("group", { name: clusterGroupName, exact: true });
+    const groupButton = clusterGroup.getByRole("button", { name: clusterGroupName, exact: true });
+    if (await groupButton.getAttribute("aria-expanded") !== "true") await groupButton.click();
+  }
   await nav.getByRole("link", { name: linkLabel, exact: true }).first().click();
 }
 

@@ -469,6 +469,8 @@ function EvidencePanel({ data, isPending }: { data?: ComplianceEvidenceResponse;
         {items.length > 0 && (
           <DataTable<ComplianceEvidenceItem>
             rows={items}
+            sourceLimit={500}
+            sourceCount={items.length}
             columns={evidenceColumns}
             rowKey={(item) => item.id}
           />

@@ -53,6 +53,8 @@ export default function FindingsTab({ entityType, entityId }: { entityType: stri
     <div data-testid="risk-findings-table">
       <DataTable
         rows={list}
+        sourceLimit={200}
+        sourceCount={q.data?.findings.length ?? 0}
         columns={columns}
         rowKey={(f) => f.id}
         showDensityToggle={false}

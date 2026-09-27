@@ -153,7 +153,7 @@ function AliasRedirect({ to, cluster = false, from }: { to: string; cluster?: bo
   const location = useLocation();
   const { id } = useParams();
   const [targetPath, defaultSearch = ""] = to.split("?");
-  const pathname = cluster ? `/clusters/${id}/${targetPath}` : targetPath;
+  const pathname = targetPath.startsWith("/") ? targetPath : cluster ? `/clusters/${id}/${targetPath}` : targetPath;
   const aliasPath = from ? (cluster ? `/clusters/${id}/${from}` : `/${from}`) : "";
   const suffix = from ? location.pathname.slice(aliasPath.length) : "";
   const search = new URLSearchParams(location.search);
@@ -228,7 +228,7 @@ export function App() {
         <Route path="agents" element={<LegacyClusterRedirect />} />
         <Route path="scanners" element={<LegacyClusterRedirect />} />
         <Route path="risk/*" element={<LegacyClusterRedirect />} />
-        <Route path="health" element={<LegacyClusterRedirect />} />
+        <Route path="health" element={<AliasRedirect to="/settings/health" />} />
 
         {/* Cluster picker. */}
         <Route path="clusters" element={<ClustersLandingPage />} />
@@ -319,6 +319,10 @@ export function App() {
           <Route path="sysconfig"     element={<AliasRedirect to="/settings/effective-config" />} />
           <Route path="risk/:entityType/:entityId" element={<SuspenseRoute><RiskDetailPage /></SuspenseRoute>} />
           <Route path="health"        element={<SuspenseRoute><ClusterHealthPage /></SuspenseRoute>} />
+          <Route path="system-health" element={<AliasRedirect to="/settings/health" />} />
+          <Route path="settings" element={<AliasRedirect to="/settings" />} />
+          <Route path="tokens/*" element={<AliasRedirect to="/settings/api-tokens" cluster from="tokens" />} />
+          <Route path="attestation-trust/*" element={<AliasRedirect to="/settings/attestation-trust" cluster from="attestation-trust" />} />
         </Route>
 
         {/* Org-level surfaces. */}
@@ -341,10 +345,16 @@ export function App() {
         <Route path="integrations/*"  element={<AliasRedirect to="/settings/integrations" from="integrations" />} />
         <Route path="tokens/*"        element={<AliasRedirect to="/settings/api-tokens" from="tokens" />} />
         <Route path="attestation-trust/*" element={<AliasRedirect to="/settings/attestation-trust" from="attestation-trust" />} />
+        <Route path="attestation/*"  element={<AliasRedirect to="/settings/attestation-trust" from="attestation" />} />
 
         {/* Settings — one grouped shell, one home per feature (SettingsShell sub-nav). */}
         <Route path="settings" element={<SuspenseRoute><SettingsShell /></SuspenseRoute>}>
           <Route index element={<SuspenseRoute><SettingsLanding /></SuspenseRoute>} />
+          <Route path="system-health" element={<AliasRedirect to="/settings/health" />} />
+          <Route path="tokens/*" element={<AliasRedirect to="/settings/api-tokens" from="settings/tokens" />} />
+          <Route path="attestation/*" element={<AliasRedirect to="/settings/attestation-trust" from="settings/attestation" />} />
+          <Route path="access-control/*" element={<AliasRedirect to="/settings/access" from="settings/access-control" />} />
+          <Route path="notifications/*" element={<AliasRedirect to="/settings/integrations" from="settings/notifications" />} />
           <Route path="clusters/new"      element={<SuspenseRoute><RegisterClusterPage /></SuspenseRoute>} />
           <Route path="access"            element={<SuspenseRoute><AccessControlPage /></SuspenseRoute>} />
           <Route path="access/bindings/new"          element={<SuspenseRoute><RoleBindingFormPage /></SuspenseRoute>} />

@@ -335,6 +335,8 @@ export function CVEPage() {
       <div data-testid="cve-results-table">
         <DataTable<CVEResult>
           rows={rows}
+          sourceLimit={50}
+          sourceCount={rows.length}
           columns={columns}
           rowKey={(r) => r.cve_id}
           onRowClick={(r) => navigate(`/cve/${r.cve_id}`)}
@@ -356,7 +358,7 @@ export function CVEPage() {
       </div>
 
       <div className="text-[10px] text-muted-foreground">
-        Showing {rows.length} of {stats.data ? stats.data.total.toLocaleString() : "—"} rows · ordered by KEV → EPSS → CVSS → published date.
+        Showing up to {rows.length} fetched CVEs from {stats.data ? stats.data.total.toLocaleString() : "—"} catalog records; filter and sort run on the server. This view is capped at 50 results.
       </div>
     </PageContainer>
   );

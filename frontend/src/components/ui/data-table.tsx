@@ -76,7 +76,12 @@ export interface DataTableProps<T> {
   rowTestId?: (row: T) => string;
   /** Arbitrary per-row attributes (e.g. data-* hooks) preserved on each <tr>. */
   rowAttrs?: (row: T) => Record<string, string | number | undefined>;
+  /** Upper bound on the server response. Counts, filters, and exports cover loaded rows only. */
+  sourceLimit?: number;
+  sourceCount?: number;
 }
+
+const TABLE_PAGE_SIZE = 100;
 
 /**
  * DataTable — the single table primitive for the whole app.
@@ -111,7 +116,10 @@ export function DataTable<T>({
   testId,
   rowTestId,
   rowAttrs,
+  sourceLimit,
+  sourceCount,
 }: DataTableProps<T>) {
+  const [requestedPage, setRequestedPage] = useState(0);
   const storedPreferences = useMemo(() => readStoredTablePreferences(preferencesKey), [preferencesKey]);
   const [internalHiddenColumnIds, setInternalHiddenColumnIds] = useState<Set<string>>(() => {
     const stored = storedPreferences.hiddenColumnIds;
@@ -122,6 +130,7 @@ export function DataTable<T>({
     defaultSort ? [{ id: defaultSort.id, desc: defaultSort.dir === "desc" }] : [],
   );
   const handleSortingChange: typeof setSorting = (updater) => {
+    setRequestedPage(0);
     setSorting((prev) => {
       const next = typeof updater === "function" ? updater(prev) : updater;
       if (onSortChange) {
@@ -213,9 +222,12 @@ export function DataTable<T>({
   });
 
   const modelRows = table.getRowModel().rows;
+  const pageCount = Math.max(1, Math.ceil(modelRows.length / TABLE_PAGE_SIZE));
+  const page = Math.min(requestedPage, pageCount - 1);
+  const visibleRows = modelRows.slice(page * TABLE_PAGE_SIZE, (page + 1) * TABLE_PAGE_SIZE);
   const headers = table.getHeaderGroups()[0]?.headers ?? [];
 
-  const allKeys = useMemo(() => rows.map(rowKey), [rows, rowKey]);
+  const allKeys = visibleRows.map((row) => rowKey(row.original));
   const allSelected = selectable && selected ? allKeys.length > 0 && allKeys.every((k) => selected.has(k)) : false;
 
   function toggleAll() {
@@ -365,7 +377,7 @@ export function DataTable<T>({
             </tr>
           </thead>
           <tbody>
-            {modelRows.map((r) => {
+            {visibleRows.map((r) => {
               const row = r.original;
               const k = rowKey(row);
               const isSel = selected?.has(k);
@@ -424,7 +436,7 @@ export function DataTable<T>({
                 </tr>
               );
             })}
-            {modelRows.length === 0 && (
+            {visibleRows.length === 0 && (
               <tr>
                 <td colSpan={visibleColumns.length + (selectable ? 1 : 0)}>
                   {emptyState ?? (
@@ -436,6 +448,22 @@ export function DataTable<T>({
           </tbody>
         </table>
       </div>
+      {(modelRows.length > TABLE_PAGE_SIZE || sourceLimit !== undefined) && (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-3 py-2 text-xs text-muted-foreground" data-testid={testId ? `${testId}-page-scope` : undefined}>
+          <span>
+            Showing {visibleRows.length ? page * TABLE_PAGE_SIZE + 1 : 0}–{page * TABLE_PAGE_SIZE + visibleRows.length} of {modelRows.length.toLocaleString()} matching loaded rows.
+            {sourceLimit !== undefined && <> Server fetch limit: {sourceLimit.toLocaleString()} rows ({(sourceCount ?? rows.length).toLocaleString()} loaded); filters and totals use loaded rows only.</>}
+            {exportFileName && " Table CSV exports all matching loaded rows."}
+          </span>
+          {pageCount > 1 && (
+            <div className="flex items-center gap-2">
+              <button type="button" disabled={page === 0} onClick={() => setRequestedPage(page - 1)} className="rounded border border-border px-2 py-1 hover:bg-accent disabled:opacity-40">Previous</button>
+              <span>Page {page + 1} of {pageCount}</span>
+              <button type="button" disabled={page + 1 >= pageCount} onClick={() => setRequestedPage(page + 1)} className="rounded border border-border px-2 py-1 hover:bg-accent disabled:opacity-40">Next</button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

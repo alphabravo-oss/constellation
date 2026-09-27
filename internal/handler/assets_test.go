@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -245,8 +246,9 @@ VALUES ($1, 'ghcr.io', 'test/accepted', '1.0.0', $2,
 
 	h := NewImageAcceptances(d, audit.New(pool))
 	acceptedUntil := time.Now().UTC().Add(14 * 24 * time.Hour).Format(time.RFC3339)
+	createBody := `{"rationale":"Compensating controls verified","accepted_until":"` + acceptedUntil + `"}`
 	createReq := acceptanceRequest("POST", "/api/v1/assets/"+assetID.String()+"/image-acceptances", assetID, "", userID, orgID,
-		`{"rationale":"Compensating controls verified","accepted_until":"`+acceptedUntil+`"}`)
+		createBody)
 	createResp := httptest.NewRecorder()
 	h.Create(createResp, createReq)
 	if createResp.Code != http.StatusCreated {
@@ -261,6 +263,12 @@ VALUES ($1, 'ghcr.io', 'test/accepted', '1.0.0', $2,
 	}
 	if created.ID == uuid.Nil || len(created.ImageAcceptances) != 1 || created.ImageAcceptances[0].Status != "active" {
 		t.Fatalf("bad create response: %+v", created)
+	}
+	duplicateResp := httptest.NewRecorder()
+	duplicateReq := acceptanceRequest("POST", "/api/v1/assets/"+assetID.String()+"/image-acceptances", assetID, "", userID, orgID, createBody)
+	h.Create(duplicateResp, duplicateReq)
+	if duplicateResp.Code != http.StatusConflict || strings.Contains(duplicateResp.Body.String(), "image_acceptances_active_expiry_key") {
+		t.Fatalf("duplicate acceptance response: %d %s", duplicateResp.Code, duplicateResp.Body.String())
 	}
 
 	listReq := acceptanceRequest("GET", "/api/v1/assets/"+assetID.String()+"/image-acceptances", assetID, "", userID, orgID, "")
@@ -310,6 +318,23 @@ VALUES ($1, 'ghcr.io', 'test/accepted', '1.0.0', $2,
 	if len(revoked.ImageAcceptances) != 1 || revoked.ImageAcceptances[0].Status != "revoked" {
 		t.Fatalf("bad revoke response: %+v", revoked)
 	}
+	reacceptedReq := acceptanceRequest("POST", "/api/v1/assets/"+assetID.String()+"/image-acceptances", assetID, "", userID, orgID,
+		`{"rationale":"Compensating controls verified again","accepted_until":"`+acceptedUntil+`"}`)
+	reacceptedResp := httptest.NewRecorder()
+	h.Create(reacceptedResp, reacceptedReq)
+	if reacceptedResp.Code != http.StatusCreated {
+		t.Fatalf("reaccept response: %d %s", reacceptedResp.Code, reacceptedResp.Body.String())
+	}
+	var reaccepted struct {
+		ID               uuid.UUID            `json:"id"`
+		ImageAcceptances []imageAcceptanceDTO `json:"image_acceptances"`
+	}
+	if err := json.NewDecoder(reacceptedResp.Body).Decode(&reaccepted); err != nil {
+		t.Fatalf("decode reaccept: %v", err)
+	}
+	if reaccepted.ID == created.ID || len(reaccepted.ImageAcceptances) != 2 || reaccepted.ImageAcceptances[0].Status != "active" || reaccepted.ImageAcceptances[1].Status != "revoked" {
+		t.Fatalf("reaccept did not preserve history: %+v", reaccepted)
+	}
 
 	var auditEvents int
 	if err := pool.QueryRow(ctx, `
@@ -317,8 +342,8 @@ SELECT count(*) FROM audit_events
  WHERE org_id = $1 AND action IN ('image.accept-risk', 'image.accept-risk.revoke')`, orgID).Scan(&auditEvents); err != nil {
 		t.Fatalf("audit count: %v", err)
 	}
-	if auditEvents != 2 {
-		t.Fatalf("expected create and revoke audit events, got %d", auditEvents)
+	if auditEvents != 3 {
+		t.Fatalf("expected create, revoke and reaccept audit events, got %d", auditEvents)
 	}
 }
 

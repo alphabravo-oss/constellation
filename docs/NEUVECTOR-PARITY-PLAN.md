@@ -87,12 +87,13 @@ Unchecked parent items remain open until **all** their acceptance requirements
 are met. Code present is not the same as verified or release-ready. The older
 deficiency ledger includes findings that already have fixes; do not use its
 historical counts as a count of currently open defects.
-Acceptance backlog: **98 open**. Since the `800b0ef` baseline of 107 open,
-**twelve existing items closed** (four OPS-1 items, three SIEM-1 items, one
-POL-1 item, one IAM-1 item, one UI-1 item, one UI-2 item and one UI-3 item), and three new items were added: vendor interoperability, legacy
+Acceptance backlog: **97 open**. Since the `800b0ef` baseline of 107 open,
+**thirteen existing items closed** (four OPS-1 items, three SIEM-1 items, one
+POL-1 item, one IAM-1 item, two UI-1 items, one UI-2 item and one UI-3 item), and three new items were added: vendor interoperability, legacy
 DPI binding tenant validation, and registration/proof of the unreachable
 group-edge HTTP workflow.
-The checklist contains **51 checked bounded rows** (39 at baseline). Earlier
+The checklist contains **53 checked bounded rows** (39 at baseline); one new
+bounded OPS-2 database-reclaim item was added as complete. Earlier
 rounds added bounded POL-1, POL-2 and API-1 fixes without closing their parent
 acceptance item. Those rounds added an eight-object cutover fixture and opt-in
 runner, network precedence guards, and YAML API contracts. A subsequent round added
@@ -126,6 +127,7 @@ coverage remain open.
 | UI-3 platform-role classification | Source API tests and a deterministic production-browser test prove custom-namespace `core` classification and visibility behavior. The complete API/export and live-install matrix remains open. |
 | UI-2 YAML contract discipline | The six enterprise-table YAML controls (network, DLP, signatures, response, groups, vulnerability profiles) each pair export with a registered import route and typed client call. Generated cluster-init and Kubernetes policy YAML are deployment artifacts, not table configuration imports. The response-rule control has deterministic production-browser coverage; the other families have existing import tests. This closes only the YAML discipline row, not shared-table completeness. |
 | UI-1 scope order | The sidebar, command palette, and Settings hub present Organization, Platform, Integrations, Cluster in that order without changing canonical destinations. Three deterministic production-build browser cases cover ordered groups, route targets, keyboard navigation, and cluster context. Other UI-1 navigation and page-contract items remain open. |
+| UI-1 duplicate entry points | Generic health and system-health aliases now redirect to platform health, while cluster sensor/registration health remains intentionally distinct at its cluster URL. Token, attestation, access-control, integration and Settings aliases preserve deep paths, filters and fragments. Cluster health selection follows its URL rather than silently displaying the first cluster; three API-backed cluster browser cases and deterministic alias/settings cases pass. Other feature-home and page-contract rows remain open. |
 
 New bounded evidence without a checklist closure: network sessions and
 conversations now return tenant/cluster-scoped platform roles, conversation
@@ -148,7 +150,8 @@ while preserving deep paths, filters and fragments; deterministic browser
 coverage exercises representative aliases. Token, attestation, access-control
 and integration aliases now also redirect to Settings, and the cluster picker
 links directly to canonical system health. Cluster health remains a distinct
-sensor/registration surface, so the UI-1 entry-point decision stays open.
+sensor/registration surface; the duplicate-entry-point row is now closed, while
+the canonical-home audit and page-contract rows remain open.
 
 2026-09-27 continuation: an isolated PostgreSQL database migrated through 166
 and seeded for a locally running API passed seven existing API-backed browser
@@ -171,13 +174,57 @@ and the deny/block aggregate link remain open, so UI-4 stays unchecked.
 An attempted 164-case full Playwright run on another isolated migration-166
 database was stopped after 38 cases: 24 failures were HTTP 429 from the
 intentional 10-per-minute per-IP login guard, not verified feature regressions.
-The focused API-backed and deterministic browser gates remain valid, but a
-full-suite auth/setup strategy must preserve the guard and run without retries.
-A worker-local Playwright helper now reuses validated browser cookies and
-re-authenticates after revocation without weakening the guard. Its focused
-reuse/revocation test passed; a four-spec API-backed sample passed 5/6 cases
-without 429s, with one asset-detail test timing out at the revoke control.
-Full-suite proof and a setup-project auth contract remain open.
+The focused API-backed and deterministic browser gates remain valid. A
+worker-local helper alone still hit 429 after a worker restart; a Playwright
+setup project now persists validated bearer/browser state outside test output,
+shares it across workers, re-authenticates after revocation, and cleans it up
+afterward without weakening the guard. A 16-case API-backed browser sample
+then passed 15 cases without 429; the remaining repeat image-acceptance case
+exposed a database uniqueness defect. Migration 167 permits re-acceptance
+after revocation while preserving history; its focused PostgreSQL test and a
+three-case browser rerun pass. A subsequent isolated-API full Playwright run
+reached 133 of 182 cases: 119 passed before it was stopped after stale
+accordion-navigation tests, an obsolete migration-preview assertion, one
+intermittent cross-tab refresh failure and one blank asset-detail render.
+The navigation and migration assertions were corrected; a 35-pass focused
+browser run and a four-pass targeted rerun verified the fixes, including asset
+detail and cross-tab recovery. The full suite and cross-tab race remain open.
+For browser-only disposable stacks, the session cap is raised to 32 so direct
+login tests do not evict the shared setup state; the login rate guard is intact.
+This is test infrastructure, not a production session-cap change.
+
+The current code batch also adds stable, explicit asset-list continuation and
+loaded-only UI/CSV labeling; bounded network map/conversation/session/threat
+filters, totals and paging; and a saved LDAP/SAML/OIDC role/scope preview for
+already-extracted group values. The 251-row asset fixture, 250–350-row network
+fixtures and scoped provider preview tests pass locally. These are partial
+OPS-2, NET-1 and IAM-1 progress, not closures: other high-volume pages and
+source counts, exact rollup peer matching/application behavior, cross-tab
+reconciliation and live IdP group retrieval remain open.
+
+Local k3s maintenance and deployment on 2026-09-27: both legacy DEFAULT
+partitions were proven to contain zero live rows and safely truncated, reducing
+the existing database from 33 GB to 18 GB without touching identity or audit
+tables. A validated 244 MB non-telemetry backup was taken before Helm upgrade.
+Dev telemetry retention was changed from 30 to 7 days for events and from 14
+to 3 days for raw network flows by a direct DBA configuration update; this is
+not evidence of an audited Settings PATCH. The upgraded API dropped 23 expired
+event partitions and 11 expired flow partitions, reducing the database to
+6.8 GB. Revision 18 deployed API/frontend and migration 167 in the existing
+namespace; API, frontend and runtime-agent pods were ready. The ingress host,
+TLS certificate fingerprint and admin password hash/state matched pre-upgrade
+baselines; local TLS and an unauthenticated production-browser login-route
+smoke passed. The current k3s UI also responds through a local port-forward at
+`http://127.0.0.1:5182`. A focused 19-test browser gate against a disposable
+local API passed for assets, network activity, provider-role preview,
+high-volume caps and clusters.
+Authenticated browser smoke against k3s remains open because the bootstrap
+Secret does not contain the current admin password. Public DNS currently points
+to a different IP than this k3s node, so external URL reachability needs a DNS
+change or another routing path; the in-cluster ingress URL and cert are intact.
+The partition manager now reclaims an empty, bloated DEFAULT partition only
+after a locked recheck; focused PostgreSQL tests cover nonempty, detached and
+concurrent-ingest cases. This closes only the bounded reclaim item below.
 
 | Slice | Current status | Evidence / remaining work |
 |---|---|---|
@@ -706,6 +753,9 @@ row saying `enforced`.
   test verifies saved SAML metadata and cleanup. Private or air-gapped
   LDAP/OIDC endpoints and live SAML connectivity remain open.
 - [ ] Add group-resolution and final mapped-role/scope previews.
+  Saved LDAP/SAML/OIDC providers now preview final organization, cluster and
+  namespace grants for bounded supplied group values without echoing values or
+  secrets. Live group extraction/lookup and provider-backed cutover proof remain.
 - [ ] Import NeuVector users, roles, mappings, and token metadata without
   privilege escalation; require token reissue.
 - [x] Add audited local-user unlock and force-reset actions. The scoped routes
@@ -774,7 +824,11 @@ row saying `enforced`.
 - [ ] Apply shared filters consistently to map, conversations, sessions, threats,
   policy context, and PCAP where each dimension is meaningful.
 - [ ] Finish server-side port/peer/application/time filtering, totals, `has_more`,
-  and cursor/offset contracts for row-oriented network APIs.
+  and cursor/offset contracts for row-oriented network APIs. Map,
+  conversations, sessions and DPI threats now expose applicable filters and
+  bounded page metadata with database fixtures; rollup peer-IP matching uses
+  stored minimum addresses, named applications do not filter DPI threats, and
+  remaining network rows/export contracts need review.
 - [ ] Reconcile counts across tabs for the same filter and large fixture.
 - [ ] Live-test Flannel/iptables inline behavior and Cilium/Calico CNI-native
   policy behavior; keep the documented L7-on-Cilium limitation explicit.
@@ -937,12 +991,12 @@ progressive disclosure, while retaining Constellation's security vocabulary.
 - [x] Order scope consistently: Organization, Platform, Integrations, Cluster.
   Sidebar, command palette, and Settings hub agree; deterministic browser
   tests cover route targets, keyboard operation, and cluster context.
-- [ ] Resolve remaining duplicate health/settings/token/attestation entry points.
-  Token, attestation, access-control and integration aliases now redirect to
-  Settings with deep-link preservation and browser coverage. Cluster health
-  still has sensor gates and registration actions absent from org system health;
-  its navigation/consolidation decision remains open. `/tokens` is the browser
-  alias because `/api` is reserved by the server.
+- [x] Resolve remaining duplicate health/settings/token/attestation entry points.
+  Generic health resolves to platform health; cluster health remains the distinct
+  sensor/registration surface and follows its URL-scoped cluster. Token,
+  attestation, access-control, integration and Settings aliases preserve deep
+  paths, filters and fragments with production-build browser coverage. `/tokens`
+  is the browser alias because `/api` is reserved by the server.
 - [ ] Every primary page opens with one verdict, no more than five KPIs, and one
   primary table or workspace.
 - [ ] Use tabs for peer views, drawers for editing, and an Advanced disclosure for
@@ -1012,11 +1066,27 @@ progressive disclosure, while retaining Constellation's security vocabulary.
 
 ### OPS-2 Scale and test matrix
 
+- [x] Reclaim physically bloated, empty legacy event/flow DEFAULT partitions
+  after age-based deletion without risking concurrent ingest. The partition
+  manager checks attachment and size, verifies emptiness before and under a
+  bounded non-waiting exclusive lock, and truncates only an empty child.
+  Focused PostgreSQL tests passed twice. On the existing k3s database, exact
+  zero-row checks preceded a one-time manual truncate that reclaimed 15 GB;
+  the 7-day event and 3-day raw-flow dev retention settings then dropped 34
+  expired daily partitions after the Helm rollout. This does not prove
+  fleet-wide retention policy or audit-log archival.
 - [ ] Seed large datasets and prove every high-volume page either pages or labels
   its render cap. Audit and Timeline now label their loaded 100-row page ranges,
   distinguish current-page CSV, and clear stale rows on page/scope changes;
   deterministic browser tests cover page two and cluster-scoped requests.
-  Other high-volume pages and a real large-dataset run remain open.
+  Shared tables now render 100-row pages and label known server fetch limits;
+  grouped findings and network lists are bounded. CSV retains all matching
+  loaded rows and labels that scope. Deterministic 250–500-row browser fixtures
+  pass. Assets now has a stable `has_more`/offset API, a load-more control,
+  loaded-only summary/CSV labels and a two-page live-API test. Network activity
+  has bounded server pages and 250–350-row database fixtures. A comprehensive
+  API-backed large-dataset run, complete detail previews and backend
+  pagination for the other capped families remain open.
 - [ ] Add performance budgets for network rollups, findings, audit/timeline, and
   dashboard summaries.
 - [ ] Maintain opt-in real-cluster suites for Flannel, Cilium, and Calico plus
@@ -1062,8 +1132,10 @@ compatibility, supported runtime versions, and upstream changes before pinning.
 
 - [ ] Expand each chapter into stable, chapter/section-linked control IDs for
   every applicable MUST/MUST NOT and SHOULD/SHOULD NOT; record MAY decisions and
-  not-applicable requirements with rationale. The chapter matrix is a starting
-  review, not an assertion that every individual requirement has been tested.
+  not-applicable requirements with rationale. The
+  [102-family guide inventory](technology-guide-control-matrix.md) pins the
+  published source hash and records provisional applicability, but grouped
+  clauses need a completeness review before this item closes.
 - [ ] For each control record status (`open`, `implemented/unverified`,
   `verified`, `approved-deviation`, or `not-applicable`), repository evidence,
   positive/failure tests, owner, acceptance command and live evidence where
@@ -1136,10 +1208,11 @@ custody, threat-model or external-provider release matrix.
   state, zero PR retries, configurable base URL and retained failure artifacts;
   wire browser tests and distinct FIPS builds/status checks into CI. A fresh
   164-case local suite attempt hit the intentional 10/minute per-IP login guard
-  after 38 cases (24 HTTP 429 failures). A worker-local helper now reuses
-  validated browser cookies; its focused test passed and a four-spec sample
-  had no 429s, but one asset-detail case timed out and the full suite has not
-  rerun. Setup-project auth and full-suite proof remain open; do not loosen
+  after 38 cases (24 HTTP 429 failures). A later 173-case attempt using only
+  worker-local cookies still hit 429 after test 20. Setup-project auth now
+  shares validated state across worker restarts; a 16-case API-backed sample
+  had no 429s, and the one asset repeat-workflow failure passed after migration
+  167. Full-suite, hosted CI and distinct FIPS proof remain open; do not loosen
   production rate limiting merely to pass tests.
 
 ### TSG-5 Typed API and frontend conventions — P1/P2

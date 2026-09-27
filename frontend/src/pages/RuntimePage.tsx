@@ -164,6 +164,8 @@ export function RuntimePage() {
         </div>
         <DataTable
           rows={liveEvents}
+          sourceLimit={100}
+          sourceCount={liveEvents.length}
           rowKey={(e) => e.id}
           columns={liveColumns}
           defaultSort={{ id: "at", dir: "desc" }}
@@ -444,4 +446,3 @@ function Field({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
-

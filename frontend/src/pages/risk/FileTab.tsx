@@ -43,7 +43,7 @@ export default function FileTab({ entityId }: { entityType: string; entityId: st
       </div>
 
       <section className="space-y-1">
-        <h3 className="text-xs font-semibold">Observed file activity ({files.length})</h3>
+        <h3 className="text-xs font-semibold">Observed file activity ({files.length} loaded; showing first {Math.min(50, files.length)})</h3>
         <ul className="space-y-1 text-xs">
           {files.slice(0, 50).map((f) => (
             <li key={`${f.path}:${f.operation}`} className="flex items-center justify-between rounded-md border border-border bg-card px-3 py-2">
@@ -58,7 +58,7 @@ export default function FileTab({ entityId }: { entityType: string; entityId: st
       </section>
 
       <section className="space-y-1">
-        <h3 className="text-xs font-semibold">Monitor rules ({rules.length})</h3>
+        <h3 className="text-xs font-semibold">Monitor rules ({rules.length} loaded; showing first {Math.min(30, rules.length)})</h3>
         <ul className="space-y-1 text-xs">
           {rules.slice(0, 30).map((r) => (
             <li key={r.id} className="flex items-center justify-between rounded-md border border-border bg-card px-3 py-2">

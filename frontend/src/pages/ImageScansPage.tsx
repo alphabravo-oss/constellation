@@ -151,6 +151,8 @@ export function ImageScansPage() {
         <div data-testid="image-scans-table">
           <DataTable
             rows={filtered}
+            sourceLimit={500}
+            sourceCount={results.length}
             columns={columns}
             rowKey={(item) => item.id}
             onRowClick={(item) => setSelectedID(item.id)}

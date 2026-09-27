@@ -383,7 +383,7 @@ function OrgOverviewCallout() {
   const items: Array<{ to: string; label: string; description: string; icon: React.ReactNode }> = [
     { to: "/cve", label: "CVE DB", description: "Org-wide vulnerability catalog", icon: <Database className="h-4 w-4" /> },
     { to: "/federation", label: "Federation", description: "Multi-cluster joins", icon: <Globe2 className="h-4 w-4" /> },
-    { to: "/coverage", label: "Coverage", description: "Feature & connector matrix", icon: <ShieldCheck className="h-4 w-4" /> },
+    { to: "/posture", label: "Posture", description: "Feature & connector matrix", icon: <ShieldCheck className="h-4 w-4" /> },
     { to: "/settings/health", label: "System Health", description: "Platform components", icon: <Activity className="h-4 w-4" /> },
     { to: "/settings", label: "Settings", description: "Org configuration", icon: <SettingsIcon className="h-4 w-4" /> },
   ];

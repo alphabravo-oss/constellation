@@ -31,7 +31,7 @@ export default function NetworkTab({ entityType, entityId }: { entityType: strin
   return (
     <div className="space-y-2" data-testid="risk-network-tab">
       <p className="text-xs text-muted-foreground">
-        Last-24h network flows touching <span className="font-mono">{entityId}</span> ({flows.length}).
+        Last-24h network flows touching <span className="font-mono">{entityId}</span> ({flows.length} loaded; showing first {Math.min(50, flows.length)}). Narrow the network view for more.
       </p>
       <ul className="space-y-1 text-xs">
         {flows.slice(0, 50).map((f) => (

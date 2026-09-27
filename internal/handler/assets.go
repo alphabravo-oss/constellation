@@ -48,6 +48,9 @@ func (a *Assets) List(w http.ResponseWriter, r *http.Request) {
 		limit = 100
 	}
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	if offset < 0 {
+		offset = 0
+	}
 	qstr := r.URL.Query().Get("q")
 	clusterArg, err := parseClusterIDParam(r)
 	if err != nil {
@@ -65,7 +68,7 @@ func (a *Assets) List(w http.ResponseWriter, r *http.Request) {
 		extraWhere = " AND " + shiftPlaceholders(compiled.Where, len(args))
 		args = append(args, compiled.Args...)
 	}
-	args = append(args, limit, offset)
+	args = append(args, limit+1, offset)
 	rows, err := a.db.Pool().Query(r.Context(),
 		`WITH generic_finding_rollup AS (
              SELECT asset_id,
@@ -144,7 +147,7 @@ func (a *Assets) List(w http.ResponseWriter, r *http.Request) {
             ORDER BY COALESCE(fr.critical_findings, 0) DESC,
                      COALESCE(fr.high_findings, 0) DESC,
                      COALESCE(fr.finding_count, 0) DESC,
-                     a.last_seen_at DESC
+                     a.last_seen_at DESC, a.id DESC
             LIMIT $`+itoa(len(args)-1)+` OFFSET $`+itoa(len(args)), args...)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -165,7 +168,15 @@ func (a *Assets) List(w http.ResponseWriter, r *http.Request) {
 		d.Labels = labels
 		out = append(out, d)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"assets": out, "limit": limit, "offset": offset})
+	if err := rows.Err(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	hasMore := len(out) > limit
+	if hasMore {
+		out = out[:limit]
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"assets": out, "limit": limit, "offset": offset, "has_more": hasMore})
 }
 
 func (a *Assets) Get(w http.ResponseWriter, r *http.Request) {

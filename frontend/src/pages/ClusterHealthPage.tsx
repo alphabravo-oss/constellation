@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { Activity, Boxes, KeyRound, PackageCheck, ShieldCheck, UploadCloud } from "lucide-react";
 
 import { clusters } from "@/api/client";
@@ -13,12 +13,13 @@ import { componentDiagnosticsHref, nvRoleAlias } from "@/lib/component-roles";
 type HealthComponent = Awaited<ReturnType<typeof clusters.health>>["components"][number];
 
 export function ClusterHealthPage() {
+  const { id: clusterID } = useParams<{ id: string }>();
+  const location = useLocation();
   const list = useQuery({ queryKey: ["clusters"], queryFn: () => clusters.list() });
   const clusterList = useMemo(() => sortClustersByActivity(list.data?.clusters ?? []), [list.data?.clusters]);
-  const [selectedID, setSelectedID] = useState<string | null>(null);
   const selected = useMemo(
-    () => clusterList.find((cluster) => cluster.id === (selectedID ?? clusterList[0]?.id)),
-    [clusterList, selectedID],
+    () => clusterList.find((cluster) => cluster.id === clusterID),
+    [clusterList, clusterID],
   );
   const health = useQuery({
     queryKey: ["cluster-health", selected?.id],
@@ -62,8 +63,8 @@ export function ClusterHealthPage() {
   return (
     <PageContainer className="space-y-4">
       <PageHeader
-        title="Clusters"
-        description="Sensor readiness, registration bundles, upgrade posture, and health gates for connected Kubernetes estates."
+        title="Cluster Health"
+        description="Sensor readiness, registration bundles, upgrade posture, and health gates for the selected cluster."
       />
 
       <section className="grid grid-cols-3 gap-3" data-testid="clusters-stats">
@@ -75,10 +76,9 @@ export function ClusterHealthPage() {
       <section className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
         <div className="space-y-3" data-testid="clusters-list">
           {clusterList.map((cluster) => (
-            <button
+            <Link
               key={cluster.id}
-              type="button"
-              onClick={() => setSelectedID(cluster.id)}
+              to={`/clusters/${cluster.id}/health${location.search}${location.hash}`}
               className={`w-full rounded-lg border p-4 text-left transition-colors ${
                 selected?.id === cluster.id ? "border-foreground bg-accent" : "border-border bg-card hover:bg-accent/50"
               }`}
@@ -87,7 +87,7 @@ export function ClusterHealthPage() {
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-sm font-semibold">{cluster.name}</div>
+                  <div className="text-sm font-semibold" data-testid="cluster-health-card-name">{cluster.name}</div>
                   <div className="mt-1 text-xs text-muted-foreground">
                     {cluster.distro} · {cluster.cloud_provider || "onprem"} · {cluster.region || "unknown"}
                   </div>
@@ -104,12 +104,12 @@ export function ClusterHealthPage() {
                   Upgrade {cluster.upgrade.target_version} · {cluster.upgrade.rollout_status}
                 </div>
               )}
-            </button>
+            </Link>
           ))}
         </div>
 
         <main className="space-y-4" data-testid="cluster-health-panel">
-          {!selected && <p className="text-sm text-muted-foreground">No clusters registered yet.</p>}
+          {!selected && <p className="text-sm text-muted-foreground">{clusterList.length ? "Cluster not found." : "No clusters registered yet."}</p>}
           {selected && (
             <>
               <section className="rounded-lg border border-border bg-card p-4">

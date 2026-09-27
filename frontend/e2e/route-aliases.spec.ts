@@ -49,6 +49,11 @@ test("legacy and settings aliases retain deep paths, filters, and fragments", as
     ["/coverage?tab=controls#summary", "/posture?tab=controls#summary"],
     [`/clusters/${clusterId}/incidents?range=24h#events`, `/clusters/${clusterId}/timeline?range=24h&tab=incident#events`],
     [`/clusters/${clusterId}/incidents?tab=activity#events`, `/clusters/${clusterId}/timeline?tab=incident#events`],
+    [`/clusters/${clusterId}/registry/registry-1?tab=images#inventory`, `/clusters/${clusterId}/registries/registry-1?tab=images#inventory`],
+    [`/clusters/${clusterId}/admission-control/new?source=bookmark#editor`, `/clusters/${clusterId}/admission/new?source=bookmark#editor`],
+    [`/clusters/${clusterId}/vulnerability-profiles?status=enabled#profiles`, `/clusters/${clusterId}/vuln-profiles?status=enabled#profiles`],
+    [`/clusters/${clusterId}/audit-log?actor=admin#events`, `/clusters/${clusterId}/audit?actor=admin#events`],
+    [`/clusters/${clusterId}/network-activity?tab=sessions#flows`, `/clusters/${clusterId}/network?tab=sessions#flows`],
   ];
   for (const [alias, canonical] of routes) {
     await page.goto(alias);

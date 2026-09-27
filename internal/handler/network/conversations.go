@@ -193,6 +193,35 @@ func (h *NetworkConversations) List(w http.ResponseWriter, r *http.Request) {
 	// Namespace + verdict filters (previously accepted by the UI but silently ignored).
 	namespace := strings.TrimSpace(r.URL.Query().Get("namespace"))
 	verdict := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("verdict")))
+	limit := 5000
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 5000 {
+			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid limit"})
+			return
+		}
+		limit = parsed
+	}
+	offset := 0
+	if raw := strings.TrimSpace(r.URL.Query().Get("offset")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 || parsed > 1000000 {
+			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid offset"})
+			return
+		}
+		offset = parsed
+	}
+	port := 0
+	if raw := strings.TrimSpace(r.URL.Query().Get("port")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 65535 {
+			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid port"})
+			return
+		}
+		port = parsed
+	}
+	peer := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("peer")))
+	application := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("application")))
 	var clusterUUID *uuid.UUID
 	if clusterID != "" {
 		u, err := uuid.Parse(clusterID)
@@ -213,17 +242,22 @@ func (h *NetworkConversations) List(w http.ResponseWriter, r *http.Request) {
 	// when it has nothing for this org we fall through to the durable SQL path.
 	// The in-memory graph can't apply namespace/verdict filters, so skip it when
 	// either is set and serve the filterable SQL path instead.
-	if h.live != nil && namespace == "" && verdict == "" && !groupActive {
+	if h.live != nil && namespace == "" && verdict == "" && !groupActive && port == 0 && peer == "" && application == "" && offset == 0 && r.URL.Query().Get("limit") == "" {
 		g := h.live.Snapshot(subj.OrgID, clusterUUID)
 		if n, _ := g.Len(); n > 0 {
 			nodes := g.Nodes()
+			conversations := h.platformConversations(r.Context(), subj.OrgID, clusterUUID, g.Conversations())
 			httpx.WriteJSON(w, http.StatusOK, map[string]any{
-				"conversations": h.platformConversations(r.Context(), subj.OrgID, clusterUUID, g.Conversations()),
+				"conversations": conversations,
 				"nodes":         nodes,
 				"node_kinds":    nodeKinds(nodes),
 				"edges":         g.Edges(),
 				"window_hours":  hours,
 				"source":        "live",
+				"total":         len(conversations),
+				"limit":         limit,
+				"offset":        0,
+				"has_more":      false,
 			})
 			return
 		}
@@ -234,29 +268,36 @@ func (h *NetworkConversations) List(w http.ResponseWriter, r *http.Request) {
 	// NET perf: fold from the network_flow_rollups pre-aggregate (migration 115)
 	// rather than the raw network_flows day-window GROUP BY. Same shape; the
 	// 5000 cap still bounds distinct edges.
-	rows, err := h.db.Pool().Query(r.Context(), `
-SELECT src_workload, dst_workload, protocol, dst_port,
-       l7_protocol, verdict, COALESCE(MAX(max_severity),0)::int,
-       SUM(sum_bytes)::bigint, SUM(sum_packets)::bigint, MAX(max_at)
-  FROM network_flow_rollups
+	const where = `
  WHERE org_id = $1
    AND ($2::text = '' OR cluster_id::text = $2)
    AND bucket >= date_trunc('hour', NOW() - ($3::int * INTERVAL '1 hour'))
    AND ($4::text = '' OR verdict = $4)
    AND ($5::text = '' OR src_workload LIKE $5 || '/%' OR dst_workload LIKE $5 || '/%')
    AND (NOT $6::boolean OR src_workload = ANY($7::text[]) OR dst_workload = ANY($7::text[]))
- GROUP BY src_workload, dst_workload, protocol, dst_port, l7_protocol, verdict
- ORDER BY SUM(sum_bytes) DESC
- LIMIT 5000`, subj.OrgID, clusterID, hours, verdict, namespace, groupActive, groupMembers)
+   AND ($8::int = 0 OR dst_port = $8 OR min_src_port = $8)
+   AND ($9::text = '' OR strpos(lower(src_workload), $9) > 0 OR strpos(lower(dst_workload), $9) > 0 OR strpos(lower(min_src_addr), $9) > 0 OR strpos(lower(min_dst_addr), $9) > 0)
+   AND ($10::text = '' OR lower(l7_protocol) = $10 OR max_application::text = $10)`
+	args := []any{subj.OrgID, clusterID, hours, verdict, namespace, groupActive, groupMembers, port, peer, application}
+	var total int
+	if err := h.db.Pool().QueryRow(r.Context(), `SELECT COUNT(DISTINCT (src_workload, dst_workload))::int FROM network_flow_rollups`+where, args...).Scan(&total); err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	rows, err := h.db.Pool().Query(r.Context(), `
+WITH scoped AS (SELECT * FROM network_flow_rollups`+where+`),
+pairs AS (
+  SELECT src_workload, dst_workload, SUM(sum_bytes) AS volume
+    FROM scoped GROUP BY src_workload, dst_workload
+   ORDER BY volume DESC, src_workload, dst_workload LIMIT $11 OFFSET $12)
+SELECT scoped.src_workload, scoped.dst_workload, protocol, dst_port,
+       l7_protocol, verdict, COALESCE(MAX(max_severity),0)::int,
+       SUM(sum_bytes)::bigint, SUM(sum_packets)::bigint, MAX(max_at)
+  FROM scoped JOIN pairs USING (src_workload, dst_workload)
+ GROUP BY scoped.src_workload, scoped.dst_workload, protocol, dst_port, l7_protocol, verdict
+ ORDER BY MAX(pairs.volume) DESC, scoped.src_workload, scoped.dst_workload`, append(args, limit, offset)...)
 	if err != nil {
-		// network_flows table may be absent in non-runtime envs; degrade to empty graph.
-		httpx.WriteJSON(w, http.StatusOK, map[string]any{
-			"conversations": []graph.Conversation{},
-			"nodes":         []string{},
-			"node_kinds":    map[string]string{},
-			"edges":         []graph.Edge{},
-			"window_hours":  hours,
-		})
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	defer rows.Close()
@@ -281,6 +322,10 @@ SELECT src_workload, dst_workload, protocol, dst_port,
 		"node_kinds":    nodeKinds(nodes),
 		"edges":         g.Edges(),
 		"window_hours":  hours,
+		"total":         total,
+		"limit":         limit,
+		"offset":        offset,
+		"has_more":      offset+len(g.Conversations()) < total,
 	}
 	if groupActive {
 		response["selected_group"] = groupName

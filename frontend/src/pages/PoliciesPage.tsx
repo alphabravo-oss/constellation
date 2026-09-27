@@ -123,7 +123,8 @@ export function PoliciesPage() {
   if (q.isPending) return <p className="text-sm text-muted-foreground">Loading policies…</p>;
 
   const list = q.data?.policies ?? [];
-  const byCategory = groupBy(list, (p) => p.category || "general");
+  const catalogRows = list.slice(0, 100);
+  const byCategory = groupBy(catalogRows, (p) => p.category || "general");
   const enabledCount = list.filter((p) => p.enabled).length;
   const enforceCount = list.filter((p) => p.mode === "enforce").length;
   const profileCount = profilesQ.data?.profiles.length ?? 0;
@@ -132,6 +133,7 @@ export function PoliciesPage() {
 
   const catalogTab = (
     <div className="space-y-4" data-testid="policies-layout">
+      {list.length > catalogRows.length && <p className="text-xs text-muted-foreground">Showing the first {catalogRows.length} of {list.length} loaded policy cards. Use the paged policy table for remaining policies.</p>}
       <section className="space-y-4" data-testid="policy-rail">
         {Object.entries(byCategory).map(([cat, ps]) => (
           <section key={cat}>

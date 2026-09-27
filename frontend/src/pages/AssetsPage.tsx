@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { BadgeCheck, Boxes, FileJson, Search, ShieldAlert, ShieldCheck } from "lucide-react";
 
@@ -13,6 +13,7 @@ import { StatCard } from "@/components/ui/stat-card";
 
 const kinds = ["all", "image", "workload", "iac-resource", "ml-model", "cloud-resource"];
 const criticalities = ["all", "critical", "high", "medium", "low"];
+const ASSET_PAGE_SIZE = 250;
 
 export function AssetsPage() {
   // Cluster-scoped: only show assets belonging to the active cluster. Assets
@@ -24,12 +25,21 @@ export function AssetsPage() {
   const [criticality, setCriticality] = useState("all");
   const [search, setSearch] = useState("");
   const [selectedID, setSelectedID] = useState<string | null>(null);
-  const q = useQuery({
+  const q = useInfiniteQuery({
     queryKey: ["assets", clusterId],
-    queryFn: () => assets.list({ limit: 250, cluster_id: clusterId }),
+    initialPageParam: 0,
+    queryFn: async ({ pageParam }) => {
+      const response = await assets.list({ limit: ASSET_PAGE_SIZE, offset: pageParam, cluster_id: clusterId });
+      if (typeof response.has_more !== "boolean") {
+        throw new Error("Assets pagination metadata is missing");
+      }
+      return response;
+    },
+    getNextPageParam: (lastPage) => lastPage.has_more ? lastPage.offset + lastPage.assets.length : undefined,
   });
 
-  const inventory = useMemo(() => q.data?.assets ?? [], [q.data?.assets]);
+  const inventory = useMemo(() => q.data?.pages.flatMap((page) => page.assets) ?? [], [q.data]);
+  const incomplete = q.hasNextPage;
   const filtered = useMemo(() => {
     const needle = search.trim().toLowerCase();
     return inventory.filter((asset) => {
@@ -86,10 +96,10 @@ export function AssetsPage() {
           <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => downloadCsv("constellation-assets", ["Name", "Kind", "Criticality", "OpenFindings", "Critical", "High", "Signed", "SBOMs", "Registry", "Tag", "LastSeen"],
+            onClick={() => downloadCsv(incomplete ? "constellation-assets-loaded-only" : "constellation-assets", ["Name", "Kind", "Criticality", "OpenFindings", "Critical", "High", "Signed", "SBOMs", "Registry", "Tag", "LastSeen"],
               filtered.map((a) => [a.name, a.kind, a.criticality, a.open_findings, a.critical_findings, a.high_findings, a.image_signed ? "yes" : "", a.sbom_count, a.registry ?? "", a.tag ?? "", a.last_seen_at]))}
             className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-2 text-sm hover:bg-accent"
-          >Export CSV</button>
+          >{incomplete ? "Export loaded rows CSV" : "Export CSV"}</button>
           <Link
             to={selected ? `/clusters/${clusterId}/assets/${selected.id}` : `/clusters/${clusterId}/assets`}
             className={cn(
@@ -104,8 +114,19 @@ export function AssetsPage() {
         }
       />
 
+      {incomplete && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card p-3 text-sm" data-testid="assets-incomplete-notice">
+          <span>Showing {inventory.length.toLocaleString()} loaded assets; more are available on the server. Summary, filters, and CSV cover loaded rows only.</span>
+          <button type="button" onClick={() => void q.fetchNextPage()} disabled={q.isFetchingNextPage} className="shrink-0 rounded-md border border-border px-3 py-1.5 hover:bg-accent disabled:opacity-50">
+            {q.isFetchingNextPage ? "Loading…" : q.isFetchNextPageError ? "Retry loading assets" : "Load more assets"}
+          </button>
+        </div>
+      )}
+
+      {q.isError && !q.data && <p role="alert" className="text-sm text-destructive">Could not load assets. Retry the page.</p>}
+
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4" data-testid="assets-summary">
-        <StatCard label="Assets" value={summary.total.toLocaleString()} icon={<Boxes className="h-3.5 w-3.5" />} hint={`${summary.images} images · ${summary.workloads} workloads`} />
+        <StatCard label={incomplete ? "Loaded Assets" : "Assets"} value={summary.total.toLocaleString()} icon={<Boxes className="h-3.5 w-3.5" />} hint={`${summary.images} images · ${summary.workloads} workloads`} />
         <StatCard label="Critical / High" value={summary.criticalHigh.toLocaleString()} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={summary.criticalHigh > 0 ? "high" : "neutral"} hint={`${summary.openFindings} open findings`} />
         <StatCard label="Unsigned Images" value={summary.unsignedImages.toLocaleString()} icon={<BadgeCheck className="h-3.5 w-3.5" />} tone={summary.unsignedImages > 0 ? "medium" : "neutral"} hint={`${summary.signedImages} signed`} />
         <StatCard label="Missing SBOM" value={summary.missingSBOM.toLocaleString()} icon={<FileJson className="h-3.5 w-3.5" />} hint={`${summary.withSBOM} with SBOM evidence`} />
@@ -149,6 +170,8 @@ export function AssetsPage() {
       <section className="flex flex-col gap-4">
         <DataTable
           rows={filtered}
+          sourceLimit={ASSET_PAGE_SIZE}
+          sourceCount={inventory.length}
           columns={columns}
           rowKey={(asset) => asset.id}
           onRowClick={(asset) => setSelectedID(asset.id)}

@@ -219,7 +219,7 @@ function PackagesPanel({ evidence, packages }: { evidence: ServerlessEvidence | 
         <span className="font-mono text-xs text-muted-foreground">{evidence?.package_count ?? 0} packages</span>
       </header>
       <DataTable
-        rows={packages.slice(0, 100)}
+        rows={packages}
         columns={packageColumns}
         rowKey={(pkg) => `${pkg.ecosystem}:${pkg.name}:${pkg.version}:${pkg.purl}`}
         showDensityToggle={false}

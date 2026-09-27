@@ -70,6 +70,7 @@ import {
 } from "@/lib/network-saved-views";
 import { toast } from "sonner";
 import { DataTable, type Column } from "@/components/ui/data-table";
+import { Pager } from "@/components/ui/pager";
 
 import {
   groupsApi,
@@ -268,6 +269,9 @@ function NetworkMapInner() {
   const [scopeMode, setScopeMode] = useState<ScopeMode>("both");
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [sessionFilters, setSessionFilters] = useState<NetworkSessionSavedFilters>(() => ({ ...EMPTY_SESSION_FILTERS }));
+  const [sessionPage, setSessionPage] = useState(0);
+  const [conversationPage, setConversationPage] = useState(0);
+  const [threatPage, setThreatPage] = useState(0);
   const [pcapFilters, setPcapFilters] = useState<NetworkPcapSavedFilters>(() => ({ ...EMPTY_PCAP_FILTERS }));
   const groupsQ = useQuery({
     queryKey: ["groups", clusterID],
@@ -294,6 +298,16 @@ function NetworkMapInner() {
       node: sessionFilters.node || undefined,
     };
   }, [effectiveGroupFilter, sessionFilters]);
+  const sharedTrafficFilters = useMemo(() => ({
+    port: sessionQueryParams.port,
+    peer: sessionQueryParams.peer,
+    application: sessionQueryParams.application,
+  }), [sessionQueryParams.port, sessionQueryParams.peer, sessionQueryParams.application]);
+  useEffect(() => {
+    setSessionPage(0);
+    setConversationPage(0);
+    setThreatPage(0);
+  }, [clusterID, hours, namespace, effectiveGroupFilter, verdict, sessionQueryParams]);
 
   const savedViewSnapshot = useMemo(
     () => buildNetworkSavedViewSnapshot({
@@ -334,8 +348,8 @@ function NetworkMapInner() {
   }, [setHidePlatformComponents]);
 
   const q = useQuery({
-    queryKey: ["network-map", hours, clusterID, namespace, effectiveGroupFilter, verdict],
-    queryFn: () => network.map({ hours, cluster_id: clusterID || undefined, namespace: namespace || undefined, group: effectiveGroupFilter || undefined, verdict: verdict || undefined }),
+    queryKey: ["network-map", hours, clusterID, namespace, effectiveGroupFilter, verdict, sharedTrafficFilters],
+    queryFn: () => network.map({ hours, cluster_id: clusterID || undefined, namespace: namespace || undefined, group: effectiveGroupFilter || undefined, verdict: verdict || undefined, ...sharedTrafficFilters }),
     enabled: !!clusterID,
     refetchInterval: live ? 10_000 : false,
   });
@@ -344,8 +358,8 @@ function NetworkMapInner() {
   // can badge off-cluster endpoints the raw map can't classify. Cluster-scoped
   // via useCluster() like every other query on this page.
   const conversationsQ = useQuery({
-    queryKey: ["network-conversations", hours, clusterID, namespace, effectiveGroupFilter, verdict],
-    queryFn: () => network.conversations({ hours, cluster_id: clusterID || undefined, namespace: namespace || undefined, group: effectiveGroupFilter || undefined, verdict: verdict || undefined }),
+    queryKey: ["network-conversations", hours, clusterID, namespace, effectiveGroupFilter, verdict, sharedTrafficFilters, conversationPage],
+    queryFn: () => network.conversations({ hours, cluster_id: clusterID || undefined, namespace: namespace || undefined, group: effectiveGroupFilter || undefined, verdict: verdict || undefined, ...sharedTrafficFilters, limit: 100, offset: conversationPage * 100 }),
     enabled: !!clusterID,
     refetchInterval: live ? 10_000 : false,
   });
@@ -362,15 +376,15 @@ function NetworkMapInner() {
   // longer refetch interval (15s) since threats are append-only and don't
   // need the 10s flow cadence.
   const threatsQ = useQuery({
-    queryKey: ["runtime-threats", hours, clusterID, effectiveGroupFilter],
-    queryFn: () => runtimeThreats.list({ hours, cluster_id: clusterID || undefined, group: effectiveGroupFilter || undefined }),
+    queryKey: ["runtime-threats", hours, clusterID, effectiveGroupFilter, sharedTrafficFilters, threatPage],
+    queryFn: () => runtimeThreats.page({ hours, cluster_id: clusterID || undefined, group: effectiveGroupFilter || undefined, port: sharedTrafficFilters.port, peer: sharedTrafficFilters.peer, application: /^\d+$/.test(sharedTrafficFilters.application ?? "") ? Number(sharedTrafficFilters.application) : undefined, limit: 100, offset: threatPage * 100 }),
     enabled: !!clusterID,
     refetchInterval: live ? 15_000 : false,
   });
   // NV RESTSession: live per-connection table from the runtime-agent's dp session snapshot.
   const sessionsQ = useQuery({
-    queryKey: ["network-sessions", clusterID, sessionQueryParams],
-    queryFn: () => network.sessions({ cluster_id: clusterID || undefined, ...sessionQueryParams }),
+    queryKey: ["network-sessions", clusterID, sessionQueryParams, sessionPage],
+    queryFn: () => network.sessions({ cluster_id: clusterID || undefined, ...sessionQueryParams, limit: 100, offset: sessionPage * 100 }),
     enabled: !!clusterID,
     refetchInterval: live ? 15_000 : false,
   });
@@ -453,7 +467,7 @@ function NetworkMapInner() {
     () => hidePlatformComponents ? sessionsRaw.filter((item) => !isPlatformEndpoint(item.workload_id, item.platform_role)) : sessionsRaw,
     [hidePlatformComponents, isPlatformEndpoint, sessionsRaw],
   );
-  const sessionsTotal = hidePlatformComponents ? sessions.length : (sessionsQ.data?.total ?? sessions.length);
+  const sessionsTotal = sessionsQ.data?.total ?? sessions.length;
   const sessionsHasMore = sessionsQ.data?.has_more ?? false;
   // Cluster list was used by the dropped select; URL-driven now.
   // const clusters = q.data?.summary.clusters ?? [];
@@ -462,7 +476,7 @@ function NetworkMapInner() {
     () => hidePlatformComponents ? lifecycleItemsRaw.filter((item) => !isPlatformNamespace(item.namespace)) : lifecycleItemsRaw,
     [hidePlatformComponents, lifecycleItemsRaw],
   );
-  const threatsRaw = threatsQ.data ?? EMPTY_THREATS;
+  const threatsRaw = threatsQ.data?.threats ?? EMPTY_THREATS;
   const threats = useMemo(
     () => hidePlatformComponents ? threatsRaw.filter((item) => !isPlatformNamespace(item.namespace)) : threatsRaw,
     [hidePlatformComponents, threatsRaw],
@@ -733,7 +747,7 @@ function NetworkMapInner() {
     <div className="flex h-[calc(100vh-72px)] flex-col gap-2">
       <PageHeader
         title="Network Activity"
-        description="Map, conversations, live sessions, PCAP capture, rules, and DPI threats"
+        description="Map, conversations, live sessions, PCAP capture, rules, and DPI threats. The map loads up to 300 rolled-up flows and 50 recent flow events; narrow filters to inspect more."
         actions={
           <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-mono">
             <StatPill icon={<Waypoints className="h-3 w-3" />} label="workloads" value={workloadCount} />
@@ -805,6 +819,32 @@ function NetworkMapInner() {
           <option value={24}>24h</option>
           <option value={168}>7d</option>
         </select>
+        <input
+          className="h-6 w-16 rounded border border-input bg-card px-1.5 text-[11px] text-mono"
+          aria-label="Traffic port"
+          data-testid="network-traffic-port"
+          placeholder="Port"
+          inputMode="numeric"
+          value={sessionFilters.port}
+          onChange={(event) => setSessionFilters((current) => ({ ...current, port: event.target.value.replace(/[^\d]/g, "").slice(0, 5) }))}
+        />
+        <input
+          className="h-6 w-28 rounded border border-input bg-card px-1.5 text-[11px]"
+          aria-label="Traffic peer"
+          data-testid="network-traffic-peer"
+          placeholder="Peer"
+          value={sessionFilters.peer}
+          onChange={(event) => setSessionFilters((current) => ({ ...current, peer: event.target.value }))}
+        />
+        <input
+          className="h-6 w-24 rounded border border-input bg-card px-1.5 text-[11px]"
+          aria-label="Traffic application"
+          data-testid="network-traffic-application"
+          title="Application names filter flows and sessions; numeric application IDs also filter DPI threats"
+          placeholder="App / ID"
+          value={sessionFilters.application}
+          onChange={(event) => setSessionFilters((current) => ({ ...current, application: event.target.value }))}
+        />
         {/* Server-side verdict / namespace filters — these thread into the
             network.map / lifecycle queries (distinct from the client-side
             verdict + namespace chips that only re-filter the in-memory graph). */}
@@ -1169,6 +1209,9 @@ function NetworkMapInner() {
         <RadixTabs.Content value="conversations" className="min-h-0 flex-1 overflow-auto outline-none" data-testid="network-workspace-panel-conversations">
           <NetworkConversationsWorkspaceTab
             conversations={conversations}
+            total={conversationsQ.data?.total ?? conversations.length}
+            page={conversationPage}
+            onPage={setConversationPage}
             loading={conversationsQ.isPending}
             hours={hours}
             onSelect={(conversation) => {
@@ -1188,6 +1231,8 @@ function NetworkMapInner() {
             sessions={sessions}
             total={sessionsTotal}
             hasMore={sessionsHasMore}
+            page={sessionPage}
+            onPage={setSessionPage}
             filters={sessionFilters}
             loading={sessionsQ.isPending}
             killing={killSessionMut.isPending}
@@ -1220,6 +1265,9 @@ function NetworkMapInner() {
         <RadixTabs.Content value="threats" className="min-h-0 flex-1 overflow-auto outline-none" data-testid="network-workspace-panel-threats">
           <NetworkThreatsWorkspaceTab
             threats={threats}
+            total={threatsQ.data?.total ?? threats.length}
+            page={threatPage}
+            onPage={setThreatPage}
             weakTLS={dpiSettingsQ.data?.weak_tls_enabled ?? false}
             toggling={dpiToggleMut.isPending}
             onToggleWeakTLS={(value) => dpiToggleMut.mutate(value)}
@@ -1424,11 +1472,17 @@ function NetworkSavedViewsControl({
 
 function NetworkConversationsWorkspaceTab({
   conversations,
+  total,
+  page,
+  onPage,
   loading,
   hours,
   onSelect,
 }: {
   conversations: NetworkConversation[];
+  total: number;
+  page: number;
+  onPage: (page: number) => void;
   loading: boolean;
   hours: number;
   onSelect: (conversation: NetworkConversation) => void;
@@ -1465,7 +1519,7 @@ function NetworkConversationsWorkspaceTab({
     <section className="space-y-3" data-testid="network-conversations-tab">
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-card px-3 py-2">
         <div className="flex flex-wrap items-center gap-2">
-          <StatPill icon={<Table2 className="h-3 w-3" />} label="pairs" value={rows.length} />
+          <StatPill icon={<Table2 className="h-3 w-3" />} label="pairs" value={total} />
           <StatPill icon={<Activity className="h-3 w-3" />} label="streams" value={totals.edges} />
           <StatPill icon={<Activity className="h-3 w-3" />} label="volume" value={formatBytes(totals.bytes)} />
           <StatPill icon={<Ban className="h-3 w-3" />} label="blocked" value={totals.blocked} tone={totals.blocked > 0 ? "critical" : "neutral"} />
@@ -1496,7 +1550,9 @@ function NetworkConversationsWorkspaceTab({
           CSV
         </Button>
       </div>
-      <DataTable rows={loading ? [] : rows} columns={columns} rowKey={(row) => `${row.from}-${row.to}`} defaultSort={{ id: "last_seen", dir: "desc" }} preferencesKey="network-conversations" exportFileName={`network-conversations-${hours}h`} testId="network-conversations-table" emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">{loading ? "Loading conversations..." : "No conversations in this window."}</div>} />
+      <DataTable rows={loading ? [] : rows} sourceLimit={100} sourceCount={total} columns={columns} rowKey={(row) => `${row.from}-${row.to}`} defaultSort={{ id: "last_seen", dir: "desc" }} preferencesKey="network-conversations" exportFileName={`network-conversations-${hours}h`} testId="network-conversations-table" emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">{loading ? "Loading conversations..." : "No conversations in this window."}</div>} />
+      <p className="text-xs text-muted-foreground">Metrics and CSV cover this page of conversations.</p>
+      <Pager page={page} pageSize={100} total={total} rowsOnPage={rows.length} onPage={onPage} />
     </section>
   );
 }
@@ -1505,6 +1561,8 @@ function NetworkSessionsWorkspaceTab({
   sessions,
   total,
   hasMore,
+  page,
+  onPage,
   filters,
   loading,
   killing,
@@ -1515,6 +1573,8 @@ function NetworkSessionsWorkspaceTab({
   sessions: NetworkSession[];
   total: number;
   hasMore: boolean;
+  page: number;
+  onPage: (page: number) => void;
   filters: NetworkSessionSavedFilters;
   loading: boolean;
   killing: boolean;
@@ -1522,10 +1582,7 @@ function NetworkSessionsWorkspaceTab({
   onFiltersChange: (filters: NetworkSessionSavedFilters) => void;
   onKill: (id: number, node: string) => void;
 }) {
-  const rows = useMemo(
-    () => [...sessions].sort((a, b) => (b.client_bytes + b.server_bytes) - (a.client_bytes + a.server_bytes)),
-    [sessions],
-  );
+  const rows = sessions;
   const totals = useMemo(
     () => rows.reduce(
       (acc, row) => ({
@@ -1538,6 +1595,7 @@ function NetworkSessionsWorkspaceTab({
     [rows],
   );
   const hasFilters = Object.values(filters).some(Boolean);
+  const visibleRows = rows;
   const updateFilter = (key: keyof NetworkSessionSavedFilters, value: string) => {
     onFiltersChange({ ...filters, [key]: value });
   };
@@ -1545,8 +1603,7 @@ function NetworkSessionsWorkspaceTab({
     <section className="space-y-3" data-testid="network-sessions-tab">
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-card px-3 py-2">
         <div className="flex flex-wrap items-center gap-2">
-          <StatPill icon={<Activity className="h-3 w-3" />} label="sessions" value={rows.length} />
-          {hasMore ? <StatPill icon={<Table2 className="h-3 w-3" />} label="total" value={total} tone="accent" /> : null}
+          <StatPill icon={<Activity className="h-3 w-3" />} label="sessions" value={total} />
           <StatPill icon={<Activity className="h-3 w-3" />} label="client" value={formatBytes(totals.inBytes)} />
           <StatPill icon={<Activity className="h-3 w-3" />} label="server" value={formatBytes(totals.outBytes)} />
           <StatPill icon={<ShieldAlert className="h-3 w-3" />} label="threats" value={totals.threats} tone={totals.threats > 0 ? "critical" : "neutral"} />
@@ -1649,9 +1706,9 @@ function NetworkSessionsWorkspaceTab({
           Clear
         </Button>
       </div>
-      {hasMore && (
+      {(hasMore || page > 0) && (
         <div className="rounded-md border border-[color:var(--color-status-warning)]/40 bg-[color-mix(in_oklab,var(--color-status-warning)_10%,transparent)] px-3 py-2 text-xs text-muted-foreground" data-testid="network-sessions-truncated">
-          Showing first {rows.length.toLocaleString()} of {total.toLocaleString()} live sessions. Narrow the scope or use the API limit parameter for a larger page.
+          Showing page {page + 1} of {Math.ceil(total / 100)} live sessions. Metrics and CSV cover this page only.
         </div>
       )}
       {lastKill && (
@@ -1701,7 +1758,7 @@ function NetworkSessionsWorkspaceTab({
                 <td colSpan={9} className="px-3 py-8 text-center text-muted-foreground">No live sessions reported.</td>
               </tr>
             )}
-            {!loading && rows.map((row) => (
+            {!loading && visibleRows.map((row) => (
               <tr key={`${row.node}-${row.id}`} className="border-t border-border/60 hover:bg-accent/50">
                 <td className="px-3 py-2 font-mono">{row.client_ip}:{row.client_port}</td>
                 <td className="px-3 py-2 font-mono">{row.server_ip}:{row.server_port}</td>
@@ -1731,6 +1788,7 @@ function NetworkSessionsWorkspaceTab({
           </tbody>
         </table>
       </div>
+      <Pager page={page} pageSize={100} total={total} rowsOnPage={visibleRows.length} onPage={onPage} />
     </section>
   );
 }
@@ -1801,6 +1859,9 @@ function PcapWorkspaceTab({
     refetchInterval: 5_000,
   });
   const captures = capturesQ.data ?? [];
+  const [requestedCapturePage, setRequestedCapturePage] = useState(0);
+  const capturePage = Math.min(requestedCapturePage, Math.max(0, Math.ceil(captures.length / 100) - 1));
+  const visibleCaptures = captures.slice(capturePage * 100, (capturePage + 1) * 100);
   const start = useMutation({
     mutationFn: () => {
       const port = Number(filters.dst_port);
@@ -2027,7 +2088,7 @@ function PcapWorkspaceTab({
                 <td colSpan={8} className="px-3 py-8 text-center text-muted-foreground">No packet captures match this filter.</td>
               </tr>
             )}
-            {!capturesQ.isPending && captures.map((capture) => (
+            {!capturesQ.isPending && visibleCaptures.map((capture) => (
               <tr key={capture.id} className="border-t border-border/60 hover:bg-accent/50">
                 <td className="max-w-[240px] truncate px-3 py-2 font-mono">{capture.workload}</td>
                 <td className="max-w-[260px] truncate px-3 py-2 text-muted-foreground">
@@ -2071,6 +2132,8 @@ function PcapWorkspaceTab({
           </tbody>
         </table>
       </div>
+      <p className="text-xs text-muted-foreground">Showing {visibleCaptures.length ? capturePage * 100 + 1 : 0}–{capturePage * 100 + visibleCaptures.length} of {captures.length} loaded captures. Server fetch is capped at 200; filters apply to loaded captures.</p>
+      <Pager page={capturePage} pageSize={100} total={captures.length} rowsOnPage={visibleCaptures.length} onPage={setRequestedCapturePage} />
     </section>
   );
 }
@@ -2176,29 +2239,33 @@ function NetworkRulesWorkspaceTab({
 
 function NetworkThreatsWorkspaceTab({
   threats,
+  total,
+  page,
+  onPage,
   weakTLS,
   toggling,
   onToggleWeakTLS,
   onPivot,
 }: {
   threats: RuntimeThreat[];
+  total: number;
+  page: number;
+  onPage: (page: number) => void;
   weakTLS: boolean;
   toggling: boolean;
   onToggleWeakTLS: (value: boolean) => void;
   onPivot: (threat: RuntimeThreat) => void;
 }) {
   const [drilldownID, setDrilldownID] = useState<string | null>(null);
-  const rows = useMemo(
-    () => [...threats].sort((a, b) => Date.parse(b.reported_at || b.at) - Date.parse(a.reported_at || a.at)),
-    [threats],
-  );
+  const rows = threats;
   const critical = rows.filter((row) => row.severity >= 8).length;
   const blocked = rows.filter((row) => row.action === 2 || row.action === 3 || row.action === 4).length;
+  const visibleThreats = rows;
   return (
     <section className="space-y-3" data-testid="network-threats-tab">
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-card px-3 py-2">
         <div className="flex flex-wrap items-center gap-2">
-          <StatPill icon={<ShieldAlert className="h-3 w-3" />} label="threats" value={rows.length} tone={rows.length > 0 ? "critical" : "neutral"} />
+          <StatPill icon={<ShieldAlert className="h-3 w-3" />} label="threats" value={total} tone={total > 0 ? "critical" : "neutral"} />
           <StatPill icon={<AlertTriangle className="h-3 w-3" />} label="critical" value={critical} tone={critical > 0 ? "critical" : "neutral"} />
           <StatPill icon={<Ban className="h-3 w-3" />} label="blocked" value={blocked} tone={blocked > 0 ? "critical" : "neutral"} />
         </div>
@@ -2233,7 +2300,7 @@ function NetworkThreatsWorkspaceTab({
                 <td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">No DPI threats in this window.</td>
               </tr>
             )}
-            {rows.map((row) => (
+            {visibleThreats.map((row) => (
               <tr key={row.id} className="border-t border-border/60 hover:bg-accent/50">
                 <td className="max-w-[300px] truncate px-3 py-2">
                   <button
@@ -2261,6 +2328,8 @@ function NetworkThreatsWorkspaceTab({
           </tbody>
         </table>
       </div>
+      <p className="text-xs text-muted-foreground">Critical and blocked metrics cover this page of threats.</p>
+      <Pager page={page} pageSize={100} total={total} rowsOnPage={visibleThreats.length} onPage={onPage} />
       {drilldownID && <ThreatDrilldownDialog id={drilldownID} onClose={() => setDrilldownID(null)} />}
     </section>
   );
@@ -4010,6 +4079,7 @@ function LiveSessionsCard({
             </p>
           ) : (
             <div className="max-h-[300px] overflow-auto">
+              {count > 200 && <p className="px-1 py-1 text-[10px] text-muted-foreground">Showing first 200 of {count} loaded sessions. Open the Sessions tab for the paged list.</p>}
               <table className="app-semantic-table w-full text-[10px]">
                 <thead className="sticky top-0 bg-card">
                   <tr className="text-left uppercase tracking-wider text-muted-foreground">
@@ -4123,7 +4193,7 @@ function ThreatsCard({
         {!collapsed && (
         <>
         <p className="mb-1 px-1 text-[9px] leading-tight text-muted-foreground/80">
-          DPI signatures matched on observed traffic. In monitor mode these are logged, not blocked — click a row for the packet &amp; full context.
+          Showing latest {recent.length} of {threats.length} loaded DPI threats. Open the Threats tab for the paged list. In monitor mode these are logged, not blocked.
         </p>
         <ul className="space-y-0.5" data-testid="network-threats-list">
           {recent.map((t) => {

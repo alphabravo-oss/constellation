@@ -162,7 +162,7 @@ export function NetworkRulesPage() {
       ) : (
         <div>
           <p className="mb-2 text-xs text-muted-foreground">Initially shown in server evaluation order. Column sorting changes only the view; Move to top changes rule precedence.</p>
-          <DataTable rows={rows} columns={columns} rowKey={(r) => String(r.id)} />
+          <DataTable rows={rows} sourceLimit={3000} sourceCount={all.length} columns={columns} rowKey={(r) => String(r.id)} />
         </div>
       )}
     </div>
