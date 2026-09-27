@@ -1080,8 +1080,13 @@ progressive disclosure, while retaining Constellation's security vocabulary.
   archive/prune, define a reviewed retention horizon for network-flow rollups,
   and alert on per-table growth, retention lag, failed partition drops, and
   database/PVC free space. On 2026-09-27 the local database was 6.8 GB, with
-  `audit_events` at 1.6 GB (append-only, no archiver), `cve_records` at 1.1 GB,
-  and `network_flow_rollups` at 79 MB (oldest bucket in June). The event and
+  `audit_events` at 1.6 GB, `cve_records` at 1.1 GB, and
+  `network_flow_rollups` at 79 MB (oldest bucket in June). The audit archiver
+  exists but is disabled on k3s and exports only a rolling window; it neither
+  catches up missed history nor prunes after verification. Recent audit growth
+  is dominated by runtime alerts and scan completions, not control-plane
+  mutations. The [storage lifecycle review](storage-lifecycle-review.md)
+  compares the local NeuVector code and proposes a safe split. The event and
   raw-flow windows are bounded locally but do not close this item.
 - [ ] Seed large datasets and prove every high-volume page either pages or labels
   its render cap. Audit and Timeline now label their loaded 100-row page ranges,
