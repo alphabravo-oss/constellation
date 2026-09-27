@@ -1089,7 +1089,10 @@ progressive disclosure, while retaining Constellation's security vocabulary.
   compares the local NeuVector code and proposes a safe split. The active
   scanner uses Syft, Trivy and Grype, not the retired `constellation-vulndb`
   bundle; `cve_records` is fed by KEV/EPSS and optional NVD. The event and
-  raw-flow windows are bounded locally but do not close this item.
+  raw-flow windows are bounded locally but do not close this item. The
+  [23-item database lifecycle register](database-lifecycle-backlog.md) tracks
+  the concrete fixes and policy decisions, including a confirmed
+  cross-partition `ctid` deletion defect that must be fixed urgently.
 - [ ] Seed large datasets and prove every high-volume page either pages or labels
   its render cap. Audit and Timeline now label their loaded 100-row page ranges,
   distinguish current-page CSV, and clear stale rows on page/scope changes;
