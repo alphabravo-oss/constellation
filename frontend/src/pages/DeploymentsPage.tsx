@@ -4,7 +4,7 @@
 // deployments first and expose the factors behind the score. The discoverer
 // rolls image/workload findings and runtime exposure into deployments.risk_score.
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, Flame, Layers, ShieldAlert } from "lucide-react";
 import { deployments, type Deployment } from "@/api/client";
@@ -19,6 +19,8 @@ import { usePlatformComponentVisibility } from "@/hooks/usePlatformComponentVisi
 
 export function DeploymentsPage() {
   const { clusterId } = useCluster();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const search = searchParams.get("q") ?? "";
   const [namespace, setNamespace] = useState("");
   const [hidePlatformComponents, setHidePlatformComponents] = usePlatformComponentVisibility();
   const q = useQuery({
@@ -27,10 +29,14 @@ export function DeploymentsPage() {
   });
 
   const allRows = useMemo(() => q.data?.deployments ?? [], [q.data?.deployments]);
-  const platformCount = useMemo(() => allRows.filter((row) => isPlatformResource(row.platform_role, row.namespace)).length, [allRows]);
+  const matchingRows = useMemo(() => {
+    const name = search.trim().toLowerCase();
+    return name ? allRows.filter((row) => row.name.toLowerCase().includes(name)) : allRows;
+  }, [allRows, search]);
+  const platformCount = useMemo(() => matchingRows.filter((row) => isPlatformResource(row.platform_role, row.namespace)).length, [matchingRows]);
   const rows = useMemo(
-    () => hidePlatformComponents ? allRows.filter((row) => !isPlatformResource(row.platform_role, row.namespace)) : allRows,
-    [allRows, hidePlatformComponents],
+    () => hidePlatformComponents ? matchingRows.filter((row) => !isPlatformResource(row.platform_role, row.namespace)) : matchingRows,
+    [matchingRows, hidePlatformComponents],
   );
   const summary = useMemo(
     () =>
@@ -120,6 +126,22 @@ export function DeploymentsPage() {
         description="Your riskiest deployments first. The score blends open vulnerabilities, exploit signals (CVSS, KEV), runtime exposure, and workload posture."
         actions={
           <div className="flex items-center gap-2">
+            <label className="flex items-center gap-2 text-xs">
+              <span className="text-muted-foreground">Search</span>
+              <input
+                type="search"
+                value={search}
+                onChange={(event) => {
+                  const next = new URLSearchParams(searchParams);
+                  if (event.target.value) next.set("q", event.target.value);
+                  else next.delete("q");
+                  setSearchParams(next);
+                }}
+                placeholder="Deployment name"
+                className="rounded-md border border-border bg-card px-2 py-1 text-sm"
+                data-testid="deployment-search"
+              />
+            </label>
             <PlatformVisibilityToggle
               hidden={hidePlatformComponents}
               onHiddenChange={setHidePlatformComponents}
@@ -166,8 +188,10 @@ export function DeploymentsPage() {
             <div className="px-3 py-6" />
           ) : (
             <div className="px-3 py-6 text-center text-xs text-muted-foreground">
-              {hidePlatformComponents && platformCount > 0 && allRows.length === platformCount
+              {hidePlatformComponents && platformCount > 0 && matchingRows.length === platformCount
                 ? `${platformCount} platform ${platformCount === 1 ? "deployment is" : "deployments are"} hidden. Use Platform hidden to show them.`
+                : search.trim()
+                  ? "No deployments match this search."
                 : "No deployments yet. The operator's reconciler discovers deployments per ConstellationCluster and persists risk into the deployments table."}
             </div>
           )

@@ -476,7 +476,7 @@ export function DashboardPage() {
             title="Top Network Denies"
             subtitle="Blocked service pairs in the last 24h"
             icon={<ShieldAlert className="h-3.5 w-3.5" />}
-            rightSlot={<Link to={clusterPath("/network?verdict=deny")} className="text-[11px] text-muted-foreground hover:text-foreground">open map <ArrowUpRight className="inline h-3 w-3" /></Link>}
+            rightSlot={<Link to={clusterPath("/network?tab=conversations&hours=24&verdict=deny")} className="text-[11px] text-muted-foreground hover:text-foreground">view conversations <ArrowUpRight className="inline h-3 w-3" /></Link>}
           >
             <div data-testid="dashboard-network-denies">
               {conversationsQ.isPending ? (
@@ -487,7 +487,7 @@ export function DashboardPage() {
                 <ul className="divide-y divide-border">
                   {topNetworkDenies.map((row, index) => (
                     <li key={`${row.from}-${row.to}-${index}`}>
-                      <Link to={clusterPath(`/network?tab=conversations&workload=${encodeURIComponent(row.from)}`)} className="flex items-center gap-3 px-3 py-2 hover:bg-muted/40 transition-colors">
+                      <Link to={clusterPath(`/network?tab=conversations&hours=24&verdict=${encodeURIComponent(row.verdict ?? "deny")}&workload=${encodeURIComponent(row.from)}`)} className="flex items-center gap-3 px-3 py-2 hover:bg-muted/40 transition-colors">
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-xs font-medium">
                             <span className="font-mono">{row.from}</span>
@@ -626,7 +626,7 @@ export function DashboardPage() {
           title="Action Items"
           subtitle="Top 10 open critical and high findings · sorted by composite risk"
           icon={<ShieldAlert className="h-3.5 w-3.5" />}
-          rightSlot={<Link to={clusterPath("/findings?severity=critical")} className="text-[11px] text-muted-foreground hover:text-foreground">view all <ArrowUpRight className="inline h-3 w-3" /></Link>}
+          rightSlot={<Link to={clusterPath("/findings")} className="text-[11px] text-muted-foreground hover:text-foreground">view all <ArrowUpRight className="inline h-3 w-3" /></Link>}
         >
           {topActions.length === 0 ? (
             <EmptyState

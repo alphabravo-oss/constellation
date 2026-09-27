@@ -9,10 +9,10 @@
 //   - ActionBar slides up when rows are selected (Triage / Suppress / Accept / Comment)
 //   - Right Drawer opens on row click with full detail + inline triage
 //
-// Filtering uses the existing /findings?lifecycle= and ?kind= params; the
-// free-text query refines client-side until the backend's DSL is wired through.
+// URL severity and lifecycle filters drive the findings request; the free-text
+// query refines client-side until the backend's DSL is wired through.
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { Save, Tag, Bookmark, ChevronDown, ListFilter } from "lucide-react";
 
@@ -87,10 +87,24 @@ export function FindingsPage() {
   // Cluster scope: when mounted under /clusters/:id/findings, all queries are
   // filtered to that cluster. At org-level (legacy) we pass undefined.
   const { clusterId } = useCluster();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const severity = searchParams.get("severity") === "critical" || searchParams.get("severity") === "high"
+    ? searchParams.get("severity") as "critical" | "high" : "";
+  const lifecycleParam = searchParams.get("lifecycle");
+  const lifecycle: Lifecycle | "" = lifecycleParam === "all" ? ""
+    : lifecycleParam === "accepted" || lifecycleParam === "suppressed" || lifecycleParam === "open"
+      ? lifecycleParam : "open";
+
+  function setUrlFilter(name: "severity" | "lifecycle", value: string) {
+    const next = new URLSearchParams(searchParams);
+    if (name === "lifecycle" && !value) next.set(name, "all");
+    else if (value && !(name === "lifecycle" && value === "open")) next.set(name, value);
+    else next.delete(name);
+    setSearchParams(next);
+  }
 
   // Filters
   const [kind, setKind] = useState<FindingKind | "">("");
-  const [lifecycle, setLifecycle] = useState<Lifecycle | "">("open");
   const [query, setQuery] = useState("");
   const [groupBy, setGroupBy] = useState<GroupBy>("none");
   const [, startTransition] = useTransition();
@@ -105,7 +119,11 @@ export function FindingsPage() {
   const [selected, setSelected] = useState<Set<React.Key>>(new Set());
   // CVE-first by default, matching NeuVector's vulnerability view (one row per CVE +
   // blast radius). "Instances" (one row per CVE×workload) stays one click away.
-  const [view, setView] = useState<"instances" | "cve">("cve");
+  const [view, setView] = useState<"instances" | "cve">(() => severity || lifecycle !== "open" ? "instances" : "cve");
+  useEffect(() => {
+    if (severity || lifecycle !== "open") setView("instances");
+  }, [severity, lifecycle]);
+  const activeView = severity ? "instances" : view;
   useEffect(() => {
     if (kind && kind !== "vulnerability" && view === "cve") {
       setView("instances");
@@ -119,10 +137,11 @@ export function FindingsPage() {
   const [fixableOnly, setFixableOnly] = useState(false);
   // Data — cluster_id is threaded so the URL is the source of truth for scope.
   const q = useQuery({
-    queryKey: ["findings", kind, lifecycle, clusterId, fixableOnly],
+    queryKey: ["findings", kind, lifecycle, severity, clusterId, fixableOnly],
     queryFn: () => findings.list({
       kind: kind || undefined,
       lifecycle: lifecycle || undefined,
+      q: severity ? `severity:${severity}` : undefined,
       cluster_id: clusterId,
       // Only meaningful for vulnerabilities; harmless on other kinds (they have no fixed field).
       fixable: fixableOnly || undefined,
@@ -136,14 +155,14 @@ export function FindingsPage() {
   const CVE_PAGE = 100;
   const [cvePage, setCvePage] = useState(0);
   const cveSearch = useDebounced(query.trim(), 300);
-  useEffect(() => { setCvePage(0); }, [cveSearch, lifecycle, clusterId, fixableOnly]);
+  useEffect(() => { setCvePage(0); }, [cveSearch, lifecycle, severity, clusterId, fixableOnly]);
   const cveQ = useQuery({
     queryKey: ["findings-cve", lifecycle, clusterId, fixableOnly, cveSearch, cvePage],
     queryFn: () => findings.byCVE({
       cluster_id: clusterId, lifecycle: lifecycle || undefined, fixable: fixableOnly || undefined,
       q: cveSearch || undefined, limit: CVE_PAGE, offset: cvePage * CVE_PAGE,
     }),
-    enabled: view === "cve",
+    enabled: activeView === "cve",
     placeholderData: keepPreviousData,
   });
   const cveRows = cveQ.data?.cves ?? [];
@@ -161,10 +180,11 @@ export function FindingsPage() {
   const activeChips = useMemo(() => {
     const out: Array<{ label: string; value: string; onRemove: () => void }> = [];
     if (kind)      out.push({ label: "kind",      value: kind,      onRemove: () => setKind("") });
-    if (lifecycle) out.push({ label: "lifecycle", value: lifecycle, onRemove: () => setLifecycle("") });
+    if (severity) out.push({ label: "severity", value: severity, onRemove: () => setUrlFilter("severity", "") });
+    if (lifecycle !== "open") out.push({ label: "lifecycle", value: lifecycle || "all", onRemove: () => setUrlFilter("lifecycle", lifecycle ? "" : "open") });
     if (query)     out.push({ label: "q",         value: query,     onRemove: () => setQuery("") });
     return out;
-  }, [kind, lifecycle, query]);
+  }, [kind, lifecycle, query, severity, searchParams]);
 
   function saveView() {
     const name = prompt("Name this view");
@@ -173,7 +193,7 @@ export function FindingsPage() {
   }
   function applyView(v: SavedView) {
     setKind(v.kind);
-    setLifecycle(v.lifecycle);
+    setUrlFilter("lifecycle", v.lifecycle);
     setQuery(v.query);
   }
 
@@ -363,6 +383,8 @@ export function FindingsPage() {
             options={[["", "any kind"], ["vulnerability","vulnerability"], ["iac","iac"], ["license","license"],
                       ["cloud-config","cloud-config"], ["drift","drift"], ["signature","signature"],
                       ["ml-model","ml-model"], ["compliance","compliance"], ["runtime","runtime"]]} />
+          <Select label="Severity" value={severity} onChange={(value) => setUrlFilter("severity", value)}
+            options={[["", "any severity"], ["critical", "critical"], ["high", "high"]]} />
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Try</span>
@@ -397,7 +419,7 @@ export function FindingsPage() {
             <button
               key={tab.lifecycle}
               type="button"
-              onClick={() => setLifecycle(tab.lifecycle)}
+              onClick={() => setUrlFilter("lifecycle", tab.lifecycle)}
               className={cn(
                 "rounded-md border bg-card px-3 py-2.5 text-left transition-all duration-100",
                 active
@@ -426,17 +448,20 @@ export function FindingsPage() {
             key={v}
             type="button"
             onClick={() => setView(v)}
+            disabled={v === "cve" && !!severity}
+            title={v === "cve" && severity ? "Clear the severity filter to use By CVE" : undefined}
             data-testid={`findings-view-${v}`}
             className={cn(
               "rounded h-6 px-2 text-[11px] border transition-colors",
-              view === v
+              activeView === v
                 ? "bg-[color-mix(in_oklab,var(--color-primary)_18%,transparent)] border-[color-mix(in_oklab,var(--color-primary)_36%,transparent)] text-[color:var(--color-primary)]"
                 : "bg-card border-border hover:bg-accent",
+              v === "cve" && severity && "cursor-not-allowed opacity-50",
             )}
           >{l}</button>
         ))}
         <span className="ml-2 text-[10px] text-muted-foreground">
-          {view === "cve" ? "one row per CVE with its blast radius" : "one row per CVE × workload"}
+          {activeView === "cve" ? "one row per CVE with its blast radius" : "one row per CVE × workload"}
         </span>
         <button
           type="button"
@@ -449,7 +474,7 @@ export function FindingsPage() {
           )}
           title="Hide vulnerabilities with no available fix (won't-fix / not-fixed)"
         >{fixableOnly ? "✓ " : ""}Fixable only</button>
-        {view === "cve" && (
+        {activeView === "cve" && (
           <span className="rounded h-6 px-2 text-[11px] border border-border bg-card text-muted-foreground">
             {cveRows.length} of {cveTotal} CVEs
           </span>
@@ -457,7 +482,7 @@ export function FindingsPage() {
       </div>
 
       {/* Group by (instance view only) */}
-      {view === "instances" && (
+      {activeView === "instances" && (
       <div className="flex items-center gap-1.5">
         <span className="text-[10px] uppercase tracking-wider text-muted-foreground"><ListFilter className="h-3 w-3 inline" /> Group</span>
         {([
@@ -480,7 +505,7 @@ export function FindingsPage() {
       )}
 
       {/* CVE rollup view */}
-      {view === "cve" ? (
+      {activeView === "cve" ? (
         <>
           <CVETable rows={cveRows} loading={cveQ.isPending} clusterId={clusterId} />
           <Pager page={cvePage} pageSize={CVE_PAGE} total={cveTotal} rowsOnPage={cveRows.length} onPage={setCvePage} />
@@ -506,7 +531,7 @@ export function FindingsPage() {
               title="No findings match"
               hint="Adjust your filters or clear the query."
               icon={<Tag className="h-8 w-8" />}
-              action={<Button size="sm" variant="outline" onClick={() => { setQuery(""); setKind(""); setLifecycle("open"); }}>Reset filters</Button>}
+              action={<Button size="sm" variant="outline" onClick={() => { setQuery(""); setKind(""); setSearchParams(new URLSearchParams()); }}>Reset filters</Button>}
             />
           }
         />

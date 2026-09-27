@@ -138,11 +138,33 @@ sources, full rule-category behavior and deployed enforcement remain open.
 Saved-provider probes now exercise public LDAPS TLS/optional bind, local SAML
 metadata parsing and public HTTPS OIDC discovery with scoped authorization,
 redacted responses and audit tests. Private/air-gapped IdPs and live SAML
-connectivity are not supported by these probes, so IAM-1 stays open.
+connectivity are not supported by these probes, so IAM-1 stays open. A
+production-build browser test against an isolated migration-166 API/DB created
+a saved SAML provider, exercised its check and removed it; this proves the
+local metadata path, not external IdP connectivity.
 Legacy DLP/WAF and common feature aliases now redirect to canonical routes
 while preserving deep paths, filters and fragments; deterministic browser
-coverage exercises representative aliases. The remaining UI-1 route and entry-
-point audit stays open.
+coverage exercises representative aliases. Token, attestation, access-control
+and integration aliases now also redirect to Settings, and the cluster picker
+links directly to canonical system health. Cluster health remains a distinct
+sensor/registration surface, so the UI-1 entry-point decision stays open.
+
+2026-09-27 continuation: an isolated PostgreSQL database migrated through 166
+and seeded for a locally running API passed seven existing API-backed browser
+tests across Access Control, network, and response workflows. A separate live
+browser test created, checked and removed a saved SAML provider. These are
+local API/browser proofs, not deployed IdP or network enforcement evidence.
+The network conversation table CSV now includes endpoint roles, with a
+cluster-scoped browser test; other role-bearing exports remain under review.
+Dashboard link tests cover metric destinations and supported filters, but
+the destination matrix remains incomplete. Findings now applies severity and
+accepted-lifecycle URL filters in the instance view with browser-history tests;
+its list is capped at 500 rows, and the CVE rollup has no severity-aware total.
+Deployments now applies a visible URL-backed name filter to rows, counts and
+CSV, but its API returns only the default first 100 rows. Nodes cannot
+accurately filter Host CVEs from `open_vulns`, which counts all open host
+findings and is capped at 500 nodes. Exact network pair/exposure drill-downs
+and the deny/block aggregate link remain open, so UI-4 stays unchecked.
 
 | Slice | Current status | Evidence / remaining work |
 |---|---|---|
@@ -667,7 +689,8 @@ row saying `enforced`.
 - [ ] Add bounded, secret-redacted connection tests for LDAP, SAML metadata, and
   OIDC discovery. Saved-provider API/UI probes cover public LDAPS TLS/optional
   bind, local SAML metadata parsing and public HTTPS OIDC discovery with
-  scoped authorization, audit and sanitized results. Private or air-gapped
+  scoped authorization, audit and sanitized results. A live API-backed browser
+  test verifies saved SAML metadata and cleanup. Private or air-gapped
   LDAP/OIDC endpoints and live SAML connectivity remain open.
 - [ ] Add group-resolution and final mapped-role/scope previews.
 - [ ] Import NeuVector users, roles, mappings, and token metadata without
@@ -900,6 +923,11 @@ progressive disclosure, while retaining Constellation's security vocabulary.
   fragments. Other duplicate feature routes still need audit.
 - [ ] Order scope consistently: Organization, Platform, Integrations, Cluster.
 - [ ] Resolve remaining duplicate health/settings/token/attestation entry points.
+  Token, attestation, access-control and integration aliases now redirect to
+  Settings with deep-link preservation and browser coverage. Cluster health
+  still has sensor gates and registration actions absent from org system health;
+  its navigation/consolidation decision remains open. `/tokens` is the browser
+  alias because `/api` is reserved by the server.
 - [ ] Every primary page opens with one verdict, no more than five KPIs, and one
   primary table or workspace.
 - [ ] Use tabs for peer views, drawers for editing, and an Advanced disclosure for
@@ -932,15 +960,23 @@ progressive disclosure, while retaining Constellation's security vocabulary.
   and policy-lifecycle APIs plus session/conversation responses and
   container/deployment/session/conversation CSV now carry the role. Multi-cluster
   org-wide conversations omit ambiguous label-derived roles. Conversation
-  detail includes roles for matching flows; other exports and live-install
-  proof remain open.
+  detail includes roles for matching flows; the conversation table CSV also
+  includes endpoint roles with browser coverage. Dashboard exposure export,
+  other exports and live-install proof remain open.
 
 ### UI-4 Dashboard and operational posture
 
 - [ ] Reconcile component health, policy modes, threats, vulnerability posture,
   exposed services, admission, scanner DB, and federation counts with their
   source endpoints.
-- [ ] Link every tile to the exact filtered source view.
+- [ ] Link every tile to the exact filtered source view. Browser tests now cover
+  dashboard metric destinations and supported component/network filters.
+  Findings severity/lifecycle URLs now filter instance rows and preserve
+  history, but the list caps at 500 and CVE rollups lack a filtered total.
+  Deployment name search is URL-backed yet limited to the API's first 100
+  rows. Host-CVE nodes lack an exact per-node source count; network pair and
+  exposure drill-downs remain broad, and the deny-only conversation header
+  cannot represent blocked records too.
 - [ ] Prefer downloadable HTML/CSV/JSON evidence; add PDF only when it materially
   improves a customer workflow.
 

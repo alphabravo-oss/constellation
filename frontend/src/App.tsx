@@ -10,8 +10,7 @@
 //       ├── findings                → FindingsPage (filtered by :id)
 //       ├── findings/:fid           → FindingDetailPage
 //       ├── nodes, images, assets, deployments, etc — see below
-//   Org-level surfaces stay at root: /cve, /settings, /federation, /coverage,
-//     /system-health, /access-control, /integrations, /ai.
+//   Org-level surfaces: /cve, /federation, /posture, and /settings/*.
 import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -333,13 +332,15 @@ export function App() {
             or were renamed. Keep them so bookmarks/links don't break. */}
         <Route path="coverage"        element={<AliasRedirect to="/posture" />} />
         <Route path="system-health"   element={<AliasRedirect to="/settings/health" />} />
-        <Route path="access-control"  element={<AliasRedirect to="/settings/access" />} />
+        <Route path="access-control/*" element={<AliasRedirect to="/settings/access" from="access-control" />} />
         <Route path="system-config"   element={<AliasRedirect to="/settings/effective-config" />} />
         <Route path="sysconfig"       element={<AliasRedirect to="/settings/effective-config" />} />
         <Route path="vulndb"          element={<AliasRedirect to="/settings/scanner" />} />
         <Route path="cve-sources"     element={<AliasRedirect to="/settings/scanner" />} />
         <Route path="notifications"   element={<AliasRedirect to="/settings/integrations" />} />
-        <Route path="integrations"    element={<AliasRedirect to="/settings/integrations" />} />
+        <Route path="integrations/*"  element={<AliasRedirect to="/settings/integrations" from="integrations" />} />
+        <Route path="tokens/*"        element={<AliasRedirect to="/settings/api-tokens" from="tokens" />} />
+        <Route path="attestation-trust/*" element={<AliasRedirect to="/settings/attestation-trust" from="attestation-trust" />} />
 
         {/* Settings — one grouped shell, one home per feature (SettingsShell sub-nav). */}
         <Route path="settings" element={<SuspenseRoute><SettingsShell /></SuspenseRoute>}>

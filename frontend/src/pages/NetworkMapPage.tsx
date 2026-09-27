@@ -818,6 +818,7 @@ function NetworkMapInner() {
           <option value="">All verdicts</option>
           <option value="allow">Allow</option>
           <option value="alert">Alert</option>
+          <option value="deny">Deny</option>
           <option value="block">Block</option>
         </select>
         <select
@@ -1449,8 +1450,10 @@ function NetworkConversationsWorkspaceTab({
     [rows],
   );
   const columns = useMemo<Column<NetworkConversation>[]>(() => [
-    { id: "from", header: "From", cell: (row) => <span className="font-mono">{row.from}</span>, sort: (a, b) => a.from.localeCompare(b.from) },
-    { id: "to", header: "To", cell: (row) => <span className="font-mono">{row.to}</span>, sort: (a, b) => a.to.localeCompare(b.to) },
+    { id: "from", header: "From", cell: (row) => <span className="font-mono">{row.from}</span>, exportValue: (row) => row.from, sort: (a, b) => a.from.localeCompare(b.from) },
+    { id: "from_platform_role", header: "From role", exportHeader: "from_platform_role", cell: (row) => row.from_platform_role ?? "", exportValue: (row) => row.from_platform_role ?? "" },
+    { id: "to", header: "To", cell: (row) => <span className="font-mono">{row.to}</span>, exportValue: (row) => row.to, sort: (a, b) => a.to.localeCompare(b.to) },
+    { id: "to_platform_role", header: "To role", exportHeader: "to_platform_role", cell: (row) => row.to_platform_role ?? "", exportValue: (row) => row.to_platform_role ?? "" },
     { id: "apps", header: "Apps", cell: (row) => <span className="text-muted-foreground">{(row.apps ?? []).slice(0, 4).join(", ") || "-"}</span>, sort: (a, b) => (a.apps ?? []).join(",").localeCompare((b.apps ?? []).join(",")) },
     { id: "volume", header: "Volume", cell: (row) => <span className="font-mono">{formatBytes(row.bytes)}</span>, sort: (a, b) => a.bytes - b.bytes, numeric: true },
     { id: "packets", header: "Packets", cell: (row) => <span className="font-mono">{row.packets.toLocaleString()}</span>, sort: (a, b) => a.packets - b.packets, numeric: true },
