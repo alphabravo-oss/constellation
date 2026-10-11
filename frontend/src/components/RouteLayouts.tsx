@@ -39,4 +39,3 @@ export function LegacyClusterRedirect() {
   const legacyPath = location.pathname.replace(/^\/+/, "");
   return <Navigate to="." href={`/clusters/${activeCluster}/${legacyPath}${location.searchStr}${location.hash ? `#${location.hash}` : ""}`} replace />;
 }
-

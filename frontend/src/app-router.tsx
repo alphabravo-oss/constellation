@@ -540,4 +540,3 @@ export function createAppRouter(history?: RouterHistory) {
 
 export const router = createAppRouter();
 declare module "@tanstack/react-router" { interface Register { router: typeof router } }
-
