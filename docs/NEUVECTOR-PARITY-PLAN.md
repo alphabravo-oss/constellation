@@ -92,8 +92,9 @@ evidence that CI is missing. This documentation update is subsequent work.
 Old stashed UI edits, historical local branches and untracked smoke artifacts
 need separate disposition; do not replay them blindly into the current code.
 
-The published checklist remains **53 checked / 98 open**. No acceptance row
-was newly closed by this review. Many open parents contain source fixes and
+The published checklist is now **53 checked / 100 open**. No acceptance row
+was newly closed by this review; two fleet-scale acceptance items were added
+after comparing ingestion and failure boundaries with NeuVector. Many open parents contain source fixes and
 focused tests already recorded in the September implementation review. Their
 remaining integration, negative-path or deployment tests are the work; do not
 restart implementation from the older July/August gap lists. The 23 DB detail
@@ -184,7 +185,33 @@ browser and aggregate required checks failed
 Local focused passes do not override that release gate. Triage and resolve the
 failed checks before deployment or merge; keep the PR draft and the acceptance
 items open. The canonical plan is reconciled; full implementation/acceptance is
-**not complete**, and its count remains **53 checked / 98 open**.
+**not complete**. The subsequent fleet review brings its count to
+**53 checked / 100 open** without changing any completed-item status.
+
+### October 11 fleet architecture review
+
+NeuVector keeps cluster-local controllers/state and federates policy, summaries
+and selected scan results. Its bounded console history plus external logging
+has different storage guarantees from Constellation's centralized searchable
+history and integrity chain. The [architecture document](architecture.md) now
+describes the active scanner pipeline, current ingest limitations and a proposed
+bounded regional deployment model; it replaces the retired VulnDB architecture.
+This is a qualification direction, not a claim of implemented regional routing.
+
+Add two explicit OPS-2 gates below: durable/idempotent bounded cluster delivery,
+and independent workload/progress/failure boundaries. Current agent batching
+and retry counters, time partitions, CNPG replicas and federation APIs do not
+close those gaps. Keep PostgreSQL/CNPG, qualify one deployment's capacity first,
+and expand to independently operated groups of clusters at measured capacity,
+latency or isolation thresholds. Global audit/rollup serialization and shared
+retention holds need deliberate contracts before claiming fleet scalability.
+Distinguish delivery from storage: durable spool/replay/idempotency is required
+work; an external broker and analytical database are conditional technology
+choices. Keep transactional authority in PostgreSQL and benchmark the expected
+fleet's telemetry workload before selecting a separate store. The architecture
+document records triggers, ownership and consistency/restore acceptance for a
+possible analytical tier; adding ClickHouse or a streaming broker is not yet an
+approved deployment or an acceptance shortcut.
 
 ### Stack baseline and approved convergence target
 
@@ -370,7 +397,9 @@ Unchecked parent items remain open until **all** their acceptance requirements
 are met. Code present is not the same as verified or release-ready. The older
 deficiency ledger includes findings that already have fixes; do not use its
 historical counts as a count of currently open defects.
-Acceptance backlog: **98 open**. Since the `800b0ef` baseline of 107 open,
+Acceptance backlog: **100 open**. The September reconciliation reached 98;
+the October 11 fleet review adds two explicit ingestion/isolation gates.
+Since the `800b0ef` baseline of 107 open,
 **thirteen existing items closed** (four OPS-1 items, three SIEM-1 items, one
 POL-1 item, one IAM-1 item, two UI-1 items, one UI-2 item and one UI-3 item), and four new items were added: vendor interoperability, legacy
 DPI binding tenant validation, registration/proof of the unreachable
@@ -1402,6 +1431,29 @@ progressive disclosure, while retaining Constellation's security vocabulary.
   pagination for the other capped families remain open.
 - [ ] Add performance budgets for network rollups, findings, audit/timeline, and
   dashboard summaries.
+- [ ] Implement durable, bounded per-cluster telemetry delivery and idempotent
+  acceptance. The current memory queues count drops after exhausted retries;
+  the inspected event uploader treats 429 as terminal, and ingest lacks a
+  producer sequence/replay contract. Require capped protected spool, durable
+  acknowledgement, authenticated producer/cluster binding, fair byte/row
+  quotas, retry/Retry-After handling and priority/overflow visibility. Test WAN
+  and API loss, process restart, lost acknowledgement after DB commit, duplicate
+  and reordered batches, full spool and one noisy cluster without silently
+  losing critical receipts or double-counting flow aggregates. Preserve local
+  enforcement under disconnection; verify last-valid policy, freshness and
+  restart behavior separately for each enforcement backend.
+- [ ] Qualify independent fleet workload and failure boundaries using the
+  [proposed architecture](architecture.md#proposed-fleet-topology--qualification-work-not-deployed-behavior).
+  Publish one deployment's measured capacity and expansion thresholds before
+  assigning groups of clusters to multiple deployments. Require fair worker
+  scheduling, bounded connections, scoped rollup ownership/watermarks, explicit
+  tenant-hold budgets, and a versioned design for any audit-chain split.
+  Regional assignment, history/replay-preserving cluster movement and fleet
+  policy/query routing must preserve scope, report stale/partial results, and
+  tolerate one deployment's outage. CNPG standbys do not shard writes, and
+  existing federation APIs do not prove this isolation. Benchmark skewed active
+  clusters with concurrent ingest/read/prune/backup; registration counts alone
+  do not establish fleet capacity.
 - [ ] Maintain opt-in real-cluster suites for Flannel, Cilium, and Calico plus
   BPF-LSM-capable and non-capable kernels.
 - [ ] Keep FIPS, disconnected install, upgrade, backup/restore, and HA smoke in
