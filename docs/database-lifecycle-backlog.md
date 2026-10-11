@@ -6,6 +6,33 @@ release. This is the detailed open-item register for the OPS-2 storage item in
 retired `constellation-vulndb` integration is tracked separately and is not a
 proposed destination for current CVE data.
 
+**October 11 baseline recheck:** the `711a881` source still contains the DB-01
+partition-ambiguous deletes and DB-02 prune-after-refresh-failure path. The
+existing cluster has one node, a PostgreSQL StatefulSet, no CNPG CRDs/operator,
+and no DB-backup CronJob in `constellation-system`. External backup coverage
+has not been verified. The sizes and seven-day row counts below remain the
+September 27 observations; they were not remeasured. The canonical parity
+plan's October 11 packages A/B/J define the next implementation, recovery/CNPG
+and lifecycle work. No item is closed by this source/infrastructure inspection.
+
+**October 11 implementation:** DB-01–04 now have source fixes and actual
+PostgreSQL tests. Deletes use `(id, at)`; folding and expiry share transactional
+locks/watermarks; late rows update aggregates atomically; migration 168 prevents
+rebuilding aggregates from already-pruned history. Fresh defaults are 14/30/7
+days for flows/events/jobs. Existing zero/absent legacy values remain holds.
+The installation-wide policy takes the maximum organization window, with any
+zero holding deletion and read errors skipping maintenance. Race tests passed
+twice. Deployment and operational acceptance remain open, especially the fold
+lag alarm and measured lock contention. This does not repair historical loss.
+
+DB-05 has chart plugin/recovery support and a local RustFS/CNPG rehearsal
+([runbook](cnpg-recovery.md)). An independent full restore of the existing
+database also passed migration 168 with unchanged raw-flow, rollup, event and
+audit counts. The live StatefulSet remains unchanged; off-host copies, HA,
+failure alerts, audit-chain and encrypted-credential recovery remain unproved.
+The table below retains the original failure/acceptance definitions so the
+remaining deployment gates are not mistaken for new implementation work.
+
 ## Live baseline
 
 - PostgreSQL database: about 6.8 GB. `audit_events` 1.6 GB, `cve_records`

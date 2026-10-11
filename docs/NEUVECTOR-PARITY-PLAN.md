@@ -1,7 +1,8 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-09-27**
+Last reconciled: **2026-10-11** (source/stack and live infrastructure review;
+prior feature acceptance evidence remains dated below)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -74,6 +75,256 @@ not permanent claims: regressions reopen the relevant workstream.
 | Operations | Effective-config read view, component cockpit/diagnostics, support bundle, dashboard rollups, audit and timeline exports |
 | Admission | Full PSS baseline/restricted engine plus targeted hardening profiles, dry-run assessment, monitor/protect state |
 | UI visibility | Shared persisted platform-component filter for Kubernetes, Constellation, and Astronomer namespaces on network, deployment, and container views |
+
+## October 11 reconciliation and next-work plan
+
+This section sets the execution order for the existing acceptance checklist.
+It does not create a second backlog or count an installed dependency as a
+completed workflow. The source baseline is Constellation `711a881`; Astronomer
+was fast-forwarded from `f87b189f` to `3b378ef16141b9eaac35a1e5fe292e061b69f5f1`
+and its checkout matches `origin/main`. The comparison uses that source, not
+an assertion that every Astronomer capability is deployed or release-qualified.
+
+The Constellation branch is pushed through `711a881`, 38 commits ahead of
+`origin/main`, with no PR or branch Actions run found during this review.
+CI triggers on PRs/main/manual invocation, so absence of a branch run is not
+evidence that CI is missing. This documentation update is subsequent work.
+Old stashed UI edits, historical local branches and untracked smoke artifacts
+need separate disposition; do not replay them blindly into the current code.
+
+The published checklist remains **53 checked / 98 open**. No acceptance row
+was newly closed by this review. Many open parents contain source fixes and
+focused tests already recorded in the September implementation review. Their
+remaining integration, negative-path or deployment tests are the work; do not
+restart implementation from the older July/August gap lists. The 23 DB detail
+items are decomposition of OPS-2, not 23 additional top-level items. These
+counts mix correctness, NV switchability, UX and guide conformance and must
+not be presented as a feature-completion percentage.
+
+### October 11 implementation review
+
+The baseline comparison below describes `711a881`, before this implementation.
+The following source changes supersede its Router/Form, retention and backup
+gaps; broad acceptance items remain open until their remaining gates pass.
+
+- **Package A:** partition-safe `(id, at)` row deletion, failure/watermark-gated
+  flow expiry, transactional late-flow aggregation and replay protection after
+  pruning are implemented. Migration 168 records the conservative raw-history
+  boundary. Shared retention uses the longest organization window, with any
+  explicit zero holding deletion; fresh installs use flow/event/job defaults of
+  14/30/7 days. Legacy absent values remain holds. Actual PostgreSQL collision,
+  failure, lag, late-arrival, refold, partition and tenant tests passed with the
+  race detector and two repetitions. Main-cluster deployment, fold-lag alerts
+  and throughput/lock-contention qualification remain open.
+- **Package B:** chart support for Barman Cloud ObjectStore WAL archiving,
+  scheduled backups and recovery into a separate CNPG cluster is implemented.
+  Four chart contract tests and Helm lint pass. A full copy of the existing
+  database was independently restored and upgraded through migration 168,
+  preserving exact counts: 2,723,972 raw flows; 153,178 rollups; 3,020,985 events;
+  1,905,903 audit events. Secrets were preserved separately under restricted
+  access. The user approved local RustFS for the initial CNPG rehearsal; see
+  [recovery evidence and reproduction](cnpg-recovery.md). The repeatable RustFS
+  script passed scheduled backup, WAL/PITR boundaries, required extensions and
+  test-API DSN cutover with existing-session/configuration and fresh-login checks.
+  The existing
+  StatefulSet remains the live database. Off-host recovery, HA, alert failure
+  drills and encrypted-credential/audit-chain verification remain open.
+- **Package I / TSG-5:** TanStack Router 1.170.35 replaces React Router throughout
+  the console, using a registered code-based route tree. Alias redirects,
+  repeated query parameters, hashes, auth return paths and history have focused
+  tests. TanStack Form 1.33.5 and Zod 4.6.1 now drive Data Retention through a
+  shared form layer, with validation, pending state, conflict handling and dirty
+  navigation protection. `tailwind-merge` is 3.6.0. Frontend lint, production
+  build and 133 tests pass; 35 production-browser navigation/alias checks and a
+  separate 11-test auth/session/retention run pass against the rebuilt image.
+  The combined browser suite encountered the API login rate limit and is not a
+  green full-release gate. Generated file routes, per-domain typed search,
+  remaining form migrations, enterprise table/Virtual adoption and complete
+  browser/accessibility qualification remain open. Table is still 8.21.3.
+
+Local image digests for this verification: API
+`sha256:1d28702d34e8f738f2740bffc7325d3db7991a602f30147168c0751e435a8914`;
+frontend `sha256:3521f62bc6a1edfd9eb58f0aa7a977b1d42195a1cf836986c166220923afc25c`.
+These are local artifacts, not published release attestations. Browser batches
+were separated by restarting only the disposable API to clear its in-memory
+login quota; the production limiter was not weakened.
+
+No top-level checkbox is closed by this bounded implementation slice. Continue
+with production artifact qualification and the remaining A/B acceptance, then
+the contracts and table/form work in D/I, while retaining the NV enforcement and
+migration work in C/E/F/G/H/J/K. Do not equate stack adoption with NeuVector parity.
+
+### Stack baseline and approved convergence target
+
+**Product decision — October 11:** converge on Astronomer's technology stack,
+including **TanStack Router and TanStack Form**. This supersedes the earlier
+proposal to retain React Router. The target also includes the shared TanStack
+Table/Query/Virtual patterns, Tailwind v4-compatible primitives, generated
+REST/OpenAPI contracts, sqlc and CNPG recovery practices described below.
+Implement convergence in bounded migrations; preserve Constellation's security
+domain, APIs and enforcement behavior. Astronomer-specific product subsystems
+are not prerequisites. Record departures from the Technology Selection Guide
+as deliberate product choices, not strict guide conformance. The user's stack
+decision is settled; implementation and acceptance evidence remain open.
+
+Versions below come from each repository's committed frontend lockfile, not
+semver ranges, installed node_modules, or claims about the newest upstream release.
+Source anchors are relative to the named repository.
+
+| Area | Constellation now | Latest pulled Astronomer | Work to schedule |
+|---|---|---|---|
+| PostgreSQL/CNPG | Chart supports `statefulset`, `cnpg`, external; existing live release uses a single PG16/pgvector StatefulSet. No CNPG CRDs/operator were found. | Chart has bundled/external/CNPG modes, a PG17 operand, Barman plugin backup/recovery, WAL storage and synchronous-replication settings. | OPS-2: qualify a Constellation pgvector-compatible operand, modern backup/recovery contract and migration. Keep PG major upgrade separate from operator migration. |
+| React/Tailwind | React 19.2.6; Tailwind and Vite plugin 4.3.1, actually imported by Vite and `src/index.css`. | React 19.3.0; Tailwind/plugin 4.3.3. | Already adopted. Maintain compatible pins; this is not a Tailwind-v4 migration project. |
+| Class merging | `tailwind-merge` 2.6.1 is called by `src/lib/cn.ts`. | 3.6.0. | TSG-5/UI-2: move to a Tailwind-v4-compatible release and test theme, arbitrary values and state variants. The upstream README associates v2.6 with Tailwind v3. |
+| TanStack Query | 5.100.10; provider in `src/main.tsx`. | 5.102.8 plus canonical query/cancellation/live-state helpers. | Keep Query; standardize keys, cancellation, session refresh and invalidation. Measure request duplication before adding pacing. |
+| TanStack Table | 8.21.3 in the actual shared `src/components/ui/data-table.tsx`; 49 TSX files reference `<DataTable` in this source snapshot. Density, visibility, selection, sorting, CSV and bounded local paging exist. | 9.2.4; explicit feature graph, controlled server pagination/filter/sort, resizing/order/pinning, grouping, keyboard navigation, URL state and user-backed saved views. | UI-2/OPS-2: finish the table contract and page adoption. Qualify any v9 adapter change independently; library version alone does not give workflow parity. |
+| Virtualization | No `@tanstack/react-virtual` dependency. | 3.14.11 and a virtualized body with a separate semantic/server-paged path. | Use for measured large loaded datasets. Preserve server paging for large remote datasets and test accessibility. |
+| Router | React Router DOM 7.18.2, currently `BrowserRouter`, not a verified Data Router setup. | TanStack Router 1.170.35 and generated routes. | TSG-5: migrate to TanStack Router with typed routes/search, shared Query context, session guards and generated route checks. Preserve deep links, auth, scope and error behavior; remove React Router after cutover. |
+| Forms | No TanStack Form, react-hook-form or Zod dependency. | TanStack Form 1.33.5 through `src/lib/form.ts`; Zod 4.6.1 is in the lockfile. | TSG-5: adopt TanStack Form through one shared form layer with schema validation, field/server errors and accessible pending/error states. Do not introduce react-hook-form. Record the guide departure. |
+| Frontend tools | Vite 8.0.16, TypeScript 5.9.3, Vitest 4.1.11, Playwright 1.60.0; Radix primitives. | Vite 8.3.0, TypeScript 6.0.3, Vitest 5.0.0, Playwright 1.63.0; Radix and axe browser checks. | TSG-4/5: scoped compatibility upgrades, production-browser accessibility and bundle budgets. Avoid combining all major upgrades with feature work. |
+| SQL/API contracts | pgx, external Goose migration job, hand-written SQL and Axios DTOs; OpenAPI/checkers exist. | sqlc queries/generated accessors, generated OpenAPI client/types and transport-boundary checks. | TSG-2/5/API-1: converge on Astronomer's generated REST/OpenAPI and sqlc approach; document the guide departure and migrate by domain while preserving transactions/audit. |
+| CI/operations | Quality, unit/integration, security and release workflows exist; full green/hosted acceptance remains open. OTel infrastructure exists. | Lockfile-pinned Local CI, contract/complexity/cancellation checks, release/upgrade/DR/accessibility/scale workflows. | TSG-4/6/7: adopt useful gates and recovery evidence patterns. Workflow files do not prove a green release; do not add Redis, Flux or Charlie merely to copy Astronomer. |
+
+Evidence: both `frontend/package-lock.json` files; Constellation
+`frontend/vite.config.ts`, `frontend/src/main.tsx`,
+`frontend/src/components/ui/data-table.tsx`, `deploy/charts/constellation/values.yaml`,
+`deploy/charts/constellation/templates/postgres-cnpg-*.yaml`; Astronomer
+`frontend/src/components/ui/data-table-{types,features}.ts`,
+`frontend/src/components/ui/use-data-table-view-sync.ts`,
+`internal/handler/table_views.go`, `sqlc.yaml`, `deploy/chart/values.yaml`,
+`deploy/chart/templates/postgres-cnpg*.yaml`, and `AGENTS.md`.
+The Astronomer reference is pinned at
+[3b378ef1](https://github.com/alphabravo-oss/astronomer/tree/3b378ef16141b9eaac35a1e5fe292e061b69f5f1).
+Upstream compatibility references:
+[tailwind-merge](https://github.com/dcastil/tailwind-merge) and
+[CNPG backup](https://cloudnative-pg.io/docs/1.28/backup/).
+
+### What is already done and should be retained
+
+| Existing slice | Evidence boundary | Remaining parent work |
+|---|---|---|
+| Agent/token scope guards, audit concurrency, restore validation and fail-closed admission fixes | Source and focused DB tests recorded below | Complete the remaining write/read inventory and deployed multi-cluster/failure matrix (P0.1–P0.3). |
+| Migration preview/apply/history/rollback framework and supported converters | Code and subset fixtures; not a complete NV cutover | Remaining families, unsupported inventory, complete fixture and deployed rollback (MIG-1/API-1). |
+| Registry per-job Docker configs and authenticated metadata reads | Focused isolation/failure tests | Claimed-job credential binding, residual ambient credentials and live provider matrix (REG-1). |
+| Signed asynchronous support bundles and component fixtures | Four OPS-1 rows already closed with the recorded source/browser/k3d evidence | Preserve these gates; live fleet health and release validation remain broader OPS-2 work. |
+| SIEM TLS, formats/filters and named receiver receipts | Five bounded rows closed, including deployed collector evidence | Named vendor parsing/interoperability (SIEM-1). |
+| Local-user recovery, platform-role classification, scope ordering, aliases and YAML contract discipline | Bounded API/browser evidence below | Full IdP cutover, role-bearing exports, canonical page audit and shared-table completeness. |
+| Empty DEFAULT-partition reclaim and development retention | Recorded September deployment/reclaim evidence | The distinct unsafe row pruners and rollup expiry remain open; reclaim is not a fix for them. |
+| Syft inventory plus Trivy/Grype matching and CVE intelligence | Active source path in `internal/scanner/aggregator.go` | Remove misleading retired-bundle documentation/config references and prove live/offline freshness. Do not restore the retired VulnDB producer. |
+
+### Live infrastructure boundary — observed October 11
+
+Read-only inspection found one node (`constellation-dev-1-mj`), Helm release
+`constellation` revision 18 in `constellation-system`, a ready single
+`constellation-postgres` StatefulSet, a 60 GiB DB PVC and an 8 GiB scanner-cache
+PVC. CNPG resource types are absent. The only CronJob in this namespace is
+`constellation-k8s-compliance`; no DB-backup CronJob is present. External backup
+coverage was not verified. PVC capacities are not current utilization readings.
+
+API/frontend tags are `parity-0927-retention` / `parity-0927-preview`, while
+several other role tags are `0.1.0`. Ready pods and tag names do not establish
+that every running role contains `711a881`; record image digests/build revisions
+before a deployed parity claim. No authenticated browser, backup restore,
+failover or CNI test was rerun in this review. September database-size, DNS and
+browser observations below remain historical until remeasured.
+
+The current source still contains `ctid`-only DELETEs on partitioned events and
+flows, and rollup `runOnce` continues to the prune stage after refresh errors.
+These observations reconfirm DB-01/02 as open; this review did not rerun the
+destructive reproduction on the live database.
+
+### Ordered delivery packages
+
+All package IDs below map to existing checklist parents. Each implementation
+change should record owner, exact source/image identities, focused test output,
+negative-path behavior and deployment evidence. Assign the accountable owner
+when scheduling a package; do not mark a proposed role as an assigned person.
+Packages are sized as reviewable outcomes rather than calendar promises.
+
+| Package / priority | Existing parents | Deliverable and remaining work | Dependencies and exit evidence |
+|---|---|---|---|
+| A — P0 data safety | P0.3, OPS-2; DB-01–05 | Fix partition row identity, gate row pruning and partition expiry on successful folding/watermarks, define late/refold grace, choose retention scope and safe fresh-install defaults. Establish backup/recovery coverage before destructive maintenance. | First implementation slice. Disposable two-child collision test, refresh-failure/lag/late-arrival cases, fresh/upgrade and tenant tests; deploy only a verified artifact and confirm no unsafe pruning. |
+| B — P0 recoverability / P1 CNPG | OPS-2, TSG-2/7; DB-05,21–23 | Produce a full DB+key recovery runbook; qualify pgvector operand, CNPG operator and backup plugin/ObjectStore contract, scheduled backups, WAL/PITR, retention and alerts. Rehearse StatefulSet-to-new-CNPG-cluster transfer and DSN cutover with rollback. Preserve external-DB option. | A's safety fixes and an independently verified recovery copy before live cutover. Single-instance dev rehearsal; three-node failure-domain test for HA. Restore encrypted credentials, audit continuity and application workflows; measure RPO/RTO. Existing chart templates alone do not close this. |
+| C — P0 security correctness | P0.1/2/3, TSG-3 | Finish advertised-control reachability, remaining agent/scanner/restore scope audit, legacy DLP/WAF binding repair plan, namespace row filtering, fail-path matrix, secret key custody/rotation and cookie/CSRF/concurrent-session cases. | Can be developed beside A; release waits on both. Positive enforcement/delivery and deny/no-write assertions, cross-tenant/cluster tests, live malformed-policy and restore/agent isolation drills. |
+| D — P0/P1 reproducible gates and contracts | API-1, TSG-1/2/4/5 | Keep existing security CI; fix baseline findings, isolated DB/test fixtures and full Playwright reliability. Record architecture/guide decisions; introduce generated API contracts, domain SQL typing, migration safeguards and dependency boundaries incrementally. Add a reproducible local preflight and hosted required-check evidence. | Baseline before further large migrations; continue per package. Fresh/repeated DB migrations, complete no-skip required browser suite, contract regeneration clean, security/quality gates green at the submitted revision. Decisions remain open until recorded. |
+| E — P1 NV cutover and identity | MIG-1, CFG-1, IAM-1, API-1 | Complete import families and canonical source/converted/unsupported manifest; idempotent audited apply/history/export/rollback; effective-config provenance/revision/reload; external IdP connectivity, actual group resolution and final scopes; metadata-only user/token migration. | C scope/fail-path contracts and D test infrastructure. New-org fixture cutover through API/CLI/browser, duplicate/rejected import and rollback tests, real supported LDAP/SAML/OIDC cases. Preserve explicit unsupported/private-provider boundaries. |
+| F — P1 runtime/network enforcement | RUN-1, NET-1 | Prove process/file/exec/zero-drift Protect, delivered/acknowledged process kill, identity/argv capture, restart hydration and mutation coverage. Finish shared filters/counts/export semantics and multi-interface/host attribution. | C and reproducible role builds. Flannel inline plus Cilium/Calico CNI policy matrix with actual allowed/blocked traffic, mode changes, restart and failure behavior. Decide whether Cilium inline L7 is a required new subsystem or documented unsupported mode. |
+| G — P1 scanning, compliance and delivery | REG-1, CMP-1, SIEM-1 | Finish private/cloud registry auth/token/enumeration matrix, scanner capacity/freshness and offline updates; true on-demand/scheduled kube/docker benchmark execution with two-cluster isolation; named SIEM vendor interoperability. | C credentials/scope and D fixtures. Real private provider scans with cleanup/failure proof, installed DB refresh to dashboard, benchmark execution/evidence, vendor acceptance of routed TLS/CEF/JSON events. |
+| H — P2 policy workflows | POL-1/2/3 | Complete referenced-group conflict and group-edge workflow; per-family hit/health evidence, real runtime precedence, portable imports/exports, unsupported migration remediation; long-tail admission criteria, DLP context/WAF path, backup/federation and response categories. | E conversion semantics, F enforcement and G event paths. Operator creates/imports group and policies, observes real hit/enforcement, exports/restores, verifies precedence and denied conflicting deletes. Existing CRUD is retained. |
+| I — P2 Astronomer-quality console | UI-1/2/3/4, TSG-5; OPS-2 scale | Fix class-merger compatibility; consolidate table state/server pagination/filter/sort; add scoped saved views, URL state, measured virtualization, resizing/pinning and keyboard/accessibility behavior. Complete navigation/page contracts, backend platform-role exports and exact dashboard drilldowns. Migrate to the approved TanStack Router/Form stack through the sequence below. | D contracts and API fixes alongside UI work. Large dataset includes records beyond old 100/500 caps; API/table/count/export agree; saved-view tenant/user isolation and history/reset tests; production mobile/keyboard/axe and visual checks. No component-only closure for API truncation. |
+| J — P1/P2 durable lifecycle and observability | OPS-2, TSG-6; DB-06–23 | Finish evidence classification, contiguous signed archive/catch-up and checkpoint-aware verification before audit pruning; bound rollups/history/evidence and scanner caches; reduce redundant CVE writes and define freshness/catalog semantics. Add DB/WAL/partition/fold/archive/cache/backup alerts and trace/request propagation. | A/B; archival deletion waits on independent restore proof. Missed-run and tamper/gap tests, no-loss reconciliation, failure alarms and measured storage/request budgets. Preserve durable evidence advantages over NV. |
+| K — release qualification | OPS-2, TSG-4/7 and all applicable open parents | Build a signed immutable BOM with all role/helper images, scanner DBs, trust and architecture declarations; verify HA, upgrades, DR, disconnected first boot/update, FIPS scope and amd64/arm64 or explicit limitations. Run full browser/CNI/scale/release matrix and reconcile docs. | All release-blocking work and decisions. Exact candidate source/digests, hosted checks, archived evidence and honest unsupported/deviation list. No blanket "NV parity complete" while required workflows lack proof. |
+
+### Concrete first changes
+
+1. **DB-01:** replace partition-ambiguous row deletion in
+   `internal/handler/events_retention.go` and `internal/handler/network/rollup.go`.
+   Use partition-aware identity or a stable logical key; test an expired/current
+   collision across two child partitions plus bounded/concurrent deletion.
+2. **DB-02:** make fold failure/lag block both raw row pruning and partition
+   expiry (`internal/handler/partition_manager.go`); define late-arrival and
+   refold retention before choosing the cutoff. Prove counts survive failures.
+3. **Recovery/CNPG preparation:** capture sanitized deployment identities,
+   validate a full backup with necessary decryption/signing-key recovery,
+   implement/qualify backup-plugin and restore configuration, and restore to an
+   isolated target. Prepare a reviewable cutover/rollback runbook before touching
+   the live DB service or PVC. Single-node development remains non-HA.
+4. **Small UI compatibility slice:** upgrade the class merger for existing
+   Tailwind v4, with shared component/theme regressions. Inventory table pages
+   and API limits before selecting the next table contract migration.
+5. **Baseline qualification:** run D's full source/API/browser gates on the
+   candidate, triage failures with owners, and then submit bounded reviewable
+   changes. Keep the existing 38-commit implementation baseline distinct from
+   new fixes so reviewers can identify what was previously tested.
+
+Approved stack direction: converge on Astronomer, including TanStack Router
+and Form, with CNPG for managed production DBs and external PostgreSQL still
+supported. Production RPO/RTO, evidence retention/holds, failure-domain capacity
+and the Cilium L7 support boundary still need concrete deployment decisions.
+They do not block implementing DB-01/02 or the frontend migration foundation.
+
+### Stack convergence sequence and acceptance
+
+This decomposes packages D/I and their existing TSG-2/5 and UI parents; it adds
+no completion claims or duplicate checklist totals.
+
+1. **Contract inventory:** enumerate current routes, aliases, search parameters,
+   auth/scope guards, forms and table consumers. Pin the compared Astronomer
+   revision and compatible dependency set. Record the chosen Router/Form and
+   REST/OpenAPI direction against the guide; this documents the decision rather
+   than reopening it. Preserve links, browser history and API compatibility.
+2. **Shared foundation:** align Tailwind/class merging, Radix primitives and
+   Query keys/cancellation/error handling; introduce Astronomer-style form
+   context, schema adapters and accessible field/error components. Verify
+   keyboard/focus behavior and server validation without exposing secrets.
+3. **Router migration:** establish TanStack Router and generated typed routes,
+   route/search validation, Query context and authenticated layout guards.
+   Migrate the shell and route families in a dedicated migration branch with
+   all existing URLs and compatibility redirects preserved. Verify deep-link
+   reload, unauthorized access, scope changes, session expiry/refresh, back/
+   forward navigation, not-found/error boundaries and lazy-loading behavior.
+   Remove `BrowserRouter` and `react-router-dom` at cutover; do not ship two
+   independent navigation/auth authorities.
+4. **Form migration:** move identity/provider, registry, policy and settings
+   editors onto TanStack Form in bounded slices. Preserve server authority for
+   RBAC and validation, secret omission, dirty-state protection, field-level
+   errors, duplicate-submit prevention, reset and mutation invalidation. Cover
+   success and rejection through the actual API and production browser.
+5. **Table convergence:** migrate the shared adapter to the qualified Astronomer
+   TanStack Table generation and feature contracts, add Virtual where measured,
+   and connect saved views/typed URL state to the new router. Keep server-side
+   pagination/filter/sort authoritative. Prove selection, export scope, counts,
+   resizing/pinning, keyboard behavior and saved-view isolation on large data.
+6. **Backend/tooling convergence:** generate REST/OpenAPI clients/types and sqlc
+   queries incrementally, preserve transactional audit/scope checks, and adopt
+   local preflight, accessibility and contract-regeneration gates. CNPG proceeds
+   through package B's separate recovery/migration qualification, not a frontend
+   dependency. Full production-browser/API tests and removal of superseded
+   router/form/table code are required before calling convergence complete.
+
+DB safety remains the first delivery priority. Router/Form implementation may
+proceed independently once the baseline contracts are captured; it must not
+delay the urgent retention fixes or combine with the live DB cutover.
 
 ## P0 — truth, correctness, and release safety
 
@@ -696,7 +947,7 @@ row saying `enforced`.
 
 ### P0.3 Fail-path behavior and integrity
 
-- [ ] Close open fail-open findings in admission, CIS, CSPM, required VulnDB,
+- [ ] Close open fail-open findings in admission, CIS, CSPM, required scanner matchers,
   notification delivery, signature verification, and restore validation.
 - [x] Make the audit hash chain safe under concurrent writers and retain a
   deterministic verification test.
@@ -1010,6 +1261,10 @@ progressive disclosure, while retaining Constellation's security vocabulary.
   enterprise-table YAML control families against registered import routes and
   client methods; generated deployment artifacts are outside this table rule.
 - [ ] Persist operator choices without making saved state hide active filters.
+  Extend the existing density/visibility preferences with explicit URL state
+  and user-scoped saved views where useful. Astronomer's table-view API and
+  state sanitization are reference implementations; require cross-user/tenant
+  isolation, stale-column migration and visible reset behavior before closure.
 - [ ] Add detail drawers to repetitive triage tables where full-page navigation
   interrupts the workflow.
 
@@ -1093,6 +1348,13 @@ progressive disclosure, while retaining Constellation's security vocabulary.
   [23-item database lifecycle register](database-lifecycle-backlog.md) tracks
   the concrete fixes and policy decisions, including a confirmed
   cross-partition `ctid` deletion defect that must be fixed urgently.
+  October 11 source inspection reconfirms DB-01/02; the live namespace has
+  no CNPG CRDs/operator or DB-backup CronJob. Package B above owns qualifying
+  the existing CNPG chart path, plugin-based WAL/backup/PITR, isolated restore
+  and a rollback-capable StatefulSet cutover. CNPG supports plugin backups;
+  the legacy native Barman integration is deprecated in the referenced upstream
+  documentation. Keep extension/image compatibility and PG major upgrades
+  explicit. A single-node dev migration does not prove HA or off-host recovery.
 - [ ] Seed large datasets and prove every high-volume page either pages or labels
   its render cap. Audit and Timeline now label their loaded 100-row page ranges,
   distinguish current-page CSV, and clear stale rows on page/scope changes;
@@ -1235,17 +1497,28 @@ custody, threat-model or external-provider release matrix.
 
 ### TSG-5 Typed API and frontend conventions — P1/P2
 
-- [ ] Decide and implement the Connect/protobuf migration boundary (or explicitly
-  approve retaining REST/OpenAPI); generate server/client types and categorical
-  enums from one contract and gate request/response compatibility in CI.
+- [ ] Implement the approved Astronomer-aligned REST/OpenAPI contract pipeline;
+  generate server/client types and categorical enums from one contract and gate
+  request/response compatibility in CI. Record the Connect/protobuf departure
+  under TSG-1 without presenting it as strict guide conformance.
 - [ ] Standardize bounded opaque pagination, route-level error handling and
   session-aware data loaders while preserving API-1's migration/runbook contracts.
-- [ ] Adopt schema-driven Zod/react-hook-form validation with inline field errors,
+- [ ] Adopt schema-driven TanStack Form validation with inline field errors,
   consistent TanStack query keys/invalidation and deduplicated refresh; migrate
   forms/workspaces incrementally with component and browser tests.
-- [ ] Verify React Router Data Mode, accessible Radix-based primitives, static
+  October 11 user decision: converge on Astronomer's TanStack Form layer with
+  schema validation (Zod where appropriate). Record the guide's react-hook-form
+  departure in TSG-1; do not introduce a second form library. Data Retention now
+  uses the shared Form/Zod layer; other editors and full browser acceptance remain open.
+- [ ] Migrate to TanStack Router, verify accessible Radix-based primitives, static
   production builds, API/WebSocket dev proxies, version stamps and Node/tooling
   pins against the guide, with ADRs for deliberate alternatives.
+  TanStack Router now owns the entry point and all route consumers. Record this
+  guide departure; complete generated route checks, domain-typed search and
+  release-wide session/scope/browser acceptance beyond the focused tests.
+  Tailwind v4 and TanStack Table are already wired;
+  remaining frontend alignment is compatibility and workflow depth, including
+  API-aware enterprise-table behavior. The Tailwind v4 class merger is upgraded.
 
 ### TSG-6 Unified telemetry — P1
 
@@ -1290,6 +1563,10 @@ custody, threat-model or external-provider release matrix.
   evidence satisfies the workflow.
 
 ## Delivery order
+
+The October 11 packages A–K above make this order concrete without replacing
+the acceptance checklist. Begin with DB-01/02 and recoverability; carry the
+existing completed slices and their regression evidence forward.
 
 1. Close P0 correctness, tenant-scope, and fail-path blockers.
    Include TSG-3 security gaps and TSG-4's blocking security/test gates; perform

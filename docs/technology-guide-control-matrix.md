@@ -2,6 +2,29 @@
 
 Inventory date: 2026-09-27. Source: [published guide](https://technology-selection-guide.aws.ablabs.io/) and its [complete chapter text](https://technology-selection-guide.aws.ablabs.io/llms-full.txt), SHA-256 `13ec22a5d0dfa4789b91e2e3101bed4d9e19982db444c8c66ad4173159e6ada0`. This is an evidence inventory for the TSG-1 workstream in `NEUVECTOR-PARITY-PLAN.md`, **not** an approval record or a guide-conformance claim. The guide's May 2026 version tables are historical snapshots, not authority to downgrade supported dependencies. Recheck the source hash and upstream support at each quarterly review.
 
+## October 11 product decision
+
+Implementation evidence is now recorded in the canonical plan's October 11
+review: the console uses TanStack Router and the Data Retention editor uses the
+shared TanStack Form/Zod layer. CNPG plugin backup/recovery contracts and local
+RustFS fixtures are present. Historical inventory rows below are not current
+source descriptions; the broader conformance and deployment gates remain open.
+
+The user selected convergence on Astronomer's stack, explicitly including
+TanStack Router and TanStack Form. The [canonical plan](NEUVECTOR-PARITY-PLAN.md)
+now owns the migration sequence and targets generated REST/OpenAPI contracts,
+sqlc and the shared TanStack frontend patterns. References below to choosing
+Router/Form/API direction describe the original September inventory; the
+product direction is now settled. Record its rationale, residual risks,
+compensating controls and review ownership as the implementation proceeds.
+
+The guide obligations below remain an unchanged record of that source. A
+TanStack Form implementation does not satisfy a literal react-hook-form
+requirement, and generated REST/OpenAPI does not establish Connect conformance.
+Implementation, verification and formal deviation records remain open; this
+product decision neither closes those controls nor requires asking the user
+again to choose the stack.
+
 ## Reading this matrix
 
 Each stable ID is a *control family*, keyed to the guide chapter and prescriptive subsection. A family groups clauses that have one acceptance boundary; **every** MUST/MUST NOT and SHOULD/SHOULD NOT clause in the named boundary must pass before the family becomes `verified`. Optional MAY choices are recorded where a decision changes applicability. TL;DR repetitions, illustrative code, reference-implementation callouts, and pinned-version tables are not independent obligations. The control wording below is a paraphrase; the linked chapter remains normative. Conditional controls are `open` until applicability is decided or their condition is proven false. For a SHOULD departure, an ADR must document the trade-off; a MUST departure is a nonconformance even if a risk owner accepts it.
