@@ -1,0 +1,18 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rustfs-create-bucket
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: create-bucket
+          image: python:3.13-slim
+          command: [python, /scripts/create_bucket.py]
+          envFrom: [{secretRef: {name: rustfs-credentials}}]
+          volumeMounts: [{name: scripts, mountPath: /scripts, readOnly: true}]
+      volumes:
+        - name: scripts
+          configMap: {name: rustfs-create-bucket}

@@ -58,6 +58,12 @@ class CNPGChartTests(unittest.TestCase):
             (("postgres.mode=cnpg", "postgres.cloudnativepg.barmanCloud.enabled=true",
               "postgres.cloudnativepg.barmanCloud.objectStoreName=archive",
               "postgres.cloudnativepg.backup.retentionPolicy=30d"), "not both"),
+            (("postgres.mode=cnpg", "postgres.cloudnativepg.barmanCloud.enabled=true",
+              "postgres.cloudnativepg.barmanCloud.objectStoreName=archive",
+              "postgres.cloudnativepg.barmanCloud.recovery.enabled=true",
+              "postgres.cloudnativepg.barmanCloud.recovery.objectStoreName=archive",
+              "postgres.cloudnativepg.barmanCloud.recovery.serverName=restore-test-constellation-postgres"),
+             "source must differ from the destination archive identity"),
         ]
         for values, message in cases:
             with self.subTest(values=values):

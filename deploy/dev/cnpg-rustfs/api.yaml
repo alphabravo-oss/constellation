@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: recovery-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: recovery-api}
+  template:
+    metadata:
+      labels: {app: recovery-api}
+    spec:
+      automountServiceAccountToken: false
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001}
+      containers:
+        - name: api
+          image: constellation/api:convergence-20261011
+          imagePullPolicy: IfNotPresent
+          ports: [{name: http, containerPort: 8080}]
+          env:
+            - name: DATABASE_URL
+              valueFrom: {secretKeyRef: {name: recovery-source-database-url, key: url}}
+            - name: CONSTELLATION_KEK
+              valueFrom: {secretKeyRef: {name: recovery-application-keys, key: kek}}
+            - {name: LEADER_ELECTION_ENABLED, value: "false"}
+            - {name: MAX_CONCURRENT_SESSIONS, value: "32"}
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {cpu: "2", memory: 1Gi}
+      volumes: [{name: tmp, emptyDir: {}}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: recovery-api
+spec:
+  selector: {app: recovery-api}
+  ports: [{name: http, port: 8080, targetPort: http}]

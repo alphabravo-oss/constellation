@@ -1,0 +1,16 @@
+# Render only postgres-secrets, postgres-cnpg-cluster and scheduledbackup templates.
+fullnameOverride: recovery-source
+postgres:
+  mode: cnpg
+  cloudnativepg:
+    instances: 1
+    imageName: constellation/postgres:16.10-convergence-20261011
+    storage: 4Gi
+    affinity: {enabled: false}
+    barmanCloud:
+      enabled: true
+      objectStoreName: rustfs-archive
+    scheduledBackup:
+      enabled: true
+      immediate: true
+      schedule: "0 0 2 * * *"
