@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/flowrollup"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/spf13/cobra"
@@ -102,7 +103,7 @@ tables must be populated first by the discoverer (one reconcile pass).`,
 func backfillNetworkFlows(ctx context.Context, w stdoutWriter, pool *pgxpool.Pool, hours, batchSize int, dryRun bool, clusterOnly string) error {
 	args := []any{fmt.Sprintf("%d", hours)}
 	q := `
-SELECT ctid::text, org_id::text, cluster_id::text, src_workload, dst_workload,
+SELECT id::text, org_id::text, cluster_id::text, src_workload, dst_workload,
        COALESCE(src_addr, ''), COALESCE(dst_addr, ''), at
   FROM network_flows
  WHERE at >= NOW() - ($1::text || ' hours')::interval
@@ -120,13 +121,13 @@ SELECT ctid::text, org_id::text, cluster_id::text, src_workload, dst_workload,
 	defer rows.Close()
 
 	type pending struct {
-		ctid, orgID, clusterID, src, dst, srcAddr, dstAddr string
-		at                                                 time.Time
+		id, orgID, clusterID, src, dst, srcAddr, dstAddr string
+		at                                               time.Time
 	}
 	var all []pending
 	for rows.Next() {
 		var p pending
-		if err := rows.Scan(&p.ctid, &p.orgID, &p.clusterID, &p.src, &p.dst, &p.srcAddr, &p.dstAddr, &p.at); err != nil {
+		if err := rows.Scan(&p.id, &p.orgID, &p.clusterID, &p.src, &p.dst, &p.srcAddr, &p.dstAddr, &p.at); err != nil {
 			return err
 		}
 		all = append(all, p)
@@ -182,7 +183,7 @@ SELECT ctid::text, org_id::text, cluster_id::text, src_workload, dst_workload,
 			if newSrc == p.src && newDst == p.dst {
 				continue
 			}
-			batchOps = append(batchOps, batchUpdate{ctid: p.ctid, at: p.at, src: newSrc, dst: newDst})
+			batchOps = append(batchOps, batchUpdate{id: p.id, at: p.at, src: newSrc, dst: newDst})
 			if len(batchOps) >= batchSize {
 				if !dryRun {
 					if err := applyUpdates(ctx, pool, batchOps); err != nil {
@@ -211,33 +212,55 @@ SELECT ctid::text, org_id::text, cluster_id::text, src_workload, dst_workload,
 }
 
 type batchUpdate struct {
-	ctid string
-	at   time.Time
-	src  string
-	dst  string
+	id  string
+	at  time.Time
+	src string
+	dst string
 }
 
-// applyUpdates writes one UPDATE per row. We use ctid (PostgreSQL row pointer)
-// which is fine within a single transaction-less session for offline backfill
-// (the table is partitioned so row pointers are stable within a partition).
-// For very large rewrites consider switching to a UPDATE … FROM (VALUES (...))
-// pattern, but at the typical 24h scale this is simpler and fast enough.
+// applyUpdates addresses stable partition keys and commits labels with rebuilt
+// aggregates. It refuses windows whose raw history may already be incomplete.
 func applyUpdates(ctx context.Context, pool *pgxpool.Pool, ops []batchUpdate) error {
+	if len(ops) == 0 {
+		return nil
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(context.Background())
+	_, prunedBefore, err := flowrollup.Lock(ctx, tx, true)
+	if err != nil {
+		return err
+	}
+	from, to := ops[0].at, ops[0].at
 	b := &pgx.Batch{}
 	for _, op := range ops {
-		b.Queue(`UPDATE network_flows
-                    SET src_workload = $1, dst_workload = $2
-                  WHERE ctid::text = $3 AND at = $4`,
-			op.src, op.dst, op.ctid, op.at)
+		if op.at.Before(prunedBefore) {
+			return fmt.Errorf("cannot relabel before %s: raw history may be incomplete", prunedBefore.UTC().Format(time.RFC3339))
+		}
+		if op.at.Before(from) {
+			from = op.at
+		}
+		if op.at.After(to) {
+			to = op.at
+		}
+		b.Queue(`UPDATE network_flows SET src_workload=$1, dst_workload=$2 WHERE id=$3::uuid AND at=$4`, op.src, op.dst, op.id, op.at)
 	}
-	br := pool.SendBatch(ctx, b)
-	defer br.Close()
+	br := tx.SendBatch(ctx, b)
 	for range ops {
 		if _, err := br.Exec(); err != nil {
+			_ = br.Close()
 			return err
 		}
 	}
-	return nil
+	if err := br.Close(); err != nil {
+		return err
+	}
+	if err := flowrollup.Rebuild(ctx, tx, from, to); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func loadResolverMaps(ctx context.Context, pool *pgxpool.Pool, orgID string, ips []string) (pods, svcs map[string]string, err error) {

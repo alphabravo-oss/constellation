@@ -114,7 +114,7 @@ func TestConfigProvenanceLegacyAndInvalidBootstrap(t *testing.T) {
 
 func TestConfigProvenanceDirectMutationDoesNotRetainOrigin(t *testing.T) {
 	cfg := Default()
-	cfg.EventsRetentionDays = 30
+	cfg.EventsRetentionDays = 90
 	if cfg.Provenance()["events_retention_days"].Source != SourceDatabase {
 		t.Fatal("programmatic mutation incorrectly retained default origin")
 	}

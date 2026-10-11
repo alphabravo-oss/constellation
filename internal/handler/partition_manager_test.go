@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/testutil/pgfixture"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -31,6 +32,52 @@ func TestPartitionDay(t *testing.T) {
 		if ok && day.Format("2006-01-02") != c.wantDay {
 			t.Fatalf("%s: day=%s want %s", c.name, day.Format("2006-01-02"), c.wantDay)
 		}
+	}
+}
+
+func TestFlowPartitionExpiryRequiresFoldedHistory(t *testing.T) {
+	database := openTestDB(t)
+	t.Cleanup(database.Close)
+	pool := pgfixture.Schema(t, database.Pool())
+	ctx := context.Background()
+	day := time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -10)
+	child := partitionName("network_flows", day)
+	_, err := pool.Exec(ctx, fmt.Sprintf(`
+ CREATE TABLE network_flows (id int, at timestamptz) PARTITION BY RANGE(at);
+ CREATE TABLE %s PARTITION OF network_flows FOR VALUES FROM ('%s') TO ('%s');
+ CREATE TABLE network_flow_rollup_state (id boolean PRIMARY KEY,watermark timestamptz,raw_pruned_before timestamptz);
+ INSERT INTO network_flow_rollup_state VALUES (true,'1970-01-01','1970-01-01');
+ INSERT INTO network_flows VALUES (1,'%s');`, child, day.Format(time.RFC3339), day.AddDate(0, 0, 1).Format(time.RFC3339), day.Format(time.RFC3339)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err := dropExpiredPartitions(ctx, pool, "network_flows", 1); err != nil || n != 0 {
+		t.Fatalf("unfolded partition dropped: %d %v", n, err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE network_flow_rollup_state SET watermark=now()`); err != nil {
+		t.Fatal(err)
+	}
+	// An in-flight ingest's shared state lock must exclude partition expiry.
+	ingest, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ingest.Rollback(ctx)
+	if _, err := ingest.Exec(ctx, `SELECT id FROM network_flow_rollup_state FOR SHARE`); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := dropExpiredPartitions(ctx, pool, "network_flows", 1); err == nil || n != 0 {
+		t.Fatalf("in-flight ingest bypassed: %d %v", n, err)
+	}
+	if err := ingest.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := dropExpiredPartitions(ctx, pool, "network_flows", 1); err != nil || n != 1 {
+		t.Fatalf("folded partition retained: %d %v", n, err)
+	}
+	var boundary time.Time
+	if err := pool.QueryRow(ctx, `SELECT raw_pruned_before FROM network_flow_rollup_state`).Scan(&boundary); err != nil || boundary.Before(day.AddDate(0, 0, 1)) {
+		t.Fatalf("missing replay boundary: %v %v", boundary, err)
 	}
 }
 

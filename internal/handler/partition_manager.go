@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/flowrollup"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -215,6 +216,9 @@ func ensureDailyPartitions(ctx context.Context, pool *pgxpool.Pool, parent strin
 // The DEFAULT partition and any non-daily child are never touched. Returns the count
 // dropped. retentionDays <= 0 means "keep forever" — nothing is dropped.
 func dropExpiredPartitions(ctx context.Context, pool *pgxpool.Pool, parent string, retentionDays int) (int, error) {
+	if !partitionParentRe.MatchString(parent) {
+		return 0, fmt.Errorf("invalid partition parent %q", parent)
+	}
 	if retentionDays <= 0 {
 		return 0, nil
 	}
@@ -249,13 +253,73 @@ func dropExpiredPartitions(ctx context.Context, pool *pgxpool.Pool, parent strin
 		}
 		// Fully expired when the partition's upper bound (day+1) is at or before cutoff.
 		if !day.AddDate(0, 0, 1).After(cutoff) {
-			if _, err := pool.Exec(ctx, fmt.Sprintf(`DROP TABLE IF EXISTS %s`, n)); err != nil {
-				return dropped, fmt.Errorf("drop partition %s: %w", n, err)
+			removed, err := dropExpiredPartition(ctx, pool, parent, n, day.AddDate(0, 0, 1), cutoff)
+			if err != nil {
+				return dropped, err
 			}
-			dropped++
+			if removed {
+				dropped++
+			}
 		}
 	}
 	return dropped, nil
+}
+
+// A flow partition is expired only behind the successfully folded watermark.
+// Hold the same state lock as ingest/refold while checking and dropping it.
+func dropExpiredPartition(ctx context.Context, pool *pgxpool.Pool, parent, child string, upper, cutoff time.Time) (bool, error) {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(context.Background())
+	if _, err := tx.Exec(ctx, "SET LOCAL lock_timeout = '500ms'"); err != nil {
+		return false, err
+	}
+	if parent == "network_flows" {
+		watermark, _, err := flowrollup.Lock(ctx, tx, true)
+		if err != nil {
+			return false, err
+		}
+		foldedCutoff := watermark.UTC().Add(-time.Hour).Truncate(time.Hour)
+		if foldedCutoff.Before(cutoff) {
+			cutoff = foldedCutoff
+		}
+		if upper.After(cutoff) {
+			return false, nil
+		}
+	}
+	// Catalog-derived regclass text is quoted by PostgreSQL. Verify attachment
+	// under the lock so an independently detached table is never removed.
+	if _, err := tx.Exec(ctx, "LOCK TABLE "+child+" IN ACCESS EXCLUSIVE MODE"); err != nil {
+		return false, err
+	}
+	var attached, hasCurrent bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_inherits WHERE inhparent=to_regclass($1) AND inhrelid=to_regclass($2))`, parent, child).Scan(&attached); err != nil {
+		return false, err
+	}
+	if !attached {
+		return false, nil
+	}
+	// A date-shaped name alone is not proof of its actual partition bounds.
+	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM "+child+" WHERE at >= $1)", cutoff).Scan(&hasCurrent); err != nil {
+		return false, err
+	}
+	if hasCurrent {
+		return false, nil
+	}
+	if _, err := tx.Exec(ctx, "DROP TABLE "+child); err != nil {
+		return false, err
+	}
+	if parent == "network_flows" {
+		if _, err := tx.Exec(ctx, `UPDATE network_flow_rollup_state SET raw_pruned_before=GREATEST(raw_pruned_before,$1) WHERE id=true`, cutoff); err != nil {
+			return false, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func partitionName(parent string, day time.Time) string {

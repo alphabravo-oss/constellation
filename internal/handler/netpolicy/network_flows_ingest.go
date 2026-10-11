@@ -45,6 +45,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/alphabravocompany/constellation/internal/db"
+	"github.com/alphabravocompany/constellation/internal/flowrollup"
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
 	"github.com/alphabravocompany/constellation/pkg/livegraph"
@@ -140,6 +141,12 @@ func (h *NetworkFlowsIngest) Bulk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
+	watermark, _, err := flowrollup.Lock(r.Context(), tx, false)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "rollup state unavailable")
+		return
+	}
+	var lateIDs []uuid.UUID
 
 	const insertSQL = `
 INSERT INTO network_flows
@@ -153,7 +160,7 @@ VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),
         NULLIF($16,0::bigint), NULLIF($17,0::bigint), NULLIF($18,0::bigint),
         NULLIF($19,0::int), NULLIF($20,''),
         NULLIF($21,0::bigint), NULLIF($22,0::int), NULLIF($23,0::smallint),
-        NULLIF($24,''), NULLIF($25,''))`
+        NULLIF($24,''), NULLIF($25,'')) RETURNING id`
 
 	var accepted, rejected int
 	// Plan B5: buffer accepted rows and fan them into the hot graph / SSE only
@@ -269,7 +276,8 @@ VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),
 				policyAction = "violate"
 			}
 		}
-		if _, err := tx.Exec(r.Context(), insertSQL,
+		var flowID uuid.UUID
+		if err := tx.QueryRow(r.Context(), insertSQL,
 			tok.OrgID, cid,
 			row.SrcWorkload, row.DstWorkload,
 			row.SrcAddr, row.DstAddr,
@@ -282,9 +290,12 @@ VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),
 			int64(row.PolicyID), int32(row.ThreatID), int16(row.Severity),
 			strings.ToLower(strings.TrimSpace(row.EPMAC)),
 			strings.ToLower(strings.TrimSpace(row.Fqdn)),
-		); err != nil {
+		).Scan(&flowID); err != nil {
 			jsonError(w, http.StatusInternalServerError, "insert: "+err.Error())
 			return
+		}
+		if !row.At.After(watermark) {
+			lateIDs = append(lateIDs, flowID)
 		}
 		accepted++
 		// A7: attribute this flow to the rule that produced its verdict.
@@ -326,6 +337,10 @@ VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),
 		}
 	}
 
+	if err := flowrollup.FoldLate(r.Context(), tx, lateIDs, watermark); err != nil {
+		jsonError(w, http.StatusInternalServerError, "late flow aggregation failed")
+		return
+	}
 	if err := tx.Commit(r.Context()); err != nil {
 		jsonError(w, http.StatusInternalServerError, "commit: "+err.Error())
 		return

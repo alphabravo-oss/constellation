@@ -138,6 +138,53 @@ SELECT bytes, client_bytes, server_bytes, sessions,
 	}
 }
 
+func TestNetworkFlowsIngestLateObservationReachesRollup(t *testing.T) {
+	d := openTestDB(t)
+	t.Cleanup(d.Close)
+	ctx := context.Background()
+	pool := d.Pool()
+	org, cluster := uuid.New(), uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id,name,display_name) VALUES ($1,$2,$2)`, org, "late-flow-"+org.String()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM network_flows WHERE org_id=$1`, org)
+		_, _ = pool.Exec(ctx, `DELETE FROM network_flow_rollups WHERE org_id=$1`, org)
+		_, _ = pool.Exec(ctx, `DELETE FROM orgs WHERE id=$1`, org)
+	})
+	if _, err := pool.Exec(ctx, `INSERT INTO clusters (id,org_id,name) VALUES ($1,$2,'late')`, cluster, org); err != nil {
+		t.Fatal(err)
+	}
+	raw, tokenID, err := handler.IssueRuntimeAgentToken(ctx, pool, org, "late", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO cluster_init_bundles (org_id,cluster_id,name,expires_at,runtime_agent_token_id,kek_fingerprint,contents_encrypted) VALUES ($1,$2,'late',now()+interval '1 hour',$3,'test','\x00'::bytea)`, org, cluster, tokenID); err != nil {
+		t.Fatal(err)
+	}
+	// Use the existing watermark instead of mutating shared aggregate state.
+	var watermark time.Time
+	if err := pool.QueryRow(ctx, `SELECT watermark FROM network_flow_rollup_state WHERE id=true`).Scan(&watermark); err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal([]handler.FlowIngestRow{{SrcWorkload: "late/source", DstWorkload: "late/destination", Protocol: "tcp", At: watermark.Add(-time.Hour), Bytes: 42, Packets: 3}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/network-flows:bulk", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+raw)
+	w := httptest.NewRecorder()
+	h := NewNetworkFlowsIngest(d)
+	handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(h.Bulk)).ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("late ingest: %d %s", w.Code, w.Body.String())
+	}
+	var count, bytes, packets int64
+	if err := pool.QueryRow(ctx, `SELECT flow_count,sum_bytes,sum_packets FROM network_flow_rollups WHERE org_id=$1 AND cluster_id=$2`, org, cluster).Scan(&count, &bytes, &packets); err != nil || count != 1 || bytes != 42 || packets != 3 {
+		t.Fatalf("late rollup count=%d bytes=%d packets=%d err=%v", count, bytes, packets, err)
+	}
+}
+
 // TestNetworkFlowsIngest_HubbleSource covers NET-3: a row tagged
 // source="hubble" (Cilium-eBPF clusters where the dp/iptables datapath is
 // blind) must be accepted and stored with source="hubble"; an unknown source

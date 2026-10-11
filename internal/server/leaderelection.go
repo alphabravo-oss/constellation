@@ -105,34 +105,21 @@ func (s *Server) startSingletonLoops(ctx context.Context) {
 		runtime.NewRuntimePolicyStore(s.db, s.auditLog), s.tel.Logger)
 	go membershipReconciler.Run(ctx)
 
-	// Retention horizons resolved LIVE from system config (primary org) each pass, so
-	// an admin can set them from the Settings UI without a restart. 0 days = disabled
-	// (falls back to any env default). Bounds the two biggest storage sinks.
-	retentionResolver := func(pick func(syscfg.Config) int) func(context.Context) time.Duration {
-		return func(rctx context.Context) time.Duration {
-			if s.syscfg == nil {
-				return 0
-			}
-			var orgID uuid.UUID
-			if err := s.db.Pool().QueryRow(rctx, `SELECT id FROM orgs ORDER BY created_at LIMIT 1`).Scan(&orgID); err != nil {
-				return 0
-			}
-			return time.Duration(pick(s.syscfg.Get(rctx, orgID))) * 24 * time.Hour
-		}
-	}
-	// Day-count variant of the same resolver, for the partition manager (which drops
-	// whole daily partitions past the horizon rather than DELETE-ing rows).
+	// Shared workers honor every org: the longest live window wins and any zero
+	// disables expiry. Read failures retain data rather than substituting defaults.
 	retentionDaysResolver := func(pick func(syscfg.Config) int) func(context.Context) int {
 		return func(rctx context.Context) int {
-			if s.syscfg == nil {
+			days, err := syscfg.EffectiveRetentionDays(rctx, s.db.Pool(), pick)
+			if err != nil {
+				s.tel.Logger.Warn("retention configuration unavailable; expiry skipped")
 				return 0
 			}
-			var orgID uuid.UUID
-			if err := s.db.Pool().QueryRow(rctx, `SELECT id FROM orgs ORDER BY created_at LIMIT 1`).Scan(&orgID); err != nil {
-				return 0
-			}
-			return pick(s.syscfg.Get(rctx, orgID))
+			return days
 		}
+	}
+	retentionResolver := func(pick func(syscfg.Config) int) func(context.Context) time.Duration {
+		days := retentionDaysResolver(pick)
+		return func(rctx context.Context) time.Duration { return time.Duration(days(rctx)) * 24 * time.Hour }
 	}
 
 	// Auto-scan running workloads (NeuVector enable_auto_scan_workload): the discoverer
@@ -150,7 +137,16 @@ func (s *Server) startSingletonLoops(ctx context.Context) {
 			}
 			return !s.syscfg.Get(rctx, orgID).AutoScanDisabled
 		},
-		retentionDaysResolver(func(c syscfg.Config) int { return c.AutoScanRescanHours }),
+		func(rctx context.Context) int {
+			if s.syscfg == nil {
+				return 0
+			}
+			var orgID uuid.UUID
+			if err := s.db.Pool().QueryRow(rctx, `SELECT id FROM orgs ORDER BY created_at LIMIT 1`).Scan(&orgID); err != nil {
+				return 0
+			}
+			return s.syscfg.Get(rctx, orgID).AutoScanRescanHours
+		},
 		s.tel.Logger)
 
 	// Partition manager: pre-create daily partitions for events + network_flows and DROP
@@ -186,10 +182,10 @@ func (s *Server) startSingletonLoops(ctx context.Context) {
 	go handler.RunOrphanImageScanResultMonitor(ctx, s.db.Pool(), s.tel.Logger)
 
 	// Phase B: retroactively re-resolve flows stamped "cluster/<ip>" at ingest,
-	// now that pod_ips retains history and the resolver is time-aware. Shares the
-	// rollup refresher so it can refold the buckets its rewrites disturb. Leader-
-	// gated (derives from ctx) so replicas don't race each other or the watermark.
-	network.NewFlowBackfiller(s.db, rollupRefresher).Start(ctx)
+	// now that pod_ips retains history and the resolver is time-aware. Relabels and
+	// rebuilds complete raw-history buckets in one transaction under the rollup
+	// lock. Leader-gated (derives from ctx) so only one backfiller runs.
+	network.NewFlowBackfiller(s.db).Start(ctx)
 
 	// A9: scheduled-backup executor + retention. Leader-gated cron runner for the
 	// per-org backup_schedules an operator created via the /backups/schedule API. With

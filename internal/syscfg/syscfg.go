@@ -93,11 +93,11 @@ type Config struct {
 	// Retention windows in days. 0 = disabled (never prune). Read live by the
 	// retention loops, so a PATCH takes effect without a restart. These bound the
 	// two biggest sources of unbounded storage growth: raw network flows + events.
-	NetworkFlowRetentionDays int `json:"network_flow_retention_days,omitempty"`
-	EventsRetentionDays      int `json:"events_retention_days,omitempty"`
+	NetworkFlowRetentionDays int `json:"network_flow_retention_days"`
+	EventsRetentionDays      int `json:"events_retention_days"`
 	// ScanJobRetentionDays bounds the scan_jobs queue history: terminal jobs
 	// (completed/failed/canceled) older than this are pruned. 0 = keep forever.
-	ScanJobRetentionDays int `json:"scan_job_retention_days,omitempty"`
+	ScanJobRetentionDays int `json:"scan_job_retention_days"`
 
 	// AutoScanDisabled turns OFF the automatic scanning of running-workload images
 	// (NeuVector `enable_auto_scan_workload`). Default false = auto-scan ON, so a
@@ -169,7 +169,10 @@ func (t SyslogTarget) Addr() string {
 // proxy/syslog. Used when an org has no row yet.
 func Default() Config {
 	return trackConfig(Config{
-		TLSVerify: true,
+		TLSVerify:                true,
+		NetworkFlowRetentionDays: 14,
+		EventsRetentionDays:      30,
+		ScanJobRetentionDays:     7,
 	}, nil, SourceDefault)
 }
 
