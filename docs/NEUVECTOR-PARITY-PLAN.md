@@ -154,6 +154,38 @@ with production artifact qualification and the remaining A/B acceptance, then
 the contracts and table/form work in D/I, while retaining the NV enforcement and
 migration work in C/E/F/G/H/J/K. Do not equate stack adoption with NeuVector parity.
 
+### October 11 database qualification and release status
+
+The 23:42–23:46 UTC read-only live assessment measured **8.37 GiB** of database
+storage (about 8.99 decimal GB), with roughly 2.93 million events, 2.78 million
+raw flows, 1.91 million audit rows and 404,000 CVEs. Cleanup is active and its
+observed expired-row backlog is small, but the live service remains on migration
+**167**, a single PostgreSQL StatefulSet with WAL archiving disabled. The new
+safety fixes and the separate RustFS recovery proof do not establish live
+cleanup correctness, high availability or fleet-scale capacity.
+
+The [database lifecycle register](database-lifecycle-backlog.md#october-11-live-measurement-and-assessment)
+now contains the measured sizes/counts, active retention/partition/vacuum state,
+storage headroom, query/statistics limitations and ordered completion gates.
+The highest priorities are safe deployment, CVE repeated-write reduction,
+evidence-preserving retention for all growing histories, growth/lag/backup
+alerts, and combined ingest/read/prune/backup performance qualification. Parent
+statistics, global audit/rollup lock contention, stale Kubernetes audit and the
+cross-tenant effects of a retention hold are explicit parts of that work.
+The initial 1x/10x workload profiles and latency/lag budgets in the register are
+test targets, not measured capacity or customer SLAs. The database's current
+size alone is not a reason to replace PostgreSQL or declare it scale-qualified.
+
+Hosted CI for [PR #2](https://github.com/alphabravo-oss/constellation/pull/2),
+at implementation head `e51a69a`, has now completed: Go unit/integration,
+frontend and dependency checks passed, but quality, the security matrix,
+browser and aggregate required checks failed
+([run 38182357075](https://github.com/alphabravo-oss/constellation/actions/runs/38182357075)).
+Local focused passes do not override that release gate. Triage and resolve the
+failed checks before deployment or merge; keep the PR draft and the acceptance
+items open. The canonical plan is reconciled; full implementation/acceptance is
+**not complete**, and its count remains **53 checked / 98 open**.
+
 ### Stack baseline and approved convergence target
 
 **Product decision — October 11:** converge on Astronomer's technology stack,
@@ -1348,8 +1380,9 @@ progressive disclosure, while retaining Constellation's security vocabulary.
   [23-item database lifecycle register](database-lifecycle-backlog.md) tracks
   the concrete fixes and policy decisions, including a confirmed
   cross-partition `ctid` deletion defect that must be fixed urgently.
-  October 11 source inspection reconfirms DB-01/02; the live namespace has
-  no CNPG CRDs/operator or DB-backup CronJob. Package B above owns qualifying
+  October 11 live inspection still finds migration 167, while DB-01/02 source
+  fixes are tested in PR #2. The live namespace has no CNPG operator or
+  DB-backup CronJob. Package B above owns qualifying
   the existing CNPG chart path, plugin-based WAL/backup/PITR, isolated restore
   and a rollback-capable StatefulSet cutover. CNPG supports plugin backups;
   the legacy native Barman integration is deprecated in the referenced upstream

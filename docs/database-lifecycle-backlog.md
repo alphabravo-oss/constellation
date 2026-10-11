@@ -33,7 +33,115 @@ failure alerts, audit-chain and encrypted-credential recovery remain unproved.
 The table below retains the original failure/acceptance definitions so the
 remaining deployment gates are not mistaken for new implementation work.
 
-## Live baseline
+## October 11 live measurement and assessment
+
+Read-only measurements at 23:42–23:46 UTC on the existing
+`constellation-system/constellation-postgres-0`, not the disposable CNPG cluster.
+The live server is PostgreSQL 16.14, schema migration **167**, with one
+organization and one cluster. The migration-168/retention changes in PR #2 have
+not been deployed here. No rows, settings, statistics or storage were changed
+during this assessment.
+
+**Assessment:** a reasonable PostgreSQL foundation at a manageable data volume,
+but neither an optimized design nor demonstrated fleet-scale operation. Current
+row count is not the limiting proof; lifecycle completeness, unnecessary writes,
+query/lock latency and recovery under load remain unqualified.
+
+| Data family | Exact rows in this snapshot | Physical size including indexes |
+| --- | ---: | ---: |
+| Runtime events | 2,928,117 | 3,783 MiB |
+| Raw network flows | 2,777,455 | 1,622 MiB |
+| Control/evidence audit | 1,906,845 | 1,700 MiB |
+| CVE catalog | 403,690 | 1,060 MiB |
+| Hourly flow aggregates | 153,235 | 91 MiB |
+| Kubernetes audit | 81,695 | 174 MiB |
+| Findings | 9,684 | 38 MiB |
+
+Counts and sizes were sampled in adjacent read-only transactions while ingest
+continued. They are observations, not consistency checks against each other.
+`pg_stat_user_tables.n_live_tup` estimates were deliberately not used for the
+exact count column: Kubernetes audit, for example, reported an estimated zero
+despite containing 81,695 rows.
+
+- **Database:** 8,992,160,791 bytes, approximately **8.37 GiB / 8.99 GB**, plus
+  **160 MiB WAL** at a later snapshot. The database total includes table, TOAST
+  and index storage; WAL, scanner caches, backups and other host workloads are
+  additional. The PVC declares 60 GiB, but its backing filesystem is shared:
+  `df` reported 338 GiB total, 265 GiB used, 60 GiB available and 82% utilization.
+  PVC capacity is not proof of an enforced, exclusive 60-GiB quota. The older
+  6.8-GB observation below is approximate; do not infer a precise growth rate or
+  time-to-full from these two snapshots.
+- **Cleanup is active, correctness remains open:** configured flow/event/job
+  windows are 3/7/7 days. Only 2 raw flows and 386 events were older than their
+  respective windows in the count query; 23 finished terminal jobs were older
+  than seven days. These small boundary backlogs are consistent with periodic
+  sweeps, not a large stuck queue. Daily partitions cover the expected windows,
+  empty flow/event DEFAULT children occupy only 112/72 KiB, and autovacuum ran
+  recently. The API also logged event pruning. These observations do not negate
+  the known live partition-identity and rollup-expiry defects fixed in PR #2.
+- **Aggregation is keeping up at this load:** the watermark trailed wall clock
+  by about 78 seconds. There were no lock waiters at the later snapshot and ten
+  idle application connections. This is a point-in-time health observation,
+  not a latency SLO or a load test.
+- **Avoidable write activity:** `cve_records` had about **110.8 million cumulative
+  updates** against about 404,000 rows. The writer unconditionally updates
+  conflicts; import checkpointing also needs DB-18. The statistics reset time
+  was unavailable, so this is not a per-day rate or proof every update was
+  unnecessary. Unchanged-feed tests and interval WAL/update deltas must quantify
+  the fix. Small session/discovery tables also show substantial churn and need
+  profiling before changing their correctness semantics.
+- **Query/statistics work:** `shared_buffers` is 128 MiB in a pod limited to
+  2 GiB RAM / two CPU cores. `work_mem` is 4 MiB, autovacuum uses global defaults,
+  and there are no per-table storage overrides on the sampled hot tables.
+  Partition parents have no recorded ANALYZE; `pg_stat_statements` and I/O timing
+  are not enabled. The cumulative PostgreSQL buffer-hit ratio was 47.17%, with
+  about 126 GiB of historical temporary-file writes. These counters include
+  earlier workloads/restores, exclude the OS cache and have no known reset
+  interval: they warrant measurement, not an asserted current bottleneck or
+  blind memory/index tuning. Some large indexes have zero recorded scans, but
+  uniqueness/constraint indexes must not be dropped on that basis.
+- **Retention/data quality gaps:** audit and hourly rollups still retain June
+  history without a completed archive/prune contract. Kubernetes audit's newest
+  timestamp is **August 18**, so its freshness needs investigation separately
+  from its size. Control audit writes serialize on a global hash-chain lock;
+  changing that lock without a chain-format/migration design would break the
+  integrity contract. The new conservative shared retention policy also means
+  one tenant's zero/hold retains the corresponding history for every tenant;
+  it is not evidence of bounded tenant-independent capacity.
+- **Availability/recovery:** the live service is one StatefulSet on one node,
+  with `archive_mode=off`. The verified logical restore and separate RustFS
+  CNPG PITR rehearsal do not make this live database continuously archived or
+  highly available.
+
+### Ordered delivery and completion checks
+
+This is the database detail of packages A/B/J and OPS-2, not a separate roadmap.
+Owners below are responsibility areas, not assignments to named people.
+
+| Order / owner | Existing items | Concrete delivery | Completion evidence |
+| --- | --- | --- | --- |
+| 1 — backend/release | DB-01–05; A/B | Resolve PR release-check failures, qualify the exact image, deploy retention safety/migration 168 through the existing upgrade/rollback contract; keep the independent recovery copy. | Hosted required checks green, deployed image/schema verified, concurrent ingest/prune/refold counts preserved, zero/hold policy preserved, rollback exercised. |
+| 2 — data ingest | DB-18/19 | Persist feed checkpoints; update CVE rows only when the effective merged values change; preserve current source/KEV semantics until their separate decision is implemented. | Identical feed/restart is idempotent without row rewrites; changed rows update correctly; measure lower WAL/dead-tuple growth over the same replay workload. |
+| 3 — storage/evidence | DB-06–17/22 | Complete the per-class hot/archive/delete matrix, contiguous signed audit archival and independent verification; bound rollups and operational histories; investigate stale Kubernetes audit. | Every growing family has an owner/window/hold exception; archive failures block deletion; restored evidence verifies; late/open/referenced security records survive; expiry and freshness alarms pass failure injection. |
+| 4 — database/observability | DB-23; OPS-2 | Add interval growth, cleanup and fold-lag metrics; enable query-level profiling through a reviewed restart; maintain parent statistics; tune hot-table vacuum/index/memory settings against measured query plans. | Alerts tested for paused workers/full storage/backup gaps; representative foreground/background p95/p99 and WAL/IO/lock baselines recorded; before/after evidence for each tuning change. |
+| 5 — performance/platform | OPS-2; B | Run simultaneous ingest, findings/search, audit/dashboard reads, pruning, scanner updates and backup at increasing cluster counts and dataset sizes; qualify live recovery and separate-node failover. | Measured sustainable rows/sec, active tenants/clusters, bytes/day and latency envelope; recover after overload; no count/isolation loss; RPO/RTO measured. A single healthy dev node or CNPG install cannot close this gate. |
+
+For the first performance run, use the current dataset as the 1x profile and
+10x as a **test profile, not a promised capacity**. Include skewed tenants,
+late flows and an explicit retention hold. Record CPU/RAM/storage and query mix
+with every result. Initial engineering budgets to validate are list/search
+p95 <= 1 second, dashboard p95 <= 2 seconds, steady fold lag <= 2 minutes,
+and raw-expiry backlog <= 2 maintenance intervals once aggregation permits
+expiry. Run at least a 24-hour combined workload and a simulated full retention
+cycle, then publish the actual supported envelope. These are qualification
+targets, not customer SLAs; adjust with measured evidence and document changes.
+Size reserves must cover WAL bursts, one failed cleanup interval, backup/restore
+working space and other host consumers; set growth/free-space alerts before
+expanding retention or onboarding larger fleets. Prefer partition expiry and
+healthy routine vacuuming to routine `VACUUM FULL`, which requires an exclusive
+lock and additional rewrite space ([PostgreSQL 16 maintenance guidance](https://www.postgresql.org/docs/16/routine-vacuuming.html)).
+
+## September 27 historical baseline
 
 - PostgreSQL database: about 6.8 GB. `audit_events` 1.6 GB, `cve_records`
   1.1 GB, recent event partitions about 2.3 GB, recent raw-flow partitions
@@ -57,13 +165,13 @@ remaining deployment gates are not mistaken for new implementation work.
 
 ## P0: correctness and recoverability
 
-| ID | Status | Required fix or decision | Acceptance gate |
+| ID | Status | Original failure / required work | Acceptance gate |
 | --- | --- | --- | --- |
-| DB-01 | **Open — urgent fix** | Replace `ctid`-only DELETEs from partitioned `events` and `network_flows` (`internal/handler/events_retention.go`, `internal/handler/network/rollup.go`). `ctid` is only unique within a child; a disposable PostgreSQL reproduction selected one expired row and deleted it **and a current row** with the same `ctid` in another partition. | Partitioned two-child test proves an expired row is removed and a current row survives; deploy the fix before relying on pruning. Treat historical event/flow completeness as unverified. |
-| DB-02 | **Open — urgent fix** | Never prune or drop raw flows until the rollup watermark and a successful fold cover them. The current refresh loop prunes even after a refresh failure, while the partition manager drops by age alone; late-arriving timestamps and `RefoldWindow` need a defined grace/replay contract (`internal/handler/network/rollup.go`, `internal/handler/partition_manager.go`). | Failure, lag, late-arrival, and refold-after-prune tests preserve counts; a visible fold-lag alarm blocks unsafe expiry. |
-| DB-03 | **Open — fix** | Make new installations bounded by default. Migration 137 updates only pre-existing `system_config` rows; `syscfg.Default()` and first-boot seeding otherwise leave retention at zero, meaning never prune (`db/migrations/137_retention_defaults.sql`, `internal/syscfg/syscfg.go`, `internal/server/server.go`). | Fresh database install has explicit reviewed nonzero defaults; existing operator choices, including an explicit zero if allowed, are not silently overwritten. |
-| DB-04 | **Open — decision + fix** | Choose installation-wide versus per-org retention. The leader currently reads the earliest org's settings for every org (`internal/server/leaderelection.go`). | Config API/UI, partition drops, row pruners, and tenant tests enforce one documented scope consistently. |
-| DB-05 | **Open — fix** | Establish real PostgreSQL backup/PITR and offsite copies before more destructive cleanup. The local deployment has no app backup schedule/catalog entries; org backups are not equivalent to a database restore and omit audit replay (`pkg/backup/restorer.go`, `deploy/charts/constellation/values.yaml`). | Scheduled backup, retained WAL or equivalent recovery points, independent restore drill, RPO/RTO evidence, and alerts on missed backups. |
+| DB-01 | **Implemented; live rollout open** | Replace `ctid`-only DELETEs from partitioned `events` and `network_flows` (`internal/handler/events_retention.go`, `internal/handler/network/rollup.go`). `ctid` is only unique within a child; a disposable PostgreSQL reproduction selected one expired row and deleted it **and a current row** with the same `ctid` in another partition. | Partitioned two-child test proves an expired row is removed and a current row survives; deploy the fix before relying on pruning. Treat historical event/flow completeness as unverified. |
+| DB-02 | **Implemented; rollout/alarms open** | Never prune or drop raw flows until the rollup watermark and a successful fold cover them. The current refresh loop prunes even after a refresh failure, while the partition manager drops by age alone; late-arriving timestamps and `RefoldWindow` need a defined grace/replay contract (`internal/handler/network/rollup.go`, `internal/handler/partition_manager.go`). | Failure, lag, late-arrival, and refold-after-prune tests preserve counts; a visible fold-lag alarm blocks unsafe expiry. |
+| DB-03 | **Implemented/tested; release acceptance open** | Make new installations bounded by default. Migration 137 updates only pre-existing `system_config` rows; `syscfg.Default()` and first-boot seeding otherwise leave retention at zero, meaning never prune (`db/migrations/137_retention_defaults.sql`, `internal/syscfg/syscfg.go`, `internal/server/server.go`). | Fresh database install has explicit reviewed nonzero defaults; existing operator choices, including an explicit zero if allowed, are not silently overwritten. |
+| DB-04 | **Conservative shared policy implemented; deployment open** | Choose installation-wide versus per-org retention. The leader currently reads the earliest org's settings for every org (`internal/server/leaderelection.go`). | Config API/UI, partition drops, row pruners, and tenant tests enforce one documented scope consistently. |
+| DB-05 | **Local recovery passed; live/off-host gates open** | Establish real PostgreSQL backup/PITR and offsite copies before more destructive cleanup. The local deployment has no app backup schedule/catalog entries; org backups are not equivalent to a database restore and omit audit replay (`pkg/backup/restorer.go`, `deploy/charts/constellation/values.yaml`). | Scheduled backup, retained WAL or equivalent recovery points, independent restore drill, RPO/RTO evidence, and alerts on missed backups. |
 
 ## P1: evidence-preserving retention
 
