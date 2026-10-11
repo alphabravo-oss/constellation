@@ -4,7 +4,8 @@
 // Used by every page that lives in a multi-cluster fleet; keeps the
 // "what part of my fleet am I looking at" answer always visible.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams, type SetURLSearchParams } from "react-router-dom";
+
+import { useRouteSearchParams, type SetRouteSearchParams } from "@/lib/route-search";
 import { useQuery } from "@tanstack/react-query";
 import { Filter, X, ChevronDown } from "lucide-react";
 
@@ -51,7 +52,7 @@ function readStorage(): Scope | null {
 
 // eslint-disable-next-line react-refresh/only-export-components
 export function useScope(): [Scope, (next: Scope) => void] {
-  const [sp, setSp] = useSearchParams();
+  const [sp, setSp] = useRouteSearchParams();
   const initial = useMemo(() => {
     const fromURL = readURL(sp);
     if (isNonEmpty(fromURL)) return fromURL;
@@ -74,7 +75,7 @@ export function useScope(): [Scope, (next: Scope) => void] {
   return [scope, update];
 }
 
-function syncURL(s: Scope, sp: URLSearchParams, setSp: SetURLSearchParams) {
+function syncURL(s: Scope, sp: URLSearchParams, setSp: SetRouteSearchParams) {
   const next = new URLSearchParams(sp);
   for (const [k, v] of [["cluster", s.clusters], ["namespace", s.namespaces], ["label", s.labels]] as const) {
     if (v.length === 0) next.delete(k);

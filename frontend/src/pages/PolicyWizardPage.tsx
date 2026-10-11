@@ -14,7 +14,7 @@
 // so adding a step later doesn't bloat this file.
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { ChevronLeft, ChevronRight, Plus, Trash2 } from "lucide-react";
 
@@ -119,7 +119,7 @@ export function PolicyWizardPage() {
       }),
     onSuccess: () => {
       toast.success("Policy created (monitor-mode)");
-      nav("/policies");
+      nav({ href: "/policies" });
     },
     onError: (e: unknown) => toast.error(`Create failed: ${(e as Error).message}`),
   });

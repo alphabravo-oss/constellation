@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, ArrowUpDown } from "lucide-react";
 import { toast } from "sonner";
@@ -66,7 +66,7 @@ export function GroupsPage() {
         profile_mode: g.profile_mode,
       })}
       columns={[
-        { header: "Name", render: (g) => <Link to={g.id} className="font-medium text-[color:var(--color-primary)] hover:underline">{g.name}</Link> },
+        { header: "Name", render: (g) => <Link to="." href={g.id} className="font-medium text-[color:var(--color-primary)] hover:underline">{g.name}</Link> },
         { header: "Kind", render: (g) => g.kind },
         { header: "Network mode", render: (g) => g.policy_mode ?? "monitor" },
         { header: "Process mode", render: (g) => g.profile_mode ?? "monitor" },

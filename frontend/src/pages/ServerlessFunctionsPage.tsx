@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link } from "@tanstack/react-router";
 import { CloudCog, Database, KeyRound, Search, ShieldAlert } from "lucide-react";
 
 import { serverlessFunctions, type ServerlessFunction } from "@/api/client";
@@ -58,7 +58,7 @@ export function ServerlessFunctionsPage() {
             {item.region ? <Pill tone="accent">{item.region}</Pill> : null}
             {isStale(item.latest_observed_at || item.last_seen_at) ? <Pill tone="warn">stale evidence</Pill> : null}
           </div>
-          <Link to={`/clusters/${clusterId}/serverless/${item.id}`} className="mt-2 block break-all font-mono text-xs font-medium hover:underline">
+          <Link to="." href={`/clusters/${clusterId}/serverless/${item.id}`} className="mt-2 block break-all font-mono text-xs font-medium hover:underline">
             {item.function_name || item.function_ref}
           </Link>
           <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{item.function_ref}</div>
@@ -104,7 +104,7 @@ export function ServerlessFunctionsPage() {
         description="Lambda function package inventory and execution-role posture."
         actions={
           <Link
-            to={selected ? `/clusters/${clusterId}/serverless/${selected.id}` : `/clusters/${clusterId}/serverless`}
+            to="." href={selected ? `/clusters/${clusterId}/serverless/${selected.id}` : `/clusters/${clusterId}/serverless`}
             className={cn(
               "inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm hover:bg-accent",
               !selected && "pointer-events-none opacity-50",
@@ -193,7 +193,7 @@ function ServerlessPreview({ item, clusterId }: { item: ServerlessFunction | nul
             <h2 className="mt-2 break-all font-mono text-sm font-semibold">{item.function_name || item.function_ref}</h2>
             <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{item.role || "execution role unknown"}</p>
           </div>
-          <Link to={`/clusters/${clusterId}/serverless/${item.id}`} className="rounded-md border border-border px-2 py-1 text-xs hover:bg-accent">
+          <Link to="." href={`/clusters/${clusterId}/serverless/${item.id}`} className="rounded-md border border-border px-2 py-1 text-xs hover:bg-accent">
             Full Details
           </Link>
         </div>

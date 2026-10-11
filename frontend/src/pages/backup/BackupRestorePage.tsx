@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ArrowLeft, ShieldCheck } from "lucide-react";
@@ -48,7 +48,7 @@ export function BackupRestorePage() {
       setFile(null);
       setManifest(null);
       if (inputRef.current) inputRef.current.value = "";
-      navigate("/settings/backup");
+      navigate({ href: "/settings/backup" });
     },
     onError: (e: Error) => toast.error(`Restore failed: ${e.message}`),
   });
@@ -128,7 +128,7 @@ export function BackupRestorePage() {
             >
               {restoreMutation.isPending ? "Applying…" : "Apply restore"}
             </Button>
-            <Button type="button" variant="ghost" size="lg" onClick={() => navigate("/settings/backup")}>Cancel</Button>
+            <Button type="button" variant="ghost" size="lg" onClick={() => navigate({ href: "/settings/backup" })}>Cancel</Button>
           </div>
         </div>
       </Card>

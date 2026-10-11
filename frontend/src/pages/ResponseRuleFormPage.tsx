@@ -6,7 +6,7 @@
 // automatic actions (notify / ticket / quarantine / isolate).
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { ArrowLeft, Save, Trash2 } from "lucide-react";
 
 import {
@@ -102,7 +102,7 @@ export function ResponseRuleFormPage() {
   // Cluster-scoped config: rules created in cluster mode are tagged with the
   // cluster_id on the server. cluster_id comes from the /clusters/:id parent route.
   const { clusterId, isLoading: clusterLoading } = useCluster();
-  const { ruleId } = useParams<{ ruleId: string }>();
+  const { ruleId } = useParams({ strict: false });
   const isEdit = Boolean(ruleId);
   const backTo = `/clusters/${clusterId ?? ""}/response-rules`;
 
@@ -153,7 +153,7 @@ export function ResponseRuleFormPage() {
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["response-rules-v2", clusterId] });
-      navigate(backTo);
+      navigate({ href: backTo });
     },
     onError: (err: Error) => setError(err.message),
   });
@@ -185,7 +185,7 @@ export function ResponseRuleFormPage() {
     <div className="space-y-6" data-testid="response-rules-page">
       <PageHeader
         backLink={
-          <Link to={backTo} className="inline-flex items-center gap-1 hover:text-foreground">
+          <Link to="." href={backTo} className="inline-flex items-center gap-1 hover:text-foreground">
             <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Response Rules
           </Link>
         }
@@ -387,7 +387,7 @@ export function ResponseRuleFormPage() {
             <div className="flex justify-end gap-2">
               <button
                 type="button"
-                onClick={() => navigate(backTo)}
+                onClick={() => navigate({ href: backTo })}
                 className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent"
               >
                 Cancel

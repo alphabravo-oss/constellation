@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "@tanstack/react-router";
 import { Crown, GitBranch, Hash, LogOut as LeaveIcon, Plus, Users } from "lucide-react";
 
 import { federation, type FedMember } from "@/api/client";
@@ -62,7 +62,7 @@ export function FederationPage() {
           </button>
           <button
             disabled={cur?.state !== "standalone"}
-            onClick={() => navigate("/federation/new")}
+            onClick={() => navigate({ href: "/federation/new" })}
             className="inline-flex items-center gap-1.5 rounded-md border border-border bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
             <Plus className="h-3.5 w-3.5" />

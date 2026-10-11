@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Command } from "cmdk";
@@ -147,7 +147,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
   const go = useCallback((href: string, label: string, id?: string) => {
     if (id) pushRecent({ id: id ?? href, label, href });
     onOpenChange(false);
-    navigate(href);
+    navigate({ href: href });
   }, [navigate, onOpenChange]);
   const resolveHref = useCallback((href: string) => {
     if (clusterId && isClusterHref(href)) return `/clusters/${clusterId}${href}`;
@@ -472,16 +472,16 @@ export function CommandPaletteProvider() {
   useHotkey("Mod+k", () => setOpen((o) => !o), { description: "Open command palette", allowInEditable: true });
 
   // Global hotkey: hotkey nav
-  useHotkey("g d", () => navigate(clusterHref("/dashboard")));
-  useHotkey("g f", () => navigate(clusterHref("/findings")));
-  useHotkey("g h", () => navigate(clusterHref("/nodes")));
-  useHotkey("g i", () => navigate(clusterHref("/images")));
-  useHotkey("g a", () => navigate(clusterHref("/assets")));
-  useHotkey("g c", () => navigate(clusterHref("/compliance")));
-  useHotkey("g n", () => navigate(clusterHref("/network")));
-  useHotkey("g p", () => navigate(clusterHref("/policies")));
-  useHotkey("g r", () => navigate(clusterHref("/runtime")));
-  useHotkey("g v", () => navigate("/cve"));
+  useHotkey("g d", () => navigate({ href: clusterHref("/dashboard") }));
+  useHotkey("g f", () => navigate({ href: clusterHref("/findings") }));
+  useHotkey("g h", () => navigate({ href: clusterHref("/nodes") }));
+  useHotkey("g i", () => navigate({ href: clusterHref("/images") }));
+  useHotkey("g a", () => navigate({ href: clusterHref("/assets") }));
+  useHotkey("g c", () => navigate({ href: clusterHref("/compliance") }));
+  useHotkey("g n", () => navigate({ href: clusterHref("/network") }));
+  useHotkey("g p", () => navigate({ href: clusterHref("/policies") }));
+  useHotkey("g r", () => navigate({ href: clusterHref("/runtime") }));
+  useHotkey("g v", () => navigate({ href: "/cve" }));
 
   // ? — show hotkey help (broadcast event AppShell listens to)
   useHotkey("?", () => window.dispatchEvent(new CustomEvent("constellation:show-hotkeys")));

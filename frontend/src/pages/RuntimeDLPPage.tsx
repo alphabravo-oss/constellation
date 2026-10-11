@@ -11,7 +11,8 @@
 // browsing the page shows only the verdict + list.
 import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams } from "@tanstack/react-router";
+import { useRouteSearchParams } from "@/lib/route-search";
 import {
   ShieldAlert,
   ShieldCheck,
@@ -46,8 +47,8 @@ const MODE_BADGE: Record<DLPMode, { label: string; tone: "success" | "warning" |
 };
 
 export function RuntimeDLPPage() {
-  const [search] = useSearchParams();
-  const { id: pathClusterID } = useParams();
+  const [search] = useRouteSearchParams();
+  const { id: pathClusterID } = useParams({ strict: false });
   const clusterID = pathClusterID ?? search.get("cluster_id") ?? "";
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -60,8 +61,8 @@ export function RuntimeDLPPage() {
 
   // Add/edit now live on dedicated routes (Astronomer pattern; see
   // frontend/CLAUDE.md). Preserve any ?cluster_id= fallback across the nav.
-  const openNew = () => navigate({ pathname: "new", search: search.toString() });
-  const openEdit = (id: string) => navigate({ pathname: id, search: search.toString() });
+  const openNew = () => navigate({ to: "/clusters/$id/runtime-dlp/new", params: { id: clusterID }, search: Object.fromEntries(search) });
+  const openEdit = (id: string) => navigate({ to: "/clusters/$id/runtime-dlp/$ruleId", params: { id: clusterID, ruleId: id }, search: Object.fromEntries(search) });
   const rules = useMemo(() => q.data ?? [], [q.data]);
   const enforceCount = rules.filter((r) => r.mode === "enforce").length;
   const monitorCount = rules.filter((r) => r.mode === "monitor").length;

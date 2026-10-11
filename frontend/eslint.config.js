@@ -24,6 +24,10 @@ export default [
       },
       globals: {
         document: "readonly",
+        BroadcastChannel: "readonly",
+        HTMLSpanElement: "readonly",
+        RequestInit: "readonly",
+        structuredClone: "readonly",
         window: "readonly",
         navigator: "readonly",
         console: "readonly",

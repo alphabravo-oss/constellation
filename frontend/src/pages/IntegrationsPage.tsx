@@ -9,7 +9,7 @@
 //                          route builder with a raw-YAML escape hatch (Monaco).
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import Editor from "@monaco-editor/react";
 // @ts-expect-error - js-yaml ships no bundled type declarations in this project.
@@ -335,7 +335,7 @@ function ReceiversTab() {
           data-testid={`receiver-edit-${r.id}`}
           onClick={(e) => {
             e.stopPropagation();
-            navigate(`/settings/integrations/receivers/${r.id}`);
+            navigate({ href: `/settings/integrations/receivers/${r.id}` });
           }}
         >
           <Pencil className="h-3.5 w-3.5" aria-hidden />
@@ -357,7 +357,7 @@ function ReceiversTab() {
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs text-muted-foreground">Select a receiver to inspect deliveries, send a test alert, or rotate its HMAC secret.</p>
-        <Button variant="outline" size="sm" onClick={() => navigate("/settings/integrations/receivers/new")} data-testid="receiver-add">
+        <Button variant="outline" size="sm" onClick={() => navigate({ href: "/settings/integrations/receivers/new" })} data-testid="receiver-add">
           <Plus className="h-3.5 w-3.5" aria-hidden /> Add receiver
         </Button>
       </div>
@@ -383,7 +383,7 @@ function ReceiversTab() {
           receiver={selected}
           deliveries={recDeliveries}
           onClose={() => setSelectedID(null)}
-          onEdit={() => navigate(`/settings/integrations/receivers/${selected.id}`)}
+          onEdit={() => navigate({ href: `/settings/integrations/receivers/${selected.id}` })}
           onMutated={() => qc.invalidateQueries({ queryKey: ["receivers"] })}
         />
       )}

@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { Activity, ArrowRight, Clock3, Copy, Database, Download, Globe2, Mail, ScanSearch, SlidersHorizontal } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -237,7 +237,7 @@ export function EffectiveConfigPage() {
               title={<span className="inline-flex items-center gap-2"><span className="text-muted-foreground [&_svg]:h-4 [&_svg]:w-4">{group.icon}</span>{group.title}</span>}
               action={group.editTo ? (
                 <Button asChild variant="ghost" size="sm">
-                  <Link to={group.editTo}>Edit<ArrowRight className="h-3.5 w-3.5" /></Link>
+                  <Link to="." href={group.editTo}>Edit<ArrowRight className="h-3.5 w-3.5" /></Link>
                 </Button>
               ) : undefined}
             >

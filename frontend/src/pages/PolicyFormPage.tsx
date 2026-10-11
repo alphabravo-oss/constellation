@@ -7,7 +7,7 @@
 // policies.
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { ArrowLeft, FileJson } from "lucide-react";
 import Editor from "@monaco-editor/react";
@@ -22,7 +22,7 @@ export function PolicyFormPage() {
   const qc = useQueryClient();
   // cluster_id comes from the /clusters/:id parent route.
   const { clusterId, isLoading: clusterLoading } = useCluster();
-  const { policyId } = useParams<{ policyId: string }>();
+  const { policyId } = useParams({ strict: false });
   const isEdit = Boolean(policyId);
   const backTo = `/clusters/${clusterId ?? ""}/policies`;
 
@@ -71,7 +71,7 @@ export function PolicyFormPage() {
       toast.success(isEdit ? "Policy updated" : "Policy created");
       qc.invalidateQueries({ queryKey: ["policies", clusterId] });
       qc.invalidateQueries({ queryKey: ["policies"] });
-      navigate(backTo);
+      navigate({ href: backTo });
     },
     onError: () => toast.error("Save failed"),
   });
@@ -85,7 +85,7 @@ export function PolicyFormPage() {
     <div className="space-y-6" data-testid="policies-page" data-cluster-id={clusterId ?? ""}>
       <PageHeader
         backLink={
-          <Link to={backTo} className="inline-flex items-center gap-1 hover:text-foreground">
+          <Link to="." href={backTo} className="inline-flex items-center gap-1 hover:text-foreground">
             <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Policies
           </Link>
         }
@@ -192,7 +192,7 @@ export function PolicyFormPage() {
             <div className="mt-4 flex justify-end">
               <button
                 type="button"
-                onClick={() => navigate(backTo)}
+                onClick={() => navigate({ href: backTo })}
                 className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent"
               >
                 Cancel

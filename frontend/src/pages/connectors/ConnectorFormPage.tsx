@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
+import { useRouteSearchParams } from "@/lib/route-search";
 import { toast } from "sonner";
 import { ArrowLeft } from "lucide-react";
 
@@ -69,8 +70,8 @@ function configFromRegistry(connector: RegistryConnector, configs: ConnectorCove
  * account (?type=); edit mode (:id) pre-fills an existing registry connector.
  */
 export function ConnectorFormPage() {
-  const { id } = useParams<{ id: string }>();
-  const [searchParams] = useSearchParams();
+  const { id } = useParams({ strict: false });
+  const [searchParams] = useRouteSearchParams();
   const q = useQuery({ queryKey: ["connector-coverage"], queryFn: connectorCoverage.overview });
 
   if (q.isPending) return <p className="text-sm text-muted-foreground">Loading connector coverage...</p>;
@@ -134,7 +135,7 @@ function ConnectorFormInner({
     onSuccess: () => {
       toast.success("Connector metadata saved");
       void queryClient.invalidateQueries({ queryKey: ["connector-coverage"] });
-      navigate(backTo);
+      navigate({ href: backTo });
     },
     onError: () => toast.error("Unable to save connector metadata"),
   });
@@ -146,7 +147,7 @@ function ConnectorFormInner({
       <PageHeader
         title={`${editing ? "Edit" : "Add"} ${noun}`}
         description="Save connector metadata and an external secret reference. Raw credentials are never accepted by this API."
-        backLink={<Link to={backTo} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Connectors</Link>}
+        backLink={<Link to="." href={backTo} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Connectors</Link>}
       />
 
       <Card title={`${connectorType === "registry" ? "Registry" : "Cloud account"} details`}>
@@ -220,7 +221,7 @@ function ConnectorFormInner({
             >
               {save.isPending ? "Saving…" : "Save metadata"}
             </Button>
-            <Button type="button" variant="ghost" size="lg" onClick={() => navigate(backTo)}>Cancel</Button>
+            <Button type="button" variant="ghost" size="lg" onClick={() => navigate({ href: backTo })}>Cancel</Button>
           </div>
         </form>
       </Card>

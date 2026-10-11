@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link2, Trash2, UsersRound } from "lucide-react";
 import { toast } from "sonner";
@@ -174,7 +174,7 @@ function BoundGroupRow({
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 px-3 py-2">
       <div className="min-w-0">
-        <Link to={`/clusters/${clusterId}/groups/${group.id}`} className="font-mono text-sm text-[color:var(--color-primary)] hover:underline">
+        <Link to="." href={`/clusters/${clusterId}/groups/${group.id}`} className="font-mono text-sm text-[color:var(--color-primary)] hover:underline">
           {group.name}
         </Link>
         <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">

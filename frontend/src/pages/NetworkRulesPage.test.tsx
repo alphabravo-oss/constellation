@@ -1,6 +1,6 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
+import { TestRouter } from "@/test/router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, expect, it, vi } from "vitest";
 
@@ -47,7 +47,7 @@ async function renderRules() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   queryClient = client;
   await act(async () => root?.render(
-    <QueryClientProvider client={client}><MemoryRouter><NetworkRulesPage /></MemoryRouter></QueryClientProvider>,
+    <QueryClientProvider client={client}><TestRouter><NetworkRulesPage /></TestRouter></QueryClientProvider>,
   ));
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
 }

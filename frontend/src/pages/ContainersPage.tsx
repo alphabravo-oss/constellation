@@ -3,7 +3,7 @@
 // live container across all nodes with its pod, image, node, state, and workload
 // security posture (privileged/root/risk). Closes the #1 structural NV-parity gap.
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Boxes, ShieldAlert } from "lucide-react";
 
@@ -63,11 +63,11 @@ export function ContainersPage() {
       ), sort: (a, b) => a.name.localeCompare(b.name) },
     { id: "pod", header: "Pod", cell: (c) => (
         c.workload && clusterId
-          ? <Link to={`/clusters/${clusterId}/deployments?q=${encodeURIComponent(c.workload)}`} className="text-mono text-[11px] text-[color:var(--color-primary)] hover:underline" title={`${c.namespace}/${c.pod_name}`}>{c.namespace}/{c.pod_name}</Link>
+          ? <Link to="." href={`/clusters/${clusterId}/deployments?q=${encodeURIComponent(c.workload)}`} className="text-mono text-[11px] text-[color:var(--color-primary)] hover:underline" title={`${c.namespace}/${c.pod_name}`}>{c.namespace}/{c.pod_name}</Link>
           : <span className="text-mono text-[11px] text-muted-foreground">{c.namespace}/{c.pod_name}</span>
       ), sort: (a, b) => (a.namespace + a.pod_name).localeCompare(b.namespace + b.pod_name) },
     { id: "image", header: "Image", cell: (c) => <span className="text-mono text-[11px] max-w-[280px] truncate block" title={c.image}>{displayImage(c.image)}</span>, sort: (a, b) => a.image.localeCompare(b.image) },
-    { id: "node", header: "Node", cell: (c) => clusterId ? <Link to={`/clusters/${clusterId}/nodes/${encodeURIComponent(c.node)}`} className="text-mono text-[11px] text-[color:var(--color-primary)] hover:underline">{c.node}</Link> : <span className="text-mono text-[11px]">{c.node || "Not reported"}</span>, sort: (a, b) => a.node.localeCompare(b.node) },
+    { id: "node", header: "Node", cell: (c) => clusterId ? <Link to="." href={`/clusters/${clusterId}/nodes/${encodeURIComponent(c.node)}`} className="text-mono text-[11px] text-[color:var(--color-primary)] hover:underline">{c.node}</Link> : <span className="text-mono text-[11px]">{c.node || "Not reported"}</span>, sort: (a, b) => a.node.localeCompare(b.node) },
     { id: "risk", header: "Vulns", numeric: true, width: "110px", cell: (c) => (
         (c.critical + c.high) === 0
           ? <span className="text-[11px] text-muted-foreground">—</span>

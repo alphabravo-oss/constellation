@@ -1,6 +1,6 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
+import { TestRouter } from "@/test/router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { toast } from "sonner";
@@ -81,7 +81,7 @@ async function render() {
   root = createRoot(host);
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   await act(async () => root!.render(
-    <QueryClientProvider client={queryClient}><MemoryRouter><MigrationPage /></MemoryRouter></QueryClientProvider>,
+    <QueryClientProvider client={queryClient}><TestRouter><MigrationPage /></TestRouter></QueryClientProvider>,
   ));
   await settle();
 }

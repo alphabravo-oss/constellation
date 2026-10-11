@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "@tanstack/react-router";
 import {
   Download,
   FileCheck2,
@@ -546,7 +546,7 @@ export function AdmissionPage() {
         description="Admission policies compiled for the webhook."
         padded={false}
         action={
-          <Button size="sm" variant="primary" onClick={() => navigate(`${clusterId ? `/clusters/${clusterId}` : ""}/admission/new`)}>
+          <Button size="sm" variant="primary" onClick={() => navigate({ href: `${clusterId ? `/clusters/${clusterId}` : ""}/admission/new` })}>
             <Plus className="h-3.5 w-3.5" /> Add rule
           </Button>
         }

@@ -4,7 +4,8 @@
 // inline on the list; this page authors manual (user_created) rules or edits their fields.
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { useRouteSearchParams } from "@/lib/route-search";
 import { ArrowLeft } from "lucide-react";
 
 import { networkRules } from "@/api/client";
@@ -19,7 +20,7 @@ export function NetworkRuleFormPage() {
   const { clusterId } = useCluster();
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const [params] = useSearchParams();
+  const [params] = useRouteSearchParams();
   const editing = !!params.get("from");
   const listPath = clusterId ? `/clusters/${clusterId}/network-rules` : "/network-rules";
 
@@ -42,7 +43,7 @@ export function NetworkRuleFormPage() {
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["network-rules", clusterId] });
-      navigate(listPath);
+      navigate({ href: listPath });
     },
   });
 
@@ -51,7 +52,7 @@ export function NetworkRuleFormPage() {
       <PageHeader
         title={editing ? "Edit network rule" : "Add network rule"}
         description="Author an ordered allow/deny rule between two workloads. Use namespace/name (e.g. prod/api) or 'external' for outside traffic."
-        backLink={<Link to={listPath} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Network Rules</Link>}
+        backLink={<Link to="." href={listPath} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Network Rules</Link>}
       />
       <Card title="Rule" description="Traffic from the source workload to the destination, restricted to these applications and ports.">
         <form
@@ -105,7 +106,7 @@ export function NetworkRuleFormPage() {
             <Button type="submit" variant="primary" size="lg" disabled={!from.trim() || !to.trim() || save.isPending}>
               {save.isPending ? "Saving…" : editing ? "Save changes" : "Add rule"}
             </Button>
-            <Button type="button" variant="ghost" size="lg" onClick={() => navigate(listPath)}>Cancel</Button>
+            <Button type="button" variant="ghost" size="lg" onClick={() => navigate({ href: listPath })}>Cancel</Button>
           </div>
         </form>
       </Card>

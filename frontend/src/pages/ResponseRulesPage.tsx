@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "@tanstack/react-router";
 import { Plus, Trash2, ChevronUp, ChevronDown } from "lucide-react";
 
 import { responseRulesV2, type ResponseRuleV2 } from "@/api/client";
@@ -70,7 +70,7 @@ export function ResponseRulesPage() {
         <div className="flex items-center justify-end gap-1">
           <button
             type="button"
-            onClick={() => navigate(`${rulesBase}/${r.id}`)}
+            onClick={() => navigate({ href: `${rulesBase}/${r.id}` })}
             className="rounded-md px-2 py-1 text-xs hover:bg-accent"
           >
             Edit
@@ -110,7 +110,7 @@ export function ResponseRulesPage() {
             /> : null}
             <button
               type="button"
-              onClick={() => navigate(`${rulesBase}/new`)}
+              onClick={() => navigate({ href: `${rulesBase}/new` })}
               className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
             >
               <Plus className="h-3.5 w-3.5" /> New rule

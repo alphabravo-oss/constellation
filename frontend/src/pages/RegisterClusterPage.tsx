@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { Copy, Check, Download, Globe2 } from "lucide-react";
 
@@ -69,7 +69,7 @@ kubectl -n constellation-system create secret generic constellation-init-bundle 
               <Button type="submit" variant="primary" size="lg" disabled={create.isPending || !name.trim()} data-testid="mint-bundle-submit">
                 {create.isPending ? "Minting…" : "Mint registration bundle"}
               </Button>
-              <Button type="button" variant="ghost" size="lg" onClick={() => navigate("/settings")}>Cancel</Button>
+              <Button type="button" variant="ghost" size="lg" onClick={() => navigate({ href: "/settings" })}>Cancel</Button>
             </div>
           </form>
         </Card>
@@ -144,7 +144,7 @@ kubectl -n constellation-system create secret generic constellation-init-bundle 
 
           <div className="flex items-center gap-3">
             <Button variant="outline" size="lg" onClick={() => { setMint(null); setName(""); }}>Register another cluster</Button>
-            <Button variant="ghost" size="lg" onClick={() => navigate("/settings")}>Done</Button>
+            <Button variant="ghost" size="lg" onClick={() => navigate({ href: "/settings" })}>Done</Button>
           </div>
         </div>
       )}

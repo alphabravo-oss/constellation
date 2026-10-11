@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { ArrowRight, KeyRound, Pencil, Plus, ShieldCheck, Trash2, UserRoundCog, UsersRound, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 
@@ -154,7 +154,7 @@ export function AccessControlPage() {
           <div className="flex justify-end">
             <button
               type="button"
-              onClick={() => navigate("/settings/access/users/new")}
+              onClick={() => navigate({ href: "/settings/access/users/new" })}
               className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
             >
               <UserPlus className="h-3.5 w-3.5" /> New user
@@ -178,7 +178,7 @@ export function AccessControlPage() {
             title="Scoped bindings"
             description="Grants of a role to a subject, optionally narrowed to specific clusters or namespaces. This is where you assign access."
             action={
-              <Button variant="primary" size="sm" onClick={() => navigate("/settings/access/bindings/new")}>
+              <Button variant="primary" size="sm" onClick={() => navigate({ href: "/settings/access/bindings/new" })}>
                 <Plus className="h-3.5 w-3.5" /> Add binding
               </Button>
             }
@@ -216,7 +216,7 @@ export function AccessControlPage() {
             description="The named permission sets you can bind. Built-in roles are fixed; custom roles are defined by your org."
             padded={false}
             action={
-              <Button variant="primary" size="sm" onClick={() => navigate("/settings/access/roles/new")}>
+              <Button variant="primary" size="sm" onClick={() => navigate({ href: "/settings/access/roles/new" })}>
                 <Plus className="h-3.5 w-3.5" /> New role
               </Button>
             }
@@ -244,7 +244,7 @@ export function AccessControlPage() {
           title="Authentication providers"
           description="Identity providers (LDAP, SAML, OIDC) that federate sign-in for your organization."
           action={
-            <Button variant="primary" size="sm" onClick={() => navigate("/settings/access/sso/new")}>
+            <Button variant="primary" size="sm" onClick={() => navigate({ href: "/settings/access/sso/new" })}>
               <Plus className="h-3.5 w-3.5" /> Add provider
             </Button>
           }
@@ -274,7 +274,7 @@ export function AccessControlPage() {
                       variant="ghost"
                       size="icon"
                       aria-label="Edit provider"
-                      onClick={() => navigate(`/settings/access/sso/${provider.id}`)}
+                      onClick={() => navigate({ href: `/settings/access/sso/${provider.id}` })}
                       className="text-muted-foreground hover:text-foreground"
                     >
                       <Pencil className="h-3.5 w-3.5" />
@@ -306,7 +306,7 @@ export function AccessControlPage() {
           title="Service accounts"
           description="Non-human identities for automation, each with a scoped set of permissions."
           action={
-            <Button variant="primary" size="sm" onClick={() => navigate("/settings/access/service-accounts/new")}>
+            <Button variant="primary" size="sm" onClick={() => navigate({ href: "/settings/access/service-accounts/new" })}>
               <Plus className="h-3.5 w-3.5" /> New service account
             </Button>
           }

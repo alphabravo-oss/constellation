@@ -6,7 +6,8 @@
 // All data logic + testids are preserved verbatim from the former DLPEditor.
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
+import { useRouteSearchParams } from "@/lib/route-search";
 import { ArrowLeft } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -22,8 +23,8 @@ import { patternLines, patternsFromText } from "@/lib/dlp-patterns";
 
 export function RuntimeDLPFormPage() {
   const navigate = useNavigate();
-  const [search] = useSearchParams();
-  const { id: pathClusterID, ruleId } = useParams();
+  const [search] = useRouteSearchParams();
+  const { id: pathClusterID, ruleId } = useParams({ strict: false });
   const clusterID = pathClusterID ?? search.get("cluster_id") ?? "";
   const ruleID = ruleId ?? null;
 
@@ -55,8 +56,8 @@ export function RuntimeDLPFormPage() {
     }
   }, [existing.data, ruleID]);
 
-  const backTo = { pathname: "..", search: search.toString() };
-  const goBack = () => navigate(backTo);
+  const backTo = `/clusters/${clusterID}/runtime-dlp${search.size ? `?${search}` : ""}`;
+  const goBack = () => navigate({ href: backTo });
 
   const parsedPatterns = () => patternsFromText(patternsText, existing.data?.patterns);
 
@@ -86,7 +87,7 @@ export function RuntimeDLPFormPage() {
       <PageHeader
         title={ruleID ? "Edit DLP rule" : "New DLP rule"}
         description="PCRE patterns dp's hyperscan engine compiles and scans payloads against. New rules start in monitor mode; promote separately to enforce."
-        backLink={<Link to={backTo} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> DLP Rules</Link>}
+        backLink={<Link to="." href={backTo} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> DLP Rules</Link>}
       />
 
       <Card title="Rule" description="Name, severity, and the PCRE patterns to scan for.">

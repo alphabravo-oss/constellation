@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "@tanstack/react-router";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -513,7 +513,7 @@ export function ScannerSourcesPage() {
             desc="Full CVE catalog — descriptions + CVSS base scores"
             live={nvdEnabled}
             action={
-              <Button variant="outline" size="sm" onClick={() => navigate("/settings/scanner/nvd")}>
+              <Button variant="outline" size="sm" onClick={() => navigate({ href: "/settings/scanner/nvd" })}>
                 <Pencil className="h-3.5 w-3.5" /> Configure
               </Button>
             }

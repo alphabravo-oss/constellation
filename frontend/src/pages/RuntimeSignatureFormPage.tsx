@@ -7,7 +7,8 @@
 // start blocking. The same dp hyperscan engine runs the NeuVector built-ins.
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
+import { useRouteSearchParams } from "@/lib/route-search";
 import { ArrowLeft, ShieldAlert } from "lucide-react";
 
 import { runtimeSignatures, type DLPRule } from "@/api/client";
@@ -20,8 +21,8 @@ import { patternLines, patternsFromText } from "@/lib/dlp-patterns";
 export function RuntimeSignatureFormPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [search] = useSearchParams();
-  const { id: pathClusterID, sigId } = useParams();
+  const [search] = useRouteSearchParams();
+  const { id: pathClusterID, sigId } = useParams({ strict: false });
   const clusterID = pathClusterID ?? search.get("cluster_id") ?? "";
   const ruleID = sigId ?? null;
   const isEdit = Boolean(ruleID);
@@ -75,7 +76,7 @@ export function RuntimeSignatureFormPage() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["runtime-signatures", clusterID] });
-      navigate(backTo);
+      navigate({ href: backTo });
     },
     onError: (e) => setErr((e as Error).message),
   });
@@ -92,7 +93,7 @@ export function RuntimeSignatureFormPage() {
     <div className="space-y-6">
       <PageHeader
         backLink={
-          <Link to={backTo} className="inline-flex items-center gap-1 hover:text-foreground">
+          <Link to="." href={backTo} className="inline-flex items-center gap-1 hover:text-foreground">
             <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> DPI Signatures
           </Link>
         }
@@ -163,7 +164,7 @@ export function RuntimeSignatureFormPage() {
             <Button type="submit" variant="primary" size="lg" disabled={save.isPending} data-testid="runtime-signatures-editor-save">
               {ruleID ? "Save changes" : "Create (in monitor mode)"}
             </Button>
-            <Button type="button" variant="ghost" size="lg" onClick={() => navigate(backTo)}>Cancel</Button>
+            <Button type="button" variant="ghost" size="lg" onClick={() => navigate({ href: backTo })}>Cancel</Button>
           </div>
           <span className="text-[10px] text-muted-foreground">
             Same dp hyperscan engine that runs the NeuVector built-ins (SQL injection, log4shell, etc.).

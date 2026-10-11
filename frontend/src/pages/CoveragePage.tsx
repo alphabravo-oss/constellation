@@ -7,7 +7,7 @@
 // (Network Map, Auto NetworkPolicy) thread the picker through their API calls.
 import { useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link } from "@tanstack/react-router";
 import {
   ArrowUpRight,
   CheckCircle2,
@@ -802,7 +802,7 @@ export function CoveragePage() {
       cell: (r) =>
         r.href ? (
           <Link
-            to={r.href}
+            to="." href={r.href}
             className="inline-flex h-7 items-center gap-1 rounded border border-border bg-card px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             Open <ArrowUpRight className="h-3 w-3" />

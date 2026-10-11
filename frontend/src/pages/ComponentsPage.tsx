@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "@tanstack/react-router";
+import { useRouteSearchParams } from "@/lib/route-search";
 import { Activity, AlertTriangle, Clock, Gauge, Search, ServerCog, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { toast } from "sonner";
 
@@ -27,7 +28,7 @@ const statuses = ["all", "healthy", "degraded", "stale", "drift", "crashlooping"
 
 export function ComponentsPage() {
   const { clusterId, isLoading: clusterLoading } = useCluster();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useRouteSearchParams();
   const roleParam = normalizeNVRole(searchParams.get("role"));
   const queryParam = searchParams.get("q") ?? "";
   const [query, setQuery] = useState(queryParam);
@@ -631,7 +632,7 @@ function DiagnosticsPanel({ diagnostics, loading, error }: { diagnostics: Compon
         </div>
       </div>
       {queuedJobId && <p className="text-xs text-muted-foreground" role="status" data-testid="component-support-bundle-feedback">
-        Bundle job <span className="font-mono">{queuedJobId}</span> queued. <Link to="/settings/health?tab=bundles" className="text-[color:var(--color-primary)] hover:underline">View status and download in System Health</Link>.
+        Bundle job <span className="font-mono">{queuedJobId}</span> queued. <Link to="." href="/settings/health?tab=bundles" className="text-[color:var(--color-primary)] hover:underline">View status and download in System Health</Link>.
       </p>}
       <div className="grid grid-cols-2 gap-2">
         {counters.map((counter) => (

@@ -2,7 +2,7 @@
 // bundles the group's policy/profile mode, membership criteria, members, and links to
 // the network rules that reference it — the single surface NV shows per group. Our
 // Groups list previously only showed counts with no drill-in.
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Activity, AlertTriangle, ArrowUp, ChevronLeft, FileText, Network, ShieldCheck, UsersRound } from "lucide-react";
 import { toast } from "sonner";
@@ -28,7 +28,7 @@ function ModeBadge({ mode, label }: { mode?: string; label: string }) {
 const NEXT_MODE: Record<string, string> = { discover: "monitor", monitor: "protect" };
 
 export function GroupDetailPage() {
-  const { groupId } = useParams<{ groupId: string }>();
+  const { groupId } = useParams({ strict: false });
   const { clusterId } = useCluster();
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["groups", clusterId], queryFn: () => groupsApi.list({ cluster_id: clusterId }) });
@@ -69,7 +69,7 @@ export function GroupDetailPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        backLink={<Link to={clusterId ? `/clusters/${clusterId}/groups` : "/groups"} className="inline-flex items-center gap-1 hover:text-foreground"><ChevronLeft className="h-3.5 w-3.5" />Groups</Link>}
+        backLink={<Link to="." href={clusterId ? `/clusters/${clusterId}/groups` : "/groups"} className="inline-flex items-center gap-1 hover:text-foreground"><ChevronLeft className="h-3.5 w-3.5" />Groups</Link>}
         title={group.name}
         mono
         badges={
@@ -106,7 +106,7 @@ export function GroupDetailPage() {
         <StatCard label="Criteria" value={group.criteria?.length ?? 0} />
         <div className="rounded-md border border-border bg-card p-3">
           <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Network rules</div>
-          <Link to={clusterId ? `/clusters/${clusterId}/network-rules` : "/network-rules"} className="mt-1 block text-sm text-[color:var(--color-primary)] hover:underline">View rules →</Link>
+          <Link to="." href={clusterId ? `/clusters/${clusterId}/network-rules` : "/network-rules"} className="mt-1 block text-sm text-[color:var(--color-primary)] hover:underline">View rules →</Link>
         </div>
       </section>
 
@@ -165,7 +165,7 @@ export function GroupDetailPage() {
           <ul className="divide-y divide-border">
             {group.members.map((m) => (
               <li key={m}>
-                <Link to={clusterId ? `/clusters/${clusterId}/deployments?q=${encodeURIComponent(m.split("/").pop() ?? m)}` : "#"} className="block px-3 py-2 text-mono text-xs hover:bg-muted/40">{m}</Link>
+                <Link to="." href={clusterId ? `/clusters/${clusterId}/deployments?q=${encodeURIComponent(m.split("/").pop() ?? m)}` : "#"} className="block px-3 py-2 text-mono text-xs hover:bg-muted/40">{m}</Link>
               </li>
             ))}
           </ul>
@@ -288,7 +288,7 @@ function UsageReferenceRow({ refItem }: { refItem: GroupUsageReference }) {
     </div>
   );
   if (refItem.route) {
-    return <Link to={refItem.route}>{body}</Link>;
+    return <Link to="." href={refItem.route}>{body}</Link>;
   }
   return body;
 }

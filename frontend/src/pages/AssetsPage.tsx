@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link } from "@tanstack/react-router";
 import { BadgeCheck, Boxes, FileJson, Search, ShieldAlert, ShieldCheck } from "lucide-react";
 
 import { assets, type Asset } from "@/api/client";
@@ -70,7 +70,7 @@ export function AssetsPage() {
             <KindBadge kind={asset.kind} />
             {asset.ai_workload ? <span className="rounded-md bg-primary/10 px-2 py-0.5 text-xs text-primary">AI</span> : null}
           </div>
-          <Link to={`/clusters/${clusterId}/assets/${asset.id}`} className="mt-2 block break-all font-mono text-xs font-medium hover:underline">
+          <Link to="." href={`/clusters/${clusterId}/assets/${asset.id}`} className="mt-2 block break-all font-mono text-xs font-medium hover:underline">
             {asset.name}
           </Link>
           <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{asset.digest ?? asset.repository ?? "-"}</div>
@@ -101,7 +101,7 @@ export function AssetsPage() {
             className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-2 text-sm hover:bg-accent"
           >{incomplete ? "Export loaded rows CSV" : "Export CSV"}</button>
           <Link
-            to={selected ? `/clusters/${clusterId}/assets/${selected.id}` : `/clusters/${clusterId}/assets`}
+            to="." href={selected ? `/clusters/${clusterId}/assets/${selected.id}` : `/clusters/${clusterId}/assets`}
             className={cn(
               "inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm hover:bg-accent",
               !selected && "pointer-events-none opacity-50",
@@ -212,10 +212,10 @@ function AssetPreview({ asset, clusterId }: { asset: Asset | null; clusterId?: s
             <p className="mt-1 text-xs text-muted-foreground">{asset.criticality} criticality · first seen {formatDate(asset.first_seen_at)}</p>
           </div>
           <div className="flex items-center gap-2">
-            <Link to={`/clusters/${clusterId}/risk/asset/${encodeURIComponent(asset.id)}`} className="rounded-md border border-border px-2 py-1 text-xs hover:bg-accent" data-testid="asset-risk-workspace-link">
+            <Link to="." href={`/clusters/${clusterId}/risk/asset/${encodeURIComponent(asset.id)}`} className="rounded-md border border-border px-2 py-1 text-xs hover:bg-accent" data-testid="asset-risk-workspace-link">
               Risk workspace
             </Link>
-            <Link to={`/clusters/${clusterId}/assets/${asset.id}`} className="rounded-md border border-border px-2 py-1 text-xs hover:bg-accent">
+            <Link to="." href={`/clusters/${clusterId}/assets/${asset.id}`} className="rounded-md border border-border px-2 py-1 text-xs hover:bg-accent">
               Full Details
             </Link>
           </div>

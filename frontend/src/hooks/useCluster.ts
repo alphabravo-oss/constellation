@@ -8,7 +8,7 @@
 // returned `cluster_id` into every data fetch — that is the contract that keeps
 // the cluster-first IA honest: never query "all clusters" data while in cluster mode.
 import { useMemo } from "react";
-import { useParams } from "react-router-dom";
+import { useMatch } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 
 import { clusters, type ClusterDetail, type ClusterSummary } from "@/api/client";
@@ -35,8 +35,8 @@ export interface ClusterContextValue {
  * A missing `:id` returns `cluster: undefined` so callers can render a redirect.
  */
 export function useCluster(): ClusterContextValue {
-  const params = useParams<{ id?: string }>();
-  const clusterId = params.id;
+  const match = useMatch({ from: "/_authenticated/clusters/$id", shouldThrow: false });
+  const clusterId = match?.params.id;
 
   const listQ = useQuery({
     queryKey: ["clusters"],

@@ -1,5 +1,5 @@
 import { type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "@tanstack/react-router";
 import { ChevronRight } from "lucide-react";
 import { RiskGauge, type Subfactor, RiskScore } from "@/components/ui/risk-score";
 import { cn } from "@/lib/cn";
@@ -42,7 +42,7 @@ export function EntityHeader({
           {breadcrumbs.map((b, i) => (
             <span key={i} className="flex items-center gap-1">
               {b.to ? (
-                <Link to={b.to} className="hover:text-foreground transition-colors">{b.label}</Link>
+                <Link to="." href={b.to} className="hover:text-foreground transition-colors">{b.label}</Link>
               ) : (
                 <span className="text-foreground">{b.label}</span>
               )}

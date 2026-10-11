@@ -7,7 +7,8 @@
 // the former PolicyEditor.
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
+import { useRouteSearchParams } from "@/lib/route-search";
 import { ArrowLeft } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -25,8 +26,8 @@ import {
 
 export function RuntimePolicyFormPage() {
   const navigate = useNavigate();
-  const [search] = useSearchParams();
-  const { id: pathClusterID, policyId } = useParams();
+  const [search] = useRouteSearchParams();
+  const { id: pathClusterID, policyId } = useParams({ strict: false });
   const clusterID = pathClusterID ?? search.get("cluster_id") ?? "";
   const policyID = policyId ?? null;
 
@@ -57,8 +58,8 @@ export function RuntimePolicyFormPage() {
     }
   }, [existing.data, policyID]);
 
-  const backTo = { pathname: "..", search: search.toString() };
-  const goBack = () => navigate(backTo);
+  const backTo = `/clusters/${clusterID}/runtime-policies${search.size ? `?${search}` : ""}`;
+  const goBack = () => navigate({ href: backTo });
 
   const parseRules = (): RuntimePolicyRule[] => {
     const out = JSON.parse(rulesText);
@@ -144,7 +145,7 @@ export function RuntimePolicyFormPage() {
       <PageHeader
         title={policyID ? "Edit runtime policy" : "New runtime policy"}
         description="Author the policy's rules, simulate them against observed traffic, or generate a ruleset from what's been seen. New policies always start in monitor mode — promote separately to enforce."
-        backLink={<Link to={backTo} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Runtime Policies</Link>}
+        backLink={<Link to="." href={backTo} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Runtime Policies</Link>}
       />
 
       <Card title="Policy" description="Rules dp enforces for the selected workload.">

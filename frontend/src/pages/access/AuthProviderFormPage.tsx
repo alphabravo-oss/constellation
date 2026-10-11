@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { ArrowLeft } from "lucide-react";
 
@@ -52,7 +52,7 @@ const CONFIG_FIELDS: Record<string, ConfigFieldDef[]> = {
  * that federates sign-in for the organization.
  */
 export function AuthProviderFormPage() {
-  const { id } = useParams<{ id: string }>();
+  const { id } = useParams({ strict: false });
   const authServersQuery = useQuery({ queryKey: ["auth-servers"], queryFn: () => authServersApi.list(), enabled: Boolean(id) });
 
   if (id && authServersQuery.isPending) {
@@ -64,7 +64,7 @@ export function AuthProviderFormPage() {
       <div className="space-y-6">
         <PageHeader
           title="Edit authentication provider"
-          backLink={<Link to={BACK_TO} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Access Control</Link>}
+          backLink={<Link to="." href={BACK_TO} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Access Control</Link>}
         />
         <p className="text-sm text-muted-foreground">Provider not found.</p>
       </div>
@@ -136,7 +136,7 @@ function AuthProviderForm({ provider }: { provider: AuthServer | null }) {
       }
       return authServersApi.create(body);
     },
-    onSuccess: () => { toast.success(isEdit ? "Provider updated" : "Provider created"); navigate(BACK_TO); },
+    onSuccess: () => { toast.success(isEdit ? "Provider updated" : "Provider created"); navigate({ href: BACK_TO }); },
     onError: (error) => toast.error(error.message || (isEdit ? "Failed to update provider" : "Failed to create provider")),
   });
   const connectionTest = useMutation({
@@ -172,7 +172,7 @@ function AuthProviderForm({ provider }: { provider: AuthServer | null }) {
       <PageHeader
         title={isEdit ? "Edit authentication provider" : "Add authentication provider"}
         description="Configure an identity provider that federates sign-in for your organization."
-        backLink={<Link to={BACK_TO} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Access Control</Link>}
+        backLink={<Link to="." href={BACK_TO} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Access Control</Link>}
       />
 
       <Card title="Provider configuration" description="Choose the protocol and fill in the connection details.">
@@ -238,7 +238,7 @@ function AuthProviderForm({ provider }: { provider: AuthServer | null }) {
             {isEdit && <Button type="button" variant="outline" size="lg" disabled={connectionTest.isPending} onClick={() => connectionTest.mutate()}>
               {connectionTest.isPending ? "Testing…" : "Test saved connection"}
             </Button>}
-            <Button type="button" variant="ghost" size="lg" onClick={() => navigate(BACK_TO)}>Cancel</Button>
+            <Button type="button" variant="ghost" size="lg" onClick={() => navigate({ href: BACK_TO })}>Cancel</Button>
           </div>
           {connectionTest.isSuccess && <p role="status" className="text-sm text-status-success">Saved {provider?.type.toUpperCase()} connection passed.</p>}
           {connectionTest.isError && <p role="alert" className="text-sm text-status-error">

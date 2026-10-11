@@ -2,7 +2,7 @@
 // correlated with vulnerability scan results. Closes the "registries are a dead-end list"
 // gap (the /registries/{id}/images endpoint existed but nothing navigated to it).
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams } from "@tanstack/react-router";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { ChevronLeft, Boxes } from "lucide-react";
 
@@ -19,7 +19,7 @@ import { fmtRelative } from "@/lib/format";
 const PAGE = 100;
 
 export function RegistryImagesPage() {
-  const { regId } = useParams<{ regId: string }>();
+  const { regId } = useParams({ strict: false });
   const { clusterId } = useCluster();
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
@@ -60,7 +60,7 @@ export function RegistryImagesPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        backLink={<Link to={clusterId ? `/clusters/${clusterId}/registries` : "/registries"} className="inline-flex items-center gap-1 hover:text-foreground"><ChevronLeft className="h-3.5 w-3.5" />Registries</Link>}
+        backLink={<Link to="." href={clusterId ? `/clusters/${clusterId}/registries` : "/registries"} className="inline-flex items-center gap-1 hover:text-foreground"><ChevronLeft className="h-3.5 w-3.5" />Registries</Link>}
         title={reg.data?.name || "Registry images"}
         description="Image inventory discovered in this registry, correlated with vulnerability scan results."
       />

@@ -20,7 +20,7 @@
 // drawer in place so the analyst never loses dashboard context.
 
 import { useMemo } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { downloadCsv } from "@/lib/csv";
 import { Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis } from "recharts";
@@ -476,7 +476,7 @@ export function DashboardPage() {
             title="Top Network Denies"
             subtitle="Blocked service pairs in the last 24h"
             icon={<ShieldAlert className="h-3.5 w-3.5" />}
-            rightSlot={<Link to={clusterPath("/network?tab=conversations&hours=24&verdict=deny")} className="text-[11px] text-muted-foreground hover:text-foreground">view conversations <ArrowUpRight className="inline h-3 w-3" /></Link>}
+            rightSlot={<Link to="." href={clusterPath("/network?tab=conversations&hours=24&verdict=deny")} className="text-[11px] text-muted-foreground hover:text-foreground">view conversations <ArrowUpRight className="inline h-3 w-3" /></Link>}
           >
             <div data-testid="dashboard-network-denies">
               {conversationsQ.isPending ? (
@@ -487,7 +487,7 @@ export function DashboardPage() {
                 <ul className="divide-y divide-border">
                   {topNetworkDenies.map((row, index) => (
                     <li key={`${row.from}-${row.to}-${index}`}>
-                      <Link to={clusterPath(`/network?tab=conversations&hours=24&verdict=${encodeURIComponent(row.verdict ?? "deny")}&workload=${encodeURIComponent(row.from)}`)} className="flex items-center gap-3 px-3 py-2 hover:bg-muted/40 transition-colors">
+                      <Link to="." href={clusterPath(`/network?tab=conversations&hours=24&verdict=${encodeURIComponent(row.verdict ?? "deny")}&workload=${encodeURIComponent(row.from)}`)} className="flex items-center gap-3 px-3 py-2 hover:bg-muted/40 transition-colors">
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-xs font-medium">
                             <span className="font-mono">{row.from}</span>
@@ -592,7 +592,7 @@ export function DashboardPage() {
             <ul className="divide-y divide-border">
               {(posture?.top_vulnerable ?? []).map((t) => (
                 <li key={`${t.namespace}/${t.name}`}>
-                  <Link to={clusterPath(`/deployments?q=${encodeURIComponent(t.name)}`)} className="flex items-center gap-2 px-3 py-2 hover:bg-muted/40 transition-colors">
+                  <Link to="." href={clusterPath(`/deployments?q=${encodeURIComponent(t.name)}`)} className="flex items-center gap-2 px-3 py-2 hover:bg-muted/40 transition-colors">
                     <div className="min-w-0 flex-1">
                       <div className="text-xs font-medium truncate">{t.name}</div>
                       <div className="text-[10px] text-muted-foreground truncate">{t.namespace}</div>
@@ -626,7 +626,7 @@ export function DashboardPage() {
           title="Action Items"
           subtitle="Top 10 open critical and high findings · sorted by composite risk"
           icon={<ShieldAlert className="h-3.5 w-3.5" />}
-          rightSlot={<Link to={clusterPath("/findings")} className="text-[11px] text-muted-foreground hover:text-foreground">view all <ArrowUpRight className="inline h-3 w-3" /></Link>}
+          rightSlot={<Link to="." href={clusterPath("/findings")} className="text-[11px] text-muted-foreground hover:text-foreground">view all <ArrowUpRight className="inline h-3 w-3" /></Link>}
         >
           {topActions.length === 0 ? (
             <EmptyState
@@ -640,7 +640,7 @@ export function DashboardPage() {
                 <li key={f.id} className="accent-slide flex items-center gap-3 px-3 py-2 hover:bg-muted/40 transition-colors">
                   <SeverityBadge severity={f.severity} kev={false} />
                   <div className="min-w-0 flex-1">
-                    <Link to={clusterPath(`/findings/${f.id}`)} className="text-sm hover:underline truncate block" title={f.title}>
+                    <Link to="." href={clusterPath(`/findings/${f.id}`)} className="text-sm hover:underline truncate block" title={f.title}>
                       {f.title}
                     </Link>
                     <div className="text-[10px] text-mono text-muted-foreground">
@@ -648,7 +648,7 @@ export function DashboardPage() {
                     </div>
                   </div>
                   <RiskScore score={f.risk_score} size="sm" />
-                  <Button size="sm" variant="outline" onClick={() => navigate(clusterPath(`/findings/${f.id}`))}>Triage</Button>
+                  <Button size="sm" variant="outline" onClick={() => navigate({ href: clusterPath(`/findings/${f.id}`) })}>Triage</Button>
                 </li>
               ))}
             </ul>
@@ -871,7 +871,7 @@ const COMPONENT_ROLES: Array<{ id: ComponentRoleID; label: string; icon: React.R
 
 function ExposedRow({ s, dir, clusterPath }: { s: import("@/api/client").ExposedService; dir: "ingress" | "egress"; clusterPath: (p: string) => string }) {
   return (
-    <Link to={clusterPath(`/deployments?q=${encodeURIComponent(s.name)}`)} className="flex items-center gap-3 px-3 py-2 hover:bg-muted/40 transition-colors">
+    <Link to="." href={clusterPath(`/deployments?q=${encodeURIComponent(s.name)}`)} className="flex items-center gap-3 px-3 py-2 hover:bg-muted/40 transition-colors">
       <span className={cn("shrink-0 rounded px-1.5 py-0.5 text-[9px] uppercase tracking-wide font-medium",
         dir === "ingress" ? "bg-[color-mix(in_oklab,var(--color-severity-high)_16%,transparent)] text-[color:var(--color-severity-high)]" : "bg-muted text-muted-foreground")}>
         {dir === "ingress" ? "in" : "out"}

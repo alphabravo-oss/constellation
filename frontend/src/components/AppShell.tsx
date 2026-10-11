@@ -3,7 +3,7 @@
 // Layout (sidebar w-60/w-16, topbar h-14, content p-6 max-w-[1600px] fade-in,
 // collapsible nav groups, user menu, offline banner) mirrors /root/astronomer.
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
@@ -364,7 +364,7 @@ export function AppShell() {
           userRole={me?.roles?.[0]}
           onLaunchPalette={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))}
           onOpenHotkeys={() => setHkOpen(true)}
-          onNavigate={navigate}
+          onNavigate={(href) => { void navigate({ href }); }}
         />
         {!online && (
           <div
@@ -467,8 +467,8 @@ function SidebarRow({
 
   if (collapsed) {
     return (
-      <NavLink
-        to={to}
+      <Link
+        to="." href={to}
         data-testid={item.path === "/clusters" && clusterId ? "back-to-clusters" : undefined}
         className={cn("nav-item group justify-center px-0", active && "active")}
         title={item.label}
@@ -476,13 +476,13 @@ function SidebarRow({
         aria-current={active ? "page" : undefined}
       >
         <Icon className={cn("h-4 w-4 flex-shrink-0", active ? "text-foreground" : "text-muted-foreground group-hover:text-foreground")} />
-      </NavLink>
+      </Link>
     );
   }
 
   return (
-    <NavLink
-      to={to}
+    <Link
+      to="." href={to}
       data-testid={item.path === "/clusters" && clusterId ? "back-to-clusters" : `nav-${item.path.replace(/\//g, "-")}`}
       aria-current={active ? "page" : undefined}
       className={cn(
@@ -494,7 +494,7 @@ function SidebarRow({
     >
       <Icon className={cn("h-4 w-4 flex-shrink-0", active ? "text-foreground" : "text-muted-foreground group-hover:text-foreground")} />
       <span className="truncate flex-1">{item.label}</span>
-    </NavLink>
+    </Link>
   );
 }
 
@@ -535,7 +535,7 @@ function TopHeader({
             {i === crumbs.length - 1 ? (
               <span className="text-foreground font-medium truncate">{c.label}</span>
             ) : c.to ? (
-              <Link to={c.to} className="text-muted-foreground hover:text-foreground transition-colors truncate">{c.label}</Link>
+              <Link to="." href={c.to} className="text-muted-foreground hover:text-foreground transition-colors truncate">{c.label}</Link>
             ) : (
               <span className="text-muted-foreground truncate">{c.label}</span>
             )}

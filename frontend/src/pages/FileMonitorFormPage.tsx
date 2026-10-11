@@ -11,7 +11,8 @@
 // never blocks a live workload.
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
+import { useRouteSearchParams } from "@/lib/route-search";
 import { ArrowLeft, FileText, Plus, Save } from "lucide-react";
 
 import { fileProfiles, type FileProfileRuleBehavior } from "@/api/client";
@@ -25,8 +26,8 @@ export function FileMonitorFormPage() {
   const { clusterId, isLoading: clusterLoading } = useCluster();
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const { ruleId } = useParams<{ ruleId: string }>();
-  const [search] = useSearchParams();
+  const { ruleId } = useParams({ strict: false });
+  const [search] = useRouteSearchParams();
   const workload = search.get("workload") ?? "";
   const isEdit = Boolean(ruleId);
 
@@ -75,7 +76,7 @@ export function FileMonitorFormPage() {
     onSuccess: () => {
       setError(null);
       invalidate();
-      navigate(backTo);
+      navigate({ href: backTo });
     },
     onError: (e) => setError(e instanceof Error ? e.message : "failed to save rule"),
   });
@@ -86,7 +87,7 @@ export function FileMonitorFormPage() {
     <div className="space-y-6" data-testid="file-monitor-form-page" data-cluster-id={clusterId ?? ""}>
       <PageHeader
         backLink={
-          <Link to={backTo} className="inline-flex items-center gap-1 hover:text-foreground">
+          <Link to="." href={backTo} className="inline-flex items-center gap-1 hover:text-foreground">
             <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> File Monitor
           </Link>
         }
@@ -144,7 +145,7 @@ export function FileMonitorFormPage() {
               {isEdit ? <Save className="h-4 w-4" /> : <Plus className="h-3 w-3" />}
               {isEdit ? (save.isPending ? "Saving…" : "Save changes") : (save.isPending ? "Adding…" : "Add")}
             </Button>
-            <Button type="button" variant="ghost" size="lg" onClick={() => navigate(backTo)}>Cancel</Button>
+            <Button type="button" variant="ghost" size="lg" onClick={() => navigate({ href: backTo })}>Cancel</Button>
           </div>
           {error && <p className="text-[11px] text-status-error">{error}</p>}
         </form>

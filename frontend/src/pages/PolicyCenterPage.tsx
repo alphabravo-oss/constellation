@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -272,7 +272,7 @@ export function PolicyCenterPage() {
                   {family.portable === "network-rules" ? <NetworkRuleMatchStats clusterId={clusterId} /> : null}
                   {family.reorder && clusterId ? (
                     <div className="text-xs text-muted-foreground" data-testid={`policy-family-${familySlug(family.route)}-reorder`}>
-                      <Link to={to(family.route)} className="font-medium text-primary underline underline-offset-2" aria-label={`Manage ${family.title} precedence`}>
+                      <Link to="." href={to(family.route)} className="font-medium text-primary underline underline-offset-2" aria-label={`Manage ${family.title} precedence`}>
                         Manage precedence
                       </Link>
                       <div>{family.reorder === "move-top"
@@ -282,11 +282,11 @@ export function PolicyCenterPage() {
                   ) : null}
                   <div className="flex flex-wrap gap-2">
                     <Button asChild size="sm" variant="primary">
-                      <Link to={to(family.route)} aria-label={`Open ${family.title}`}>Open</Link>
+                      <Link to="." href={to(family.route)} aria-label={`Open ${family.title}`}>Open</Link>
                     </Button>
                     {family.createRoute ? (
                       <Button asChild size="sm" variant="outline">
-                        <Link to={to(family.createRoute)} aria-label={`Create ${family.title}`}>Create</Link>
+                        <Link to="." href={to(family.createRoute)} aria-label={`Create ${family.title}`}>Create</Link>
                       </Button>
                     ) : null}
                     {family.portable ? (

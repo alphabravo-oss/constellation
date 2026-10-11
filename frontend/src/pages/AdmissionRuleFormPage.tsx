@@ -4,7 +4,7 @@
 // save). Replaces hand-writing admission YAML on the Policies page.
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Plus, ShieldAlert, X } from "lucide-react";
 
 import { policies as policiesApi, type AdmissionCriterionOption } from "@/api/client";
@@ -64,7 +64,7 @@ export function AdmissionRuleFormPage() {
       ),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["admission-rules", clusterId] });
-      navigate(listPath);
+      navigate({ href: listPath });
     },
   });
 
@@ -99,7 +99,7 @@ export function AdmissionRuleFormPage() {
       <PageHeader
         title="Add admission rule"
         description="Build a deny rule from criteria — the server compiles it to the engine's policy spec and validates it before saving."
-        backLink={<Link to={listPath} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Admission Control</Link>}
+        backLink={<Link to="." href={listPath} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Admission Control</Link>}
       />
       <Card title="Rule" description="A workload is denied when it matches all of the criteria below.">
         <form className="space-y-5" onSubmit={(e) => { e.preventDefault(); if (canSave) save.mutate(); }}>
@@ -173,7 +173,7 @@ export function AdmissionRuleFormPage() {
           {save.isError && <p className="text-sm text-status-error">{(save.error as { response?: { data?: { error?: string } } })?.response?.data?.error ?? (save.error as Error).message}</p>}
           <div className="flex items-center gap-3">
             <Button type="submit" variant="primary" size="lg" disabled={!canSave}>{save.isPending ? "Saving…" : "Create rule"}</Button>
-            <Button type="button" variant="ghost" size="lg" onClick={() => navigate(listPath)}>Cancel</Button>
+            <Button type="button" variant="ghost" size="lg" onClick={() => navigate({ href: listPath })}>Cancel</Button>
           </div>
         </form>
       </Card>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { ArrowLeft, Check, Copy } from "lucide-react";
 
@@ -21,7 +21,7 @@ import { Field, TextInput, Textarea, Select } from "@/components/ui/form";
 const RECEIVER_KINDS = ["slack", "pagerduty", "jira", "servicenow", "webhook", "email"];
 
 export function ReceiverFormPage() {
-  const { id } = useParams<{ id: string }>();
+  const { id } = useParams({ strict: false });
   const editing = !!id;
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -85,7 +85,7 @@ export function ReceiverFormPage() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["receivers"] });
       toast.success("Receiver updated");
-      navigate("/settings/integrations");
+      navigate({ href: "/settings/integrations" });
     },
     onError: () => toast.error("Failed to update receiver"),
   });
@@ -122,7 +122,7 @@ export function ReceiverFormPage() {
             </p>
             <div className="flex items-center gap-2">
               <CopyButton text={secret} />
-              <Button variant="ghost" size="sm" onClick={() => navigate("/settings/integrations")}>Done</Button>
+              <Button variant="ghost" size="sm" onClick={() => navigate({ href: "/settings/integrations" })}>Done</Button>
             </div>
           </div>
         </Card>
@@ -221,7 +221,7 @@ export function ReceiverFormPage() {
             >
               {pending ? (editing ? "Saving…" : "Creating…") : (editing ? "Save receiver" : "Create receiver")}
             </Button>
-            <Button type="button" variant="ghost" size="lg" onClick={() => navigate("/settings/integrations")}>Cancel</Button>
+            <Button type="button" variant="ghost" size="lg" onClick={() => navigate({ href: "/settings/integrations" })}>Cancel</Button>
           </div>
         </form>
       </Card>

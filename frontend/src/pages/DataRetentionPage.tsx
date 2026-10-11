@@ -1,106 +1,99 @@
-import { useEffect, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { z } from "zod";
+import { useBlocker } from "@tanstack/react-router";
 import { toast } from "sonner";
-
-import { systemConfigApi } from "@/api/client";
+import { systemConfigApi, type SystemConfigResponse } from "@/api/client";
+import { useAppForm, useStore } from "@/lib/form";
 import { PageHeader } from "@/components/ui/page";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Field, TextInput } from "@/components/ui/form";
 
-/**
- * Data Retention — how long the two highest-volume tables (raw network flows and
- * runtime events) are kept before automatic pruning. Bounds storage growth.
- */
+const days = z.number().int("Enter a whole number of days.").min(0).max(3650);
+const retentionSchema = z.object({
+  network_flow_retention_days: days,
+  events_retention_days: days,
+  scan_job_retention_days: days,
+});
+
+function valuesFrom(data: SystemConfigResponse) {
+  const number = (key: string) => typeof data.config[key] === "number" ? data.config[key] as number : 0;
+  return {
+    network_flow_retention_days: number("network_flow_retention_days"),
+    events_retention_days: number("events_retention_days"),
+    scan_job_retention_days: number("scan_job_retention_days"),
+  };
+}
+
 export function DataRetentionPage() {
+  const query = useQuery({ queryKey: ["system-config"], queryFn: () => systemConfigApi.get() });
+  return <div className="space-y-6">
+    <PageHeader title="Data Retention" description="Control how long raw network flows, runtime events, and finished scan jobs are kept." />
+    {query.isPending ? <p role="status">Loading retention settings…</p> : query.isError ?
+      <div role="alert">Could not load retention settings. <Button onClick={() => void query.refetch()}>Retry</Button></div> :
+      <RetentionForm data={query.data} />}
+  </div>;
+}
+
+function RetentionForm({ data }: { data: SystemConfigResponse }) {
   const qc = useQueryClient();
-  const q = useQuery({ queryKey: ["system-config"], queryFn: () => systemConfigApi.get() });
-  const [flows, setFlows] = useState(0);
-  const [events, setEvents] = useState(0);
-  const [scanJobs, setScanJobs] = useState(0);
-
-  useEffect(() => {
-    const c = q.data?.config;
-    if (!c) return;
-    setFlows(typeof c.network_flow_retention_days === "number" ? c.network_flow_retention_days : 0);
-    setEvents(typeof c.events_retention_days === "number" ? c.events_retention_days : 0);
-    setScanJobs(typeof c.scan_job_retention_days === "number" ? c.scan_job_retention_days : 0);
-  }, [q.data]);
-
-  const save = useMutation({
-    mutationFn: (body: Record<string, unknown>) => systemConfigApi.patch(body),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["system-config"] });
-      toast.success("Retention settings saved");
-    },
-    onError: (error: unknown) => {
-      const status = (error as { response?: { status?: number } })?.response?.status;
-      if (status === 409) {
-        void qc.invalidateQueries({ queryKey: ["system-config"] });
-        toast.error("Config changed elsewhere; reloaded latest — please retry.");
-        return;
+  const savedValues = useMemo(() => valuesFrom(data), [data]);
+  const [loadedRevision, setLoadedRevision] = useState(data.revision);
+  const [saveError, setSaveError] = useState("");
+  const form = useAppForm({
+    defaultValues: savedValues,
+    validators: { onChange: retentionSchema, onSubmit: retentionSchema },
+    onSubmit: async ({ value }) => {
+      setSaveError("");
+      try {
+        const saved = await systemConfigApi.patch(value);
+        qc.setQueryData(["system-config"], saved);
+        form.reset(valuesFrom(saved));
+        setLoadedRevision(saved.revision);
+        toast.success("Retention settings saved");
+      } catch (error) {
+        const status = (error as { response?: { status?: number } })?.response?.status;
+        if (status === 409) {
+          setSaveError("Config changed elsewhere. Your edits are preserved; reload current settings before trying again.");
+          void qc.invalidateQueries({ queryKey: ["system-config"] });
+        } else {
+          setSaveError("Could not save retention settings. Your edits are preserved; please retry.");
+        }
       }
-      const msg = (error as { response?: { data?: { error?: string } } })?.response?.data?.error;
-      toast.error(msg ? `Save failed: ${msg}` : "Failed to save retention settings");
     },
   });
-
-  const bothOff = flows === 0 && events === 0 && scanJobs === 0;
-
-  return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Data Retention"
-        description="Automatically prune the highest-volume history so storage doesn't grow unbounded. Older rows are deleted in batches by a background job."
-      />
-
-      <VerdictBanner
-        status={bothOff ? "degraded" : "ok"}
-        title={bothOff ? "Retention disabled — history is kept forever" : "Automatic pruning is active"}
-        detail={bothOff
-          ? "Network flows and events accumulate without limit. Set a horizon to cap storage."
-          : "A leader-elected job prunes rows past the horizon every few minutes."}
-      />
-
-      <form
-        className="space-y-6"
-        onSubmit={(e) => { e.preventDefault(); save.mutate({ network_flow_retention_days: flows, events_retention_days: events, scan_job_retention_days: scanJobs }); }}
-      >
-        <Card title="Network flows" description="Raw per-connection flow records (the largest table). The network map and conversations read from a compact hourly rollup that is unaffected by pruning raw flows.">
-          <Field label="Keep raw flows for (days)" hint="0 disables pruning (keep forever). Typical: 7–30 days. The hourly rollup used by dashboards is retained regardless.">
-            <div className="flex items-center gap-2">
-              <TextInput type="number" min={0} max={3650} value={flows}
-                onChange={(e) => setFlows(Number.parseInt(e.target.value, 10) || 0)} className="w-32" />
-              <span className="text-xs text-muted-foreground">days</span>
-            </div>
-          </Field>
-        </Card>
-
-        <Card title="Runtime events" description="Process, network, and file events emitted by the runtime agents (the second-largest table).">
-          <Field label="Keep events for (days)" hint="0 disables pruning (keep forever). Typical: 30–90 days for forensics.">
-            <div className="flex items-center gap-2">
-              <TextInput type="number" min={0} max={3650} value={events}
-                onChange={(e) => setEvents(Number.parseInt(e.target.value, 10) || 0)} className="w-32" />
-              <span className="text-xs text-muted-foreground">days</span>
-            </div>
-          </Field>
-        </Card>
-
-        <Card title="Scan-job history" description="Finished image/host scan jobs (completed, failed, canceled). Live jobs and the actual scan results are always kept.">
-          <Field label="Keep finished scan jobs for (days)" hint="0 disables pruning (keep forever). Typical: 7–14 days — the queue turns over fast.">
-            <div className="flex items-center gap-2">
-              <TextInput type="number" min={0} max={3650} value={scanJobs}
-                onChange={(e) => setScanJobs(Number.parseInt(e.target.value, 10) || 0)} className="w-32" />
-              <span className="text-xs text-muted-foreground">days</span>
-            </div>
-          </Field>
-        </Card>
-
-        <Button type="submit" variant="primary" size="lg" disabled={save.isPending || q.isLoading}>
-          {save.isPending ? "Saving…" : "Save retention settings"}
-        </Button>
-      </form>
-    </div>
-  );
+  const dirty = useStore(form.store, (state) => state.isDirty);
+  useEffect(() => {
+    if (!dirty) {
+      form.reset(savedValues);
+      setLoadedRevision(data.revision);
+    }
+  }, [data.revision, savedValues, dirty, form]);
+  useBlocker({
+    shouldBlockFn: () => dirty && !window.confirm("Discard unsaved retention settings?"),
+    enableBeforeUnload: dirty,
+  });
+  const allOff = Object.values(savedValues).every((value) => value === 0);
+  return <>
+    <VerdictBanner status={allOff ? "degraded" : "ok"}
+      title={allOff ? "Retention disabled for this organization" : "Retention windows configured"}
+      detail="Shared storage uses the longest window across organizations. A zero value in any organization holds that history indefinitely. Raw flow pruning also waits for successful aggregation." />
+    <form className="space-y-6" noValidate onSubmit={(e) => { e.preventDefault(); void form.handleSubmit(); }}>
+      {(saveError || (dirty && loadedRevision !== data.revision)) && <div role="alert" className="space-y-2">
+        <p>{saveError || "Settings changed elsewhere. Your unsaved edits are preserved."}</p>
+        <Button type="button" onClick={() => { form.reset(savedValues); setLoadedRevision(data.revision); setSaveError(""); }}>Reload current settings</Button>
+      </div>}
+      <Card title="Network flows" description="Raw per-connection records. Historical hourly aggregates are preserved when raw flows expire.">
+        <form.AppField name="network_flow_retention_days">{(field) => <field.NumberField label="Keep raw flows for (days)" min={0} max={3650} hint="0 keeps raw flows indefinitely. New organizations default to 14 days." />}</form.AppField>
+      </Card>
+      <Card title="Runtime events" description="Process, network, and file events emitted by runtime agents.">
+        <form.AppField name="events_retention_days">{(field) => <field.NumberField label="Keep events for (days)" min={0} max={3650} hint="0 keeps events indefinitely. New organizations default to 30 days." />}</form.AppField>
+      </Card>
+      <Card title="Scan-job history" description="Finished scan jobs. Live jobs and scan results are kept.">
+        <form.AppField name="scan_job_retention_days">{(field) => <field.NumberField label="Keep finished scan jobs for (days)" min={0} max={3650} hint="0 keeps finished jobs indefinitely. New organizations default to 7 days." />}</form.AppField>
+      </Card>
+      <form.AppForm><form.SubmitButton>Save retention settings</form.SubmitButton></form.AppForm>
+    </form>
+  </>;
 }

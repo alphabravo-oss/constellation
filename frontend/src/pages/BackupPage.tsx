@@ -23,7 +23,7 @@
 //   GET    /api/v1/backups/{id}/download
 //   GET    /api/v1/backups/schedule
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -231,7 +231,7 @@ function DestinationCard({ schedule }: { schedule: BackupSchedule | undefined })
             </span>
           }
           actions={
-            <Button variant="outline" size="sm" onClick={() => navigate("/settings/backup/destination")} data-testid="backup-destination-configure">
+            <Button variant="outline" size="sm" onClick={() => navigate({ href: "/settings/backup/destination" })} data-testid="backup-destination-configure">
               <Pencil className="h-3.5 w-3.5" /> Configure destination
             </Button>
           }
@@ -246,7 +246,7 @@ function DestinationCard({ schedule }: { schedule: BackupSchedule | undefined })
           }
           detail="Backups are written to the server's local disk and lost if the instance is destroyed. Set an Amazon S3 destination for durable, off-cluster storage."
           actions={
-            <Button variant="primary" size="sm" onClick={() => navigate("/settings/backup/destination")} data-testid="backup-destination-configure">
+            <Button variant="primary" size="sm" onClick={() => navigate({ href: "/settings/backup/destination" })} data-testid="backup-destination-configure">
               <Cloud className="h-3.5 w-3.5" /> Set S3 destination
             </Button>
           }
@@ -275,7 +275,7 @@ function SchedulePanel({ schedule }: { schedule: BackupSchedule | undefined }) {
         title={<span className="flex items-center gap-2"><Calendar className="h-4 w-4" aria-hidden /> Scheduled backups</span>}
         description="Automatic signed backups on a cron schedule, written to the destination above."
         action={
-          <Button variant="outline" size="sm" onClick={() => navigate("/settings/backup/schedule")}>
+          <Button variant="outline" size="sm" onClick={() => navigate({ href: "/settings/backup/schedule" })}>
             <Pencil className="h-3.5 w-3.5" /> Configure
           </Button>
         }
@@ -306,7 +306,7 @@ function RestoreCard() {
           </>
         }
         action={
-          <Button variant="outline" size="sm" onClick={() => navigate("/settings/backup/restore")}>
+          <Button variant="outline" size="sm" onClick={() => navigate({ href: "/settings/backup/restore" })}>
             <UploadCloud className="h-3.5 w-3.5" /> Restore from backup
           </Button>
         }

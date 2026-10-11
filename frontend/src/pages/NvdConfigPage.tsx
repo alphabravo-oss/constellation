@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { ArrowLeft } from "lucide-react";
 
@@ -42,9 +42,9 @@ export function NvdConfigPage() {
           mirror={mirror}
           onSaved={() => {
             void qc.invalidateQueries({ queryKey: ["system-config"] });
-            navigate("/settings/scanner");
+            navigate({ href: "/settings/scanner" });
           }}
-          onCancel={() => navigate("/settings/scanner")}
+          onCancel={() => navigate({ href: "/settings/scanner" })}
         />
       )}
     </div>

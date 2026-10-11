@@ -3,7 +3,7 @@
 // can search/filter without typing a query first.
 import { useMemo, useState, useEffect, useDeferredValue } from "react";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { Search, Database, Crown, Activity, AlertTriangle } from "lucide-react";
 
 import { cve, type CVEResult, type Severity } from "@/api/client";
@@ -82,7 +82,7 @@ export function CVEPage() {
         id: "cve_id",
         header: "CVE-ID",
         cell: (r) => (
-          <Link to={`/cve/${r.cve_id}`} className="text-mono text-[12px] text-[color:var(--color-primary)] hover:underline">
+          <Link to="." href={`/cve/${r.cve_id}`} className="text-mono text-[12px] text-[color:var(--color-primary)] hover:underline">
             {r.cve_id}
           </Link>
         ),
@@ -339,7 +339,7 @@ export function CVEPage() {
           sourceCount={rows.length}
           columns={columns}
           rowKey={(r) => r.cve_id}
-          onRowClick={(r) => navigate(`/cve/${r.cve_id}`)}
+          onRowClick={(r) => navigate({ href: `/cve/${r.cve_id}` })}
           defaultSort={{ id: "cvss", dir: "desc" }}
           onSortChange={(s) => setSort(s ?? { id: "cvss", dir: "desc" })}
           rowTestId={(r) => `cve-row-${r.cve_id}`}

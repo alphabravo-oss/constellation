@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link } from "@tanstack/react-router";
 import { findings, type Finding } from "@/api/client";
 import { severityBg, SEVERITY_RANK } from "@/lib/severity";
 import { useCluster } from "@/hooks/useCluster";
@@ -37,7 +37,7 @@ export default function FindingsTab({ entityType, entityId }: { entityType: stri
       id: "title",
       header: "Title",
       cell: (f) => (
-        <Link to={clusterId ? `/clusters/${clusterId}/findings/${f.id}` : `/findings/${f.id}`} className="hover:underline">{f.title}</Link>
+        <Link to="." href={clusterId ? `/clusters/${clusterId}/findings/${f.id}` : `/findings/${f.id}`} className="hover:underline">{f.title}</Link>
       ),
       sort: (a, b) => a.title.localeCompare(b.title),
     },

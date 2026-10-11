@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
@@ -56,7 +56,7 @@ import { useCluster } from "@/hooks/useCluster";
 import { cn } from "@/lib/cn";
 
 export function DeploymentDetailPage() {
-  const { did } = useParams<{ did: string }>();
+  const { did } = useParams({ strict: false });
   const { clusterId, isLoading: clusterLoading } = useCluster();
   const q = useQuery({
     queryKey: ["deployment", did],
@@ -75,7 +75,7 @@ export function DeploymentDetailPage() {
     <div className="space-y-4" data-testid="deployment-detail-page" data-cluster-id={clusterId ?? ""}>
       <PageHeader
         backLink={
-          <Link to={`/clusters/${clusterId}/deployments`} className="inline-flex items-center gap-1 hover:text-foreground">
+          <Link to="." href={`/clusters/${clusterId}/deployments`} className="inline-flex items-center gap-1 hover:text-foreground">
             <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
             Workloads
           </Link>
@@ -328,7 +328,7 @@ function ImageEvidenceTable({ images, clusterId }: { images: DeploymentImageEvid
       cell: (image) => (
         <>
           {image.image_scan_result_id ? (
-            <Link to={`/clusters/${clusterId}/images/${image.image_scan_result_id}`} className="break-all font-mono text-xs font-medium hover:underline">
+            <Link to="." href={`/clusters/${clusterId}/images/${image.image_scan_result_id}`} className="break-all font-mono text-xs font-medium hover:underline">
               {displayImage(image)}
             </Link>
           ) : (
@@ -400,7 +400,7 @@ function ImageFileRisksPanel({ risks, clusterId }: { risks: DeploymentFileRisk[]
       cell: (risk) => (
         <>
           {risk.image_scan_result_id ? (
-            <Link to={`/clusters/${clusterId}/images/${risk.image_scan_result_id}`} className="break-all font-mono text-xs font-medium hover:underline">
+            <Link to="." href={`/clusters/${clusterId}/images/${risk.image_scan_result_id}`} className="break-all font-mono text-xs font-medium hover:underline">
               {risk.image_ref || risk.image_digest}
             </Link>
           ) : (
@@ -475,9 +475,9 @@ function FindingsTable({ findings, clusterId }: { findings: DeploymentFinding[];
       cell: (finding) => (
         <>
           {finding.external_id ? (
-            <Link to={`/cve/${finding.external_id}`} className="font-mono text-xs font-medium hover:underline">{finding.external_id}</Link>
+            <Link to="." href={`/cve/${finding.external_id}`} className="font-mono text-xs font-medium hover:underline">{finding.external_id}</Link>
           ) : (
-            <Link to={`/clusters/${clusterId}/findings/${finding.id}`} className="font-mono text-xs font-medium hover:underline">{finding.kind}</Link>
+            <Link to="." href={`/clusters/${clusterId}/findings/${finding.id}`} className="font-mono text-xs font-medium hover:underline">{finding.kind}</Link>
           )}
           <div className="mt-1 max-w-[420px] truncate text-xs text-muted-foreground">{finding.title}</div>
         </>
@@ -769,7 +769,7 @@ function DeploymentActionsPanel({ detail, clusterId }: { detail: DeploymentDetai
                 <GitBranch className="h-3.5 w-3.5" aria-hidden /> Review
               </Button>
               <Button size="sm" variant="ghost" asChild>
-                <Link to={`/network?workload=${encodeURIComponent(workload)}`}>Topology</Link>
+                <Link to="." href={`/network?workload=${encodeURIComponent(workload)}`}>Topology</Link>
               </Button>
               {canApprove ? (
                 <Button

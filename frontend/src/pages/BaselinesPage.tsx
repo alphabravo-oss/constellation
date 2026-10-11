@@ -8,7 +8,7 @@
 // Cluster-scoped: every fetch threads cluster_id (derived from useCluster()).
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "@tanstack/react-router";
 import { Activity, AlertTriangle, GitMerge, ShieldCheck, Sparkles, Clock3 } from "lucide-react";
 
 import {
@@ -128,11 +128,9 @@ export function BaselinesPage() {
             Icon={col.icon}
             profiles={byMode[col.mode]}
             onSelect={(id) =>
-              navigate(
-                clusterId
+              navigate({ href: clusterId
                   ? `/clusters/${clusterId}/runtime/baselines/${encodeURIComponent(id)}`
-                  : "/clusters",
-              )
+                  : "/clusters" })
             }
             highlightIDs={autoPromote ? autoPromoteCandidates : []}
             loading={listQ.isPending}

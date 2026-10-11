@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link } from "@tanstack/react-router";
 import {
   ArrowRight,
   BadgeCheck,
@@ -236,7 +236,7 @@ export function NeuVectorSwitchboardPage() {
                     {mapping.links.map((link) => (
                       <Link
                         key={`${mapping.nv}:${link.label}`}
-                        to={link.to}
+                        to="." href={link.to}
                         data-testid={`neuvector-map-link-${mapping.id}-${link.id ?? slugify(link.label)}`}
                         className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-primary/40 hover:bg-accent"
                       >
@@ -305,7 +305,7 @@ function ModeRow({ nv, constellation, detail }: { nv: string; constellation: str
 function RunwayLink({ icon, label, to }: { icon: React.ReactNode; label: string; to: string }) {
   return (
     <li>
-      <Link to={to} className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2 transition-colors hover:bg-accent">
+      <Link to="." href={to} className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2 transition-colors hover:bg-accent">
         <span className="flex min-w-0 items-center gap-2">
           <span className="flex h-6 w-6 items-center justify-center rounded bg-muted text-muted-foreground [&_svg]:h-3.5 [&_svg]:w-3.5">
             {icon}

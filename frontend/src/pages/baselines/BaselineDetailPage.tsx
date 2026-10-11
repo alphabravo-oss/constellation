@@ -6,7 +6,7 @@
 // inline promote/rollback mode-transition actions. Deep-linkable per workload.
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "@tanstack/react-router";
 import { ArrowRight, ArrowLeft, GitMerge, Plus, Check, Ban, Power, PowerOff, Trash2 } from "lucide-react";
 
 import {
@@ -25,14 +25,14 @@ import { TextInput, Select } from "@/components/ui/form";
 
 export function BaselineDetailPage() {
   const { clusterId, cluster } = useCluster();
-  const { baselineId } = useParams<{ baselineId: string }>();
+  const { baselineId } = useParams({ strict: false });
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   const workloadID = baselineId ?? "";
   const clusterName = cluster?.name ?? "—";
   const listPath = clusterId ? `/clusters/${clusterId}/runtime/baselines` : "/clusters";
-  const backToList = () => navigate(listPath);
+  const backToList = () => navigate({ href: listPath });
 
   const detailQ = useQuery({
     queryKey: ["baseline", workloadID, clusterId],

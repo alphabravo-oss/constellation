@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link } from "@tanstack/react-router";
 import { Boxes, Clock3, Database, PackageSearch, Search, ShieldAlert } from "lucide-react";
 
 import { imageScanResults, type ImageScanResult } from "@/api/client";
@@ -59,7 +59,7 @@ export function ImageScansPage() {
             {item.impacted_count > 0 ? <Pill tone="accent">running workload</Pill> : null}
             {isStale(item.last_scanned_at) ? <Pill tone="warn">stale scan</Pill> : null}
           </div>
-          <Link to={`/clusters/${clusterId}/images/${item.id}`} className="mt-2 block break-all font-mono text-xs font-medium hover:underline">
+          <Link to="." href={`/clusters/${clusterId}/images/${item.id}`} className="mt-2 block break-all font-mono text-xs font-medium hover:underline">
             {displayImage(item)}
           </Link>
           <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{item.image_digest}</div>
@@ -103,7 +103,7 @@ export function ImageScansPage() {
         description="Every scanned container image and the running workloads exposed to its vulnerabilities."
         actions={
           <Link
-            to={selected ? `/clusters/${clusterId}/images/${selected.id}` : `/clusters/${clusterId}/images`}
+            to="." href={selected ? `/clusters/${clusterId}/images/${selected.id}` : `/clusters/${clusterId}/images`}
             className={cn(
               "inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm hover:bg-accent",
               !selected && "pointer-events-none opacity-50",
@@ -190,7 +190,7 @@ function ImagePreview({ item, clusterId }: { item: ImageScanResult | null; clust
             <h2 className="mt-2 break-all font-mono text-sm font-semibold">{displayImage(item)}</h2>
             <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{item.image_digest}</p>
           </div>
-          <Link to={`/clusters/${clusterId}/images/${item.id}`} className="rounded-md border border-border px-2 py-1 text-xs hover:bg-accent">
+          <Link to="." href={`/clusters/${clusterId}/images/${item.id}`} className="rounded-md border border-border px-2 py-1 text-xs hover:bg-accent">
             Full Details
           </Link>
         </div>

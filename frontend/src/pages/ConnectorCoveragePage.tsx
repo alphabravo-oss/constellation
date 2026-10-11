@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { Database, Pause, Pencil, Play, Plus, RotateCcw, ShieldQuestion, XCircle } from "lucide-react";
 import { toast } from "sonner";
@@ -118,7 +118,7 @@ export function ConnectorCoveragePage() {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold">Registry connectors</h2>
-            {addButton("Add registry", () => navigate("/settings/connectors/new?type=registry"))}
+            {addButton("Add registry", () => navigate({ href: "/settings/connectors/new?type=registry" }))}
           </div>
 
           <section className="grid gap-3 lg:grid-cols-2" data-testid="registry-connectors">
@@ -153,7 +153,7 @@ export function ConnectorCoveragePage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => navigate(`/settings/connectors/${connector.id}`)}
+                    onClick={() => navigate({ href: `/settings/connectors/${connector.id}` })}
                     className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs hover:bg-accent"
                   >
                     <Pencil className="h-3.5 w-3.5" aria-hidden />
@@ -240,7 +240,7 @@ export function ConnectorCoveragePage() {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold">Cloud accounts</h2>
-            {addButton("Add cloud account", () => navigate("/settings/connectors/new?type=cloud"))}
+            {addButton("Add cloud account", () => navigate({ href: "/settings/connectors/new?type=cloud" }))}
           </div>
           <div className="overflow-x-auto rounded-lg border border-border bg-card" data-testid="cloud-connectors">
             <DataTable<CloudConnector>
@@ -261,7 +261,7 @@ export function ConnectorCoveragePage() {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold">Scan jobs</h2>
-            {addButton("Queue scan", () => navigate("/settings/connectors/scan/new"))}
+            {addButton("Queue scan", () => navigate({ href: "/settings/connectors/scan/new" }))}
           </div>
 
           <section className="space-y-2" data-testid="recent-scan-jobs">

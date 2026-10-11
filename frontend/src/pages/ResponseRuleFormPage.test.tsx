@@ -1,7 +1,7 @@
 import { act } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { TestRouter } from "@/test/router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { groupsApi, responseRulesV2, type Group, type ResponseRuleV2 } from "@/api/client";
@@ -73,12 +73,10 @@ describe("ResponseRuleFormPage group selector", () => {
     await act(async () => {
       root?.render(
         <QueryClientProvider client={queryClient!}>
-          <MemoryRouter initialEntries={["/clusters/cluster-1/response-rules/rule-1"]}>
-            <Routes>
-              <Route path="/clusters/:id/response-rules/:ruleId" element={<ResponseRuleFormPage />} />
-              <Route path="/clusters/:id/response-rules" element={<div>Rules list</div>} />
-            </Routes>
-          </MemoryRouter>
+          <TestRouter initialEntries={["/clusters/cluster-1/response-rules/rule-1"]}
+            path="/clusters/$id/response-rules/$ruleId" next={{ path: "/clusters/$id/response-rules", element: <div>Rules list</div> }}>
+            <ResponseRuleFormPage />
+          </TestRouter>
         </QueryClientProvider>,
       );
     });

@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { ReactNode } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, Database, KeyRound, Layers, ShieldAlert } from "lucide-react";
 
@@ -20,7 +20,7 @@ import { useCluster } from "@/hooks/useCluster";
 import { cn } from "@/lib/cn";
 
 export function ServerlessFunctionDetailPage() {
-  const { functionId } = useParams<{ functionId: string }>();
+  const { functionId } = useParams({ strict: false });
   const { clusterId, isLoading: clusterLoading } = useCluster();
   const q = useQuery({
     queryKey: ["serverless-function", functionId],
@@ -40,7 +40,7 @@ export function ServerlessFunctionDetailPage() {
     <div className="space-y-4" data-testid="serverless-function-detail-page" data-cluster-id={clusterId ?? ""}>
       <PageHeader
         backLink={
-          <Link to={`/clusters/${clusterId}/serverless`} className="inline-flex items-center gap-1 hover:text-foreground">
+          <Link to="." href={`/clusters/${clusterId}/serverless`} className="inline-flex items-center gap-1 hover:text-foreground">
             <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
             Serverless
           </Link>
@@ -238,7 +238,7 @@ function FindingsTable({ findings, clusterId }: { findings: ServerlessFinding[];
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <SeverityBadge severity={finding.severity} size="xs" />
-            <Link to={`/clusters/${clusterId}/findings/${finding.id}`} className="font-medium hover:underline">{finding.title}</Link>
+            <Link to="." href={`/clusters/${clusterId}/findings/${finding.id}`} className="font-medium hover:underline">{finding.title}</Link>
           </div>
           <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{finding.external_id || finding.kind}</div>
         </div>

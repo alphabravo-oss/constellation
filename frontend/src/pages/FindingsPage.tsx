@@ -11,8 +11,9 @@
 //
 // URL severity and lifecycle filters drive the findings request; the free-text
 // query refines client-side until the backend's DSL is wired through.
-import { useEffect, useMemo, useState, useTransition } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { useRouteSearchParams } from "@/lib/route-search";
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { Save, Tag, Bookmark, ChevronDown, ListFilter } from "lucide-react";
 
@@ -87,7 +88,7 @@ export function FindingsPage() {
   // Cluster scope: when mounted under /clusters/:id/findings, all queries are
   // filtered to that cluster. At org-level (legacy) we pass undefined.
   const { clusterId } = useCluster();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useRouteSearchParams();
   const severity = searchParams.get("severity") === "critical" || searchParams.get("severity") === "high"
     ? searchParams.get("severity") as "critical" | "high" : "";
   const lifecycleParam = searchParams.get("lifecycle");
@@ -95,13 +96,13 @@ export function FindingsPage() {
     : lifecycleParam === "accepted" || lifecycleParam === "suppressed" || lifecycleParam === "open"
       ? lifecycleParam : "open";
 
-  function setUrlFilter(name: "severity" | "lifecycle", value: string) {
+  const setUrlFilter = useCallback((name: "severity" | "lifecycle", value: string) => {
     const next = new URLSearchParams(searchParams);
     if (name === "lifecycle" && !value) next.set(name, "all");
     else if (value && !(name === "lifecycle" && value === "open")) next.set(name, value);
     else next.delete(name);
     setSearchParams(next);
-  }
+  }, [searchParams, setSearchParams]);
 
   // Filters
   const [kind, setKind] = useState<FindingKind | "">("");
@@ -131,7 +132,7 @@ export function FindingsPage() {
     }
   }, [kind, view]);
   const navigate = useNavigate();
-  const openFinding = (f: Finding) => navigate(`/clusters/${clusterId}/findings/${f.id}`);
+  const openFinding = (f: Finding) => navigate({ href: `/clusters/${clusterId}/findings/${f.id}` });
 
   // Fixable-only toggle (hide won't-fix / not-fixed vulns) — shared by both the findings
   // list and the by-CVE rollup.
@@ -186,7 +187,7 @@ export function FindingsPage() {
     if (lifecycle !== "open") out.push({ label: "lifecycle", value: lifecycle || "all", onRemove: () => setUrlFilter("lifecycle", lifecycle ? "" : "open") });
     if (query)     out.push({ label: "q",         value: query,     onRemove: () => setQuery("") });
     return out;
-  }, [kind, lifecycle, query, severity, searchParams]);
+  }, [kind, lifecycle, query, severity, setUrlFilter]);
 
   function saveView() {
     const name = prompt("Name this view");
@@ -214,7 +215,7 @@ export function FindingsPage() {
       cell: (f) => (
         <span className="flex items-center gap-1.5">
           {f.external_id
-            ? <Link to={clusterId ? `/clusters/${clusterId}/cve/${f.external_id}` : `/cve/${f.external_id}`} className="text-mono text-xs hover:text-[color:var(--color-primary)]">{f.external_id}</Link>
+            ? <Link to="." href={clusterId ? `/clusters/${clusterId}/cve/${f.external_id}` : `/cve/${f.external_id}`} className="text-mono text-xs hover:text-[color:var(--color-primary)]">{f.external_id}</Link>
             : <span className="text-mono text-xs text-muted-foreground">{f.id.slice(0, 10)}</span>}
           {f.kev && <span className="rounded px-1 py-px text-[9px] font-semibold text-white" style={{ background: "var(--color-severity-critical)" }} title="CISA Known-Exploited">KEV</span>}
         </span>
@@ -283,7 +284,7 @@ export function FindingsPage() {
       id: "asset",
       header: "Asset",
       cell: (f) => (
-        <Link to={`/clusters/${clusterId}/risk/asset/${encodeURIComponent(f.asset_id)}`} className="text-mono text-[10px] text-muted-foreground hover:text-foreground" title="Open risk workspace">
+        <Link to="." href={`/clusters/${clusterId}/risk/asset/${encodeURIComponent(f.asset_id)}`} className="text-mono text-[10px] text-muted-foreground hover:text-foreground" title="Open risk workspace">
           {f.asset_id.slice(0, 14)}
         </Link>
       ),
@@ -597,7 +598,7 @@ function CVETable({ rows, loading, clusterId }: { rows: CVERollup[]; loading: bo
     { id: "cve", header: "CVE", width: "190px",
       cell: (c) => (
         <span className="flex items-center gap-1.5">
-          <Link to={clusterId ? `/clusters/${clusterId}/cve/${c.cve}` : `/cve/${c.cve}`} className="text-mono text-xs hover:text-[color:var(--color-primary)]">{c.cve}</Link>
+          <Link to="." href={clusterId ? `/clusters/${clusterId}/cve/${c.cve}` : `/cve/${c.cve}`} className="text-mono text-xs hover:text-[color:var(--color-primary)]">{c.cve}</Link>
           {c.kev && <span className="rounded px-1 py-px text-[9px] font-semibold text-white" style={{ background: "var(--color-severity-critical)" }} title="CISA Known-Exploited">KEV</span>}
         </span>
       ),

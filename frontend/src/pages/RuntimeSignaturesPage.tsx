@@ -16,7 +16,8 @@
 // runtime-signatures/new and runtime-signatures/:sigId respectively.
 import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams } from "@tanstack/react-router";
+import { useRouteSearchParams } from "@/lib/route-search";
 import {
   ShieldAlert,
   ShieldCheck,
@@ -57,8 +58,8 @@ const APPLY_DIR_LABEL: Record<number, string> = {
 };
 
 export function RuntimeSignaturesPage() {
-  const [search] = useSearchParams();
-  const { id: pathClusterID } = useParams();
+  const [search] = useRouteSearchParams();
+  const { id: pathClusterID } = useParams({ strict: false });
   const clusterID = pathClusterID ?? search.get("cluster_id") ?? "";
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -117,7 +118,7 @@ export function RuntimeSignaturesPage() {
       cell: (r) => (Array.isArray(r.patterns) ? r.patterns.length : 0),
       sort: (a, b) => (Array.isArray(a.patterns) ? a.patterns.length : 0) - (Array.isArray(b.patterns) ? b.patterns.length : 0),
     },
-    { id: "actions", header: "Actions", className: "text-right", cell: (r) => <SignatureActions r={r} onEdit={() => navigate(r.id)} /> },
+    { id: "actions", header: "Actions", className: "text-right", cell: (r) => <SignatureActions r={r} onEdit={() => navigate({ to: "/clusters/$id/runtime-signatures/$sigId", params: { id: clusterID, sigId: r.id } })} /> },
   ];
 
   if (!clusterID) {
@@ -141,7 +142,7 @@ export function RuntimeSignaturesPage() {
               importYaml={(text) => runtimeSignatures.importYaml(clusterID, text)}
               onImported={() => void queryClient.invalidateQueries({ queryKey: ["runtime-signatures", clusterID] })}
             />
-            <Button size="sm" variant="outline" onClick={() => navigate("new")} data-testid="runtime-signatures-new">
+            <Button size="sm" variant="outline" onClick={() => navigate({ to: "/clusters/$id/runtime-signatures/new", params: { id: clusterID } })} data-testid="runtime-signatures-new">
               <Plus className="mr-1 h-3.5 w-3.5" /> New signature
             </Button>
           </div>

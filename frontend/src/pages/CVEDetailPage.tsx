@@ -2,7 +2,7 @@
 // banner + entity tile rail + fix advisor.
 import { useMemo } from "react";
 import type { ReactNode } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, ExternalLink, Wrench, BookOpen, Bug } from "lucide-react";
 
@@ -32,7 +32,7 @@ export function CVEDetailPage() {
   // The distinct `:cveId` param name is REQUIRED: if the nested route reused `:id` it
   // would shadow the cluster's `:id`, so useCluster() (which reads params.id) would get
   // the CVE id, "not find" the cluster, and ClusterRouter would bounce to /clusters.
-  const { id, cveId } = useParams<{ id: string; cveId: string }>();
+  const { id, cveId } = useParams({ strict: false });
   const clusterScoped = !!cveId;
   const cveKey = cveId ?? id;
   // useCluster reads params.id — correct (the cluster) only on the nested route.
@@ -231,7 +231,7 @@ function Crumb({ label, count, href, active }: { label: string; count: number; h
       <span className="text-mono text-[10px] opacity-80">({count})</span>
     </span>
   );
-  return href ? <Link to={href}>{inner}</Link> : inner;
+  return href ? <Link to="." href={href}>{inner}</Link> : inner;
 }
 
 function Sep() {
@@ -265,7 +265,7 @@ function TileList({ id, title, items, emptyHint }: { id: string; title: string; 
 
 function TileLink({ href, children }: { href?: string; children: ReactNode }) {
   const className = "accent-slide block px-3 py-1.5 hover:bg-muted/40 transition-colors";
-  return href ? <Link to={href} className={className}>{children}</Link> : <div className={className}>{children}</div>;
+  return href ? <Link to="." href={href} className={className}>{children}</Link> : <div className={className}>{children}</div>;
 }
 
 interface TileEntry { id: string; label: string; sub?: string; href?: string }

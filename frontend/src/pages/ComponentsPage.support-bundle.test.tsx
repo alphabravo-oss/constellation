@@ -1,6 +1,6 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
+import { TestRouter } from "@/test/router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, expect, it, vi } from "vitest";
 import { componentsInventory, supportBundles, type ComponentDiagnostics, type ComponentInstance } from "@/api/client";
@@ -45,7 +45,7 @@ it("queues a diagnostic bundle and links to persisted job history without downlo
   root = createRoot(host);
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   await act(async () => root!.render(
-    <QueryClientProvider client={queryClient}><MemoryRouter><ComponentsPage /></MemoryRouter></QueryClientProvider>,
+    <QueryClientProvider client={queryClient}><TestRouter><ComponentsPage /></TestRouter></QueryClientProvider>,
   ));
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
   const button = host.querySelector<HTMLButtonElement>('[data-testid="component-support-bundle"]')!;

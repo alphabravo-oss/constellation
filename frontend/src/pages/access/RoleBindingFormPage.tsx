@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { ArrowLeft } from "lucide-react";
 
@@ -37,7 +37,7 @@ export function RoleBindingFormPage() {
           ? [{ kind: scopeKind.trim(), values: scopeValues.split(",").map((v) => v.trim()).filter(Boolean), inherited: false }]
           : [],
       }),
-    onSuccess: () => { toast.success("Role binding created"); navigate(BACK_TO); },
+    onSuccess: () => { toast.success("Role binding created"); navigate({ href: BACK_TO }); },
     onError: () => toast.error("Failed to create binding"),
   });
 
@@ -46,7 +46,7 @@ export function RoleBindingFormPage() {
       <PageHeader
         title="Add role binding"
         description="Grant a role to a subject, optionally scoped to specific resources."
-        backLink={<Link to={BACK_TO} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Access Control</Link>}
+        backLink={<Link to="." href={BACK_TO} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Access Control</Link>}
       />
 
       <Card title="Binding details" description="Choose the subject, the role, and an optional scope.">
@@ -77,7 +77,7 @@ export function RoleBindingFormPage() {
             <Button type="submit" variant="primary" size="lg" disabled={save.isPending}>
               {save.isPending ? "Creating…" : "Create binding"}
             </Button>
-            <Button type="button" variant="ghost" size="lg" onClick={() => navigate(BACK_TO)}>Cancel</Button>
+            <Button type="button" variant="ghost" size="lg" onClick={() => navigate({ href: BACK_TO })}>Cancel</Button>
           </div>
         </form>
       </Card>

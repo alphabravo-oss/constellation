@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams } from "@tanstack/react-router";
 import { Boxes, FileJson, ShieldAlert, ShieldCheck, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -14,7 +14,7 @@ import { StatCard } from "@/components/ui/stat-card";
 const ACCEPT_RISK_MAX_DAYS = 30;
 
 export function AssetDetailPage() {
-  const { aid } = useParams<{ aid: string }>();
+  const { aid } = useParams({ strict: false });
   const { clusterId } = useCluster();
   const qc = useQueryClient();
   const [rationale, setRationale] = useState("");
@@ -63,7 +63,7 @@ export function AssetDetailPage() {
           {f.image_scan_result_id ? (
             <span className="font-medium">{f.title}</span>
           ) : (
-            <Link to={`/clusters/${clusterId}/findings/${f.id}`} className="font-medium hover:underline">{f.title}</Link>
+            <Link to="." href={`/clusters/${clusterId}/findings/${f.id}`} className="font-medium hover:underline">{f.title}</Link>
           )}
           <div className="text-xs text-muted-foreground">{f.external_id}</div>
         </>
@@ -76,7 +76,7 @@ export function AssetDetailPage() {
   return (
     <PageContainer>
       <PageHeader
-        eyebrow={<Link to={`/clusters/${clusterId}/assets`} className="hover:underline">Assets</Link>}
+        eyebrow={<Link to="." href={`/clusters/${clusterId}/assets`} className="hover:underline">Assets</Link>}
         title={asset.name}
         description={`${asset.kind} · ${asset.criticality} criticality — image, supply-chain evidence, and accepted-risk history for this asset.`}
       />

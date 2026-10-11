@@ -8,7 +8,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import {
   ArrowLeft,
@@ -147,7 +147,7 @@ export function ApiTokensPage() {
           <Button
             variant="primary"
             size="lg"
-            onClick={() => navigate("/settings/api-tokens/new")}
+            onClick={() => navigate({ href: "/settings/api-tokens/new" })}
             data-testid="api-tokens-create-button"
           >
             <Plus className="h-4 w-4" aria-hidden /> Create token

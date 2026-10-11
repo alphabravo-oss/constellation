@@ -1,10 +1,12 @@
 import { useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate } from "@tanstack/react-router";
+import { useRouteSearchParams } from "@/lib/route-search";
 import { toast } from "sonner";
 import { ArrowRight, Database, Eye, EyeOff, Network, ShieldCheck } from "lucide-react";
 
 import { useAuth } from "@/contexts/AuthContext";
 import { auth as authApi } from "@/api/client";
+import { loginReturnPath } from "@/lib/login-return";
 
 function BrandMark({ compact = false }: { compact?: boolean }) {
   return (
@@ -26,7 +28,7 @@ function BrandMark({ compact = false }: { compact?: boolean }) {
 export function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams] = useRouteSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -38,8 +40,8 @@ export function LoginPage() {
     try {
       await login(email, password);
       const returnTo = searchParams.get("returnTo");
-      const nextPath = returnTo?.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "/clusters";
-      navigate(nextPath, { replace: true });
+      const nextPath = loginReturnPath(returnTo);
+      navigate({ href: nextPath, replace: true });
     } catch (err) {
       toast.error("Login failed");
       console.error(err);
@@ -93,7 +95,7 @@ export function LoginPage() {
             </div>
             <div className="flex items-center gap-2">
               <Database className="h-4 w-4 text-status-info" />
-              VulnDB aligned
+              Vulnerability checks
             </div>
             <div className="flex items-center gap-2">
               <Network className="h-4 w-4 text-primary" />

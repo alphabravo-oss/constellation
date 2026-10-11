@@ -6,7 +6,7 @@
 // pane + NeuVector's "Admission Rules" catalog feel.
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { CheckCircle2, Download, Eye, FileJson, GitCompare, ListChecks, Pencil, Play, Plus, Power, ShieldCheck, UploadCloud } from "lucide-react";
 
@@ -129,7 +129,7 @@ export function PoliciesPage() {
   const enforceCount = list.filter((p) => p.mode === "enforce").length;
   const profileCount = profilesQ.data?.profiles.length ?? 0;
 
-  const openEditor = (id: string) => navigate(`${policiesBase}/${id}`);
+  const openEditor = (id: string) => navigate({ href: `${policiesBase}/${id}` });
 
   const catalogTab = (
     <div className="space-y-4" data-testid="policies-layout">
@@ -275,7 +275,7 @@ export function PoliciesPage() {
         description="Rules that gate what's allowed to run: admission, signature, license, and runtime policies. Toggle each on or off, and run it in monitor mode before enforcing."
         actions={
           <Link
-            to="/policies/new"
+            to="/clusters/$id/policies/new" params={{ id: clusterId! }}
             className="inline-flex items-center gap-1 rounded-md bg-foreground px-3 py-1.5 text-xs text-background hover:opacity-90"
             data-testid="policies-create-cta"
           >
@@ -596,7 +596,7 @@ function SimulationMatchCard({ match }: { match: PolicySimulation["matches"][num
             return (
               <div key={`${label}-${index}`} className="rounded-md border border-border bg-background px-2 py-1.5">
                 {href ? (
-                  <Link to={href} className="font-medium hover:underline" data-testid="policy-simulator-evidence-detail-link">
+                  <Link to="." href={href} className="font-medium hover:underline" data-testid="policy-simulator-evidence-detail-link">
                     {label}
                   </Link>
                 ) : (

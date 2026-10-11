@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { ArrowLeft } from "lucide-react";
 
@@ -29,7 +29,7 @@ export function ServiceAccountFormPage() {
         description: description.trim() || undefined,
         scopes: scopes.split(",").map((s) => s.trim()).filter(Boolean),
       }),
-    onSuccess: () => { toast.success("Service account created"); navigate(BACK_TO); },
+    onSuccess: () => { toast.success("Service account created"); navigate({ href: BACK_TO }); },
     onError: () => toast.error("Failed to create service account"),
   });
 
@@ -38,7 +38,7 @@ export function ServiceAccountFormPage() {
       <PageHeader
         title="New service account"
         description="A non-human identity for automation, with scoped permissions."
-        backLink={<Link to={BACK_TO} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Access Control</Link>}
+        backLink={<Link to="." href={BACK_TO} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Access Control</Link>}
       />
 
       <Card title="Service account details" description="Name the account and grant it scoped permissions.">
@@ -56,7 +56,7 @@ export function ServiceAccountFormPage() {
             <Button type="submit" variant="primary" size="lg" disabled={save.isPending}>
               {save.isPending ? "Creating…" : "Create service account"}
             </Button>
-            <Button type="button" variant="ghost" size="lg" onClick={() => navigate(BACK_TO)}>Cancel</Button>
+            <Button type="button" variant="ghost" size="lg" onClick={() => navigate({ href: BACK_TO })}>Cancel</Button>
           </div>
         </form>
       </Card>

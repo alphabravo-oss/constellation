@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
+
+import { useRouteSearchParams } from "@/lib/route-search";
 import { api } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { LoadingState, ErrorState, EmptyState } from "@/components/ui/states";
@@ -34,7 +35,7 @@ export function AuditPage() {
   // deployments/compliance_checks/policies rows of the active cluster so we only
   // surface events that touched something inside this cluster.
   const { clusterId, isLoading: clusterLoading } = useCluster();
-  const [searchParams] = useSearchParams();
+  const [searchParams] = useRouteSearchParams();
   const eventID = searchParams.get("event_id");
   const supportBundleJobID = searchParams.get("support_bundle_job_id");
   const [page, setPage] = useState(0);

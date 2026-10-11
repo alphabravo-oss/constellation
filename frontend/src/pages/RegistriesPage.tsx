@@ -4,7 +4,7 @@
 // /api/v1/registries endpoints; uses Radix Dialog for the create wizard so the
 // kind picker can swap credential fields per registry kind.
 import { useMemo, useState, type ChangeEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "@tanstack/react-router";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -157,7 +157,7 @@ export function RegistriesPage() {
     },
     { id: "images", header: "Images", numeric: true, sort: (a, b) => a.images_seen - b.images_seen,
       cell: (r) => (
-        <Link to={clusterId ? `/clusters/${clusterId}/registries/${r.id}` : `/registries/${r.id}`} className="text-mono text-[color:var(--color-primary)] hover:underline" onClick={(e) => e.stopPropagation()}>
+        <Link to="." href={clusterId ? `/clusters/${clusterId}/registries/${r.id}` : `/registries/${r.id}`} className="text-mono text-[color:var(--color-primary)] hover:underline" onClick={(e) => e.stopPropagation()}>
           {r.images_seen} →
         </Link>
       ) },

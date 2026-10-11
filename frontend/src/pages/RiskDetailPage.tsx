@@ -4,7 +4,7 @@
 // tiles · action bar). Tabs are Radix-driven, lazy-loaded, with badge counts
 // pulled from the relevant entity slice.
 import { Suspense, lazy, useMemo } from "react";
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { useParams, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLink, ShieldCheck, AlertTriangle } from "lucide-react";
 
@@ -27,7 +27,7 @@ const FileTab       = lazy(() => import("./risk/FileTab"));
 const ComplianceTab = lazy(() => import("./risk/ComplianceTab"));
 
 export function RiskDetailPage() {
-  const { entityType = "asset", entityId = "" } = useParams<{ entityType: string; entityId: string }>();
+  const { entityType = "asset", entityId = "" } = useParams({ strict: false });
   const [tab, setTab] = useTabParam("tab", "overview");
   const navigate = useNavigate();
   const { clusterId } = useCluster();
@@ -141,10 +141,10 @@ export function RiskDetailPage() {
         ]}
         actions={
           <>
-            <Button size="sm" variant="outline" onClick={() => navigate(clusterPath(`/findings?asset=${entityId}`))}>View findings</Button>
+            <Button size="sm" variant="outline" onClick={() => navigate({ href: clusterPath(`/findings?asset=${entityId}`) })}>View findings</Button>
             {detailPath && (
               <Button size="sm" variant="primary" asChild>
-                <Link to={clusterPath(detailPath)}>
+                <Link to="." href={clusterPath(detailPath)}>
                   {listLabel.replace(/s$/, "")} detail <ExternalLink className="h-3 w-3" />
                 </Link>
               </Button>
@@ -173,7 +173,7 @@ export function RiskDetailPage() {
                       <ul className="divide-y divide-border">
                         {top.map((f) => (
                           <li key={f.id} className="px-3 py-2">
-                            <Link to={clusterPath(`/findings/${f.id}`)} className="flex items-start gap-2 hover:bg-muted/40 -mx-1 px-1 py-1 rounded">
+                            <Link to="." href={clusterPath(`/findings/${f.id}`)} className="flex items-start gap-2 hover:bg-muted/40 -mx-1 px-1 py-1 rounded">
                               <SeverityBadge severity={f.severity} size="xs" />
                               <div className="min-w-0 flex-1">
                                 <div className="text-xs truncate">{f.title}</div>

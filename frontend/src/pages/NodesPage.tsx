@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "@tanstack/react-router";
+import { useRouteSearchParams } from "@/lib/route-search";
 import {
   Activity,
   CheckCircle2,
@@ -23,7 +24,7 @@ type NodePage = NodeListResponse & { total: number; limit: number; offset: numbe
 
 export function NodesPage() {
   const { clusterId, isLoading: clusterLoading } = useCluster();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useRouteSearchParams();
   const [query, setQuery] = useState("");
   const [agentStatus, setAgentStatus] = useState("all");
   const riskFilter = riskFilters.includes(searchParams.get("risk") ?? "") ? searchParams.get("risk")! : "all";
@@ -77,7 +78,7 @@ export function NodesPage() {
       header: "Node",
       cell: (item) => (
         <div>
-          <Link to={`/clusters/${clusterId}/nodes/${encodeURIComponent(item.node)}`} className="block break-all font-mono text-xs font-medium hover:underline">
+          <Link to="." href={`/clusters/${clusterId}/nodes/${encodeURIComponent(item.node)}`} className="block break-all font-mono text-xs font-medium hover:underline">
             {item.node}
           </Link>
           {item.coverage_gaps?.length ? <div className="mt-1 text-[11px] text-status-warn">{item.coverage_gaps.length} coverage gap{item.coverage_gaps.length === 1 ? "" : "s"}</div> : null}
@@ -166,7 +167,7 @@ export function NodesPage() {
         actions={
           <div className="flex items-center gap-2">
             <Link
-              to={selected ? `/clusters/${clusterId}/nodes/${encodeURIComponent(selected.node)}` : `/clusters/${clusterId}/nodes`}
+              to="." href={selected ? `/clusters/${clusterId}/nodes/${encodeURIComponent(selected.node)}` : `/clusters/${clusterId}/nodes`}
               className={cn(
                 "inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm hover:bg-accent",
                 !selected && "pointer-events-none opacity-50",
@@ -289,10 +290,10 @@ function NodePreview({ node, clusterId }: { node: NodeSummary | null; clusterId?
             <p className="mt-1 text-xs text-muted-foreground">{displayOS(node)} · kernel {node.kernel_release || "unknown"}</p>
           </div>
           <div className="flex items-center gap-2">
-            <Link to={`/clusters/${clusterId}/risk/node/${encodeURIComponent(node.node)}`} className="rounded-md border border-border px-2 py-1 text-xs hover:bg-accent" data-testid="node-risk-workspace-link">
+            <Link to="." href={`/clusters/${clusterId}/risk/node/${encodeURIComponent(node.node)}`} className="rounded-md border border-border px-2 py-1 text-xs hover:bg-accent" data-testid="node-risk-workspace-link">
               Risk workspace
             </Link>
-            <Link to={`/clusters/${clusterId}/nodes/${encodeURIComponent(node.node)}`} className="rounded-md border border-border px-2 py-1 text-xs hover:bg-accent">
+            <Link to="." href={`/clusters/${clusterId}/nodes/${encodeURIComponent(node.node)}`} className="rounded-md border border-border px-2 py-1 text-xs hover:bg-accent">
               Full Details
             </Link>
           </div>

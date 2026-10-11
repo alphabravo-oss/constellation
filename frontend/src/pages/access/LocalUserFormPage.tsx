@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { ArrowLeft } from "lucide-react";
 
@@ -31,7 +31,7 @@ export function LocalUserFormPage() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["access-control"] });
       toast.success("User created");
-      navigate(BACK_TO);
+      navigate({ href: BACK_TO });
     },
     onError: (e: unknown) => {
       const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error;
@@ -44,7 +44,7 @@ export function LocalUserFormPage() {
       <PageHeader
         title="New local user"
         description="A password-authenticated user with a single org-scoped role. Use this for accounts that don't sign in through your SSO provider."
-        backLink={<Link to={BACK_TO} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Access Control</Link>}
+        backLink={<Link to="." href={BACK_TO} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Access Control</Link>}
       />
 
       <Card title="User details" description="The user signs in with this email + password and is granted the selected role across the org.">
@@ -70,7 +70,7 @@ export function LocalUserFormPage() {
             <Button type="submit" variant="primary" size="lg" disabled={!email.trim() || !password || save.isPending}>
               {save.isPending ? "Creating…" : "Create user"}
             </Button>
-            <Button type="button" variant="ghost" size="lg" onClick={() => navigate(BACK_TO)}>Cancel</Button>
+            <Button type="button" variant="ghost" size="lg" onClick={() => navigate({ href: BACK_TO })}>Cancel</Button>
           </div>
         </form>
       </Card>

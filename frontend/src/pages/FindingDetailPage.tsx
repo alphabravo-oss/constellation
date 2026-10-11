@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -15,7 +15,7 @@ const ACCEPT_RISK_MAX_DAYS = 30;
 
 export function FindingDetailPage() {
   // Route param is :fid (see App.tsx). Alias to `id` for the queries below.
-  const { fid: id } = useParams<{ fid: string }>();
+  const { fid: id } = useParams({ strict: false });
   const { clusterId } = useCluster();
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["finding", id], queryFn: () => findings.get(id!), enabled: !!id });
@@ -90,7 +90,7 @@ export function FindingDetailPage() {
             <span>· {f.lifecycle}</span>
             {isExceptionLifecycle(f.lifecycle) ? (
               <Link
-                to={exceptionHref(f.lifecycle, f.id)}
+                to="." href={exceptionHref(f.lifecycle, f.id)}
                 className="rounded-md border border-border px-2 py-0.5 text-foreground hover:bg-accent"
                 data-testid="finding-exception-link"
               >
@@ -128,14 +128,14 @@ export function FindingDetailPage() {
           <span className="font-mono">{f.asset_id.slice(0, 24)}</span>
           <div className="ml-auto flex items-center gap-2">
             <Link
-              to={`/clusters/${clusterId}/risk/asset/${encodeURIComponent(f.asset_id)}`}
+              to="." href={`/clusters/${clusterId}/risk/asset/${encodeURIComponent(f.asset_id)}`}
               className="rounded-md border border-border px-2 py-1 text-foreground hover:bg-accent"
               data-testid="finding-affected-asset-risk"
             >
               Risk workspace
             </Link>
             <Link
-              to={`/clusters/${clusterId}/assets/${encodeURIComponent(f.asset_id)}`}
+              to="." href={`/clusters/${clusterId}/assets/${encodeURIComponent(f.asset_id)}`}
               className="rounded-md border border-border px-2 py-1 text-foreground hover:bg-accent"
               data-testid="finding-affected-asset-detail"
             >

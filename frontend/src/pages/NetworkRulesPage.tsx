@@ -5,7 +5,7 @@
 // learns from observed conversations); edit/deny/reorder CRUD is the next step.
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { Network as NetworkIcon, Check, Ban, Plus, Power, PowerOff, Trash2, Pencil, ArrowUpToLine } from "lucide-react";
 
 import { networkRules, type NetworkRule } from "@/api/client";
@@ -100,7 +100,7 @@ export function NetworkRulesPage() {
               className="rounded p-1 hover:bg-accent disabled:opacity-40">
               {r.disable ? <Power className="h-3.5 w-3.5" /> : <PowerOff className="h-3.5 w-3.5" />}
             </button>
-            <Link to={editHref(r)} title="Edit" className="rounded p-1 hover:bg-accent"><Pencil className="h-3.5 w-3.5" /></Link>
+            <Link to="." href={editHref(r)} title="Edit" className="rounded p-1 hover:bg-accent"><Pencil className="h-3.5 w-3.5" /></Link>
             {overridden && (
               <button type="button" title={r.learned ? "Revert to learned" : "Delete rule"} disabled={busy}
                 onClick={() => remove.mutate(r)}
@@ -137,7 +137,7 @@ export function NetworkRulesPage() {
             >Export CSV</button>
             <button
               type="button"
-              onClick={() => navigate(`${clusterId ? `/clusters/${clusterId}` : ""}/network-rules/new`)}
+              onClick={() => navigate({ href: `${clusterId ? `/clusters/${clusterId}` : ""}/network-rules/new` })}
               className="inline-flex items-center gap-1.5 rounded-md bg-[color:var(--color-primary)] px-3 py-2 text-sm font-medium text-white hover:opacity-90"
             ><Plus className="h-4 w-4" />Add rule</button>
           </div>

@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { ReactNode } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Boxes, ChevronLeft, Database, Layers, Server, ShieldAlert, ShieldCheck, TerminalSquare, RefreshCw } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -15,7 +15,7 @@ import { cn } from "@/lib/cn";
 import { fmtBytes } from "@/lib/format";
 
 export function NodeDetailPage() {
-  const { nodeName: nodeParam } = useParams<{ nodeName: string }>();
+  const { nodeName: nodeParam } = useParams({ strict: false });
   const { clusterId, isLoading: clusterLoading } = useCluster();
   const nodeName = useMemo(() => safeDecode(nodeParam ?? ""), [nodeParam]);
 
@@ -45,7 +45,7 @@ export function NodeDetailPage() {
     <div className="space-y-4" data-testid="node-detail-page" data-cluster-id={clusterId ?? ""}>
       <PageHeader
         backLink={
-          <Link to={`/clusters/${clusterId}/nodes`} className="inline-flex items-center gap-1 hover:text-foreground">
+          <Link to="." href={`/clusters/${clusterId}/nodes`} className="inline-flex items-center gap-1 hover:text-foreground">
             <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
             Nodes
           </Link>
@@ -165,7 +165,7 @@ function HostVulnerabilitiesTable({ vulnerabilities }: { vulnerabilities: HostVu
       cell: (vulnerability) => (
         <>
           {vulnerability.vuln_id ? (
-            <Link to={`/cve/${encodeURIComponent(vulnerability.vuln_id)}`} className="font-mono text-xs font-medium hover:underline">
+            <Link to="." href={`/cve/${encodeURIComponent(vulnerability.vuln_id)}`} className="font-mono text-xs font-medium hover:underline">
               {vulnerability.vuln_id}
             </Link>
           ) : (
@@ -234,7 +234,7 @@ function NodeContainersTable({ containers, observedAt, clusterId }: { containers
     { id: "name", header: "Container", cell: (c) => <span className="text-xs font-medium">{String(c.name ?? "—")}</span>, sort: (a, b) => String(a.name ?? "").localeCompare(String(b.name ?? "")) },
     { id: "pod", header: "Pod", cell: (c) => (
         clusterId && c.pod_name
-          ? <Link to={`/clusters/${clusterId}/deployments?q=${encodeURIComponent(String(c.pod_name).replace(/-[a-z0-9]+-[a-z0-9]+$/, ""))}`} className="text-mono text-[11px] text-[color:var(--color-primary)] hover:underline">{String(c.pod_namespace ?? "")}/{String(c.pod_name ?? "")}</Link>
+          ? <Link to="." href={`/clusters/${clusterId}/deployments?q=${encodeURIComponent(String(c.pod_name).replace(/-[a-z0-9]+-[a-z0-9]+$/, ""))}`} className="text-mono text-[11px] text-[color:var(--color-primary)] hover:underline">{String(c.pod_namespace ?? "")}/{String(c.pod_name ?? "")}</Link>
           : <span className="text-mono text-[11px] text-muted-foreground">{String(c.pod_namespace ?? "")}/{String(c.pod_name ?? "—")}</span>
       ) },
     { id: "image", header: "Image", cell: (c) => <span className="text-mono text-[11px] text-muted-foreground max-w-[300px] truncate block" title={String(c.image_ref ?? c.image ?? "")}>{String(c.image_ref ?? c.image ?? "—").replace("sha256:", "").slice(0, 24)}</span> },

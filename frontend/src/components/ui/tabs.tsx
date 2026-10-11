@@ -1,6 +1,7 @@
 import { type ReactNode } from "react";
 import * as RadixTabs from "@radix-ui/react-tabs";
-import { useSearchParams } from "react-router-dom";
+
+import { useRouteSearchParams } from "@/lib/route-search";
 import { cn } from "@/lib/cn";
 
 /**
@@ -10,7 +11,7 @@ import { cn } from "@/lib/cn";
  */
 // eslint-disable-next-line react-refresh/only-export-components
 export function useTabParam(key: string, defaultValue: string): [string, (v: string) => void] {
-  const [params, setParams] = useSearchParams();
+  const [params, setParams] = useRouteSearchParams();
   const value = params.get(key) ?? defaultValue;
   const setValue = (v: string) => {
     const next = new URLSearchParams(params);

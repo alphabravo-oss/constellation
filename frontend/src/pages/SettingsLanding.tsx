@@ -1,5 +1,5 @@
 import { type ElementType } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "@tanstack/react-router";
 import {
   UsersRound,
   KeyRound,
@@ -98,5 +98,5 @@ function SettingsCardLink({ card }: { card: SettingsCard }) {
   if (card.external) {
     return <a href={card.to} className={className} data-testid="settings-openapi-link">{content}</a>;
   }
-  return <Link to={card.to} className={className}>{content}</Link>;
+  return <Link to="." href={card.to} className={className}>{content}</Link>;
 }

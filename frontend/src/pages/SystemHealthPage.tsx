@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link } from "@tanstack/react-router";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -41,7 +41,7 @@ const heartbeatColumns: Column<SystemHealthHeartbeat>[] = [
       const role = nvRoleAlias({ component: hb.component });
       return (
         <Link
-          to={componentDiagnosticsHref({ clusterId: hb.cluster_id, component: hb.component, role: role.id })}
+          to="." href={componentDiagnosticsHref({ clusterId: hb.cluster_id, component: hb.component, role: role.id })}
           className="hover:text-[color:var(--color-primary)]"
           data-testid={`system-health-component-link-${safeTestID(hb.component)}`}
           title={`Open ${role.label.toLowerCase()} diagnostics`}
@@ -216,7 +216,7 @@ export function SystemHealthPage() {
                   </div>
                   <p className="text-muted-foreground">Created {formatBundleTime(job.created_at)}{job.started_at ? ` · started ${formatBundleTime(job.started_at)}` : ""}{job.finished_at ? ` · finished ${formatBundleTime(job.finished_at)}` : ""}</p>
                   {job.bundle_id && <p className="font-mono text-muted-foreground">Bundle {job.bundle_id}</p>}
-                  {job.audit_event_id && <Link to={`/audit?support_bundle_job_id=${job.id}`} className="text-[color:var(--color-primary)] hover:underline">Audit history</Link>}
+                  {job.audit_event_id && <Link to="." href={`/audit?support_bundle_job_id=${job.id}`} className="text-[color:var(--color-primary)] hover:underline">Audit history</Link>}
                   {job.status === "queued" && <p className="text-muted-foreground">Waiting for a worker. Status refreshes automatically.</p>}
                   {job.status === "running" && <p className="text-muted-foreground">Preparing the redacted bundle. Status refreshes automatically.</p>}
                   {job.status === "ready" && job.expires_at && <p className="text-muted-foreground">Download before {formatBundleTime(job.expires_at)}.</p>}

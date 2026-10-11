@@ -8,7 +8,7 @@
 // The "Org overview" callout below the grid links to the surfaces that legitimately
 // span clusters (CVE DB, Settings, Federation) so they remain one click away.
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertOctagon,
@@ -328,7 +328,7 @@ function ClusterTile({ cluster }: { cluster: ClusterSummary }) {
           {cluster.deployments} workloads · {stats.open_findings} open findings
         </span>
         <Link
-          to={`/clusters/${cluster.id}/dashboard`}
+          to="." href={`/clusters/${cluster.id}/dashboard`}
           data-testid="cluster-enter"
           className={cn(
             "inline-flex items-center gap-1.5 rounded-md border border-input bg-card px-2 py-1 text-xs font-medium",
@@ -397,7 +397,7 @@ function OrgOverviewCallout() {
         {items.map((item) => (
           <li key={item.to}>
             <Link
-              to={item.to}
+              to="." href={item.to}
               className="flex items-start gap-2 rounded border border-border bg-card p-2.5 text-xs hover:bg-accent transition-colors"
             >
               <span className="text-muted-foreground">{item.icon}</span>

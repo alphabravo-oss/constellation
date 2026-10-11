@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Boxes, ChevronLeft, Database, Download, FileJson, FileWarning, KeyRound, Layers, ShieldAlert, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
@@ -24,7 +24,7 @@ import { PageHeader } from "@/components/ui/page";
 import { StatCard } from "@/components/ui/stat-card";
 
 export function ImageScanDetailPage() {
-  const { resultId } = useParams<{ resultId: string }>();
+  const { resultId } = useParams({ strict: false });
   const { clusterId, isLoading: clusterLoading } = useCluster();
   const q = useQuery({
     queryKey: ["image-scan-result", resultId],
@@ -46,7 +46,7 @@ export function ImageScanDetailPage() {
     <div className="space-y-4" data-testid="image-scan-detail-page" data-cluster-id={clusterId ?? ""}>
       <PageHeader
         backLink={
-          <Link to={`/clusters/${clusterId}/images`} className="inline-flex items-center gap-1 hover:text-foreground">
+          <Link to="." href={`/clusters/${clusterId}/images`} className="inline-flex items-center gap-1 hover:text-foreground">
             <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
             Images
           </Link>
@@ -451,7 +451,7 @@ function FindingsTable({ findings }: { findings: ImageScanFinding[] }) {
         <>
           <span className="flex items-center gap-1.5">
             {finding.external_id ? (
-              <Link to={`/cve/${finding.external_id}`} className="font-mono text-xs font-medium hover:underline">{finding.external_id}</Link>
+              <Link to="." href={`/cve/${finding.external_id}`} className="font-mono text-xs font-medium hover:underline">{finding.external_id}</Link>
             ) : (
               <span className="font-mono text-xs">-</span>
             )}
@@ -515,7 +515,7 @@ function WorkloadsPanel({ workloads }: { workloads: ImpactedWorkload[] }) {
         {workloads.map((workload) => (
           <Link
             key={`${workload.cluster_id}:${workload.deployment_id}:${workload.image_ref}`}
-            to={`/clusters/${workload.cluster_id}/deployments/${workload.deployment_id}`}
+            to="." href={`/clusters/${workload.cluster_id}/deployments/${workload.deployment_id}`}
             className="block rounded-md border border-border p-3 hover:bg-accent"
           >
             <div className="flex items-center justify-between gap-2">

@@ -15,7 +15,8 @@
 // so it survives round-trips to the form page.
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate } from "@tanstack/react-router";
+import { useRouteSearchParams } from "@/lib/route-search";
 import { Edit3, FileText, FolderTree, ListChecks, Plus, Trash2 } from "lucide-react";
 
 import { fileProfiles } from "@/api/client";
@@ -29,7 +30,7 @@ export function FileMonitorPage() {
   const { clusterId, isLoading: clusterLoading } = useCluster();
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const [params, setParams] = useSearchParams();
+  const [params, setParams] = useRouteSearchParams();
   const selected = params.get("workload");
   const [error, setError] = useState<string | null>(null);
 
@@ -53,7 +54,7 @@ export function FileMonitorPage() {
   };
 
   const gotoForm = (segment: string) =>
-    navigate(`${segment}${activeWorkload ? `?workload=${encodeURIComponent(activeWorkload)}` : ""}`);
+    navigate({ href: `${segment}${activeWorkload ? `?workload=${encodeURIComponent(activeWorkload)}` : ""}` });
 
   const delMut = useMutation({
     mutationFn: (ruleID: string) =>

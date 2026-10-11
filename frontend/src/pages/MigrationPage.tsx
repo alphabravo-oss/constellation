@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, CheckCircle2, Download, RotateCcw, ShieldCheck, Wand2 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
 
 import { clusters as clustersApi, enterprise, type MigrationImportListItem, type MigrationPreview, type MigrationUnsupported } from "@/api/client";
@@ -522,7 +522,7 @@ export function MigrationPage() {
                   <StatusPill label={item.category} tone={readinessTone(item.category)} />
                 </div>
                 {item.href ? (
-                  <Link to={item.href} className="mt-2 inline-flex items-center gap-1 text-xs text-[color:var(--color-primary)] hover:underline">
+                  <Link to="." href={item.href} className="mt-2 inline-flex items-center gap-1 text-xs text-[color:var(--color-primary)] hover:underline">
                     Open <ArrowRight className="h-3 w-3" aria-hidden />
                   </Link>
                 ) : null}
@@ -563,7 +563,7 @@ export function MigrationPage() {
           {MIGRATION_RECOMMENDED_ACTIONS.map((action) => (
             <Link
               key={action.id}
-              to={action.href}
+              to="." href={action.href}
               className="group rounded-md border border-border bg-background p-3 transition-colors hover:border-[color:var(--color-primary)]/60 hover:bg-accent"
               data-testid={`migration-action-${action.id}`}
             >

@@ -1,7 +1,7 @@
 // Route: /settings/attestation-trust.
 import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import {
   ArrowLeft,
@@ -132,7 +132,7 @@ export function AttestationTrustPage() {
           <IconButton label="Verify pending attestations" disabled={busy || !policy.enabled} onClick={() => verifyPending.mutate(policy.id)}>
             <RefreshCw className="h-3.5 w-3.5" aria-hidden />
           </IconButton>
-          <IconButton label="Edit policy" disabled={busy} onClick={() => navigate(`/settings/attestation-trust/${policy.id}`)}>
+          <IconButton label="Edit policy" disabled={busy} onClick={() => navigate({ href: `/settings/attestation-trust/${policy.id}` })}>
             <Edit2 className="h-3.5 w-3.5" aria-hidden />
           </IconButton>
           <IconButton label="Delete policy" disabled={busy} onClick={() => { if (window.confirm(`Delete "${policy.name}"? Existing attestation links will no longer satisfy admission.`)) { removePolicy.mutate(policy.id); } }}>
@@ -159,7 +159,7 @@ export function AttestationTrustPage() {
         }
         description="Verify that container images are signed by a source you trust before they're allowed to run (Sigstore/cosign, SLSA provenance)."
         actions={
-          <Button variant="primary" onClick={() => navigate("/settings/attestation-trust/new")} data-testid="attestation-trust-new">
+          <Button variant="primary" onClick={() => navigate({ href: "/settings/attestation-trust/new" })} data-testid="attestation-trust-new">
             <Plus className="h-4 w-4" aria-hidden />
             New policy
           </Button>
@@ -220,7 +220,7 @@ export function AttestationTrustPage() {
                     policy={policy}
                     selected={false}
                     busy={quickUpdate.isPending || removePolicy.isPending || verifyPending.isPending}
-                    onEdit={() => navigate(`/settings/attestation-trust/${policy.id}`)}
+                    onEdit={() => navigate({ href: `/settings/attestation-trust/${policy.id}` })}
                     onToggleEnabled={() => quickUpdate.mutate({ id: policy.id, patch: { enabled: !policy.enabled } })}
                     onToggleAuto={() => quickUpdate.mutate({ id: policy.id, patch: { auto_verify: !policy.auto_verify } })}
                     onVerify={() => verifyPending.mutate(policy.id)}

@@ -4,7 +4,8 @@
 // deployments first and expose the factors behind the score. The discoverer
 // rolls image/workload findings and runtime exposure into deployments.risk_score.
 import { useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "@tanstack/react-router";
+import { useRouteSearchParams } from "@/lib/route-search";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, Flame, Layers, ShieldAlert } from "lucide-react";
 import { deployments, type Deployment } from "@/api/client";
@@ -19,7 +20,7 @@ import { usePlatformComponentVisibility } from "@/hooks/usePlatformComponentVisi
 
 export function DeploymentsPage() {
   const { clusterId } = useCluster();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useRouteSearchParams();
   const search = searchParams.get("q") ?? "";
   const [namespace, setNamespace] = useState("");
   const [hidePlatformComponents, setHidePlatformComponents] = usePlatformComponentVisibility();
@@ -65,7 +66,7 @@ export function DeploymentsPage() {
       header: "Deployment",
       cell: (d) => (
         <>
-          <Link to={`/clusters/${clusterId}/deployments/${d.id}`} className="hover:underline">
+          <Link to="." href={`/clusters/${clusterId}/deployments/${d.id}`} className="hover:underline">
             <span className="text-foreground font-medium">
               {d.namespace}/{d.name}
             </span>
@@ -76,7 +77,7 @@ export function DeploymentsPage() {
           {Number(d.risk_factors?.run_as_root) > 0 && <span className="ml-1 rounded px-1 py-px text-[9px] font-semibold uppercase" style={{ background: "color-mix(in oklab, var(--color-severity-high) 16%, transparent)", color: "var(--color-severity-high)" }} title="runs as root">root</span>}
           {Number(d.risk_factors?.host_network) > 0 && <span className="ml-1 rounded px-1 py-px text-[9px] font-semibold uppercase" style={{ background: "color-mix(in oklab, var(--color-severity-high) 16%, transparent)", color: "var(--color-severity-high)" }} title="host network">hostnet</span>}
           <Link
-            to={`/clusters/${clusterId}/risk/deployment/${encodeURIComponent(d.id)}`}
+            to="." href={`/clusters/${clusterId}/risk/deployment/${encodeURIComponent(d.id)}`}
             className="ml-2 text-[10px] text-muted-foreground hover:text-foreground hover:underline"
             data-testid="deployment-risk-workspace-link"
           >

@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link, useLocation, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "@tanstack/react-router";
 import { Activity, Boxes, KeyRound, PackageCheck, ShieldCheck, UploadCloud } from "lucide-react";
 
 import { clusters } from "@/api/client";
@@ -13,7 +13,7 @@ import { componentDiagnosticsHref, nvRoleAlias } from "@/lib/component-roles";
 type HealthComponent = Awaited<ReturnType<typeof clusters.health>>["components"][number];
 
 export function ClusterHealthPage() {
-  const { id: clusterID } = useParams<{ id: string }>();
+  const { id: clusterID } = useParams({ strict: false });
   const location = useLocation();
   const list = useQuery({ queryKey: ["clusters"], queryFn: () => clusters.list() });
   const clusterList = useMemo(() => sortClustersByActivity(list.data?.clusters ?? []), [list.data?.clusters]);
@@ -44,7 +44,7 @@ export function ClusterHealthPage() {
         const role = nvRoleAlias({ name: c.name, kind: c.kind });
         return (
           <Link
-            to={componentDiagnosticsHref({ clusterId: selected?.id, component: c.name, role: role.id })}
+            to="." href={componentDiagnosticsHref({ clusterId: selected?.id, component: c.name, role: role.id })}
             className="font-medium hover:text-[color:var(--color-primary)]"
             data-testid={`cluster-health-component-link-${safeTestID(c.name)}`}
             title={`Open ${role.label.toLowerCase()} diagnostics`}
@@ -78,7 +78,7 @@ export function ClusterHealthPage() {
           {clusterList.map((cluster) => (
             <Link
               key={cluster.id}
-              to={`/clusters/${cluster.id}/health${location.search}${location.hash}`}
+              to="." href={`/clusters/${cluster.id}/health${location.searchStr}${location.hash ? `#${location.hash}` : ""}`}
               className={`w-full rounded-lg border p-4 text-left transition-colors ${
                 selected?.id === cluster.id ? "border-foreground bg-accent" : "border-border bg-card hover:bg-accent/50"
               }`}

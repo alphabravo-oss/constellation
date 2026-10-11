@@ -6,7 +6,7 @@
 // clusters without re-architecting. Includes a "Back to all clusters" item that
 // routes to /clusters (the picker).
 import { useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "@tanstack/react-router";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { Check, ChevronsUpDown, Search, ServerCog, ArrowLeft } from "lucide-react";
 
@@ -34,7 +34,7 @@ export function ClusterSwitcher() {
     setOpen(false);
     const m = location.pathname.match(/^\/clusters\/[^/]+\/(.+)$/);
     const subPath = m?.[1] ?? "dashboard";
-    navigate(`/clusters/${nextID}/${subPath}`);
+    navigate({ href: `/clusters/${nextID}/${subPath}` });
   }
 
   const label = cluster?.name ?? clusterId?.slice(0, 8) ?? "Select cluster";
@@ -114,7 +114,7 @@ export function ClusterSwitcher() {
           <DropdownMenu.Item
             onSelect={() => {
               setOpen(false);
-              navigate("/clusters");
+              navigate({ href: "/clusters" });
             }}
             className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs outline-none data-[highlighted]:bg-accent"
           >
