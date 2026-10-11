@@ -788,6 +788,19 @@ postgres:
     #       secretAccessKey: { name: cnpg-backup, key: SECRET_ACCESS_KEY }
     #   retentionPolicy: "30d"
     backup: {}
+    # CNPG-I Barman Cloud plugin and ObjectStore CRs are installed separately.
+    # Prefer this path for new deployments; backup above is legacy compatibility.
+    barmanCloud:
+      enabled: false
+      pluginName: barman-cloud.cloudnative-pg.io
+      objectStoreName: ""
+      recovery:
+        enabled: false
+        # Recovery initializes a NEW cluster; never enable on the live cluster.
+        sourceName: origin
+        objectStoreName: ""
+        serverName: ""
+        targetTime: "" # empty replays to the latest available WAL
     scheduledBackup:
       enabled: false
       # Six-field cron syntax used by CNPG (seconds first): daily at 02:00 UTC.

@@ -16,3 +16,25 @@
 {{- if and .Values.gateway.enabled .Values.ingress.enabled }}
 {{- fail "enable only one of gateway.enabled or ingress.enabled" }}
 {{- end }}
+{{- $cnpg := .Values.postgres.cloudnativepg }}
+{{- $barman := $cnpg.barmanCloud }}
+{{- if or $barman.enabled $barman.recovery.enabled }}
+{{- if ne (include "constellation.postgresMode" .) "cnpg" }}
+{{- fail "Barman Cloud configuration requires postgres.mode=cnpg" }}
+{{- end }}
+{{- if $cnpg.backup }}
+{{- fail "configure Barman Cloud plugin or legacy postgres.cloudnativepg.backup, not both" }}
+{{- end }}
+{{- $_ := required "Barman Cloud pluginName is required" $barman.pluginName }}
+{{- end }}
+{{- if $barman.enabled }}
+{{- $_ := required "Barman Cloud objectStoreName is required" $barman.objectStoreName }}
+{{- end }}
+{{- if $barman.recovery.enabled }}
+{{- $_ := required "Barman Cloud recovery sourceName is required" $barman.recovery.sourceName }}
+{{- $_ := required "Barman Cloud recovery objectStoreName is required" $barman.recovery.objectStoreName }}
+{{- $_ := required "Barman Cloud recovery serverName is required" $barman.recovery.serverName }}
+{{- if and $barman.enabled (eq $barman.objectStoreName $barman.recovery.objectStoreName) (eq $barman.recovery.serverName (printf "%s-postgres" (include "constellation.fullname" .))) }}
+{{- fail "recovery source must differ from the destination archive identity" }}
+{{- end }}
+{{- end }}

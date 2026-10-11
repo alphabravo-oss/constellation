@@ -37,6 +37,7 @@ spec:
   instances: {{ $cfg.instances }}
   imageName: {{ $cfg.imageName }}
   primaryUpdateStrategy: {{ $cfg.primaryUpdateStrategy }}
+  enableSuperuserAccess: false
   {{- if $cfg.affinity.enabled }}
   affinity:
     topologyKey: {{ $cfg.affinity.topologyKey | quote }}
@@ -53,7 +54,35 @@ spec:
   backup:
     {{- toYaml . | nindent 4 }}
   {{- end }}
+  {{- if $cfg.barmanCloud.enabled }}
+  plugins:
+    - name: {{ $cfg.barmanCloud.pluginName | quote }}
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: {{ $cfg.barmanCloud.objectStoreName | quote }}
+  {{- end }}
+  {{- if $cfg.barmanCloud.recovery.enabled }}
+  externalClusters:
+    - name: {{ $cfg.barmanCloud.recovery.sourceName | quote }}
+      plugin:
+        name: {{ $cfg.barmanCloud.pluginName | quote }}
+        parameters:
+          barmanObjectName: {{ $cfg.barmanCloud.recovery.objectStoreName | quote }}
+          serverName: {{ $cfg.barmanCloud.recovery.serverName | quote }}
+  {{- end }}
   bootstrap:
+    {{- if $cfg.barmanCloud.recovery.enabled }}
+    recovery:
+      source: {{ $cfg.barmanCloud.recovery.sourceName | quote }}
+      database: {{ $cfg.database | quote }}
+      owner: {{ $cfg.username | quote }}
+      secret:
+        name: {{ include "constellation.fullname" . }}-postgres
+      {{- with $cfg.barmanCloud.recovery.targetTime }}
+      recoveryTarget:
+        targetTime: {{ . | quote }}
+      {{- end }}
+    {{- else }}
     initdb:
       database: {{ $cfg.database }}
       owner: {{ $cfg.username }}
@@ -63,4 +92,5 @@ spec:
         - CREATE EXTENSION IF NOT EXISTS pgcrypto
         - CREATE EXTENSION IF NOT EXISTS pg_trgm
         - CREATE EXTENSION IF NOT EXISTS vector
+    {{- end }}
 {{- end }}
