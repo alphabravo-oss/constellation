@@ -1,17 +1,4 @@
-// Wave B1: Runtime policies UI.
-//
-// Two tabs:
-//   - Authored: list of policies for the selected cluster. Each row shows
-//     the mode badge, workload, rule count, last update, and the four
-//     action buttons (Promote / Demote / Edit / Delete). Promote pops a
-//     confirmation since it starts dropping packets.
-//   - Editor: a barebones form for now (workload, name, JSON rules
-//     textarea, mode). The rich form (peer dropdowns, port multi-add,
-//     L7 picker) is a follow-up — landing the round-trip first keeps
-//     the slice useful even while the editor evolves.
-//
-// All writes go through the API which writes audit_events; the
-// auto-rollback watcher (Wave A5) handles enforce-mode safety.
+// Runtime policy inventory and explicit mode-change confirmations.
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
@@ -31,6 +18,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
+import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { StatCard } from "@/components/ui/stat-card";
 import { StatusPill } from "@/components/ui/status-pill";
 import { LoadingState, ErrorState, EmptyState } from "@/components/ui/states";
@@ -125,7 +113,7 @@ export function RuntimePoliciesPage() {
     <div className="space-y-6" data-testid="runtime-policies-page">
       <PageHeader
         title="Runtime Policies"
-        description="Per-workload network policy bundles dp enforces. New policies start in monitor mode (observe only); promote one to enforce to start dropping matched packets."
+        description="Manage network rules for individual workloads. New policies observe traffic; promote a reviewed policy to enable enforcement."
         actions={
           <Button
             size="sm"
@@ -138,10 +126,13 @@ export function RuntimePoliciesPage() {
         }
       />
 
+      <VerdictBanner status={q.isError ? "degraded" : "info"}
+        title={q.isError ? "Runtime policies could not be loaded" : q.isPending ? "Loading runtime policies" : policies.length === 0 ? "No runtime policies configured" : `${enforceCount} policies configured to enforce`}
+        detail="Configured modes describe policy intent. Review observed matches before promotion; mode alone does not prove agent enforcement." />
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <StatCard label="Total policies" value={policies.length} icon={<ListChecks className="h-3.5 w-3.5" />} />
-        <StatCard label="Monitoring" value={monitorCount} icon={<ShieldAlert className="h-3.5 w-3.5" />} />
-        <StatCard label="Enforcing" value={enforceCount} icon={<ShieldCheck className="h-3.5 w-3.5" />} tone={enforceCount > 0 ? "accent" : "neutral"} />
+        <StatCard label="Total policies" value={q.data ? policies.length : "—"} icon={<ListChecks className="h-3.5 w-3.5" />} />
+        <StatCard label="Monitoring" value={q.data ? monitorCount : "—"} icon={<ShieldAlert className="h-3.5 w-3.5" />} />
+        <StatCard label="Enforcing" value={q.data ? enforceCount : "—"} icon={<ShieldCheck className="h-3.5 w-3.5" />} tone={enforceCount > 0 ? "accent" : "neutral"} />
       </section>
 
       <div className="overflow-x-auto rounded-lg border border-border bg-card" data-testid="runtime-policies-list">
@@ -152,13 +143,14 @@ export function RuntimePoliciesPage() {
             rows={policies}
             columns={columns}
             rowKey={(p) => p.id}
-            showDensityToggle={false}
+            preferencesKey="runtime-policies"
+            exportFileName="runtime-policies"
             emptyState={<EmptyState title="No policies yet" hint="Click New policy to author one." />}
           />
         )}
       </div>
 
-      <PromoteConfirmDialog
+      <PromoteConfirmDialog key={confirmPromoteID ?? "closed"}
         policyID={confirmPromoteID}
         onClose={() => setConfirmPromoteID(null)}
         onConfirmed={() => {
@@ -200,7 +192,7 @@ function PolicyActions({
           Demote
         </Button>
       )}
-      <Button size="sm" variant="ghost" onClick={onEdit} data-testid={`runtime-policy-edit-${p.id}`}>
+      <Button size="sm" variant="ghost" aria-label={`Edit ${p.name}`} onClick={onEdit} data-testid={`runtime-policy-edit-${p.id}`}>
         <Edit3 className="h-3.5 w-3.5" />
       </Button>
       <Button
@@ -210,10 +202,12 @@ function PolicyActions({
           if (window.confirm(`Delete policy "${p.name}"?`)) remove.mutate();
         }}
         disabled={remove.isPending}
+        aria-label={`Delete ${p.name}`}
         data-testid={`runtime-policy-delete-${p.id}`}
       >
         <Trash2 className="h-3.5 w-3.5" />
       </Button>
+      {(demote.isError || remove.isError) && <span role="alert" className="text-xs text-status-error">Action failed. Check your permissions and try again.</span>}
     </div>
   );
 }
@@ -246,11 +240,11 @@ function PromoteConfirmDialog({
 
   const stats = statsQ.data;
   return (
-    <Dialog.Root open onOpenChange={(o) => { if (!o) onClose(); }}>
+    <Dialog.Root open onOpenChange={(o) => { if (!o && !promote.isPending) onClose(); }}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-background/40 backdrop-blur-[1px]" />
         <Dialog.Content
-          className="fixed left-1/2 top-1/2 z-50 w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-card p-4 shadow-[var(--elev-3)]"
+          className="fixed left-1/2 top-1/2 z-50 w-[min(520px,calc(100%-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-card p-4 shadow-[var(--elev-3)]"
           data-testid="runtime-policy-promote-dialog"
         >
           <div className="flex items-start justify-between gap-2">
@@ -258,13 +252,15 @@ function PromoteConfirmDialog({
               <ShieldCheck className="h-4 w-4 text-[color:var(--color-status-success)]" />
               Promote to enforce
             </Dialog.Title>
-            <Dialog.Close className="rounded p-1 hover:bg-accent" aria-label="Close" data-testid="runtime-policy-promote-cancel">
+            <Dialog.Close disabled={promote.isPending} className="rounded p-1 hover:bg-accent" aria-label="Close" data-testid="runtime-policy-promote-cancel">
               <X className="h-4 w-4" />
             </Dialog.Close>
           </div>
-          <p className="mt-2 text-xs text-muted-foreground">
-            dp will start dropping packets matched by this policy's <code>deny</code> rules.
-          </p>
+          <Dialog.Description className="mt-2 text-xs text-muted-foreground">
+            Agents configured to enforce will block packets matched by this policy's <code>deny</code> rules.
+          </Dialog.Description>
+          {statsQ.isError && <p role="alert">Match preview could not be loaded. <button type="button" className="underline" onClick={() => void statsQ.refetch()}>Retry preview</button></p>}
+          {promote.isError && <p role="alert">Promotion failed. The policy may have changed or you may lack permission. Refresh and try again.</p>}
           <MatchStatsPane stats={stats} loading={statsQ.isLoading} />
           <p className="mt-2 text-[11px] text-muted-foreground">
             The auto-rollback watcher demotes back to monitor automatically if
@@ -272,8 +268,8 @@ function PromoteConfirmDialog({
             1000 / 60s) — your safety belt against a bad rule.
           </p>
           <div className="mt-3 flex items-center justify-end gap-2">
-            <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
-            <Button size="sm" onClick={() => promote.mutate()} disabled={promote.isPending} data-testid="runtime-policy-promote-confirm">
+            <Button variant="outline" size="sm" disabled={promote.isPending} onClick={onClose}>Cancel</Button>
+            <Button size="sm" onClick={() => promote.mutate()} disabled={promote.isPending || statsQ.isPending || statsQ.isError} data-testid="runtime-policy-promote-confirm">
               {promote.isPending ? "Promoting…" : "Promote"}
             </Button>
           </div>

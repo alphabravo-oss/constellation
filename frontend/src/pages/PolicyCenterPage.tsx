@@ -16,6 +16,9 @@ import {
 
 import { useCluster } from "@/hooks/useCluster";
 import { PageContainer, PageHeader, PageSection } from "@/components/ui/page";
+import { Tabs, useTabParam } from "@/components/ui/tabs";
+import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { StatCard } from "@/components/ui/stat-card";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/status-pill";
@@ -199,6 +202,8 @@ function MigrationDiagnostics({ diagnostics, clusterId }: { diagnostics: Migrati
 
 export function PolicyCenterPage() {
   const { clusterId } = useCluster();
+  const [requestedTab, setTab] = useTabParam("tab", "families");
+  const tab = ["families", "migration", "modes"].includes(requestedTab) ? requestedTab : "families";
   const queryClient = useQueryClient();
   const importsQuery = useInfiniteQuery({
     queryKey: ["migration-imports-pages"],
@@ -218,7 +223,7 @@ export function PolicyCenterPage() {
     <PageContainer data-testid="policy-center-page">
       <PageHeader
         title="Policy Center"
-        description="One cluster policy entry point for NeuVector-style groups, rules, profiles, sensors, and response actions."
+        description="Manage this cluster’s policies, review migration diagnostics, and open the workflow for each policy family."
         actions={
           <Button asChild variant="outline">
             <Link to="/settings/migration">Migration Imports</Link>
@@ -226,20 +231,19 @@ export function PolicyCenterPage() {
         }
       />
 
-      <PageSection
-        title="Mode Vocabulary"
-        description="NeuVector modes are shown beside the Constellation mode used by the target policy family."
-      >
-        <div className="grid gap-3 md:grid-cols-3" data-testid="policy-mode-vocabulary">
-          <ModeBridge nv="Discover" constellation="Learn" detail="Observe behavior and build candidate baselines." />
-          <ModeBridge nv="Monitor" constellation="Monitor" detail="Detect and alert without blocking traffic or workload activity." />
-          <ModeBridge nv="Protect" constellation="Enforce" detail="Block or deny according to the active rule family." />
-        </div>
-      </PageSection>
-
+      <VerdictBanner status={!clusterId || importsQuery.isError ? "degraded" : "info"}
+        title={!clusterId ? "Select a cluster to manage policies" : importsQuery.isError ? "Migration diagnostics could not be refreshed" : "Choose a policy family to review or change"}
+        detail="This directory links to configured policies. Enforcement status must be checked in the selected policy workflow." />
+      <section className="grid gap-3 sm:grid-cols-3">
+        <StatCard label="Policy families" value={policyFamilies.length} />
+        <StatCard label="Families with YAML transfer" value={policyFamilies.filter((family) => family.portable).length} />
+        <StatCard label="Loaded import diagnostics" value={importsQuery.data ? diagnostics.length : "—"} hint="Organization import history" />
+      </section>
+      <Tabs value={tab} onValueChange={setTab} items={[
+        { value: "families", label: "Policy families", content: (
       <PageSection
         title="Policy Families"
-        description="Every enforcement and detection surface reachable from one place. Saved migration diagnostics are import-time findings, not this cluster's current policies. Selected-cluster and unknown-target records are labeled separately; other-cluster records appear below."
+        description="Every enforcement and detection surface reachable from one place. Saved migration diagnostics are import-time findings, not this cluster's current policies. Selected-cluster records are labeled; missing IDs remain unknown or unspecified. Other-cluster records are in the Migration diagnostics tab."
       >
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3" data-testid="policy-family-grid">
           {policyFamilies.map((family) => (
@@ -252,7 +256,6 @@ export function PolicyCenterPage() {
                   </span>
                 }
                 description={family.nvName}
-                action={family.mode ? <ModePair mode={family.mode} /> : undefined}
                 className="rounded-lg"
               >
                 <div className="flex min-h-[116px] flex-col justify-between gap-4">
@@ -304,6 +307,8 @@ export function PolicyCenterPage() {
           ))}
         </div>
       </PageSection>
+        ) },
+        { value: "migration", label: "Migration diagnostics", content: (
       <PageSection title="Migration Diagnostics" description="Org-wide saved NeuVector import history. Only records with a matching target ID are attributed to the selected cluster; missing IDs remain unknown or unspecified. Loaded pages may not cover all history.">
         {importsQuery.isPending ? <p role="status">Loading migration diagnostics…</p> : null}
         {importsQuery.isError && !importsQuery.isFetchNextPageError ? (
@@ -331,6 +336,21 @@ export function PolicyCenterPage() {
           </Button>
         ) : null}
       </PageSection>
+        ) },
+        { value: "modes", label: "Mode guide", content: (
+      <PageSection
+        title="Mode Vocabulary"
+        description="NeuVector modes are shown beside the Constellation mode used by the target policy family."
+      >
+        <div className="grid gap-3 md:grid-cols-3" data-testid="policy-mode-vocabulary">
+          <ModeBridge nv="Discover" constellation="Learn" detail="Observe behavior and build candidate baselines." />
+          <ModeBridge nv="Monitor" constellation="Monitor" detail="Detect and alert without blocking traffic or workload activity." />
+          <ModeBridge nv="Protect" constellation="Enforce" detail="Block or deny according to the active rule family." />
+        </div>
+      </PageSection>
+
+        ) },
+      ]} />
     </PageContainer>
   );
 }
@@ -465,20 +485,6 @@ function ModeBridge({ nv, constellation, detail }: { nv: string; constellation: 
   );
 }
 
-function ModePair({ mode }: { mode: "learn" | "monitor" | "enforce" }) {
-  return (
-    <div className="flex flex-wrap items-center justify-end gap-1.5">
-      <StatusPill label={nvMode(mode)} tone={modeTone(mode)} />
-      <StatusPill label={mode} tone={modeTone(mode)} />
-    </div>
-  );
-}
-
-function nvMode(mode: "learn" | "monitor" | "enforce") {
-  if (mode === "learn") return "Discover";
-  if (mode === "enforce") return "Protect";
-  return "Monitor";
-}
 
 function modeTone(mode: string): "neutral" | "success" | "warning" | "error" | "info" | "pending" | "accent" {
   const normalized = mode.toLowerCase();

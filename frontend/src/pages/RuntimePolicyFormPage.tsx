@@ -5,7 +5,7 @@
 // cluster comes from the parent :id route param (query-string fallback for
 // standalone routing). All data logic + testids are preserved verbatim from
 // the former PolicyEditor.
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useRouteSearchParams } from "@/lib/route-search";
@@ -13,6 +13,8 @@ import { ArrowLeft } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page";
+import { Collapse } from "@/components/ui/collapse";
+import { useTabParam } from "@/components/ui/tabs";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/cn";
 
@@ -25,40 +27,26 @@ import {
 } from "@/api/client";
 
 export function RuntimePolicyFormPage() {
-  const navigate = useNavigate();
   const [search] = useRouteSearchParams();
   const { id: pathClusterID, policyId } = useParams({ strict: false });
   const clusterID = pathClusterID ?? search.get("cluster_id") ?? "";
-  const policyID = policyId ?? null;
+  const existing = useQuery({ queryKey: ["runtime-policy", policyId], queryFn: () => runtimePolicies.get(policyId!), enabled: !!policyId, gcTime: 0 });
+  const backTo = `/clusters/${clusterID}/runtime-policies${search.size ? `?${search}` : ""}`;
+  if (!clusterID) return <p>Select a cluster before editing a policy.</p>;
+  if (policyId && existing.isPending) return <p>Loading runtime policy...</p>;
+  if (policyId && (!existing.data || existing.data.cluster_id !== clusterID)) return <div className="space-y-4"><p role="alert">This policy could not be loaded for the selected cluster.</p><Link to="." href={backTo}>Back to runtime policies</Link></div>;
+  return <RuntimePolicyEditor key={`${clusterID}:${policyId ?? "new"}`} clusterID={clusterID} policyID={policyId ?? null} initial={existing.data} refreshFailed={existing.isError} backTo={backTo} />;
+}
 
+function RuntimePolicyEditor({ clusterID, policyID, initial, refreshFailed, backTo }: { clusterID: string; policyID: string | null; initial?: RuntimePolicy; refreshFailed: boolean; backTo: string }) {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const existing = useQuery({
-    queryKey: ["runtime-policy", policyID],
-    queryFn: () => runtimePolicies.get(policyID as string),
-    enabled: !!policyID,
-  });
-
-  const [workload, setWorkload] = useState("");
-  const [namespace, setNamespace] = useState("");
-  const [name, setName] = useState("");
-  const [rulesText, setRulesText] = useState("[]");
+  const [workload, setWorkload] = useState(initial?.workload ?? "");
+  const [namespace, setNamespace] = useState(initial?.namespace ?? "");
+  const [name, setName] = useState(initial?.name ?? "");
+  const [rulesText, setRulesText] = useState(typeof initial?.rules === "string" ? initial.rules : JSON.stringify(initial?.rules ?? [], null, 2));
   const [err, setErr] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (existing.data) {
-      setWorkload(existing.data.workload);
-      setNamespace(existing.data.namespace);
-      setName(existing.data.name);
-      setRulesText(JSON.stringify(Array.isArray(existing.data.rules) ? existing.data.rules : [], null, 2));
-    } else if (!policyID) {
-      setWorkload("");
-      setNamespace("");
-      setName("");
-      setRulesText("[]");
-    }
-  }, [existing.data, policyID]);
-
-  const backTo = `/clusters/${clusterID}/runtime-policies${search.size ? `?${search}` : ""}`;
   const goBack = () => navigate({ href: backTo });
 
   const parseRules = (): RuntimePolicyRule[] => {
@@ -86,11 +74,12 @@ export function RuntimePolicyFormPage() {
         rules: parsedRules,
       });
     },
-    onSuccess: () => {
+    onSuccess: (saved) => {
+      queryClient.setQueryData(["runtime-policy", saved.id], saved);
       void queryClient.invalidateQueries({ queryKey: ["runtime-policies", clusterID] });
       goBack();
     },
-    onError: (e) => setErr((e as Error).message),
+    onError: () => setErr("Could not save this policy. Check its rules and your permissions, then try again. Your draft is preserved."),
   });
 
   // Wave B3: Simulate the candidate ruleset against the workload's
@@ -112,8 +101,9 @@ export function RuntimePolicyFormPage() {
       }
       return runtimePolicies.simulate(policyID, { rules: parsedRules, as_mode: "enforce" }, 24);
     },
+    onMutate: () => setSimStats(undefined),
     onSuccess: setSimStats,
-    onError: (e) => setErr((e as Error).message),
+    onError: () => setErr("Simulation could not complete. Check the rules and try again."),
   });
 
   // Wave B4: Generate rules from observed traffic for the workload.
@@ -132,14 +122,17 @@ export function RuntimePolicyFormPage() {
     },
     onSuccess: (g) => {
       setGenResult(g);
+      setSimStats(undefined);
       // Prefill the editor with the generated rules so the operator can
       // review + tweak before saving. We DO NOT auto-save — auto-gen is
       // a draft, not a commit.
       setRulesText(JSON.stringify(g.rules, null, 2));
     },
-    onError: (e) => setErr((e as Error).message),
+    onError: () => setErr("Rules could not be generated. Check the workload and try again."),
   });
 
+  const busy = save.isPending || simulate.isPending || generate.isPending;
+  const rulesValid = Array.isArray(tryParse(rulesText));
   return (
     <div className="space-y-6">
       <PageHeader
@@ -148,58 +141,64 @@ export function RuntimePolicyFormPage() {
         backLink={<Link to="." href={backTo} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Runtime Policies</Link>}
       />
 
-      <Card title="Policy" description="Rules dp enforces for the selected workload.">
-        <div className="space-y-4" data-testid="runtime-policies-editor">
+      {refreshFailed && <p role="alert">Could not refresh the saved policy. Your draft is preserved.</p>}
+      <Card title="Policy" description="Review rules for this workload before saving. New policies observe traffic until promoted.">
+        <form className="space-y-4" data-testid="runtime-policies-editor" onSubmit={(event) => { event.preventDefault(); if (!busy && rulesValid && name.trim() && workload.trim() && namespace.trim()) save.mutate(); }}>
+          <fieldset disabled={busy} className="space-y-4">
           <div className="space-y-3" data-testid="runtime-policies-editor-form">
             <Field label="Workload" value={workload} onChange={setWorkload} placeholder="namespace/deployment" disabled={!!policyID} />
             <Field label="Namespace" value={namespace} onChange={setNamespace} placeholder="default" disabled={!!policyID} />
             <Field label="Name" value={name} onChange={setName} placeholder="block-egress-to-internet" />
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Rules (JSON)</div>
-            <textarea
+            <label htmlFor="runtime-policy-rules" className="text-sm text-muted-foreground">Rules (JSON)</label>
+            <textarea id="runtime-policy-rules"
               className="h-[300px] w-full rounded border border-input bg-card p-2 font-mono text-[11px] outline-none focus:border-[color:var(--color-primary)]"
               value={rulesText}
-              onChange={(e) => setRulesText(e.target.value)}
+              onChange={(e) => { setRulesText(e.target.value); setSimStats(undefined); setGenResult(undefined); }}
               spellCheck={false}
               data-testid="runtime-policies-editor-rules"
             />
+            {!rulesValid && <p role="alert">Rules must be a valid JSON array.</p>}
             {err && (
-              <div className="rounded border border-[color:var(--color-status-error)] bg-card p-2 text-[11px] text-[color:var(--color-status-error)]" data-testid="runtime-policies-editor-error">
+              <div className="rounded border border-[color:var(--color-status-error)] bg-card p-2 text-[11px] text-[color:var(--color-status-error)]" role="alert" data-testid="runtime-policies-editor-error">
                 {err}
               </div>
             )}
             <div className="flex items-center gap-2">
-              <Button onClick={() => save.mutate()} disabled={save.isPending} data-testid="runtime-policies-editor-save">
+              <Button type="submit" disabled={busy || !rulesValid || !name.trim() || !workload.trim() || !namespace.trim()} data-testid="runtime-policies-editor-save">
                 {policyID ? "Save changes" : "Create (in monitor mode)"}
               </Button>
               <Button
-                variant="outline"
+                type="button" variant="outline"
                 onClick={() => simulate.mutate()}
-                disabled={simulate.isPending || !policyID}
+                disabled={busy || !policyID || !rulesValid}
                 data-testid="runtime-policies-editor-simulate"
                 title={policyID ? "Run the current rules against the last 24h of observed flows for this workload" : "Save the policy first to enable simulation"}
               >
                 {simulate.isPending ? "Simulating…" : "Simulate"}
               </Button>
               <Button
-                variant="outline"
+                type="button" variant="outline"
                 onClick={() => generate.mutate()}
-                disabled={generate.isPending || !workload}
+                disabled={busy || !workload}
                 data-testid="runtime-policies-editor-generate"
                 title="Synthesize a default-deny ruleset from the last 24h of observed traffic for this workload. Threat-tagged flows are excluded."
               >
                 {generate.isPending ? "Generating…" : "Generate from traffic"}
               </Button>
-              <Button variant="ghost" onClick={goBack}>Cancel</Button>
+              <Button type="button" variant="ghost" onClick={goBack}>Cancel</Button>
               <span className="text-[10px] text-muted-foreground">
                 New policies always start in <b>monitor</b>. Promote separately to enforce.
               </span>
             </div>
           </div>
+          <Collapse label="Advanced: request preview">
           <div className="space-y-2" data-testid="runtime-policies-editor-preview">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Live preview</div>
             <pre className="h-[280px] overflow-auto rounded border border-border bg-background/40 p-2 font-mono text-[10px] leading-snug">
               {JSON.stringify({ cluster_id: clusterID, workload, namespace, name, rules: tryParse(rulesText) }, null, 2)}
             </pre>
+          </div>
+          </Collapse>
             {simStats && (
               <>
                 <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Simulation</div>
@@ -207,8 +206,8 @@ export function RuntimePolicyFormPage() {
               </>
             )}
             {genResult && <GenerateResultPane result={genResult} />}
-          </div>
-        </div>
+          </fieldset>
+        </form>
       </Card>
     </div>
   );
@@ -218,7 +217,8 @@ export function RuntimePolicyFormPage() {
 // looked at, how many threat-tagged flows it deliberately skipped, and
 // downloadable NetworkPolicy YAML in three flavors.
 function GenerateResultPane({ result }: { result: GeneratePolicyResponse }) {
-  const [yamlTab, setYamlTab] = useState<"native" | "cilium" | "calico">("native");
+  const [requestedFormat, setYamlTab] = useTabParam("format", "native");
+  const yamlTab = requestedFormat === "cilium" || requestedFormat === "calico" ? requestedFormat : "native";
   const yaml = result.yaml[yamlTab];
   const download = (flavor: string) => {
     const blob = new Blob([result.yaml[flavor as keyof typeof result.yaml]], { type: "text/yaml" });
@@ -310,10 +310,11 @@ function Field({
   disabled?: boolean;
 }) {
   return (
-    <div>
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+    <label className="block">
+      <span className="text-sm text-muted-foreground">{label}</span>
       <input
         type="text"
+        required
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
@@ -323,7 +324,7 @@ function Field({
           disabled && "opacity-60",
         )}
       />
-    </div>
+    </label>
   );
 }
 

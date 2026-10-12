@@ -176,6 +176,27 @@ Live shared-browser checks cover list tabs, dedicated registration, advanced
 settings, Cancel and hard reload. Live credential rotation was not exercised.
 This advances UI-1; the full console audit and its acceptance items remain open.
 
+The policy-console continuation is deployed at Helm revision **29**. Runtime
+policy editors wait for a successful same-cluster load, preserve string-encoded
+rules, and keep drafts across background refreshes and refresh failures. Required
+fields and JSON-array validation prevent invalid form submissions; overlapping
+save/simulate/generate requests are disabled, stale simulation evidence clears when
+rules change, and transport failures are shown without raw error text. Request
+previews use collapsed disclosure; generated YAML format is URL-linked. The list
+has a verdict, shared table preferences/export and explicit action failures.
+Promotion waits for its match preview and exposes preview retry/failure states.
+
+Policy Center separates families, migration diagnostics and mode guidance into
+URL-linked tabs. Fixed example modes no longer appear as live family status.
+Validation: **175 frontend tests**, production build, changed-file lint and
+endpoint/plan checks pass. Regression tests cover failed and cross-cluster editor
+loads, draft preservation, string rules, failed saves/demotion, unavailable promotion
+previews and migration diagnostic scope/pagination under the new tabs. Live browser
+checks cover a temporary monitor-only policy create/edit, required fields,
+collapsed preview, Policy Center tabs and direct-link reload. The fixture was
+removed; no live enforcement mode was changed. UI-1 and the broader console audit
+remain open.
+
 The admission-engine continuation adds migration **172** and persists normalized
 engine outcomes atomically with image scan completion. The built-in vulnerability
 profiles now require successful Trivy and Grype results rather than retired
