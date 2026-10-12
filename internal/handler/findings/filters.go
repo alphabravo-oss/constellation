@@ -20,6 +20,14 @@ func findingFilter(orgID uuid.UUID, values url.Values, includeLifecycle, include
 		args = append(args, value)
 		parts = append(parts, fmt.Sprintf("%s = $%d", column, len(args)))
 	}
+	if target := values.Get("target_type"); target != "" {
+		switch target {
+		case "image", "image-workload", "host", "platform", "workload", "registry", "repository", "serverless":
+			add("target_type", target)
+		default:
+			return "", nil, fmt.Errorf("invalid target_type")
+		}
+	}
 	if kind := values.Get("kind"); kind != "" {
 		add("kind", kind)
 	}

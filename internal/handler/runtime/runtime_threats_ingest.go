@@ -340,32 +340,33 @@ func runtimeThreatWorkloadSeed(row *ThreatIngestRow) (workloadID, addr string) {
 // captured packet bytes by default — too noisy for a list view; the user
 // fetches Get(id) for the full row when drilling in.
 type RuntimeThreatRow struct {
-	ID          string    `json:"id"`
-	OrgID       string    `json:"org_id"`
-	ClusterID   string    `json:"cluster_id"`
-	Node        string    `json:"node,omitempty"`
-	EPMAC       string    `json:"ep_mac,omitempty"`
-	WorkloadID  string    `json:"workload_id,omitempty"`
-	Namespace   string    `json:"namespace,omitempty"`
-	PodName     string    `json:"pod_name,omitempty"`
-	ThreatID    int32     `json:"threat_id"`
-	ThreatName  string    `json:"threat_name,omitempty"` // pretty label derived from ID
-	Category    string    `json:"category,omitempty"`    // "ips" | "dlp" | "waf", derived from threat_id range
-	Severity    int16     `json:"severity"`
-	Action      int16     `json:"action"`
-	Application int32     `json:"application,omitempty"`
-	Msg         string    `json:"msg,omitempty"`
-	IPProto     int16     `json:"ip_proto,omitempty"`
-	SrcIP       string    `json:"src_ip,omitempty"`
-	SrcPort     int       `json:"src_port,omitempty"`
-	DstIP       string    `json:"dst_ip,omitempty"`
-	DstPort     int       `json:"dst_port,omitempty"`
-	PktLen      int       `json:"pkt_len,omitempty"`
-	CapLen      int       `json:"cap_len,omitempty"`
-	PktIngress  bool      `json:"pkt_ingress"`
-	SessIngress bool      `json:"sess_ingress"`
-	ReportedAt  time.Time `json:"reported_at"`
-	At          time.Time `json:"at"`
+	PlatformRole string    `json:"platform_role"`
+	ID           string    `json:"id"`
+	OrgID        string    `json:"org_id"`
+	ClusterID    string    `json:"cluster_id"`
+	Node         string    `json:"node,omitempty"`
+	EPMAC        string    `json:"ep_mac,omitempty"`
+	WorkloadID   string    `json:"workload_id,omitempty"`
+	Namespace    string    `json:"namespace,omitempty"`
+	PodName      string    `json:"pod_name,omitempty"`
+	ThreatID     int32     `json:"threat_id"`
+	ThreatName   string    `json:"threat_name,omitempty"` // pretty label derived from ID
+	Category     string    `json:"category,omitempty"`    // "ips" | "dlp" | "waf", derived from threat_id range
+	Severity     int16     `json:"severity"`
+	Action       int16     `json:"action"`
+	Application  int32     `json:"application,omitempty"`
+	Msg          string    `json:"msg,omitempty"`
+	IPProto      int16     `json:"ip_proto,omitempty"`
+	SrcIP        string    `json:"src_ip,omitempty"`
+	SrcPort      int       `json:"src_port,omitempty"`
+	DstIP        string    `json:"dst_ip,omitempty"`
+	DstPort      int       `json:"dst_port,omitempty"`
+	PktLen       int       `json:"pkt_len,omitempty"`
+	CapLen       int       `json:"cap_len,omitempty"`
+	PktIngress   bool      `json:"pkt_ingress"`
+	SessIngress  bool      `json:"sess_ingress"`
+	ReportedAt   time.Time `json:"reported_at"`
+	At           time.Time `json:"at"`
 }
 
 // List returns recent threats. Filters: ?hours= (default 24, max 720),
@@ -499,6 +500,24 @@ SELECT id::text, org_id::text, cluster_id::text,
 		t.Category = threatCategory(t.ThreatID)
 		out = append(out, t)
 	}
+	if err := rows.Err(); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	rows.Close()
+	identities := make([]handler.PlatformWorkloadIdentity, len(out))
+	for i, threat := range out {
+		cluster, _ := uuid.Parse(threat.ClusterID)
+		identities[i] = handler.PlatformWorkloadIdentity{ClusterID: cluster, Workload: threat.WorkloadID, Namespace: threat.Namespace}
+	}
+	roles, err := handler.EvidencePlatformRoles(r.Context(), h.db.Pool(), sub.OrgID, identities)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	for i := range out {
+		out[i].PlatformRole = roles[i]
+	}
 	response := map[string]any{"threats": out, "total": total, "limit": limit, "offset": offset, "has_more": offset+len(out) < total}
 	if groupActive {
 		response["selected_group"] = groupName
@@ -605,6 +624,13 @@ SELECT id::text, org_id::text, cluster_id::text,
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	cluster, _ := uuid.Parse(t.ClusterID)
+	roles, err := handler.EvidencePlatformRoles(r.Context(), h.db.Pool(), sub.OrgID, []handler.PlatformWorkloadIdentity{{ClusterID: cluster, Workload: t.WorkloadID, Namespace: t.Namespace}})
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	t.PlatformRole = roles[0]
 	t.ThreatName = resolveThreatName(uint32(t.ThreatID))
 	t.Category = threatCategory(t.ThreatID)
 	t.Packet = packet

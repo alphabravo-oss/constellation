@@ -15,6 +15,7 @@ import { computeColumnWidths, parsePx, resolveColumnLayout, type ColumnKind } fr
 import { TableCellContent } from "./table-cell-content";
 
 export type Density = "compact" | "cozy" | "comfy";
+export type TableSort = { id: string; dir: "asc" | "desc" };
 interface StoredTablePreferences {
   density?: Density;
   hiddenColumnIds?: string[];
@@ -61,7 +62,9 @@ export interface DataTableProps<T> {
   emptyState?: ReactNode;
   className?: string;
   /** Initial sort */
-  defaultSort?: { id: string; dir: "asc" | "desc" };
+  defaultSort?: TableSort;
+  /** Controlled sort, including URL/history changes. null means no active sort. */
+  sort?: TableSort | null;
   /**
    * Notified whenever the sort column/direction changes (header click). Pages that
    * sort SERVER-SIDE (data larger than one page) use this to refetch in the new order;
@@ -86,6 +89,8 @@ export interface DataTableProps<T> {
   exportLabel?: string;
   /** data-testid on the wrapper (preserves page/table test hooks after migration). */
   testId?: string;
+  /** Accessible name; defaults to the column labels for distinct table regions. */
+  ariaLabel?: string;
   /** Per-row data-testid — lets migrated tables keep e2e row selectors. */
   rowTestId?: (row: T) => string;
   /** Arbitrary per-row attributes (e.g. data-* hooks) preserved on each <tr>. */
@@ -131,6 +136,7 @@ function DataTableView<T>({
   emptyState,
   className,
   defaultSort,
+  sort: controlledSort,
   onSortChange,
   manualSorting = false,
   showDensityToggle = true,
@@ -142,6 +148,7 @@ function DataTableView<T>({
   exportFileName,
   exportLabel = "Export CSV",
   testId,
+  ariaLabel,
   rowTestId,
   rowAttrs,
   sourceLimit,
@@ -155,9 +162,15 @@ function DataTableView<T>({
     return new Set(stored ?? defaultHiddenColumnIds ?? []);
   });
   const [internalDensity, setInternalDensity] = useState<Density>(() => densityProp ?? storedPreferences.density ?? "cozy");
-  const [sorting, setSorting] = useState<SortingState>(
+  const [internalSorting, setSorting] = useState<SortingState>(
     defaultSort ? [{ id: defaultSort.id, desc: defaultSort.dir === "desc" }] : [],
   );
+  const sorting = useMemo(() => {
+    const requested = controlledSort === undefined ? internalSorting : controlledSort ? [{ id: controlledSort.id, desc: controlledSort.dir === "desc" }] : [];
+    return requested.filter(sort => columns.some(column => column.id === sort.id && column.sort));
+  }, [controlledSort, internalSorting, columns]);
+  const [preferencesUnavailable, setPreferencesUnavailable] = useState(false);
+  const [preferencesWriteAttempt, setPreferencesWriteAttempt] = useState(0);
   const handleSortingChange: typeof setSorting = (updater) => {
     setRequestedPage(0);
     const next = typeof updater === "function" ? updater(sorting) : updater;
@@ -167,14 +180,14 @@ function DataTableView<T>({
   };
 
   const hiddenIds = useMemo(
-    () => new Set(hiddenColumnIds ?? Array.from(internalHiddenColumnIds)),
-    [hiddenColumnIds, internalHiddenColumnIds],
+    () => sanitizeHiddenColumns(hiddenColumnIds ?? Array.from(internalHiddenColumnIds), columns),
+    [hiddenColumnIds, internalHiddenColumnIds, columns],
   );
   const visibleColumns = useMemo(
     () => columns.filter((c) => !hiddenIds.has(c.id) || c.hideable === false),
     [columns, hiddenIds],
   );
-  const visibleColumnIds = useMemo(() => new Set(visibleColumns.map((c) => c.id)), [visibleColumns]);
+  const columnVisibility = useMemo(() => Object.fromEntries(columns.map(column => [column.id, !hiddenIds.has(column.id)])), [columns, hiddenIds]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   useEffect(() => {
@@ -200,40 +213,27 @@ function DataTableView<T>({
   const tableWidth = columnWidths.reduce((sum, width) => sum + width, selectionWidth);
 
   useEffect(() => {
-    const valid = new Set(columns.map((c) => c.id));
     setInternalHiddenColumnIds((prev) => {
-      const next = new Set(Array.from(prev).filter((id) => valid.has(id)));
+      const next = sanitizeHiddenColumns(Array.from(prev), columns);
       return setsEqual(prev, next) ? prev : next;
     });
   }, [columns]);
 
   useEffect(() => {
-    if (!preferencesKey || hiddenColumnIds) return;
+    if (!preferencesKey || (hiddenColumnIds !== undefined && densityProp !== undefined)) return;
     const prefs = readStoredTablePreferences(preferencesKey);
-    writeStoredTablePreferences(preferencesKey, {
+    setPreferencesUnavailable(!writeStoredTablePreferences(preferencesKey, {
       ...prefs,
-      hiddenColumnIds: Array.from(internalHiddenColumnIds),
-    });
-  }, [preferencesKey, hiddenColumnIds, internalHiddenColumnIds]);
+      ...(hiddenColumnIds === undefined ? { hiddenColumnIds: Array.from(hiddenIds) } : {}),
+      ...(densityProp === undefined ? { density: internalDensity } : {}),
+    }));
+  }, [preferencesKey, hiddenColumnIds, hiddenIds, densityProp, internalDensity, preferencesWriteAttempt]);
 
   useEffect(() => {
     if (densityProp) {
       setInternalDensity(densityProp);
     }
   }, [densityProp]);
-
-  useEffect(() => {
-    if (!preferencesKey || densityProp) return;
-    const prefs = readStoredTablePreferences(preferencesKey);
-    writeStoredTablePreferences(preferencesKey, {
-      ...prefs,
-      density: internalDensity,
-    });
-  }, [preferencesKey, densityProp, internalDensity]);
-
-  useEffect(() => {
-    setSorting((prev) => prev.filter((s) => visibleColumnIds.has(s.id)));
-  }, [visibleColumnIds]);
 
   const density = densityProp ?? internalDensity;
   const rowH = density === "compact" ? "h-6" : density === "comfy" ? "h-10" : "h-8";
@@ -245,7 +245,7 @@ function DataTableView<T>({
 
   const columnDefs = useMemo<ColumnDef<T>[]>(
     () =>
-      visibleColumns.map((c) => ({
+      columns.map((c) => ({
         id: c.id,
         accessorFn: (row: T) => row,
         enableSorting: !!c.sort,
@@ -254,13 +254,13 @@ function DataTableView<T>({
         header: c.id,
         cell: () => null,
       })),
-    [visibleColumns],
+    [columns],
   );
 
   const table = useReactTable({
     data: rows,
     columns: columnDefs,
-    state: { sorting },
+    state: { sorting, columnVisibility },
     onSortingChange: handleSortingChange,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
@@ -278,10 +278,15 @@ function DataTableView<T>({
 
   const allKeys = visibleRows.map((row) => rowKey(row.original));
   const allSelected = selectable && selected ? allKeys.length > 0 && allKeys.every((k) => selected.has(k)) : false;
+  const partiallySelected = !!selected && !allSelected && allKeys.some(key => selected.has(key));
 
   function toggleAll() {
     if (!onSelectedChange) return;
-    onSelectedChange(allSelected ? new Set() : new Set(allKeys));
+    const next = new Set(selected);
+    for (const key of allKeys) {
+      if (allSelected) next.delete(key); else next.add(key);
+    }
+    onSelectedChange(next);
   }
 
   function toggleOne(k: Key) {
@@ -298,8 +303,7 @@ function DataTableView<T>({
     if (visible) {
       next.delete(id);
     } else {
-      const visibleHideable = columns.filter((c) => c.hideable !== false && !hiddenIds.has(c.id));
-      if (visibleHideable.length <= 1) return;
+      if (visibleColumns.length <= 1) return;
       next.add(id);
     }
     setInternalHiddenColumnIds(next);
@@ -307,7 +311,7 @@ function DataTableView<T>({
   }
 
   function resetColumns() {
-    const next = new Set(defaultHiddenColumnIds ?? []);
+    const next = sanitizeHiddenColumns(defaultHiddenColumnIds ?? [], columns);
     setInternalHiddenColumnIds(next);
     onHiddenColumnIdsChange?.(Array.from(next));
   }
@@ -317,6 +321,11 @@ function DataTableView<T>({
       setInternalDensity(next);
     }
     onDensityChange?.(next);
+  }
+
+  function resetPreferences() {
+    resetColumns();
+    setDensity("cozy");
   }
 
   function exportVisibleRows() {
@@ -330,6 +339,7 @@ function DataTableView<T>({
   const shouldShowColumnChooser = (showColumnChooser ?? !!preferencesKey) && columns.length > 1;
   const shouldShowExport = Boolean(exportFileName);
   const shouldShowToolbar = showDensityToggle || shouldShowColumnChooser || shouldShowExport;
+  const tableLabel = ariaLabel ?? `Table: ${columns.slice(0, 3).map(column => headerText(column.header, column.id)).join(", ")}`;
 
   return (
     <div className={cn("app-data-table min-w-0 max-w-full rounded-md border border-border bg-card overflow-hidden", className)} data-testid={testId}>
@@ -355,6 +365,7 @@ function DataTableView<T>({
               visibleColumns={visibleColumns.length}
               onVisibleChange={setColumnVisible}
               onReset={resetColumns}
+              onResetPreferences={resetPreferences}
               testId={testId}
             />
           )}
@@ -368,8 +379,14 @@ function DataTableView<T>({
           )}
         </div>
       )}
-      <div ref={scrollRef} className="app-table-scroll overflow-auto">
-        <table className="w-full text-sm" data-layout={semanticLayout ? "semantic" : "auto"}
+      {preferencesUnavailable && <div role="status" className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2 text-xs text-muted-foreground"><span>Table preferences could not be saved. Changes apply to this tab.</span><button type="button" className="text-primary underline underline-offset-2" onClick={() => setPreferencesWriteAttempt(attempt => attempt + 1)}>Retry saving preferences</button></div>}
+      {sorting[0] && hiddenIds.has(sorting[0].id) && <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2 text-xs">
+        <span>Sorted by {headerText(columns.find(column => column.id === sorting[0].id)?.header, sorting[0].id)} ({sorting[0].desc ? "descending" : "ascending"}) · hidden column</span>
+        {(hiddenColumnIds === undefined || onHiddenColumnIdsChange) && <button type="button" className="text-primary underline underline-offset-2" onClick={() => setColumnVisible(sorting[0].id, true)}>Show sort column</button>}
+        {!manualSorting && <button type="button" className="text-primary underline underline-offset-2" onClick={() => handleSortingChange([])}>Clear sort</button>}
+      </div>}
+      <div ref={scrollRef} className="app-table-scroll overflow-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary" tabIndex={0} role="region" aria-label={`Scrollable ${tableLabel}`}>
+        <table className="w-full text-sm" aria-label={tableLabel} data-layout={semanticLayout ? "semantic" : "auto"}
           style={semanticLayout ? { tableLayout: "fixed", width: tableWidth, minWidth: tableWidth } : undefined}>
           {semanticLayout && <colgroup>
             {selectable && <col style={{ width: selectionWidth }} />}
@@ -382,6 +399,8 @@ function DataTableView<T>({
                   <input
                     type="checkbox"
                     checked={allSelected}
+                    ref={input => { if (input) input.indeterminate = partiallySelected; }}
+                    aria-checked={partiallySelected ? "mixed" : allSelected}
                     onChange={toggleAll}
                     aria-label="Select all"
                     className="accent-[color:var(--color-primary)]"
@@ -453,7 +472,7 @@ function DataTableView<T>({
                   onClick={onRowClick ? (e) => {
                     // Ignore clicks on inputs/buttons/anchors inside the row.
                     const tgt = e.target as HTMLElement;
-                    if (tgt.closest("input,button,a,[role='button']")) return;
+                    if (tgt.closest("input,button,a,select,textarea,summary,label,[role='button'],[contenteditable='true']")) return;
                     onRowClick(row);
                   } : undefined}
                   onKeyDown={onRowClick ? (event) => {
@@ -533,6 +552,7 @@ function ColumnChooser<T>({
   visibleColumns,
   onVisibleChange,
   onReset,
+  onResetPreferences,
   testId,
 }: {
   columns: Column<T>[];
@@ -540,6 +560,7 @@ function ColumnChooser<T>({
   visibleColumns: number;
   onVisibleChange: (id: string, visible: boolean) => void;
   onReset: () => void;
+  onResetPreferences: () => void;
   testId?: string;
 }) {
   return (
@@ -593,6 +614,10 @@ function ColumnChooser<T>({
             <RotateCcw className="h-3.5 w-3.5 text-muted-foreground" />
             Reset columns
           </DropdownMenu.Item>
+          <DropdownMenu.Item onSelect={onResetPreferences} className="flex cursor-pointer select-none items-center gap-2 rounded px-2 py-1.5 text-xs outline-none transition-colors focus:bg-accent">
+            <RotateCcw className="h-3.5 w-3.5 text-muted-foreground" />
+            Reset table preferences
+          </DropdownMenu.Item>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
@@ -636,10 +661,11 @@ function exportCellValue<T>(column: Column<T>, row: T): CsvCell {
 }
 
 function readStoredTablePreferences(key?: string): StoredTablePreferences {
-  if (!key || typeof localStorage === "undefined") return {};
+  if (!key) return {};
   try {
+    if (typeof localStorage === "undefined") return {};
     const parsed = JSON.parse(localStorage.getItem(tablePreferencesStorageKey(key)) ?? "{}");
-    if (!parsed || typeof parsed !== "object") return {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
     const hiddenColumnIds = Array.isArray(parsed.hiddenColumnIds)
       ? parsed.hiddenColumnIds.filter((id: unknown): id is string => typeof id === "string")
       : undefined;
@@ -653,12 +679,22 @@ function readStoredTablePreferences(key?: string): StoredTablePreferences {
 }
 
 function writeStoredTablePreferences(key: string, preferences: StoredTablePreferences) {
-  if (typeof localStorage === "undefined") return;
   try {
-    localStorage.setItem(tablePreferencesStorageKey(key), JSON.stringify(preferences));
+    if (typeof localStorage === "undefined") return false;
+    const storageKey = tablePreferencesStorageKey(key);
+    const serialized = JSON.stringify(preferences);
+    if (localStorage.getItem(storageKey) !== serialized) localStorage.setItem(storageKey, serialized);
+    return true;
   } catch {
-    // Storage can be unavailable in locked-down browsers; table controls should still work.
+    return false;
   }
+}
+
+function sanitizeHiddenColumns<T>(ids: string[], columns: Column<T>[]): Set<string> {
+  const hideable = new Set(columns.filter(column => column.hideable !== false).map(column => column.id));
+  const hidden = new Set(ids.filter(id => hideable.has(id)));
+  if (columns.length && columns.every(column => hidden.has(column.id))) hidden.delete(columns[0].id);
+  return hidden;
 }
 
 function tablePreferencesStorageKey(key: string) {

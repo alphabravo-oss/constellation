@@ -1025,6 +1025,10 @@
           "expires_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "platform_role": {
+            "type": "string",
+            "description": "Optional backend platform classification. core identifies platform workloads. Unresolved or ambiguous custom-workload identities omit the role; exact tenant and cluster scope is retained."
           }
         }
       },
@@ -6451,6 +6455,21 @@
               "minimum": 0,
               "type": "integer"
             }
+          },
+          {
+            "name": "risk_fact",
+            "in": "query",
+            "required": false,
+            "description": "Exact risk-factor key presence, including keys whose value is zero, false or null. Counts, pages and CSV use the same predicate.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "privileged",
+                "run_as_root",
+                "net_exposure",
+                "host_network"
+              ]
+            }
           }
         ]
       }
@@ -6512,6 +6531,21 @@
                 "none"
               ],
               "type": "string"
+            }
+          },
+          {
+            "name": "risk_fact",
+            "in": "query",
+            "required": false,
+            "description": "Exact risk-factor key presence, including keys whose value is zero, false or null. Counts, pages and CSV use the same predicate.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "privileged",
+                "run_as_root",
+                "net_exposure",
+                "host_network"
+              ]
             }
           }
         ],
@@ -7253,6 +7287,25 @@
               "minimum": 0,
               "default": 0
             }
+          },
+          {
+            "name": "target_type",
+            "in": "query",
+            "required": false,
+            "description": "Exact finding target type. Applied before pagination, lifecycle counts, CVE aggregation and export; canonical vulnerability deduplication still excludes workload rollups.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "image",
+                "image-workload",
+                "host",
+                "platform",
+                "workload",
+                "registry",
+                "repository",
+                "serverless"
+              ]
+            }
           }
         ],
         "responses": {
@@ -7610,6 +7663,25 @@
               "minimum": 0,
               "default": 0
             }
+          },
+          {
+            "name": "target_type",
+            "in": "query",
+            "required": false,
+            "description": "Exact finding target type. Applied before pagination, lifecycle counts, CVE aggregation and export; canonical vulnerability deduplication still excludes workload rollups.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "image",
+                "image-workload",
+                "host",
+                "platform",
+                "workload",
+                "registry",
+                "repository",
+                "serverless"
+              ]
+            }
           }
         ],
         "responses": {
@@ -7734,6 +7806,25 @@
               "type": "integer",
               "minimum": 0,
               "default": 0
+            }
+          },
+          {
+            "name": "target_type",
+            "in": "query",
+            "required": false,
+            "description": "Exact finding target type. Applied before pagination, lifecycle counts, CVE aggregation and export; canonical vulnerability deduplication still excludes workload rollups.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "image",
+                "image-workload",
+                "host",
+                "platform",
+                "workload",
+                "registry",
+                "repository",
+                "serverless"
+              ]
             }
           }
         ],
@@ -8565,10 +8656,10 @@
     },
     "/api/v1/image-scan-results": {
       "get": {
-        "summary": "List canonical image scan results by digest, platform, scanner profile, and VulnDB bundle",
+        "summary": "List filtered image-scan-results with matching totals and continuation",
         "responses": {
           "200": {
-            "description": "Image scan evidence including the latest engine outcomes.",
+            "description": "Matching inventory page and source totals. Empty pages retain matching totals.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8579,14 +8670,261 @@
                       "items": {
                         "$ref": "#/components/schemas/ImageScanResult"
                       }
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    },
+                    "limit": {
+                      "type": "integer"
+                    },
+                    "offset": {
+                      "type": "integer"
+                    },
+                    "sort": {
+                      "type": "string"
+                    },
+                    "order": {
+                      "type": "string"
+                    },
+                    "summary": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "integer"
+                      },
+                      "description": "Aggregates over all matching inventory rows, independent of page offset."
                     }
                   },
                   "required": [
-                    "image_scan_results"
+                    "image_scan_results",
+                    "total",
+                    "has_more",
+                    "summary",
+                    "limit",
+                    "offset",
+                    "sort",
+                    "order"
                   ]
                 }
               }
             }
+          },
+          "400": {
+            "description": "Unsupported filter, sort or order."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Filters and sorting run before pagination. Rows, total and matching summary use one read-only repeatable-read snapshot. Repository and serverless sources are organization-wide.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Case-insensitive literal substring; percent and underscore are not wildcards.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "description": "Allowlisted global ordering; scan is the default, UUID ascending breaks ties.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "image",
+                "risk",
+                "exposure",
+                "scan",
+                "packages",
+                "findings"
+              ]
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "description": "Global sort direction; defaults to desc, NULLS LAST.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            }
+          },
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "description": "Optional cluster association; absent means organization-wide evidence.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "image_digest",
+            "in": "query",
+            "required": false,
+            "description": "Exact image digest; digest is a compatibility alias.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "required": false,
+            "description": "Images with at least one finding of this severity.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "critical",
+                "high",
+                "medium",
+                "low",
+                "info"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size, default 100; values outside 1..500 use the default.",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "description": "Zero-based row offset, default 0.",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/image-scan-results/export.csv": {
+      "get": {
+        "summary": "Export filtered image-scan-results across pages",
+        "description": "Uses the same predicates and deterministic order as the list. Ignores page limit/offset and exports up to 100000 matching rows. Errors are reported before sending CSV. Check X-Export-Truncated and X-Export-Total before treating the export as complete.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Case-insensitive literal substring; percent and underscore are not wildcards.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "description": "Allowlisted global ordering; scan is the default, UUID ascending breaks ties.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "image",
+                "risk",
+                "exposure",
+                "scan",
+                "packages",
+                "findings"
+              ]
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "description": "Global sort direction; defaults to desc, NULLS LAST.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            }
+          },
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "description": "Optional cluster association; absent means organization-wide evidence.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "image_digest",
+            "in": "query",
+            "required": false,
+            "description": "Exact image digest; digest is a compatibility alias.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "required": false,
+            "description": "Images with at least one finding of this severity.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "critical",
+                "high",
+                "medium",
+                "low",
+                "info"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CSV metadata with explicit completeness headers.",
+            "headers": {
+              "X-Export-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "const": 100000
+                }
+              },
+              "X-Export-Total": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Export-Truncated": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unsupported filter, sort or order."
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -9568,7 +9906,8 @@
     },
     "/api/v1/network/map": {
       "get": {
-        "summary": "Cluster-scoped Network Traffic Map workloads and observed flow edges"
+        "summary": "Cluster-scoped Network Traffic Map workloads and observed flow edges",
+        "description": " Read responses carry platform-role metadata resolved from exact organization/cluster/workload identity. Network map flows and recent entries use src_platform_role/dst_platform_role; threats and captures use platform_role. Unknown or ambiguous identities return an empty role string; older APIs may omit role fields. Classification does not change collection, detection or enforcement."
       }
     },
     "/api/v1/network/peers": {
@@ -10464,7 +10803,282 @@
     },
     "/api/v1/repository-scans": {
       "get": {
-        "summary": "List repository package evidence scans with findings, jobs, and attestation summaries"
+        "summary": "List filtered repository-scans with matching totals and continuation",
+        "description": "Filters and sorting run before pagination. Rows, total and matching summary use one read-only repeatable-read snapshot. Repository and serverless sources are organization-wide.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Case-insensitive literal substring; percent and underscore are not wildcards.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "description": "Allowlisted global ordering; scan is the default, UUID ascending breaks ties.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "repository",
+                "source",
+                "packages",
+                "scan",
+                "findings"
+              ]
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "description": "Global sort direction; defaults to desc, NULLS LAST.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Exact latest job status before pagination. not-queued selects absent job evidence.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "running",
+                "completed",
+                "failed",
+                "paused",
+                "canceled",
+                "not-queued"
+              ]
+            }
+          },
+          {
+            "name": "branch",
+            "in": "query",
+            "required": false,
+            "description": "Exact branch.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "workflow",
+            "in": "query",
+            "required": false,
+            "description": "Exact workflow.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size, default 100; values outside 1..500 use the default.",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "description": "Zero-based row offset, default 0.",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching inventory page and source totals. Empty pages retain matching totals.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "repository_scans": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    },
+                    "limit": {
+                      "type": "integer"
+                    },
+                    "offset": {
+                      "type": "integer"
+                    },
+                    "sort": {
+                      "type": "string"
+                    },
+                    "order": {
+                      "type": "string"
+                    },
+                    "summary": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "integer"
+                      },
+                      "description": "Aggregates over all matching inventory rows, independent of page offset."
+                    }
+                  },
+                  "required": [
+                    "repository_scans",
+                    "total",
+                    "has_more",
+                    "summary",
+                    "limit",
+                    "offset",
+                    "sort",
+                    "order"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unsupported filter, sort or order."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/repository-scans/export.csv": {
+      "get": {
+        "summary": "Export filtered repository-scans across pages",
+        "description": "Uses the same predicates and deterministic order as the list. Ignores page limit/offset and exports up to 100000 matching rows. Errors are reported before sending CSV. Check X-Export-Truncated and X-Export-Total before treating the export as complete.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Case-insensitive literal substring; percent and underscore are not wildcards.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "description": "Allowlisted global ordering; scan is the default, UUID ascending breaks ties.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "repository",
+                "source",
+                "packages",
+                "scan",
+                "findings"
+              ]
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "description": "Global sort direction; defaults to desc, NULLS LAST.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Exact latest job status before pagination. not-queued selects absent job evidence.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "running",
+                "completed",
+                "failed",
+                "paused",
+                "canceled",
+                "not-queued"
+              ]
+            }
+          },
+          {
+            "name": "branch",
+            "in": "query",
+            "required": false,
+            "description": "Exact branch.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "workflow",
+            "in": "query",
+            "required": false,
+            "description": "Exact workflow.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CSV metadata with explicit completeness headers.",
+            "headers": {
+              "X-Export-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "const": 100000
+                }
+              },
+              "X-Export-Total": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Export-Truncated": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unsupported filter, sort or order."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/api/v1/repository-scans/{id}": {
@@ -11042,7 +11656,7 @@
     "/api/v1/runtime-pcap": {
       "get": {
         "summary": "List runtime packet captures",
-        "description": "Returns up to 200 organization-scoped captures, newest first. A group filter also returns selected_group metadata.",
+        "description": "Returns up to 200 organization-scoped captures, newest first. A group filter also returns selected_group metadata. Read responses carry platform-role metadata resolved from exact organization/cluster/workload identity. Network map flows and recent entries use src_platform_role/dst_platform_role; threats and captures use platform_role. Unknown or ambiguous identities return an empty role string; older APIs may omit role fields. Classification does not change collection, detection or enforcement.",
         "parameters": [
           {
             "name": "cluster_id",
@@ -11311,7 +11925,8 @@
           "default": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "description": " Read responses carry platform-role metadata resolved from exact organization/cluster/workload identity. Network map flows and recent entries use src_platform_role/dst_platform_role; threats and captures use platform_role. Unknown or ambiguous identities return an empty role string; older APIs may omit role fields. Classification does not change collection, detection or enforcement."
       },
       "parameters": [
         {
@@ -12026,7 +12641,8 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Get runtime-threats"
+        "summary": "Get runtime-threats",
+        "description": " Read responses carry platform-role metadata resolved from exact organization/cluster/workload identity. Network map flows and recent entries use src_platform_role/dst_platform_role; threats and captures use platform_role. Unknown or ambiguous identities return an empty role string; older APIs may omit role fields. Classification does not change collection, detection or enforcement."
       }
     },
     "/api/v1/runtime-threats/{id}": {
@@ -12039,7 +12655,8 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Get runtime-threats"
+        "summary": "Get runtime-threats",
+        "description": " Read responses carry platform-role metadata resolved from exact organization/cluster/workload identity. Network map flows and recent entries use src_platform_role/dst_platform_role; threats and captures use platform_role. Unknown or ambiguous identities return an empty role string; older APIs may omit role fields. Classification does not change collection, detection or enforcement."
       }
     },
     "/api/v1/runtime-threats:bulk": {
@@ -13668,13 +14285,296 @@
       "get": {
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Matching inventory page and source totals. Empty pages retain matching totals.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serverless_functions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    },
+                    "limit": {
+                      "type": "integer"
+                    },
+                    "offset": {
+                      "type": "integer"
+                    },
+                    "sort": {
+                      "type": "string"
+                    },
+                    "order": {
+                      "type": "string"
+                    },
+                    "summary": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "integer"
+                      },
+                      "description": "Aggregates over all matching inventory rows, independent of page offset."
+                    }
+                  },
+                  "required": [
+                    "serverless_functions",
+                    "total",
+                    "has_more",
+                    "summary",
+                    "limit",
+                    "offset",
+                    "sort",
+                    "order"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unsupported filter, sort or order."
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Get serverless-functions"
+        "summary": "List filtered serverless-functions with matching totals and continuation",
+        "description": "Filters and sorting run before pagination. Rows, total and matching summary use one read-only repeatable-read snapshot. Repository and serverless sources are organization-wide.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Case-insensitive literal substring; percent and underscore are not wildcards.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "description": "Allowlisted global ordering; scan is the default, UUID ascending breaks ties.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "function",
+                "posture",
+                "packages",
+                "scan",
+                "findings"
+              ]
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "description": "Global sort direction; defaults to desc, NULLS LAST.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            }
+          },
+          {
+            "name": "posture",
+            "in": "query",
+            "required": false,
+            "description": "Reported permission-analysis level, trimmed of ASCII whitespace and lowercased. Unknown selects missing, malformed, empty, or unrecognized levels; the same normalized value is used for filtering, sorting, rows and CSV.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "critical",
+                "high",
+                "medium",
+                "low",
+                "info",
+                "unknown"
+              ]
+            }
+          },
+          {
+            "name": "provider",
+            "in": "query",
+            "required": false,
+            "description": "Exact provider.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "account_id",
+            "in": "query",
+            "required": false,
+            "description": "Exact account.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "region",
+            "in": "query",
+            "required": false,
+            "description": "Exact region.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size, default 100; values outside 1..500 use the default.",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "description": "Zero-based row offset, default 0.",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/serverless-functions/export.csv": {
+      "get": {
+        "summary": "Export filtered serverless-functions across pages",
+        "description": "Uses the same predicates and deterministic order as the list. Ignores page limit/offset and exports up to 100000 matching rows. Errors are reported before sending CSV. Check X-Export-Truncated and X-Export-Total before treating the export as complete.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Case-insensitive literal substring; percent and underscore are not wildcards.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "description": "Allowlisted global ordering; scan is the default, UUID ascending breaks ties.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "function",
+                "posture",
+                "packages",
+                "scan",
+                "findings"
+              ]
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "description": "Global sort direction; defaults to desc, NULLS LAST.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            }
+          },
+          {
+            "name": "posture",
+            "in": "query",
+            "required": false,
+            "description": "Reported permission-analysis level, trimmed of ASCII whitespace and lowercased. Unknown selects missing, malformed, empty, or unrecognized levels; the same normalized value is used for filtering, sorting, rows and CSV.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "critical",
+                "high",
+                "medium",
+                "low",
+                "info",
+                "unknown"
+              ]
+            }
+          },
+          {
+            "name": "provider",
+            "in": "query",
+            "required": false,
+            "description": "Exact provider.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "account_id",
+            "in": "query",
+            "required": false,
+            "description": "Exact account.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "region",
+            "in": "query",
+            "required": false,
+            "description": "Exact region.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CSV metadata with explicit completeness headers.",
+            "headers": {
+              "X-Export-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "const": 100000
+                }
+              },
+              "X-Export-Total": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Export-Truncated": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unsupported filter, sort or order."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/api/v1/serverless-functions/{id}": {

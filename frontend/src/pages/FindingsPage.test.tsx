@@ -227,3 +227,29 @@ it("reports a failed saved-view delete without removing the persisted or visible
   await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="delete view Retained view"]')!.click()); await settled(() => expect(host.textContent).toContain("could not be stored")); expect(host.textContent).toContain("Retained view");
   vi.unstubAllGlobals(); expect(JSON.parse(localStorage.getItem(key)!)).toHaveLength(1);
 });
+
+it("keeps the exact target cohort across paging, CVE rollup, export and selection changes", async () => {
+ route.initial = "view=instances&kind=vulnerability&target_type=image-workload&page=6";
+ await renderPage(); await settled(() => expect(host.textContent).toContain("Finding 500"));
+ expect(findings.list).toHaveBeenLastCalledWith(expect.objectContaining({ target_type: "image-workload", offset: 500 }));
+ expect(host.textContent).toContain("image-workload"); await selectFirst();
+ await selectFilter("Target type", "host");
+ await settled(() => { expect(params().get("page")).toBeNull(); expect(findings.list).toHaveBeenLastCalledWith(expect.objectContaining({ target_type: "host", offset: 0 })); expect(host.textContent).toContain("Finding 0"); });
+ expect(host.querySelector<HTMLInputElement>('[data-testid="findings-table"] tbody input[type="checkbox"]')?.checked).toBe(false);
+ await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="findings-view-cve"]')!.click());
+ await settled(() => expect(host.textContent).toContain("CVE-last"));
+ expect(findings.byCVE).toHaveBeenLastCalledWith(expect.objectContaining({ target_type: "host", cluster_id: "cluster" }));
+ await click("Export filtered instances CSV");
+ expect(findings.exportCSV).toHaveBeenCalledWith(expect.objectContaining({ target_type: "host", offset: 0, limit: 100000 }));
+});
+
+it("applies saved target cohorts and clears them when applying a legacy view", async () => {
+ const key = operatorStorageKey("constellation.findings.views.v1", identity)!;
+ localStorage.setItem(key, JSON.stringify([{ id: "target", name: "Host cohort", kind: "vulnerability", lifecycle: "open", query: "", targetType: "host", view: "instances" }, { id: "legacy", name: "All targets", kind: "vulnerability", lifecycle: "open", query: "", view: "instances" }]));
+ route.initial = "view=instances&target_type=image-workload&page=6";
+ await renderPage(); await settled(() => expect(host.textContent).toContain("Finding 500")); await click("Views (2)");
+ await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent?.startsWith("Host cohort"))!.click());
+ await settled(() => { expect(params().get("target_type")).toBe("host"); expect(findings.list).toHaveBeenLastCalledWith(expect.objectContaining({ target_type: "host", offset: 0 })); });
+ await click("Views (2)"); await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent?.startsWith("All targets"))!.click());
+ await settled(() => { expect(params().has("target_type")).toBe(false); expect(findings.list).toHaveBeenLastCalledWith(expect.not.objectContaining({ target_type: expect.anything() })); });
+});

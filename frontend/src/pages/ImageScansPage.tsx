@@ -1,10 +1,9 @@
-import { useMemo } from "react";
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Boxes, Clock3, Database, PackageSearch, Search, ShieldAlert } from "lucide-react";
 
 import { imageScanResults, type ImageScanResult } from "@/api/client";
-import { INVENTORY_FETCH_SIZE, INVENTORY_PAGE_SIZE, useInventoryScope, useInventoryRoute, InventoryScopeState, InventoryLoadState, ScanInventoryContinuation } from "./inventory-workspace";
+import { INVENTORY_PAGE_SIZE, scanInventoryResponseValid, ScanInventoryExport, useInventoryScope, useInventoryRoute, InventoryScopeState, InventoryLoadState, ScanInventoryContinuation } from "./inventory-workspace";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ui/states";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
@@ -24,24 +23,27 @@ export function ImageScansPage() {
   const { query, setQuery, selectedID, setSelectedID } = route;
   const severity = route.params.get("severity") || "all";
   const setSeverity = (value: string) => route.update({ severity: value === "all" ? null : value });
+  const sort = route.params.get("sort") || "scan";
+  const order = route.params.get("order") || "desc";
+  const validFilters = severities.includes(severity) && ['image', 'risk', 'exposure', 'scan'].includes(sort) && ["asc", "desc"].includes(order);
+  const request = { cluster_id: clusterId, q: route.debouncedQuery || undefined,  limit: INVENTORY_PAGE_SIZE, offset: route.offset, severity: severity === "all" ? undefined : severity, image_digest: route.params.get("image_digest") || route.params.get("digest") || undefined, sort, order: order as "asc" | "desc" };
   const q = useQuery({
-    queryKey: ["image-scan-results", scope.owner, clusterId, route.debouncedQuery, route.offset],
-    queryFn: () => imageScanResults.list({ cluster_id: clusterId, q: route.debouncedQuery || undefined,  limit: INVENTORY_FETCH_SIZE, offset: route.offset }),
-    enabled: scope.ready && !route.debouncing,
+    queryKey: ["image-scan-results", scope.owner, clusterId, request],
+    queryFn: () => imageScanResults.list(request),
+    enabled: scope.ready && !route.debouncing && validFilters,
   });
-  const invalid = Boolean(q.data && (q.data.offset !== route.offset || q.data?.image_scan_results.some(item => item.impacted_count <= 0)));
-  const available = scope.ready && !q.isError && !q.isPending && !q.isFetching && !route.debouncing && !invalid;
-  const results = useMemo(() => available ? q.data?.image_scan_results.slice(0, INVENTORY_PAGE_SIZE) ?? [] : [], [available, q.data]);
-  const hasMore = available && (q.data?.image_scan_results.length ?? 0) > INVENTORY_PAGE_SIZE;
-  const filtered = useMemo(() => {
-    return results.filter(item => severity === "all" || (item.severity_counts?.[severity] ?? 0) > 0);
-  }, [results, severity]);
+  const rawRows = q.data?.image_scan_results ?? [];
+  const invalid = Boolean(q.data && (!Array.isArray(q.data.image_scan_results) || !scanInventoryResponseValid(q.data, rawRows.length, route.offset, sort, order, ['total', 'packages', 'findings', 'critical_high', 'exposed', 'local', 'stale', 'incomplete']) || rawRows.some(item => item.impacted_count <= 0)));
+  const available = scope.ready && q.isSuccess && !route.debouncing && validFilters && !invalid;
+  const filtered = available ? rawRows : [];
+  const hasMore = available && q.data?.has_more === true;
   const selected = filtered.find((item) => item.id === selectedID) ?? null;
-  const summary = useMemo(() => summarize(results), [results]);
+  const summary = available ? q.data!.summary! : {};
+  const results = filtered;
 
   const columns: Column<ImageScanResult>[] = [
     {
-      id: "image", exportValue: item => [item.image_ref, item.image_digest].join(" · "), kind: "name", grow: true, minSize: 280, wrap: true,
+      id: "image", sort: () => 0, exportValue: item => [item.image_ref, item.image_digest].join(" · "), kind: "name", grow: true, minSize: 280, wrap: true,
       header: "Image",
       cell: (item) => (
         <>
@@ -58,12 +60,12 @@ export function ImageScansPage() {
       ),
     },
     {
-      id: "risk", exportValue: item => `${item.max_risk_score} risk; ${item.critical_count} critical; ${item.high_count} high; ${item.medium_count} medium`, kind: "count", size: 152, minSize: 136, maxSize: 176, wrap: true,
+      id: "risk", sort: () => 0, exportValue: item => `${item.max_risk_score} risk; ${item.critical_count} critical; ${item.high_count} high; ${item.medium_count} medium`, kind: "count", size: 152, minSize: 136, maxSize: 176, wrap: true,
       header: "Risk",
       cell: (item) => <RiskStack item={item} />,
     },
     {
-      id: "exposure", exportValue: item => `${item.impacted_count} workloads; ${item.package_count} packages`, kind: "count", size: 144, minSize: 128, maxSize: 160, wrap: true,
+      id: "exposure", sort: () => 0, exportValue: item => `${item.impacted_count} workloads; ${item.package_count} packages`, kind: "count", size: 144, minSize: 128, maxSize: 160, wrap: true,
       header: "Exposure",
       cell: (item) => (
         <div className="text-xs">
@@ -73,7 +75,7 @@ export function ImageScansPage() {
       ),
     },
     {
-      id: "scan", exportValue: item => [item.scanner_profile, item.last_scanned_at, JSON.stringify(item.engine_status ?? {})].join(" · "), kind: "text", size: 232, minSize: 200, wrap: true,
+      id: "scan", sort: () => 0, exportValue: item => [item.scanner_profile, item.last_scanned_at, JSON.stringify(item.engine_status ?? {})].join(" · "), kind: "text", size: 232, minSize: 200, wrap: true,
       header: "Scan",
       cell: (item) => (
         <div className="text-xs">
@@ -106,17 +108,19 @@ export function ImageScansPage() {
         }
       />
 
-      <VerdictBanner status={q.isError || invalid ? "degraded" : !available ? "info" : summary.incomplete > 0 || summary.criticalHigh > 0 || summary.stale > 0 ? "degraded" : "info"}
-        title={q.isError || invalid ? "Image scans are unavailable" : !available ? "Loading image scans" : summary.total === 0 ? "No image scans on this page" : summary.incomplete > 0 ? "Some loaded scans have incomplete engine evidence" : "Review loaded image scan evidence"}
-        detail="Metrics describe up to 100 loaded image scans on this server page. Image scan results are shared evidence; exposure is scoped to this cluster." />
+      <VerdictBanner status={q.isError || invalid || !validFilters ? "degraded" : !available ? "info" : summary.incomplete > 0 || summary.critical_high > 0 || summary.stale > 0 ? "degraded" : "info"}
+        title={q.isError || invalid || !validFilters ? "Image scans are unavailable" : !available ? "Loading image scans" : summary.total === 0 ? "No matching image scans" : summary.incomplete > 0 ? "Some matching scans have incomplete engine evidence" : "Review matching image scan evidence"}
+        detail="Metrics cover all image scans matching the server filters. Image scan results are shared evidence; exposure is scoped to this cluster." />
       {available && <StatGrid data-testid="image-scan-summary">
-        <StatCard label="Loaded images" value={summary.total.toLocaleString()} icon={<Boxes className="h-3.5 w-3.5" />} hint={`${summary.exposed} running · ${summary.local} local`} />
-        <StatCard label="Critical / High" value={summary.criticalHigh.toLocaleString()} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={summary.criticalHigh > 0 ? "high" : "neutral"} hint={`${summary.findings} image findings`} />
-        <StatCard label="Packages" value={summary.packages.toLocaleString()} icon={<Database className="h-3.5 w-3.5" />} hint="across loaded image results" />
+        <StatCard label="Matching images" value={summary.total.toLocaleString()} icon={<Boxes className="h-3.5 w-3.5" />} hint={`${summary.exposed} running · ${summary.local} local`} />
+        <StatCard label="Critical / High" value={summary.critical_high.toLocaleString()} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={summary.critical_high > 0 ? "high" : "neutral"} hint={`${summary.findings} image findings`} />
+        <StatCard label="Packages" value={summary.packages.toLocaleString()} icon={<Database className="h-3.5 w-3.5" />} hint="across matching image results" />
         <StatCard label="Stale Scans" value={summary.stale.toLocaleString()} icon={<Clock3 className="h-3.5 w-3.5" />} tone={summary.stale > 0 ? "medium" : "neutral"} hint="older than 7 days" />
       </StatGrid>}
 
-      <Button disabled={q.isFetching || route.debouncing || !scope.ready} onClick={() => void q.refetch()}>Refresh</Button>
+      <div className="flex flex-wrap gap-3"><Button disabled={q.isFetching || route.debouncing || !scope.ready || !validFilters} onClick={() => void q.refetch()}>Refresh</Button><ScanInventoryExport context={JSON.stringify([scope.owner, clusterId, request])} disabled={!available || q.isFetching} download={() => imageScanResults.exportCSV(request)} /></div>
+      {q.isFetching && q.isSuccess && <p role="status" className="text-sm text-muted-foreground">Refreshing scan inventory…</p>}
+      <p className="text-xs text-muted-foreground">Matching CSV includes fixed inventory columns across all matching pages (up to 100,000 records). The table’s page CSV follows visible columns.</p>
       <section className="rounded-lg border border-border bg-card p-3">
         <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_170px]">
           <label className="relative block">
@@ -138,21 +142,24 @@ export function ImageScansPage() {
             aria-label="Filter image scans by severity"
           >
             {severities.map((item) => (
-              <option key={item} value={item}>{item === "all" ? "All severities on this page" : item}</option>
+              <option key={item} value={item}>{item === "all" ? "All severities" : item}</option>
             ))}
           </select>
         </div>
       </section>
 
-      <p className="text-xs text-muted-foreground">Shared image scan evidence for images linked to workloads in this cluster. Search runs on the server. Severity and table sorting apply to this server page only.</p>
-      {!severities.includes(severity) && <ErrorState title="The requested page filter is invalid. Choose a listed value to recover." />}
-      {available && <ScanInventoryContinuation page={route.page} rows={results.length} matching={filtered.length} hasMore={hasMore} onPage={route.setPage} />}
+      <p className="text-xs text-muted-foreground">Shared image scan evidence for images linked to workloads in this cluster. Search runs on the server. Severity and sorting run on the server before pagination.</p>
+      {!validFilters && <ErrorState title="The requested server filter or sort is invalid. Choose a listed value to recover." action={<Button onClick={() => route.update({ sort: null, order: null, severity: null })}>Reset filters and sort</Button>} />}
+      {available && <ScanInventoryContinuation total={q.data?.total} page={route.page} rows={results.length} matching={filtered.length} hasMore={hasMore} onPage={route.setPage} />}
       {available && selectedID && !selected && <ErrorState title="The selected record is unavailable on this page or hidden by its filters." action={<Button onClick={() => setSelectedID(null)}>Clear selection</Button>} />}
       <section className="flex flex-col gap-4">
         <div data-testid="image-scans-table">
-          {!available ? <InventoryLoadState label="Image scans" query={q} invalid={invalid} debouncing={route.debouncing} /> : <DataTable
+          {!available ? validFilters ? <InventoryLoadState label="Image scans" query={q} invalid={invalid} debouncing={route.debouncing} /> : null : <DataTable
             rows={filtered}
             pagination={false}
+            manualSorting
+            sort={{ id: sort, dir: order as "asc" | "desc" }}
+            onSortChange={next => route.update({ sort: next?.id ?? null, order: next?.dir ?? null })}
             preferencesKey="image-scan-results-inventory"
             exportFileName="constellation-image-scan-results-server-page"
             exportLabel="Export this page CSV"
@@ -219,19 +226,6 @@ function ImagePreview({ item, clusterId }: { item: ImageScanResult | null; clust
       </div>
     </aside>
   );
-}
-
-function summarize(items: ImageScanResult[]) {
-  return {
-    total: items.length,
-    exposed: items.filter((item) => item.impacted_count > 0).length,
-    local: items.filter(isLocalImage).length,
-    criticalHigh: items.reduce((sum, item) => sum + item.critical_count + item.high_count, 0),
-    findings: items.reduce((sum, item) => sum + item.finding_count, 0),
-    packages: items.reduce((sum, item) => sum + item.package_count, 0),
-    stale: items.filter((item) => isStale(item.last_scanned_at)).length,
-    incomplete: items.filter((item) => scanEngineEvidence(item.engine_status).engines.some((engine) => engine.status !== "succeeded")).length,
-  };
 }
 
 function displayImage(item: ImageScanResult): string {

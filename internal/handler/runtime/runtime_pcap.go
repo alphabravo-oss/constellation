@@ -78,6 +78,7 @@ const (
 
 // PcapCapture is one row in runtime_pcap_captures.
 type PcapCapture struct {
+	PlatformRole  string            `json:"platform_role"`
 	ID            uuid.UUID         `json:"id"`
 	OrgID         uuid.UUID         `json:"org_id"`
 	ClusterID     uuid.UUID         `json:"cluster_id"`
@@ -268,6 +269,15 @@ SELECT `+pcapCols+` FROM runtime_pcap_captures
 		}
 		out = append(out, c)
 	}
+	if err := rows.Err(); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	rows.Close()
+	if err := h.capturePlatformRoles(r.Context(), sub.OrgID, out); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	response := map[string]any{"captures": out}
 	if groupActive {
 		response["selected_group"] = groupName
@@ -297,7 +307,26 @@ func (h *PcapHTTP) Get(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if err := h.capturePlatformRoles(r.Context(), sub.OrgID, []*PcapCapture{got}); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	httpx.WriteJSON(w, http.StatusOK, got)
+}
+
+func (h *PcapHTTP) capturePlatformRoles(ctx context.Context, orgID uuid.UUID, captures []*PcapCapture) error {
+	identities := make([]handler.PlatformWorkloadIdentity, len(captures))
+	for i, capture := range captures {
+		identities[i] = handler.PlatformWorkloadIdentity{ClusterID: capture.ClusterID, Workload: capture.Workload, Namespace: capture.Namespace}
+	}
+	roles, err := handler.EvidencePlatformRoles(ctx, h.db.Pool(), orgID, identities)
+	if err != nil {
+		return err
+	}
+	for i := range captures {
+		captures[i].PlatformRole = roles[i]
+	}
+	return nil
 }
 
 // Download streams the .pcap file. The caller's browser tags it with the

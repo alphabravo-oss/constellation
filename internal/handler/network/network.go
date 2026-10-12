@@ -390,7 +390,14 @@ SELECT cluster_id::text, src_workload, dst_workload, protocol, l7_protocol, dst_
 		}
 		out = append(out, row)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	if err := h.flowPlatformRoles(r, orgID, out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // threatNameForFlow resolves a dp threat id to a readable name for the flow row. DPI
@@ -454,7 +461,36 @@ SELECT cluster_id::text, src_workload, dst_workload, protocol, COALESCE(l7_proto
 			"observed_at": at.UTC().Format(time.RFC3339),
 		})
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	if err := h.flowPlatformRoles(r, orgID, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// Each row retains its own cluster, including organization-wide map requests.
+func (h *Network) flowPlatformRoles(r *http.Request, orgID uuid.UUID, flows []map[string]any) error {
+	identities := make([]handler.PlatformWorkloadIdentity, 0, len(flows)*2)
+	for _, flow := range flows {
+		cluster, _ := uuid.Parse(flow["cluster_id"].(string))
+		identities = append(identities,
+			handler.PlatformWorkloadIdentity{ClusterID: cluster, Workload: flow["src"].(string)},
+			handler.PlatformWorkloadIdentity{ClusterID: cluster, Workload: flow["dst"].(string)})
+	}
+	roles, err := handler.EvidencePlatformRoles(r.Context(), h.db.Pool(), orgID, identities)
+	if err != nil {
+		return err
+	}
+	for i, flow := range flows {
+		// Empty means this server evaluated the identity and did not classify
+		// it. Omission is reserved for legacy responses in the UI fallback.
+		flow["src_platform_role"] = roles[i*2]
+		flow["dst_platform_role"] = roles[i*2+1]
+	}
+	return nil
 }
 
 func (h *Network) flowTotal(r *http.Request, orgID uuid.UUID, clusterID *uuid.UUID, hours int, namespace, verdict string, groupActive bool, groupMembers []string, port int, peer, application string) (int, error) {

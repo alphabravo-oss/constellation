@@ -1,11 +1,10 @@
-import { useMemo } from "react";
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Clock, Download, Fingerprint, GitBranch, PackageSearch, Search, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 
 import { repositoryScanAttestations, repositoryScans, type RepositoryScan } from "@/api/client";
-import { INVENTORY_FETCH_SIZE, INVENTORY_PAGE_SIZE, useInventoryScope, useInventoryRoute, InventoryScopeState, InventoryLoadState, ScanInventoryContinuation } from "./inventory-workspace";
+import { INVENTORY_PAGE_SIZE, scanInventoryResponseValid, ScanInventoryExport, useInventoryScope, useInventoryRoute, InventoryScopeState, InventoryLoadState, ScanInventoryContinuation } from "./inventory-workspace";
 import { Button } from "@/components/ui/button";
 import { ErrorState, LoadingState } from "@/components/ui/states";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
@@ -16,11 +15,11 @@ import { DataTable, type Column } from "@/components/ui/data-table";
 import { cn } from "@/lib/cn";
 import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
 
-const scanStatuses = ["all", "pending", "running", "completed", "failed", "paused", "canceled"];
+const scanStatuses = ["all", "pending", "running", "completed", "failed", "paused", "canceled", "not-queued"];
 
 const repositoryColumns: Column<RepositoryScan>[] = [
   {
-    id: "repository", exportValue: item => item.repository_ref,
+    id: "repository", sort: () => 0, exportValue: item => item.repository_ref,
     header: "Repository", kind: "name", size: 320, minSize: 240, wrap: true,
     cell: (item) => (
       <>
@@ -36,7 +35,7 @@ const repositoryColumns: Column<RepositoryScan>[] = [
     ),
   },
   {
-    id: "source", exportValue: item => [item.branch, item.commit_sha || item.source_ref, item.workflow].filter(Boolean).join(" · "),
+    id: "source", sort: () => 0, exportValue: item => [item.branch, item.commit_sha || item.source_ref, item.workflow].filter(Boolean).join(" · "),
     header: "Source", kind: "text", size: 220, maxSize: 360, wrap: true,
     className: "text-xs",
     cell: (item) => (
@@ -48,7 +47,7 @@ const repositoryColumns: Column<RepositoryScan>[] = [
     ),
   },
   {
-    id: "packages", exportValue: item => `${item.package_count} packages; ${item.open_findings} open findings; ${item.inventory_hash || ""}`,
+    id: "packages", sort: () => 0, exportValue: item => `${item.package_count} packages; ${item.open_findings} open findings; ${item.inventory_hash || ""}`,
     header: "Packages", kind: "count", size: 180, minSize: 140, maxSize: 240, wrap: true,
     className: "text-xs",
     cell: (item) => (
@@ -60,7 +59,7 @@ const repositoryColumns: Column<RepositoryScan>[] = [
     ),
   },
   {
-    id: "scan", exportValue: item => [item.latest_job_status, item.latest_observed_at || item.last_seen_at, item.latest_job_id].filter(Boolean).join(" · "),
+    id: "scan", sort: () => 0, exportValue: item => [item.latest_job_status, item.latest_observed_at || item.last_seen_at, item.latest_job_id].filter(Boolean).join(" · "),
     header: "Scan", kind: "text", size: 220, minSize: 180, maxSize: 320, wrap: true,
     className: "text-xs",
     cell: (item) => (
@@ -80,20 +79,23 @@ export function RepositoryScansPage() {
   const { query, setQuery, selectedID, setSelectedID } = route;
   const status = route.params.get("status") || "all";
   const setStatus = (value: string) => route.update({ status: value === "all" ? null : value });
+  const sort = route.params.get("sort") || "scan";
+  const order = route.params.get("order") || "desc";
+  const validFilters = scanStatuses.includes(status) && ['repository', 'source', 'packages', 'scan'].includes(sort) && ["asc", "desc"].includes(order);
+  const request = { q: route.debouncedQuery || undefined, branch: route.params.get("branch") || undefined, workflow: route.params.get("workflow") || undefined, limit: INVENTORY_PAGE_SIZE, offset: route.offset, status: status === "all" ? undefined : status, sort, order: order as "asc" | "desc" };
   const q = useQuery({
-    queryKey: ["repository-scans", scope.owner, clusterId, route.debouncedQuery, route.offset, route.params.get("branch"), route.params.get("workflow")],
-    queryFn: () => repositoryScans.list({ q: route.debouncedQuery || undefined, branch: route.params.get("branch") || undefined, workflow: route.params.get("workflow") || undefined, limit: INVENTORY_FETCH_SIZE, offset: route.offset }),
-    enabled: scope.ready && !route.debouncing,
+    queryKey: ["repository-scans", scope.owner, clusterId, request],
+    queryFn: () => repositoryScans.list(request),
+    enabled: scope.ready && !route.debouncing && validFilters,
   });
-  const invalid = Boolean(q.data && (q.data.offset !== route.offset));
-  const available = scope.ready && !q.isError && !q.isPending && !q.isFetching && !route.debouncing && !invalid;
-  const scans = useMemo(() => available ? q.data?.repository_scans.slice(0, INVENTORY_PAGE_SIZE) ?? [] : [], [available, q.data]);
-  const hasMore = available && (q.data?.repository_scans.length ?? 0) > INVENTORY_PAGE_SIZE;
-  const filtered = useMemo(() => {
-    return scans.filter(item => status === "all" || (item.latest_job_status || "not queued") === status);
-  }, [scans, status]);
+  const rawRows = q.data?.repository_scans ?? [];
+  const invalid = Boolean(q.data && (!Array.isArray(q.data.repository_scans) || !scanInventoryResponseValid(q.data, rawRows.length, route.offset, sort, order, ['total', 'packages', 'findings', 'critical_high', 'with_evidence', 'active_jobs', 'stale_evidence', 'attestations', 'trusted_attestations', 'unverified_attestations', 'branches', 'workflows'])));
+  const available = scope.ready && q.isSuccess && !route.debouncing && validFilters && !invalid;
+  const filtered = available ? rawRows : [];
+  const hasMore = available && q.data?.has_more === true;
   const selected = filtered.find((item) => item.id === selectedID) ?? null;
-  const summary = useMemo(() => summarize(scans), [scans]);
+  const summary = available ? q.data!.summary! : {};
+  const scans = filtered;
 
   if (!scope.ready) return <div className="space-y-4"><PageHeader title="Repositories" description="Organization-wide repository evidence; the selected cluster provides navigation context only." /><InventoryScopeState scope={scope} /></div>;
 
@@ -104,16 +106,18 @@ export function RepositoryScansPage() {
         description="Source-repository scans — package inventory, scan jobs, findings, and provenance attestations."
       />
 
-      <VerdictBanner status={q.isError || invalid ? "degraded" : "info"} title={q.isError || invalid ? "Repository scans are unavailable" : !available ? "Loading repository scans" : summary.total ? "Review loaded repository scans" : "No repository scans on this page"} detail="Metrics describe up to 100 loaded records on this server page; organization-wide totals are not reported." />
+      <VerdictBanner status={q.isError || invalid || !validFilters ? "degraded" : "info"} title={q.isError || invalid || !validFilters ? "Repository scans are unavailable" : !available ? "Loading repository scans" : summary.total ? "Review matching repository scans" : "No matching repository scans"} detail="Metrics cover all organization-wide records matching the server filters." />
       {available && <StatGrid data-testid="repository-summary">
-        <StatCard label="Loaded repositories" value={summary.total.toLocaleString()} icon={<GitBranch className="h-3.5 w-3.5" />} hint={`${summary.branches} branches · ${summary.workflows} workflows`} />
-        <StatCard label="Packages" value={summary.packages.toLocaleString()} icon={<PackageSearch className="h-3.5 w-3.5" />} hint={`${summary.withEvidence} with evidence`} />
-        <StatCard label="Open Findings" value={summary.findings.toLocaleString()} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={summary.criticalHigh > 0 ? "high" : "neutral"} hint={`${summary.criticalHigh} critical/high`} />
-        <StatCard label="Active Jobs" value={summary.activeJobs.toLocaleString()} icon={<Clock className="h-3.5 w-3.5" />} hint={`${summary.staleEvidence} stale evidence`} />
-        <StatCard label="Attestations" value={summary.attestations.toLocaleString()} icon={<Fingerprint className="h-3.5 w-3.5" />} hint={`${summary.trustedAttestations} trusted · ${summary.unverifiedAttestations} unverified`} />
+        <StatCard label="Matching repositories" value={summary.total.toLocaleString()} icon={<GitBranch className="h-3.5 w-3.5" />} hint={`${summary.branches} branches · ${summary.workflows} workflows`} />
+        <StatCard label="Packages" value={summary.packages.toLocaleString()} icon={<PackageSearch className="h-3.5 w-3.5" />} hint={`${summary.with_evidence} with evidence`} />
+        <StatCard label="Open Findings" value={summary.findings.toLocaleString()} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={summary.critical_high > 0 ? "high" : "neutral"} hint={`${summary.critical_high} critical/high`} />
+        <StatCard label="Active Jobs" value={summary.active_jobs.toLocaleString()} icon={<Clock className="h-3.5 w-3.5" />} hint={`${summary.stale_evidence} stale evidence`} />
+        <StatCard label="Attestations" value={summary.attestations.toLocaleString()} icon={<Fingerprint className="h-3.5 w-3.5" />} hint={`${summary.trusted_attestations} trusted · ${summary.unverified_attestations} unverified`} />
       </StatGrid>}
 
-      <Button disabled={q.isFetching || route.debouncing || !scope.ready} onClick={() => void q.refetch()}>Refresh</Button>
+      <div className="flex flex-wrap gap-3"><Button disabled={q.isFetching || route.debouncing || !scope.ready || !validFilters} onClick={() => void q.refetch()}>Refresh</Button><ScanInventoryExport context={JSON.stringify([scope.owner, clusterId, request])} disabled={!available || q.isFetching} download={() => repositoryScans.exportCSV(request)} /></div>
+      {q.isFetching && q.isSuccess && <p role="status" className="text-sm text-muted-foreground">Refreshing scan inventory…</p>}
+      <p className="text-xs text-muted-foreground">Matching CSV includes fixed inventory columns across all matching pages (up to 100,000 records). The table’s page CSV follows visible columns.</p>
       <section className="rounded-lg border border-border bg-card p-3">
         <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_170px]">
           <label className="relative block">
@@ -140,15 +144,18 @@ export function RepositoryScansPage() {
       </section>
 
       <div className="flex flex-wrap gap-3"><label className="text-xs">Branch<input aria-label="Branch filter" className="ml-2 rounded border border-input bg-background px-2 py-1" value={route.params.get("branch") ?? ""} onChange={event => route.update({ branch: event.target.value }, true, true)} /></label><label className="text-xs">Workflow<input aria-label="Workflow filter" className="ml-2 rounded border border-input bg-background px-2 py-1" value={route.params.get("workflow") ?? ""} onChange={event => route.update({ workflow: event.target.value }, true, true)} /></label></div>
-      <p className="text-xs text-muted-foreground">Organization-wide repository evidence; the selected cluster provides navigation context only. Search runs on the server. Status and table sorting apply to this server page only.</p>
-      {!scanStatuses.includes(status) && <ErrorState title="The requested page filter is invalid. Choose a listed value to recover." />}
-      {available && <ScanInventoryContinuation page={route.page} rows={scans.length} matching={filtered.length} hasMore={hasMore} onPage={route.setPage} />}
+      <p className="text-xs text-muted-foreground">Organization-wide repository evidence; the selected cluster provides navigation context only. Search runs on the server. Job status and sorting run on the server before pagination.</p>
+      {!validFilters && <ErrorState title="The requested server filter or sort is invalid. Choose a listed value to recover." action={<Button onClick={() => route.update({ sort: null, order: null, status: null })}>Reset filters and sort</Button>} />}
+      {available && <ScanInventoryContinuation total={q.data?.total} page={route.page} rows={scans.length} matching={filtered.length} hasMore={hasMore} onPage={route.setPage} />}
       {available && selectedID && !selected && <ErrorState title="The selected record is unavailable on this page or hidden by its filters." action={<Button onClick={() => setSelectedID(null)}>Clear selection</Button>} />}
       <section className="flex flex-col gap-4">
         <div data-testid="repository-table">
-          {!available ? <InventoryLoadState label="Repository scans" query={q} invalid={invalid} debouncing={route.debouncing} /> : <DataTable
+          {!available ? validFilters ? <InventoryLoadState label="Repository scans" query={q} invalid={invalid} debouncing={route.debouncing} /> : null : <DataTable
             rows={filtered}
             pagination={false}
+            manualSorting
+            sort={{ id: sort, dir: order as "asc" | "desc" }}
+            onSortChange={next => route.update({ sort: next?.id ?? null, order: next?.dir ?? null })}
             preferencesKey="repository-scans-inventory"
             exportFileName="constellation-repository-scans-server-page"
             exportLabel="Export this page CSV"
@@ -326,25 +333,6 @@ function AttestationHistoryPanel({ item }: { item: RepositoryScan }) {
       </div>
     </div>
   );
-}
-
-function summarize(items: RepositoryScan[]) {
-  const branches = new Set(items.map((item) => item.branch).filter(Boolean));
-  const workflows = new Set(items.map((item) => item.workflow).filter(Boolean));
-  return {
-    total: items.length,
-    branches: branches.size,
-    workflows: workflows.size,
-    packages: items.reduce((sum, item) => sum + item.package_count, 0),
-    withEvidence: items.filter((item) => !!item.latest_evidence_id).length,
-    findings: items.reduce((sum, item) => sum + item.open_findings, 0),
-    criticalHigh: items.reduce((sum, item) => sum + item.critical_findings + item.high_findings, 0),
-    activeJobs: items.filter((item) => item.latest_job_status === "pending" || item.latest_job_status === "running").length,
-    staleEvidence: items.filter((item) => isStale(item.latest_observed_at || item.last_seen_at)).length,
-    attestations: items.filter((item) => !!item.latest_attestation).length,
-    trustedAttestations: items.filter((item) => item.latest_attestation?.trusted).length,
-    unverifiedAttestations: items.filter((item) => item.latest_attestation?.verification_status === "unverified").length,
-  };
 }
 
 function ScanStatus({ status }: { status?: string }) {

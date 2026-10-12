@@ -19,6 +19,7 @@ const columns: Column<Row>[] = [
 
 let root: Root | undefined;
 let host: HTMLDivElement | undefined;
+Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
 afterEach(() => {
   if (root) {
@@ -28,7 +29,114 @@ afterEach(() => {
   root = undefined;
   host = undefined;
   document.body.innerHTML = "";
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   localStorage.clear();
+});
+
+describe("DataTable acceptance", () => {
+  it("repairs stale and all-hidden preferences before rendering and persists the repaired state", () => {
+    localStorage.setItem(storageKey("stale"), JSON.stringify({ hiddenColumnIds: ["name", "risk", "risk", "owner", "retired", 42], density: "tiny" }));
+    render(<DataTable rows={rows} columns={columns} rowKey={row => row.id} preferencesKey="stale" />);
+    expect([...host!.querySelectorAll("th")].map(cell => cell.textContent)).toEqual(["Name"]);
+    expect(host?.querySelector("tbody td")?.textContent).toBe("api");
+    expect(JSON.parse(localStorage.getItem(storageKey("stale"))!)).toEqual({ hiddenColumnIds: ["risk", "owner"], density: "cozy" });
+    expect(host?.querySelector('[aria-label="cozy density"]')?.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("keeps a remaining column visible when previously visible columns are removed", () => {
+    const view = (cols: Column<Row>[]) => <TablePreferencesProvider identity={{ org_id: "org", user_id: "user" }}><DataTable rows={rows} columns={cols} rowKey={row => row.id} preferencesKey="evolving" /></TablePreferencesProvider>;
+    localStorage.setItem(storageKey("evolving"), JSON.stringify({ hiddenColumnIds: ["risk", "owner"] }));
+    render(view(columns));
+    act(() => root?.render(view(columns.slice(1))));
+    expect([...host!.querySelectorAll("th")].map(cell => cell.textContent)).toEqual(["Risk"]);
+    expect(JSON.parse(localStorage.getItem(storageKey("evolving"))!).hiddenColumnIds).toEqual(["owner"]);
+  });
+
+  it("keeps hidden-column sort visible and effective until the operator clears it", () => {
+    const onSortChange = vi.fn();
+    const list = [{ ...rows[0], id: "low", risk: 1 }, { ...rows[0], id: "high", name: "worker", risk: 9 }];
+    render(<DataTable rows={list} columns={[columns[0], { ...columns[1], sort: (a,b) => a.risk-b.risk }]} rowKey={row => row.id} hiddenColumnIds={["risk"]} defaultSort={{ id: "risk", dir: "desc" }} onSortChange={onSortChange} />);
+    expect(host?.textContent).toContain("Sorted by Risk (descending) · hidden column");
+    expect(host?.querySelector("tbody tr")?.textContent).toBe("worker");
+    act(() => [...host!.querySelectorAll("button")].find(button => button.textContent === "Clear sort")?.click());
+    expect(onSortChange).toHaveBeenCalledWith(null);
+    expect(host?.textContent).not.toContain("hidden column");
+    expect(host?.querySelector("tbody tr")?.textContent).toBe("api");
+  });
+
+  it("follows controlled URL sort changes and clearing while preserving server row order", () => {
+    const onSortChange = vi.fn();
+    const cols = [columns[0], { ...columns[1], sort: (a: Row,b: Row) => a.risk-b.risk }];
+    const list = [{ ...rows[0], id: "low", risk: 1 }, { ...rows[0], id: "high", name: "worker", risk: 9 }];
+    const view = (sort: {id: string; dir: "asc"|"desc"}|null) => <TablePreferencesProvider identity={{ org_id: "org", user_id: "user" }}><DataTable rows={list} columns={cols} rowKey={row => row.id} sort={sort} manualSorting onSortChange={onSortChange} /></TablePreferencesProvider>;
+    render(view({id:"risk",dir:"desc"}));
+    expect(host?.querySelector('th[data-column-id="risk"]')?.getAttribute("aria-sort")).toBe("descending");
+    act(() => root?.render(view({id:"risk",dir:"asc"})));
+    expect(host?.querySelector('th[data-column-id="risk"]')?.getAttribute("aria-sort")).toBe("ascending");
+    expect(host?.querySelector("tbody tr")?.textContent).toBe("api1");
+    act(() => root?.render(view(null)));
+    expect(host?.querySelector('th[aria-sort]')).toBeNull();
+    expect(onSortChange).not.toHaveBeenCalled();
+  });
+
+  it("reports unavailable storage while keeping density controls usable", () => {
+    const storage = localStorage;
+    let unavailable = true;
+    vi.stubGlobal("localStorage", { getItem: storage.getItem.bind(storage), setItem: (key: string, value: string) => { if (unavailable) throw new Error("quota"); storage.setItem(key,value); } });
+    render(<DataTable rows={rows} columns={columns} rowKey={row => row.id} preferencesKey="blocked" />);
+    expect(host?.querySelector('[role="status"]')?.textContent).toContain("could not be saved");
+    act(() => host?.querySelector<HTMLButtonElement>('[aria-label="compact density"]')?.click());
+    expect(host?.querySelector("tbody tr")?.className).toContain("h-6");
+    expect(host?.querySelector('[aria-label="compact density"]')?.getAttribute("aria-pressed")).toBe("true");
+    unavailable = false;
+    act(() => [...host!.querySelectorAll("button")].find(button => button.textContent === "Retry saving preferences")?.click());
+    expect(host?.querySelector('[role="status"]')).toBeNull();
+    expect(JSON.parse(storage.getItem(storageKey("blocked"))!).density).toBe("compact");
+  });
+
+  it("shows mixed selection and exposes the scroll area to keyboard users", () => {
+    const list = [rows[0], {...rows[0],id:"two"}];
+    render(<DataTable rows={list} columns={columns} rowKey={row => row.id} selectable selected={new Set(["one"])} />);
+    const all = host?.querySelector<HTMLInputElement>('input[aria-label="Select all"]');
+    expect(all?.indeterminate).toBe(true);
+    expect(all?.getAttribute("aria-checked")).toBe("mixed");
+    expect(host?.querySelector('[role="region"]')?.getAttribute("tabindex")).toBe("0");
+  });
+
+  it("selects and clears the current page without discarding selections on other pages", () => {
+    const list = Array.from({length:101},(_,index)=>({...rows[0],id:String(index)}));
+    const changed = vi.fn();
+    const view = (selected: Set<string>) => <TablePreferencesProvider identity={{org_id:"org",user_id:"user"}}><DataTable rows={list} columns={columns} rowKey={row=>row.id} selectable selected={selected} onSelectedChange={changed}/></TablePreferencesProvider>;
+    render(view(new Set(["100"])));
+    act(() => host?.querySelector<HTMLInputElement>('input[aria-label="Select all"]')?.click());
+    const all = changed.mock.calls[0][0] as Set<string>;
+    expect(all.size).toBe(101);
+    expect(all.has("100")).toBe(true);
+    act(() => root?.render(view(all)));
+    act(() => host?.querySelector<HTMLInputElement>('input[aria-label="Select all"]')?.click());
+    expect([...changed.mock.calls[1][0]]).toEqual(["100"]);
+  });
+
+  it("resets columns and density together through the shared menu", async () => {
+    localStorage.setItem(storageKey("reset"), JSON.stringify({ hiddenColumnIds:["risk","owner"], density:"compact" }));
+    render(<DataTable rows={rows} columns={columns} rowKey={row => row.id} preferencesKey="reset" defaultHiddenColumnIds={["owner"]} />);
+    await act(async () => { host?.querySelector<HTMLButtonElement>('[aria-label="Columns"]')?.dispatchEvent(new MouseEvent("pointerdown", {bubbles:true,button:0})); });
+    const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent?.includes("Reset table preferences"));
+    expect(item).toBeDefined();
+    await act(async () => { item?.click(); });
+    expect([...host!.querySelectorAll("th")].map(cell => cell.textContent)).toEqual(["Name","Risk"]);
+    expect(host?.querySelector('[aria-label="cozy density"]')?.getAttribute("aria-pressed")).toBe("true");
+    expect(JSON.parse(localStorage.getItem(storageKey("reset"))!)).toEqual({ hiddenColumnIds:["owner"], density:"cozy" });
+  });
+
+  it("allows hiding the last optional column when a required column remains", async () => {
+    render(<DataTable rows={rows} columns={[{...columns[0],hideable:false},columns[1]]} rowKey={row => row.id} preferencesKey="required" />);
+    await act(async () => { host?.querySelector<HTMLButtonElement>('[aria-label="Columns"]')?.dispatchEvent(new MouseEvent("pointerdown",{bubbles:true,button:0})); });
+    const risk = [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find(item => item.textContent === "Risk");
+    await act(async () => { risk?.click(); });
+    expect([...host!.querySelectorAll("th")].map(cell => cell.textContent)).toEqual(["Name"]);
+  });
 });
 
 describe("DataTable preferences", () => {

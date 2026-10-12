@@ -450,9 +450,10 @@ function NetworkMapInner() {
     () => hidePlatformComponents ? lifecycleItemsRaw.filter((item) => !isPlatformResource(item.platform_role,item.namespace)) : lifecycleItemsRaw,
     [hidePlatformComponents, lifecycleItemsRaw],
   );
-  const threatsRaw = threatsQ.data?.threats ?? EMPTY_THREATS;
+  const threatsAvailable = scopeReady && threatsQ.isSuccess && !threatsQ.isError && threatsQ.data.threats.every(threat => threat.cluster_id === clusterID);
+  const threatsRaw = threatsAvailable ? threatsQ.data!.threats : EMPTY_THREATS;
   const threats = useMemo(
-    () => hidePlatformComponents ? threatsRaw.filter((item) => !isPlatformNamespace(item.namespace)) : threatsRaw,
+    () => hidePlatformComponents ? threatsRaw.filter((item) => !isPlatformResource(item.platform_role, item.namespace)) : threatsRaw,
     [hidePlatformComponents, threatsRaw],
   );
   const conversationsRaw = conversationsQ.data?.conversations ?? EMPTY_CONVERSATIONS;
@@ -499,9 +500,9 @@ function NetworkMapInner() {
   const isExternal = useCallback((f: NetworkFlow) => f.src.startsWith("external/") || f.dst.startsWith("external/"), []);
   const isPlatformFlow = useCallback(
     (f: NetworkFlow) => {
-      return isPlatformWorkload(f.src) || isPlatformWorkload(f.dst);
+      return isPlatformEndpoint(f.src, f.src_platform_role) || isPlatformEndpoint(f.dst, f.dst_platform_role);
     },
-    [isPlatformWorkload],
+    [isPlatformEndpoint],
   );
 
   // Apply L2 chip filters on top of the server-side filters (which only
@@ -718,7 +719,7 @@ function NetworkMapInner() {
         <StatCard label="Visible map flows" value={q.isSuccess ? flowCount : "—"} />
         <StatCard label="Map flow volume" value={q.isSuccess ? volume : "—"} />
         <StatCard label="Blocked map flows" value={q.isSuccess ? blocked : "—"} tone={blocked > 0 ? "critical" : "neutral"} />
-        <div data-testid="netstat-threats"><StatCard label="Loaded threats" value={threatsQ.isSuccess ? threats.length : "—"} hint="Separate DPI source sample" tone={threats.length > 0 ? "critical" : "neutral"} /></div>
+        <div data-testid="netstat-threats"><StatCard label="Loaded threats" value={threatsAvailable ? threats.length : "—"} hint="Separate DPI source sample" tone={threats.length > 0 ? "critical" : "neutral"} /></div>
       </StatGrid>}
       <RadixTabs.Root
         value={workspaceTab}
@@ -1215,7 +1216,7 @@ function NetworkMapInner() {
         </RadixTabs.Content>
 
         <RadixTabs.Content value="threats" className="min-h-0 flex-1 overflow-auto outline-none" data-testid="network-workspace-panel-threats">
-          <NetworkThreatsWorkspaceTab
+          {!threatsAvailable ? threatsQ.isPending ? <p role="status">Loading threat evidence…</p> : <ErrorState title="Threat evidence could not be loaded or refreshed for the selected cluster." error={threatsQ.error} action={<Button onClick={() => void threatsQ.refetch()}>Retry threats</Button>} /> : <NetworkThreatsWorkspaceTab
             threats={threats}
             total={threatsQ.data?.total ?? threats.length}
             page={threatPage}
@@ -1237,7 +1238,7 @@ function NetworkMapInner() {
                 setPopoverOpen(true);
               }
             }}
-          />
+          />}
         </RadixTabs.Content>
       </RadixTabs.Root>
     </div>
@@ -1666,13 +1667,15 @@ export function PcapWorkspaceTab({
           emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">{capturesQ.isPending ? "Loading captures..." : "No packet captures match this filter."}</div>}
           columns={[
             { id: "workload", header: "Workload", kind: "name", code: true, cell: (capture) => capture.workload },
+            { id: "platform_role", header: "Platform role", kind: "text", exportHeader: "platform_role", cell: (capture) => capture.platform_role || "Not classified", exportValue: (capture) => capture.platform_role ?? "" },
+            { id: "namespace", header: "Namespace", kind: "name", cell: (capture) => capture.namespace },
             { id: "filter", header: "Filter", kind: "text", wrap: true, size: 220, cell: pcapCaptureFilterLabel },
             { id: "status", header: "Status", kind: "status", cell: (capture) => <PcapStatusPill status={capture.status} /> },
             { id: "node", header: "Node", kind: "id", cell: (capture) => capture.claimed_by_node || "-" },
             { id: "packets", header: "Packets", kind: "count", cell: (capture) => capture.packet_count == null ? "Not reported" : capture.packet_count.toLocaleString() },
             { id: "size", header: "Size", kind: "bytes", cell: (capture) => capture.file_size_bytes == null ? "Not reported" : formatBytes(capture.file_size_bytes) },
             { id: "requested", header: "Requested", kind: "date", cell: (capture) => formatDateTime(capture.requested_at) },
-            { id: "actions", header: "", kind: "actions", size: 160, minSize: 160, maxSize: 240, wrap: true, cell: (capture) => <div className="flex flex-wrap items-center justify-end gap-1">
+            { id: "actions", header: "", kind: "actions", exportable: false, size: 160, minSize: 160, maxSize: 240, wrap: true, cell: (capture) => <div className="flex flex-wrap items-center justify-end gap-1">
               {capture.status === "completed" && <Button size="sm" variant="outline" onClick={() => void runtimePcap.download(capture.id).catch((err: Error) => toast.error(`PCAP download failed: ${err.message}`))} data-testid="network-pcap-download"><Download className="h-3.5 w-3.5" aria-hidden />Download</Button>}
               {capture.error_message ? <span className="min-w-0 break-words text-[color:var(--color-status-error)]">{capture.error_message}</span> : null}
               <Button size="icon" variant="ghost" disabled={remove.isPending} onClick={() => { if (window.confirm(`Remove PCAP capture ${capture.id.slice(0, 8)}?`)) remove.mutate(capture.id); }} title={capture.status === "pending" || capture.status === "running" ? "Cancel capture" : "Remove capture"} data-testid="network-pcap-delete"><Trash2 className="h-3.5 w-3.5" aria-hidden /></Button>
@@ -1680,7 +1683,7 @@ export function PcapWorkspaceTab({
           ]}
         />
       </div>}
-      {capturesQ.isSuccess && !scopeMismatch && !portInvalid && <p className="text-xs text-muted-foreground">{captures.length} returned capture requests. Server fetch is capped at 200; table sort and CSV cover all returned captures.</p>}
+      {capturesQ.isSuccess && !scopeMismatch && !portInvalid && <p className="text-xs text-muted-foreground">{captures.length} returned capture requests. Server fetch is capped at 200; table sort and CSV cover all returned captures and selected columns.</p>}
     </section>
   );
 }
@@ -1735,6 +1738,14 @@ export function NetworkRulesWorkspaceTab({
         </button>
       ),
       exportValue: (r) => r.workload,
+    },
+    {
+      id: "platform_role",
+      header: "Platform role",
+      kind: "text",
+      exportHeader: "platform_role",
+      cell: (r) => r.platform_role || "Not classified",
+      exportValue: (r) => r.platform_role ?? "",
     },
     {
       id: "mode",
@@ -1822,7 +1833,7 @@ export function NetworkRulesWorkspaceTab({
   );
 }
 
-function NetworkThreatsWorkspaceTab({
+export function NetworkThreatsWorkspaceTab({
   threats,
   total,
   page,
@@ -1864,21 +1875,27 @@ function NetworkThreatsWorkspaceTab({
           className="rounded-none border-0"
           rows={visibleThreats}
           rowKey={(row) => row.id}
-          showDensityToggle={false}
-          showColumnChooser={false}
+          pagination={false}
+          preferencesKey="network-threats"
+          exportFileName="network-loaded-threat-page"
+          exportLabel="Export loaded threat page"
+          sourceCount={visibleThreats.length}
+          sourceLimit={100}
           emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">No DPI threats in this window.</div>}
           columns={[
-            { id: "threat", header: "Threat", kind: "name", cell: (row) => <><button type="button" className="block max-w-full truncate text-left font-medium hover:text-[color:var(--color-primary)]" onClick={() => setDrilldownID(row.id)} data-testid="network-threats-open" title={row.threat_name || row.msg || `signature ${row.threat_id}`}>{row.threat_name || row.msg || `signature ${row.threat_id}`}</button>{row.msg && <div className="truncate text-xs text-muted-foreground" title={row.msg}>{row.msg}</div>}</> },
+            { id: "threat", header: "Threat", kind: "name", exportValue: (row) => row.threat_name || row.msg || `signature ${row.threat_id}`, cell: (row) => <><button type="button" className="block max-w-full truncate text-left font-medium hover:text-[color:var(--color-primary)]" onClick={() => setDrilldownID(row.id)} data-testid="network-threats-open" title={row.threat_name || row.msg || `signature ${row.threat_id}`}>{row.threat_name || row.msg || `signature ${row.threat_id}`}</button>{row.msg && <div className="truncate text-xs text-muted-foreground" title={row.msg}>{row.msg}</div>}</> },
+            { id: "workload", header: "Workload", kind: "name", code: true, cell: (row) => row.workload_id || row.namespace || "Not reported", exportValue: (row) => row.workload_id ?? "" },
+            { id: "platform_role", header: "Platform role", kind: "text", exportHeader: "platform_role", cell: (row) => row.platform_role || "Not classified", exportValue: (row) => row.platform_role ?? "" },
             { id: "category", header: "Category", kind: "text", size: 140, cell: (row) => threatCategoryLabel(row.threat_id) },
             { id: "flow", header: "Flow", kind: "id", size: 260, maxSize: 360, cell: (row) => `${row.src_ip}:${row.src_port} -> ${row.dst_ip}:${row.dst_port}` },
             { id: "severity", header: "Severity", kind: "status", cell: (row) => severityLabel(row.severity) },
             { id: "action", header: "Action", kind: "status", cell: (row) => threatActionLabel(row.action) },
             { id: "reported", header: "Reported", kind: "date", cell: (row) => formatDateTime(row.reported_at || row.at) },
-            { id: "actions", header: "", kind: "actions", cell: (row) => <Button size="sm" variant="outline" onClick={() => onPivot(row)} data-testid="network-threats-pivot">Pivot</Button> },
+            { id: "actions", header: "", kind: "actions", exportable: false, cell: (row) => <Button size="sm" variant="outline" onClick={() => onPivot(row)} data-testid="network-threats-pivot">Pivot</Button> },
           ]}
         />
       </div>
-      <p className="text-xs text-muted-foreground">Critical and blocked metrics cover this page of threats.</p>
+      <p className="text-xs text-muted-foreground">Critical and blocked metrics and CSV cover this loaded page of threats; platform visibility may hide rows from the server page. CSV includes the selected table columns.</p>
       <Pager page={page} pageSize={100} total={total} rowsOnPage={visibleThreats.length} onPage={onPage} />
       {drilldownID && <ThreatDrilldownDialog id={drilldownID} onClose={() => setDrilldownID(null)} />}
     </section>
@@ -2433,7 +2450,7 @@ export function StreamsTab({ flow, from: explicitFrom, to: explicitTo, clusterID
   const t = data!.totals;
   return (
     <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">Up to 200 returned streams; totals and CSV cover this loaded sample.</p>
+      <p className="text-xs text-muted-foreground">Up to 200 returned streams; totals and CSV cover this loaded sample. CSV includes the selected table columns.</p>
       <div className="grid gap-2 sm:grid-cols-2">
         <Field label="Streams" value={String(entries.length)} />
         <Field label="Total bytes" value={formatBytes(t.bytes)} />
@@ -2442,7 +2459,7 @@ export function StreamsTab({ flow, from: explicitFrom, to: explicitTo, clusterID
       </div>
       <div className="min-w-0">
         <DataTable
-          rows={entries.map((entry, index) => ({ ...entry, rowKey: index }))}
+          rows={entries.map((entry, index) => ({ ...entry, rowKey: index, from, to, from_platform_role: data?.from_platform_role, to_platform_role: data?.to_platform_role }))}
           rowKey={(entry) => entry.rowKey}
           density="compact"
           sourceLimit={200}
@@ -2450,6 +2467,10 @@ export function StreamsTab({ flow, from: explicitFrom, to: explicitTo, clusterID
           preferencesKey="network-conversation-streams"
           exportFileName="network-conversation-streams"
           columns={[
+            { id: "from", header: "From", kind: "name", code: true, cell: (entry) => entry.from },
+            { id: "from_platform_role", header: "From role", kind: "text", exportHeader: "from_platform_role", cell: (entry) => entry.from_platform_role || "Not classified", exportValue: (entry) => entry.from_platform_role ?? "" },
+            { id: "to", header: "To", kind: "name", code: true, cell: (entry) => entry.to },
+            { id: "to_platform_role", header: "To role", kind: "text", exportHeader: "to_platform_role", cell: (entry) => entry.to_platform_role || "Not classified", exportValue: (entry) => entry.to_platform_role ?? "" },
             { id: "application", header: "Proto / App", kind: "name", code: true, size: 180, minSize: 120, cell: (entry) => <>{entry.protocol}{entry.application ? <span className="text-muted-foreground">/{entry.application}</span> : ""}</> },
             { id: "port", header: "Port", kind: "count", cell: (entry) => entry.port || "—" },
             { id: "bytes", header: "Bytes", kind: "bytes", cell: (entry) => formatBytes(entry.bytes) },
@@ -2497,7 +2518,9 @@ function FlowTab({ flow, threats }: { flow: NetworkFlow; threats: RuntimeThreat[
         <Field label="Protocol" value={flow.protocol} />
         <Field label="L7" value={flow.l7_protocol || "—"} />
         <Field label="Source" value={formatEndpoint(flow.src_addr, flow.src_port)} />
+        <Field label="Source platform role" value={flow.src_platform_role || "Not classified"} />
         <Field label="Destination" value={formatEndpoint(flow.dst_addr, flow.dst_port)} />
+        <Field label="Destination platform role" value={flow.dst_platform_role || "Not classified"} />
         {typeof flow.fqdn === "string" && flow.fqdn !== "" && <Field label="FQDN" value={flow.fqdn} />}
         {fromDP && (flow.client_bytes ?? 0) > 0 && (
           <Field label="Client→Server" value={formatBytes(flow.client_bytes as number)} />
@@ -2684,7 +2707,21 @@ function HistoryTab({ data, samples }: { data: number[]; samples: NetworkRecentF
         </div>
       </div>
       <div>
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Recent samples</div>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            Recent samples · preview up to 8 of {samples.length} returned for this flow
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={samples.length === 0}
+            onClick={() => downloadCsv(
+              "network-selected-flow-returned-samples.csv",
+              ["cluster_id", "src", "src_platform_role", "dst", "dst_platform_role", "observed_at", "bytes", "packets", "verdict"],
+              samples.map(sample => [sample.cluster_id ?? "", sample.src, sample.src_platform_role ?? "", sample.dst, sample.dst_platform_role ?? "", sample.observed_at, String(sample.bytes), String(sample.packets), sample.verdict]),
+            )}
+          >Export returned samples</Button>
+        </div>
         <ul className="mt-2 space-y-1 text-[11px]">
           {samples.slice(0, 8).map((s) => (
             <li key={s.id} className="flex items-center justify-between rounded border border-border bg-card px-2 py-1">

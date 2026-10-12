@@ -49,6 +49,16 @@ func deploymentListFilters(r *http.Request, orgID uuid.UUID) (deploymentListFilt
 		arg := bind(search)
 		parts = append(parts, "(strpos(lower(d.name),lower("+arg+"::text))>0 OR strpos(lower(d.namespace||'/'||d.name),lower("+arg+"::text))>0)")
 	}
+	// Dashboard hardening counts record presence, including zero/null values.
+	// Keep the exact same predicate for totals, pages and CSV.
+	if fact := values.Get("risk_fact"); fact != "" {
+		switch fact {
+		case "privileged", "run_as_root", "net_exposure", "host_network":
+			parts = append(parts, "d.risk_factors ? "+bind(fact)+"::text")
+		default:
+			return filter, fmt.Errorf("invalid risk_fact")
+		}
+	}
 	filter.base = "WITH classified AS (SELECT d.*, " + platformRoleSQL("d.namespace", "d.labels") + " AS platform_role FROM deployments d WHERE " + strings.Join(parts, " AND ") + ") "
 	filter.role = "true"
 	switch role := values.Get("platform_role"); role {

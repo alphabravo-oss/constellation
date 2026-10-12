@@ -8,7 +8,7 @@ import { operatorStorageKey } from "@/lib/operator-preferences";
 import { networkViewHref, networkViewSnapshotFromParams } from "@/lib/network-saved-view-route";
 import { buildNetworkSavedViewSnapshot, networkActivitySavedViewsStorageKey } from "@/lib/network-saved-views";
 import { parseURLSearch, stringifyURLSearch } from "@/lib/route-search";
-import { network, groupsApi, runtimeThreats, policies } from "@/api/client";
+import { network, groupsApi, runtimeThreats, policies, type RuntimeThreat } from "@/api/client";
 import { NetworkMapPage } from "./NetworkMapPage";
 import { NetworkSavedViewFormPage } from "./NetworkSavedViewFormPage";
 vi.mock("@/hooks/useCluster", () => ({ useCluster: () => ({ clusterId: "cluster", cluster: { id: "cluster", name: "Primary" }, isLoading: false, error: null }) }));
@@ -30,14 +30,14 @@ beforeEach(() => {
   host = document.createElement("div"); document.body.append(host); root = createRoot(host); client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 });
 afterEach(() => { act(() => root.unmount()); client.clear(); host.remove(); history?.destroy(); localStorage.clear(); });
-async function render() {
-  history = createMemoryHistory({ initialEntries: [networkViewHref("cluster", context, "#evidence", "network", snapshot)] });
+async function render(initialHref?: string) {
+  history = createMemoryHistory({ initialEntries: [initialHref ?? networkViewHref("cluster", context, "#evidence", "network", snapshot)] });
   const routeRoot = createRootRoute({ component: Outlet });
   const workspace = createRoute({ getParentRoute: () => routeRoot, path: "/clusters/$id/network", component: NetworkMapPage });
   const form = createRoute({ getParentRoute: () => routeRoot, path: "/clusters/$id/network/views/new", component: NetworkSavedViewFormPage });
   const router = createRouter({ routeTree: routeRoot.addChildren([workspace, form]), history, parseSearch: parseURLSearch, stringifySearch: stringifyURLSearch });
   await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{ org_id: "org", user_id: "user" }}><RouterProvider router={router} /></TablePreferencesProvider></QueryClientProvider>));
-  await restored();
+  if (!initialHref) await restored();
 }
 async function settle(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
 function button(testid: string) { return host.querySelector<HTMLButtonElement>(`[data-testid="${testid}"]`)!; }
@@ -72,4 +72,27 @@ it("keeps subsequent local presentation filters in the URL snapshot without chan
   await render(); const updated = { ...snapshot, verdicts_visible: { ...snapshot.verdicts_visible, allow: true } };
   await act(async () => button("netchip-verdict-allow").click()); await restored("after local filter change", updated);
   await openForm(updated); await act(async () => history.back()); await restored("Back with changed local filters", updated);
+});
+
+it("uses explicit threat roles before legacy namespace fallback and restores hidden evidence by URL", async () => {
+ const row = (id: string, namespace: string, platform_role?: string): RuntimeThreat => ({ id, org_id: "org", cluster_id: "cluster", namespace, workload_id: `${namespace}/${id}`, platform_role, threat_id: 2022, threat_name: id, severity: 2, action: 0, pkt_ingress: false, sess_ingress: false, at: "2026-10-12T00:00:00Z", reported_at: "2026-10-12T00:00:00Z" });
+ vi.mocked(runtimeThreats.page).mockResolvedValue({ threats: [row("custom-install", "operations", "core"), row("namespace-legacy", "kube-system"), row("explicit-unclassified", "kube-system", ""), row("customer", "prod")], total: 4, has_more: false, limit: 100, offset: 0 });
+ await render("/clusters/cluster/network?tab=threats&hours=168&hide_platform=true");
+ await settle(() => expect(host.querySelector('[data-testid="network-threats-table"]')?.textContent).toContain("customer"));
+ const table = () => host.querySelector('[data-testid="network-threats-table"]')!.textContent!;
+ expect(table()).not.toContain("custom-install"); expect(table()).not.toContain("namespace-legacy"); expect(table()).toContain("explicit-unclassified");
+ await act(async () => history.push("/clusters/cluster/network?tab=threats&hours=168&hide_platform=false"));
+ await settle(() => expect(table()).toContain("custom-install")); expect(table()).toContain("namespace-legacy");
+ expect(network.policyAction).not.toHaveBeenCalled(); expect(policies.updateDpiThreatSettings).not.toHaveBeenCalled();
+});
+
+it("withholds cached threat exports and names a failed refresh instead of reporting no threats", async () => {
+ const threat = { id: "retained-threat", org_id: "org", cluster_id: "cluster", workload_id: "prod/api", namespace: "prod", platform_role: "", threat_name: "retained-threat", threat_id: 2022, severity: 2, action: 0, pkt_ingress: false, sess_ingress: false, at: "2026-10-12T00:00:00Z", reported_at: "2026-10-12T00:00:00Z" };
+ vi.mocked(runtimeThreats.page).mockResolvedValue({ threats: [threat], total: 1, has_more: false, limit: 100, offset: 0 });
+ await render("/clusters/cluster/network?tab=threats&hours=168&hide_platform=false");
+ await settle(() => expect(host.querySelector('[data-testid="network-threats-table"]')?.textContent).toContain("retained-threat"));
+ vi.mocked(runtimeThreats.page).mockRejectedValue(new Error("Role evidence unavailable"));
+ await act(async () => { await client.invalidateQueries({ queryKey: ["runtime-threats"] }); });
+ await settle(() => expect(host.textContent).toContain("Threat evidence could not be loaded or refreshed"));
+ expect(host.querySelector('[data-testid="network-threats-table"]')).toBeNull(); expect(host.textContent).not.toContain("Export loaded threat page"); expect(host.textContent).not.toContain("No DPI threats");
 });

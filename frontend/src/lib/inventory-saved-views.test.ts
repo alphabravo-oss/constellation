@@ -24,3 +24,10 @@ it("builds canonical form and return links preserving query, page, unknown conte
   expect(inventoryViewHref("cluster", "timeline", params, "#evidence", true)).toBe(`/clusters/cluster/timeline/views/new?${params}#evidence`);
   expect(inventoryViewHref("cluster", "timeline", params, "evidence")).toBe(`/clusters/cluster/timeline?${params}#evidence`);
 });
+
+it("captures exact target cohorts and rejects malformed target filters without breaking legacy views", () => {
+ const captured = findingViewPayload(new URLSearchParams("target_type=image-workload&view=instances&kind=vulnerability"));
+ expect(captured?.targetType).toBe("image-workload"); expect(isFindingSavedView(captured)).toBe(true);
+ expect(findingViewPayload(new URLSearchParams("target_type=image-workload-extra"))).toBeNull();
+ expect(isFindingSavedView({ kind: "", lifecycle: "open", query: "", targetType: [] })).toBe(false);
+});

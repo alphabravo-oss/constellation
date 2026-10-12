@@ -27,6 +27,7 @@ export function DeploymentsPage() {
   const [searchParams, setSearchParams] = useRouteSearchParams();
   const search = searchParams.get("q") ?? searchParams.get("name") ?? "";
   const namespace = searchParams.get("namespace") ?? "";
+  const riskFact = searchParams.get("risk_fact") ?? "";
   const platformRole = searchParams.get("platform_role") ?? "all";
   const requestedPage = Number(searchParams.get("page") ?? "1");
   const page = Number.isSafeInteger(requestedPage) && requestedPage > 0 && requestedPage <= Math.floor(Number.MAX_SAFE_INTEGER / PAGE_SIZE) ? requestedPage - 1 : 0;
@@ -37,9 +38,9 @@ export function DeploymentsPage() {
   const hidePlatformComponents = visibility === null ? preferredHidden : ["true", "1", "t"].includes(normalizedVisibility!);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<unknown>(null);
-  const filters = { q: search.trim() || undefined, namespace: namespace || undefined, cluster_id: clusterId, hide_platform: hidePlatformComponents, platform_role: platformRole === "all" ? undefined : platformRole };
+  const filters = { q: search.trim() || undefined, namespace: namespace || undefined, cluster_id: clusterId, hide_platform: hidePlatformComponents, platform_role: platformRole === "all" ? undefined : platformRole, ...(riskFact ? { risk_fact: riskFact } : {}) };
   const q = useQuery({
-    queryKey: ["deployments", clusterId, search.trim(), namespace, platformRole, hidePlatformComponents, visibility, page],
+    queryKey: ["deployments", clusterId, search.trim(), namespace, platformRole, riskFact, hidePlatformComponents, visibility, page],
     queryFn: async () => {
       if (!validVisibility) throw new Error("Invalid platform visibility filter");
       return deployments.list({ ...filters, limit: PAGE_SIZE, offset: page * PAGE_SIZE });
@@ -164,10 +165,12 @@ export function DeploymentsPage() {
             current.delete("page"); return current;
           });
         }} className="block rounded-md border border-border bg-background px-3 py-2 text-sm" data-testid="deployment-role-filter"><option value="all">All types</option><option value="none">Customer deployments</option><option value="core">Platform deployments</option></select></label>
+        <label className="space-y-1 text-xs"><span className="text-muted-foreground">Recorded risk fact</span><select aria-label="Recorded risk fact" value={riskFact} onChange={(event) => updateFilter("risk_fact", event.target.value)} className="block rounded-md border border-border bg-background px-3 py-2 text-sm"><option value="">Any fact</option><option value="privileged">Privileged</option><option value="run_as_root">Runs as root</option><option value="net_exposure">Network exposure</option><option value="host_network">Host network</option>{riskFact && !["privileged", "run_as_root", "net_exposure", "host_network"].includes(riskFact) && <option value={riskFact}>Invalid fact: {riskFact}</option>}</select></label>
         <PlatformVisibilityToggle hidden={hidePlatformComponents} onHiddenChange={(hidden) => { setPreferredHidden(hidden); updateFilter("hide_platform", String(hidden)); }} hiddenCount={platformCount} />
         <Button variant="outline" disabled={!scopeReady || q.isFetching} onClick={() => void q.refetch()}><RefreshCw className="h-4 w-4" />Refresh</Button>
         <Button variant="outline" disabled={!scopeReady || q.isPending || q.isFetching || q.isError || !total || exporting} onClick={() => void exportMatching()}>{exporting ? "Exporting…" : "Export CSV"}</Button>
       </div>
+      {riskFact && <p className="text-xs text-muted-foreground" data-testid="deployment-risk-fact-scope">Recorded risk fact: {riskFact}. Matches deployments reporting this key, including zero or null values; this does not assert that the condition is active.</p>}
       {exportError ? <ErrorState title="Deployment export failed" error={exportError} /> : null}
 
       <StatGrid data-testid="deployments-summary">
@@ -187,7 +190,7 @@ export function DeploymentsPage() {
           rowTestId={() => "deployment-row"}
           pagination={false}
           className="rounded-lg"
-          emptyState={<div className="px-3 py-6 text-center text-xs text-muted-foreground">{hidePlatformComponents && platformCount ? `${platformCount} matching platform deployments are hidden. Use Platform hidden to show them.` : page > 0 ? "No deployments on this page. Return to the first page or change the filters." : search.trim() || namespace || platformRole !== "all" ? "No deployments match this search." : "No deployments yet. The operator discovers workloads and persists their risk."}</div>}
+          emptyState={<div className="px-3 py-6 text-center text-xs text-muted-foreground">{hidePlatformComponents && platformCount ? `${platformCount} matching platform deployments are hidden. Use Platform hidden to show them.` : page > 0 ? "No deployments on this page. Return to the first page or change the filters." : search.trim() || namespace || riskFact || platformRole !== "all" ? "No deployments match this search." : "No deployments yet. The operator discovers workloads and persists their risk."}</div>}
         />
         <p className="text-xs text-muted-foreground" data-testid="deployment-page-scope">Showing {rows.length ? page * PAGE_SIZE + 1 : 0}–{page * PAGE_SIZE + rows.length} of {total ?? "unknown"} matching deployments, ranked by risk then last seen. CSV exports all matching deployments.</p>
         <Pager page={page} pageSize={PAGE_SIZE} total={total} hasMore={q.data?.has_more} rowsOnPage={rows.length} onPage={setPage} />

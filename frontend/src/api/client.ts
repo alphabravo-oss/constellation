@@ -193,12 +193,12 @@ export interface CVERollup {
 }
 
 export const findings = {
-  list: (params: { kind?: FindingKind; lifecycle?: Lifecycle; cluster_id?: string; q?: string; limit?: number; offset?: number; fixable?: boolean; sort?: string; order?: "asc" | "desc" } = {}) =>
+  list: (params: { kind?: FindingKind; lifecycle?: Lifecycle; cluster_id?: string; target_type?: string; q?: string; limit?: number; offset?: number; fixable?: boolean; sort?: string; order?: "asc" | "desc" } = {}) =>
     api.get<{ findings: Finding[]; limit: number; offset: number; total: number; has_more: boolean; lifecycle_counts?: Record<Lifecycle, number> }>("/findings", { params: { ...params, fixable: params.fixable ? "1" : undefined } }).then((r) => r.data),
   // NeuVector-style rollup: one row per CVE with its blast radius (affected images/clusters).
-  byCVE: (params: { cluster_id?: string; lifecycle?: Lifecycle; limit?: number; offset?: number; fixable?: boolean; q?: string } = {}) =>
+  byCVE: (params: { cluster_id?: string; target_type?: string; lifecycle?: Lifecycle; limit?: number; offset?: number; fixable?: boolean; q?: string } = {}) =>
     api.get<{ cves: CVERollup[]; limit: number; offset: number; total: number }>("/findings/by-cve", { params: { ...params, fixable: params.fixable ? "true" : undefined, q: params.q || undefined } }).then((r) => r.data),
-  exportCSV: (params: { kind?: FindingKind; lifecycle?: Lifecycle; cluster_id?: string; q?: string; limit?: number; offset?: number; fixable?: boolean; sort?: string; order?: "asc" | "desc" } = {}) => {
+  exportCSV: (params: { kind?: FindingKind; lifecycle?: Lifecycle; cluster_id?: string; target_type?: string; q?: string; limit?: number; offset?: number; fixable?: boolean; sort?: string; order?: "asc" | "desc" } = {}) => {
     const query = new URLSearchParams();
     for (const [key, value] of Object.entries(params)) if (value !== undefined && value !== false && value !== "") query.set(key, value === true ? "1" : String(value));
     return downloadAPIFile(`/findings.csv?${query}`, "constellation-findings-instances.csv");
@@ -952,9 +952,9 @@ export interface DeploymentDetail extends Deployment {
 }
 
 export const deployments = {
-  list: (params: { q?: string; name?: string; namespace?: string; cluster_id?: string; hide_platform?: boolean; platform_role?: string; limit?: number; offset?: number } = {}) =>
+  list: (params: { q?: string; name?: string; namespace?: string; cluster_id?: string; hide_platform?: boolean; platform_role?: string; risk_fact?: string; limit?: number; offset?: number } = {}) =>
     api.get<{ deployments: Deployment[]; total: number; limit: number; offset: number; has_more: boolean; platform_count: number; summary: { total: number; at_risk: number; finding_count: number; critical_count: number; high_count: number } }>("/deployments", { params }).then((r) => r.data),
-  exportCsv: (params: { q?: string; name?: string; namespace?: string; cluster_id?: string; hide_platform?: boolean; platform_role?: string } = {}) =>
+  exportCsv: (params: { q?: string; name?: string; namespace?: string; cluster_id?: string; hide_platform?: boolean; platform_role?: string; risk_fact?: string } = {}) =>
     api.get<Blob>("/deployments.csv", { params, responseType: "blob" }).then((r) => r.data),
   get: (id: string) =>
     api.get<DeploymentDetail>(`/deployments/${id}`).then((r) => r.data),
@@ -1990,6 +1990,8 @@ export interface EnforcementAction {
 export interface ConversationEntries {
   from: string;
   to: string;
+  from_platform_role?: string;
+  to_platform_role?: string;
   window_hours: number;
   entries: ConversationEntry[];
   totals: { bytes: number; client_bytes: number; server_bytes: number; packets: number; sessions: number };
@@ -2075,6 +2077,8 @@ export interface NetworkFlow {
   cluster_id?: string;
   src: string;
   dst: string;
+  src_platform_role?: string;
+  dst_platform_role?: string;
   src_addr?: string;
   dst_addr?: string;
   src_port?: number;
@@ -2128,6 +2132,7 @@ export interface RuntimeThreat {
   ep_mac?: string;
   workload_id?: string;
   namespace?: string;
+  platform_role?: string;
   pod_name?: string;
   threat_id: number;
   /** Human-friendly upstream name, eg. "SQL_INJECTION", "SSL_HEARTBLEED". */
@@ -2159,6 +2164,8 @@ export interface NetworkRecentFlow {
   cluster_id?: string;
   src: string;
   dst: string;
+  src_platform_role?: string;
+  dst_platform_role?: string;
   src_addr?: string;
   dst_addr?: string;
   src_port?: number;
@@ -2528,6 +2535,7 @@ export interface PcapCapture {
   cluster_id: string;
   workload: string;
   namespace: string;
+  platform_role?: string;
   requested_by: string;
   requested_at: string;
   duration_s: number;
@@ -4419,9 +4427,27 @@ export const scanTargets = {
     api.get<ScanTargetImpacts>(`/scan-targets/${encodeURIComponent(id)}/impacted-workloads`).then((r) => r.data),
 };
 
+export interface ScanInventoryParams { q?: string; sort?: string; order?: "asc" | "desc"; limit?: number; offset?: number }
+export interface ScanInventoryMetadata { total?: number; has_more?: boolean; summary?: Record<string, number>; sort?: string; order?: "asc" | "desc" }
+export interface ImageScanInventoryParams extends ScanInventoryParams { cluster_id?: string; image_digest?: string; digest?: string; severity?: string }
+export interface RepositoryScanInventoryParams extends ScanInventoryParams { branch?: string; workflow?: string; status?: string }
+export interface ServerlessInventoryParams extends ScanInventoryParams { provider?: string; account_id?: string; region?: string; posture?: string }
+export interface ScanInventoryExportResult { total: number; exported: number; limit: number; truncated: boolean }
+async function downloadScanInventoryCSV(path: string, params: ScanInventoryParams, filename: string): Promise<ScanInventoryExportResult> {
+  const filters = { ...params }; delete filters.limit; delete filters.offset;
+  const response = await api.get<Blob>(path, { params: filters, responseType: "blob" });
+  const total = Number(response.headers["x-export-total"]), limit = Number(response.headers["x-export-limit"]);
+  const truncated = response.headers["x-export-truncated"];
+  if (!Number.isSafeInteger(total) || total < 0 || !Number.isSafeInteger(limit) || limit < 1 || !["true", "false"].includes(String(truncated)) || (truncated === "true") !== (total > limit)) throw new Error("Export scope could not be confirmed. Retry before treating the download as complete.");
+  const blob = response.data instanceof Blob ? response.data : new Blob([response.data]);
+  const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = filename; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
+  return { total, exported: Math.min(total, limit), limit, truncated: truncated === "true" };
+}
+
 export const imageScanResults = {
-  list: (params?: { cluster_id?: string; image_digest?: string; digest?: string; q?: string; limit?: number; offset?: number }) =>
-    api.get<{ image_scan_results: ImageScanResult[]; limit: number; offset: number }>("/image-scan-results", { params }).then((r) => r.data),
+  exportCSV: (params: ImageScanInventoryParams = {}) => downloadScanInventoryCSV("/image-scan-results/export.csv", params, "constellation-image-scan-results.csv"),
+  list: (params?: ImageScanInventoryParams) =>
+    api.get<ScanInventoryMetadata & { image_scan_results: ImageScanResult[]; limit: number; offset: number }>("/image-scan-results", { params }).then((r) => r.data),
   get: (id: string) =>
     api.get<ImageScanResultDetail>(`/image-scan-results/${encodeURIComponent(id)}`).then((r) => r.data),
   packages: (id: string) =>
@@ -4457,15 +4483,17 @@ export const imageScanResults = {
 };
 
 export const serverlessFunctions = {
-  list: (params?: { q?: string; provider?: string; account_id?: string; region?: string; limit?: number; offset?: number }) =>
-    api.get<{ serverless_functions: ServerlessFunction[]; limit: number; offset: number }>("/serverless-functions", { params }).then((r) => r.data),
+  exportCSV: (params: ServerlessInventoryParams = {}) => downloadScanInventoryCSV("/serverless-functions/export.csv", params, "constellation-serverless-functions.csv"),
+  list: (params?: ServerlessInventoryParams) =>
+    api.get<ScanInventoryMetadata & { serverless_functions: ServerlessFunction[]; limit: number; offset: number }>("/serverless-functions", { params }).then((r) => r.data),
   get: (id: string) =>
     api.get<ServerlessFunctionDetail>(`/serverless-functions/${encodeURIComponent(id)}`).then((r) => r.data),
 };
 
 export const repositoryScans = {
-  list: (params?: { q?: string; branch?: string; workflow?: string; limit?: number; offset?: number }) =>
-    api.get<{ repository_scans: RepositoryScan[]; limit: number; offset: number }>("/repository-scans", { params }).then((r) => r.data),
+  exportCSV: (params: RepositoryScanInventoryParams = {}) => downloadScanInventoryCSV("/repository-scans/export.csv", params, "constellation-repository-scans.csv"),
+  list: (params?: RepositoryScanInventoryParams) =>
+    api.get<ScanInventoryMetadata & { repository_scans: RepositoryScan[]; limit: number; offset: number }>("/repository-scans", { params }).then((r) => r.data),
   get: (id: string) =>
     api.get<RepositoryScanDetail>(`/repository-scans/${encodeURIComponent(id)}`).then((r) => r.data),
   attestations: (id: string) =>

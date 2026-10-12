@@ -767,6 +767,76 @@ tables have matching header/body geometry and no clipped actions at 1280px and
 scan, migration, acceptance or saved-view writes were submitted. These checks do
 not close the remaining all-page, scale, accessibility or infrastructure gates.
 
+The next shared-table acceptance increment keeps one column-sizing/alignment
+implementation and adds controlled URL/history sorting, visible disclosure and
+recovery for a hidden sort column, stale-column repair, a full preference reset,
+and a visible retry when browser storage cannot save. Select-all preserves
+selections on other pages; partial selection exposes its mixed state. Named,
+keyboard-focusable scroll regions retain contained horizontal scrolling. The
+shared preference namespace remains scoped to organization, user and table.
+
+The frozen frontend passed **1,341 tests across 105 files**, production build,
+typecheck and changed-source lint. Fresh schema-173 databases passed **58 focused
+race/shuffle executions with no skips**: eight Dashboard cohort, 28 platform-role
+and 22 scan-inventory/metadata cases. The 656-execution Network/runtime suite
+passed before the final small role contract correction; the frozen-source focused
+role rerun qualifies that correction. Handler vet, generated OpenAPI and 107
+endpoint mappings pass.
+
+Image, repository and serverless scan inventories now filter and sort on the
+server before pagination. Matching totals, aggregate metrics and rows share one
+read-only repeatable-read snapshot; deterministic ID ties prevent unstable pages.
+Their matching CSV routes use the same query predicates and ordering across pages,
+with an explicit 100,000-record cap and total/truncation headers. The separate
+page CSV follows visible columns. Search is literal and case-insensitive, invalid
+filter/sort/raw query values fail explicitly, and serverless posture uses ASCII
+whitespace trimming and case normalization consistently across filters, rows, metrics and exports. Package metadata is a
+fallback only when package evidence is absent, preserving authoritative zeroes.
+
+Dashboard image/host vulnerability tiles now link to exact target-type Findings
+cohorts, and privileged/root/exposure tiles link to exact deployment risk-fact
+key-presence cohorts. These predicates apply to list/count/CSV; target-type also
+applies to CVE rollups and saved views. Risk-fact presence includes false, zero and
+null stored values because that is the source metric's predicate. CVE rollups
+retain unnamed host instances while excluding null image names from string arrays.
+Policy-mode labels distinguish distinct open CVE IDs from exposed workloads.
+
+Network flow/recent-entry, threat and capture reads now carry platform roles from
+exact organization/cluster/workload evidence. Ambiguous owners and IP endpoints
+remain unclassified; modern responses use an explicit empty role to suppress
+legacy namespace guesses. Default lifecycle/stream/threat/capture tables and
+visible-column CSV carry the role. User-hidden columns remain hidden in page CSV.
+Classification does not alter collection or enforcement, and optional live
+streaming remains disabled pending its separate scope/connection acceptance.
+
+Helm revision **57** deploys frontend and API `table-contract-20261012`, with
+migration `audit-lookup-20261012`, schema 173 and all seven deployments ready.
+Read-only live checks show image-list matching total **27**, two nonoverlapping
+continuation pages and **27 CSV records**; critical severity selects **12** in the
+UI, source count and matching CSV. The browser reports all twelve exported.
+Repository/serverless live inventories and CSV are empty; nonempty continuation,
+malformed metadata and cap contracts remain fixture-qualified. Offset continuation
+reflects current data across requests, not an immutable multi-request snapshot.
+
+Live Dashboard source/destination totals agree for **5,186 image-workload** and
+**641 host** open vulnerability records, and **1 privileged**, **1 root**, and
+**17 network-exposure** risk-fact deployments. The Host CVEs tile opens the exact
+641-instance Findings view; the exposure destination displays its key-presence
+semantics and 17 matching rows. Current network reads include role fields on
+294 aggregate flows and 50 recent entries; custom-install and ambiguity positives
+remain database-qualified rather than live-install acceptance.
+
+At 1280px and 640px the populated Images, Findings and Deployments tables have
+matching header/body boundaries, correct numeric alignment, no clipped actions
+and contained horizontal overflow. Image filters stay within the content width.
+Hiding the active Image sort preserves ordering and displays its caption; Show
+sort column restores it. Ascending sort changes server order, and browser Back
+restores descending state and its fragment. Keyboard menu navigation activates
+Reset table preferences and restores columns/cozy density. The scroll region is
+focusable; full keyboard-scrolling and broader accessibility acceptance remain
+open. Temporary table preferences were restored. No live policy, scan, migration,
+acceptance, capture or saved-view writes were submitted.
+
 The admission-engine continuation adds migration **172** and persists normalized
 engine outcomes atomically with image scan completion. The built-in vulnerability
 profiles now require successful Trivy and Grype results rather than retired
@@ -2364,8 +2434,10 @@ for the remaining UI-2/3/4 acceptance matrix.
 
 The baseline, inventory, entity-detail, configuration/health and bounded inventory
 control implementations are recorded in the Helm-53 evidence above. Visible caps,
-page-scoped scan filters/exports and fixture-only positive paths are limitations,
-not full-fleet or all-page acceptance.
+page-scoped filters/exports recorded for that earlier batch and fixture-only
+positive paths did not establish full-fleet or all-page acceptance. The subsequent
+scan-inventory increment replaces page-only filtering/export for image, repository
+and serverless inventories; other capped surfaces still need acceptance.
 
 This audit found no additional confirmed duplicate feature-home renderer or
 primary KPI row above five. Those findings do not close the all-page contract or
@@ -2406,7 +2478,10 @@ are not counted as inline authoring.
   org-wide conversations omit ambiguous label-derived roles. Conversation
   detail includes roles for matching flows; the conversation table CSV also
   includes endpoint roles with browser coverage. Dashboard exposure CSV also includes the server role. Other exports and
-  live-install proof remain open.
+  live-install proof remain open. The subsequent flow/recent-entry, threat and
+  capture increment adds exact identity-derived roles and default page CSV
+  coverage, including explicit unknown values; it does not qualify every export
+  or a live custom installation.
 
 ### UI-4 Dashboard and operational posture
 
@@ -2418,15 +2493,18 @@ are not counted as inline authoring.
   Findings filters and server pages now preserve URL state and use matching
   instance totals; CVE rollups retain their filtered total and share the search DSL.
   Deployment search and platform/namespace filters now run before server
-  pagination, with matching totals and full filtered CSV. Host CVEs filters open host vulnerabilities using the source
-  cluster and pages matching nodes; its distinct-node total does not equal the
-  tile's finding count, and unnamed findings cannot appear as nodes. Network
+  pagination, with matching totals and full filtered CSV. Image and host CVE
+  tiles now select the exact Findings target type, including unnamed instances;
+  privileged/root/exposure tiles use the exact deployment risk-fact predicate. Network
   pair and exposure drill-downs now preserve exact directed endpoints, source
   windows and visible platform context. The conversation header requests a combined
   deny/block cohort before server pagination. Top-vulnerable deployment links and
   the source/destination matrix now use exact deployment IDs and explicit cohort
   units. Fixable findings share the source predicate. Complete live matrix
-  acceptance across datasets remains open.
+  acceptance across datasets remains open. Remaining exact-cohort destinations
+  include 24-hour runtime alert verdicts, cross-framework graded compliance,
+  organization-wide recent audit activity, strongest-policy-mode CVE/exposure
+  groups, and the 14-day high/critical event chart.
 - [ ] Prefer downloadable HTML/CSV/JSON evidence; add PDF only when it materially
   improves a customer workflow.
 

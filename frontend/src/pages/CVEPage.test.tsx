@@ -56,3 +56,16 @@ it("shows a retryable load failure instead of a false empty result", async () =>
   await render(); await settled(() => expect(host.textContent).toContain("Could not load CVE results"));
   expect(host.textContent).not.toContain("No CVEs match"); expect(host.textContent).not.toContain("private transport details");
 });
+it("keeps the server order authoritative and follows sort changes in the header", async () => {
+  vi.mocked(cve.search).mockResolvedValue({ results: [
+    { cve_id: "CVE-server-first", cvss_base: 1, sources: [] },
+    { cve_id: "CVE-server-second", cvss_base: 9, sources: [] },
+  ] as unknown as CVEResult[], limit: 51, offset: 0 });
+  await render();
+  await settled(() => expect(host.querySelector('tbody tr')?.textContent).toContain("CVE-server-first"));
+  expect(host.querySelector('th[data-column-id="cvss"]')?.getAttribute("aria-sort")).toBe("descending");
+  await act(async () => { host.querySelector<HTMLButtonElement>('th[data-column-id="cvss"] button')?.click(); });
+  await settled(() => expect(cve.search).toHaveBeenLastCalledWith(expect.objectContaining({sort:"cvss",dir:"asc",offset:0})));
+  await settled(() => expect(host.querySelector('th[data-column-id="cvss"]')?.getAttribute("aria-sort")).toBe("ascending"));
+  expect(host.querySelector('tbody tr')?.textContent).toContain("CVE-server-first");
+});

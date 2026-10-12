@@ -4,10 +4,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { PcapWorkspaceTab, ThreatPcapCapturePane } from "./NetworkMapPage";
+import { downloadCsv } from "@/lib/csv";
 import { runtimePcap, type PcapCapture, type RuntimeThreatDetail } from "@/api/client";
 import { buildNetworkSavedViewSnapshot, type NetworkPcapSavedFilters } from "@/lib/network-saved-views";
 import { TestRouter } from "@/test/router";
 import { TablePreferencesProvider } from "@/contexts/TablePreferencesContext";
+vi.mock("@/lib/csv", () => ({ downloadCsv: vi.fn() }));
 vi.mock("@/api/client", () => ({ runtimePcap: { list: vi.fn(), remove: vi.fn(), download: vi.fn() } }));
 let root: Root; let host: HTMLDivElement; let client: QueryClient;
 const snapshot = buildNetworkSavedViewSnapshot({ workspaceTab: "pcap", hours: 24, namespace: "", verdict: "", verdictsVisible: { allow: true, alert: true, block: true }, protocolFilter: [], namespaceFilter: [], hidePlatformComponents: true, hiddenKinds: [], scopeMode: "both" });
@@ -36,4 +38,13 @@ it("routes threat capture through the canonical form with the exact traffic tupl
  await show("cluster"); const link=host.querySelector<HTMLAnchorElement>('[data-testid="threat-pcap-new"]')!; const url=new URL(link.getAttribute('href')!,"https://example.com");
  expect(url.pathname).toBe('/clusters/cluster/network/pcap/new');expect(url.searchParams.get('context')).toBe('keep');expect(url.hash).toBe('#proof');expect(JSON.parse(url.searchParams.get('network_view')!).pcap_filters).toEqual(expect.objectContaining({workload:'prod/api',src_ip:'10.0.0.1',dst_ip:'10.0.0.2',dst_port:'443',protocol:'tcp'}));expect(host.querySelector('input')).toBeNull();
  await show("other");expect(host.querySelector('a')).toBeNull();expect(host.textContent).toContain('scope does not match');
+});
+
+it("preserves installation roles in the returned capture inventory CSV", async () => {
+ vi.mocked(runtimePcap.list).mockResolvedValue([{ ...capture(), workload: "operations/houston", namespace: "operations", platform_role: "core" }, capture("customer")]);
+ await render(); await settle(() => expect(host.textContent).toContain("operations/houston"));
+ await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Export CSV")!.click());
+ const [,headers,rows]=vi.mocked(downloadCsv).mock.calls.at(-1)!;
+ expect(rows).toHaveLength(2); expect(rows[0][headers.indexOf("platform_role")]).toBe("core"); expect(rows[1][headers.indexOf("platform_role")]).toBe("");
+ expect(headers).not.toContain("Actions"); expect(headers).not.toContain(""); expect(rows.flat()).not.toContain("Remove capture");
 });

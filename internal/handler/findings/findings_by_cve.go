@@ -55,7 +55,7 @@ SELECT external_id,
        count(*)                                                                       AS instances,
        count(DISTINCT target_ref)                                                     AS affected_images,
        count(DISTINCT cluster_id) FILTER (WHERE cluster_id IS NOT NULL)               AS affected_clusters,
-       (array_agg(DISTINCT target_ref))[1:25]                                         AS images,
+       COALESCE((array_agg(DISTINCT target_ref) FILTER (WHERE target_ref IS NOT NULL))[1:25], ARRAY[]::text[])                                         AS images,
        max(last_seen_at)                                                              AS last_seen_at,
        max(CASE
              WHEN COALESCE(detail_json->>'cvss_base', '') ~ '^[0-9]+(\.[0-9]+)?$'

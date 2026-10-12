@@ -1,8 +1,9 @@
-import { useIsFetching, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useIsFetching, useQueryClient } from "@tanstack/react-query";
 import { useCluster } from "@/hooks/useCluster";
 import { useDebounced } from "@/hooks/useDebounced";
 import { useRouteSearchParams } from "@/lib/route-search";
 import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
+import type { ScanInventoryExportResult, ScanInventoryMetadata } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { ErrorState, LoadingState } from "@/components/ui/states";
 import { Pager } from "@/components/ui/pager";
@@ -45,10 +46,26 @@ export function InventoryLoadState({ label, query, invalid = false, debouncing =
   return query.isError || invalid ? <ErrorState title={`${label} are unavailable${invalid ? ": the response does not match the requested scope or page" : " or could not be refreshed"}.`} action={<Button onClick={() => void query.refetch()}>Retry</Button>} />
     : query.isPending || query.isFetching || debouncing ? <LoadingState label={`Loading ${label.toLowerCase()}…`} /> : null;
 }
-export function ScanInventoryContinuation({ page, rows, hasMore, onPage, matching }: { page: number; rows: number; hasMore: boolean; onPage: (page: number) => void; matching: number }) {
+export function ScanInventoryContinuation({ page, rows, hasMore, onPage, matching, total }: { page: number; rows: number; hasMore: boolean; onPage: (page: number) => void; matching: number; total?: number }) {
   return <div className="space-y-2" data-testid="scan-inventory-continuation">
-    <p className="text-xs text-muted-foreground">{rows} loaded records on server page {page + 1}; {matching} match page filters. The server does not report a total. CSV and metrics cover this page only.</p>
+    <p className="text-xs text-muted-foreground">{total === undefined ? <>{rows} loaded records on server page {page + 1}; {matching} match page filters. The server does not report a total. CSV and metrics cover this page only.</> : <>{total.toLocaleString()} records match the server filters; {rows} on page {page + 1}. Metrics cover every match. Matching CSV exports up to 100,000 records across pages.</>}</p>
     {rows === 0 && page > 0 ? <div className="space-y-2"><p>No records were returned for this page. Return to the first page to recover.</p><Button onClick={() => onPage(0)}>First page</Button><Button onClick={() => onPage(page - 1)}>Previous page</Button></div>
-      : <Pager page={page} pageSize={INVENTORY_PAGE_SIZE} rowsOnPage={rows} hasMore={hasMore} onPage={onPage} />}
+      : <Pager page={page} pageSize={INVENTORY_PAGE_SIZE} rowsOnPage={rows} total={total} hasMore={hasMore} onPage={onPage} />}
+  </div>;
+}
+
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function scanInventoryResponseValid(data: (ScanInventoryMetadata & { limit: number; offset: number }) | undefined, rows: number, offset: number, sort: string, order: string, summaryKeys: string[] = []) {
+  return !!data && data.offset === offset && data.limit === INVENTORY_PAGE_SIZE && Number.isSafeInteger(data.total) && data.total! >= 0 && typeof data.has_more === "boolean" && data.summary?.total === data.total && summaryKeys.every(key => Number.isSafeInteger(data.summary?.[key]) && data.summary![key] >= 0) && data.sort === sort && data.order === order && rows === Math.min(INVENTORY_PAGE_SIZE, Math.max(0, data.total! - offset)) && data.has_more === (data.total! > offset + rows);
+}
+
+export function ScanInventoryExport({ context, disabled, download }: { context: string; disabled: boolean; download: () => Promise<ScanInventoryExportResult> }) {
+  const exportCSV = useMutation({ mutationFn: async (requestContext: string) => ({ ...await download(), context: requestContext }) });
+  const result = exportCSV.data?.context === context ? exportCSV.data : undefined;
+  const failed = exportCSV.isError && exportCSV.variables === context;
+  return <div className="space-y-2"><Button disabled={disabled || exportCSV.isPending} onClick={() => exportCSV.mutate(context)}>{exportCSV.isPending ? "Exporting matching CSV…" : "Export matching CSV"}</Button>
+    {failed && <p role="alert" className="text-sm text-destructive">Matching CSV could not be exported. Refresh the evidence and try again.</p>}
+    {result && <p role={result.truncated ? "alert" : "status"} className="text-sm">{result.truncated ? `Export capped at ${result.limit.toLocaleString()} of ${result.total.toLocaleString()} matching records. Narrow filters for a complete export.` : `Exported all ${result.exported.toLocaleString()} matching records across pages.`}</p>}
   </div>;
 }

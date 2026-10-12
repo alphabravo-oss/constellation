@@ -1,3 +1,4 @@
+/* global HTMLSelectElement */
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { createMemoryHistory, type RouterHistory } from "@tanstack/react-router";
@@ -15,7 +16,7 @@ import { FederationPage } from "./FederationPage";
 import { ConnectorCoveragePage } from "./ConnectorCoveragePage";
 const scope = vi.hoisted(() => ({ id: "cluster", resolved: "cluster", loading: false, error: null as Error | null }));
 vi.mock("@/hooks/useCluster", () => ({ useCluster: () => ({ clusterId: scope.id, cluster: scope.resolved ? { id: scope.resolved } : undefined, isLoading: scope.loading, error: scope.error }) }));
-vi.mock("@/api/client", () => ({ imageScanResults: { list: vi.fn() }, repositoryScans: { list: vi.fn(), attestations: vi.fn() }, repositoryScanAttestations: { verifications: vi.fn() }, serverlessFunctions: { list: vi.fn() }, containers: { list: vi.fn() }, federation: { state: vi.fn(), members: vi.fn(), transition: vi.fn() }, connectorCoverage: { overview: vi.fn(), testPreview: vi.fn(), testConfig: vi.fn(), cacheStat: vi.fn(), cacheData: vi.fn() }, scanJobs: { list: vi.fn() }, scanJobsAdmin: { pause: vi.fn(), resume: vi.fn(), retry: vi.fn(), cancel: vi.fn() } }));
+vi.mock("@/api/client", () => ({ imageScanResults: { list: vi.fn(), exportCSV: vi.fn() }, repositoryScans: { list: vi.fn(), exportCSV: vi.fn(), attestations: vi.fn() }, repositoryScanAttestations: { verifications: vi.fn() }, serverlessFunctions: { list: vi.fn(), exportCSV: vi.fn() }, containers: { list: vi.fn() }, federation: { state: vi.fn(), members: vi.fn(), transition: vi.fn() }, connectorCoverage: { overview: vi.fn(), testPreview: vi.fn(), testConfig: vi.fn(), cacheStat: vi.fn(), cacheData: vi.fn() }, scanJobs: { list: vi.fn() }, scanJobsAdmin: { pause: vi.fn(), resume: vi.fn(), retry: vi.fn(), cancel: vi.fn() } }));
 vi.mock("@/lib/csv", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/csv")>(), downloadCsv: vi.fn() }));
 type Kind = "image" | "repository" | "serverless" | "containers" | "federation" | "connectors";
 const scans = ["image", "repository", "serverless"] as const;
@@ -26,7 +27,9 @@ const repo = (index: number): RepositoryScan => ({ ...common(index), repository_
 const fn = (index: number): ServerlessFunction => ({ ...common(index), function_ref: `arn:function:${index}`, function_name: `Function ${index}`, permission_level: index % 2 ? "low" : "critical" });
 const image = (index: number): ImageScanResult => ({ id: `record-${index}`, image_ref: `Image ${index}`, image_ref_normalized: `image:${index}`, image_repository: `repo/${index}`, image_digest: `sha256:${index}`, scanner_profile: "complete", source_type: "registry", engine_status: { syft: "succeeded", grype: "succeeded", trivy: "succeeded" }, package_count: 10, layer_count: 1, secret_count: 0, file_risk_count: 0, image_signed: false, finding_count: 1, severity_counts: { critical: index % 2 ? 0 : 2 }, max_risk_score: 50, critical_count: index % 2 ? 0 : 2, high_count: 1, medium_count: 0, low_count: 0, info_count: 0, impacted_count: 1, first_seen_at: "2026-10-12T00:00:00Z", last_scanned_at: "2026-10-12T00:00:00Z", updated_at: "2026-10-12T00:00:00Z" });
 const coverage = (): ConnectorCoverageOverview => ({ summary: { registry_connectors_ready: 0, registry_connectors_total: 0, cloud_connectors_ready: 0, cloud_connectors_total: 0, images_unscanned: 0, credential_rotations_due: 0, queued_scans: 0 }, registry_connectors: [], cloud_connectors: [], configs: [], recent_jobs: [], scan_coverage: [], scanner_pools: [], guardrails: [] } as unknown as ConnectorCoverageOverview);
-function loaded(offset = 0, limit = 101) { return Array.from({ length: offset >= 800 ? 0 : limit }, (_, index) => index + offset); }
+function loaded(offset = 0, limit = 100) { return Array.from({ length: offset >= 800 ? 0 : limit }, (_, index) => index + offset); }
+const inventorySummary = { total: 800, packages: 8000, findings: 800, critical_high: 2400, exposed: 800, local: 0, stale: 0, incomplete: 0, providers: 1, regions: 1, scanned: 800, role_risks: 400, branches: 1, workflows: 1, with_evidence: 800, active_jobs: 0, stale_evidence: 0, attestations: 0, trusted_attestations: 0, unverified_attestations: 0 };
+function metadata(params?: { limit?: number; offset?: number; sort?: string; order?: string }) { return { limit: params?.limit ?? 100, offset: params?.offset ?? 0, total: 800, has_more: (params?.offset ?? 0) + (params?.limit ?? 100) < 800, sort: params?.sort ?? "scan", order: (params?.order ?? "desc") as "asc" | "desc", summary: inventorySummary }; }
 const list = (kind: typeof scans[number]) => kind === "image" ? imageScanResults.list : kind === "repository" ? repositoryScans.list : serverlessFunctions.list;
 const table = (kind: typeof scans[number]) => kind === "image" ? "image-scans-table" : kind === "repository" ? "repository-table" : "serverless-table";
 const stat = (kind: typeof scans[number]) => kind === "image" ? "image-scan-summary" : kind === "repository" ? "repository-summary" : "serverless-summary";
@@ -34,12 +37,13 @@ const preview = (kind: typeof scans[number]) => kind === "image" ? "image-scan-p
 const path = (kind: Kind) => kind === "federation" ? "/federation" : kind === "connectors" ? "/settings/connectors" : `/clusters/cluster/${kind === "image" ? "images" : kind === "repository" ? "repositories" : kind}`;
 beforeEach(() => {
  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true; vi.clearAllMocks(); localStorage.clear(); identity = { org_id: "org", user_id: "user" }; Object.assign(scope, { id: "cluster", resolved: "cluster", loading: false, error: null });
- vi.mocked(imageScanResults.list).mockImplementation(async params => ({ image_scan_results: loaded(params?.offset, params?.limit).map(image), limit: params?.limit ?? 101, offset: params?.offset ?? 0 }));
- vi.mocked(repositoryScans.list).mockImplementation(async params => ({ repository_scans: loaded(params?.offset, params?.limit).map(repo), limit: params?.limit ?? 101, offset: params?.offset ?? 0 }));
- vi.mocked(serverlessFunctions.list).mockImplementation(async params => ({ serverless_functions: loaded(params?.offset, params?.limit).map(fn), limit: params?.limit ?? 101, offset: params?.offset ?? 0 }));
+ vi.mocked(imageScanResults.list).mockImplementation(async params => ({ image_scan_results: loaded(params?.offset, params?.limit).map(image), ...metadata(params) }));
+ vi.mocked(repositoryScans.list).mockImplementation(async params => ({ repository_scans: loaded(params?.offset, params?.limit).map(repo), ...metadata(params) }));
+ vi.mocked(serverlessFunctions.list).mockImplementation(async params => ({ serverless_functions: loaded(params?.offset, params?.limit).map(fn), ...metadata(params) }));
  vi.mocked(containers.list).mockResolvedValue({ cluster_id: "cluster", summary: { total: 1, running: 1, privileged: 0, run_as_root: 0 }, items: [{ id: "container", name: "Confirmed container", node: "node", namespace: "prod", pod_name: "pod", image: "image", state: "running", privileged: false, run_as_root: false, risk_score: 0, critical: 0, high: 0, observed_at: "2026-10-12T00:00:00Z" }] });
  vi.mocked(federation.state).mockResolvedValue({ state: "standalone", revision: 4 }); vi.mocked(federation.members).mockResolvedValue({ members: [{ id: "member", cluster_id: "cluster", name: "Confirmed member", role: "joint", endpoint: "endpoint", status: "connected", revision: 4 }] });
  vi.mocked(connectorCoverage.overview).mockResolvedValue(coverage()); vi.mocked(scanJobs.list).mockResolvedValue({ jobs: [] });
+ for (const api of [imageScanResults, repositoryScans, serverlessFunctions]) vi.mocked(api.exportCSV).mockResolvedValue({ total: 800, exported: 800, limit: 100000, truncated: false });
  client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }); host = document.createElement("div"); document.body.append(host); root = createRoot(host);
 });
 afterEach(() => { act(() => root.unmount()); client.clear(); host.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); localStorage.clear(); });
@@ -49,7 +53,7 @@ async function settle(check: () => void) { await vi.waitFor(async () => { await 
 async function ready(kind: typeof scans[number]) { await settle(() => expect(host.querySelectorAll(`[data-testid="${table(kind)}"] tbody tr`)).toHaveLength(100)); }
 const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent?.trim() === label)!;
 async function field(selector: string, value: string) { await act(async () => { const input = host.querySelector<HTMLInputElement>(selector)!; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); }); }
-it.each(scans)("%s restores URL search/page and requests continuation past the old 500-row limit", async kind => { await render(kind, "?q=needle&page=7&context=keep#proof"); await ready(kind); expect(list(kind)).toHaveBeenLastCalledWith(expect.objectContaining({ q: "needle", offset: 600, limit: 101 })); expect(host.textContent).toContain("100 loaded records on server page 7"); expect(host.textContent).toContain("does not report a total"); expect(host.querySelector(`[data-testid="${preview(kind)}"]`)).toBeNull(); expect(button("Next").disabled).toBe(false); });
+it.each(scans)("%s restores URL search/page and requests continuation past the old 500-row limit", async kind => { await render(kind, "?q=needle&page=7&context=keep#proof"); await ready(kind); expect(list(kind)).toHaveBeenLastCalledWith(expect.objectContaining({ q: "needle", offset: 600, limit: 100 })); expect(host.textContent).toContain("800 records match the server filters"); expect(host.textContent).toContain("100 on page 7"); expect(host.querySelector(`[data-testid="${preview(kind)}"]`)).toBeNull(); expect(button("Next").disabled).toBe(false); });
 it.each(scans)("%s makes Next/Back URL-addressable and keeps context while clearing selection", async kind => { await render(kind, "?selected=record-0&context=keep#proof"); await ready(kind); expect(host.querySelector(`[data-testid="${preview(kind)}"]`)).not.toBeNull(); await act(async () => button("Next").click()); await ready(kind); expect(list(kind)).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 100 })); expect(new URLSearchParams(history.location.search).get("selected")).toBeNull(); expect(new URLSearchParams(history.location.search).get("context")).toBe("keep"); expect(history.location.hash).toBe("#proof"); await act(async () => history.back()); await ready(kind); expect(host.querySelector(`[data-testid="${preview(kind)}"]`)).not.toBeNull(); });
 it.each(scans)("%s never substitutes the first row for a missing selected ID", async kind => { await render(kind, "?selected=missing"); await ready(kind); expect(host.textContent).toContain("selected record is unavailable"); expect(host.querySelector(`[data-testid="${preview(kind)}"]`)).toBeNull(); await act(async () => button("Clear selection").click()); expect(new URLSearchParams(history.location.search).has("selected")).toBe(false); });
 it.each(scans)("%s debounces server search, resets page/selection and preserves unrelated URL context", async kind => { await render(kind, "?page=3&selected=record-200&context=keep"); await ready(kind); await field(kind === "image" ? '[data-testid="image-scan-search"]' : kind === "repository" ? '[data-testid="repository-search"]' : '[data-testid="serverless-search"]', "new search"); await settle(() => expect(list(kind)).toHaveBeenLastCalledWith(expect.objectContaining({ q: "new search", offset: 0 }))); await ready(kind); const params = new URLSearchParams(history.location.search); expect(params.get("q")).toBe("new search"); expect(params.has("page")).toBe(false); expect(params.has("selected")).toBe(false); expect(params.get("context")).toBe("keep"); });
@@ -73,3 +77,47 @@ it.each(scans)("%s never reuses cached scan evidence after organization/user swi
 
 it.each(scans)("%s rejects cached foreign cluster context before requesting evidence", async kind => { client.setQueryData(["clusters"], { clusters: [{ id: "other" }] }); await render(kind); expect(list(kind)).not.toHaveBeenCalled(); expect(host.textContent).toContain("active cluster could not be resolved"); });
 it("unknown scanner URL selection remains explicit and does not query an unrelated scanner", async () => { await render("connectors", "?tab=scanner-cache&scanner=foreign"); await settle(() => expect(host.textContent).toContain("selected scanner is unavailable")); expect(connectorCoverage.cacheData).not.toHaveBeenCalled(); expect(connectorCoverage.cacheStat).not.toHaveBeenCalled(); });
+
+
+const exportAPI = (kind: typeof scans[number]) => kind === "image" ? imageScanResults.exportCSV : kind === "repository" ? repositoryScans.exportCSV : serverlessFunctions.exportCSV;
+it.each(scans)("%s filters on the server before pagination, resets page and uses matching totals", async kind => {
+ await render(kind, "?page=7&context=keep"); await ready(kind);
+ const key = kind === "image" ? "severity" : kind === "repository" ? "status" : "posture";
+ const value = kind === "repository" ? "failed" : "critical";
+ const select = host.querySelector<HTMLSelectElement>("select")!;
+ await act(async () => { select.value = value; select.dispatchEvent(new Event("change", { bubbles: true })); });
+ await settle(() => expect(list(kind)).toHaveBeenLastCalledWith(expect.objectContaining({ [key]: value, offset: 0, limit: 100 })));
+ await ready(kind); expect(new URLSearchParams(history.location.search).get("page")).toBeNull(); expect(host.textContent).toContain("800 records match the server filters");
+ expect(host.querySelector(`[data-testid="${stat(kind)}"]`)?.textContent).toContain("800");
+});
+it.each(scans)("%s keeps server ordering authoritative and restores URL sorting headers on Back", async kind => {
+ const firstColumn = kind === "image" ? "image" : kind === "repository" ? "repository" : "function";
+ await render(kind, `?sort=${firstColumn}&order=desc&context=keep#proof`); await ready(kind);
+ const header = () => host.querySelector(`th[data-column-id="${firstColumn}"]`)!;
+ expect(header().getAttribute("aria-sort")).toBe("descending");
+ await act(async () => header().querySelector<HTMLButtonElement>("button")!.click());
+ await settle(() => expect(list(kind)).toHaveBeenLastCalledWith(expect.objectContaining({ sort: firstColumn, order: "asc", offset: 0 })));
+ await ready(kind); expect(header().getAttribute("aria-sort")).toBe("ascending");
+ expect(host.querySelector("tbody tr")?.textContent).toContain(kind === "image" ? "repo/0" : kind === "repository" ? "Repository 0" : "Function 0");
+ await act(async () => history.back()); await ready(kind); expect(header().getAttribute("aria-sort")).toBe("descending"); expect(history.location.hash).toBe("#proof");
+});
+it.each(scans)("%s exports matching records beyond the current page with URL filters and order", async kind => {
+ const key = kind === "image" ? "severity" : kind === "repository" ? "status" : "posture"; const value = kind === "repository" ? "failed" : "high";
+ await render(kind, `?${key}=${value}&page=7&sort=scan&order=asc&q=literal%25_value`); await ready(kind);
+ await act(async () => button("Export matching CSV").click()); await settle(() => expect(exportAPI(kind)).toHaveBeenCalledWith(expect.objectContaining({ [key]: value, sort: "scan", order: "asc", q: "literal%_value" })));
+ await settle(() => expect(host.textContent).toContain("Exported all 800 matching records across pages"));
+});
+it.each(scans)("%s shows matching-export failures and caps without claiming a complete result", async kind => {
+ vi.mocked(exportAPI(kind)).mockRejectedValueOnce(new Error("export failed")); await render(kind); await ready(kind); await act(async () => button("Export matching CSV").click()); await settle(() => expect(host.textContent).toContain("Matching CSV could not be exported"));
+ vi.mocked(exportAPI(kind)).mockResolvedValueOnce({ total: 100001, exported: 100000, limit: 100000, truncated: true }); await act(async () => button("Export matching CSV").click()); await settle(() => expect(host.textContent).toContain("Export capped at 100,000 of 100,001 matching records")); expect(host.textContent).not.toContain("Exported all 100,000");
+});
+it.each(scans)("%s retains successful scoped evidence during a deferred refresh", async kind => {
+ await render(kind); await ready(kind); let resolve!: (value: Awaited<ReturnType<typeof imageScanResults.list>>) => void;
+ const promise = new Promise<Awaited<ReturnType<typeof imageScanResults.list>>>(done => { resolve = done; });
+ // Each family retains its successful response while the refresh is unsettled.
+ const previous = client.getQueriesData({ queryKey: [kind === "image" ? "image-scan-results" : kind === "repository" ? "repository-scans" : "serverless-functions"] })[0][1];
+ vi.mocked(list(kind)).mockReturnValueOnce(promise as ReturnType<typeof imageScanResults.list> & ReturnType<typeof repositoryScans.list> & ReturnType<typeof serverlessFunctions.list>);
+ await act(async () => { void client.invalidateQueries(); }); await settle(() => expect(host.textContent).toContain("Refreshing scan inventory")); expect(host.querySelectorAll("tbody tr")).toHaveLength(100); expect(button("Export matching CSV").disabled).toBe(true);
+ await act(async () => resolve(previous as Awaited<ReturnType<typeof imageScanResults.list>>)); await ready(kind);
+});
+it.each(scans)("%s rejects unsupported URL sort before requesting misleading results", async kind => { await render(kind, "?sort=unknown&context=keep"); expect(list(kind)).not.toHaveBeenCalled(); expect(host.textContent).toContain("server filter or sort is invalid"); await act(async () => button("Reset filters and sort").click()); await ready(kind); expect(history.location.search).toContain("context=keep"); });

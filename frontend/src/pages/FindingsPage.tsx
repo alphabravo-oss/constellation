@@ -77,6 +77,7 @@ export function FindingsPage() {
   const locationHash = useLocation({ select: location => location.hash });
   const severity = (["critical", "high", "medium", "low", "info"] as const).find((value) => value === searchParams.get("severity")) ?? "";
   const kind = (["vulnerability", "iac", "license", "cloud-config", "drift", "signature", "ml-model", "compliance", "runtime"] as const).find((value) => value === searchParams.get("kind")) ?? "";
+  const targetType = searchParams.get("target_type") ?? "";
   const lifecycleValue = searchParams.get("lifecycle");
   const lifecycle: Lifecycle | "" = lifecycleValue === "all" ? "" : (["open", "triaged", "in_progress", "accepted", "suppressed", "resolved"] as const).find((value) => value === lifecycleValue) ?? "open";
   const query = searchParams.get("q") ?? "";
@@ -110,11 +111,11 @@ export function FindingsPage() {
   const { views, deleteView, persistenceError } = useSavedViews<SavedView>(FINDING_VIEWS_KEY, { validate: isFindingSavedView });
   const navigate = useNavigate();
   const openFinding = (finding: Finding) => navigate({ href: clusterId ? `/clusters/${clusterId}/findings/${finding.id}` : `/findings/${finding.id}` });
-  const request: NonNullable<Parameters<typeof findings.list>[0]> = { kind: activeView === "cve" ? "vulnerability" as const : kind || undefined, lifecycle: lifecycle || undefined, cluster_id: clusterId, q: serverQuery || undefined, fixable: fixableOnly || undefined, sort: activeView === "cve" ? "risk" : sort, order: activeView === "cve" ? "desc" as const : order };
+  const request: NonNullable<Parameters<typeof findings.list>[0]> = { kind: activeView === "cve" ? "vulnerability" as const : kind || undefined, lifecycle: lifecycle || undefined, cluster_id: clusterId, ...(targetType ? { target_type: targetType } : {}), q: serverQuery || undefined, fixable: fixableOnly || undefined, sort: activeView === "cve" ? "risk" : sort, order: activeView === "cve" ? "desc" as const : order };
   const instanceKey = ["findings", request, activeView, activeView === "instances" ? page : 0];
   // The rollup needs a single instance solely for its lifecycle counts.
   const q = useQuery({ queryKey: instanceKey, queryFn: () => findings.list({ ...request, limit: activeView === "instances" ? PAGE_SIZE : 1, offset: activeView === "instances" ? page * PAGE_SIZE : 0 }), enabled: scopeReady && querySettled, placeholderData: keepPreviousData });
-  const cveQ = useQuery({ queryKey: ["findings-cve", request, page], queryFn: () => findings.byCVE({ cluster_id: clusterId, lifecycle: lifecycle || undefined, q: serverQuery || undefined, fixable: fixableOnly || undefined, limit: PAGE_SIZE, offset: page * PAGE_SIZE }), enabled: activeView === "cve" && scopeReady && querySettled, placeholderData: keepPreviousData });
+  const cveQ = useQuery({ queryKey: ["findings-cve", request, page], queryFn: () => findings.byCVE({ cluster_id: clusterId, ...(targetType ? { target_type: targetType } : {}), lifecycle: lifecycle || undefined, q: serverQuery || undefined, fixable: fixableOnly || undefined, limit: PAGE_SIZE, offset: page * PAGE_SIZE }), enabled: activeView === "cve" && scopeReady && querySettled, placeholderData: keepPreviousData });
   const activeQ = activeView === "cve" ? cveQ : q;
   const ready = scopeReady && querySettled && activeQ.isSuccess && !activeQ.isFetching && !activeQ.isPlaceholderData;
   const rows = useMemo(() => q.data?.findings ?? [], [q.data]);
@@ -122,19 +123,20 @@ export function FindingsPage() {
   const total = ready ? activeQ.data?.total ?? 0 : undefined;
   const outOfRange = ready && page > 0 && page * PAGE_SIZE >= (total ?? 0);
   const grouped = useMemo(() => groupRows(rows, groupBy), [rows, groupBy]);
-  const selectionScope = JSON.stringify([clusterId, kind, lifecycle, severity, query, fixableOnly, activeView, groupBy, page, sort, order]);
+  const selectionScope = JSON.stringify([clusterId, targetType, kind, lifecycle, severity, query, fixableOnly, activeView, groupBy, page, sort, order]);
   const [selection, setSelection] = useState<{ scope: string; ids: Set<React.Key> }>({ scope: selectionScope, ids: new Set() });
   const selected = ready && activeView === "instances" && selection.scope === selectionScope ? selection.ids : new Set<React.Key>();
   const setSelected = (ids: Set<React.Key>) => setSelection({ scope: selectionScope, ids });
   useEffect(() => { setSelection({ scope: selectionScope, ids: new Set() }); }, [selectionScope, ready]);
   const activeChips: Array<{ label: string; value: string; onRemove: () => void }> = [];
   if (kind) activeChips.push({ label: "kind", value: kind, onRemove: () => setUrlFilter("kind", "") });
+  if (targetType) activeChips.push({ label: "target", value: targetType, onRemove: () => setUrlFilter("target_type", "") });
   if (severity) activeChips.push({ label: "severity", value: severity, onRemove: () => setUrlFilter("severity", "") });
   if (lifecycle !== "open") activeChips.push({ label: "lifecycle", value: lifecycle || "all", onRemove: () => setUrlFilter("lifecycle", "open") });
   if (query) activeChips.push({ label: "q", value: query, onRemove: () => setQuery("") });
   if (fixableOnly) activeChips.push({ label: "fixable", value: "true", onRemove: () => setUrlFilter("fixable", "") });
   function applyView(value: SavedView) {
-    setFilters({ kind: value.kind, lifecycle: value.lifecycle || "all", q: value.query, severity: value.severity ?? "", fixable: value.fixable ? "true" : "", view: value.view ?? ((value.kind && value.kind !== "vulnerability") || (value.lifecycle && value.lifecycle !== "open") || value.severity ? "instances" : "cve"), group: value.group ?? "none", sort: value.sort ?? "risk", order: value.order ?? "desc" });
+    setFilters({ target_type: value.targetType ?? "", kind: value.kind, lifecycle: value.lifecycle || "all", q: value.query, severity: value.severity ?? "", fixable: value.fixable ? "true" : "", view: value.view ?? ((value.kind && value.kind !== "vulnerability") || (value.lifecycle && value.lifecycle !== "open") || value.severity ? "instances" : "cve"), group: value.group ?? "none", sort: value.sort ?? "risk", order: value.order ?? "desc" });
   }
   const exportCSV = useMutation({ mutationFn: () => {
     if (!ready) throw new Error("Current results are unavailable");
@@ -297,7 +299,7 @@ export function FindingsPage() {
       </StatGrid>
       {/* Query input + hints */}
       <div className="space-y-2">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <QueryInput
             value={query}
             placeholder="severity:critical kev:true cve:CVE-2024- !status:resolved"
@@ -309,6 +311,7 @@ export function FindingsPage() {
             options={[["", "any kind"], ["vulnerability","vulnerability"], ["iac","iac"], ["license","license"],
                       ["cloud-config","cloud-config"], ["drift","drift"], ["signature","signature"],
                       ["ml-model","ml-model"], ["compliance","compliance"], ["runtime","runtime"]]} />
+          <Select label="Target type" value={targetType} onChange={(value) => setUrlFilter("target_type", value)} options={[["", "any target"], ["image-workload", "image workload"], ["host", "host"], ["platform", "platform"], ["image", "image"], ["registry", "registry"], ["repository", "repository"], ["serverless", "serverless"], ["workload", "workload"], ...(!["", "image-workload", "host", "platform", "image", "registry", "repository", "serverless", "workload"].includes(targetType) ? [[targetType, `invalid target: ${targetType}`] as [string, string]] : [])]} />
           <Select label="Severity" value={severity} onChange={(value) => setUrlFilter("severity", value)}
             options={[["", "any severity"], ["critical", "critical"], ["high", "high"], ["medium", "medium"], ["low", "low"], ["info", "info"]]} />
         </div>
@@ -443,20 +446,20 @@ export function FindingsPage() {
         : <>
           {activeView === "cve" ? <CVETable rows={cveRows} clusterId={clusterId} />
             : groupBy === "none" ? <DataTable
-                key={`${sort}:${order}`} rows={rows} columns={columns} rowKey={(finding) => finding.id}
+                rows={rows} columns={columns} rowKey={(finding) => finding.id}
                 density={density} onDensityChange={setDensity} selectable selected={selected} onSelectedChange={setSelected}
-                onRowClick={openFinding} defaultSort={{ id: sort === "last_seen" ? "age" : sort, dir: order }} onSortChange={onSortChange} manualSorting pagination={false}
+                onRowClick={openFinding} sort={{ id: sort === "last_seen" ? "age" : sort, dir: order }} onSortChange={onSortChange} manualSorting pagination={false}
                 preferencesKey={INSTANCE_TABLE_KEY} defaultHiddenColumnIds={["package", "fixed"]}
                 exportFileName="constellation-findings-page" exportLabel="Export this page CSV" testId="findings-table"
-                emptyState={<EmptyState title="No findings match" hint="Adjust your filters or clear the query." icon={<Tag className="h-8 w-8" />} action={<Button variant="outline" onClick={() => setFilters({ q: "", kind: "", severity: "", lifecycle: "open", fixable: "", page: "" })}>Reset filters</Button>} />}
+                emptyState={<EmptyState title="No findings match" hint="Adjust your filters or clear the query." icon={<Tag className="h-8 w-8" />} action={<Button variant="outline" onClick={() => setFilters({ q: "", kind: "", target_type: "", severity: "", lifecycle: "open", fixable: "", page: "" })}>Reset filters</Button>} />}
               />
             : <div className="space-y-3">
                 <p className="text-xs text-muted-foreground" data-testid="findings-group-scope">{grouped.length} groups from {rows.length} instances on this server page. Group counts, selection, and table CSV cover this page only.</p>
                 {grouped.map((group) => <details key={group.label} open className="rounded-md border border-border bg-card">
                   <summary className="flex cursor-pointer items-center justify-between gap-2 border-b border-border px-3 py-2 list-none"><span className="flex items-center gap-2"><ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /><span className="text-sm font-semibold">{group.label}</span><span className="text-xs text-muted-foreground">{group.items.length} on this page</span></span></summary>
-                  <DataTable key={`${sort}:${order}`} rows={group.items} columns={columns} rowKey={(finding) => finding.id} density={density} onDensityChange={setDensity}
+                  <DataTable rows={group.items} columns={columns} rowKey={(finding) => finding.id} density={density} onDensityChange={setDensity}
                     selectable selected={selected} onSelectedChange={(ids) => { const merged = new Set(selected); for (const item of group.items) merged.delete(item.id); for (const id of ids) if (group.items.some((item) => item.id === id)) merged.add(id); setSelected(merged); }} onRowClick={openFinding}
-                    defaultSort={{ id: sort === "last_seen" ? "age" : sort, dir: order }} onSortChange={onSortChange} manualSorting pagination={false}
+                    sort={{ id: sort === "last_seen" ? "age" : sort, dir: order }} onSortChange={onSortChange} manualSorting pagination={false}
                     showDensityToggle={false} showColumnChooser={false} preferencesKey={INSTANCE_TABLE_KEY} defaultHiddenColumnIds={["package", "fixed"]}
                     exportFileName={`constellation-findings-page-${safeFilename(group.label)}`} exportLabel="Export this group on this page CSV" className="rounded-none border-0" />
                 </details>)}

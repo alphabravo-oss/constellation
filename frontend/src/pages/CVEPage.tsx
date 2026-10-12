@@ -338,14 +338,14 @@ export function CVEPage() {
       <div data-testid="cve-results-table">
         {search.isError ? <ErrorState title="Could not load CVE results." action={<Button onClick={() => void search.refetch()}>Retry</Button>} /> : search.isPending || q !== debouncedQ ? <LoadingState label="Loading CVE results…" /> : <DataTable<CVEResult>
           rows={rows}
-          key={`${sort.id}:${sort.dir}`}
           preferencesKey="cve-catalog"
           exportFileName="constellation-cve-page.csv"
           exportLabel="Export this page"
           columns={columns}
           rowKey={(r) => r.cve_id}
           onRowClick={(r) => navigate({ href: `/cve/${r.cve_id}` })}
-          defaultSort={sort}
+          sort={sort}
+          manualSorting
           onSortChange={(s) => setSort(s ?? { id: "cvss", dir: "desc" })}
           rowTestId={(r) => `cve-row-${r.cve_id}`}
           emptyState={

@@ -236,12 +236,16 @@ it("links top vulnerable workload IDs exactly and labels legacy namespace/name s
  await renderPage(); await settled(() => expect(host.querySelector('a[href="/clusters/cluster/deployments/deployment-exact"]')).not.toBeNull());
  expect(host.querySelector('a[href="/clusters/cluster/deployments?q=api&namespace=two&hide_platform=false"]')).not.toBeNull(); expect(host.textContent).toContain("namespace + name search"); expect(host.textContent).toContain("Up to six reported workloads");
 });
-it("uses matching finding instance cohorts and makes unsupported location/fact destinations explicit", async () => {
+it("links image and host CVE record counts and recorded workload facts to exact cohorts", async () => {
  route.params = new URLSearchParams("tab=posture");
  await renderPage(); await settled(() => expect(host.textContent).toContain("Additional posture metrics"));
  expect(host.querySelector('[data-testid="dashboard-summary"] a[href="/clusters/cluster/findings?view=instances&lifecycle=open"]')).not.toBeNull();
  expect(host.querySelector('a[href="/clusters/cluster/findings?view=instances&kind=vulnerability&lifecycle=open&fixable=true"]')).not.toBeNull();
- expect(host.textContent).toContain("image-location filter unavailable"); expect(host.textContent).toContain("privileged fact filter unavailable"); expect(host.textContent).toContain("destination groups named nodes");
+ for (const target of ["image-workload", "host"]) expect(host.querySelector(`a[href="/clusters/cluster/findings?view=instances&kind=vulnerability&lifecycle=open&target_type=${target}"]`)).not.toBeNull();
+ for (const fact of ["privileged", "run_as_root", "net_exposure"]) expect(host.querySelector(`a[href="/clusters/cluster/deployments?hide_platform=false&risk_fact=${fact}"]`)).not.toBeNull();
+ expect(host.querySelector('a[href="/clusters/cluster/nodes?risk=host-cves"]')).toBeNull();
+ expect(host.textContent).not.toContain("filter unavailable");
+ expect(host.querySelector('[data-testid="dashboard-source-matrix"]')?.textContent).toContain("Exact open image CVE record cohort");
 });
 it("exports a source matrix with aggregate-versus-sample counts and failed sources marked unavailable", async () => {
  vi.mocked(network.conversations).mockRejectedValue(new Error("source offline"));
@@ -255,5 +259,8 @@ it("renders the risk-by-mode matrix through canonical table headers and truthful
  route.params = new URLSearchParams("tab=network");
  vi.mocked(dashboard.summary).mockResolvedValue({ findings_by_severity: {}, recent_activity: [], posture: {security_score: 5,enforcement:{groups:3,discover:1,monitor:1,protect:1},cves_by_mode:{discover:4,monitor:5,protect:6},exposed_by_mode:{discover:1,monitor:2,protect:3}} } as unknown as Awaited<ReturnType<typeof dashboard.summary>>);
  await renderPage();await settled(()=>expect(host.querySelector('[data-testid="dashboard-risk-by-mode"]')).not.toBeNull());
- const table=host.querySelector('[data-testid="dashboard-risk-by-mode"]')!;expect([...table.querySelectorAll("thead th")].map(th=>th.textContent?.trim())).toEqual(["Configured mode","Open CVE records","Exposure facts"]);expect(table.querySelectorAll("tbody tr")).toHaveLength(3);expect(host.textContent).toContain("not applier health");
+ const table=host.querySelector('[data-testid="dashboard-risk-by-mode"]')!;expect([...table.querySelectorAll("thead th")].map(th=>th.textContent?.trim())).toEqual(["Configured mode","Distinct open CVE IDs","Exposed workloads"]);expect(table.querySelectorAll("tbody tr")).toHaveLength(3);expect(host.textContent).toContain("not applier health");
+ expect(host.textContent).toContain("deduplicated within each mode and may occur in more than one mode");
+ expect(host.textContent).toContain("strongest configured group mode"); expect(host.textContent).toContain("workloads without a matching group are excluded");
+ expect(host.textContent).toContain("including zero or null values"); expect(host.textContent).toContain("Platform / Host distinct open CVE IDs:");
 });

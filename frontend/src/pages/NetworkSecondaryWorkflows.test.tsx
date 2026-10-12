@@ -7,10 +7,13 @@ import {
   policies,
   type NetworkPolicyLifecycle,
   type NetworkPolicyActionResponse,
+  type RuntimeThreat,
 } from "@/api/client";
+import { downloadCsv } from "@/lib/csv";
+vi.mock("@/lib/csv", () => ({ downloadCsv: vi.fn() }));
 import { NetworkActionFormPage } from "./NetworkActionFormPage";
 import { NetworkDpiSettingsFormPage } from "./NetworkDpiSettingsFormPage";
-import { NetworkRulesWorkspaceTab, WeakTLSStatus } from "./NetworkMapPage";
+import { NetworkRulesWorkspaceTab, NetworkThreatsWorkspaceTab, WeakTLSStatus } from "./NetworkMapPage";
 const route = vi.hoisted(() => ({
   action: "apply-policy",
   search:
@@ -504,4 +507,19 @@ it("retains the current YAML preview when the manifest dictionary is empty", asy
   expect(
     host.querySelector('[data-testid="network-policy-preview"]')?.textContent,
   ).toContain("legacy YAML still supplied");
+});
+
+it("includes policy installation roles in returned lifecycle evidence exports", async () => {
+ await render(<NetworkRulesWorkspaceTab items={[{ ...candidate(), platform_role: "core" }]} selectedWorkload={null} onSelect={vi.fn()} available loading={false} refreshing={false} onRetry={vi.fn()} />);
+ await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Export returned policy evidence")!.click());
+ const [,headers,rows]=vi.mocked(downloadCsv).mock.calls.at(-1)!;
+ expect(rows[0][headers.indexOf("platform_role")]).toBe("core");
+});
+it("exports the loaded threat page and real workload role without action controls", async () => {
+ const threat = { id: "threat", workload_id: "operations/houston", platform_role: "core", threat_id: 2022, severity: 8, action: 2, at: "2026-10-12T00:00:00Z" } as RuntimeThreat;
+ await render(<NetworkThreatsWorkspaceTab threats={[threat]} total={301} page={2} onPage={vi.fn()} weakTLS={true} settingsUnavailable={false} settingsLoading={false} settingsHref={undefined} onPivot={vi.fn()} />);
+ expect(host.textContent).toContain("loaded page");
+ await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Export loaded threat page")!.click());
+ const [,headers,rows]=vi.mocked(downloadCsv).mock.calls.at(-1)!;
+ expect(rows).toHaveLength(1); expect(rows[0][headers.indexOf("platform_role")]).toBe("core"); expect(rows[0][headers.indexOf("Workload")]).toBe("operations/houston"); expect(headers).not.toContain("Actions"); expect(headers).not.toContain(""); expect(rows.flat()).not.toContain("Pivot");
 });

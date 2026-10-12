@@ -1,3 +1,4 @@
+/* global HTMLSelectElement */
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { createMemoryHistory, type RouterHistory } from "@tanstack/react-router";
@@ -90,4 +91,19 @@ it("shows unavailable inventory without zero metrics or enabled export", async (
  await vi.waitFor(() => expect(host.textContent).toContain("Could not load deployments"));
  expect(host.querySelector('[data-testid="deployments-summary"]')?.textContent).toContain("—");
  expect(host.textContent).not.toContain("No matching deployments"); expect(button("Export CSV").disabled).toBe(true);
+});
+
+it("restores a fact cohort through history and applies it to pages and full CSV", async () => {
+ vi.mocked(deployments.exportCsv).mockResolvedValue(new Blob(["CSV"]));
+ vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:export"); vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {}); vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+ await render("/clusters/cluster/deployments?hide_platform=false&risk_fact=privileged&page=3"); await settled();
+ expect(deployments.list).toHaveBeenLastCalledWith(expect.objectContaining({ risk_fact: "privileged", hide_platform: false, offset: 200 }));
+ expect(host.textContent).toContain("including zero or null values");
+ await act(async () => button("Export CSV").click());
+ expect(deployments.exportCsv).toHaveBeenCalledWith(expect.objectContaining({ risk_fact: "privileged", hide_platform: false }));
+ const field = host.querySelector<HTMLSelectElement>('[aria-label="Recorded risk fact"]')!;
+ await act(async () => { field.value = "run_as_root"; field.dispatchEvent(new Event("change", { bubbles: true })); });
+ await vi.waitFor(() => { expect(history.location.search).toBe("?hide_platform=false&risk_fact=run_as_root"); expect(deployments.list).toHaveBeenLastCalledWith(expect.objectContaining({ risk_fact: "run_as_root", offset: 0 })); });
+ await act(async () => history.back());
+ await vi.waitFor(() => expect(deployments.list).toHaveBeenLastCalledWith(expect.objectContaining({ risk_fact: "privileged", offset: 200 })));
 });

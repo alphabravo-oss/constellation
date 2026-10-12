@@ -1237,6 +1237,7 @@ func (s *Server) buildRouter() chi.Router {
 			r.Post("/repository-packages:report", s.requireVerb(rbac.VerbManagePolicies, repositoryPkgs.Report))
 			repositoryInventory := handler.NewRepositoryInventory(s.db)
 			r.Get("/repository-scans", s.requireVerb(rbac.VerbReadFindings, repositoryInventory.List))
+			r.Get("/repository-scans/export.csv", s.requireVerb(rbac.VerbReadFindings, repositoryInventory.ExportCSV))
 			r.Get("/repository-scans/{id}", s.requireVerb(rbac.VerbReadFindings, repositoryInventory.Get))
 			scanAttestations := scanning.NewScanAttestationsWithAudit(s.db, s.auditLog)
 			r.Get("/repository-scan-attestation-trust-policies", s.requireVerb(rbac.VerbReadFindings, scanAttestations.ListTrustPolicies))
@@ -1253,6 +1254,7 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/image-scan-results/{id}/attestations", s.requireVerb(rbac.VerbReadFindings, scanAttestations.ListForImageScanResult))
 			serverlessInventory := scanning.NewServerlessInventory(s.db)
 			r.Get("/serverless-functions", s.requireVerb(rbac.VerbReadFindings, serverlessInventory.List))
+			r.Get("/serverless-functions/export.csv", s.requireVerb(rbac.VerbReadFindings, serverlessInventory.ExportCSV))
 			r.Get("/serverless-functions/{id}", s.requireVerb(rbac.VerbReadFindings, serverlessInventory.Get))
 
 			// Host vulnerabilities. Read-only view backed by unified findings
@@ -1316,6 +1318,7 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/scanner-cache/{scanner_id}/stat", s.requireVerb(rbac.VerbReadFindings, scannerCache.Stat))
 			r.Get("/scanner-cache/{scanner_id}/data", s.requireVerb(rbac.VerbReadFindings, scannerCache.Data))
 			r.Get("/image-scan-results", s.requireVerb(rbac.VerbReadFindings, imageScanResults.List))
+			r.Get("/image-scan-results/export.csv", s.requireVerb(rbac.VerbReadFindings, imageScanResults.ExportCSV))
 			r.Get("/image-scan-results/{id}", s.requireVerb(rbac.VerbReadFindings, imageScanResults.Get))
 			r.Get("/image-scan-results/{id}/findings.csv", s.requireVerb(rbac.VerbReadFindings, imageScanResults.FindingsCSV))
 			r.Get("/image-scan-results/{id}/packages", s.requireVerb(rbac.VerbReadFindings, imageScanResults.Packages))
