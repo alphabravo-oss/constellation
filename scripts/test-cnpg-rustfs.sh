@@ -4,6 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 export GOWORK=off
 : "${CNPG_TEST_KUBECONFIG:?Set CNPG_TEST_KUBECONFIG to an isolated k3d kubeconfig}"
+: "${CNPG_TEST_API_IMAGE:?Set CNPG_TEST_API_IMAGE to the freshly built API image imported into that cluster}"
 for executable in kubectl helm python3 goose go rg curl; do command -v "$executable" >/dev/null; done
 k=(kubectl --kubeconfig "$CNPG_TEST_KUBECONFIG")
 context="$("${k[@]}" config current-context)"
@@ -79,7 +80,10 @@ for ((n=0;n<300;n++)); do
 done
 [[ "$phase" == completed ]]
 echo "Scheduled backup completed: $backup"
-"${k[@]}" apply -f "$fixtures/api.yaml" >/dev/null
+# Both containers must exercise the exact selected API build, not a stale fixture.
+"${k[@]}" create --dry-run=client -f "$fixtures/api.yaml" -o json >"$work/api-template.json"
+python3 "$fixtures/render_api.py" "$work/api-template.json" "$work/api-source.yaml" "$CNPG_TEST_API_IMAGE"
+"${k[@]}" apply -f "$work/api-source.yaml" >/dev/null
 "${k[@]}" rollout status deployment/recovery-api --timeout=300s
 forward_api() {
   "${k[@]}" port-forward svc/recovery-api "$api_port:8080" >"$work/api-forward.log" 2>&1 &
@@ -117,7 +121,7 @@ helm template recovery-target "$chart" -n "$namespace" -f "$fixtures/source-valu
 [[ "$(sql recovery-target-postgres 'SELECT string_agg(id::text,chr(44) ORDER BY id) FROM recovery_proof')" == 1,2 ]]
 [[ "$(sql recovery-target-postgres "SELECT count(*) FROM pg_extension WHERE extname IN ('vector','pgcrypto','pg_trgm')")" == 3 ]]
 kill "$api_forward"; wait "$api_forward" 2>/dev/null || true; api_forward=""
-sed 's/recovery-source-database-url/recovery-target-database-url/' "$fixtures/api.yaml" >"$work/api-target.yaml"
+sed 's/recovery-source-database-url/recovery-target-database-url/' "$work/api-source.yaml" >"$work/api-target.yaml"
 "${k[@]}" apply -f "$work/api-target.yaml" >/dev/null
 "${k[@]}" rollout status deployment/recovery-api --timeout=300s
 forward_api

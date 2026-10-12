@@ -122,7 +122,7 @@ kubectl --kubeconfig "$CNPG_TEST_KUBECONFIG" -n cnpg-system rollout status deplo
 docker build -f deploy/docker/Dockerfile.postgres -t constellation/postgres:16.10-convergence-20261011 .
 docker build -f deploy/docker/Dockerfile.api -t constellation/api:convergence-20261011 .
 k3d image import -c constellation-recovery constellation/postgres:16.10-convergence-20261011 constellation/api:convergence-20261011
-scripts/test-cnpg-rustfs.sh
+CNPG_TEST_API_IMAGE=constellation/api:convergence-20261011 scripts/test-cnpg-rustfs.sh
 ```
 
 The script requires Go, Goose, Python, Helm, kubectl, curl and ripgrep. It refuses
@@ -159,3 +159,25 @@ and a fresh login/configuration check. Both CNPG clusters were healthy afterward
 The run finished with exit status 0. Protected evidence is retained locally in
 `/tmp/constellation-cnpg-test.iSTzPK`; this directory contains secrets and is not
 a repository artifact. No main-cluster resource was changed.
+
+The recovery runner requires `CNPG_TEST_API_IMAGE` explicitly. Import that exact
+fresh build into the isolated cluster first. Both the schema-check init container
+and API use it on the source and recovered databases. An old cached fixture image
+is not accepted as evidence for the current source. The API's schema requirement
+is enforced before it initializes services.
+
+The October 12 repeat passed at schema **171** in disposable namespace
+`recovery-2e90a3cc`, including both schema-check init containers, scheduled backup
+`recovery-source-postgres-20261012030452`, the WAL/PITR marker boundary, extensions,
+existing session continuity, saved configuration and fresh login. The namespace
+was deleted on exit. The selected API image was
+`constellation-browser-24194cdf9ad0-api:latest`, image index
+`sha256:2880f0aeaed7a5e27a3abf44aabaa1025cfb6e7eb9894aeb48c9c145c8e29ccd`,
+built for the session/schema increment `103bf74`. This qualifies that build; it
+does not qualify subsequent archive extraction or dead-code changes. The run log
+is `/tmp/constellation-cnpg-171-rehearsal-fixed.log`; protected credentials and
+evidence remain in `/tmp/constellation-cnpg-test.BTZyxA` and must not be committed.
+The API manifest renderer handles both Kubernetes Lists and adjacent JSON
+documents, requires exactly one API and schema-check container, and assigns the
+explicitly selected image to both. Three tooling regression tests cover those
+contracts and rejection of ambiguous manifests.

@@ -12,6 +12,21 @@ spec:
     spec:
       automountServiceAccountToken: false
       securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001}
+      initContainers:
+        - name: wait-for-migrations
+          image: constellation/api:convergence-20261011
+          imagePullPolicy: IfNotPresent
+          args: ["--check-schema"]
+          env:
+            - name: DATABASE_URL
+              valueFrom: {secretKeyRef: {name: recovery-source-database-url, key: url}}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: "1", memory: 256Mi}
       containers:
         - name: api
           image: constellation/api:convergence-20261011

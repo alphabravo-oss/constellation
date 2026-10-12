@@ -58,8 +58,21 @@ Wave H3.
 
 The old TLS Secret remains exposed in Git history. Removing the capture does
 not revoke that key or make the full-history scanner pass. The current default
-cluster has no `constellation-system/e2e-admission-tls` Secret, but other copies
-and trust stores have not been inventoried. The historical certificate is valid
+cluster has no `constellation-system/e2e-admission-tls` Secret. The owner is unsure
+whether this fixture was used outside local development. A read-only October 12
+inventory compared the historical leaf and CA certificate DER SHA-256 fingerprints
+against public certificates in every `kubernetes.io/tls` Secret and all validating
+and mutating admission webhook CA bundles in the two accessible environments:
+
+| Environment | TLS certificates checked | Webhook CA bundles checked | Matches |
+| --- | ---: | ---: | ---: |
+| Main local cluster | 2 | 4 | 0 |
+| Isolated CNPG test cluster | 14 | 11 | 0 |
+
+The inventory did not read private keys. Its non-secret result is retained locally
+at `/tmp/constellation-historical-tls-inventory.json`. This check does not cover
+Opaque Secrets, external trust stores or other clusters and does not establish
+global revocation. The historical certificate is valid
 until May 9, 2036; treat any deployment using it as compromised, replace the key
 and certificate, and remove obsolete CA trust. That deployment inventory and
 revocation evidence remain release blockers.
