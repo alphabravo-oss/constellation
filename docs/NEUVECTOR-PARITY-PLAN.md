@@ -104,6 +104,33 @@ executions** pass with no skips and zero new lint findings
 (`/tmp/constellation-dns-context-seeded/`). This bounds DNS work; it does not
 establish a serverless dial-time DNS-rebinding defense.
 
+Native policy generation now rejects out-of-range ports and unsupported protocols
+with an error and no partial allow-list; it can no longer wrap port 65536 to the
+zero/any-port wildcard or translate SCTP/unknown protocols to any protocol.
+Explicit port zero remains supported. Group-edge create/expand validates both
+submitted and transaction-locked state and returns HTTP 400 for unsupported
+native rules. SCTP remains available only where a separate CNI workflow supports
+it; native group-edge SCTP enforcement is not advertised. A read-only main-cluster
+inventory found zero group edges, so no legacy rows were changed.
+
+Qualification: **1,084 seeded race-test executions** across native policy,
+runtime handlers, migration and registered server routes passed; the subsequent
+error-handler cleanup passed **704 executions**, all without skips. **Six
+production-image browser tests** passed without retries, including real API
+rejection/no-write checks, group lifecycle and network workflows. The final API
+image is `constellation-browser-4a502b1b2b82-api:latest`, index
+`sha256:e1a17de6c80a09ab9ded2cdfcb2b3e7ae7fd59e212495c0ae0a6ca6791d6026c`.
+Evidence: `/tmp/constellation-native-policy-{final,cleanup-tests,browser-final}/`
+and `/tmp/constellation-native-policy-legacy-inventory.log`. Frontend lint passes.
+Full lint now has **1,639 findings**; standalone gosec has **253 findings** and
+zero package-load errors. Both remain blocking. No exceptions were added.
+
+A second current-feature CNPG/RustFS rehearsal also passed at schema 171 in
+`recovery-94263fc4`, using the native-validation image before the error-handler
+cleanup; the [recovery runbook](cnpg-recovery.md) records its exact image and
+scope. Main deployment remains unchanged. These fixes do not close the broader
+live dataplane, legacy-policy ownership or production recovery gates.
+
 The latest session-lifecycle increment adds migration 171, bounded leader-owned
 cleanup for expired browser/session records and five-minute network snapshots and
 kill requests. It preserves unexpired refresh reuse evidence, legacy unknown

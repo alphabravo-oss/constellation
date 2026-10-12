@@ -232,7 +232,10 @@ func (h *RuntimePoliciesHTTP) generateInternal(ctx context.Context, orgID uuid.U
 	if req.DefaultDeny != nil {
 		opts.DefaultDeny = *req.DefaultDeny
 	}
-	rules, defAction, applyDir := netpolicy.BuildDPRules(req.Workload, flows, opts)
+	rules, defAction, applyDir, err := netpolicy.BuildDPRules(req.Workload, flows, opts)
+	if err != nil {
+		return nil, errBadRequest(err.Error())
+	}
 
 	ns := namespaceOrDerived(req)
 	yaml := GenerateYAML{

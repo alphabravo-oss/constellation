@@ -476,6 +476,9 @@ SELECT id, cluster_id, from_group, to_group, ports, mode, comment, updated_at
 		}
 		e = netpolicy.GroupEdge{ID: row.ID.String(), FromGroup: row.FromGroup, ToGroup: row.ToGroup,
 			Ports: row.Ports, Mode: row.Mode, Comment: row.Comment}
+		if err := e.Validate(); err != nil {
+			return ExpandResult{}, nil, err
+		}
 	}
 	fromMembers, err := s.groupMembers(ctx, tx, orgID, clusterID, e.FromGroup)
 	if err != nil {
@@ -532,7 +535,10 @@ SELECT id, cluster_id, from_group, to_group, ports, mode, comment, updated_at
 		if m == "" {
 			continue
 		}
-		rules, defAction, applyDir := netpolicy.BuildDPRules(m, flows, opts)
+		rules, defAction, applyDir, err := netpolicy.BuildDPRules(m, flows, opts)
+		if err != nil {
+			return ExpandResult{}, nil, err
+		}
 		if len(rules) == 0 {
 			continue
 		}
@@ -543,7 +549,7 @@ SELECT id, cluster_id, from_group, to_group, ports, mode, comment, updated_at
 			CreatedBy: by,
 		}
 		var existingRules json.RawMessage
-		err := tx.QueryRow(ctx, `SELECT rules FROM runtime_policies
+		err = tx.QueryRow(ctx, `SELECT rules FROM runtime_policies
  WHERE org_id=$1 AND cluster_id=$2 AND workload=$3 AND name=$4 FOR UPDATE`,
 			orgID, clusterID, m, name).Scan(&existingRules)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -759,23 +765,7 @@ func (h *GroupEdgesHTTP) Create(w http.ResponseWriter, r *http.Request) {
 		row, err = h.store.Upsert(r.Context(), sub.OrgID, req.ClusterID, edge, &sub.UserID)
 	}
 	if err != nil {
-		if errors.Is(err, errEdgeClusterNotFound) {
-			jsonError(w, http.StatusNotFound, "cluster not found")
-			return
-		}
-		if errors.Is(err, errEdgeGroupNotFound) {
-			code := http.StatusBadRequest
-			if req.Expand {
-				code = http.StatusConflict
-			}
-			jsonError(w, code, err.Error())
-			return
-		}
-		if errors.Is(err, errEdgePolicyOwnership) {
-			jsonError(w, http.StatusConflict, "edge policies have ambiguous ownership; resolve them before expansion")
-			return
-		}
-		jsonError(w, http.StatusInternalServerError, "failed to save edge or expansion")
+		writeGroupEdgeMutationError(w, err, req.Expand, "failed to save edge or expansion")
 		return
 	}
 	h.auditMutation(r, sub, "group_rule_edge.upsert", row, nil, row)
@@ -826,15 +816,7 @@ func (h *GroupEdgesHTTP) Expand(w http.ResponseWriter, r *http.Request) {
 	}
 	exp, err := h.store.Expand(r.Context(), sub.OrgID, row.ClusterID, edge, &sub.UserID)
 	if err != nil {
-		if errors.Is(err, errEdgeGroupNotFound) {
-			jsonError(w, http.StatusConflict, err.Error())
-			return
-		}
-		if errors.Is(err, errEdgePolicyOwnership) {
-			jsonError(w, http.StatusConflict, "edge policies have ambiguous ownership; resolve them before expansion")
-			return
-		}
-		jsonError(w, http.StatusInternalServerError, "failed to expand edge")
+		writeGroupEdgeMutationError(w, err, true, "failed to expand edge")
 		return
 	}
 	h.auditMutation(r, sub, "group_rule_edge.expand", row, row, exp)
@@ -883,4 +865,23 @@ func (h *GroupEdgesHTTP) Delete(w http.ResponseWriter, r *http.Request) {
 func pathSegmentBeforeExpand(p string) string {
 	p = strings.TrimSuffix(p, "/expand")
 	return pathTail(p)
+}
+
+func writeGroupEdgeMutationError(w http.ResponseWriter, err error, expanding bool, fallback string) {
+	switch {
+	case errors.Is(err, errEdgeClusterNotFound):
+		jsonError(w, http.StatusNotFound, "cluster not found")
+	case errors.Is(err, errEdgeGroupNotFound):
+		code := http.StatusBadRequest
+		if expanding {
+			code = http.StatusConflict
+		}
+		jsonError(w, code, err.Error())
+	case errors.Is(err, netpolicy.ErrInvalidDPFlow):
+		jsonError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, errEdgePolicyOwnership):
+		jsonError(w, http.StatusConflict, "edge policies have ambiguous ownership; resolve them before expansion")
+	default:
+		jsonError(w, http.StatusInternalServerError, fallback)
+	}
 }

@@ -1,6 +1,42 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 
+test("native group-edge API rejects widening inputs without creating edges", async ({ page }) => {
+  await page.goto("/auth/login");
+  await page.getByLabel("Email").fill("admin@demo.test");
+  await page.getByLabel("Password", { exact: true }).fill("Constellation!1");
+  await page.getByRole("button", { name: /^Sign in$/ }).click();
+  await expect(page).toHaveURL(/\/clusters$/);
+  const cluster = page.getByTestId("cluster-card").first();
+  await expect(cluster).toBeVisible();
+  const clusterId = await cluster.getAttribute("data-cluster-id");
+  expect(clusterId).toBeTruthy();
+  const origin = new URL(page.url()).origin;
+  const endpoint = `${origin}/api/v1/runtime-policies/group-edges`;
+  const before = await page.request.get(`${endpoint}?cluster_id=${clusterId}`);
+  expect(before.ok()).toBeTruthy();
+  const originalEdges = (await before.json()).edges;
+  for (const port of [
+    { protocol: "SCTP", port: 443 },
+    { protocol: "GRE", port: 443 },
+    { protocol: "TCP", port: 65536 },
+    { protocol: "UDP", port: -1 },
+  ]) {
+    const result = await page.request.post(endpoint, {
+      headers: { Origin: origin, "X-Constellation-Client": "browser" },
+      data: {
+        cluster_id: clusterId, from_group: "invalid-source", to_group: "invalid-destination",
+        mode: "protect", expand: true, ports: [port],
+      },
+    });
+    expect(result.status()).toBe(400);
+    expect(await result.text()).toContain("flow cannot be represented by the native datapath");
+  }
+  const after = await page.request.get(`${endpoint}?cluster_id=${clusterId}`);
+  expect(after.ok()).toBeTruthy();
+  expect((await after.json()).edges).toEqual(originalEdges);
+});
+
 async function removeFixture(page: Page, clusterId: string, groupName: string) {
   const origin = new URL(page.url()).origin;
   const mutationHeaders = { Origin: origin, "X-Constellation-Client": "browser" };

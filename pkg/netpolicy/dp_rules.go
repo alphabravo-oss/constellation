@@ -17,7 +17,9 @@
 package netpolicy
 
 import (
+	"errors"
 	"fmt"
+	"math"
 	"net"
 	"sort"
 	"strings"
@@ -25,9 +27,10 @@ import (
 	"github.com/alphabravocompany/constellation/internal/runtime/dp"
 )
 
+var ErrInvalidDPFlow = errors.New("flow cannot be represented by the native datapath")
+
 // BuildDPRulesOptions configures the rule generator. The defaults work for
-// most callers; bump DefaultPort if you want every-port-on-this-peer rules
-// instead of per-port (eg. "trust the peer entirely").
+// most callers. A flow port of zero deliberately allows every port for that protocol.
 type BuildDPRulesOptions struct {
 	// AllowDNS — when true, prepend an egress rule allowing UDP/53 to any
 	// peer. Mirrors the implicit DNS allow in GenerateNative. Default true.
@@ -47,6 +50,7 @@ func DefaultBuildDPRulesOptions() BuildDPRulesOptions {
 //   - rules:     []dp.PolicyRule with stable, deterministic ordering
 //   - defAction: PolicyActionDeny (with opts.DefaultDeny) or PolicyActionAllow
 //   - applyDir:  always ApplyDirBoth (we generate both ingress + egress rules)
+//   - error:     invalid port or unsupported native protocol; no partial allow-list
 //
 // `targetWorkload` is the policy-target — flows where DstWorkload matches
 // become ingress rules; flows where SrcWorkload matches become egress rules.
@@ -56,7 +60,7 @@ func DefaultBuildDPRulesOptions() BuildDPRulesOptions {
 // IDs are NOT stamped here — the handler does that after insert, using the
 // dp_policy_id sequence value from runtime_policies. We leave PolicyRule.ID
 // = 0 so ToWorkloadPolicy can overwrite cleanly.
-func BuildDPRules(targetWorkload string, flows []Flow, opts BuildDPRulesOptions) ([]*dp.PolicyRule, uint8, int) {
+func BuildDPRules(targetWorkload string, flows []Flow, opts BuildDPRulesOptions) ([]*dp.PolicyRule, uint8, int, error) {
 	defAction := uint8(dp.PolicyActionDeny)
 	if !opts.DefaultDeny {
 		defAction = dp.PolicyActionAllow
@@ -89,9 +93,6 @@ func BuildDPRules(targetWorkload string, flows []Flow, opts BuildDPRulesOptions)
 		var ing bool
 		var peerIP string
 		switch {
-		case f.DstWorkload == targetWorkload && f.DstNamespace == "":
-			// Tolerate a target string without explicit namespace match.
-			ing = true
 		case f.DstWorkload == targetWorkload:
 			ing = true
 		case f.SrcWorkload == targetWorkload:
@@ -118,8 +119,12 @@ func BuildDPRules(targetWorkload string, flows []Flow, opts BuildDPRulesOptions)
 		if seen[key] {
 			continue
 		}
+		rule, err := buildAllowRule(ing, peerIP, fqdn, f.Port, f.Protocol)
+		if err != nil {
+			return nil, dp.PolicyActionDeny, dp.ApplyDirBoth, err
+		}
 		seen[key] = true
-		rules = append(rules, buildAllowRule(ing, peerIP, fqdn, f.Port, f.Protocol))
+		rules = append(rules, rule)
 	}
 
 	// Stable sort: ingress first, then by port, then by peer for ties.
@@ -137,7 +142,7 @@ func BuildDPRules(targetWorkload string, flows []Flow, opts BuildDPRulesOptions)
 		return ipToString(a.DstIP) < ipToString(b.DstIP)
 	})
 
-	return rules, defAction, dp.ApplyDirBoth
+	return rules, defAction, dp.ApplyDirBoth, nil
 }
 
 // peerIPFromFlow returns the IP of the non-target side of the flow, or ""
@@ -163,11 +168,15 @@ func peerIPFromFlow(f Flow, ingress bool) string {
 	return ""
 }
 
-func buildAllowRule(ingress bool, peerIP, fqdn string, port int, protoStr string) *dp.PolicyRule {
+func buildAllowRule(ingress bool, peerIP, fqdn string, port int, protoStr string) (*dp.PolicyRule, error) {
+	encodedPort, proto, err := nativeFlowPortAndProtocol(port, protoStr)
+	if err != nil {
+		return nil, err
+	}
 	r := &dp.PolicyRule{
 		Ingress: ingress,
-		Port:    uint16(port),
-		IPProto: protoToCode(protoStr),
+		Port:    encodedPort,
+		IPProto: proto,
 		Action:  dp.PolicyActionAllow,
 		Fqdn:    fqdn,
 	}
@@ -181,11 +190,11 @@ func buildAllowRule(ingress bool, peerIP, fqdn string, port int, protoStr string
 			}
 		}
 	}
-	return r
+	return r, nil
 }
 
 func protoToCode(s string) uint8 {
-	switch strings.ToUpper(s) {
+	switch strings.ToUpper(strings.TrimSpace(s)) {
 	case "TCP":
 		return 6
 	case "UDP":
@@ -245,4 +254,15 @@ func protoCodeToString(code uint8) string {
 	default:
 		return "any"
 	}
+}
+
+func nativeFlowPortAndProtocol(port int, protoStr string) (uint16, uint8, error) {
+	if port < 0 || port > math.MaxUint16 {
+		return 0, 0, fmt.Errorf("%w: port %d is outside 0..65535", ErrInvalidDPFlow, port)
+	}
+	proto := protoToCode(protoStr)
+	if proto == 0 {
+		return 0, 0, fmt.Errorf("%w: unsupported protocol %q; supported: TCP, UDP, ICMP, ICMPV6", ErrInvalidDPFlow, protoStr)
+	}
+	return uint16(port), proto, nil
 }

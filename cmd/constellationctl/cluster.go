@@ -219,24 +219,25 @@ func resolveClient(ctx context.Context, serverOverride, email string) (*authedCl
 		return nil, errors.New("server URL not set; pass --server or run `constellationctl login` first")
 	}
 	cli := &authedClient{server: server, token: cfg.Token, http: newAPIClient()}
-	if cli.token == "" {
-		if email == "" {
-			return nil, errors.New("no cached token; pass --email to authenticate")
+	if cli.token != "" {
+		return cli, nil
+	}
+	if email == "" {
+		return nil, errors.New("no cached token; pass --email to authenticate")
+	}
+	pw := os.Getenv("CONSTELLATION_PASSWORD")
+	if pw == "" {
+		fmt.Fprint(os.Stderr, "Password: ")
+		if _, err := fmt.Fscan(os.Stdin, &pw); err != nil {
+			return nil, fmt.Errorf("read password: %w", err)
 		}
-		pw := os.Getenv("CONSTELLATION_PASSWORD")
-		if pw == "" {
-			fmt.Fprint(os.Stderr, "Password: ")
-			if _, err := fmt.Fscan(os.Stdin, &pw); err != nil {
-				return nil, fmt.Errorf("read password: %w", err)
-			}
-		}
-		cli.token, err = loginToken(ctx, cli.http, server, email, pw)
-		if err != nil {
-			return nil, err
-		}
-		if err := saveConfig(&config{Server: server, Token: cli.token}); err != nil {
-			return nil, fmt.Errorf("save login: %w", err)
-		}
+	}
+	cli.token, err = loginToken(ctx, cli.http, server, email, pw)
+	if err != nil {
+		return nil, err
+	}
+	if err := saveConfig(&config{Server: server, Token: cli.token}); err != nil {
+		return nil, fmt.Errorf("save login: %w", err)
 	}
 	return cli, nil
 }

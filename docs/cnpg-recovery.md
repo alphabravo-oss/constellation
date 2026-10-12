@@ -181,3 +181,15 @@ The API manifest renderer handles both Kubernetes Lists and adjacent JSON
 documents, requires exactly one API and schema-check container, and assigns the
 explicitly selected image to both. Three tooling regression tests cover those
 contracts and rejection of ambiguous manifests.
+
+A later October 12 rehearsal passed with the native policy validation and DNS/CLI
+changes in `constellation-browser-ec202b2c53f2-api:latest`, index
+`sha256:85d14cbf5b7fb67f0ef3b6da4f8065df2c42fe5f89bdc90b8c57f1e87a8221e3`.
+Namespace `recovery-94263fc4` completed scheduled backup
+`recovery-source-postgres-20261012033238`, recovered exactly markers 1 and 2,
+passed the extension/session/config/login checks, and was deleted on exit.
+Schema 171 gates passed on source and target. This image precedes the small CLI
+and group-edge error-handler cleanup, whose later image has separate browser
+evidence; do not conflate the image digests. The successful run is recorded in
+`/tmp/constellation-cnpg-current-rehearsal.log`; protected credentials/evidence
+remain in `/tmp/constellation-cnpg-test.TEXvXJ` and must not be committed.

@@ -675,7 +675,7 @@
         "properties": {
           "protocol": {
             "type": "string",
-            "description": "L4 protocol; defaults to TCP when omitted or empty."
+            "description": "Native group-edge protocol: TCP, UDP, ICMP or ICMPV6 (case-insensitive). Defaults to TCP when omitted or empty. SCTP and other unsupported protocols are rejected rather than widened to any protocol."
           },
           "port": {
             "type": "integer",
