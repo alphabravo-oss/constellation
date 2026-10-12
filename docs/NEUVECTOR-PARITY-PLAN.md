@@ -127,6 +127,20 @@ the corrected digest control, lease denials, audit receipts and credential clean
 This is a bounded P0/UI-1 truthfulness improvement; the broader page and scanner
 fleet acceptance items remain open.
 
+The registry form continuation is deployed at Helm revision **24**. Add and
+edit now use dedicated `/registries/new` and `/registries/:id/edit` pages with
+back navigation, explicit Save/Cancel and collapsed advanced settings. Testing a
+connection is a separate action on the saved registry; the former form test could
+silently create/update it. Blank credential edits preserve the saved sealed set;
+selecting anonymous authentication clears it. The form exposes all 13 connector
+kinds accepted by the API without claiming live provider qualification. The list
+has a verdict and labels the 200-image-job queue sample.
+
+Validation: **160 frontend tests**, production build and changed-file lint pass.
+Collaborative-browser checks cover create-once, loaded edit, save, cancel without
+changes, advanced disclosure and hard reload of the edit URL. The temporary manual
+registry was removed. UI-1 stays open pending the remaining page/form audit.
+
 The admission-engine continuation adds migration **172** and persists normalized
 engine outcomes atomically with image scan completion. The built-in vulnerability
 profiles now require successful Trivy and Grype results rather than retired

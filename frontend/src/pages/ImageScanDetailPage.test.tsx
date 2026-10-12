@@ -24,7 +24,10 @@ it("fetches failed zero-count artifacts and shows failures instead of clean empt
   host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   await act(async () => root.render(<QueryClientProvider client={client}><ImageScanDetailPage /></QueryClientProvider>));
-  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+  await vi.waitFor(async () => {
+    await act(async () => {});
+    expect(host.textContent).toContain("Inspection failed. image config unavailable");
+  });
   expect(imageScanResults.layers).toHaveBeenCalledWith("result");
   expect(imageScanResults.fileRisks).toHaveBeenCalledWith("result");
   expect(host.textContent).toContain("Findings may be incomplete");

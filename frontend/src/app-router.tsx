@@ -106,6 +106,7 @@ const RuntimeDLPFormPage    = lazy(() => import("./pages/RuntimeDLPFormPage").th
 const RuntimeSignatureFormPage = lazy(() => import("./pages/RuntimeSignatureFormPage").then((m) => ({ default: m.RuntimeSignatureFormPage })));
 const FileMonitorFormPage   = lazy(() => import("./pages/FileMonitorFormPage").then((m) => ({ default: m.FileMonitorFormPage })));
 const RegistriesPage        = lazy(() => import("./pages/RegistriesPage").then((m) => ({ default: m.RegistriesPage })));
+const RegistryFormPage = lazy(() => import("./pages/RegistryFormPage").then((m) => ({ default: m.RegistryFormPage })));
 const RegistryImagesPage    = lazy(() => import("./pages/RegistryImagesPage").then((m) => ({ default: m.RegistryImagesPage })));
 const ContainersPage        = lazy(() => import("./pages/ContainersPage").then((m) => ({ default: m.ContainersPage })));
 const NetworkRulesPage      = lazy(() => import("./pages/NetworkRulesPage").then((m) => ({ default: m.NetworkRulesPage })));
@@ -210,6 +211,8 @@ const cluster_workloads_splatRoute = createRoute({ getParentRoute: () => app_clu
 const cluster_deployments_didRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "deployments/$did", component: () => (<SuspenseRoute><DeploymentDetailPage /></SuspenseRoute>) });
 const cluster_complianceRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "compliance", component: () => (<SuspenseRoute><CompliancePage /></SuspenseRoute>) });
 const cluster_registriesRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "registries", component: () => (<SuspenseRoute><RegistriesPage /></SuspenseRoute>) });
+const cluster_registries_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "registries/new", component: () => (<SuspenseRoute><RegistryFormPage /></SuspenseRoute>) });
+const cluster_registries_editRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "registries/$regId/edit", component: () => (<SuspenseRoute><RegistryFormPage /></SuspenseRoute>) });
 const cluster_registry_splatRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "registry/$", beforeLoad: aliasRedirect({ to: "registries", cluster: true, from: "registry" }) });
 const cluster_registries_regIdRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "registries/$regId", component: () => (<SuspenseRoute><RegistryImagesPage /></SuspenseRoute>) });
 const cluster_exceptionsRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "exceptions", component: () => (<SuspenseRoute><VulnerabilityExceptionsPage /></SuspenseRoute>) });
@@ -410,6 +413,8 @@ authenticatedRoute.addChildren([
   cluster_deployments_didRoute,
   cluster_complianceRoute,
   cluster_registriesRoute,
+  cluster_registries_newRoute,
+  cluster_registries_editRoute,
   cluster_registry_splatRoute,
   cluster_registries_regIdRoute,
   cluster_exceptionsRoute,

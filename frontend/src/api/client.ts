@@ -5562,7 +5562,7 @@ export const apiTokens = {
 
 export type RegistryKind =
   | "docker-hub" | "ghcr" | "ecr" | "gcr" | "acr"
-  | "quay" | "harbor" | "gitlab" | "jfrog";
+  | "quay" | "harbor" | "gitlab" | "jfrog" | "generic-v2" | "nexus" | "openshift" | "ibmcloud";
 
 export type RegistryAuthKind =
   | "static" | "aws-iam-role" | "gcp-service-account" | "azure-managed-id" | "none";
