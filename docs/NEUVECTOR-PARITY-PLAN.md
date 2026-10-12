@@ -105,11 +105,17 @@ under `/static/`, redirects preserve the public origin, and both Docker and Helm
 serve SPA deep links. Browser setup now extends its timeout only for an actual
 server-mandated login cooldown; production throttling remains enabled. The next
 full run passed 190/191, exposing one ambiguous Name/Namespace test locator, now
-corrected. The final rebuilt production-container suite passes **191/191** with
-zero retries; all **133 frontend unit/component tests** also pass. CI now invokes
+corrected. The final rebuilt production-container suite passes **193/193** with
+zero retries; all **141 frontend unit/component tests** also pass. CI now invokes
 the whole browser suite by default and enables the isolated migration
 apply/idempotency/rollback recipe. These are local results; hosted and live-cluster
 qualification remain open.
+
+The NVD settings editor now uses the shared TanStack Form/Zod layer, accessible
+text/password fields and labelled switches. It preserves unsaved drafts across
+query refresh/conflicts, omits blank replacement keys, sanitizes save errors and
+blocks accidental navigation. Eight component cases and two production browser
+cases cover validation, secret handling, save and explicit discard.
 
 Additional security fixes in this continuation:
 
@@ -132,7 +138,7 @@ Additional security fixes in this continuation:
   All three runtime cases and four builds pass locally. The tagged startup guard
   and crypto-module logs now exist; [FIPS documentation](fips.md) removes earlier
   unsupported whole-product, CLI and native-library claims. Workflow validation
-  passes; deployed cryptographic qualification remains open.
+  and the hosted FIPS job pass; deployed cryptographic qualification remains open.
 
 These fixes do not establish green CI. Historical secret findings need
 classification/remediation and any genuine credentials revoked; do not broadly
@@ -151,14 +157,17 @@ WAL/dead-tuple improvement.
 The existing global rollup lock and global control-audit chain remain scaling
 constraints; this change does not claim to remove them.
 
-Local evidence for this continuation: `/tmp/constellation-parity-browser-final/`
+Local evidence for this continuation: `/tmp/constellation-parity-browser-expanded/`
 contains image IDs, migration/API logs and generated screenshots;
-`/tmp/constellation-parity-frontend-unit.log` records 133 passing tests;
+`/tmp/constellation-nvd-full-unit.log` records 141 passing tests;
 `/tmp/constellation-parity-fips/fips/` records the four builds and three runtime
-cases. The expanded seeded/shuffled/race database gate is still running.
-The previous unseeded run exposed legacy skips; passing package totals alone do
-not establish that those skipped workflows ran. The harness now seeds only its
+cases. The expanded seeded database gate passes **5,556 test executions**, twice
+and shuffled with the race detector, with **zero skips and failures**. Evidence:
+`/tmp/constellation-parity-seeded-race/integration.xml` and `integration.json`.
+The previous unseeded run exposed legacy skips; the harness now seeds only its
 new disposable database, and new federation redirect tests own their fixtures.
+All 69 tooling tests, endpoint/plan checks, repository formatting, ShellCheck,
+actionlint, frontend lint, Helm lint and HA/template smoke pass locally.
 
 ## Current baseline
 
@@ -1596,7 +1605,7 @@ compatibility, supported runtime versions, and upstream changes before pinning.
 | [07 Testing](https://technology-selection-guide.aws.ablabs.io/07-testing/) | Go/Vitest/Playwright tests, disposable PostgreSQL repeat/race/JUnit gate and production-container browser gate pass locally. Playwright browser auth coverage uses zero PR retries. | Partial: most DB tests lack integration tags and share a DB; no pgtestdb/testcontainers harness found. Seed-dependent skips, CNI/kernel/cloud matrix, hosted CI evidence, and full isolated integration contracts remain open. | TSG-4 |
 | [08 Discipline](https://technology-selection-guide.aws.ablabs.io/08-discipline/) | Canonical evidence-driven plan and real DB tests provide a foundation. | Partial: codify ADR/deviation review, root-cause and transport-boundary testing, layer/enum discipline, offline-first acceptance and contributor commands. | TSG-1, TSG-2, TSG-7 |
 | [09 Air-gap](https://technology-selection-guide.aws.ablabs.io/09-airgap/) | Scanner DB preload/airgap image support and signed release artifacts exist. | Partial: complete signed offline deployment BOM/loader, local-first OCI resolver, closed-egress first boot and all-feature upgrade/restore proof are not established; release images are deliberately amd64-only versus the guide's dual-architecture requirement. | TSG-7 |
-| [10 TypeScript](https://technology-selection-guide.aws.ablabs.io/10-typescript/) | React 19, strict TypeScript, Vite, Tailwind 4, Radix, TanStack Query, lucide, Vitest and Playwright exist. Node is pinned and browser auth/session regressions pass locally. | Partial: TanStack Router owns routing and the shared TanStack Form/Zod layer is used by Data Retention. The user chose these Astronomer-aligned alternatives to the guide's router/form choices; record the deviation. No Connect-Web pipeline or root session-loader contract is established. Mutation invalidation, inline field errors and version-review obligations need broader acceptance tests. | TSG-5 |
+| [10 TypeScript](https://technology-selection-guide.aws.ablabs.io/10-typescript/) | React 19, strict TypeScript, Vite, Tailwind 4, Radix, TanStack Query, lucide, Vitest and Playwright exist. Node is pinned and browser auth/session regressions pass locally. | Partial: TanStack Router owns routing and the shared TanStack Form/Zod layer is used by Data Retention and NVD configuration. The user chose these Astronomer-aligned alternatives to the guide's router/form choices; record the deviation. No Connect-Web pipeline or root session-loader contract is established. Mutation invalidation, inline field errors and version-review obligations need broader acceptance tests. | TSG-5 |
 | [11 Multi-language](https://technology-selection-guide.aws.ablabs.io/11-multi-language/) | Go/TypeScript, native/eBPF runtime code, Python test tooling, shell and Helm coexist. Go/Node/Python CI runtimes are pinned, npm lockfiles are audited, and ShellCheck is a blocking gate. | Partial: language ADRs/ownership, native exceptions, Python type/lint coverage, per-language SBOM/signing and cross-language telemetry remain open. | TSG-1, TSG-4, TSG-7 |
 
 ### TSG-1 Requirement inventory and deliberate adoption
@@ -1685,7 +1694,7 @@ custody, threat-model or external-provider release matrix.
   had no 429s, and the one asset repeat-workflow failure passed after migration
   167. October 12 adds actual Retry-After timeout budgeting and fixes production
   nginx Assets deep links. A subsequent full run passed 190/191; the remaining
-  ambiguous field locator is fixed and the final rebuilt suite passes 191/191.
+  ambiguous field locator is fixed and the final rebuilt suite passes 193/193.
   The full suite and migration apply/rollback fixture are now the CI default.
   The distinct FIPS build/runtime job now passes locally. Hosted CI and deployed FIPS workflow
   qualification remain open; do not loosen production rate limiting for tests.
@@ -1704,7 +1713,8 @@ custody, threat-model or external-provider release matrix.
   October 11 user decision: converge on Astronomer's TanStack Form layer with
   schema validation (Zod where appropriate). Record the guide's react-hook-form
   departure in TSG-1; do not introduce a second form library. Data Retention now
-  uses the shared Form/Zod layer; other editors and full browser acceptance remain open.
+  uses the shared Form/Zod layer, as does NVD configuration. Both have component
+  and production browser coverage; other editors remain open.
 - [ ] Migrate to TanStack Router, verify accessible Radix-based primitives, static
   production builds, API/WebSocket dev proxies, version stamps and Node/tooling
   pins against the guide, with ADRs for deliberate alternatives.

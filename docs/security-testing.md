@@ -264,8 +264,9 @@ actual Retry-After cooldowns without weakening the production rate limit.
 The clean-database runner seeds its newly created disposable database after both
 migration runs. This exercises legacy seed-dependent tests instead of treating
 their skips as coverage. It never seeds an operator-supplied DSN. Per-test fixture
-isolation remains unfinished; the full seeded, shuffled race result is required
-in addition to source compilation. New federation redirect tests own their org.
+isolation remains unfinished. The full seeded run passed 5,556 test executions
+with repetition, shuffling and the race detector, with no skips or failures;
+JUnit/JSON are in `/tmp/constellation-parity-seeded-race/`. New federation redirect tests own their org.
 
 Repository Go formatting and ShellCheck pass locally. The remaining strict lint
 and security findings still block release; they have not been suppressed.

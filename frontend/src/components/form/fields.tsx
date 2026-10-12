@@ -20,6 +20,21 @@ export function NumberField({ label, hint, min, max }: { label: string; hint?: s
   );
 }
 
+export function TextField({ label, hint, type = "text", placeholder, autoComplete }: {
+  label: string; hint?: string; type?: "text" | "password" | "url"; placeholder?: string; autoComplete?: string;
+}) {
+  const field = useFieldContext<string>();
+  const id = useId();
+  const errors = field.state.meta.isTouched ? field.state.meta.errors : [];
+  const error = errors.map((e: unknown) => typeof e === "string" ? e : (e as { message?: string })?.message).filter(Boolean).join("; ");
+  return <Field label={label} htmlFor={id} hint={hint && <span id={`${id}-hint`}>{hint}</span>}
+    error={error && <span id={`${id}-error`}>{error}</span>}>
+    <TextInput id={id} name={field.name} type={type} value={field.state.value} placeholder={placeholder} autoComplete={autoComplete}
+      onChange={(event) => field.handleChange(event.target.value)} onBlur={field.handleBlur}
+      aria-invalid={Boolean(error)} aria-describedby={error ? `${id}-error` : hint ? `${id}-hint` : undefined} />
+  </Field>;
+}
+
 export function SubmitButton({ children }: { children: ReactNode }) {
   const form = useFormContext();
   return <form.Subscribe selector={(state) => [state.canSubmit, state.isSubmitting]}>
