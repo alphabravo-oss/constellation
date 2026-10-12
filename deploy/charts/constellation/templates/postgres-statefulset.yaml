@@ -1,5 +1,6 @@
 {{- $mode := include "constellation.postgresMode" . -}}
-{{- if eq $mode "statefulset" -}}
+{{- $retained := .Values.postgres.retainStatefulSetForRollback -}}
+{{- if or (eq $mode "statefulset") $retained -}}
 {{- /*
 The two Secrets (postgres credentials + composed DSN) used to live in this
 file. They were moved to postgres-secrets.yaml as pre-install hooks so the
@@ -34,7 +35,7 @@ metadata:
     app.kubernetes.io/component: postgres
 spec:
   serviceName: {{ include "constellation.fullname" . }}-postgres
-  replicas: 1
+  replicas: {{ ternary 0 1 $retained }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "constellation.name" . }}

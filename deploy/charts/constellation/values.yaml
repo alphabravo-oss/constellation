@@ -710,6 +710,12 @@ postgres:
   dsn: ""
   existingSecret: ""        # if set, takes precedence over `dsn`
   existingSecretKey: url
+  # Upgrade-only cutover option: retain the legacy StatefulSet and Service, with
+  # zero replicas, while the app uses a separately validated target Secret.
+  # Requires mode=external and existingSecret. Preserve embeddedConfig values
+  # and the old credential Secret/PVC. Removing this flag removes the old workload;
+  # rollback after target writes requires reconciliation, not merely scaling it up.
+  retainStatefulSetForRollback: false
   embeddedConfig:
     image: pgvector/pgvector:pg16@sha256:00ba258a66dac104fd5171074a0084462a64a1369d8513f3d0a634e2f24d15bc
     storage: 20Gi

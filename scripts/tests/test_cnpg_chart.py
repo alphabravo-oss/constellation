@@ -8,6 +8,40 @@ CHART = ROOT / "deploy/charts/constellation"
 
 
 class CNPGChartTests(unittest.TestCase):
+    def test_external_cutover_retains_stopped_source_without_rewriting_credentials(self):
+        rendered = self.render(
+            "postgres.mode=external", "postgres.existingSecret=verified-cnpg-dsn",
+            "postgres.retainStatefulSetForRollback=true",
+        )
+        source = self.render(
+            "postgres.mode=external", "postgres.existingSecret=verified-cnpg-dsn",
+            "postgres.retainStatefulSetForRollback=true",
+            template="postgres-statefulset.yaml",
+        )
+        self.assertIn("kind: StatefulSet", source)
+        self.assertIn("replicas: 0", source)
+        self.assertIn("name: restore-test-constellation-postgres", source)
+        self.assertIn("volumeClaimTemplates:", source)
+        self.assertNotIn("kind: Secret", source)
+        self.assertNotIn("# Source: constellation/templates/postgres-secrets.yaml", rendered)
+        api = self.render(
+            "postgres.mode=external", "postgres.existingSecret=verified-cnpg-dsn",
+            "postgres.retainStatefulSetForRollback=true", template="api-deployment.yaml",
+        )
+        self.assertIn("name: verified-cnpg-dsn", api)
+        ordinary = self.render("postgres.mode=external", "postgres.existingSecret=verified-cnpg-dsn")
+        self.assertNotIn("# Source: constellation/templates/postgres-statefulset.yaml", ordinary)
+
+    def test_retained_source_requires_external_target_secret(self):
+        for mode in ("statefulset", "cnpg"):
+            with self.subTest(mode=mode):
+                self.assertIn("requires postgres.mode=external", self.render(
+                    "postgres.mode=" + mode, "postgres.retainStatefulSetForRollback=true", fails=True,
+                ))
+        self.assertIn("requires postgres.existingSecret", self.render(
+            "postgres.mode=external", "postgres.retainStatefulSetForRollback=true", fails=True,
+        ))
+
     def test_partition_statistics_maintenance_switch(self):
         for enabled in ("true", "false"):
             with self.subTest(enabled=enabled):

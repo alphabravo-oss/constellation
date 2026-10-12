@@ -4,6 +4,12 @@ The chart supports CNPG-I Barman Cloud backups and recovery into a new cluster.
 This is a deployment contract, not evidence that the existing development
 StatefulSet has been migrated or that an off-host recovery target is configured.
 
+Latest live continuation: migrations **168–172** are applied on the existing
+development StatefulSet. The API, frontend and admission controller have been
+updated, authenticated API session continuity and browser login pass, and the
+CNPG 1.30.1 / Barman 0.15.1 operators are installed. The new database identity is
+`constellation-cnpg-postgres`; transfer and DSN cutover are still pending.
+
 Install a compatible CloudNativePG operator and Barman Cloud plugin separately.
 Create an ObjectStore resource with externally managed credentials, trusted TLS,
 WAL archival and a reviewed retention policy. Pin a CNPG-compatible PG16 image
@@ -65,11 +71,25 @@ Before switching the existing StatefulSet:
    first StatefulSet transition, and test the application's connection as its
    non-superuser. Plugin physical recovery requires an existing compatible base
    backup/WAL archive; it cannot consume a plain logical dump directly.
+   Set a distinct `nameOverride` as well as `fullnameOverride` for the parallel
+   database release. The old headless Service selects the chart's application
+   name and PostgreSQL component labels: reusing those pod labels would route
+   source traffic to both databases before cutover. Verify its EndpointSlice
+   still contains only the source pod after the CNPG pod becomes ready.
 4. Freeze application writers for the final transfer, verify a final consistent
    copy, and change the owning deployment's DSN through reviewed Helm values.
    Do not perform an in-place mode flip that removes the source StatefulSet
    before the replacement has passed recovery and application checks. Retain
    the source PVC and rollback configuration until cutover is accepted.
+   For a separately managed CNPG target, use `postgres.mode: external`, a new
+   `postgres.existingSecret` containing its validated DSN, and
+   `postgres.retainStatefulSetForRollback: true`. The chart keeps the source
+   StatefulSet/Service under Helm ownership at **zero replicas**, preserves its
+   volume claim template and does not regenerate its credentials. Keep the old
+   `embeddedConfig` and credential Secret. The flag is rejected in other modes
+   or without a target Secret. Enable it only after validating the transferred
+   database; it stops the source. Removing it removes the old workload from the
+   release, so retain it until rollback storage can be retired deliberately.
 5. Verify authenticated login, scans, flow ingestion/rollups, policy reads and
    writes, audit append/verification and key-dependent operations. If rollback
    occurs after new writes, reconcile those writes first; pointing back to an
@@ -202,6 +222,71 @@ remain in `/tmp/constellation-cnpg-test.TEXvXJ` and must not be committed.
 
 ## October 12 credential and process-recovery qualification
 
+The schema-172 continuation passed the complete script in
+`recovery-bf8bf9af`, using API image
+`constellation-browser-58c8017f4908-api:latest` with index
+`sha256:8382addded7cd3d9d2e74410772f6b64342189a0f82e88ea74abe6e19ded867b`.
+Scheduled backup `recovery-source-postgres-20261012050048` completed; PITR,
+extensions, existing sessions, fresh login, saved configuration, encrypted
+credentials, source audit anchor, wrong-key rejection and key restoration passed.
+Database-pod restart through authenticated recovery took **199 seconds**.
+The namespace was removed. The log is `/tmp/constellation-resume-cnpg.log`;
+protected evidence is `/tmp/constellation-cnpg-test.ExEW6y` (never commit).
+
+This run used locally rebuilt upstream operators: CNPG source
+`2a35abb4628f209d149825ef3c38011e0701ff2f` and Barman source
+`6216b7dd552f389952d3de77712d9522a79d9548`, rebuilt with Go 1.27.2 and updated
+`golang.org/x` dependencies. The subsequent main-cluster operator index is
+`sha256:cc61009ac3d2cdf0aa2ff7f44f85dbb7bdf85ab50425d41a71da2af6521cc1b9`,
+plugin index
+`sha256:de96d9e4bf0f2f69f8d2b3c1a8bc953ea8235d613901ae19754600b55cb07590`,
+and sidecar index
+`sha256:61b55f0807293213c68d3d7a5572c41d5b7fa164dba2f956d0c660952779f261`.
+All have successful Trivy and Grype engine outcomes. The operator has no findings;
+the plugin has 56 findings, none critical; the sidecar has 187 findings including
+four critical Python findings without reported fixes. These are local development
+artifacts, not a claim that upstream releases or the complete stack are clean.
+The rehearsal controller ran the earlier operator image with runtime image ID
+`sha256:3fd7acc3fa5923cf4b98d18abc88ba986a1f3ea3a959a6030e1c851ec778d110`;
+the main controller uses
+`sha256:7bd7c74ccdc103c7b6bbb2f28149d072ac0ee7c725bb4c65305f628a32af55b9`,
+which also replaces the otherwise-unused arm64 binary. The amd64 operator binary
+is the same build, but those container identities are not interchangeable evidence.
+
+The live saved admission rule was explicitly converted from retired VulnDB
+provenance to successful Trivy and Grype evidence through the authenticated policy
+API. Its existing severity, fix-availability and exception requirements were
+preserved. Actual local scan reports were uploaded through scanner claim/completion
+endpoints, with imported image digests checked; findings were not filtered out.
+Unknown-image admission still denies. The local-path provisioner helper was
+scanned normally and pinned to the accepted digest
+`rancher/mirrored-library-busybox:1.37.0@sha256:101b4afd76732482eff9b95cae5f94bcf295e521fbec4e01b69c5421f3f3f3e5`.
+Mutable tag references were not recognized as equivalent to the scanner's pinned
+reference; the digest pin avoids weakening admission or inventing tag evidence.
+
+The main local-path provisioner also needed a patched build: upstream v0.0.36
+(source `5d4bfc84b32cd9c5f56ed3aba921b1a3924ea2f0`) was rebuilt with Go 1.27.2,
+`x/net v0.60.0` and `x/text v0.42.0`. Its static executable runs in pinned
+`gcr.io/distroless/static-debian13:nonroot`, rather than the upstream runtime that
+also carries an old Go toolchain. The imported local image
+`constellation/local-path-provisioner:v0.0.36-go1.27.2` has image ID
+`sha256:0cc6512f76e806dec03b7418d39ee953d75fc7f1b12df3aa9c32fc58ca2c35cb`.
+Upstream tests passed; the real scan returned one finding, none critical, with
+successful Trivy and Grype outcomes. Admission accepted the replacement. Setting
+`CONFIG_MOUNT_PATH=/etc/config` enables the provisioner's helper-template reload;
+its restart picked up the pinned helper and both new PVCs bound. These node-local
+images and the k3s-managed provisioner override must be distributed/persisted
+before adding nodes or replacing this host; they are not a portable release.
+
+Staging initially crossed the node's image-GC threshold. Removing only Docker
+build cache older than 24 hours reclaimed **26.9 GB**, reducing disk use to 79%
+with approximately 72 GiB available before the new database copy. Existing
+volumes and backup artifacts were retained. The protected cutover directory is
+`/root/constellation-cutover-20261012-ec73Oq`; it contains database dumps, credentials,
+prior resources/values, scan receipts and rollout configuration and must never be
+committed. Helm release 19 reconciles the application values with the cutover
+described below. The CNPG cluster, RustFS and operators were installed separately.
+
 The stronger check passed first in namespace `recovery-224164bc` at schema 171,
 with scheduled backup `recovery-source-postgres-20261012042414`. The API created
 and recovered a randomly generated encrypted credential, rejected a wrong KEK,
@@ -228,6 +313,58 @@ The owner explicitly **deferred off-host recovery and real node-failure testing*
 on October 12. Those acceptance requirements remain deferred, not satisfied by
 the local rehearsal. Main-cluster cutover is authorized, but image qualification,
 consistent transfer and application checks still precede switching its DSN.
+
+### Main development cutover
+
+On October 12, the application moved from its legacy StatefulSet to
+`constellation-cnpg-postgres-rw` on PostgreSQL **16.14**, schema **172**. Before
+changing the DSN, the six application writer Deployments were stopped, remaining
+source client connections checked, and a fresh custom-format dump restored into
+the empty CNPG application database. All **138** public root-table counts matched,
+including **2,992,972** flows, **3,095,974** runtime events and **1,909,943** audit
+rows. The audit head at ID **1,909,970** matched; a second source check confirmed
+that it had remained frozen. The successful dump/restore/comparison took
+**208 seconds**; that is not an end-to-end outage or RTO measurement. An initial
+attempt failed on a verification-script type error before switching connections;
+its recovery path resumed the original writers, and a new dump was taken for the
+successful attempt.
+
+Helm release **19** uses `postgres.mode=external` with the new Secret
+`constellation-cnpg-database-url` and `retainStatefulSetForRollback=true`. The old
+StatefulSet is retained at zero replicas, along with its original PVC and
+credentials. The new cluster uses distinct pod labels, so the old headless
+Service cannot accidentally select it. Do not simply point back at the old data
+after writes reach CNPG; rollback now requires reconciliation.
+
+All application roles returned ready. Fresh API and real-browser login passed;
+clusters, scan status, organization settings and registries returned HTTP 200.
+Existing Kubernetes Secret data was unchanged across the upgrade. The API and
+frontend include the configured-provider-only SSO login fix; admission uses
+successful Trivy/Grype evidence. Other runtime roles still use the earlier image
+line, so this cutover does not qualify receipt-aware agent queues. The canonical
+parity and fleet acceptance items remain open.
+
+The verified final dump, row counts, audit anchor, Secret snapshots, exact values
+and recovery receipts remain in the protected cutover directory. Continuous WAL
+archiving is healthy. Daily scheduled backup is configured for **02:00 UTC** via
+the Barman plugin and local RustFS. This single-node object store does not satisfy
+the explicitly deferred off-host or node-loss recovery requirements.
+
+The first main scheduled backup,
+`constellation-cnpg-postgres-20261012053647`, completed successfully. A separate
+`constellation-cnpg-restore-check` cluster recovered it through the Barman plugin.
+An isolated API, with no service-account token and egress limited to that database
+and DNS, verified the original session, fresh login, saved configuration and a
+randomly generated encrypted registry credential. Schema 172, all three required
+extensions and the original migrated audit anchor matched. This proves the
+recorded backup plus archived WAL can recover the actual database and its key
+material; it does not certify the pre-existing audit-chain break. Live ingestion
+and retention had resumed before this backup, so its later row counts are not the
+frozen transfer's counts. The temporary source credential fixture, validation API,
+restored cluster and restored PVC were removed after passing. Logs are
+`/tmp/constellation-main-restore-check.log` and
+`/tmp/constellation-main-recovery-verification.log`; protected receipts are in the
+cutover directory.
 
 ### Existing database audit baseline
 

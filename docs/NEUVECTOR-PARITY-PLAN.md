@@ -60,6 +60,24 @@ Parity and switchability are release-ready only when:
 
 ## October 12 implementation continuation
 
+The main development deployment now uses **PostgreSQL 16.14 on CNPG**, schema
+**172**, under Helm revision **19**. Its frozen-source transfer matched all
+**138 public root-table counts** and the audit head before changing the DSN.
+The old StatefulSet is stopped with its PVC/credentials retained. Fresh browser
+login and authenticated cluster, scan, settings and registry checks pass;
+continuous WAL archiving and daily Barman/RustFS backup are configured. The first
+main backup and a separate-cluster restore passed session, login, settings,
+encrypted-credential and original audit-anchor checks. See the
+[main cutover evidence](cnpg-recovery.md#main-development-cutover). Earlier dated
+StatefulSet/schema-167 observations below describe the pre-cutover deployment.
+
+Login now follows Astronomer's configured-provider behavior: unavailable SSO
+buttons, divider and copy are hidden. Public provider discovery exposes only
+OIDC/SAML availability; disabled live providers do not fall back to old environment
+configuration. **149 frontend tests**, production build, focused race/API tests,
+real-browser verification and changed-code lint pass. No checklist item is closed
+by this bounded login or single-node database increment.
+
 The admission-engine continuation adds migration **172** and persists normalized
 engine outcomes atomically with image scan completion. The built-in vulnerability
 profiles now require successful Trivy and Grype results rather than retired
@@ -93,8 +111,9 @@ authenticated recovery). It qualifies the recorded schema-171 image, not later
 source changes. The [runbook](cnpg-recovery.md#october-12-credential-and-process-recovery-qualification)
 records the proof and a newly confirmed pre-existing row-53 audit-chain break in
 both the live source and independent existing-data restore. Do not label that
-history clean or rewrite it to satisfy verification. Main image qualification and
-consistent cutover/application checks remain required.
+history clean or rewrite it to satisfy verification. The main cutover is now
+verified as recorded above; full fleet qualification, historical audit integrity
+and the deferred failure-domain checks remain open.
 
 The subsequent security/recovery increment confines serverless ZIP extraction
 with `os.Root`, private permissions, exclusive file creation and entry/byte

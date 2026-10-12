@@ -17,6 +17,12 @@
 {{- fail "enable only one of gateway.enabled or ingress.enabled" }}
 {{- end }}
 {{- $cnpg := .Values.postgres.cloudnativepg }}
+{{- if .Values.postgres.retainStatefulSetForRollback }}
+{{- if ne (include "constellation.postgresMode" .) "external" }}
+{{- fail "retainStatefulSetForRollback requires postgres.mode=external" }}
+{{- end }}
+{{- $_ := required "retainStatefulSetForRollback requires postgres.existingSecret for the validated target" .Values.postgres.existingSecret }}
+{{- end }}
 {{- $barman := $cnpg.barmanCloud }}
 {{- if or $barman.enabled $barman.recovery.enabled }}
 {{- if ne (include "constellation.postgresMode" .) "cnpg" }}

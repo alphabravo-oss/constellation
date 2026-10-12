@@ -572,6 +572,7 @@ asynchronous bundles.
 | `postgres.embedded`                   | `true`                                               | **Always set to `false` in prod**                               |
 | `postgres.dsn`                        | `""`                                                 | DSN string (alternative to existingSecret)                      |
 | `postgres.existingSecret`             | `""`                                                 | Reference an externally-managed Postgres Secret                 |
+| `postgres.retainStatefulSetForRollback` | `false` | During a validated external-DB cutover, retain the old StatefulSet/Service with zero replicas; requires `existingSecret`. Preserve its previous `embeddedConfig`, credential Secret and PVC. |
 | `postgres.embeddedConfig.image`       | digest-pinned `pgvector/pgvector:pg16`               | Mirror or upgrade the dev/test embedded Postgres image          |
 | `postgres.embeddedConfig.storage`     | `20Gi`                                               | Sizing for the embedded PVC                                     |
 | `postgres.embeddedConfig.storageClass`| `""`                                                 | Override the cluster default StorageClass                       |

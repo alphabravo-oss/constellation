@@ -142,6 +142,11 @@
       "type": "object",
       "additionalProperties": true,
       "properties": {
+        "retainStatefulSetForRollback": {
+          "type": "boolean",
+          "default": false,
+          "description": "Retain the stopped legacy StatefulSet during an external database cutover; requires an existing target DSN Secret."
+        },
         "mode": { "type": "string", "title": "Database mode", "enum": ["", "statefulset", "cnpg", "external"], "default": "" },
         "dsn": { "type": "string", "title": "External database URL", "description": "Prefer an existing Secret for production credentials.", "default": "" },
         "existingSecret": { "type": "string", "title": "External database Secret", "default": "" },
@@ -161,7 +166,7 @@
           "properties": {
             "enabled": { "type": "boolean", "title": "Enable CloudNativePG", "default": false },
             "instances": { "type": "integer", "title": "PostgreSQL instances", "minimum": 1, "maximum": 9, "default": 3 },
-            "imageName": { "type": "string", "title": "pgvector-enabled operand image", "default": "ghcr.io/alphabravo-oss/constellation/postgres:16.10-v0.2.0" },
+            "imageName": { "type": "string", "title": "pgvector-enabled operand image", "default": "ghcr.io/alphabravo-oss/constellation/postgres:16.14-v0.2.0" },
             "storage": { "type": "string", "title": "Volume size per instance", "default": "20Gi", "pattern": "^[0-9]+(Mi|Gi|Ti)$" },
             "storageClass": { "type": "string", "title": "Storage class", "default": "" },
             "barmanCloud": {
