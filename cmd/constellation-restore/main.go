@@ -34,6 +34,7 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -66,12 +67,16 @@ func main() {
 		fmt.Fprintln(os.Stderr, "invalid --on-conflict; want skip|overwrite")
 		os.Exit(2)
 	}
+	if *server != "" && (*verifyKey != "" || *allowUnverified) {
+		fmt.Fprintln(os.Stderr, "--verify-key and --allow-unverified apply only to local restore; configure verification on the API server")
+		os.Exit(2)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
 	if *server != "" {
-		if err := runServerMode(*server, *token, *inPath); err != nil {
+		if err := runServerMode(ctx, *server, *token, *inPath, policy); err != nil {
 			fmt.Fprintln(os.Stderr, "server restore failed:", err)
 			os.Exit(1)
 		}
@@ -137,26 +142,43 @@ func runLocalRestore(ctx context.Context, dbURL, inPath, verifyKey string, allow
 }
 
 // runServerMode uploads the tarball to a running Constellation API and asks it to apply.
-// Endpoint: POST /api/v1/backups/restore (multipart form). Used by `constellationctl backup
-// restore` when DATABASE_URL isn't reachable from the operator's laptop.
-func runServerMode(server, token, inPath string) error {
+// Endpoint: POST /api/v1/backups/restore (application/octet-stream).
+// Signature verification is controlled by API server policy.
+func runServerMode(ctx context.Context, server, token, inPath string, policy backup.ConflictPolicy) error {
+	endpoint, err := url.Parse(server)
+	if err != nil {
+		return fmt.Errorf("parse server URL: %w", err)
+	}
+	if endpoint.Host == "" || (endpoint.Scheme != "http" && endpoint.Scheme != "https") {
+		return fmt.Errorf("server URL must use http or https and include a host")
+	}
+	endpoint.Path = strings.TrimRight(endpoint.Path, "/") + "/api/v1/backups/restore"
+	query := endpoint.Query()
+	query.Set("on_conflict", string(policy))
+	endpoint.RawQuery = query.Encode()
 	f, err := os.Open(inPath)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(server, "/")+"/api/v1/backups/restore", f)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), f)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/octet-stream")
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{
+		Timeout: 30 * time.Minute,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("server returned %d", resp.StatusCode)
 	}
 	var out backup.RestoreResult

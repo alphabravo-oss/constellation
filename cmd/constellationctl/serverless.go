@@ -62,7 +62,7 @@ func serverlessAWSLambdaSyncCmd(serverFlag *string, email *string) *cobra.Comman
 downloads ZIP deployment packages and layers, catalogs packages with Syft, and
 posts package evidence to /api/v1/serverless-packages:report.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cli, err := resolveClient(*serverFlag, *email)
+			cli, err := resolveClient(cmd.Context(), *serverFlag, *email)
 			if err != nil {
 				return err
 			}
@@ -146,12 +146,12 @@ type awsLambdaPackageReporter struct {
 	client *authedClient
 }
 
-func (r awsLambdaPackageReporter) Report(_ context.Context, payload awslambda.PackageReport) (awslambda.ReportResponse, error) {
+func (r awsLambdaPackageReporter) Report(ctx context.Context, payload awslambda.PackageReport) (awslambda.ReportResponse, error) {
 	var out awslambda.ReportResponse
 	if r.client == nil {
 		return out, fmt.Errorf("constellation client required")
 	}
-	if err := r.client.postJSON("/api/v1/serverless-packages:report", payload, &out); err != nil {
+	if err := r.client.postJSON(ctx, "/api/v1/serverless-packages:report", payload, &out); err != nil {
 		return out, err
 	}
 	return out, nil

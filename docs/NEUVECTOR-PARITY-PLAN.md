@@ -86,6 +86,17 @@ the two accessible clusters have no matching historical certificate or webhook
 CA in the checked scope. [Inventory limitations and outstanding revocation](../deploy/e2e/threat-scenarios/04-admission-tls/EVIDENCE.md#october-12-credential-remediation)
 remain recorded; historical secret findings are not suppressed.
 
+CLI recovery fixes now transmit `--on-conflict` in server-mode restores, enforce
+the existing 30-minute deadline and reject redirects instead of replaying the
+archive. Local signature-verification flags are rejected in server mode because
+the API owns verification policy. Operator login, backup listing, cluster and
+package-report calls propagate command cancellation; login/mutation bodies do
+not follow redirects, malformed or empty login tokens are not persisted, and a
+rejected backup-list request returns an error. Both binaries build; **62 seeded
+PostgreSQL/race test executions** pass with no skips, and changed-code lint has
+zero findings (`/tmp/constellation-cli-context-seeded/`,
+`/tmp/constellation-cli-new-lint-fixed.json`). CLI live-recipe acceptance stays open.
+
 The latest session-lifecycle increment adds migration 171, bounded leader-owned
 cleanup for expired browser/session records and five-minute network snapshots and
 kill requests. It preserves unexpired refresh reuse evidence, legacy unknown

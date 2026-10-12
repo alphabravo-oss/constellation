@@ -10,8 +10,10 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -32,14 +34,20 @@ var newExecCommand = func(ctx context.Context, name string, args ...string) *exe
 var version = "dev"
 
 func main() {
+	if err := runCLI(); err != nil {
+		os.Exit(1)
+	}
+}
+
+func runCLI() error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	root := &cobra.Command{
 		Use:   "constellationctl",
 		Short: "Constellation operator CLI",
 	}
 	root.AddCommand(loginCmd(), imageCheckCmd(), auditCmd(), versionCmd(), iacCheckCmd(), modelCheckCmd(), policyCmd(), clusterCmd(), tokensCmd(), networkFlowsCmd(), backupCmd(), vulndbCmd(), serverlessCmd(), repositoryCmd(), federationCmd())
-	if err := root.Execute(); err != nil {
-		os.Exit(1)
-	}
+	return root.ExecuteContext(ctx)
 }
 
 // ---- config ----
@@ -97,25 +105,14 @@ func loginCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			fmt.Fprint(cmd.OutOrStdout(), "Password: ")
 			var pw string
-			fmt.Fscan(cmd.InOrStdin(), &pw)
-			payload := map[string]string{"email": email, "password": pw}
-			body, _ := json.Marshal(payload)
-			resp, err := http.Post(server+"/api/v1/auth/login", "application/json", bytes.NewReader(body))
+			if _, err := fmt.Fscan(cmd.InOrStdin(), &pw); err != nil {
+				return fmt.Errorf("read password: %w", err)
+			}
+			token, err := loginToken(cmd.Context(), newAPIClient(), server, email, pw)
 			if err != nil {
 				return err
 			}
-			defer resp.Body.Close()
-			rb, _ := io.ReadAll(resp.Body)
-			if resp.StatusCode != 200 {
-				return fmt.Errorf("login failed: %s", rb)
-			}
-			var out struct {
-				Token string `json:"token"`
-			}
-			if err := json.Unmarshal(rb, &out); err != nil {
-				return err
-			}
-			return saveConfig(&config{Server: server, Token: out.Token})
+			return saveConfig(&config{Server: server, Token: token})
 		}}
 	cmd.Flags().StringVar(&server, "server", "http://localhost:8080", "Constellation server URL")
 	cmd.Flags().StringVar(&email, "email", "", "Email")

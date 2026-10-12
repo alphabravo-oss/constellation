@@ -49,7 +49,7 @@ func repositoryScanCmd(serverFlag *string, email *string) *cobra.Command {
 		Use:   "scan",
 		Short: "Catalog a repository checkout and queue a repository scan",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cli, err := resolveClient(*serverFlag, *email)
+			cli, err := resolveClient(cmd.Context(), *serverFlag, *email)
 			if err != nil {
 				return err
 			}
@@ -173,11 +173,11 @@ type repositoryPackageReporter struct {
 	client *authedClient
 }
 
-func (r repositoryPackageReporter) Report(_ context.Context, payload repositoryPackageReport, out *repositoryReportResponse) error {
+func (r repositoryPackageReporter) Report(ctx context.Context, payload repositoryPackageReport, out *repositoryReportResponse) error {
 	if r.client == nil {
 		return fmt.Errorf("constellation client required")
 	}
-	return r.client.postJSON("/api/v1/repository-packages:report", payload, out)
+	return r.client.postJSON(ctx, "/api/v1/repository-packages:report", payload, out)
 }
 
 func normalizeRepositoryEvidencePackages(packages []scanner.Package) []scanner.Package {

@@ -252,7 +252,7 @@ func backupListCmd() *cobra.Command {
 		Short: "List recorded backups",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if server != "" {
-				return listViaServer(cmd, server)
+				return listViaServer(cmd.Context(), server, cmd.OutOrStdout())
 			}
 			if dbURL == "" {
 				dbURL = os.Getenv("DATABASE_URL")
@@ -305,22 +305,28 @@ SELECT id, COALESCE(mode,'org-backup'), status, COALESCE(format_version,''),
 	return c
 }
 
-func listViaServer(cmd *cobra.Command, server string) error {
-	cfg, _ := loadConfig()
-	req, err := http.NewRequest(http.MethodGet, strings.TrimRight(server, "/")+"/api/v1/backups", nil)
+func listViaServer(ctx context.Context, server string, out io.Writer) error {
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(server, "/")+"/api/v1/backups", nil)
 	if err != nil {
 		return err
 	}
 	if cfg != nil && cfg.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+cfg.Token)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := newAPIClient().Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	io.Copy(cmd.OutOrStdout(), resp.Body)
-	return nil
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("list backups: server returned %d", resp.StatusCode)
+	}
+	_, err = io.Copy(out, resp.Body)
+	return err
 }
 
 func backupRestoreCmd() *cobra.Command {

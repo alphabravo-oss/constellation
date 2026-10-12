@@ -64,7 +64,7 @@ func clusterCreateCmd(serverFlag *string) *cobra.Command {
     --output cluster-init.yaml`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := strings.TrimSpace(args[0])
-			cli, err := resolveClient(*serverFlag, email)
+			cli, err := resolveClient(cmd.Context(), *serverFlag, email)
 			if err != nil {
 				return err
 			}
@@ -79,7 +79,7 @@ func clusterCreateCmd(serverFlag *string) *cobra.Command {
 				body["ttl"] = expiry
 			}
 			var resp mintResponse
-			if err := cli.postJSON("/api/v1/cluster-init-bundles", body, &resp); err != nil {
+			if err := cli.postJSON(cmd.Context(), "/api/v1/cluster-init-bundles", body, &resp); err != nil {
 				return err
 			}
 			if output != "" {
@@ -116,14 +116,14 @@ func clusterListCmd(serverFlag *string) *cobra.Command {
 		Use:   "list",
 		Short: "List cluster init-bundles",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cli, err := resolveClient(*serverFlag, email)
+			cli, err := resolveClient(cmd.Context(), *serverFlag, email)
 			if err != nil {
 				return err
 			}
 			var resp struct {
 				Bundles []bundleSummary `json:"bundles"`
 			}
-			if err := cli.getJSON("/api/v1/cluster-init-bundles", &resp); err != nil {
+			if err := cli.getJSON(cmd.Context(), "/api/v1/cluster-init-bundles", &resp); err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "%-36s  %-24s  %-10s  %-25s\n", "ID", "NAME", "STATUS", "EXPIRES")
@@ -148,12 +148,12 @@ func clusterRotateCmd(serverFlag *string) *cobra.Command {
 		Short: "Rotate a cluster init-bundle (revokes prior tokens, mints replacement)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cli, err := resolveClient(*serverFlag, email)
+			cli, err := resolveClient(cmd.Context(), *serverFlag, email)
 			if err != nil {
 				return err
 			}
 			var resp mintResponse
-			if err := cli.postJSON("/api/v1/cluster-init-bundles/"+args[0]+"/rotate", nil, &resp); err != nil {
+			if err := cli.postJSON(cmd.Context(), "/api/v1/cluster-init-bundles/"+args[0]+"/rotate", nil, &resp); err != nil {
 				return err
 			}
 			if output != "" {
@@ -179,12 +179,12 @@ func clusterRevokeCmd(serverFlag *string) *cobra.Command {
 		Short: "Revoke a cluster init-bundle (cascades to its scanner + runtime-agent tokens)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cli, err := resolveClient(*serverFlag, email)
+			cli, err := resolveClient(cmd.Context(), *serverFlag, email)
 			if err != nil {
 				return err
 			}
 			var resp map[string]any
-			if err := cli.deleteJSON("/api/v1/cluster-init-bundles/"+args[0], &resp); err != nil {
+			if err := cli.deleteJSON(cmd.Context(), "/api/v1/cluster-init-bundles/"+args[0], &resp); err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Revoked bundle %s\n", args[0])
@@ -206,7 +206,7 @@ type authedClient struct {
 	http   *http.Client
 }
 
-func resolveClient(serverOverride, email string) (*authedClient, error) {
+func resolveClient(ctx context.Context, serverOverride, email string) (*authedClient, error) {
 	cfg, err := loadConfig()
 	if err != nil {
 		return nil, err
@@ -218,7 +218,7 @@ func resolveClient(serverOverride, email string) (*authedClient, error) {
 	if server == "" {
 		return nil, errors.New("server URL not set; pass --server or run `constellationctl login` first")
 	}
-	cli := &authedClient{server: server, token: cfg.Token, http: &http.Client{Timeout: 30 * time.Second}}
+	cli := &authedClient{server: server, token: cfg.Token, http: newAPIClient()}
 	if cli.token == "" {
 		if email == "" {
 			return nil, errors.New("no cached token; pass --email to authenticate")
@@ -230,42 +230,30 @@ func resolveClient(serverOverride, email string) (*authedClient, error) {
 				return nil, fmt.Errorf("read password: %w", err)
 			}
 		}
-		payload := map[string]string{"email": email, "password": pw}
-		body, _ := json.Marshal(payload)
-		resp, err := http.Post(server+"/api/v1/auth/login", "application/json", bytes.NewReader(body))
+		cli.token, err = loginToken(ctx, cli.http, server, email, pw)
 		if err != nil {
-			return nil, fmt.Errorf("login: %w", err)
-		}
-		defer resp.Body.Close()
-		rb, _ := io.ReadAll(resp.Body)
-		if resp.StatusCode != 200 {
-			return nil, fmt.Errorf("login failed (%d): %s", resp.StatusCode, rb)
-		}
-		var out struct {
-			Token string `json:"token"`
-		}
-		if err := json.Unmarshal(rb, &out); err != nil {
 			return nil, err
 		}
-		cli.token = out.Token
-		_ = saveConfig(&config{Server: server, Token: out.Token})
+		if err := saveConfig(&config{Server: server, Token: cli.token}); err != nil {
+			return nil, fmt.Errorf("save login: %w", err)
+		}
 	}
 	return cli, nil
 }
 
-func (c *authedClient) postJSON(path string, body any, out any) error {
-	return c.do(http.MethodPost, path, body, out)
+func (c *authedClient) postJSON(ctx context.Context, path string, body any, out any) error {
+	return c.do(ctx, http.MethodPost, path, body, out)
 }
 
-func (c *authedClient) getJSON(path string, out any) error {
-	return c.do(http.MethodGet, path, nil, out)
+func (c *authedClient) getJSON(ctx context.Context, path string, out any) error {
+	return c.do(ctx, http.MethodGet, path, nil, out)
 }
 
-func (c *authedClient) deleteJSON(path string, out any) error {
-	return c.do(http.MethodDelete, path, nil, out)
+func (c *authedClient) deleteJSON(ctx context.Context, path string, out any) error {
+	return c.do(ctx, http.MethodDelete, path, nil, out)
 }
 
-func (c *authedClient) do(method, path string, body any, out any) error {
+func (c *authedClient) do(ctx context.Context, method, path string, body any, out any) error {
 	var rdr io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -274,7 +262,7 @@ func (c *authedClient) do(method, path string, body any, out any) error {
 		}
 		rdr = bytes.NewReader(b)
 	}
-	req, err := http.NewRequestWithContext(context.Background(), method, c.server+path, rdr)
+	req, err := http.NewRequestWithContext(ctx, method, c.server+path, rdr)
 	if err != nil {
 		return err
 	}
@@ -287,8 +275,11 @@ func (c *authedClient) do(method, path string, body any, out any) error {
 		return err
 	}
 	defer resp.Body.Close()
-	rb, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 400 {
+	rb, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read API response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("%s %s -> %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(rb)))
 	}
 	if out != nil && len(rb) > 0 {
