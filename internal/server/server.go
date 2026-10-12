@@ -136,6 +136,7 @@ type Server struct {
 	sealer                auth.Sealer
 	supportBundleJobs     *handler.SupportBundleJobs
 	sessionCleanupMetrics *lifecycle.Metrics
+	partitionStatsMetrics *lifecycle.StatisticsMetrics
 }
 
 // New constructs the server. Caller must Run() and Shutdown().
@@ -283,6 +284,10 @@ func New(ctx context.Context, cfg Config, tel *observability.Telemetry, database
 	s.sessionCleanupMetrics, err = lifecycle.NewMetrics(tel.Registry)
 	if err != nil {
 		return nil, fmt.Errorf("register session cleanup metrics: %w", err)
+	}
+	s.partitionStatsMetrics, err = lifecycle.NewStatisticsMetrics(tel.Registry)
+	if err != nil {
+		return nil, fmt.Errorf("register partition statistics metrics: %w", err)
 	}
 	s.supportBundleJobs = handler.NewSupportBundleJobs(database, s.auditLog)
 	// B1: seed each existing org's system_config from env BOOTSTRAP DEFAULTS on first

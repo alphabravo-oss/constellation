@@ -47,6 +47,9 @@ func (s *Server) startBackgroundWork(ctx context.Context) {
 // them. This is the set of loops that must NOT be duplicated across replicas.
 func (s *Server) startSingletonLoops(ctx context.Context) {
 	go lifecycle.RunSessionCleanup(ctx, s.db.Pool(), s.tel.Logger, s.sessionCleanupMetrics)
+	if envBool("PARTITION_STATISTICS_MAINTENANCE_ENABLED", true) {
+		go lifecycle.RunPartitionStatistics(ctx, s.db.Pool(), s.tel.Logger, s.partitionStatsMetrics)
+	}
 	// Live CVE-intelligence: CISA KEV + FIRST EPSS straight from the public feeds
 	// (the live replacement for the dropped vulndb bundle). Fills cve_records with
 	// known-exploited flags + exploit-probability scores; NVD base catalog is a

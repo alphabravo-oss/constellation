@@ -8,6 +8,18 @@ CHART = ROOT / "deploy/charts/constellation"
 
 
 class CNPGChartTests(unittest.TestCase):
+    def test_partition_statistics_maintenance_switch(self):
+        for enabled in ("true", "false"):
+            with self.subTest(enabled=enabled):
+                rendered = self.render(
+                    "api.partitionStatisticsMaintenanceEnabled=" + enabled,
+                    template="api-deployment.yaml",
+                )
+                self.assertIn(
+                    'name: PARTITION_STATISTICS_MAINTENANCE_ENABLED\n              value: "' + enabled + '"',
+                    rendered,
+                )
+
     def render(self, *values, template=None, fails=False):
         command = ["helm", "template", "restore-test", str(CHART)]
         for value in values:

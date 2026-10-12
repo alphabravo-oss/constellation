@@ -29,6 +29,7 @@
       "additionalProperties": true,
       "properties": {
         "replicas": { "type": "integer", "title": "API replicas", "minimum": 1, "maximum": 20, "default": 2 },
+        "partitionStatisticsMaintenanceEnabled": { "type": "boolean", "title": "Maintain partitioned parent statistics", "default": true },
         "supportBundleSigningKeySecret": { "type": "string", "title": "Existing support-bundle signing key Secret", "default": "" },
         "supportBundleSigningKeySecretKey": { "type": "string", "title": "Signing key field in Secret", "minLength": 1, "default": "private-key.pem" },
         "leaderElection": {

@@ -131,6 +131,22 @@ cleanup; the [recovery runbook](cnpg-recovery.md) records its exact image and
 scope. Main deployment remains unchanged. These fixes do not close the broader
 live dataplane, legacy-policy ownership or production recovery gates.
 
+Partitioned-parent statistics now have bounded maintenance for flows, events and
+findings: one stale parent per pass, database coordination across replicas,
+explicit ownership/lock checks, statement/context budgets and fixed-cardinality
+metrics. Helm can disable it for externally managed statistics. The independent
+restored copy's row counts are unchanged after analysis, and the flow-organization
+cardinality estimate now matches its measured single organization. See the
+[statistics contract and measurements](database-lifecycle-backlog.md#october-12-partitioned-parent-statistics-maintenance).
+**342 seeded race-test executions**, **85 tooling tests**, changed-code lint,
+ShellCheck and **six production browser tests** pass. The production smoke also
+requires a completed parent refresh, corresponding PostgreSQL statistics and a
+successful session-cleanup pass. API image
+`constellation-browser-dd0f7f69b304-api:latest`, index
+`sha256:3a6569c2c020c40fff1e5d143863c1ea3faa299a0df50341f4aa7d1a60b70d48`,
+is qualified by `/tmp/constellation-parent-stats-browser/`. This is a measured
+maintenance improvement, not deployed tuning, fleet capacity or completed DB-23.
+
 The latest session-lifecycle increment adds migration 171, bounded leader-owned
 cleanup for expired browser/session records and five-minute network snapshots and
 kill requests. It preserves unexpired refresh reuse evidence, legacy unknown

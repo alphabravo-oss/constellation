@@ -78,6 +78,8 @@ spec:
 {{- end }}
             - name: CONSTELLATION_REQUIRE_JWT_KEYS
               value: {{ .Values.api.requireJWTKeys | quote }}
+            - name: PARTITION_STATISTICS_MAINTENANCE_ENABLED
+              value: {{ .Values.api.partitionStatisticsMaintenanceEnabled | quote }}
 {{- if .Values.api.supportBundleSigningKeySecret }}
             - name: CONSTELLATION_SUPPORT_BUNDLE_SIGNING_KEY_FILE
               value: /var/run/constellation/support-bundle-signing-key/private-key.pem

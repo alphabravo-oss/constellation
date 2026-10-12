@@ -74,9 +74,13 @@ for ((attempt=1; attempt<=60; attempt++)); do
   sleep 1
 done
 [[ "$ready" == 1 ]]
-CONSTELLATION="http://127.0.0.1:$port" python3 -B - >"$artifact_dir/api-recipes-smoke.log" 2>&1 <<'PY'
+CONSTELLATION="http://127.0.0.1:$port" FRONTEND_CONTAINER="$frontend" DATABASE_CONTAINER="$database" \
+  LIFECYCLE_METRICS_PATH="$artifact_dir/lifecycle-metrics.txt" \
+  python3 -B - >"$artifact_dir/api-recipes-smoke.log" 2>&1 <<'PY'
 import json
 import os
+import subprocess
+import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.request import ProxyHandler, Request, build_opener
@@ -86,6 +90,34 @@ from scripts.smoke_api_recipes import run
 
 origin = os.environ["CONSTELLATION"]
 opener = build_opener(ProxyHandler({}))
+
+# Exercise the production workers, not just collector registration. The frontend
+# container reaches the API on the private Docker network on Linux and Desktop.
+for attempt in range(30):
+    sample = subprocess.run([
+        "docker", "exec", os.environ["FRONTEND_CONTAINER"], "wget", "-qO-",
+        "http://constellation-api:8080/metrics",
+    ], capture_output=True, text=True, timeout=5, check=True)
+    lines = [line for line in sample.stdout.splitlines() if line.startswith((
+        "constellation_partition_statistics_", "constellation_session_cleanup_",
+    ))]
+    analyzed = any(line.startswith("constellation_partition_statistics_completed_total{")
+                   and float(line.rsplit(" ", 1)[1]) >= 1 for line in lines)
+    reaped = any(line.startswith("constellation_session_cleanup_last_success_timestamp_seconds ")
+                 and float(line.rsplit(" ", 1)[1]) > 0 for line in lines)
+    parents = subprocess.run([
+        "docker", "exec", os.environ["DATABASE_CONTAINER"], "psql", "-XAt",
+        "-U", "test", "-d", "constellation_test", "-c",
+        "SELECT count(*) FROM pg_stat_all_tables WHERE schemaname='public' "
+        "AND relname IN ('network_flows','events','findings') AND last_analyze IS NOT NULL",
+    ], capture_output=True, text=True, timeout=5, check=True)
+    if analyzed and reaped and int(parents.stdout.strip()) > 0:
+        Path(os.environ["LIFECYCLE_METRICS_PATH"]).write_text("\n".join(lines) + "\n")
+        print("Production parent statistics and session cleanup workers passed")
+        break
+    time.sleep(1)
+else:
+    raise RuntimeError("production lifecycle workers did not complete within the smoke budget")
 
 
 def fetch(path, token=None, body=None):

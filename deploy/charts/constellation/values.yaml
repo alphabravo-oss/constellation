@@ -169,6 +169,8 @@ migrate:
 # Control plane API
 # ---------------------------------------------------------------------------
 api:
+  # Bounded hourly ANALYZE of partitioned parents; disable when managed externally.
+  partitionStatisticsMaintenanceEnabled: true
   enabled: true
   replicas: 2
   image: {}

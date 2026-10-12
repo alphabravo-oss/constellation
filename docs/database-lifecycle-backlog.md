@@ -157,6 +157,57 @@ expanding retention or onboarding larger fleets. Prefer partition expiry and
 healthy routine vacuuming to routine `VACUUM FULL`, which requires an exclusive
 lock and additional rewrite space ([PostgreSQL 16 maintenance guidance](https://www.postgresql.org/docs/16/routine-vacuuming.html)).
 
+## October 12 partitioned-parent statistics maintenance
+
+The API now periodically refreshes planner statistics for `network_flows`,
+`events` and `findings`. PostgreSQL autovacuum analyzes their children but does
+not maintain partitioned-parent statistics; see the
+[PostgreSQL 16 maintenance guidance](https://www.postgresql.org/docs/16/routine-vacuuming.html#VACUUM-FOR-STATISTICS).
+The worker runs under the API leader, with an additional transaction advisory
+lock for installations without leader election. Every five minutes it selects
+at most one parent whose PostgreSQL-reported last analysis is absent or older
+than one hour. Targets resolve through the application connection's search path;
+unrelated parents and non-partitioned tables are excluded.
+
+Maintenance has a 30-second context budget, 25-second SQL statement limit,
+one-second lock limit and 2 MiB ANALYZE buffer ring. It acquires the parent lock
+without waiting, then uses `SKIP_LOCKED` for child analysis to avoid waiting on
+busy child maintenance. It can still time out while sampling locked children;
+failures are counted and retried on a later pass. Explicit ownership validation
+prevents PostgreSQL's permission-skip warning from looking like success. A
+skipped parent or failed transaction never increments the completed counter.
+This updates statistics; it does not prune rows, rebuild indexes, vacuum tables
+or change query-memory settings.
+
+The Helm switch is `api.partitionStatisticsMaintenanceEnabled` (default `true`),
+which sets `PARTITION_STATISTICS_MAINTENANCE_ENABLED`. Disable it when an external
+maintenance service owns the same task. Metrics have only the three fixed table
+labels: `constellation_partition_statistics_last_analyze_timestamp_seconds` and
+`constellation_partition_statistics_completed_total`; failures and duration are
+also exported. Last-analysis gauges include PostgreSQL-reported timestamps,
+including analysis done outside this worker. Aggregate those gauges with `max`
+across API replicas before computing age; followers initialize at zero. Alert
+deployment and failure-injection qualification remain DB-23 work. A two-hour
+age is an initial investigation threshold, not a query-latency guarantee.
+
+On the independent restored copy, manual analysis with those SQL time/buffer
+limits took **4.094 seconds for flows**, **5.141 seconds for events** and
+**0.498 seconds for findings**. All three parents previously had unknown row
+estimates (`reltuples=-1`). The distinct flow-organization estimate changed from
+200 to 1, matching the measured single organization. These one-shot measurements
+are not a concurrency or latency benchmark. Exact counts remained **2,723,972
+flows, 153,178 rollups, 3,020,985 events and 1,905,903 audit entries**.
+
+Validation: **342 repeated seeded race-test executions** passed, including
+freshness, one-parent-per-pass, advisory-lock contention, conflicting parent
+locks, cancellation, non-owner rejection and fixed metric labels. All **85
+tooling tests**, ShellCheck and changed-code lint passed. A fresh production API
+image completed one parent refresh and one session-cleanup pass, with matching
+PostgreSQL statistics and exported metrics; six group/network browser cases
+passed without retries. Evidence is in `/tmp/constellation-parent-stats-*.log`
+and `/tmp/constellation-parent-stats-browser/`. No main-cluster database or
+deployment was changed; DB-23 remains open for broader profiling and alarms.
+
 ## September 27 historical baseline
 
 - PostgreSQL database: about 6.8 GB. `audit_events` 1.6 GB, `cve_records`
