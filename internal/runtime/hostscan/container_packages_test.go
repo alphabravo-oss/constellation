@@ -7,10 +7,12 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/testutil/socketfixture"
 )
 
 func TestCollectContainerPackagesReadsDpkgViaProcRoot(t *testing.T) {
-	root := t.TempDir()
+	root := socketfixture.Dir(t)
 	listener := createTestCRISocket(t, root)
 	defer listener.Close()
 
@@ -76,7 +78,7 @@ func TestContainerPIDParsesNumberAndNestedString(t *testing.T) {
 }
 
 func TestCollectPackagesAtRootDoesNotFallbackToHost(t *testing.T) {
-	root := t.TempDir()
+	root := socketfixture.Dir(t)
 	pkgs, err := collectPackagesAtRoot(root, "node-a", "ubuntu", "24.04")
 	if err == nil {
 		t.Fatalf("expected error for empty root, got packages: %+v", pkgs)

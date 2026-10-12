@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -199,7 +200,7 @@ func (h *IntegrationDeliveries) TestPreview(w http.ResponseWriter, r *http.Reque
 
 	receiver, err := h.loadReceiver(r, subj.OrgID, receiverID)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "integration not found"})
 			return
 		}
@@ -354,7 +355,7 @@ func (h *IntegrationDeliveries) loadRoutingRules(r *http.Request, orgID uuid.UUI
 	err := h.db.Pool().QueryRow(r.Context(),
 		`SELECT yaml, revision, updated_at FROM routing_configs WHERE org_id = $1`, orgID).
 		Scan(&yamlStr, &revision, &updatedAt)
-	if err == pgx.ErrNoRows || strings.TrimSpace(yamlStr) == "" {
+	if errors.Is(err, pgx.ErrNoRows) || strings.TrimSpace(yamlStr) == "" {
 		return []integrationRoutingRuleDTO{}, nil
 	}
 	if err != nil {

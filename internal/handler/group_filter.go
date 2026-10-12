@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -37,7 +38,7 @@ SELECT name, COALESCE(members, '[]'::jsonb)
           updated_at DESC
  LIMIT 1`, orgID, raw, clusterID).Scan(&name, &membersRaw)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, "", true, fmt.Errorf("group not found")
 		}
 		return nil, "", true, err

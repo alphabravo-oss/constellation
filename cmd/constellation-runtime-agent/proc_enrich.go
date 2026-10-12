@@ -20,6 +20,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"os"
 	"strconv"
@@ -137,7 +138,7 @@ func hashExe(pid uint32) string {
 	}
 	defer f.Close()
 	h := sha256.New()
-	if _, err := io.CopyN(h, f, procExecHashMaxBytes); err != nil && err != io.EOF {
+	if _, err := io.CopyN(h, f, procExecHashMaxBytes); err != nil && !errors.Is(err, io.EOF) {
 		return ""
 	}
 	return hex.EncodeToString(h.Sum(nil))

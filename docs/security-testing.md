@@ -141,6 +141,22 @@ disable scanners, lower exit-code enforcement, add broad path/rule exclusions,
 or baseline the existing findings to make CI green. No new finding exceptions
 are introduced here. Existing inline exclusions still need review.
 
+## Wrapped errors and archive extraction
+
+Error handling now recognizes wrapped sentinel errors in authentication,
+federation, migration, compliance, scanning and runtime paths. This removes 49
+errorlint findings without disabling rules. Serverless ZIP extraction uses an
+`os.Root` directory handle and private directory/file permissions; it rejects
+non-local paths, duplicate files and archives exceeding the entry budget,
+including directory entries. This intentionally rejects ambiguous duplicate-path
+packages that previously overwrote an earlier entry. Symlink-escape and package
+permission regression tests exercise the actual filesystem.
+
+A full current scan reports 256 gosec findings (previously 261), with no Go load
+errors. This remains a failing gate, not security acceptance. The archive changes
+do not close the separately documented serverless DNS-rebinding or scanner
+isolation requirements.
+
 ## Admission TLS capture remediation
 
 The October 12 continuation removes the historical admission TLS Secret capture

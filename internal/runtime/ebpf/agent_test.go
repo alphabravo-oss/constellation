@@ -2,6 +2,7 @@ package ebpf
 
 import (
 	"context"
+	"errors"
 	"net/netip"
 	"testing"
 	"time"
@@ -84,7 +85,7 @@ func TestAgentAlreadyRunning(t *testing.T) {
 	go func() { done <- a.Run(ctx) }()
 	// Give the first call a chance to claim runOnce.
 	time.Sleep(10 * time.Millisecond)
-	if err := a.Run(ctx); err != ErrAlreadyRunning {
+	if err := a.Run(ctx); !errors.Is(err, ErrAlreadyRunning) {
 		t.Fatalf("second Run = %v, want ErrAlreadyRunning", err)
 	}
 	cancel()

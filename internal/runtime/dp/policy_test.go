@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/testutil/socketfixture"
 )
 
 // captureClient is a dpClient hooked up to a real unixgram socket that
@@ -21,7 +23,7 @@ type captureServer struct {
 
 func newCaptureServer(t *testing.T) *captureServer {
 	t.Helper()
-	dir := t.TempDir()
+	dir := socketfixture.Dir(t)
 	path := dir + "/dp_listen.sock"
 	_ = os.Remove(path)
 	c, err := net.ListenUnixgram("unixgram", &net.UnixAddr{Name: path, Net: "unixgram"})
@@ -54,7 +56,7 @@ func (s *captureServer) drain(n int) [][]byte {
 func newClientPointedAt(t *testing.T, srv *captureServer) *dpClient {
 	t.Helper()
 	c := newDPClient(newSilentLogger())
-	laddrPath := t.TempDir() + "/dp_client.sock"
+	laddrPath := socketfixture.Dir(t) + "/dp_client.sock"
 	_ = os.Remove(laddrPath)
 	conn, err := net.DialUnix("unixgram",
 		&net.UnixAddr{Name: laddrPath, Net: "unixgram"},

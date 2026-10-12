@@ -2,6 +2,7 @@ package admissionevidence
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -419,7 +420,7 @@ SELECT r.id,
 		&result.PackageCount,
 		&result.FindingCount,
 	); err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return admissionEvidenceScanResult{}, false, nil
 		}
 		return admissionEvidenceScanResult{}, false, err
@@ -453,7 +454,7 @@ SELECT a.id
    AND (cardinality($6::text[]) = 0 OR a.signer_issuer = ANY($6::text[]))
  ORDER BY a.observed_at DESC, a.created_at DESC
  LIMIT 1`, s.orgID, result.ID, result.Digest, predicateTypes, identities, issuers).Scan(&id)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
@@ -576,7 +577,7 @@ SELECT upper(f.external_id)
            AND ia.revoked_at IS NULL AND ia.accepted_until > NOW()))
  LIMIT 1`,
 		s.orgID, image.Candidates, image.Digest, upperStrings(gate.DeniedCVEs), graceDaysArg(gate), gate.HonorActiveExceptions).Scan(&matched)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return "", false, nil
 	}
 	if err != nil {
@@ -888,7 +889,7 @@ SELECT id,
 		&hit.Path,
 		&hit.Count,
 	); err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return admissionEvidenceHit{}, false, nil
 		}
 		return admissionEvidenceHit{}, false, err
@@ -1019,7 +1020,7 @@ SELECT id,
 		&riskTypeCSV,
 		&hit.Count,
 	); err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return admissionEvidenceHit{}, false, nil
 		}
 		return admissionEvidenceHit{}, false, err
@@ -1109,7 +1110,7 @@ SELECT l.id,
 		&identity,
 		&reason,
 	); err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return admissionEvidenceHit{}, false, nil
 		}
 		return admissionEvidenceHit{}, false, err

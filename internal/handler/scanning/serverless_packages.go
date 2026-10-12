@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -537,7 +538,7 @@ SELECT id
    AND detail_json->>'stable_key' = $3
  ORDER BY last_seen_at DESC
  LIMIT 1`, orgID, target.ID, stableKey).Scan(&existing)
-	if err != nil && err != pgx.ErrNoRows {
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return err
 	}
 	if err == nil {

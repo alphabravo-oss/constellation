@@ -234,22 +234,29 @@ func unzipInto(zipPath, dir string, maxBytes int64, maxFiles int) (int, int64, e
 	if err != nil {
 		return 0, 0, fmt.Errorf("serverless: open zip: %w", err)
 	}
-	defer zr.Close()
-
-	cleanDir := filepath.Clean(dir)
+	defer func() { _ = zr.Close() }()
+	if maxBytes <= 0 || maxFiles <= 0 || len(zr.File) > maxFiles {
+		return 0, 0, fmt.Errorf("serverless: archive exceeds %d entries or has invalid limits", maxFiles)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return 0, 0, fmt.Errorf("serverless: extraction root: %w", err)
+	}
+	defer func() { _ = root.Close() }()
 	var (
 		files int
 		total int64
 	)
 	for _, zf := range zr.File {
-		// Zip-slip guard: reject entries that escape the extraction root.
-		target := filepath.Join(cleanDir, zf.Name)
-		if target != cleanDir && !strings.HasPrefix(target, cleanDir+string(os.PathSeparator)) {
+		// ZIP paths are slash-separated. Reject non-local/ambiguous names before
+		// using a directory handle that also prevents symlink traversal races.
+		target := filepath.FromSlash(zf.Name)
+		if !filepath.IsLocal(target) || strings.Contains(zf.Name, "\\") {
 			return files, total, fmt.Errorf("serverless: illegal path in zip: %q", zf.Name)
 		}
 		info := zf.FileInfo()
 		if info.IsDir() {
-			if err := os.MkdirAll(target, 0o755); err != nil {
+			if err := root.MkdirAll(target, 0o700); err != nil {
 				return files, total, fmt.Errorf("serverless: mkdir: %w", err)
 			}
 			continue
@@ -259,13 +266,10 @@ func unzipInto(zipPath, dir string, maxBytes int64, maxFiles int) (int, int64, e
 		if !info.Mode().IsRegular() {
 			continue
 		}
-		if files >= maxFiles {
-			return files, total, fmt.Errorf("serverless: archive exceeds %d files", maxFiles)
-		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		if err := root.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 			return files, total, fmt.Errorf("serverless: mkdir parent: %w", err)
 		}
-		written, err := extractZipFile(zf, target, maxBytes-total)
+		written, err := extractZipFile(root, zf, target, maxBytes-total)
 		total += written
 		if err != nil {
 			return files, total, err
@@ -275,7 +279,7 @@ func unzipInto(zipPath, dir string, maxBytes int64, maxFiles int) (int, int64, e
 	return files, total, nil
 }
 
-func extractZipFile(zf *zip.File, target string, remaining int64) (int64, error) {
+func extractZipFile(root *os.Root, zf *zip.File, target string, remaining int64) (int64, error) {
 	if remaining <= 0 {
 		return 0, fmt.Errorf("serverless: unpacked size exceeds cap")
 	}
@@ -283,9 +287,11 @@ func extractZipFile(zf *zip.File, target string, remaining int64) (int64, error)
 	if err != nil {
 		return 0, fmt.Errorf("serverless: open entry %q: %w", zf.Name, err)
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
-	out, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	// Reject duplicate paths and pre-existing links rather than overwriting
+	// another archive entry or a file shared outside the scratch directory.
+	out, err := root.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return 0, fmt.Errorf("serverless: create %q: %w", target, err)
 	}

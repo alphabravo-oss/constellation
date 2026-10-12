@@ -2,6 +2,7 @@ package policy
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -123,7 +124,7 @@ func (p *Policies) Bulk(w http.ResponseWriter, r *http.Request) {
 	if clusterArg != nil {
 		var clusterID uuid.UUID
 		if err := tx.QueryRow(r.Context(), `SELECT id FROM clusters WHERE id=$1 AND org_id=$2 FOR KEY SHARE`, clusterArg, subj.OrgID).Scan(&clusterID); err != nil {
-			if err == pgx.ErrNoRows {
+			if errors.Is(err, pgx.ErrNoRows) {
 				jsonError(w, http.StatusBadRequest, "cluster not found")
 			} else {
 				jsonError(w, http.StatusInternalServerError, "cluster: "+err.Error())
@@ -152,7 +153,7 @@ func (p *Policies) Bulk(w http.ResponseWriter, r *http.Request) {
 	}
 	lockGroups := func(engine, specYAML string, clusterID any) bool {
 		if err := p.lockAdmissionPolicyGroups(r.Context(), tx, subj.OrgID, clusterID, admissionPolicyGroupSelectors(engine, specYAML)); err != nil {
-			if err == pgx.ErrNoRows {
+			if errors.Is(err, pgx.ErrNoRows) {
 				jsonError(w, http.StatusBadRequest, "group not found")
 			} else {
 				jsonError(w, http.StatusInternalServerError, "group: "+err.Error())

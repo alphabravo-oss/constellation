@@ -2,6 +2,7 @@ package network
 
 import (
 	"encoding/json"
+	"errors"
 	"hash/fnv"
 	"net/http"
 	"sort"
@@ -353,7 +354,7 @@ func (h *Network) MoveNetworkRuleToTop(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 	var lockedCluster uuid.UUID
 	if err := tx.QueryRow(r.Context(), `SELECT id FROM clusters WHERE id=$1 AND org_id=$2 FOR UPDATE`, clusterID, subj.OrgID).Scan(&lockedCluster); err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found"})
 		} else {
 			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify cluster"})
