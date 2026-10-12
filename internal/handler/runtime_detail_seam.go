@@ -30,6 +30,8 @@ import (
 
 // EventDTO is the wire shape for a runtime event in deployment detail.
 type EventDTO struct {
+	ClusterID        uuid.UUID       `json:"cluster_id"`
+	PlatformRole     string          `json:"platform_role"`
 	ID               uuid.UUID       `json:"id"`
 	At               time.Time       `json:"at"`
 	Kind             string          `json:"kind"`

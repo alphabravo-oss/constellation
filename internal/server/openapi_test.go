@@ -912,3 +912,43 @@ func TestOpenAPINodeAndContainerInventoryContracts(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenAPIRegistryAndJobInventoryContracts(t *testing.T) {
+	for _, path := range []string{"/api/v1/registries/{id}/images", "/api/v1/scan-jobs"} {
+		list := openAPISchemaAt(t, "paths", path, "get")
+		export := openAPISchemaAt(t, "paths", path+".csv", "get")
+		parameters := func(op map[string]any) map[string]any {
+			out := map[string]any{}
+			for _, raw := range op["parameters"].([]any) {
+				p := raw.(map[string]any)
+				out[p["name"].(string)] = p
+			}
+			return out
+		}
+		lp, ep := parameters(list), parameters(export)
+		for name, p := range lp {
+			if name == "limit" || name == "offset" {
+				continue
+			}
+			if !reflect.DeepEqual(p, ep[name]) {
+				t.Errorf("%s inconsistent export filter%s", path, name)
+			}
+		}
+		if ep["limit"] != nil || ep["offset"] != nil {
+			t.Errorf("%s CSV advertises clipping", path)
+		}
+		schema := openAPISchemaAt(t, "paths", path, "get", "responses", "200", "content", "application/json", "schema")
+		properties := schema["properties"].(map[string]any)
+		for _, key := range []string{"total", "summary", "has_more", "limit", "offset", "sort", "order"} {
+			if properties[key] == nil {
+				t.Errorf("%s missing%s", path, key)
+			}
+		}
+		headers := openAPISchemaAt(t, "paths", path+".csv", "get", "responses", "200", "headers")
+		for _, key := range []string{"X-Export-Limit", "X-Export-Total", "X-Export-Truncated"} {
+			if headers[key] == nil {
+				t.Errorf("%s missing%s", path, key)
+			}
+		}
+	}
+}

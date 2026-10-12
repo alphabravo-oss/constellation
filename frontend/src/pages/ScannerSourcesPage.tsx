@@ -29,6 +29,7 @@ import {
   type SystemConfigResponse,
   type ScanJob,
   type ScanJobAttempt,
+  type ScanJobInventoryResponse,
   type ScanQueueMetric,
   type ScannerCacheHealthEntry,
   type ScannerCacheStat,
@@ -44,6 +45,9 @@ import { PageHeader } from "@/components/ui/page";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { DigestDisclosure } from "@/components/ui/digest-disclosure";
+import { Pager } from "@/components/ui/pager";
+import { useInventoryRoute, ScanInventoryExport } from "./inventory-workspace";
 import { Drawer } from "@/components/ui/drawer";
 import { Field, TextInput } from "@/components/ui/form";
 import { DataTable, type Column } from "@/components/ui/data-table";
@@ -51,6 +55,8 @@ import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { StatusPill } from "@/components/ui/status-pill";
 import { ScannerDbCapacity } from "@/components/ScannerDbCapacity";
 import { cn } from "@/lib/cn";
+import { fmtRelative } from "@/lib/format";
+import { scanJobInventoryResponseValid } from "@/lib/scan-job-inventory";
 import {
   scanJobBundleRows,
   scanJobRetryState,
@@ -68,21 +74,49 @@ export function ScannerSourcesPage() {
   const [requestedTab, setTab] = useTabParam("tab", "jobs");
   const tab = ["jobs", "workers", "databases", "sources"].includes(requestedTab) ? requestedTab : "jobs";
   const navigate = useNavigate();
-  const [params] = useRouteSearchParams();
+  const route = useInventoryRoute();
+  const params = route.params;
+  const identity = useTablePreferencesIdentity();
+  const owner = identity?.org_id && identity.user_id ? `${identity.org_id}:${identity.user_id}` : "";
+  const jobStatusFilter = params.get("status") || "all";
+  const targetType = params.get("target_type") || "";
+  const jobSort = params.get("sort") || "requested";
+  const jobOrder = params.get("order") || "desc";
+  const clusterFilter = params.get("cluster_id") || "";
+  const registryFilter = params.get("registry_id") || "";
+  const rawPage = params.get("page");
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const invalidJobs = !JOB_STATUS_FILTERS.includes(jobStatusFilter) || targetType !== "" && !JOB_TARGET_TYPES.includes(targetType) || !JOB_SORTS.includes(jobSort) || !["asc", "desc"].includes(jobOrder) || !!(clusterFilter && !uuidPattern.test(clusterFilter) || registryFilter && !uuidPattern.test(registryFilter)) || rawPage !== null && (!/^\d+$/.test(rawPage) || !Number.isSafeInteger(Number(rawPage)) || Number(rawPage) < 1 || Number(rawPage) > 10000);
+  const jobRequest = { q: route.debouncedQuery.trim() || undefined, status: jobStatusFilter === "all" ? undefined : jobStatusFilter, target_type: targetType || undefined, cluster_id: clusterFilter || undefined, registry_id: registryFilter || undefined, sort: jobSort, order: jobOrder as "asc" | "desc", limit: 100, offset: route.offset };
+  const jobListKey = ["scan-jobs", "scanner-sources", owner, jobRequest];
+  const jobContext = JSON.stringify(jobListKey);
+  const currentJobContext = useRef(jobContext);
+  currentJobContext.current = jobContext;
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const selectedJobID = route.selectedID || "";
+  const setSelectedJobID = (id: string) => route.setSelectedID(id || null);
   const intervalReturn = `/settings/scanner?${params.size ? params.toString() : "tab=databases"}`;
   const intervalHref = `/settings/scanner/databases/edit?return_to=${encodeURIComponent(intervalReturn)}`;
   const systemConfig = useQuery({ queryKey: ["system-config"], queryFn: () => systemConfigApi.get() });
   const scanStatus = useQuery({ queryKey: ["scan-status"], queryFn: scannerOperations.status });
   const scannerWorkers = useQuery({ queryKey: ["scan-scanner-workers"], queryFn: scannerOperations.workers });
   const scannerHealth = useQuery({ queryKey: ["system-health"], queryFn: systemHealth.overview, refetchInterval: 30_000 });
-  const scanJobList = useQuery({ queryKey: ["scan-jobs", "scanner-sources"], queryFn: () => scanJobs.list() });
+  const scanJobList = useQuery({
+    queryKey: jobListKey,
+    enabled: Boolean(owner) && !invalidJobs && !route.debouncing,
+    queryFn: async () => {
+      const data = await scanJobs.list(jobRequest);
+      if (!scanJobInventoryResponseValid(data, jobRequest, identity?.org_id)) throw new Error("Scan job response does not match this inventory scope or page.");
+      return data;
+    },
+  });
+  const jobsAvailable = Boolean(owner) && !invalidJobs && !route.debouncing && scanJobList.isSuccess && !scanJobList.isFetching;
   const config = systemConfig.isSuccess ? systemConfig.data.config : {};
   const refreshMinutes = typeof config.scanner_db_refresh_minutes === "number" ? config.scanner_db_refresh_minutes : 0;
   const offlineDb = config.scanner_offline_db === true;
   const nvdEnabled = config.nvd_enabled === true;
-  const [jobStatusFilter, setJobStatusFilter] = useState("all");
   const [selectedScannerID, setSelectedScannerID] = useState("");
-  const [selectedJobID, setSelectedJobID] = useState("");
 
   const cacheStat = useQuery({
     queryKey: ["scanner-cache-stat", selectedScannerID],
@@ -105,39 +139,34 @@ export function ScannerSourcesPage() {
     onError: () => toast.error("Failed to request refresh"),
   });
 
+  const invalidateJobLists = (targetOwner: string) => qc.invalidateQueries({ queryKey: ["scan-jobs"], predicate: query => query.queryKey.includes(targetOwner) });
   const jobAction = useMutation({
-    mutationFn: ({ id, action }: { id: string; action: ScanJobAction }) => {
-      const state = qc.getQueryState<Awaited<ReturnType<typeof scanJobs.list>>>(["scan-jobs", "scanner-sources"]);
-      const job = state?.data?.jobs.find(item => item.id === id);
-      if (state?.status !== "success" || state.fetchStatus !== "idle" || !job || !eligibleJobAction(job, action)) throw new Error("Job state changed or is unavailable. Refresh before continuing.");
-      switch (action) {
-        case "pause":
-          return scanJobsAdmin.pause(id);
-        case "resume":
-          return scanJobsAdmin.resume(id);
-        case "retry":
-          return scanJobsAdmin.retry(id);
-        case "cancel":
-          return scanJobsAdmin.cancel(id);
-      }
+    mutationFn: ({ reviewed, action, context }: { reviewed: ScanJob; action: ScanJobAction; context: string; owner: string }) => {
+      const state = qc.getQueryState<ScanJobInventoryResponse>(jobListKey);
+      const job = state?.data?.jobs.find(item => item.id === reviewed.id);
+      if (!mounted.current || !jobsAvailable || !owner || context !== currentJobContext.current || state?.status !== "success" || state.fetchStatus !== "idle" || state.isInvalidated || !job || jobReview(job) !== jobReview(reviewed) || !eligibleJobAction(job, action)) throw new Error("Job state changed or is unavailable. Refresh before continuing.");
+      return scanJobsAdmin[action](job.id);
     },
     onSuccess: (_result, vars) => {
+      void invalidateJobLists(vars.owner);
+      if (!mounted.current || vars.context !== currentJobContext.current) return;
       void qc.invalidateQueries({ queryKey: ["scan-status"] });
-      void qc.invalidateQueries({ queryKey: ["scan-jobs", "scanner-sources"] });
-      toast.success(`Scan job ${vars.id}: ${vars.action} requested`);
+      toast.success(`Scan job ${vars.reviewed.id}: ${vars.action} requested`);
     },
-    onError: (error: unknown) => {
+    onError: (error: unknown, vars) => {
+      if (!mounted.current || vars.context !== currentJobContext.current) return;
       const status = (error as { response?: { status?: number } })?.response?.status;
       toast.error(status === 409 ? "Scan job is no longer in an eligible state" : "Failed to update scan job");
     },
   });
+  const runJobAction = (job: ScanJob, action: ScanJobAction) => jobAction.mutate({ reviewed: job, action, context: jobContext, owner });
 
   const lifecycle = scanStatus.isSuccess ? scanStatus.data : undefined;
   const workers = scannerWorkers.isSuccess ? scannerWorkers.data : [];
-  const allJobs = useMemo(() => scanJobList.isSuccess ? scanJobList.data.jobs : [], [scanJobList.isSuccess, scanJobList.data?.jobs]);
-  const selectedJob = useMemo(() => allJobs.find((job) => job.id === selectedJobID) ?? null, [allJobs, selectedJobID]);
+  const allJobs = jobsAvailable ? scanJobList.data!.jobs : [];
+  const selectedJob = allJobs.find(job => job.id === selectedJobID) ?? null;
   const selectedJobAttempts = useQuery({
-    queryKey: ["scan-job-attempts", selectedJobID],
+    queryKey: ["scan-job-attempts", owner, selectedJobID],
     queryFn: async () => {
       const attempts = await scanJobs.attempts(selectedJobID);
       if (attempts.some(attempt => attempt.job_id !== selectedJobID)) throw new Error("Attempt ledger does not match the selected job.");
@@ -145,45 +174,42 @@ export function ScannerSourcesPage() {
     },
     enabled: Boolean(selectedJob),
   });
-  const filteredJobs = useMemo(
-    () => (jobStatusFilter === "all" ? allJobs : allJobs.filter((job) => job.status === jobStatusFilter)),
-    [allJobs, jobStatusFilter],
-  );
-  const queueMetrics = scanJobList.isSuccess ? scanJobList.data.queue_metrics ?? [] : [];
+  const queueMetrics = jobsAvailable ? scanJobList.data.queue_metrics ?? [] : [];
   const pendingTotal = sumMetric(queueMetrics, "pending") + sumMetric(queueMetrics, "retry_delayed");
   const runningTotal = sumMetric(queueMetrics, "running");
   const staleTotal = sumMetric(queueMetrics, "stale_running");
   const failedTotal = (lifecycle?.failed ?? 0) + sumMetric(queueMetrics, "exhausted");
-  const unavailable = scanStatus.isError || scanJobList.isError || scannerWorkers.isError || systemConfig.isError || scannerHealth.isError;
+  const unavailable = !owner || invalidJobs || scanStatus.isError || scanJobList.isError || scannerWorkers.isError || systemConfig.isError || scannerHealth.isError;
   const loading = scanStatus.isPending || scanJobList.isPending || scannerWorkers.isPending || systemConfig.isPending;
   const latestDb = lifecycle?.cvedb_version || newestWorkerDb(workers);
   const latestDbTime = lifecycle?.cvedb_create_time || newestWorkerDbTime(workers);
 
-  const jobColumns = useMemo<Column<ScanJob>[]>(
-    () => [
+  const jobColumns: Column<ScanJob>[] = [
       {
         id: "target",
         exportValue: job => job.target_ref,
-        header: "Target", kind: "name", code: true,
-        cell: (job) => (
-          <div className="min-w-0">
-            <div className="font-mono text-xs text-foreground" title={job.target_ref}>{job.target_ref}</div>
-            <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-              <span>{job.target_type}</span>
-              {job.source_type ? <span>· {job.source_type}</span> : null}
-              {job.registry_id ? <span>· registry</span> : null}
-            </div>
-          </div>
-        ),
-        sort: (a, b) => a.target_ref.localeCompare(b.target_ref),
+        header: "Target", kind: "name", code: true, minSize: 260, wrap: true,
+        cell: job => {
+          const digest = job.target_type === "image" ? job.target_ref.match(/(?:^|@)(sha256:.+)$/)?.[1] : undefined;
+          const name = digest ? job.target_ref.replace(/(?:^|@)sha256:.+$/, "") || "Unnamed image" : job.target_ref;
+          return <div className="min-w-0">
+            <div className="font-mono text-xs text-foreground" title={name}>{name}</div>
+            <DigestDisclosure digest={digest} />
+            <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground"><span>{job.target_type}</span>{job.source_type ? <span>· {job.source_type}</span> : null}{job.registry_id ? <span>· registry</span> : null}</div>
+          </div>;
+        },
+        sort: () => 0,
       },
+      { id: "type", header: "Target type", kind: "status", cell: job => job.target_type, exportValue: job => job.target_type, sort: () => 0 },
+      { id: "findings", header: "Findings", kind: "count", cell: job => job.finding_count ?? "—", exportValue: job => job.finding_count, sort: () => 0 },
+      { id: "finished", header: "Finished", kind: "date", cell: job => job.finished_at ? <span title={formatDate(job.finished_at)}>{fmtRelative(job.finished_at)}</span> : "—", exportValue: job => job.finished_at, sort: () => 0 },
       {
         id: "status",
         exportValue: job => job.status,
         header: "Status", kind: "status",
 
         cell: (job) => <StatusPill label={job.status} tone={scanJobStatusTone(job.status)} />,
-        sort: (a, b) => a.status.localeCompare(b.status),
+        sort: () => 0,
       },
       {
         id: "attempts",
@@ -192,7 +218,7 @@ export function ScannerSourcesPage() {
 
         numeric: true,
         cell: (job) => `${job.attempt_count}/${job.max_attempts}`,
-        sort: (a, b) => a.attempt_count - b.attempt_count,
+        sort: () => 0,
       },
       {
         id: "worker",
@@ -200,7 +226,6 @@ export function ScannerSourcesPage() {
         header: "Worker", kind: "id", size: 160,
 
         cell: (job) => <span className="block font-mono text-xs text-muted-foreground" title={job.worker_id}>{job.worker_id || "-"}</span>,
-        sort: (a, b) => (a.worker_id ?? "").localeCompare(b.worker_id ?? ""),
       },
       {
         id: "error",
@@ -218,15 +243,14 @@ export function ScannerSourcesPage() {
             {job.error || (job.next_attempt_at ? `retry ${formatDate(job.next_attempt_at)}` : "-")}
           </span>
         ),
-        sort: (a, b) => (a.error || a.next_attempt_at || "").localeCompare(b.error || b.next_attempt_at || ""),
       },
       {
         id: "requested",
         exportValue: job => job.requested_at,
-        header: "Requested", kind: "date", size: 224, minSize: 208, maxSize: 240,
+        header: "Requested", kind: "date",
 
-        cell: (job) => <span className="text-xs text-muted-foreground">{formatDate(job.requested_at)}</span>,
-        sort: (a, b) => a.requested_at.localeCompare(b.requested_at),
+        cell: (job) => <span className="text-xs text-muted-foreground" title={formatDate(job.requested_at)}>{fmtRelative(job.requested_at)}</span>,
+        sort: () => 0,
       },
       {
         id: "actions",
@@ -246,13 +270,11 @@ export function ScannerSourcesPage() {
             >
               <Eye className="h-3.5 w-3.5" />
             </Button>
-            <ScanJobActions job={job} pending={jobAction.isPending || !scanJobList.isSuccess || scanJobList.isFetching} onAction={(action) => jobAction.mutate({ id: job.id, action })} />
+            <ScanJobActions job={job} pending={jobAction.isPending || !jobsAvailable} onAction={(action) => runJobAction(job, action)} />
           </div>
         ),
       },
-    ],
-    [jobAction, scanJobList.isFetching, scanJobList.isSuccess],
-  );
+  ];
 
   const workerColumns = useMemo<Column<ScannerWorker>[]>(
     () => [
@@ -330,7 +352,7 @@ export function ScannerSourcesPage() {
     void qc.invalidateQueries({ queryKey: ["scan-status"] });
     void qc.invalidateQueries({ queryKey: ["scan-scanner-workers"] });
     void qc.invalidateQueries({ queryKey: ["system-health"] });
-    void qc.invalidateQueries({ queryKey: ["scan-jobs", "scanner-sources"] });
+    void invalidateJobLists(owner);
     if (selectedScannerID) {
       void qc.invalidateQueries({ queryKey: ["scanner-cache-stat", selectedScannerID] });
     }
@@ -362,7 +384,7 @@ export function ScannerSourcesPage() {
       {unavailable && <ErrorState title="Some scanner evidence is unavailable. Failed sources are hidden." action={<Button onClick={refreshOperatorState}>Retry scanner evidence</Button>} />}
       {[systemConfig, scanStatus, scanJobList, scannerWorkers, scannerHealth].some(query => query.isFetching && query.isSuccess) && <p role="status" className="text-sm text-muted-foreground">Refreshing scanner evidence…</p>}
       {refreshNow.isError && <p role="alert" className="text-sm text-destructive">Could not request a database refresh. Try again after refreshing scanner configuration.</p>}
-      {jobAction.isError && <p role="alert" className="text-sm text-destructive">Could not update scan job {jobAction.variables?.id}. Refresh the job and try again.</p>}
+      {jobAction.isError && jobAction.variables?.context === jobContext && <p role="alert" className="text-sm text-destructive">Could not update scan job {jobAction.variables?.reviewed.id}. Refresh the job and try again.</p>}
       <StatGrid data-testid="scanner-operator-summary">
         <StatCard label="Scanned" value={lifecycle ? lifecycle.scanned.toLocaleString() : "—"} icon={<CheckCircle2 className="h-3.5 w-3.5" />} tone="accent" />
         <StatCard label="Scheduled" value={lifecycle ? lifecycle.scheduled.toLocaleString() : scanJobList.isSuccess ? pendingTotal.toLocaleString() : "—"} icon={<Clock className="h-3.5 w-3.5" />} tone={pendingTotal > 0 ? "medium" : "neutral"} hint={typeof lifecycle?.paused === "number" ? `${lifecycle.paused} paused` : "Paused count unavailable"} />
@@ -375,15 +397,16 @@ export function ScannerSourcesPage() {
         { value: "jobs", label: "Scan jobs", content: (
           <Card
             title="Scan lifecycle and queue"
-            description="Organization-wide recent scan jobs, limited to the latest 200. Filters and CSV cover loaded jobs only. Pause, resume, retry or cancel eligible jobs from the table."
+            description="Filter and review scan jobs across server pages. Inspect their attempt history and pause, resume, retry or cancel eligible jobs."
           >
             <div className="space-y-4">
               <Collapse label="Queue depth by target type">
+              <p className="mb-3 text-xs text-muted-foreground">Organization-wide current queue state, read separately from the filtered job ledger. These counts do not describe only the matching jobs.</p>
               <DataTable<ScanQueueMetric>
                 rows={queueMetrics}
                 columns={QUEUE_COLUMNS}
                 rowKey={(row) => row.target_type}
-                emptyState={<div className="px-6 py-8 text-center text-xs text-muted-foreground">{scanJobList.isError ? "Queue status could not be loaded." : scanJobList.isPending ? "Loading queue status..." : "No queued scan work."}</div>}
+                emptyState={<div className="px-6 py-8 text-center text-xs text-muted-foreground">{scanJobList.isError || !owner || invalidJobs ? "Queue status could not be loaded." : !jobsAvailable ? "Loading queue status..." : "No queued scan work."}</div>}
                 defaultSort={{ id: "pending", dir: "desc" }}
                 showDensityToggle={false}
                 preferencesKey="scanner-queue-metrics"
@@ -396,7 +419,8 @@ export function ScannerSourcesPage() {
                   <button
                     key={status}
                     type="button"
-                    onClick={() => setJobStatusFilter(status)}
+                    aria-pressed={jobStatusFilter === status}
+                    onClick={() => route.update({ status: status === "all" ? null : status })}
                     className={cn(
                       "rounded border px-2 py-1 text-xs transition-colors",
                       jobStatusFilter === status
@@ -409,19 +433,39 @@ export function ScannerSourcesPage() {
                 ))}
               </div>
 
-              <DataTable<ScanJob>
-                rows={filteredJobs}
-                sourceLimit={200}
-                sourceCount={allJobs.length}
-                columns={jobColumns}
-                rowKey={(job) => job.id}
-                onRowClick={(job) => setSelectedJobID(job.id)}
-                emptyState={<div className="px-6 py-8 text-center text-xs text-muted-foreground">{scanJobList.isError ? "Scan jobs could not be loaded." : scanJobList.isPending ? "Loading scan jobs..." : "No scan jobs match this view."}</div>}
-                defaultSort={{ id: "requested", dir: "desc" }}
-                preferencesKey="scanner-recent-jobs"
-                exportFileName="scanner-recent-jobs"
-                testId="scanner-recent-jobs"
-              />
+              <div className="flex flex-wrap items-center gap-2">
+                <TextInput aria-label="Search scan jobs" placeholder="Search target, source, worker or error" value={route.query} onChange={event => route.setQuery(event.target.value)} />
+                <select aria-label="Scan target type" value={targetType} onChange={event => route.update({ target_type: event.target.value })} className="rounded-md border border-border bg-background p-2 text-sm"><option value="">All target types</option>{JOB_TARGET_TYPES.map(type => <option key={type}>{type}</option>)}</select>
+                <Button variant="outline" onClick={() => route.update({ q: null, status: null, target_type: null, cluster_id: null, registry_id: null, sort: null, order: null })}>Reset job filters</Button>
+              </div>
+              <Collapse label="Advanced: cluster and registry scope">
+                <div className="grid gap-3 sm:grid-cols-2"><Field label="Cluster ID"><TextInput aria-label="Scan job cluster ID" value={clusterFilter} onChange={event => route.update({ cluster_id: event.target.value }, true, true)} placeholder="All clusters" /></Field><Field label="Registry ID"><TextInput aria-label="Scan job registry ID" value={registryFilter} onChange={event => route.update({ registry_id: event.target.value }, true, true)} placeholder="All registries" /></Field></div>
+              </Collapse>
+              {(clusterFilter || registryFilter) && <p className="text-xs text-muted-foreground">{clusterFilter && `Cluster: ${clusterFilter} `}{registryFilter && `Registry: ${registryFilter}`}</p>}
+              {!owner ? <ErrorState title="An available organization and user session are required to load scan jobs." /> : invalidJobs ? <ErrorState title="Choose supported scan job filters, IDs, sorting and page." /> : scanJobList.isError ? <ErrorState title="Scan jobs could not be loaded or refreshed." action={<Button onClick={() => void scanJobList.refetch()}>Retry scan jobs</Button>} /> : !jobsAvailable ? <LoadingState label="Loading scan jobs…" /> : <>
+                <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs text-muted-foreground">{scanJobList.data!.total!.toLocaleString()} matching jobs · {scanJobList.data!.summary!.running.toLocaleString()} running · {scanJobList.data!.summary!.failed.toLocaleString()} failed. Counts cover all matches; table CSV covers this server page and selected columns.</p><ScanInventoryExport key={jobContext} context={jobContext} disabled={!jobsAvailable} download={() => scanJobs.exportCSV(jobRequest)} /></div>
+                <DataTable<ScanJob>
+                  rows={allJobs}
+                  sourceLimit={100}
+                  sourceCount={scanJobList.data!.total}
+                  columns={jobColumns}
+                  rowKey={job => job.id}
+                  onRowClick={job => setSelectedJobID(job.id)}
+                  selected={new Set(selectedJob ? [selectedJob.id] : [])}
+                  emptyState={<div className="px-6 py-8 text-center text-xs text-muted-foreground">No scan jobs match this view or page.</div>}
+                  pagination={false}
+                  manualSorting
+                  sort={{ id: jobSort, dir: jobOrder as "asc" | "desc" }}
+                  onSortChange={next => route.update({ sort: next?.id ?? null, order: next?.dir ?? null })}
+                  preferencesKey="scanner-recent-jobs"
+                  exportFileName="scanner-recent-jobs-page"
+                  exportLabel="Export this page CSV"
+                  testId="scanner-recent-jobs"
+                />
+                {route.page > 0 && !allJobs.length && <Button onClick={() => route.setPage(0)}>First page</Button>}
+                <Pager page={route.page} pageSize={100} rowsOnPage={allJobs.length} total={scanJobList.data!.total} onPage={route.setPage} />
+              </>}
+
             </div>
           </Card>
 
@@ -548,18 +592,19 @@ export function ScannerSourcesPage() {
 
       <ScanJobDrawer
         job={selectedJob}
-        open={Boolean(selectedJob)}
+        open={Boolean(selectedJobID) && tab === "jobs"}
+        unavailable={scanJobList.isError ? "The selected job could not be refreshed. Retry the job inventory before continuing." : !jobsAvailable ? "The selected job is unavailable while this inventory scope is loading or invalid." : "The selected job is outside this page or filter. No other job has been substituted."}
         onOpenChange={(open) => {
           if (!open) setSelectedJobID("");
         }}
-        pending={jobAction.isPending || !scanJobList.isSuccess || scanJobList.isFetching}
+        pending={jobAction.isPending || !jobsAvailable}
         attempts={selectedJobAttempts.isSuccess ? selectedJobAttempts.data : []}
         attemptsLoading={selectedJobAttempts.isPending}
         attemptsRefreshing={selectedJobAttempts.isSuccess && selectedJobAttempts.isFetching}
         attemptsError={selectedJobAttempts.isError}
         retryAttempts={() => void selectedJobAttempts.refetch()}
         onAction={(action) => {
-          if (selectedJob) jobAction.mutate({ id: selectedJob.id, action });
+          if (selectedJob) runJobAction(selectedJob, action);
         }}
       />
     </div>
@@ -586,6 +631,9 @@ function SourceRow({ name, desc, status, action }: { name: string; desc: string;
 
 type ScanJobAction = "pause" | "resume" | "retry" | "cancel";
 
+const JOB_TARGET_TYPES = ["image", "workload", "host", "platform", "registry", "repository", "serverless"];
+const JOB_SORTS = ["requested", "target", "type", "status", "attempts", "findings", "finished"];
+function jobReview(job: ScanJob) { return JSON.stringify([job.id, job.org_id, job.target_id, job.target_type, job.target_ref, job.target_cluster_id, job.registry_id, job.status, job.attempt_count, job.max_attempts, job.claimed_at, job.next_attempt_at, job.finished_at]); }
 const JOB_STATUS_FILTERS = ["all", "pending", "running", "failed", "paused", "canceled", "completed"];
 
 const QUEUE_COLUMNS: Column<ScanQueueMetric>[] = [
@@ -651,6 +699,7 @@ function ScanJobDrawer({
   open,
   onOpenChange,
   pending,
+  unavailable,
   attempts,
   attemptsLoading,
   attemptsRefreshing,
@@ -662,6 +711,7 @@ function ScanJobDrawer({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   pending: boolean;
+  unavailable: string;
   attempts: ScanJobAttempt[];
   attemptsLoading: boolean;
   attemptsRefreshing: boolean;
@@ -687,7 +737,7 @@ function ScanJobDrawer({
         </div>
       ) : undefined}
     >
-      {!job || !retry ? null : (
+      {!job || !retry ? <p role="status" className="text-sm text-muted-foreground">{unavailable}</p> : (
         <div className="space-y-5" data-testid="scan-job-detail-drawer">
           <section className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
             <DetailMetric label="Status" value={<StatusPill label={job.status} tone={scanJobStatusTone(job.status)} />} />

@@ -1,9 +1,10 @@
 package network
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
+
+	"github.com/google/uuid"
 
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
@@ -18,7 +19,7 @@ import (
 type exposedServiceDTO struct {
 	Workload      string   `json:"workload"` // "namespace/name"
 	Namespace     string   `json:"namespace"`
-	PlatformRole  string   `json:"platform_role,omitempty"`
+	PlatformRole  string   `json:"platform_role"`
 	Name          string   `json:"name"`
 	ExternalPeers int      `json:"external_peers"` // distinct external IPs
 	Protocols     []string `json:"protocols"`
@@ -61,36 +62,51 @@ func (h *Network) Exposure(w http.ResponseWriter, r *http.Request) {
 		}
 		// wl_mode: strongest group policy_mode covering each workload (NV per-endpoint
 		// policy_mode). An exposed service still in discover is unprotected attack surface.
+		// Aggregate source observations before joining deployment rollups. An
+		// endpoint shared by several workload kinds must not multiply sessions.
 		sql := `
 WITH wl_mode AS (
   SELECT jsonb_array_elements_text(g.members) AS wl,
          MAX(CASE g.policy_mode WHEN 'protect' THEN 3 WHEN 'monitor' THEN 2 ELSE 1 END) AS r
     FROM groups g
    WHERE g.org_id = $1 AND ($2::uuid IS NULL OR g.cluster_id = $2)
-   GROUP BY 1)
-SELECT ` + internalCol + ` AS workload,
-       count(DISTINCT ` + externalAddr + `)::int                                   AS external_peers,
-       COALESCE(array_agg(DISTINCT nf.protocol) FILTER (WHERE COALESCE(nf.protocol,'') <> ''), '{}') AS protocols,
-       (COALESCE(array_agg(DISTINCT nf.dst_port) FILTER (WHERE nf.dst_port > 0), '{}'))[1:12]         AS ports,
-       COALESCE(sum(nf.sessions), 0)::bigint                                        AS sessions,
-       COALESCE(max(d.critical_count), 0)::int                                      AS critical,
-       COALESCE(max(d.high_count), 0)::int                                          AS high,
-       COALESCE(max(d.risk_score), 0)::int                                          AS risk_score,
-       CASE max(m.r) WHEN 3 THEN 'protect' WHEN 2 THEN 'monitor' WHEN 1 THEN 'discover' ELSE '' END AS policy_mode,
-       COALESCE((array_agg(d.labels) FILTER (WHERE d.labels IS NOT NULL))[1], '{}'::jsonb) AS labels
-  FROM network_flows nf
-  LEFT JOIN deployments d
-    ON d.org_id = nf.org_id AND d.cluster_id = nf.cluster_id
-   AND (d.namespace || '/' || d.name) = ` + internalCol + `
-  LEFT JOIN wl_mode m ON m.wl = ` + internalCol + `
- WHERE nf.org_id = $1
-   AND ($2::uuid IS NULL OR nf.cluster_id = $2)
-   AND ` + externalWL + ` = 'external'
-   AND COALESCE(` + internalCol + `, '') NOT IN ('external', '')
-   AND ` + internalCol + ` NOT LIKE 'host/%'
-   AND nf.at > now() - ($3 || ' hours')::interval
- GROUP BY ` + internalCol + `
- ORDER BY critical DESC, high DESC, sessions DESC
+   GROUP BY 1
+), scoped AS (
+ SELECT ` + internalCol + ` AS workload, ` + externalAddr + ` AS external_addr,
+        nf.cluster_id, nf.protocol, nf.dst_port, nf.sessions
+   FROM network_flows nf
+  WHERE nf.org_id = $1
+    AND ($2::uuid IS NULL OR nf.cluster_id = $2)
+    AND ` + externalWL + ` = 'external'
+    AND COALESCE(` + internalCol + `, '') NOT IN ('external', '')
+    AND ` + internalCol + ` NOT LIKE 'host/%'
+    AND nf.at > now() - ($3 || ' hours')::interval
+), observed AS (
+ SELECT workload, count(DISTINCT external_addr)::int AS external_peers,
+        COALESCE(array_agg(DISTINCT protocol) FILTER (WHERE COALESCE(protocol,'') <> ''), '{}') AS protocols,
+        (COALESCE(array_agg(DISTINCT dst_port) FILTER (WHERE dst_port > 0), '{}'))[1:12] AS ports,
+        COALESCE(sum(sessions), 0)::bigint AS sessions,
+        array_agg(DISTINCT cluster_id) AS cluster_ids,
+        CASE WHEN COUNT(DISTINCT cluster_id) = 1 AND bool_and(cluster_id IS NOT NULL)
+             THEN (array_agg(cluster_id))[1] ELSE NULL END AS role_cluster_id
+   FROM scoped GROUP BY workload
+)
+SELECT observed.workload, observed.external_peers, observed.protocols,
+       observed.ports, observed.sessions,
+       COALESCE(d.critical, 0)::int AS critical,
+       COALESCE(d.high, 0)::int AS high,
+       COALESCE(d.risk_score, 0)::int AS risk_score,
+       CASE m.r WHEN 3 THEN 'protect' WHEN 2 THEN 'monitor' WHEN 1 THEN 'discover' ELSE '' END AS policy_mode,
+       observed.role_cluster_id
+  FROM observed
+  LEFT JOIN LATERAL (
+    SELECT max(critical_count) AS critical, max(high_count) AS high, max(risk_score) AS risk_score
+      FROM deployments d
+     WHERE d.org_id = $1 AND d.cluster_id = ANY(observed.cluster_ids)
+       AND (d.namespace || '/' || d.name) = observed.workload
+  ) d ON true
+  LEFT JOIN wl_mode m ON m.wl = observed.workload
+ ORDER BY critical DESC, high DESC, sessions DESC, observed.workload ASC
  LIMIT 50`
 		rows, err := h.db.Pool().Query(r.Context(), sql, subj.OrgID, clusterID, strconv.Itoa(hours))
 		if err != nil {
@@ -98,18 +114,34 @@ SELECT ` + internalCol + ` AS workload,
 		}
 		defer rows.Close()
 		out := []exposedServiceDTO{}
+		identities := []handler.PlatformWorkloadIdentity{}
 		for rows.Next() {
 			var s exposedServiceDTO
-			var labels []byte
+			var sourceCluster *uuid.UUID
 			if err := rows.Scan(&s.Workload, &s.ExternalPeers, &s.Protocols, &s.Ports,
-				&s.Sessions, &s.Critical, &s.High, &s.RiskScore, &s.PolicyMode, &labels); err != nil {
+				&s.Sessions, &s.Critical, &s.High, &s.RiskScore, &s.PolicyMode, &sourceCluster); err != nil {
 				return nil, err
 			}
 			s.Namespace, s.Name = splitWorkload(s.Workload)
-			s.PlatformRole = handler.PlatformRoleJSON(s.Namespace, json.RawMessage(labels))
+			identity := handler.PlatformWorkloadIdentity{Workload: s.Workload}
+			if sourceCluster != nil {
+				identity.ClusterID = *sourceCluster
+			}
+			identities = append(identities, identity)
 			out = append(out, s)
 		}
-		return out, rows.Err()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		rows.Close()
+		roles, err := handler.EvidencePlatformRoles(r.Context(), h.db.Pool(), subj.OrgID, identities)
+		if err != nil {
+			return nil, err
+		}
+		for i := range out {
+			out[i].PlatformRole = roles[i]
+		}
+		return out, nil
 	}
 
 	ingress, err := query("ingress")

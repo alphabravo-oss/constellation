@@ -1045,17 +1045,73 @@ status is **32px instead of80px** on desktop, and40px on the narrow viewport;
 its paragraph is hidden by default and mouse/Enter toggles work. Viewport was
 restored to1280px, with Nodes open and Details closed.
 
-A read-only follow-up audit keeps the complete UI-3 matrix open. Flow-only map
-nodes and Exposure still need exact ownership/ambiguity/IP handling. Deployment
-detail embedded runtime events need actual cluster/role fields; embedded network
-and Deployment/Risk CSVs need endpoint roles. Baseline/file-profile workload
-inventories and CSVs, plus applicable workload asset/finding exports, also need
-role coverage. Image/repository/cloud/node records must not invent workload roles.
-Dormant SSE remains unqualified and disabled. The live cluster has no discovered
-custom-namespace installation candidate; a real isolated chart installation and
-discovery proof remains outstanding. Registry-image full sorting/export, scan-job
-continuation, CVE/Compliance evidence caps, named saved views and the full
-accessibility/cross-dataset acceptance matrix remain open.
+The registry/job continuation adds server filtering, stable sorting, complete
+matching summaries and matching CSV to Registry Images and Scan Jobs. Count,
+summary and rows share one read snapshot; later pages read current state. CSV
+uses the same predicates and reports its 100,000-row cap. Registry scan evidence
+correlates the latest organization-wide exact repository, not a particular
+registry, tag or digest. Critical/high summary values count findings; scanned
+values count repositories. Both scan-job screens use the same response validation
+and URL/history contract; stale, foreign or malformed evidence cannot enable
+job actions. Digests remain behind Show digest, and page CSV retains raw identity.
+
+Registry queue KPIs now count all organization image jobs, including manual
+jobs. Each visible registry's row and Stop action use all jobs linked to that
+registry, matching the backend cancellation scope. These per-registry summaries
+are independent current-state reads, fetched only for mounted rows. Metadata
+CSV marks unfetched off-page counters Not loaded. Queue metrics returned with
+scan-job inventory remain organization-wide and independent of list filters.
+
+Network Map and Exposure now resolve exact actual-cluster ownership and emit
+explicit unknown roles for ambiguous workload identities and IP endpoints.
+Merged graph nodes cannot borrow one source cluster's installation labels.
+Exposure aggregates observed sessions before workload enrichment, preventing
+same-name workload kinds from multiplying session counts. Embedded deployment
+runtime/network evidence now includes actual cluster and role fields; Deployment
+and Risk tables/CSV retain them and withhold explicitly foreign-cluster rows.
+Unknown deployment cluster no longer matches other clusters. The existing
+50-row embedded-evidence and per-direction Exposure bounds remain unchanged.
+
+The frozen source passes **1,628 frontend tests /126 files**, production
+build/typecheck and full lint. The initial unconstrained concurrent run had one
+Nodes timing failure; Nodes passed separately and the complete final run passed
+with two workers. A shared Pager fix now shows0–0 on empty continuation pages.
+**170 fresh PostgreSQL race/shuffle executions** pass without skips: Registry2,
+ScanJobs4, Network154, embedded Deployment evidence10. Fixtures exercise source
+caps, literal filtering, exact scope, summaries/CSV, ambiguous roles and lookup
+failure paths. Affected vet, generated OpenAPI/contracts, 107 endpoint mappings
+and plan checks pass. Five connector browser cases were discovered after their
+selectors were updated; the standalone browser runner was not executed.
+
+Helm revision **65** runs frontend `scan-jobs-fit-20261012`, API
+`registry-jobs-roles-20261012`, migration `audit-lookup-20261012` and schema173;
+all seven deployments are ready. Revision64 deployed the inventory/role batch;
+revision65 refines target width and dates. Those final UI refinements pass **152
+focused tests**, build/typecheck and changed-source lint after the full suite.
+Live reads reconcile **14,406 scan jobs** with matching CSV, **seven** matches
+for an exact target/status search and **14,397** source-cluster jobs. Missing
+registry scope returns404. Map returns **121 workloads /300 flows**, Exposure
+**four egress rows**, and **17 deployment details /850 embedded network rows**
+carry exact cluster and explicit role fields. Runtime-event positives and
+registry-image/queue positives remain fixture-qualified because these live
+sources are empty. Counts are observations of current state, not durable totals.
+
+The collaborative browser reaches the third scan-job page, verifies sort/reset
+and Back restoration, and exports all **four** matches for a live image query.
+Both job tables align at1280px and640px with contained scrolling and no clipped
+actions. Scanner target width is260px rather than160px; both ledgers use compact
+relative times with exact timestamp tooltips and raw ISO values in CSV. Digests
+remain hidden by default. No live scan, policy, capture or acceptance mutations
+were submitted. Full accessibility and cross-dataset acceptance remain open.
+
+The remaining UI-3 matrix includes baseline/file-profile workload inventories
+and CSVs, plus applicable workload asset/finding exports. Image/repository/cloud/
+node records must not invent workload roles. Dormant SSE remains unqualified
+and disabled. The live cluster has no discovered custom-namespace installation
+candidate; a real isolated chart installation and discovery proof remains
+outstanding. CVE/Compliance/asset evidence caps, other cross-page filter/export
+contracts, named saved views and the full accessibility/cross-dataset acceptance
+matrix remain open.
 
 The admission-engine continuation adds migration **172** and persists normalized
 engine outcomes atomically with image scan completion. The built-in vulnerability

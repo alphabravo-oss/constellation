@@ -9,7 +9,7 @@ export function Pager({ page, pageSize, total, hasMore, rowsOnPage, onPage }: { 
   if (!cursor && total! <= pageSize && page === 0) return null;
   if (cursor && page === 0 && !hasMore) return null;
   const from = rowsOnPage === 0 ? 0 : page * pageSize + 1;
-  const to = page * pageSize + rowsOnPage;
+  const to = rowsOnPage === 0 ? 0 : page * pageSize + rowsOnPage;
   const pages = cursor ? 0 : Math.max(1, Math.ceil(total! / pageSize));
   const nextDisabled = cursor ? !hasMore : page + 1 >= pages;
   return (

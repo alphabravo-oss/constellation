@@ -3,11 +3,22 @@
 // Sits under Supply Chain → Registries in the cluster-mode sidebar. Drives the
 // /api/v1/registries endpoints; add/edit use dedicated form routes.
 import { useMemo, useState } from "react";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  AlertTriangle, Boxes, Clock, Database, Plus, RotateCw, Trash2, Beaker, PlayCircle, MoreHorizontal, X, StopCircle,
+  AlertTriangle,
+  Boxes,
+  Clock,
+  Database,
+  Plus,
+  RotateCw,
+  Trash2,
+  Beaker,
+  PlayCircle,
+  MoreHorizontal,
+  X,
+  StopCircle,
 } from "lucide-react";
 
 import {
@@ -18,7 +29,8 @@ import {
   type RegistryCancelScansResult,
   type RegistrySyncResult,
   type RegistryTestResult,
-  type ScanJob,
+  type ScanJobInventoryParams,
+  type ScanJobInventoryResponse,
 } from "@/api/client";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
@@ -26,137 +38,336 @@ import { StatusPill } from "@/components/ui/status-pill";
 import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { useCluster } from "@/hooks/useCluster";
 import { KINDS } from "@/lib/registry-form";
+import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
+import { scanJobInventoryResponseValid } from "@/lib/scan-job-inventory";
+import { Button } from "@/components/ui/button";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 
 export function RegistriesPage() {
+  const identity = useTablePreferencesIdentity();
+  if (!identity)
+    return (
+      <div className="space-y-4">
+        <PageHeader title="Container Registries" />
+        <p role="status">Resolving organization…</p>
+      </div>
+    );
+  return (
+    <RegistriesWorkspace
+      key={JSON.stringify(identity)}
+      orgID={identity.org_id}
+      owner={`${identity.org_id}:${identity.user_id}`}
+    />
+  );
+}
+
+function RegistriesWorkspace({
+  orgID,
+  owner,
+}: {
+  orgID: string;
+  owner: string;
+}) {
   const { clusterId } = useCluster();
   const navigate = useNavigate();
   const base = `/clusters/${clusterId}/registries`;
   const qc = useQueryClient();
-  const q = useQuery({ queryKey: ["registries"], queryFn: () => registriesApi.list() });
-  const scanQueue = useQuery({ queryKey: ["scan-jobs", "registries"], queryFn: () => scanJobs.list({ target_type: "image" }) });
+  const q = useQuery({
+    queryKey: ["registries", owner],
+    queryFn: async () => {
+      const registries = await registriesApi.list();
+      if (
+        !Array.isArray(registries) ||
+        new Set(registries.map((row) => row.id)).size !== registries.length ||
+        registries.some(
+          (row) =>
+            !row.id ||
+            row.org_id !== orgID ||
+            !Number.isSafeInteger(row.images_seen) ||
+            row.images_seen < 0,
+        )
+      )
+        throw new Error("Registry inventory does not match this organization");
+      return registries;
+    },
+  });
+  const scanQueue = useQuery({
+    queryKey: ["scan-jobs", "registries", owner, "organization-image"],
+    queryFn: () => loadJobCounts({ target_type: "image", limit: 1 }, orgID),
+  });
+  const registryReady = q.isSuccess && q.fetchStatus === "idle";
+  const queueReady = scanQueue.isSuccess && scanQueue.fetchStatus === "idle";
 
   const [actionMsg, setActionMsg] = useState<string | null>(null);
 
   const remove = useMutation({
     mutationFn: (id: string) => registriesApi.remove(id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["registries"] }); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["registries"] });
+    },
   });
   const test = useMutation({
     mutationFn: (id: string) => registriesApi.test(id),
     onSuccess: (r: RegistryTestResult, id) => {
-      setActionMsg(r.ok
-        ? `Test ${id.slice(0, 8)}: OK (${r.images_visible ?? 0} images visible)`
-        : `Test ${id.slice(0, 8)} failed: ${r.error ?? "unknown"}`);
+      setActionMsg(
+        r.ok
+          ? `Test ${id.slice(0, 8)}: OK (${r.images_visible ?? 0} images visible)`
+          : `Test ${id.slice(0, 8)} failed: ${r.error ?? "unknown"}`,
+      );
     },
   });
   const sync = useMutation({
     mutationFn: (id: string) => registriesApi.syncNow(id),
     onSuccess: (r: RegistrySyncResult) => {
       qc.invalidateQueries({ queryKey: ["registries"] });
-      qc.invalidateQueries({ queryKey: ["scan-jobs", "registries"] });
-      setActionMsg(`Sync ${r.registry_id.slice(0, 8)}: ${r.status} — ${r.images_seen} images, ${r.scan_jobs_enqueued} jobs queued${r.error ? ` (${r.error})` : ""}`);
+      qc.invalidateQueries({
+        queryKey: ["scan-jobs"],
+        predicate: (query) => query.queryKey.includes(owner),
+      });
+      setActionMsg(
+        `Sync ${r.registry_id.slice(0, 8)}: ${r.status} — ${r.images_seen} images, ${r.scan_jobs_enqueued} jobs queued${r.error ? ` (${r.error})` : ""}`,
+      );
     },
   });
   const cancelScans = useMutation({
     mutationFn: (id: string) => registriesApi.cancelScans(id),
     onSuccess: (r: RegistryCancelScansResult) => {
       qc.invalidateQueries({ queryKey: ["registries"] });
-      qc.invalidateQueries({ queryKey: ["scan-jobs", "registries"] });
-      const remaining = r.active_remaining > 0 ? `, ${r.active_remaining} still active` : "";
-      setActionMsg(`Stopped scans for ${r.registry_id.slice(0, 8)}: ${r.canceled} canceled${remaining}`);
+      qc.invalidateQueries({
+        queryKey: ["scan-jobs"],
+        predicate: (query) => query.queryKey.includes(owner),
+      });
+      const remaining =
+        r.active_remaining > 0 ? `, ${r.active_remaining} still active` : "";
+      setActionMsg(
+        `Stopped scans for ${r.registry_id.slice(0, 8)}: ${r.canceled} canceled${remaining}`,
+      );
     },
   });
 
-  const rows = useMemo(() => q.data ?? [], [q.data]);
-  const registryJobs = useMemo(() => (scanQueue.data?.jobs ?? []).filter((job) => !!job.registry_id), [scanQueue.data?.jobs]);
-  const registryJobCounts = useMemo(() => buildRegistryJobCounts(registryJobs), [registryJobs]);
-  const summary = useMemo(() => summarizeRegistries(rows, registryJobs), [rows, registryJobs]);
+  const rows = useMemo(
+    () => (registryReady ? q.data : []),
+    [registryReady, q.data],
+  );
+  const summary = useMemo(() => summarizeRegistries(rows), [rows]);
+  const imageJobs = queueReady ? scanQueue.data : undefined;
 
-  const columns = useMemo<Column<RegistryDTO>[]>(() => [
-    { id: "name", exportValue: r => r.name, header: "Name", kind: "name", hideable: false, cell: (r) => <span className="font-medium">{r.name}</span>, sort: (a, b) => a.name.localeCompare(b.name) },
-    { id: "kind", exportValue: r => r.kind, header: "Kind", kind: "text", size: 176, minSize: 136, maxSize: 216, cell: (r) => <KindBadge kind={r.kind} /> },
-    { id: "endpoint", exportValue: r => r.endpoint, header: "Endpoint", kind: "id", size: 224, minSize: 160, maxSize: 320, cell: (r) => <span className="text-mono text-xs text-muted-foreground">{r.endpoint}</span> },
-    { id: "cadence", exportValue: r => r.scan_cadence, header: "Cadence", kind: "age", size: 104, minSize: 88, maxSize: 128, cell: (r) => r.scan_cadence },
-    { id: "status", exportValue: r => [r.last_sync_status || "not reported", r.last_sync_at || "", r.last_sync_error || ""].filter(Boolean).join("; "), header: "Last sync", kind: "status", size: 224, minSize: 208, maxSize: 240, cell: (r) => <SyncPill row={r} />, sort: (a, b) => (a.last_sync_at ?? "").localeCompare(b.last_sync_at ?? "") },
-    {
-      id: "scan-jobs",
-      exportValue: r => scanQueue.isError || scanQueue.isPending || scanQueue.isFetching ? "Unavailable" : JSON.stringify(registryJobCounts.get(r.id) ?? { active: 0, pending: 0, running: 0, paused: 0, failed: 0, completed: 0, canceled: 0 }),
-      header: "Scan jobs",
-      kind: "badge",
-      size: 152,
-      minSize: 128,
-      maxSize: 192,
-      wrap: true,
-      cell: (r) => <RegistryJobPills counts={registryJobCounts.get(r.id)} />,
-      sort: (a, b) => (registryJobCounts.get(a.id)?.active ?? 0) - (registryJobCounts.get(b.id)?.active ?? 0),
-    },
-    { id: "images", exportValue: r => r.images_seen, header: "Images", kind: "count", numeric: true, sort: (a, b) => a.images_seen - b.images_seen,
-      cell: (r) => (
-        <Link to="." href={clusterId ? `/clusters/${clusterId}/registries/${r.id}` : `/registries/${r.id}`} className="text-mono text-[color:var(--color-primary)] hover:underline" onClick={(e) => e.stopPropagation()}>
-          {r.images_seen} →
-        </Link>
-      ) },
-    {
-      id: "actions",
-      header: "",
-      kind: "actions",
-      size: 48,
-      minSize: 48,
-      maxSize: 48,
-      hideable: false,
-      exportable: false,
-      cell: (r) => {
-        const activeJobs = registryJobCounts.get(r.id)?.active ?? 0;
-        return (
-          <DropdownMenu.Root>
-            <DropdownMenu.Trigger asChild>
-              <button
-                type="button"
-                className="rounded-md p-1 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
-                aria-label={`Actions for ${r.name}`}
-                data-testid={`registry-actions-${r.id}`}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <MoreHorizontal className="h-4 w-4" />
-              </button>
-            </DropdownMenu.Trigger>
-            <DropdownMenu.Portal>
-              <DropdownMenu.Content
-                align="end"
-                sideOffset={4}
-                className="z-50 min-w-[180px] rounded-md border border-border bg-popover p-1 shadow-[var(--elev-popover)]"
-              >
-                <Item icon={<Beaker className="h-3.5 w-3.5" />} onSelect={() => test.mutate(r.id)}>Test</Item>
-                <Item icon={<PlayCircle className="h-3.5 w-3.5" />} onSelect={() => sync.mutate(r.id)}>Sync now</Item>
-                <Item
-                  icon={<StopCircle className="h-3.5 w-3.5" />}
-                  destructive
-                  disabled={activeJobs === 0 || cancelScans.isPending}
-                  onSelect={() => {
-                    if (window.confirm(`Stop ${activeJobs} active scan job${activeJobs === 1 ? "" : "s"} for ${r.name}?`)) {
-                      cancelScans.mutate(r.id);
-                    }
-                  }}
-                >
-                  Stop active scans
-                </Item>
-                <Item icon={<RotateCw className="h-3.5 w-3.5" />} onSelect={() => void navigate({ href: `${base}/${r.id}/edit` })}>Edit</Item>
-                <DropdownMenu.Separator className="my-1 h-px bg-border" />
-                <Item
-                  icon={<Trash2 className="h-3.5 w-3.5" />}
-                  destructive
-                  onSelect={() => { if (window.confirm(`Delete registry ${r.name}?`)) remove.mutate(r.id); }}
-                >
-                  Delete
-                </Item>
-              </DropdownMenu.Content>
-            </DropdownMenu.Portal>
-          </DropdownMenu.Root>
-        );
+  const columns = useMemo<Column<RegistryDTO>[]>(
+    () => [
+      {
+        id: "name",
+        exportValue: (r) => r.name,
+        header: "Name",
+        kind: "name",
+        hideable: false,
+        cell: (r) => <span className="font-medium">{r.name}</span>,
+        sort: (a, b) => a.name.localeCompare(b.name),
       },
-    },
-  ], [base, navigate, clusterId, registryJobCounts, scanQueue.isError, scanQueue.isPending, scanQueue.isFetching, test, sync, cancelScans, remove]);
+      {
+        id: "kind",
+        exportValue: (r) => r.kind,
+        header: "Kind",
+        kind: "text",
+        size: 176,
+        minSize: 136,
+        maxSize: 216,
+        cell: (r) => <KindBadge kind={r.kind} />,
+      },
+      {
+        id: "endpoint",
+        exportValue: (r) => r.endpoint,
+        header: "Endpoint",
+        kind: "id",
+        size: 224,
+        minSize: 160,
+        maxSize: 320,
+        cell: (r) => (
+          <span className="text-mono text-xs text-muted-foreground">
+            {r.endpoint}
+          </span>
+        ),
+      },
+      {
+        id: "cadence",
+        exportValue: (r) => r.scan_cadence,
+        header: "Cadence",
+        kind: "age",
+        size: 104,
+        minSize: 88,
+        maxSize: 128,
+        cell: (r) => r.scan_cadence,
+      },
+      {
+        id: "status",
+        exportValue: (r) =>
+          [
+            r.last_sync_status || "not reported",
+            r.last_sync_at || "",
+            r.last_sync_error || "",
+          ]
+            .filter(Boolean)
+            .join("; "),
+        header: "Last sync",
+        kind: "status",
+        size: 224,
+        minSize: 208,
+        maxSize: 240,
+        cell: (r) => <SyncPill row={r} />,
+        sort: (a, b) =>
+          (a.last_sync_at ?? "").localeCompare(b.last_sync_at ?? ""),
+      },
+      {
+        id: "scan-jobs",
+        exportValue: (r) => {
+          const counts = readReadyRegistryCounts(qc, owner, r.id);
+          const state = qc.getQueryState(registryJobKey(owner, r.id));
+          return counts
+            ? JSON.stringify(counts)
+            : state
+              ? "Unavailable"
+              : "Not loaded";
+        },
+        header: "Scan jobs",
+        kind: "badge",
+        size: 152,
+        minSize: 128,
+        maxSize: 192,
+        wrap: true,
+        cell: (r) => (
+          <RegistryQueueStatus registryID={r.id} owner={owner} orgID={orgID} />
+        ),
+      },
+      {
+        id: "images",
+        exportValue: (r) => r.images_seen,
+        header: "Images",
+        kind: "count",
+        numeric: true,
+        sort: (a, b) => a.images_seen - b.images_seen,
+        cell: (r) => (
+          <a
+            href={
+              clusterId
+                ? `/clusters/${encodeURIComponent(clusterId)}/registries/${encodeURIComponent(r.id)}`
+                : `/registries/${encodeURIComponent(r.id)}`
+            }
+            className="text-mono text-[color:var(--color-primary)] hover:underline"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {r.images_seen} →
+          </a>
+        ),
+      },
+      {
+        id: "actions",
+        header: "",
+        kind: "actions",
+        size: 48,
+        minSize: 48,
+        maxSize: 48,
+        hideable: false,
+        exportable: false,
+        cell: (r) => {
+          return (
+            <RegistryQueueStatus registryID={r.id} owner={owner} orgID={orgID}>
+              {(counts) => (
+                <DropdownMenu.Root>
+                  <DropdownMenu.Trigger asChild>
+                    <button
+                      type="button"
+                      className="rounded-md p-1 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                      aria-label={`Actions for ${r.name}`}
+                      data-testid={`registry-actions-${r.id}`}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <MoreHorizontal className="h-4 w-4" />
+                    </button>
+                  </DropdownMenu.Trigger>
+                  <DropdownMenu.Portal>
+                    <DropdownMenu.Content
+                      align="end"
+                      sideOffset={4}
+                      className="z-50 min-w-[180px] rounded-md border border-border bg-popover p-1 shadow-[var(--elev-popover)]"
+                    >
+                      <Item
+                        icon={<Beaker className="h-3.5 w-3.5" />}
+                        onSelect={() => test.mutate(r.id)}
+                      >
+                        Test
+                      </Item>
+                      <Item
+                        icon={<PlayCircle className="h-3.5 w-3.5" />}
+                        onSelect={() => sync.mutate(r.id)}
+                      >
+                        Sync now
+                      </Item>
+                      <Item
+                        icon={<StopCircle className="h-3.5 w-3.5" />}
+                        destructive
+                        disabled={
+                          !counts ||
+                          counts.active === 0 ||
+                          cancelScans.isPending
+                        }
+                        onSelect={() => {
+                          const current = readReadyRegistryCounts(
+                            qc,
+                            owner,
+                            r.id,
+                          );
+                          if (!current || current.active === 0) return;
+                          if (
+                            window.confirm(
+                              `Stop ${current.active} active scan job${current.active === 1 ? "" : "s"} for ${r.name}?`,
+                            )
+                          ) {
+                            cancelScans.mutate(r.id);
+                          }
+                        }}
+                      >
+                        Stop active scans
+                      </Item>
+                      <Item
+                        icon={<RotateCw className="h-3.5 w-3.5" />}
+                        onSelect={() =>
+                          void navigate({ href: `${base}/${r.id}/edit` })
+                        }
+                      >
+                        Edit
+                      </Item>
+                      <DropdownMenu.Separator className="my-1 h-px bg-border" />
+                      <Item
+                        icon={<Trash2 className="h-3.5 w-3.5" />}
+                        destructive
+                        onSelect={() => {
+                          if (window.confirm(`Delete registry ${r.name}?`))
+                            remove.mutate(r.id);
+                        }}
+                      >
+                        Delete
+                      </Item>
+                    </DropdownMenu.Content>
+                  </DropdownMenu.Portal>
+                </DropdownMenu.Root>
+              )}
+            </RegistryQueueStatus>
+          );
+        },
+      },
+    ],
+    [
+      base,
+      navigate,
+      clusterId,
+      owner,
+      orgID,
+      qc,
+      test,
+      sync,
+      cancelScans,
+      remove,
+    ],
+  );
 
   return (
     <div className="space-y-4" data-testid="registries-page">
@@ -164,14 +375,28 @@ export function RegistriesPage() {
         title="Container Registries"
         description="Configure registries Constellation should pull image metadata from on a cadence and enqueue new tags for scanning."
         actions={
-          <button
-            type="button"
-            onClick={() => void navigate({ href: `${base}/new` })}
-            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
-            data-testid="add-registry"
-          >
-            <Plus className="h-3.5 w-3.5" /> Add registry
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                void qc.invalidateQueries({ queryKey: ["registries", owner] });
+                void qc.invalidateQueries({
+                  queryKey: ["scan-jobs"],
+                  predicate: (query) => query.queryKey.includes(owner),
+                });
+              }}
+            >
+              Refresh
+            </Button>
+            <button
+              type="button"
+              onClick={() => void navigate({ href: `${base}/new` })}
+              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
+              data-testid="add-registry"
+            >
+              <Plus className="h-3.5 w-3.5" /> Add registry
+            </button>
+          </div>
         }
       />
 
@@ -181,31 +406,97 @@ export function RegistriesPage() {
           data-testid="registry-action-message"
         >
           <span>{actionMsg}</span>
-          <button type="button" onClick={() => setActionMsg(null)} aria-label="Dismiss">
+          <button
+            type="button"
+            onClick={() => setActionMsg(null)}
+            aria-label="Dismiss"
+          >
             <X className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
           </button>
         </div>
       )}
 
-      <VerdictBanner status={q.isPending ? "info" : q.isError || scanQueue.isError ? "degraded" : summary.failedSync > 0 || summary.failedJobs > 0 ? "degraded" : summary.total === 0 ? "info" : "ok"}
-        title={q.isPending ? "Loading registry inventory" : q.isError ? "Registry inventory could not be loaded" : scanQueue.isError ? "Registry scan jobs could not be loaded" : summary.failedSync > 0 || summary.failedJobs > 0 ? "Registry scans need attention" : summary.total === 0 ? "Add a registry to begin scanning" : "Registry inventory is available"}
-        detail="Review synchronization and scan jobs below. Queue metrics cover registry jobs in the latest 200 image jobs. Connection testing uses saved configuration." />
+      <VerdictBanner
+        status={
+          q.isError ||
+          scanQueue.isError ||
+          summary.failedSync > 0 ||
+          (imageJobs?.failed ?? 0) > 0
+            ? "degraded"
+            : "info"
+        }
+        title={
+          q.isError
+            ? "Registry inventory could not be loaded"
+            : !registryReady
+              ? "Loading registry inventory"
+              : scanQueue.isError
+                ? "Organization image jobs could not be loaded"
+                : !queueReady
+                  ? "Loading organization image queue"
+                  : summary.failedSync > 0 || imageJobs!.failed > 0
+                    ? "Registry or image scans need attention"
+                    : summary.total === 0
+                      ? "Add a registry to begin scanning"
+                      : "Registry inventory is available"
+        }
+        detail="Queue KPIs cover all organization image jobs, including manual scans. Row counts cover all jobs linked to that registry and refresh independently."
+      />
       <StatGrid data-testid="registry-operator-summary">
-        <StatCard label="Registries" value={summary.total.toLocaleString()} icon={<Database className="h-3.5 w-3.5" />} />
-        <StatCard label="Healthy Sync" value={summary.healthy.toLocaleString()} icon={<PlayCircle className="h-3.5 w-3.5" />} tone={summary.failedSync > 0 ? "medium" : "accent"} hint={`${summary.failedSync} failed`} />
-        <StatCard label="Images Seen" value={summary.images.toLocaleString()} icon={<Boxes className="h-3.5 w-3.5" />} />
-        <StatCard label="Active Jobs" value={summary.activeJobs.toLocaleString()} icon={<Clock className="h-3.5 w-3.5" />} tone={summary.activeJobs > 0 ? "low" : "neutral"} hint={`${summary.pendingJobs} pending`} />
-        <StatCard label="Failed Jobs" value={summary.failedJobs.toLocaleString()} icon={<AlertTriangle className="h-3.5 w-3.5" />} tone={summary.failedJobs > 0 ? "high" : "neutral"} />
+        <StatCard
+          label="Registries"
+          value={registryReady ? summary.total : "—"}
+          icon={<Database className="h-3.5 w-3.5" />}
+        />
+        <StatCard
+          label="Successful last sync"
+          value={registryReady ? summary.healthy : "—"}
+          icon={<PlayCircle className="h-3.5 w-3.5" />}
+          tone={summary.failedSync > 0 ? "medium" : "neutral"}
+          hint={
+            registryReady
+              ? `${summary.failedSync} failed or partial`
+              : undefined
+          }
+        />
+        <StatCard
+          label="Images seen"
+          value={registryReady ? summary.images : "—"}
+          icon={<Boxes className="h-3.5 w-3.5" />}
+        />
+        <StatCard
+          label="Active image jobs (organization)"
+          value={imageJobs?.active ?? "—"}
+          icon={<Clock className="h-3.5 w-3.5" />}
+          tone={imageJobs?.active ? "low" : "neutral"}
+          hint={imageJobs ? `${imageJobs.pending} pending` : undefined}
+        />
+        <StatCard
+          label="Failed image jobs (organization)"
+          value={imageJobs?.failed ?? "—"}
+          icon={<AlertTriangle className="h-3.5 w-3.5" />}
+          tone={imageJobs?.failed ? "high" : "neutral"}
+        />
       </StatGrid>
 
       <DataTable<RegistryDTO>
         rows={rows}
         columns={columns}
         preferencesKey="registry-inventory"
-        exportFileName={q.isSuccess && !q.isError && !q.isFetching ? "constellation-registry-loaded-inventory" : undefined}
+        exportFileName={
+          registryReady ? "constellation-registry-loaded-inventory" : undefined
+        }
         exportLabel="Export loaded registries CSV"
         rowKey={(r) => r.id}
-        emptyState={q.isPending ? "Loading registries..." : q.isError ? "Registry inventory is unavailable. Refresh to try again." : <EmptyState onAdd={() => void navigate({ href: `${base}/new` })} />}
+        emptyState={
+          q.isError ? (
+            "Registry inventory is unavailable. Refresh to try again."
+          ) : !registryReady ? (
+            "Loading registries..."
+          ) : (
+            <EmptyState onAdd={() => void navigate({ href: `${base}/new` })} />
+          )
+        }
         defaultSort={{ id: "name", dir: "asc" }}
       />
     </div>
@@ -229,14 +520,21 @@ function SyncPill({ row }: { row: RegistryDTO }) {
     return <StatusPill label="manual" tone="neutral" />;
   }
   const tone =
-    row.last_sync_status === "ok" ? "success" :
-    row.last_sync_status === "partial" ? "warning" :
-    row.last_sync_status === "failed" ? "error" : "neutral";
+    row.last_sync_status === "ok"
+      ? "success"
+      : row.last_sync_status === "partial"
+        ? "warning"
+        : row.last_sync_status === "failed"
+          ? "error"
+          : "neutral";
   return (
     <div className="space-y-1">
       <StatusPill label={row.last_sync_status || "unknown"} tone={tone} />
       {row.last_sync_at && (
-        <span className="block text-xs text-muted-foreground" title={new Date(row.last_sync_at).toLocaleString()}>
+        <span
+          className="block text-xs text-muted-foreground"
+          title={new Date(row.last_sync_at).toLocaleString()}
+        >
           {new Date(row.last_sync_at).toLocaleString()}
         </span>
       )}
@@ -260,83 +558,122 @@ function RegistryJobPills({ counts }: { counts?: RegistryJobCounts }) {
   }
   return (
     <div className="flex flex-wrap items-center gap-1">
-      {counts.active > 0 ? <StatusPill label={`${counts.active} active`} tone="pending" /> : null}
-      {counts.failed > 0 ? <StatusPill label={`${counts.failed} failed`} tone="error" /> : null}
+      {counts.active > 0 ? (
+        <StatusPill label={`${counts.active} active`} tone="pending" />
+      ) : null}
+      {counts.failed > 0 ? (
+        <StatusPill label={`${counts.failed} failed`} tone="error" />
+      ) : null}
     </div>
   );
 }
 
-function buildRegistryJobCounts(jobs: ScanJob[]) {
-  const out = new Map<string, RegistryJobCounts>();
-  for (const job of jobs) {
-    if (!job.registry_id) continue;
-    const counts = out.get(job.registry_id) ?? {
-      active: 0,
-      pending: 0,
-      running: 0,
-      paused: 0,
-      failed: 0,
-      completed: 0,
-      canceled: 0,
-    };
-    switch (job.status) {
-      case "pending":
-        counts.pending += 1;
-        counts.active += 1;
-        break;
-      case "running":
-        counts.running += 1;
-        counts.active += 1;
-        break;
-      case "paused":
-        counts.paused += 1;
-        counts.active += 1;
-        break;
-      case "failed":
-        counts.failed += 1;
-        break;
-      case "completed":
-        counts.completed += 1;
-        break;
-      case "canceled":
-        counts.canceled += 1;
-        break;
-    }
-    out.set(job.registry_id, counts);
-  }
-  return out;
+const jobStatuses = [
+  "pending",
+  "running",
+  "paused",
+  "failed",
+  "completed",
+  "canceled",
+] as const;
+const registryJobKey = (owner: string, registryID: string) => [
+  "scan-jobs",
+  "registries",
+  owner,
+  "registry",
+  registryID,
+];
+async function loadJobCounts(
+  request: ScanJobInventoryParams,
+  orgID: string,
+): Promise<RegistryJobCounts> {
+  const result: ScanJobInventoryResponse = await scanJobs.list(request);
+  if (
+    !scanJobInventoryResponseValid(result, request, orgID) ||
+    result.jobs.some(
+      (job) =>
+        job.org_id !== orgID ||
+        !jobStatuses.includes(job.status as (typeof jobStatuses)[number]),
+    ) ||
+    jobStatuses.reduce((sum, status) => sum + result.summary![status], 0) !==
+      result.total
+  )
+    throw new Error("Scan job summary does not match this scope");
+  const summary = result.summary!;
+  return {
+    active: summary.pending + summary.running + summary.paused,
+    pending: summary.pending,
+    running: summary.running,
+    paused: summary.paused,
+    failed: summary.failed,
+    completed: summary.completed,
+    canceled: summary.canceled,
+  };
+}
+function readReadyRegistryCounts(
+  client: ReturnType<typeof useQueryClient>,
+  owner: string,
+  registryID: string,
+) {
+  const state = client.getQueryState<RegistryJobCounts>(
+    registryJobKey(owner, registryID),
+  );
+  return state?.status === "success" &&
+    state.fetchStatus === "idle" &&
+    !state.isInvalidated
+    ? state.data
+    : undefined;
+}
+function RegistryQueueStatus({
+  owner,
+  orgID,
+  registryID,
+  children,
+}: {
+  owner: string;
+  orgID: string;
+  registryID: string;
+  children?: (counts: RegistryJobCounts | undefined) => React.ReactNode;
+}) {
+  const query = useQuery({
+    queryKey: registryJobKey(owner, registryID),
+    queryFn: () => loadJobCounts({ registry_id: registryID, limit: 1 }, orgID),
+  });
+  const available =
+    query.isSuccess && query.fetchStatus === "idle" ? query.data : undefined;
+  if (children) return children(available);
+  if (query.isError)
+    return (
+      <span className="text-xs text-muted-foreground">
+        Unavailable{" "}
+        <button
+          className="text-primary underline"
+          onClick={() => void query.refetch()}
+        >
+          Retry
+        </button>
+      </span>
+    );
+  if (!available)
+    return <span className="text-xs text-muted-foreground">Loading…</span>;
+  return <RegistryJobPills counts={available} />;
 }
 
-function summarizeRegistries(rows: RegistryDTO[], jobs: ScanJob[]) {
+function summarizeRegistries(rows: RegistryDTO[]) {
   let healthy = 0;
   let failedSync = 0;
   let images = 0;
   for (const row of rows) {
     if (row.last_sync_status === "ok") healthy += 1;
-    if (row.last_sync_status === "failed" || row.last_sync_status === "partial") failedSync += 1;
+    if (row.last_sync_status === "failed" || row.last_sync_status === "partial")
+      failedSync += 1;
     images += row.images_seen;
-  }
-  let activeJobs = 0;
-  let pendingJobs = 0;
-  let failedJobs = 0;
-  for (const job of jobs) {
-    if (job.status === "pending") {
-      activeJobs += 1;
-      pendingJobs += 1;
-    } else if (job.status === "running" || job.status === "paused") {
-      activeJobs += 1;
-    } else if (job.status === "failed") {
-      failedJobs += 1;
-    }
   }
   return {
     total: rows.length,
     healthy,
     failedSync,
     images,
-    activeJobs,
-    pendingJobs,
-    failedJobs,
   };
 }
 
@@ -356,7 +693,11 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
 }
 
 function Item({
-  icon, children, onSelect, destructive, disabled,
+  icon,
+  children,
+  onSelect,
+  destructive,
+  disabled,
 }: {
   icon: React.ReactNode;
   children: React.ReactNode;

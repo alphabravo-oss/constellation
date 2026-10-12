@@ -214,23 +214,26 @@ type deploymentFileRiskFindingDTO struct {
 }
 
 type deploymentNetworkFlowDTO struct {
-	ID         string    `json:"id"`
-	Src        string    `json:"src"`
-	Dst        string    `json:"dst"`
-	SrcAddr    string    `json:"src_addr,omitempty"`
-	DstAddr    string    `json:"dst_addr,omitempty"`
-	SrcPort    int       `json:"src_port,omitempty"`
-	DstPort    int       `json:"dst_port,omitempty"`
-	Protocol   string    `json:"protocol"`
-	L7Protocol string    `json:"l7_protocol,omitempty"`
-	Verdict    string    `json:"verdict"`
-	Source     string    `json:"source,omitempty"`
-	Bytes      int64     `json:"bytes"`
-	Packets    int64     `json:"packets"`
-	Sessions   int64     `json:"sessions,omitempty"`
-	ThreatID   int       `json:"threat_id,omitempty"`
-	Severity   int       `json:"severity,omitempty"`
-	LastSeenAt time.Time `json:"last_seen_at"`
+	ClusterID       uuid.UUID `json:"cluster_id"`
+	SrcPlatformRole string    `json:"src_platform_role"`
+	DstPlatformRole string    `json:"dst_platform_role"`
+	ID              string    `json:"id"`
+	Src             string    `json:"src"`
+	Dst             string    `json:"dst"`
+	SrcAddr         string    `json:"src_addr,omitempty"`
+	DstAddr         string    `json:"dst_addr,omitempty"`
+	SrcPort         int       `json:"src_port,omitempty"`
+	DstPort         int       `json:"dst_port,omitempty"`
+	Protocol        string    `json:"protocol"`
+	L7Protocol      string    `json:"l7_protocol,omitempty"`
+	Verdict         string    `json:"verdict"`
+	Source          string    `json:"source,omitempty"`
+	Bytes           int64     `json:"bytes"`
+	Packets         int64     `json:"packets"`
+	Sessions        int64     `json:"sessions,omitempty"`
+	ThreatID        int       `json:"threat_id,omitempty"`
+	Severity        int       `json:"severity,omitempty"`
+	LastSeenAt      time.Time `json:"last_seen_at"`
 }
 
 type deploymentProcessBaselineDTO struct {
@@ -614,13 +617,13 @@ SELECT f.id::text,
 
 func (h *Deployments) deploymentRuntimeEvents(r *http.Request, orgID uuid.UUID, clusterID *uuid.UUID, workloadIDs []string) ([]EventDTO, error) {
 	rows, err := h.db.Pool().Query(r.Context(), `
-SELECT id, at, kind, source, severity, verdict, node_id, workload_id,
+SELECT id, cluster_id, at, kind, source, severity, verdict, node_id, workload_id,
        COALESCE(namespace,''), COALESCE(container_id,''), attack_techniques, payload
   FROM events
  WHERE org_id = $1
-   AND ($2::uuid IS NULL OR cluster_id = $2)
+   AND cluster_id IS NOT DISTINCT FROM $2::uuid
    AND workload_id = ANY($3::text[])
- ORDER BY at DESC
+ ORDER BY at DESC, id ASC
  LIMIT 50`, orgID, clusterID, workloadIDs)
 	if err != nil {
 		return nil, err
@@ -630,7 +633,7 @@ SELECT id, at, kind, source, severity, verdict, node_id, workload_id,
 	for rows.Next() {
 		var item EventDTO
 		var payload []byte
-		if err := rows.Scan(&item.ID, &item.At, &item.Kind, &item.Source, &item.Severity, &item.Verdict,
+		if err := rows.Scan(&item.ID, &item.ClusterID, &item.At, &item.Kind, &item.Source, &item.Severity, &item.Verdict,
 			&item.NodeID, &item.WorkloadID, &item.Namespace, &item.ContainerID, &item.AttackTechniques, &payload); err != nil {
 			return nil, err
 		}
@@ -640,7 +643,22 @@ SELECT id, at, kind, source, severity, verdict, node_id, workload_id,
 		}
 		out = append(out, item)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	identities := make([]PlatformWorkloadIdentity, len(out))
+	for i, item := range out {
+		identities[i] = PlatformWorkloadIdentity{ClusterID: item.ClusterID, Workload: item.WorkloadID, Namespace: item.Namespace}
+	}
+	roles, err := EvidencePlatformRoles(r.Context(), h.db.Pool(), orgID, identities)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].PlatformRole = roles[i]
+	}
+	return out, nil
 }
 
 func (h *Deployments) deploymentThreatPivots(r *http.Request, orgID uuid.UUID, clusterID *uuid.UUID, workloadIDs []string) ([]deploymentThreatPivotDTO, error) {
@@ -912,7 +930,7 @@ SELECT DISTINCT ON (sr.id, a.id)
 
 func (h *Deployments) deploymentNetworkFlows(r *http.Request, orgID uuid.UUID, clusterID *uuid.UUID, workloadIDs []string) ([]deploymentNetworkFlowDTO, error) {
 	rows, err := h.db.Pool().Query(r.Context(), `
-SELECT id::text,
+SELECT id::text, cluster_id,
        src_workload,
        dst_workload,
        COALESCE(src_addr, ''),
@@ -931,12 +949,12 @@ SELECT id::text,
        at
   FROM network_flows
  WHERE org_id = $1
-   AND ($2::uuid IS NULL OR cluster_id = $2)
+   AND cluster_id IS NOT DISTINCT FROM $2::uuid
    AND (
         src_workload = ANY($3::text[])
      OR dst_workload = ANY($3::text[])
    )
- ORDER BY at DESC
+ ORDER BY at DESC, id ASC
  LIMIT 50`, orgID, clusterID, workloadIDs)
 	if err != nil {
 		return nil, err
@@ -945,14 +963,30 @@ SELECT id::text,
 	out := []deploymentNetworkFlowDTO{}
 	for rows.Next() {
 		var item deploymentNetworkFlowDTO
-		if err := rows.Scan(&item.ID, &item.Src, &item.Dst, &item.SrcAddr, &item.DstAddr,
+		if err := rows.Scan(&item.ID, &item.ClusterID, &item.Src, &item.Dst, &item.SrcAddr, &item.DstAddr,
 			&item.SrcPort, &item.DstPort, &item.Protocol, &item.L7Protocol, &item.Verdict, &item.Source,
 			&item.Bytes, &item.Packets, &item.Sessions, &item.ThreatID, &item.Severity, &item.LastSeenAt); err != nil {
 			return nil, err
 		}
 		out = append(out, item)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	identities := make([]PlatformWorkloadIdentity, 0, len(out)*2)
+	for _, item := range out {
+		identities = append(identities, PlatformWorkloadIdentity{ClusterID: item.ClusterID, Workload: item.Src}, PlatformWorkloadIdentity{ClusterID: item.ClusterID, Workload: item.Dst})
+	}
+	roles, err := EvidencePlatformRoles(r.Context(), h.db.Pool(), orgID, identities)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].SrcPlatformRole = roles[2*i]
+		out[i].DstPlatformRole = roles[2*i+1]
+	}
+	return out, nil
 }
 
 func (h *Deployments) deploymentNetworkPolicyLifecycle(r *http.Request, orgID uuid.UUID, clusterID *uuid.UUID, workloadID string) (any, error) {

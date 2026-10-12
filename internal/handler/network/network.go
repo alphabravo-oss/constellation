@@ -2,7 +2,6 @@
 package network
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -131,11 +130,17 @@ func (h *Network) Map(w http.ResponseWriter, r *http.Request) {
 				"risk_score": 0, "finding_count": 0,
 				"critical_count": 0, "high_count": 0,
 			}
-			if role := handler.PlatformRole(ns, nil); role != "" {
-				workload["platform_role"] = role
-			}
+			// The flow already resolved this endpoint with its actual cluster.
+			// Keep evaluated unknown explicit so namespace fallback cannot turn
+			// an IP or unresolved custom-install pod into a platform node.
+			workload["platform_role"] = f[key+"_platform_role"]
 			workloads = append(workloads, workload)
 		}
+	}
+
+	if err := h.reconcileGraphRoles(r, subj.OrgID, workloads, flows); err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
 	}
 
 	summary := map[string]any{
@@ -176,6 +181,51 @@ func (h *Network) Map(w http.ResponseWriter, r *http.Request) {
 		"flows":        flows,
 		"recent_flows": recentFlows,
 	})
+}
+
+// Graph IDs remain namespace/name for compatibility. If a legacy unscoped
+// source spans clusters, a graph node must not borrow the first endpoint's
+// installation labels. Exact namespace roles are still independent of cluster.
+func (h *Network) reconcileGraphRoles(r *http.Request, orgID uuid.UUID, workloads, flows []map[string]any) error {
+	clusters := make(map[string]map[string]struct{})
+	observe := func(id, cluster string) {
+		if cluster == "" {
+			return
+		}
+		if clusters[id] == nil {
+			clusters[id] = make(map[string]struct{})
+		}
+		clusters[id][cluster] = struct{}{}
+	}
+	for _, workload := range workloads {
+		cluster, _ := workload["cluster_id"].(string)
+		observe(workload["id"].(string), cluster)
+	}
+	for _, flow := range flows {
+		cluster, _ := flow["cluster_id"].(string)
+		observe(flow["src"].(string), cluster)
+		observe(flow["dst"].(string), cluster)
+	}
+	identities := []handler.PlatformWorkloadIdentity{}
+	for id, sources := range clusters {
+		if len(sources) > 1 {
+			identities = append(identities, handler.PlatformWorkloadIdentity{Workload: id})
+		}
+	}
+	roles, err := handler.EvidencePlatformRoles(r.Context(), h.db.Pool(), orgID, identities)
+	if err != nil {
+		return err
+	}
+	resolved := make(map[string]string, len(identities))
+	for i, identity := range identities {
+		resolved[identity.Workload] = roles[i]
+	}
+	for _, workload := range workloads {
+		if role, ambiguous := resolved[workload["id"].(string)]; ambiguous {
+			workload["platform_role"] = role
+		}
+	}
+	return nil
 }
 
 func (h *Network) resolveNetworkCluster(r *http.Request, orgID uuid.UUID) (*uuid.UUID, error) {
@@ -238,7 +288,7 @@ WITH wl_mode AS (
     FROM groups g
    WHERE g.org_id = $1 AND ($2::uuid IS NULL OR g.cluster_id = $2)
    GROUP BY 1)
-SELECT d.cluster_id::text, COALESCE(c.name, ''), d.namespace, d.name, d.kind, d.risk_score, d.finding_count, d.critical_count, d.high_count, COALESCE(d.labels, '{}'::jsonb),
+SELECT d.cluster_id::text, COALESCE(c.name, ''), d.namespace, d.name, d.kind, d.risk_score, d.finding_count, d.critical_count, d.high_count,
        CASE m.r WHEN 3 THEN 'protect' WHEN 2 THEN 'monitor' WHEN 1 THEN 'discover' ELSE '' END AS policy_mode
   FROM deployments d
   LEFT JOIN clusters c ON c.id = d.cluster_id
@@ -256,8 +306,7 @@ SELECT d.cluster_id::text, COALESCE(c.name, ''), d.namespace, d.name, d.kind, d.
 	for rows.Next() {
 		var cluster, clusterName, ns, name, kind, policyMode string
 		var risk, findings, critical, high int
-		var labels []byte
-		if err := rows.Scan(&cluster, &clusterName, &ns, &name, &kind, &risk, &findings, &critical, &high, &labels, &policyMode); err != nil {
+		if err := rows.Scan(&cluster, &clusterName, &ns, &name, &kind, &risk, &findings, &critical, &high, &policyMode); err != nil {
 			return nil, err
 		}
 		workload := map[string]any{
@@ -267,12 +316,28 @@ SELECT d.cluster_id::text, COALESCE(c.name, ''), d.namespace, d.name, d.kind, d.
 			"critical_count": critical, "high_count": high,
 			"policy_mode": policyMode,
 		}
-		if role := handler.PlatformRoleJSON(ns, json.RawMessage(labels)); role != "" {
-			workload["platform_role"] = role
-		}
 		out = append(out, workload)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	identities := make([]handler.PlatformWorkloadIdentity, len(out))
+	for i, workload := range out {
+		cluster, err := uuid.Parse(workload["cluster_id"].(string))
+		if err != nil {
+			return nil, err
+		}
+		identities[i] = handler.PlatformWorkloadIdentity{ClusterID: cluster, Workload: workload["id"].(string)}
+	}
+	roles, err := handler.EvidencePlatformRoles(r.Context(), h.db.Pool(), orgID, identities)
+	if err != nil {
+		return nil, err
+	}
+	for i, workload := range out {
+		workload["platform_role"] = roles[i]
+	}
+	return out, nil
 }
 
 func (h *Network) flows(r *http.Request, orgID uuid.UUID, clusterID *uuid.UUID, hours int, namespace, verdict string, groupActive bool, groupMembers []string, port int, peer, application string, offset int) ([]map[string]any, error) {

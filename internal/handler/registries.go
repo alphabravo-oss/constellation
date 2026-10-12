@@ -30,7 +30,6 @@ import (
 	"log/slog"
 	"net/http"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -837,100 +836,6 @@ SELECT COUNT(*)::bigint
 		})
 	}
 	writeJSON(w, http.StatusOK, res)
-}
-
-// Images returns the list of repositories last discovered for a registry.
-func (h *Registries) Images(w http.ResponseWriter, r *http.Request) {
-	subj, ok := SubjectFrom(r.Context())
-	if !ok {
-		jsonError(w, http.StatusUnauthorized, "no subject")
-		return
-	}
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		jsonError(w, http.StatusBadRequest, "invalid id")
-		return
-	}
-	limit := 100
-	if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 && l <= 500 {
-		limit = l
-	}
-	offset := 0
-	if o, err := strconv.Atoi(r.URL.Query().Get("offset")); err == nil && o > 0 {
-		offset = o
-	}
-	q := strings.TrimSpace(r.URL.Query().Get("q")) // server-side repository search
-
-	// Total matching repositories so the client can page instead of fetch-all-then-truncate.
-	var total int
-	if err := h.db.Pool().QueryRow(r.Context(), `
-SELECT count(*) FROM registry_images ri
- WHERE ri.registry_id = $1 AND ri.org_id = $2
-   AND ($3::text = '' OR ri.repository ILIKE '%'||$3||'%')`, id, subj.OrgID, q).Scan(&total); err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	rows, err := h.db.Pool().Query(r.Context(), `
-SELECT ri.id, ri.repository, ri.tags, COALESCE(ri.digests, '{}'::jsonb), COALESCE(ri.last_pushed_at, ''),
-       ri.first_seen_at, ri.last_seen_at,
-       (sr.id IS NOT NULL)                       AS scanned,
-       COALESCE(sr.finding_count, 0)             AS finding_count,
-       sr.last_scanned_at,
-       COALESCE(sr.max_severity_critical, 0)     AS critical,
-       COALESCE(sr.max_severity_high, 0)         AS high
-  FROM registry_images ri
-  LEFT JOIN LATERAL (
-      SELECT r.id, r.finding_count, r.last_scanned_at,
-             (SELECT count(*) FROM image_scan_findings f WHERE f.image_scan_result_id = r.id AND f.severity = 'critical') AS max_severity_critical,
-             (SELECT count(*) FROM image_scan_findings f WHERE f.image_scan_result_id = r.id AND f.severity = 'high')     AS max_severity_high
-        FROM image_scan_results r
-       WHERE r.org_id = ri.org_id AND r.image_repository = ri.repository
-       ORDER BY r.last_scanned_at DESC NULLS LAST
-       LIMIT 1
-  ) sr ON true
- WHERE ri.registry_id = $1 AND ri.org_id = $2
-   AND ($5::text = '' OR ri.repository ILIKE '%'||$5||'%')
- ORDER BY sr.finding_count DESC NULLS LAST, ri.last_seen_at DESC
- LIMIT $3 OFFSET $4`, id, subj.OrgID, limit, offset, q)
-	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	defer rows.Close()
-
-	type imgRow struct {
-		ID            uuid.UUID         `json:"id"`
-		Repository    string            `json:"repository"`
-		Tags          []string          `json:"tags"`
-		Digests       map[string]string `json:"digests"`
-		LastPushedAt  string            `json:"last_pushed_at,omitempty"`
-		FirstSeenAt   time.Time         `json:"first_seen_at"`
-		LastSeenAt    time.Time         `json:"last_seen_at"`
-		Scanned       bool              `json:"scanned"`
-		FindingCount  int               `json:"finding_count"`
-		LastScannedAt *time.Time        `json:"last_scanned_at,omitempty"`
-		Critical      int               `json:"critical"`
-		High          int               `json:"high"`
-	}
-	out := []imgRow{}
-	for rows.Next() {
-		var ir imgRow
-		var digestsRaw []byte
-		if err := rows.Scan(&ir.ID, &ir.Repository, &ir.Tags, &digestsRaw, &ir.LastPushedAt,
-			&ir.FirstSeenAt, &ir.LastSeenAt, &ir.Scanned, &ir.FindingCount, &ir.LastScannedAt,
-			&ir.Critical, &ir.High); err != nil {
-			jsonError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		if ir.Tags == nil {
-			ir.Tags = []string{}
-		}
-		ir.Digests = map[string]string{}
-		_ = json.Unmarshal(digestsRaw, &ir.Digests)
-		out = append(out, ir)
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"images": out, "total": total, "limit": limit, "offset": offset})
 }
 
 // -----------------------------------------------------------------------------

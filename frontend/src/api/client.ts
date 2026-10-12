@@ -784,6 +784,9 @@ export interface DeploymentFinding {
 
 export interface DeploymentNetworkFlow {
   id: string;
+  cluster_id?: string;
+  src_platform_role?: string;
+  dst_platform_role?: string;
   src: string;
   dst: string;
   src_addr?: string;
@@ -4516,9 +4519,12 @@ export const connectorCoverage = {
     api.get<ScannerCacheData>(`/scanner-cache/${encodeURIComponent(scannerId)}/data`).then((r) => r.data),
 };
 
+export interface ScanJobInventoryParams extends ScanInventoryParams { cluster_id?: string; registry_id?: string; target_type?: string; status?: string }
+export interface ScanJobInventoryResponse extends ScanInventoryMetadata { jobs: ScanJob[]; queue_metrics?: ScanQueueMetric[]; limit?: number; offset?: number }
 export const scanJobs = {
-  list: (params?: { cluster_id?: string; target_type?: string; status?: string }) =>
-    api.get<{ jobs: ScanJob[]; queue_metrics?: ScanQueueMetric[] }>("/scan-jobs", { params }).then((r) => r.data),
+  list: (params?: ScanJobInventoryParams) =>
+    api.get<ScanJobInventoryResponse>("/scan-jobs", { params }).then((r) => r.data),
+  exportCSV: (params: ScanJobInventoryParams = {}) => downloadScanInventoryCSV("/scan-jobs.csv", params, "constellation-scan-jobs.csv"),
   enqueue: (body: { target_type: string; target_ref: string; platform?: string; target_cluster_id?: string; source_type?: string; source_ref?: string; max_attempts?: number }) =>
     api.post<{ id: string; status: string }>("/scan-jobs", body).then((r) => r.data),
   attempts: (id: string) =>
@@ -4548,6 +4554,7 @@ export interface ScanInventoryExportResult { total: number; exported: number; li
 async function downloadScanInventoryCSV(path: string, params: ScanInventoryParams, filename: string): Promise<ScanInventoryExportResult> {
   const filters = { ...params }; delete filters.limit; delete filters.offset;
   const response = await api.get<Blob>(path, { params: filters, responseType: "blob" });
+  if (!/^[0-9]+$/.test(String(response.headers["x-export-total"] ?? "")) || !/^[0-9]+$/.test(String(response.headers["x-export-limit"] ?? ""))) throw new Error("Export scope could not be confirmed.");
   const total = Number(response.headers["x-export-total"]), limit = Number(response.headers["x-export-limit"]);
   const truncated = response.headers["x-export-truncated"];
   if (!Number.isSafeInteger(total) || total < 0 || !Number.isSafeInteger(limit) || limit < 1 || !["true", "false"].includes(String(truncated)) || (truncated === "true") !== (total > limit)) throw new Error("Export scope could not be confirmed. Retry before treating the download as complete.");
@@ -5783,6 +5790,14 @@ export interface RegistryImageRow {
   high: number;
 }
 
+export interface RegistryImageParams {
+  q?: string; scan_status?: string; severity?: string; sort?: string; order?: "asc" | "desc"; limit?: number; offset?: number;
+}
+export interface RegistryImageResponse {
+  registry_id: string; images: RegistryImageRow[]; total: number; limit: number; offset: number; has_more: boolean; sort: string; order: "asc" | "desc";
+  summary: { total: number; scanned: number; unscanned: number; critical: number; high: number };
+}
+
 export interface RegistryTestResult {
   ok: boolean;
   images_visible?: number;
@@ -5836,8 +5851,16 @@ export const registries = {
   syncNow:(id: string) => api.post<RegistrySyncResult>(`/registries/${id}/sync-now`).then((r) => r.data),
   cancelScans: (id: string) =>
     api.post<RegistryCancelScansResult>(`/registries/${id}/cancel-scans`).then((r) => r.data),
-  images: (id: string, params: { q?: string; limit?: number; offset?: number } = {}) =>
-    api.get<{ images: RegistryImageRow[]; total: number; limit: number; offset: number }>(`/registries/${id}/images`, { params: { ...params, q: params.q || undefined } }).then((r) => r.data),
+  images: (id: string, params: RegistryImageParams = {}) =>
+    api.get<RegistryImageResponse>(`/registries/${encodeURIComponent(id)}/images`, { params }).then((r) => r.data),
+  imagesCSV: async (id: string, params: RegistryImageParams = {}) => {
+    const filters = { ...params }; delete filters.limit; delete filters.offset;
+    const response = await api.get<Blob>(`/registries/${encodeURIComponent(id)}/images.csv`, { params: filters, responseType: "blob" });
+    const total = Number(response.headers["x-export-total"]), limit = Number(response.headers["x-export-limit"]), truncated = response.headers["x-export-truncated"];
+    if (!/^\d+$/.test(String(response.headers["x-export-total"])) || !Number.isSafeInteger(total) || total < 0 || limit !== 100000 || !["true", "false"].includes(String(truncated)) || (truncated === "true") !== (total > limit)) throw new Error("Registry image export scope could not be confirmed.");
+    const blob = response.data instanceof Blob ? response.data : new Blob([response.data]); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = "constellation-registry-images.csv"; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
+    return { total, exported: Math.min(total, limit), limit, truncated: truncated === "true" };
+  },
 };
 
 // Wave N5 — Backup / Restore.

@@ -357,81 +357,8 @@ func (h *ScanJobs) loadScanTarget(ctx context.Context, tx pgx.Tx, id uuid.UUID) 
 	return handler.LoadScanTarget(ctx, h.db.Pool(), tx, id)
 }
 
-// List returns recent scan jobs for the calling org.
-func (h *ScanJobs) List(w http.ResponseWriter, r *http.Request) {
-	subj, _ := authctx.SubjectFrom(r.Context())
-	targetType := strings.TrimSpace(r.URL.Query().Get("target_type"))
-	status := strings.TrimSpace(r.URL.Query().Get("status"))
-	var clusterID *uuid.UUID
-	if raw := strings.TrimSpace(r.URL.Query().Get("cluster_id")); raw != "" {
-		parsed, err := uuid.Parse(raw)
-		if err != nil {
-			jsonError(w, http.StatusBadRequest, "invalid cluster_id")
-			return
-		}
-		clusterID = &parsed
-	}
-	if targetType != "" && !validScanTargetType(targetType) {
-		jsonError(w, http.StatusBadRequest, "unsupported target_type")
-		return
-	}
-	rows, err := h.db.Pool().Query(r.Context(), `
-SELECT sj.id, sj.org_id, st.id, st.type, st.ref, st.cluster_id,
-       st.source_type, COALESCE(st.source_ref, ''),
-       COALESCE(st.image_ref, ''),
-       COALESCE(st.platform, ''),
-       COALESCE(st.inventory_hash, ''),
-       st.registry_id, COALESCE(st.image_digest, ''), st.metadata,
-       COALESCE(sj.enqueue_reason,''), COALESCE(sj.registry_policy_hash,''), COALESCE(sj.vulndb_bundle_version,''),
-       sj.status, COALESCE(sj.worker_id,''), COALESCE(sj.error,''),
-       COALESCE(sj.attempt_count,0), COALESCE(sj.max_attempts,3),
-       COALESCE(sj.package_count,0), COALESCE(sj.finding_count,0),
-       sj.bundle_metadata, sj.requested_at, sj.claimed_at, sj.lease_expires_at,
-       sj.next_attempt_at, sj.last_attempt_at, sj.last_error_at, sj.finished_at
-  FROM scan_jobs sj
-  JOIN scan_targets st ON st.id = sj.target_id AND st.org_id = sj.org_id
- WHERE sj.org_id = $1
-   AND ($2 = '' OR st.type = $2)
-   AND ($3 = '' OR sj.status = $3)
-   AND ($4::uuid IS NULL OR st.cluster_id = $4)
- ORDER BY sj.requested_at DESC
- LIMIT 200`, subj.OrgID, targetType, status, clusterID)
-	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	defer rows.Close()
-	out := []JobView{}
-	for rows.Next() {
-		var j JobView
-		var bundleRaw, metadataRaw []byte
-		if err := rows.Scan(&j.ID, &j.OrgID, &j.TargetID, &j.TargetType, &j.TargetRef, &j.TargetClusterID,
-			&j.SourceType, &j.SourceRef, &j.ImageRef, &j.Platform, &j.InventoryHash,
-			&j.RegistryID, &j.ImageDigest, &metadataRaw, &j.EnqueueReason, &j.RegistryPolicyHash, &j.VulnDBBundleVersion,
-			&j.Status, &j.WorkerID, &j.Error, &j.AttemptCount, &j.MaxAttempts, &j.PackageCount, &j.FindingCount,
-			&bundleRaw,
-			&j.RequestedAt, &j.ClaimedAt, &j.LeaseExpiresAt, &j.NextAttemptAt, &j.LastAttemptAt, &j.LastErrorAt, &j.FinishedAt); err != nil {
-			jsonError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		if len(bundleRaw) > 0 {
-			var metadata scanner.BundleMetadata
-			if err := json.Unmarshal(bundleRaw, &metadata); err != nil {
-				jsonError(w, http.StatusInternalServerError, "invalid scan job bundle metadata")
-				return
-			}
-			j.BundleMetadata = &metadata
-		}
-		j.Metadata = handler.NormalizedJSONRaw(metadataRaw)
-		out = append(out, j)
-	}
-	metrics, err := handler.ScanQueueMetrics(r.Context(), h.db.Pool(), subj.OrgID)
-	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	httpx.WriteJSON(w, 200, map[string]any{"jobs": out, "queue_metrics": metrics})
-}
+// List returns the matching scan-job inventory for the calling organization.
+func (h *ScanJobs) List(w http.ResponseWriter, r *http.Request) { h.listInventory(w, r, false) }
 
 // Attempts returns the persisted per-attempt ledger for one scan job.
 func (h *ScanJobs) Attempts(w http.ResponseWriter, r *http.Request) {

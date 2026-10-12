@@ -14,7 +14,11 @@ When building or editing any page, conform to all of these.
 
 ## Progressive disclosure (verdict-first)
 - Every page answers its ONE question in the first screen: a `VerdictBanner` +
-  a stat row + the primary view. Everything else is behind tabs / drawers / `Collapse`.
+  a stat row + the primary view. The shared verdict is a compact, unboxed status
+  row; supporting explanation stays behind its Details control. Keep essential
+  action consequences and stale-edit instructions inline when needed. Do not
+  reintroduce large explanatory status panels (October 12 user correction).
+  Everything else is behind tabs / drawers / `Collapse`.
 - Keep pushing disclosure further everywhere — if a page shows everything at once, it's wrong.
 
 ## Tabs

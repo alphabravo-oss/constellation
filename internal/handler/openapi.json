@@ -8392,7 +8392,8 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Get deployments"
+        "summary": "Get deployments",
+        "description": " Embedded runtime_events include actual cluster_id and explicit platform_role; network_flows include actual cluster_id, src_platform_role and dst_platform_role. Exact tenant/cluster/ownership resolution leaves IP or ambiguous roles empty and rejects classification failures. Unknown deployment cluster does not match other clusters. Each embedded evidence list remains bounded at50 rows, ordered by timestamp then ID."
       }
     },
     "/api/v1/events": {
@@ -11807,13 +11808,14 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Get exposure"
+        "summary": "Get exposure",
+        "description": " Workload platform_role is always explicit: core or empty for evaluated unknown, including namespace-scoped IPs and ambiguous same-name workload kinds. Exact pod ownership and actual source cluster determine custom-install roles. Map rows sharing an identity across clusters cannot borrow one cluster\u2019s labels. Sessions, peers, protocols and ports aggregate from observed flows before MAX vulnerability enrichment, so duplicate workload kinds cannot multiply sessions. Up to50 rows per direction; this bounded exposure response has no continuation."
       }
     },
     "/api/v1/network/map": {
       "get": {
         "summary": "Cluster-scoped Network Traffic Map workloads and observed flow edges",
-        "description": " Read responses carry platform-role metadata resolved from exact organization/cluster/workload identity. Network map flows and recent entries use src_platform_role/dst_platform_role; threats and captures use platform_role. Unknown or ambiguous identities return an empty role string; older APIs may omit role fields. Classification does not change collection, detection or enforcement."
+        "description": " Read responses carry platform-role metadata resolved from exact organization/cluster/workload identity. Network map flows and recent entries use src_platform_role/dst_platform_role; threats and captures use platform_role. Unknown or ambiguous identities return an empty role string; older APIs may omit role fields. Classification does not change collection, detection or enforcement. Workload platform_role is always explicit: core or empty for evaluated unknown, including namespace-scoped IPs and ambiguous same-name workload kinds. Exact pod ownership and actual source cluster determine custom-install roles. Map rows sharing an identity across clusters cannot borrow one cluster\u2019s labels."
       }
     },
     "/api/v1/network/peers": {
@@ -12530,15 +12532,348 @@
     },
     "/api/v1/registries/{id}/images": {
       "get": {
+        "summary": "List matching registry repositories",
+        "description": "Discovered repositories owned by the selected registry. Literal case-insensitive repository search and server filters/sort apply before pagination. Latest scan correlation uses the exact repository across this organization, ordered by last_scanned_at DESC NULLS LAST then scan ID DESC; scan results are not registry-bound. Severity none requires a scanned repository without critical/high findings. Missing or foreign registry returns404. Count, summary and page share one read-only repeatable-read snapshot. Later page requests read current state. Invalid/out-of-range numeric pagination uses defaults. Summary critical/high values sum findings in the latest correlated scans; scanned/unscanned count repositories.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "scan_status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "scanned",
+                "unscanned"
+              ]
+            }
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "critical",
+                "high",
+                "none"
+              ]
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "repository",
+                "scanned",
+                "vulnerabilities",
+                "findings",
+                "last_scanned",
+                "last_seen"
+              ],
+              "default": "findings"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "minimum": 1,
+              "maximum": 500
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "minimum": 0
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Matching inventory",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "images": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "repository": {
+                            "type": "string"
+                          },
+                          "scanned": {
+                            "type": "boolean"
+                          },
+                          "tags": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "digests": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "repository",
+                          "scanned"
+                        ]
+                      }
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "summary": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "scanned": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "unscanned": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "critical": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "high": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "total",
+                        "scanned",
+                        "unscanned",
+                        "critical",
+                        "high"
+                      ]
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    },
+                    "limit": {
+                      "type": "integer"
+                    },
+                    "offset": {
+                      "type": "integer"
+                    },
+                    "sort": {
+                      "type": "string",
+                      "enum": [
+                        "repository",
+                        "scanned",
+                        "vulnerabilities",
+                        "findings",
+                        "last_scanned",
+                        "last_seen"
+                      ]
+                    },
+                    "order": {
+                      "type": "string",
+                      "enum": [
+                        "asc",
+                        "desc"
+                      ]
+                    },
+                    "registry_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  },
+                  "required": [
+                    "images",
+                    "total",
+                    "summary",
+                    "has_more",
+                    "limit",
+                    "offset",
+                    "sort",
+                    "order",
+                    "registry_id"
+                  ]
+                }
+              }
+            }
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
-        },
-        "summary": "Get images"
+        }
+      }
+    },
+    "/api/v1/registries/{id}/images.csv": {
+      "get": {
+        "summary": "Export matching registry repositories as CSV",
+        "description": "Discovered repositories owned by the selected registry. Literal case-insensitive repository search and server filters/sort apply before pagination. Latest scan correlation uses the exact repository across this organization, ordered by last_scanned_at DESC NULLS LAST then scan ID DESC; scan results are not registry-bound. Severity none requires a scanned repository without critical/high findings. Missing or foreign registry returns404. Count, summary and page share one read-only repeatable-read snapshot. Later page requests read current state. Invalid/out-of-range numeric pagination uses defaults. Exports the same matching scope/order across pages, ignoring limit/offset, up to100000 rows. Export headers report total, limit and truncation. Summary critical/high values sum findings in the latest correlated scans; scanned/unscanned count repositories.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "scan_status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "scanned",
+                "unscanned"
+              ]
+            }
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "critical",
+                "high",
+                "none"
+              ]
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "repository",
+                "scanned",
+                "vulnerabilities",
+                "findings",
+                "last_scanned",
+                "last_seen"
+              ],
+              "default": "findings"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CSV export",
+            "headers": {
+              "X-Export-Total": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-Export-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-Export-Truncated": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/api/v1/registries/{id}/sync-now": {
@@ -15663,10 +15998,399 @@
     },
     "/api/v1/scan-jobs": {
       "get": {
-        "summary": "List recent target-backed scan jobs"
+        "summary": "List matching scan jobs",
+        "description": "Organization-owned target-backed scan jobs. Literal case-insensitive search covers job ID, target reference/type, source type/reference, image reference, worker and error. Cluster/registry filters require owned scopes; missing or foreign scopes return404. Sorting uses job ID as stable final tie. Queue metrics retain full organization scope independently of inventory filters and are a separate current-state read. Count, summary and page share one read-only repeatable-read snapshot. Later page requests read current state. Invalid/out-of-range numeric pagination uses defaults. Omitted or empty limit defaults to200; invalid or out-of-range supplied limit defaults to100; invalid or negative offset defaults to0.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "registry_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "target_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "image",
+                "workload",
+                "host",
+                "platform",
+                "registry",
+                "repository",
+                "serverless"
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "running",
+                "paused",
+                "failed",
+                "completed",
+                "canceled"
+              ]
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "requested",
+                "target",
+                "type",
+                "status",
+                "attempts",
+                "findings",
+                "finished"
+              ],
+              "default": "requested"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 200,
+              "minimum": 1,
+              "maximum": 500
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching inventory",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "jobs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "target_ref": {
+                            "type": "string"
+                          },
+                          "target_type": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "requested_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "target_ref",
+                          "target_type",
+                          "status",
+                          "requested_at"
+                        ]
+                      }
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "summary": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "pending": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "running": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "paused": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "failed": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "completed": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "canceled": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "total",
+                        "pending",
+                        "running",
+                        "paused",
+                        "failed",
+                        "completed",
+                        "canceled"
+                      ]
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    },
+                    "limit": {
+                      "type": "integer"
+                    },
+                    "offset": {
+                      "type": "integer"
+                    },
+                    "sort": {
+                      "type": "string",
+                      "enum": [
+                        "requested",
+                        "target",
+                        "type",
+                        "status",
+                        "attempts",
+                        "findings",
+                        "finished"
+                      ]
+                    },
+                    "order": {
+                      "type": "string",
+                      "enum": [
+                        "asc",
+                        "desc"
+                      ]
+                    },
+                    "queue_metrics": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      },
+                      "description": "Full organization operational queue metrics; independent of inventory filtering."
+                    }
+                  },
+                  "required": [
+                    "jobs",
+                    "total",
+                    "summary",
+                    "has_more",
+                    "limit",
+                    "offset",
+                    "sort",
+                    "order",
+                    "queue_metrics"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       },
       "post": {
         "summary": "Queue a target-backed scan job"
+      }
+    },
+    "/api/v1/scan-jobs.csv": {
+      "get": {
+        "summary": "Export matching scan jobs as CSV",
+        "description": "Organization-owned target-backed scan jobs. Literal case-insensitive search covers job ID, target reference/type, source type/reference, image reference, worker and error. Cluster/registry filters require owned scopes; missing or foreign scopes return404. Sorting uses job ID as stable final tie. Queue metrics retain full organization scope independently of inventory filters and are a separate current-state read. Count, summary and page share one read-only repeatable-read snapshot. Later page requests read current state. Invalid/out-of-range numeric pagination uses defaults. Exports the same matching scope/order across pages, ignoring limit/offset, up to100000 rows. Export headers report total, limit and truncation. Omitted or empty limit defaults to200; invalid or out-of-range supplied limit defaults to100; invalid or negative offset defaults to0.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "registry_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "target_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "image",
+                "workload",
+                "host",
+                "platform",
+                "registry",
+                "repository",
+                "serverless"
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "running",
+                "paused",
+                "failed",
+                "completed",
+                "canceled"
+              ]
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "requested",
+                "target",
+                "type",
+                "status",
+                "attempts",
+                "findings",
+                "finished"
+              ],
+              "default": "requested"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CSV export",
+            "headers": {
+              "X-Export-Total": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-Export-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-Export-Truncated": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/api/v1/scan-jobs/claim": {

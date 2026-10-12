@@ -1297,6 +1297,7 @@ func (s *Server) buildRouter() chi.Router {
 			r.Post("/registries/{id}/sync-now", s.requireVerb(rbac.VerbManageRegistries, registries.SyncNow))
 			r.Post("/registries/{id}/cancel-scans", s.requireVerb(rbac.VerbManageRegistries, registries.CancelActiveScans))
 			r.Get("/registries/{id}/images", s.requireVerb(rbac.VerbReadFindings, registries.Images))
+			r.Get("/registries/{id}/images.csv", s.requireVerb(rbac.VerbReadFindings, registries.ImagesCSV))
 
 			// User-facing scan-job endpoints.
 			jobs := scanning.NewScanJobs(s.db, s.auditLog)
@@ -1308,6 +1309,7 @@ func (s *Server) buildRouter() chi.Router {
 			// trigger routes below. A read-only auditor must not be able to drive it.
 			r.Post("/scan-jobs", s.requireVerb(rbac.VerbManagePolicies, jobs.Enqueue))
 			r.Get("/scan-jobs", s.requireVerb(rbac.VerbReadFindings, jobs.List))
+			r.Get("/scan-jobs.csv", s.requireVerb(rbac.VerbReadFindings, jobs.ExportCSV))
 			r.Get("/scan-jobs/{id}/attempts", s.requireVerb(rbac.VerbReadFindings, jobs.Attempts))
 			r.Get("/scan-targets/{id}/impacted-workloads", s.requireVerb(rbac.VerbReadFindings, jobs.ImpactedWorkloads))
 			r.Get("/scan/status", s.requireVerb(rbac.VerbReadFindings, jobs.Status))

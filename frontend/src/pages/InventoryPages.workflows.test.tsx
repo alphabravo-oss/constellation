@@ -16,7 +16,7 @@ import { FederationPage } from "./FederationPage";
 import { ConnectorCoveragePage } from "./ConnectorCoveragePage";
 const scope = vi.hoisted(() => ({ id: "cluster", resolved: "cluster", loading: false, error: null as Error | null }));
 vi.mock("@/hooks/useCluster", () => ({ useCluster: () => ({ clusterId: scope.id, cluster: scope.resolved ? { id: scope.resolved } : undefined, isLoading: scope.loading, error: scope.error }) }));
-vi.mock("@/api/client", () => ({ imageScanResults: { list: vi.fn(), exportCSV: vi.fn() }, repositoryScans: { list: vi.fn(), exportCSV: vi.fn(), attestations: vi.fn() }, repositoryScanAttestations: { verifications: vi.fn() }, serverlessFunctions: { list: vi.fn(), exportCSV: vi.fn() }, containers: { list: vi.fn(), exportCSV: vi.fn() }, federation: { state: vi.fn(), members: vi.fn(), transition: vi.fn() }, connectorCoverage: { overview: vi.fn(), testPreview: vi.fn(), testConfig: vi.fn(), cacheStat: vi.fn(), cacheData: vi.fn() }, scanJobs: { list: vi.fn() }, scanJobsAdmin: { pause: vi.fn(), resume: vi.fn(), retry: vi.fn(), cancel: vi.fn() } }));
+vi.mock("@/api/client", () => ({ imageScanResults: { list: vi.fn(), exportCSV: vi.fn() }, repositoryScans: { list: vi.fn(), exportCSV: vi.fn(), attestations: vi.fn() }, repositoryScanAttestations: { verifications: vi.fn() }, serverlessFunctions: { list: vi.fn(), exportCSV: vi.fn() }, containers: { list: vi.fn(), exportCSV: vi.fn() }, federation: { state: vi.fn(), members: vi.fn(), transition: vi.fn() }, connectorCoverage: { overview: vi.fn(), testPreview: vi.fn(), testConfig: vi.fn(), cacheStat: vi.fn(), cacheData: vi.fn() }, scanJobs: { list: vi.fn(), exportCSV: vi.fn() }, scanJobsAdmin: { pause: vi.fn(), resume: vi.fn(), retry: vi.fn(), cancel: vi.fn() } }));
 vi.mock("@/lib/csv", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/csv")>(), downloadCsv: vi.fn() }));
 type Kind = "image" | "repository" | "serverless" | "containers" | "federation" | "connectors";
 const scans = ["image", "repository", "serverless"] as const;
@@ -42,7 +42,7 @@ beforeEach(() => {
  vi.mocked(serverlessFunctions.list).mockImplementation(async params => ({ serverless_functions: loaded(params?.offset, params?.limit).map(fn), ...metadata(params) }));
  vi.mocked(containers.list).mockResolvedValue({ cluster_id: "cluster", total: 1, limit:100,offset:0,has_more:false,sort:"risk",order:"desc",summary: { total: 1, running: 1, privileged: 0, run_as_root: 0,platform_count:0 }, items: [{ row_id:"row-container",id: "container", name: "Confirmed container", node: "node", namespace: "prod", pod_name: "pod", image: "image", state: "running", privileged: false, run_as_root: false, risk_score: 0, critical: 0, high: 0, observed_at: "2026-10-12T00:00:00Z" }] });
  vi.mocked(federation.state).mockResolvedValue({ state: "standalone", revision: 4 }); vi.mocked(federation.members).mockResolvedValue({ members: [{ id: "member", cluster_id: "cluster", name: "Confirmed member", role: "joint", endpoint: "endpoint", status: "connected", revision: 4 }] });
- vi.mocked(connectorCoverage.overview).mockResolvedValue(coverage()); vi.mocked(scanJobs.list).mockResolvedValue({ jobs: [] });
+ vi.mocked(connectorCoverage.overview).mockResolvedValue(coverage()); vi.mocked(scanJobs.list).mockImplementation(async params => ({ jobs: [], total: 0, limit: 100, offset: params?.offset ?? 0, has_more: false, sort: params?.sort ?? "requested", order: params?.order ?? "desc", summary: { total: 0, pending: 0, running: 0, paused: 0, completed: 0, failed: 0, canceled: 0 } }));
  for (const api of [imageScanResults, repositoryScans, serverlessFunctions]) vi.mocked(api.exportCSV).mockResolvedValue({ total: 800, exported: 800, limit: 100000, truncated: false });
  client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }); host = document.createElement("div"); document.body.append(host); root = createRoot(host);
 });
@@ -121,3 +121,8 @@ it.each(scans)("%s retains successful scoped evidence during a deferred refresh"
  await act(async () => resolve(previous as Awaited<ReturnType<typeof imageScanResults.list>>)); await ready(kind);
 });
 it.each(scans)("%s rejects unsupported URL sort before requesting misleading results", async kind => { await render(kind, "?sort=unknown&context=keep"); expect(list(kind)).not.toHaveBeenCalled(); expect(host.textContent).toContain("server filter or sort is invalid"); await act(async () => button("Reset filters and sort").click()); await ready(kind); expect(history.location.search).toContain("context=keep"); });
+
+it("connector scan jobs opens the canonical empty ledger with verified counts rather than overview cards", async () => {
+ const data = coverage(); data.recent_jobs = [{ id: "old-job", target_ref: "Old summary job", status: "running" }] as ConnectorCoverageOverview["recent_jobs"]; vi.mocked(connectorCoverage.overview).mockResolvedValue(data);
+ await render("connectors", "?tab=scan-jobs"); await settle(() => expect(host.textContent).toContain("0 matching jobs")); expect(host.querySelector('[data-testid="scan-jobs-table"]')).not.toBeNull(); expect(host.textContent).toContain("No scan jobs match these filters or page"); expect(host.textContent).not.toContain("Old summary job"); expect(host.querySelector('[aria-label="Search scan jobs"]')).not.toBeNull();
+});

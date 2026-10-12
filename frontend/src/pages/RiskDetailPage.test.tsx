@@ -157,3 +157,14 @@ it("shows capped export pending and failure feedback without dropping filters", 
   await act(async () => fail(new Error("download failed")));
   await settled(() => expect(host.textContent).toContain("Could not export asset finding records")); expect(button("Export matching records (up to 10,000)").disabled).toBe(false); expect(history.location.search).toBe("?tab=findings");
 });
+
+it("keeps embedded flow endpoint roles in risk network CSV",async()=>{
+ const d=deployment();d.network_flows=[{...d.network_flows[0],cluster_id:"cluster",src_platform_role:"core",dst_platform_role:""}];vi.mocked(deployments.get).mockResolvedValue(d);await render("deployment","deployment","?tab=network");await settled(()=>expect(host.textContent).toContain("Not classified"));expect(host.textContent).toContain("From role");expect(host.textContent).toContain("To role");await act(async()=>host.querySelector<HTMLButtonElement>('[data-testid="risk-network-tab"] [aria-label="Export CSV"]')!.click());const [,headers,rows]=vi.mocked(downloadCsv).mock.calls.at(-1)!;expect(headers).toContain("src_platform_role");expect(headers).toContain("dst_platform_role");expect(rows[0][headers.indexOf("src_platform_role")]).toBe("core");expect(rows[0][headers.indexOf("dst_platform_role")]).toBe("");
+});
+it("keeps embedded runtime cluster and role in risk process CSV",async()=>{
+ const d=deployment();d.runtime_events=[{...d.runtime_events[0],cluster_id:"cluster",platform_role:"core"}];vi.mocked(deployments.get).mockResolvedValue(d);await render("deployment","deployment","?tab=process");await settled(()=>expect(host.textContent).toContain("Platform role"));const table=[...host.querySelectorAll('[data-testid="risk-process-tab"] table')].find(item=>item.textContent?.includes("Platform role"))!;expect(table.textContent).toContain("core");expect(table.textContent).toContain("cluster");await act(async()=>table.closest('.app-data-table')!.querySelector<HTMLButtonElement>('[aria-label="Export CSV"]')!.click());const [,headers,rows]=vi.mocked(downloadCsv).mock.calls.at(-1)!;expect(rows[0][headers.indexOf("platform_role")]).toBe("core");expect(rows[0][headers.indexOf("cluster_id")]).toBe("cluster");
+});
+
+it.each(["network","process"])("withholds foreign embedded deployment evidence in risk%s",async kind=>{
+ const d=deployment();d.network_flows=[{...d.network_flows[0],cluster_id:"foreign",src:"private/source"}];d.runtime_events=[{...d.runtime_events[0],cluster_id:"foreign",workload_id:"private/workload"}];vi.mocked(deployments.get).mockResolvedValue(d);await render("deployment","deployment",`?tab=${kind}`);await settled(()=>expect(host.textContent).toContain(`Embedded ${kind==="network"?"network flows":"runtime events"} do not match this cluster`));expect(host.textContent).not.toContain(kind==="network"?"private/source":"private/workload");expect(downloadCsv).not.toHaveBeenCalled();
+});

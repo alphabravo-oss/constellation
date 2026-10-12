@@ -3,12 +3,13 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, expect, it, vi } from "vitest";
 import { scanJobs, scannerOperations, systemConfigApi, systemHealth } from "@/api/client";
+import { TablePreferencesProvider } from "@/contexts/TablePreferencesContext";
 import { ScannerSourcesPage } from "./ScannerSourcesPage";
 
 const route = vi.hoisted(() => ({ tab: "jobs" }));
 vi.mock("@/lib/route-search", () => ({ useRouteSearchParams: () => [new URLSearchParams({ tab: route.tab }), vi.fn()] }));
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn(), Link: ({ children }: { children: ReactNode }) => <span>{children}</span> }));
-vi.mock("@/api/client", () => ({ scanJobs: { list: vi.fn(), attempts: vi.fn() }, scanJobsAdmin: {}, scannerOperations: { status: vi.fn(), workers: vi.fn(), cacheStat: vi.fn() }, systemConfigApi: { get: vi.fn() }, systemHealth: { overview: vi.fn() } }));
+vi.mock("@/api/client", () => ({ scanJobs: { list: vi.fn(), attempts: vi.fn(), exportCSV: vi.fn() }, scanJobsAdmin: {}, scannerOperations: { status: vi.fn(), workers: vi.fn(), cacheStat: vi.fn() }, systemConfigApi: { get: vi.fn() }, systemHealth: { overview: vi.fn() } }));
 
 let root: Root;
 let host: HTMLDivElement;
@@ -21,10 +22,10 @@ async function renderPage(failed = false) {
   vi.mocked(scannerOperations.status).mockResolvedValue({ scanned: 2, scheduled: 0, scanning: 0, failed: 0 } as Awaited<ReturnType<typeof scannerOperations.status>>);
   vi.mocked(scannerOperations.workers).mockResolvedValue([]);
   if (failed) vi.mocked(scanJobs.list).mockRejectedValue(new Error("unavailable"));
-  else vi.mocked(scanJobs.list).mockResolvedValue({ jobs: [], queue_metrics: [] });
+  else vi.mocked(scanJobs.list).mockResolvedValue({ jobs: [], queue_metrics: [], total: 0, summary: {total:0,pending:0,running:0,paused:0,failed:0,completed:0,canceled:0}, limit:100, offset:0, sort:"requested", order:"desc", has_more:false });
   host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  await act(async () => root.render(<QueryClientProvider client={client}><ScannerSourcesPage /></QueryClientProvider>));
+  await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{org_id:"org-a",user_id:"user-a"}}><ScannerSourcesPage /></TablePreferencesProvider></QueryClientProvider>));
   await vi.waitFor(async () => {
     await act(async () => {});
     expect(host.textContent).toContain(failed ? "Some scanner status could not be loaded" : "No scanner workers reported");

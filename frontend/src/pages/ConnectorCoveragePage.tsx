@@ -2,11 +2,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import { Database, Pause, Pencil, Play, Plus, RotateCcw, ShieldQuestion, XCircle } from "lucide-react";
+import { Database, Pencil, Plus, ShieldQuestion } from "lucide-react";
 import { toast } from "sonner";
 
-import { connectorCoverage, scanJobs, scanJobsAdmin } from "@/api/client";
-import type { ConnectorCoverageOverview, ScanJob } from "@/api/client";
+import { connectorCoverage } from "@/api/client";
+import type { ConnectorCoverageOverview } from "@/api/client";
 import { PageHeader, PageContainer } from "@/components/ui/page";
 import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { DataTable, type Column } from "@/components/ui/data-table";
@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { ErrorState, LoadingState } from "@/components/ui/states";
 import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
 import { useRouteSearchParams } from "@/lib/route-search";
+import { ScanJobsInventory } from "./ScanJobsInventory";
 
 type CloudConnector = ConnectorCoverageOverview["cloud_connectors"][number];
 
@@ -38,15 +39,12 @@ const cloudColumns: Column<CloudConnector>[] = [
   { id: "status", exportValue: c => c.status, header: "Status", kind: "status", cell: (c) => <Status value={c.status} /> },
 ];
 
-type ScanJobAction = "pause" | "resume" | "retry" | "cancel";
-
 export function ConnectorCoveragePage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const identity = useTablePreferencesIdentity();
   const owner = `${identity?.org_id}:${identity?.user_id}`;
   const q = useQuery({ queryKey: ["connector-coverage", owner], queryFn: connectorCoverage.overview });
-  const jobs = useQuery({ queryKey: ["scan-jobs", owner], queryFn: () => scanJobs.list() });
   const [tab, setTab] = useTabParam("tab", "registries");
   const [params, setParams] = useRouteSearchParams();
   const cacheScannerID = params.get("scanner") ?? "";
@@ -65,7 +63,6 @@ export function ConnectorCoveragePage() {
 
   const cacheRecords = !cacheData.isError && !cacheData.isFetching && cacheData.data?.scanner_id === cacheScannerID ? cacheData.data : undefined;
   const invalidateCoverage = () => queryClient.invalidateQueries({ queryKey: ["connector-coverage", owner] });
-  const invalidateJobs = () => queryClient.invalidateQueries({ queryKey: ["scan-jobs", owner] });
 
   const preview = useMutation({ mutationFn: ({ id, type }: { id: string; type: string }) => connectorCoverage.testPreview(id, type) });
   const testConfig = useMutation({
@@ -76,15 +73,6 @@ export function ConnectorCoveragePage() {
     },
     onError: () => toast.error("Unable to test connector"),
   });
-  const lifecycle = useMutation({
-    mutationFn: ({ action, id }: { action: ScanJobAction; id: string }) => scanJobAction(action, id),
-    onSuccess: (_result, variables) => {
-      toast.success(scanJobActionLabel(variables.action));
-      void invalidateJobs();
-      void invalidateCoverage();
-    },
-    onError: (_error, variables) => toast.error(`Unable to ${variables.action} scan job`),
-  });
 
   if (q.isPending || q.isError || q.isFetching || !q.data) return <PageContainer><PageHeader title="Registry & Cloud Connectors" description="Organization-wide connector coverage and scan evidence." />{q.isError ? <ErrorState title="Connector coverage is unavailable or could not be refreshed." action={<Button onClick={() => void q.refetch()}>Retry coverage</Button>} /> : <LoadingState label="Loading connector coverage…" />}</PageContainer>;
 
@@ -93,7 +81,6 @@ export function ConnectorCoveragePage() {
   const registryConnectors = data?.registry_connectors ?? [];
   const cloudConnectors = data?.cloud_connectors ?? [];
   const configs = data?.configs ?? [];
-  const jobList = jobs.isError || jobs.isFetching || jobs.isPending ? [] : jobs.data?.jobs ?? [];
 
   // Verdict: is every connector ready and everything scanned?
   const registriesReady = (summary?.registry_connectors_ready ?? 0) >= (summary?.registry_connectors_total ?? 0);
@@ -268,7 +255,6 @@ export function ConnectorCoveragePage() {
     {
       value: "scan-jobs",
       label: "Scan jobs",
-      count: jobList.length,
       content: (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
@@ -276,18 +262,7 @@ export function ConnectorCoveragePage() {
             {addButton("Queue scan", () => navigate({ href: "/settings/connectors/scan/new" }))}
           </div>
 
-          <section className="space-y-2" data-testid="recent-scan-jobs">
-            {jobs.isError ? <ErrorState title="Scan jobs are unavailable or could not be refreshed." action={<Button onClick={() => void jobs.refetch()}>Retry scan jobs</Button>} /> : jobs.isPending || jobs.isFetching ? <LoadingState label="Loading scan jobs…" /> : null}
-            {jobList.map((job) => (
-              <ScanJobCard
-                key={job.id}
-                job={job}
-                busy={lifecycle.isPending}
-                onAction={(action) => { const current = queryClient.getQueryState<{ jobs: ScanJob[] }>(["scan-jobs", owner]); const latest = current?.data?.jobs.find(item => item.id === job.id); if (current?.status === "success" && current.fetchStatus === "idle" && latest && scanJobActions(latest.status).includes(action)) lifecycle.mutate({ action, id: job.id }); }}
-              />
-            ))}
-            {!jobs.isError && !jobs.isPending && !jobs.isFetching && jobList.length === 0 && <p className="text-xs text-muted-foreground">No scan jobs. Use “Queue scan” to enqueue one.</p>}
-          </section>
+          <ScanJobsInventory />
 
           <Collapse label="Coverage gaps by scope">
             <section className="grid gap-3 lg:grid-cols-3" data-testid="scan-coverage">
@@ -458,7 +433,6 @@ export function ConnectorCoveragePage() {
       <p className="text-xs text-muted-foreground">Organization-wide connector coverage. Registry and cloud evidence is shared across cluster navigation.</p>
       {preview.isError && <ErrorState title="The connector preview failed. Try Test connection again." />}
       {testConfig.isError && <ErrorState title="The saved connector test failed. Retry after reviewing the configuration." />}
-      {lifecycle.isError && <ErrorState title="The scan job action failed. Refresh jobs and retry." />}
       <VerdictBanner status={verdictStatus} title={verdictTitle} detail={verdictDetail} />
 
       <StatGrid>
@@ -475,49 +449,6 @@ export function ConnectorCoveragePage() {
 }
 
 
-
-function ScanJobCard({ job, busy, onAction }: { job: ScanJob; busy: boolean; onAction: (action: ScanJobAction) => void }) {
-  const actions = scanJobActions(job.status);
-  return (
-    <article className="rounded-md bg-muted p-3 text-xs" data-testid="scan-job-card">
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="rounded-sm bg-background px-1.5 py-0.5 font-mono text-[10px]">{job.target_type}</span>
-            {job.source_type ? <span className="rounded-sm bg-background px-1.5 py-0.5 text-[10px]">{job.source_type}</span> : null}
-          </div>
-          <div className="mt-1 truncate font-mono" title={job.target_ref}>{job.target_ref}</div>
-        </div>
-        <Status value={job.status} />
-      </div>
-      <div className="mt-1 text-muted-foreground">
-        attempt {job.attempt_count}/{job.max_attempts}
-        {job.worker_id ? ` · worker ${job.worker_id}` : ""}
-        {job.lease_expires_at && job.status === "running" ? ` · lease ${formatDateTime(job.lease_expires_at)}` : ""}
-        {job.next_attempt_at ? ` · retry ${formatDateTime(job.next_attempt_at)}` : ""}
-        {job.finished_at ? ` · finished ${formatDateTime(job.finished_at)}` : ""}
-        {job.error ? ` · ${job.error}` : ""}
-      </div>
-      {actions.length > 0 ? (
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {actions.map((action) => (
-            <button
-              key={action}
-              type="button"
-              className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-[10px] hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={busy}
-              onClick={() => onAction(action)}
-              data-testid={`scan-job-${action}`}
-            >
-              {scanJobActionIcon(action)}
-              {scanJobActionText(action)}
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </article>
-  );
-}
 
 function Info({ label, value }: { label: string; value: string }) {
   return (
@@ -555,74 +486,6 @@ function formatBytes(bytes?: number) {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GiB`;
-}
-
-function scanJobActions(status: string): ScanJobAction[] {
-  switch (status) {
-    case "pending":
-      return ["pause", "cancel"];
-    case "paused":
-      return ["resume", "cancel"];
-    case "running":
-      return ["cancel"];
-    case "failed":
-    case "canceled":
-      return ["retry"];
-    default:
-      return [];
-  }
-}
-
-function scanJobAction(action: ScanJobAction, id: string) {
-  switch (action) {
-    case "pause":
-      return scanJobsAdmin.pause(id);
-    case "resume":
-      return scanJobsAdmin.resume(id);
-    case "retry":
-      return scanJobsAdmin.retry(id);
-    case "cancel":
-      return scanJobsAdmin.cancel(id);
-  }
-}
-
-function scanJobActionText(action: ScanJobAction) {
-  switch (action) {
-    case "pause":
-      return "Pause";
-    case "resume":
-      return "Resume";
-    case "retry":
-      return "Retry";
-    case "cancel":
-      return "Cancel";
-  }
-}
-
-function scanJobActionLabel(action: ScanJobAction) {
-  switch (action) {
-    case "pause":
-      return "Scan job paused";
-    case "resume":
-      return "Scan job resumed";
-    case "retry":
-      return "Scan job requeued";
-    case "cancel":
-      return "Scan job canceled";
-  }
-}
-
-function scanJobActionIcon(action: ScanJobAction) {
-  switch (action) {
-    case "pause":
-      return <Pause className="h-3 w-3" aria-hidden />;
-    case "resume":
-      return <Play className="h-3 w-3" aria-hidden />;
-    case "retry":
-      return <RotateCcw className="h-3 w-3" aria-hidden />;
-    case "cancel":
-      return <XCircle className="h-3 w-3" aria-hidden />;
-  }
 }
 
 function scannerCacheSummary(cacheHealth?: Record<string, { configured?: boolean; writable?: boolean; status?: string; error?: string }>) {

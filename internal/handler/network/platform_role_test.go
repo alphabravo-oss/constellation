@@ -53,8 +53,8 @@ func TestNetworkMapPlatformRole(t *testing.T) {
 				t.Fatalf("custom install not classified: %#v", workload)
 			}
 		case "payments":
-			if _, ok := workload["platform_role"]; ok {
-				t.Fatalf("customer workload classified: %#v", workload)
+			if workload["platform_role"] != "" {
+				t.Fatalf("customer workload must remain explicitly unclassified: %#v", workload)
 			}
 		default:
 			t.Fatalf("unexpected workload: %#v", workload)

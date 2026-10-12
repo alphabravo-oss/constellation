@@ -3,17 +3,30 @@ import { createRoot, type Root } from "react-dom/client";
 import { createMemoryHistory, type RouterHistory } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { scanJobs, scannerOperations, systemConfigApi, systemHealth, type ScanJob, type ScanJobAttempt, type SystemConfigResponse } from "@/api/client";
+import { scanJobs, scanJobsAdmin, scannerOperations, systemConfigApi, systemHealth, type ScanJob, type ScanJobAttempt, type ScanJobInventoryParams, type SystemConfigResponse } from "@/api/client";
 import { TablePreferencesProvider } from "@/contexts/TablePreferencesContext";
 import { TestRouter } from "@/test/router";
 import { ScannerDatabaseSettingsFormPage, ScannerSourcesPage } from "./ScannerSourcesPage";
 
-vi.mock("@/api/client", () => ({ scanJobs: { list: vi.fn(), attempts: vi.fn() }, scanJobsAdmin: { pause: vi.fn(), resume: vi.fn(), retry: vi.fn(), cancel: vi.fn() }, scannerOperations: { status: vi.fn(), workers: vi.fn(), cacheStat: vi.fn() }, systemConfigApi: { get: vi.fn(), patch: vi.fn(), refreshScanner: vi.fn() }, systemHealth: { overview: vi.fn() } }));
+vi.mock("@/api/client", () => ({ scanJobs: { list: vi.fn(), attempts: vi.fn(), exportCSV: vi.fn() }, scanJobsAdmin: { pause: vi.fn(), resume: vi.fn(), retry: vi.fn(), cancel: vi.fn() }, scannerOperations: { status: vi.fn(), workers: vi.fn(), cacheStat: vi.fn() }, systemConfigApi: { get: vi.fn(), patch: vi.fn(), refreshScanner: vi.fn() }, systemHealth: { overview: vi.fn() } }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 let host: HTMLDivElement; let root: Root; let client: QueryClient; let history: RouterHistory;
 const settings = (revision = 4, minutes = 360): SystemConfigResponse => ({ revision, config: { scanner_db_refresh_minutes: minutes, nvd_enabled: true, arbitrary_setting: "preserve" } });
 const job = (id = "job-a"): ScanJob => ({ id, target_id: `target-${id}`, target_type: "image", target_ref: `registry.test/${id}:latest`, status: "failed", attempt_count: 2, max_attempts: 3, requested_at: "2026-10-12T08:00:00Z" });
 const attempt = (job_id = "job-a"): ScanJobAttempt => ({ id: `attempt-${job_id}`, job_id, attempt_number: 2, status: "failed", worker_id: "worker-with-full-identity", started_at: "2026-10-12T08:01:00Z", next_attempt_at: "2026-10-12T08:05:00Z", error: "Scanner could not fetch package metadata" });
+function inventory(jobs: ScanJob[] = [job()], request: ScanJobInventoryParams = {}, matching: ScanJob[] = jobs) {
+  const total = matching.length;
+  const summary = { total, pending: 0, running: 0, paused: 0, completed: 0, failed: 0, canceled: 0 };
+  for (const item of matching) summary[item.status as keyof typeof summary]++;
+  return { jobs, queue_metrics: [], total, summary, limit: request.limit ?? 100, offset: request.offset ?? 0, sort: request.sort ?? "requested", order: request.order ?? "desc", has_more: (request.offset ?? 0) + jobs.length < total };
+}
+function serverJobs(rows: ScanJob[]) {
+  vi.mocked(scanJobs.list).mockImplementation(async (request = {}) => {
+    let matching = rows.filter(row => (!request.status || row.status === request.status) && (!request.target_type || row.target_type === request.target_type) && (!request.cluster_id || row.target_cluster_id === request.cluster_id) && (!request.registry_id || row.registry_id === request.registry_id) && (!request.q || [row.id,row.target_ref,row.target_type,row.source_type,row.source_ref,row.worker_id,row.error].join(" ").toLowerCase().includes(request.q.toLowerCase())));
+    if (request.sort === "target") matching = [...matching].sort((a,b) => a.target_ref.localeCompare(b.target_ref) * (request.order === "asc" ? 1 : -1));
+    return inventory(matching.slice(request.offset ?? 0, (request.offset ?? 0) + (request.limit ?? 100)), request, matching);
+  });
+}
 function deferred<T>() { let resolve!: (value: T) => void; let reject!: (reason: unknown) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -22,7 +35,9 @@ beforeEach(() => {
   vi.mocked(systemHealth.overview).mockResolvedValue({ heartbeats: [] } as unknown as Awaited<ReturnType<typeof systemHealth.overview>>);
   vi.mocked(scannerOperations.status).mockResolvedValue({ scanned: 2, scheduled: 0, scanning: 0, failed: 1 } as Awaited<ReturnType<typeof scannerOperations.status>>);
   vi.mocked(scannerOperations.workers).mockResolvedValue([]);
-  vi.mocked(scanJobs.list).mockResolvedValue({ jobs: [job()], queue_metrics: [] });
+  vi.mocked(scanJobs.list).mockImplementation(async request => inventory([job()], request));
+  vi.mocked(scanJobsAdmin.retry).mockResolvedValue({ status: "pending" });
+  vi.mocked(scanJobs.exportCSV).mockResolvedValue({ total: 1, limit: 100000, exported: 1, truncated: false });
   vi.mocked(scanJobs.attempts).mockResolvedValue([attempt()]);
 });
 afterEach(() => { act(() => root?.unmount()); client?.clear(); host?.remove(); vi.resetAllMocks(); vi.unstubAllGlobals(); });
@@ -93,7 +108,7 @@ it("uses the shared sortable attempt ledger with complete error and distinct ret
 });
 it("keeps the current ledger during a deferred refresh then hides it after failure", async () => {
   await render("list"); await openJob(); await settled(() => expect(document.querySelector('[data-testid="scanner-job-attempts"]')).not.toBeNull()); const read = deferred<ScanJobAttempt[]>(); vi.mocked(scanJobs.attempts).mockReturnValue(read.promise);
-  await act(async () => { void client.refetchQueries({ queryKey: ["scan-job-attempts", "job-a"] }); }); await settled(() => expect(document.body.textContent).toContain("Refreshing attempts")); expect(document.querySelector('[data-testid="scanner-job-attempts"]')).not.toBeNull();
+  await act(async () => { void client.refetchQueries({ queryKey: ["scan-job-attempts", "org-a:user-a", "job-a"] }); }); await settled(() => expect(document.body.textContent).toContain("Refreshing attempts")); expect(document.querySelector('[data-testid="scanner-job-attempts"]')).not.toBeNull();
   await act(async () => read.reject(new Error("ledger failed"))); await settled(() => expect(document.body.textContent).toContain("Attempt history is unavailable")); expect(document.querySelector('[data-testid="scanner-job-attempts"]')).toBeNull(); expect(document.body.textContent).not.toContain("No attempt ledger recorded");
 });
 it("rejects another job's attempt ledger and permits Retry for the selected job", async () => {
@@ -102,4 +117,101 @@ it("rejects another job's attempt ledger and permits Retry for the selected job"
 });
 it("hides failed cached jobs instead of presenting successful empty inventory", async () => {
   await render("list"); await settled(() => expect(host.textContent).toContain("registry.test/job-a:latest")); vi.mocked(scanJobs.list).mockRejectedValue(new Error("refresh failed")); await act(async () => { await client.refetchQueries({ queryKey: ["scan-jobs", "scanner-sources"] }); }); await settled(() => expect(host.textContent).toContain("Scan jobs could not be loaded")); expect(host.textContent).not.toContain("registry.test/job-a:latest"); expect(host.textContent).not.toContain("No scan jobs match this view");
+});
+
+it("continues beyond 200 jobs using URL server pages and restores them with Back", async () => {
+  serverJobs(Array.from({length:305},(_,index)=>job(`job-${index+1}`)));
+  await render("list"); await settled(()=>expect(host.textContent).toContain("305 matching jobs"));
+  expect(host.querySelectorAll('[data-testid="scanner-recent-jobs"] tbody tr')).toHaveLength(100);
+  await click("Next"); await settled(()=>expect(scanJobs.list).toHaveBeenLastCalledWith(expect.objectContaining({limit:100,offset:100})));
+  await settled(()=>expect(host.textContent).toContain("registry.test/job-101:latest"));
+  await click("Next"); await settled(()=>expect(host.textContent).toContain("registry.test/job-201:latest"));
+  expect(history.location.href).toContain("page=3");
+  await act(async()=>history.back()); await settled(()=>expect(host.textContent).toContain("registry.test/job-101:latest"));
+  expect(history.location.href).toContain("page=2");
+});
+it("sends literal search and server status/type sorting while preserving tab and history", async () => {
+  const needle={...job("late"),target_ref:"registry.test/%_needle:latest"};serverJobs([...Array.from({length:250},(_,index)=>job(`job-${index}`)),needle]);
+  await render("list","/settings/scanner?tab=jobs&page=3&context=keep");
+  await settled(()=>expect(host.querySelector<HTMLInputElement>('[aria-label="Search scan jobs"]')).not.toBeNull());
+  const search=host.querySelector<HTMLInputElement>('[aria-label="Search scan jobs"]')!;
+  await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")!.set!.call(search,"%_needle");search.dispatchEvent(new Event("input",{bubbles:true}));});
+  await settled(()=>expect(host.textContent).toContain("1 matching jobs"));
+  expect(scanJobs.list).toHaveBeenLastCalledWith(expect.objectContaining({q:"%_needle",offset:0}));
+  expect(history.location.href).toContain("context=keep");expect(history.location.href).toContain("tab=jobs");expect(history.location.href).not.toContain("page=");
+  await click("failed");await settled(()=>expect(scanJobs.list).toHaveBeenLastCalledWith(expect.objectContaining({status:"failed",q:"%_needle"})));
+  const table=host.querySelector('[data-testid="scanner-recent-jobs"]')!;
+  await act(async()=>[...table.querySelectorAll<HTMLButtonElement>('th[data-column-id="target"] button')].find(button=>button.textContent==="Target")!.click());
+  await settled(()=>expect(scanJobs.list).toHaveBeenLastCalledWith(expect.objectContaining({sort:"target",order:"desc"})));
+  expect(table.querySelector('th[data-column-id="worker"] [aria-sort]')).toBeNull();
+  await act(async()=>history.back());await settled(()=>expect(history.location.href).not.toContain("sort="));
+});
+it("retains an off-page exact selection without substituting another job or fetching its attempts", async () => {
+  serverJobs(Array.from({length:305},(_,index)=>job(`job-${index+1}`)));
+  await render("list","/settings/scanner?page=3&selected=job-a");
+  await settled(()=>expect(document.body.textContent).toContain("selected job is outside this page or filter"));
+  expect(document.querySelector('[data-testid="scan-job-detail-drawer"]')).toBeNull();expect(scanJobs.attempts).not.toHaveBeenCalled();
+  expect(history.location.href).toContain("selected=job-a");
+});
+it("exports matching jobs across pages with exact filters and visible failure feedback", async () => {
+  const cluster="11111111-1111-4111-8111-111111111111",registry="22222222-2222-4222-8222-222222222222";
+  const rows=Array.from({length:205},(_,index)=>({...job(`job-${index+1}`),target_cluster_id:cluster,registry_id:registry}));serverJobs(rows);
+  vi.mocked(scanJobs.exportCSV).mockRejectedValueOnce(new Error("download failed")).mockResolvedValue({total:205,limit:100000,exported:205,truncated:false});
+  await render("list",`/settings/scanner?status=failed&target_type=image&cluster_id=${cluster}&registry_id=${registry}&page=3`);
+  await settled(()=>expect(host.textContent).toContain("205 matching jobs"));await click("Export matching CSV");
+  await settled(()=>expect(host.textContent).toContain("Matching CSV could not be exported"));
+  expect(scanJobs.exportCSV).toHaveBeenLastCalledWith(expect.objectContaining({cluster_id:cluster,registry_id:registry,status:"failed",target_type:"image",sort:"requested",order:"desc",offset:200}));
+  await click("Export matching CSV");await settled(()=>expect(host.textContent).toContain("Exported all 205 matching records across pages"));
+});
+it("blocks a stale action from invalidated cache before React rerenders", async () => {
+  await render("list");await settled(()=>expect(host.querySelector('[aria-label="Retry"]')).not.toBeNull());
+  const retry=host.querySelector<HTMLButtonElement>('[aria-label="Retry"]')!;
+  await act(async()=>{void client.invalidateQueries({queryKey:["scan-jobs","scanner-sources","org-a:user-a"],refetchType:"none"});retry.click();});
+  await settled(()=>expect(host.textContent).toContain("Could not update scan job job-a"));expect(scanJobsAdmin.retry).not.toHaveBeenCalled();
+});
+it("hides refreshed queue and selected evidence on failure while preserving selection for Retry", async () => {
+  const queue={target_type:"image",pending:9,retry_delayed:0,running:0,stale_running:0,exhausted:0,failed:0,paused:0,canceled:0,completed_last_hour:0,oldest_pending_seconds:5};
+  vi.mocked(scanJobs.list).mockImplementation(async request=>({...inventory([job()],request),queue_metrics:[queue]}));
+  await render("list");await openJob();await act(async()=>[...host.querySelectorAll<HTMLElement>("summary")].find(item=>item.textContent==="Queue depth by target type")!.click());await settled(()=>expect(host.querySelector('[data-testid="scanner-queue-metrics"] tbody')?.textContent).toContain("9"));
+  const read=deferred<Awaited<ReturnType<typeof scanJobs.list>>>();vi.mocked(scanJobs.list).mockReturnValue(read.promise);
+  await act(async()=>{void client.refetchQueries({queryKey:["scan-jobs","scanner-sources","org-a:user-a"]});});
+  await settled(()=>expect(host.querySelector('[data-testid="scanner-queue-metrics"] tbody')?.textContent).not.toContain("9"));
+  expect(document.querySelector('[data-testid="scan-job-detail-drawer"]')).toBeNull();
+  await act(async()=>read.reject(new Error("refresh failed")));await settled(()=>expect(document.body.textContent).toContain("selected job could not be refreshed"));
+  expect(history.location.href).toContain("selected=job-a");expect(document.querySelector('[data-testid="scanner-job-attempts"]')).toBeNull();
+});
+it("keeps image digests closed in target cells while preserving exact CSV evidence", async () => {
+  const digest=`sha256:${"a".repeat(64)}`;const image={...job(),target_ref:`registry.test/app@${digest}`};serverJobs([image]);await render("list");
+  await settled(()=>expect(host.querySelector('td[data-column-id="target"] details')).not.toBeNull());
+  const cell=host.querySelector('td[data-column-id="target"]')!;expect(cell.querySelector("details")!.open).toBe(false);expect(cell.querySelector('[title]')?.getAttribute("title")).toBe("registry.test/app");expect(cell.querySelector("code")?.textContent).toBe(digest);
+});
+it("rejects foreign job evidence and malformed or out-of-range URL state before offering actions", async () => {
+  vi.mocked(scanJobs.list).mockImplementation(async request=>inventory([{...job(),org_id:"foreign"}],request));await render("list");
+  await settled(()=>expect(host.textContent).toContain("Scan jobs could not be loaded"));expect(host.querySelector('[aria-label="Retry"]')).toBeNull();
+  vi.mocked(scanJobs.list).mockClear();await act(async()=>history.push("/settings/scanner?page=10001"));
+  await settled(()=>expect(host.textContent).toContain("Choose supported scan job filters"));expect(scanJobs.list).not.toHaveBeenCalled();
+});
+it("requires an organization and user owner for the job inventory", async () => {
+  await render("list","/settings/scanner",undefined,null);await settled(()=>expect(host.textContent).toContain("An available organization and user session are required to load scan jobs"));expect(scanJobs.list).not.toHaveBeenCalled();expect(scanJobs.attempts).not.toHaveBeenCalled();
+});
+
+it("isolates cached jobs and attempts when the organization owner changes", async () => {
+  await render("list");await openJob();await settled(()=>expect(document.body.textContent).toContain("worker-with-full-identity"));
+  const read=deferred<Awaited<ReturnType<typeof scanJobs.list>>>();vi.mocked(scanJobs.list).mockReturnValue(read.promise);
+  await act(async()=>root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{org_id:"org-b",user_id:"user-a"}}><TestRouter history={history} path="/settings/scanner"><ScannerSourcesPage/></TestRouter></TablePreferencesProvider></QueryClientProvider>));
+  await settled(()=>expect(document.querySelector('[data-testid="scan-job-detail-drawer"]')).toBeNull());
+  expect(document.body.textContent).not.toContain("worker-with-full-identity");
+  expect(client.getQueryCache().findAll({queryKey:["scan-jobs","scanner-sources","org-b:user-a"]})).toHaveLength(1);
+  const scopedJob={...job(),org_id:"org-b",target_ref:"registry.test/new-owner:latest"};vi.mocked(scanJobs.attempts).mockRejectedValue(new Error("new-owner ledger failed"));
+  await act(async()=>read.resolve(inventory([scopedJob])));await settled(()=>expect(document.body.textContent).toContain("Attempt history is unavailable"));
+  expect(document.body.textContent).not.toContain("worker-with-full-identity");expect(scanJobs.attempts).toHaveBeenCalledTimes(2);
+});
+it.each([
+ ["pending","Pause","pause"], ["paused","Resume","resume"], ["failed","Retry","retry"], ["running","Cancel","cancel"],
+] as const)("preserves eligible %s job %s actions with fresh reviewed identity",async(status,label,action)=>{
+ const candidate={...job(),status};serverJobs([candidate]);vi.mocked(scanJobsAdmin[action]).mockResolvedValue({status});await render("list");await settled(()=>expect(host.querySelector(`[aria-label="${label}"]`)).not.toBeNull());await click(label);await settled(()=>expect(scanJobsAdmin[action]).toHaveBeenCalledWith("job-a"));
+});
+
+it.each([{org_id:"",user_id:"user-a"},{org_id:"org-a",user_id:""}])("rejects a partial organization/user identity %j",async identity=>{
+ await render("list","/settings/scanner",undefined,identity);await settled(()=>expect(host.textContent).toContain("An available organization and user session are required to load scan jobs"));expect(scanJobs.list).not.toHaveBeenCalled();expect(scanJobs.attempts).not.toHaveBeenCalled();
 });
