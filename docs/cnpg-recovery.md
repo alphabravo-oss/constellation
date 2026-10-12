@@ -92,7 +92,7 @@ The user selected local RustFS for initial testing. The non-secret contract is:
 | Endpoint | `http://rustfs:9000` inside the isolated test namespace |
 | Signing region | `us-east-1` |
 | Retention / schedule | 7 days; daily at 02:00 UTC, plus immediate first backup |
-| Tested versions | RustFS 1.0.1; CNPG 1.30.1; Barman plugin 0.15.1; cert-manager 1.21.2; PostgreSQL 16.10 with pgvector |
+| Tested versions | RustFS 1.0.1; CNPG 1.30.1; Barman plugin 0.15.1; cert-manager 1.21.2; PostgreSQL 16.14 with pgvector |
 
 Credentials are generated randomly into Kubernetes Secrets and a restricted
 temporary evidence directory. There is no public S3 ingress. Source and target

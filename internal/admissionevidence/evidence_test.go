@@ -789,3 +789,51 @@ func itoaTest(n int) string {
 	}
 	return string(b)
 }
+
+func TestRequiredSuccessfulEnginesFromPostgres(t *testing.T) {
+	ctx := t.Context()
+	pool := openAdmissionTestPool(t)
+	defer pool.Close()
+	orgID := uuid.New()
+	resultID := uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id,name,display_name) VALUES ($1,$2,'Engine proof')`, orgID, "engine-proof-"+orgID.String()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id=$1`, orgID) })
+	ref := "registry.invalid/engine-proof:latest"
+	if _, err := pool.Exec(ctx, `INSERT INTO image_scan_results (id,org_id,image_ref,image_ref_normalized,image_repository,image_digest) VALUES ($1,$2,$3,$3,'registry.invalid/engine-proof','sha256:engine-proof')`, resultID, orgID, ref); err != nil {
+		t.Fatal(err)
+	}
+	source := New(pool, orgID)
+	// Engine requirements alone must force a result lookup, even without a severity gate.
+	gate := admission.EvidenceGate{Type: "vulnerability", RequiredSuccessfulEngines: []string{"Trivy", " grype "}}
+	rule := admission.Rule{Conditions: admission.RuleConditions{EvidenceGates: []admission.EvidenceGate{gate}}}
+	pod := &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: ref}}}}
+	for _, tc := range []struct {
+		name, status string
+		denied       bool
+	}{
+		{"legacy", "{}", true},
+		{"sbom only", `{"syft":"succeeded"}`, true},
+		{"partial", `{"trivy":"succeeded","grype":"failed"}`, true},
+		{"unknown status", `{"trivy":"succeeded","grype":"unknown"}`, true},
+		{"both succeeded", `{"trivy":"succeeded","grype":"succeeded"}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := pool.Exec(ctx, `UPDATE image_scan_results SET engine_status=$1::jsonb WHERE id=$2`, tc.status, resultID); err != nil {
+				t.Fatal(err)
+			}
+			reason, denied, err := source.EvaluateAdmissionEvidence(ctx, rule, pod)
+			if err != nil || denied != tc.denied {
+				t.Fatalf("denied=%v want=%v reason=%q err=%v", denied, tc.denied, reason, err)
+			}
+		})
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM image_scan_results WHERE id=$1`, resultID); err != nil {
+		t.Fatal(err)
+	}
+	_, denied, err := source.EvaluateAdmissionEvidence(ctx, rule, pod)
+	if err != nil || !denied {
+		t.Fatalf("missing result allowed: denied=%v err=%v", denied, err)
+	}
+}

@@ -992,6 +992,7 @@ INSERT INTO image_workload_links (
 		"image_ref":     imageRef,
 		"image_digest":  imageDigest,
 		"package_count": 1,
+		"engines":       []completeScanEngine{{Engine: "trivy"}, {Engine: "grype", Error: "fixture engine unavailable"}},
 		"findings": []scanner.Finding{{
 			VulnerabilityID: vulnID,
 			Severity:        "high",
@@ -1013,6 +1014,18 @@ INSERT INTO image_workload_links (
 	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Complete)).ServeHTTP(w, r)
 	if w.Code != 200 {
 		t.Fatalf("complete status: %d body: %s", w.Code, w.Body.String())
+	}
+
+	var storedEngineStatus string
+	if err := pool.QueryRow(ctx, `SELECT engine_status::text FROM image_scan_results WHERE org_id=$1 AND image_digest=$2`, orgID, imageDigest).Scan(&storedEngineStatus); err != nil {
+		t.Fatal(err)
+	}
+	var outcomes map[string]string
+	if err := json.Unmarshal([]byte(storedEngineStatus), &outcomes); err != nil {
+		t.Fatal(err)
+	}
+	if outcomes["trivy"] != "succeeded" || outcomes["grype"] != "failed" {
+		t.Fatalf("scan completion did not persist actual engine outcomes: %s", storedEngineStatus)
 	}
 
 	// The image is running on exactly one cluster (one image_workload_link), so the high

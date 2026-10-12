@@ -107,3 +107,30 @@ For the full control set, see the upstream
 Use the `pss-baseline` or `pss-restricted` built-in profile when PSS conformance
 is required. Continue to treat `basic-hardening` and `strict-hardening` as
 targeted hardening rather than PSS profiles.
+
+## Successful vulnerability engines
+
+The built-in critical/fixable vulnerability profiles require fresh, known image
+scan results and successful Trivy **and** Grype completion:
+
+```yaml
+scanEvidence:
+  maxAge: 24h
+  requiredSuccessfulEngines: ["trivy", "grype"]
+```
+
+Migration 172 records a normalized `engine_status` map on each image scan result
+in the same completion transaction. Failed/absent engines are not clean scans;
+conflicting duplicate engine reports count as failed. Raw engine errors are not
+stored in this map. Re-scans replace the map, so an earlier successful engine
+cannot mask a later failed one. Legacy results default to an empty map and must
+be re-scanned before satisfying this requirement; findings alone cannot prove
+that an engine completed successfully.
+
+The active built-in profiles no longer require the retired VulnDB bundle or filter
+vulnerabilities to its canonical engine. Severity/fix rules and active exceptions
+still apply to findings across engines, including aggregated findings. Existing
+saved policies are not silently rewritten. Deploy migration 172, the updated API
+and updated admission controller before applying this new YAML field; older
+controllers do not understand it. Retired-bundle rules need explicit conversion
+and fresh scans as part of their deployment review.

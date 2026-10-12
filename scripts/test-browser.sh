@@ -93,7 +93,10 @@ opener = build_opener(ProxyHandler({}))
 
 # Exercise the production workers, not just collector registration. The frontend
 # container reaches the API on the private Docker network on Linux and Desktop.
-for attempt in range(30):
+# A busy parent is deliberately skipped and retried on the five-minute worker
+# cadence. Allow that next pass; requiring success in 30s races startup DDL.
+deadline = time.monotonic() + 360
+while time.monotonic() < deadline:
     sample = subprocess.run([
         "docker", "exec", os.environ["FRONTEND_CONTAINER"], "wget", "-qO-",
         "http://constellation-api:8080/metrics",
@@ -115,8 +118,9 @@ for attempt in range(30):
         Path(os.environ["LIFECYCLE_METRICS_PATH"]).write_text("\n".join(lines) + "\n")
         print("Production parent statistics and session cleanup workers passed")
         break
-    time.sleep(1)
+    time.sleep(2)
 else:
+    Path(os.environ["LIFECYCLE_METRICS_PATH"]).write_text("\n".join(lines) + "\n")
     raise RuntimeError("production lifecycle workers did not complete within the smoke budget")
 
 

@@ -524,6 +524,7 @@ type EvidenceGate struct {
 	DeniedCVEs                   []string // vulnerability: deny if any of these CVE ids is present, regardless of severity/count (NeuVector CriteriaKeyCVENames). Normalized upper-case.
 	CVEGraceDays                 *int     // vulnerability: ignore CVEs published within this many days when counting/denying (NeuVector SubCriteriaPublishDays). nil/<=0 = no grace window.
 	RequireKnownScanResult       bool
+	RequiredSuccessfulEngines    []string
 	HonorActiveExceptions        bool
 	MaxScanAgeSeconds            int64
 	RequireVulnDBBundle          bool

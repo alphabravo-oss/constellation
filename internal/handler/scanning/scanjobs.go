@@ -879,7 +879,7 @@ UPDATE scan_targets
 
 	var imageScanResultID uuid.UUID
 	if target.Type == "image" {
-		imageScanResultID, err = upsertImageScanResult(r.Context(), tx, orgID, id, target, identity, assetID, body.PackageCount, len(body.Findings))
+		imageScanResultID, err = upsertImageScanResult(r.Context(), tx, orgID, id, target, identity, assetID, body.PackageCount, len(body.Findings), scanEngineStatus(body.Engines))
 		if err != nil {
 			jsonError(w, http.StatusInternalServerError, "image scan result: "+err.Error())
 			return
@@ -1316,19 +1316,19 @@ SELECT COALESCE(
 	identity.NormalizedRef = parsed.Repository + "@" + identity.Digest
 }
 
-func upsertImageScanResult(ctx context.Context, tx pgx.Tx, orgID, jobID uuid.UUID, target handler.ScanTarget, identity scanImageIdentity, assetID uuid.UUID, packageCount, findingCount int) (uuid.UUID, error) {
+func upsertImageScanResult(ctx context.Context, tx pgx.Tx, orgID, jobID uuid.UUID, target handler.ScanTarget, identity scanImageIdentity, assetID uuid.UUID, packageCount, findingCount int, engineStatus string) (uuid.UUID, error) {
 	resultID := uuid.New()
 	err := tx.QueryRow(ctx, `
 INSERT INTO image_scan_results (
     id, org_id, scan_target_id, last_scan_job_id, asset_id,
     image_ref, image_ref_normalized, image_repository, image_tag, image_digest,
     platform, scanner_profile, vulndb_bundle_version, vulndb_bundle_hash,
-    source_type, source_ref, package_count, finding_count, bundle_metadata, last_scanned_at, updated_at
+    source_type, source_ref, package_count, finding_count, bundle_metadata, engine_status, last_scanned_at, updated_at
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, NULLIF($9, ''), $10,
     $11, $12, $13, $14,
-    NULLIF($15, ''), NULLIF($16, ''), $17, $18, $19::jsonb, NOW(), NOW()
+    NULLIF($15, ''), NULLIF($16, ''), $17, $18, $19::jsonb, $20::jsonb, NOW(), NOW()
 )
 ON CONFLICT (
     org_id, image_digest, platform, scanner_profile, vulndb_bundle_version, vulndb_bundle_hash
@@ -1345,14 +1345,34 @@ ON CONFLICT (
     package_count = EXCLUDED.package_count,
     finding_count = EXCLUDED.finding_count,
     bundle_metadata = EXCLUDED.bundle_metadata,
+    engine_status = EXCLUDED.engine_status,
     last_scanned_at = NOW(),
     updated_at = NOW()
 RETURNING id`,
 		resultID, orgID, target.ID, jobID, assetID,
 		identity.Ref, identity.NormalizedRef, identity.Repository, identity.Tag, identity.Digest,
 		identity.Platform, identity.ScannerProfile, identity.BundleVersion, identity.BundleHash,
-		target.SourceType, target.SourceRef, packageCount, findingCount, identity.BundleMetadata).Scan(&resultID)
+		target.SourceType, target.SourceRef, packageCount, findingCount, identity.BundleMetadata, engineStatus).Scan(&resultID)
 	return resultID, err
+}
+
+// Store only engine outcomes, never raw engine errors that could contain secrets.
+// Conflicting duplicates fail closed; legacy uploads have no proof of success.
+func scanEngineStatus(engines []completeScanEngine) string {
+	status := make(map[string]string)
+	for _, engine := range engines {
+		name := strings.ToLower(strings.TrimSpace(engine.Engine))
+		if name == "" {
+			continue
+		}
+		if strings.TrimSpace(engine.Error) != "" || status[name] == "failed" {
+			status[name] = "failed"
+		} else {
+			status[name] = "succeeded"
+		}
+	}
+	raw, _ := json.Marshal(status)
+	return string(raw)
 }
 
 func completeScanEnginesToResults(engines []completeScanEngine) []scanner.EngineResult {

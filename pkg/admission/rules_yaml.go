@@ -135,6 +135,7 @@ type admissionRuleCondition struct {
 }
 
 type admissionRuleScanEvidence struct {
+	RequiredSuccessfulEngines    []string `yaml:"requiredSuccessfulEngines"`
 	MaxAge                       string   `yaml:"maxAge"`
 	RequireVulnDBBundle          bool     `yaml:"requireVulnDBBundle"`
 	SourceType                   string   `yaml:"sourceType"`
@@ -472,6 +473,7 @@ func admissionScanEvidenceGateFields(source admissionRuleScanEvidence) (Evidence
 		out.MaxScanAgeSeconds = seconds
 	}
 	out.RequireVulnDBBundle = source.RequireVulnDBBundle
+	out.RequiredSuccessfulEngines = normalizeStringList(source.RequiredSuccessfulEngines)
 	out.AllowedSourceTypes = normalizeStringList(source.SourceTypes)
 	if source.SourceType != "" {
 		out.AllowedSourceTypes = normalizeStringList(append(out.AllowedSourceTypes, source.SourceType))
@@ -492,6 +494,7 @@ func admissionScanEvidenceGateFields(source admissionRuleScanEvidence) (Evidence
 }
 
 func applyScanEvidenceFields(gate *EvidenceGate, source EvidenceGate) {
+	gate.RequiredSuccessfulEngines = normalizeStringList(append(gate.RequiredSuccessfulEngines, source.RequiredSuccessfulEngines...))
 	if source.MaxScanAgeSeconds > 0 && gate.MaxScanAgeSeconds == 0 {
 		gate.MaxScanAgeSeconds = source.MaxScanAgeSeconds
 	}

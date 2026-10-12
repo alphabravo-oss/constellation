@@ -2,6 +2,7 @@ package admissionevidence
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -71,6 +72,7 @@ type admissionEvidenceHit struct {
 }
 
 type admissionEvidenceScanResult struct {
+	EngineStatus        map[string]string
 	ID                  uuid.UUID
 	ImageRef            string
 	Digest              string
@@ -231,6 +233,11 @@ func (s *Source) evaluateScanEvidenceGate(ctx context.Context, gate admission.Ev
 				image.Container, image.Raw, age.Truncate(time.Second), maxAge), true, result, true, nil
 		}
 	}
+	for _, engine := range normalizeAdmissionStrings(gate.RequiredSuccessfulEngines) {
+		if result.EngineStatus[engine] != "succeeded" {
+			return fmt.Sprintf("container %q image %q has no successful %s scan evidence", image.Container, image.Raw, engine), true, result, true, nil
+		}
+	}
 	if gate.RequireVulnDBBundle && (strings.TrimSpace(result.VulnDBBundleVersion) == "" || strings.TrimSpace(result.VulnDBBundleHash) == "") {
 		return fmt.Sprintf("container %q image %q scan result has no VulnDB bundle provenance", image.Container, image.Raw), true, result, true, nil
 	}
@@ -249,6 +256,7 @@ func (s *Source) evaluateScanEvidenceGate(ctx context.Context, gate admission.Ev
 
 func scanEvidenceGateRequiresResult(gate admission.EvidenceGate) bool {
 	return gate.RequireKnownScanResult ||
+		len(gate.RequiredSuccessfulEngines) > 0 ||
 		gate.MaxScanAgeSeconds > 0 ||
 		gate.RequireVulnDBBundle ||
 		len(gate.AllowedSourceTypes) > 0 ||
@@ -393,7 +401,8 @@ SELECT r.id,
        r.vulndb_bundle_version,
        r.vulndb_bundle_hash,
        r.package_count,
-       r.finding_count
+       r.finding_count,
+       r.engine_status
   FROM image_scan_results r
   LEFT JOIN scan_targets st ON st.id = r.scan_target_id
  WHERE r.org_id = $1
@@ -408,6 +417,7 @@ SELECT r.id,
           r.last_scanned_at DESC, r.updated_at DESC
  LIMIT 1`, s.orgID, image.Candidates, image.Digest, sourceTypes, gate.RequireDigestMatch)
 	var result admissionEvidenceScanResult
+	var engineStatus []byte
 	if err := row.Scan(
 		&result.ID,
 		&result.ImageRef,
@@ -419,11 +429,15 @@ SELECT r.id,
 		&result.VulnDBBundleHash,
 		&result.PackageCount,
 		&result.FindingCount,
+		&engineStatus,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return admissionEvidenceScanResult{}, false, nil
 		}
 		return admissionEvidenceScanResult{}, false, err
+	}
+	if err := json.Unmarshal(engineStatus, &result.EngineStatus); err != nil {
+		return admissionEvidenceScanResult{}, false, fmt.Errorf("decode scan engine outcomes: %w", err)
 	}
 	return result, true, nil
 }

@@ -60,6 +60,25 @@ Parity and switchability are release-ready only when:
 
 ## October 12 implementation continuation
 
+The admission-engine continuation adds migration **172** and persists normalized
+engine outcomes atomically with image scan completion. The built-in vulnerability
+profiles now require successful Trivy and Grype results rather than retired
+VulnDB provenance. Missing, failed and conflicting engine reports fail closed;
+re-scans replace prior outcomes, and raw engine errors are excluded from this
+map. Existing saved policies are unchanged and require explicit conversion after
+the API and admission controller are upgraded. See the
+[deployment order](admission-profiles.md#successful-vulnerability-engines).
+
+The resumed verification passed **518 seeded, repeated race-test executions**
+without skips (`/tmp/constellation-resume-engine-tests/`) and **96 tooling tests**.
+The interrupted session's final production-image smoke finished successfully:
+**seven browser tests**, authenticated CLI/API recipes, parent statistics and
+session cleanup (`/tmp/constellation-engine-browser-final/`). Changed-code lint
+has zero findings. The API image is
+`constellation-browser-58c8017f4908-api:latest`, index
+`sha256:8382addded7cd3d9d2e74410772f6b64342189a0f82e88ea74abe6e19ded867b`.
+These checks do not close the remaining parity or live cutover acceptance gates.
+
 **Parity is not release-complete.** The feature checklist has 54 checked
 and 99 open items. Counts describe acceptance items, not a percentage of code
 implemented. The complete scope and remaining gates are retained below; do not

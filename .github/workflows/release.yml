@@ -63,7 +63,7 @@ jobs:
           - { role: admission, dockerfile: deploy/docker/Dockerfile.admission }
           - { role: migrate, dockerfile: deploy/docker/Dockerfile.migrate }
           - { role: bootstrap, dockerfile: deploy/docker/Dockerfile.bootstrap }
-          - { role: postgres, dockerfile: deploy/docker/Dockerfile.postgres, tag_prefix: "16.10-" }
+          - { role: postgres, dockerfile: deploy/docker/Dockerfile.postgres, tag_prefix: "16.14-" }
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
