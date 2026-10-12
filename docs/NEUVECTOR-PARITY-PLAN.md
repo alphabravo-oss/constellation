@@ -964,6 +964,28 @@ raw-evidence continuation and network/runtime history exports. Named saved views
 and the full accessibility/cross-dataset matrix remain open; these checks do not
 close the parent UI-2/3/4 rows.
 
+The image-identity correction replaces raw SHA names with reported repository/tag
+references in Assets, its preview, asset detail, risk workspace and acceptance
+review. Raw identity is preserved; the backend exposes `display_name` and uses
+it for name sorting and literal search. Full CSV retains raw Name/Digest and adds
+Display name. Digests in inventory/preview/image metadata/acceptance review are
+collapsed behind **Show digest**; asset labels are also collapsed so references
+containing SHA values do not leak into the default preview. Missing name metadata
+is shown as Unnamed image rather than making a digest the primary name.
+
+Helm revision **61** deploys frontend/API `asset-identity-20261012` from the isolated
+image-identity commits, retaining migration `audit-lookup-20261012` and schema173;
+all seven deployments are ready. **1,472 frontend tests /115 files**, build,
+typecheck, lint, affected vet and OpenAPI contracts pass. **10 focused fresh
+PostgreSQL race/shuffle executions** pass without skips, including named/raw
+identity, detail/list/export agreement, stable name ordering, full-reference
+search and existing asset scope/count checks. Live API verifies 100 sorted image
+names and two matching search/CSV records. The collaborative browser displays
+`docker.io/pgvector/pgvector:pg16` instead of its SHA, finds no SHA in the default
+image inventory view, and reveals the exact digest when Show digest is opened.
+Containers/Nodes and network/capture role work remains uncommitted and is not
+included in this image-identity release.
+
 The admission-engine continuation adds migration **172** and persists normalized
 engine outcomes atomically with image scan completion. The built-in vulnerability
 profiles now require successful Trivy and Grype results rather than retired
