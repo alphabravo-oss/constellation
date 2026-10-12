@@ -81,24 +81,12 @@ func (h *Baselines) AgentBaselineBundle(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	rows, err := h.db.Pool().Query(r.Context(), `
-SELECT s.workload_id,
-       COALESCE((
-           SELECT array_agg(DISTINCT l.pod_workload_id ORDER BY l.pod_workload_id)
-             FROM pod_workload_links l
-            WHERE l.org_id = s.org_id
-              AND l.cluster_id = s.cluster_id
-              AND l.owner_workload_id = s.workload_id
-              AND l.pod_workload_id <> ''
-       ), '{}'),
-       COALESCE(s.namespace, ''),
-       COALESCE(s.name, ''),
-       COALESCE(s.mode, 'learn'),
-       s.updated_at
-  FROM process_baseline_states s
- WHERE s.org_id = $1
-   AND s.cluster_id = $2
- ORDER BY s.workload_id`, tok.OrgID, clusterID)
+	rows, err := h.db.Pool().Query(r.Context(), baselineKeysSQL+`
+ SELECT p.workload_id,COALESCE((SELECT array_agg(DISTINCT l.pod_workload_id ORDER BY l.pod_workload_id)
+ FROM pod_workload_links l WHERE p.owner_count=1 AND l.org_id=$1 AND l.cluster_id=p.cluster_id AND l.deployment_id=p.owner_id AND l.owner_workload_id=p.workload_id AND l.namespace=p.namespace AND l.pod_workload_id<>''),'{}'),
+ p.namespace,p.name,p.mode,s.updated_at FROM profiles p
+ LEFT JOIN process_baseline_states s ON s.org_id=$1 AND s.cluster_id=p.cluster_id AND s.workload_id=p.workload_id
+ ORDER BY p.workload_id`, tok.OrgID, clusterID)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, "process baseline states: "+err.Error())
 		return
@@ -116,13 +104,15 @@ SELECT s.workload_id,
 	var pendings []pending
 	for rows.Next() {
 		var row processBaselineBundleRow
-		var updatedAt time.Time
+		var updatedAt *time.Time
 		if err := rows.Scan(&row.WorkloadID, &row.PodWorkloadIDs, &row.Namespace,
 			&row.Name, &row.Mode, &updatedAt); err != nil {
 			jsonError(w, http.StatusInternalServerError, "scan: "+err.Error())
 			return
 		}
-		row.UpdatedAt = updatedAt.UTC().Format(time.RFC3339)
+		if updatedAt != nil {
+			row.UpdatedAt = updatedAt.UTC().Format(time.RFC3339)
+		}
 		pendings = append(pendings, pending{row: row})
 	}
 	if err := rows.Err(); err != nil {
@@ -138,14 +128,15 @@ SELECT s.workload_id,
 		return
 	}
 
-	// Resolve the allowed-process set per workload from observations. Done after
-	// the cursor is drained so we don't hold the row cursor open across queries.
+	// Aggregate all retained process identities for the entire cluster in SQL;
+	// agent polls never deserialize a capped or unbounded raw event stream.
+	observations, err := h.fullProcessBundleObservations(r.Context(), tok.OrgID, clusterID)
+	if err != nil {
+		jsonError(w, 500, "process observations unavailable")
+		return
+	}
 	for _, p := range pendings {
-		obs, _, _, _, err := h.processObservations(r.Context(), tok.OrgID, clusterID, p.row.WorkloadID)
-		if err != nil {
-			jsonError(w, http.StatusInternalServerError, "observations: "+err.Error())
-			return
-		}
+		obs := observations[p.row.WorkloadID]
 		p.row.Processes = allowedBasenames(obs)
 		// Rich entries: learned observations (allow) + authored rules (allow/deny).
 		p.row.Entries = append(allowedEntries(obs), ruleEntries[p.row.WorkloadID]...)
@@ -265,4 +256,42 @@ func allowedBasenames(obs []processObservation) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// fullProcessBundleObservations returns one row per retained (profile,name,path)
+// identity. Hash and parent retain the existing latest-nonempty pin semantics.
+func (h *Baselines) fullProcessBundleObservations(ctx context.Context, org, cluster uuid.UUID) (map[string][]processObservation, error) {
+	return h.fullProcessObservations(ctx, org, cluster, "")
+}
+func (h *Baselines) fullProcessObservations(ctx context.Context, org, cluster uuid.UUID, workload string) (map[string][]processObservation, error) {
+	keys := baselineKeysSQL
+	args := []any{org, cluster}
+	if workload != "" {
+		keys = strings.TrimSuffix(keys, "\n)") + " WHERE k.workload_id=$3\n)"
+		args = append(args, workload)
+	}
+
+	rows, err := h.db.Pool().Query(ctx, baselineInventorySQLWithKeys(keys)+`, latest_hash AS (
+ SELECT DISTINCT ON(workload_id,process_name,process_path) workload_id,process_name,process_path,sha256
+ FROM evidence WHERE process_name<>'' AND sha256<>'' ORDER BY workload_id,process_name,process_path,at DESC,event_id ASC
+ ), latest_parent AS (
+ SELECT DISTINCT ON(workload_id,process_name,process_path) workload_id,process_name,process_path,parent_name
+ FROM evidence WHERE process_name<>'' AND parent_name<>'' ORDER BY workload_id,process_name,process_path,at DESC,event_id ASC
+ ) SELECT c.workload_id,c.process_name,c.process_path,COALESCE(h.sha256,''),COALESCE(p.parent_name,''),c.observations,c.first_seen,c.last_seen
+ FROM process_counts c LEFT JOIN latest_hash h USING(workload_id,process_name,process_path) LEFT JOIN latest_parent p USING(workload_id,process_name,process_path)
+ ORDER BY c.workload_id,c.observations DESC,c.process_name,c.process_path`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string][]processObservation{}
+	for rows.Next() {
+		var workload string
+		var p processObservation
+		if err := rows.Scan(&workload, &p.Name, &p.Path, &p.Sha256, &p.ParentName, &p.ObservedCount, &p.FirstSeen, &p.LastSeen); err != nil {
+			return nil, err
+		}
+		out[workload] = append(out[workload], p)
+	}
+	return out, rows.Err()
 }

@@ -10,7 +10,7 @@ export type RiskEntity =
   | { type: "deployment"; data: DeploymentDetail }
   | { type: "finding"; data: Finding }
   | { type: "node"; data: NodeDetail };
-export type RiskFinding = Pick<Finding, "id" | "title" | "severity" | "risk_score" | "lifecycle" | "kind" | "last_seen_at">;
+export type RiskFinding = Pick<Finding, "id" | "title" | "severity" | "risk_score" | "lifecycle" | "kind" | "last_seen_at" | "platform_role">;
 export interface ReportedRisk { composite: number; factors: Array<{ name: string; description: string; score: number; raw: number; weight: number }> }
 export const FINDINGS_PAGE_SIZE = 100;
 

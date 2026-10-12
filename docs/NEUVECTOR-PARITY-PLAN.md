@@ -1249,21 +1249,80 @@ history requests measured approximately **8–10 seconds** on this development
 cluster; this does not qualify fleet-scale latency. No live policy, scan, session
 termination, capture or acceptance writes were submitted.
 
-The remaining UI-3 matrix includes baseline/file-profile workload inventories
-and CSVs, plus applicable workload asset/finding exports. Read-only source audit
-finds profile lists are uncapped, but currently perform lazy state writes and
-per-workload reads; duplicate deployment kinds can duplicate a shared namespace/name
-profile identity. FileMonitor's retained-event summaries and stale export/action
-paths need explicit scope and freshness acceptance. These are concrete next UI
-workflow tasks, not evidence of a hidden profile-list cap. Image/repository/cloud/
-node records must not invent workload roles. Dormant SSE remains unqualified
-and disabled. The live cluster has no discovered custom-namespace installation
-candidate; a real isolated chart installation and discovery proof remains
-outstanding. Named saved views and the full accessibility/cross-dataset acceptance matrix
-remain open; the qualified network/history contracts above replace the earlier
-page-only continuation and export gaps. The legacy bounded
-detail payloads are compatibility surfaces; primary Asset/Node/CVE/raw Compliance
-inventories now have independent full-cohort contracts as qualified above.
+The profile-inventory continuation adds independent, read-only Process Baseline
+and File Monitor inventories. Server filtering, stable sorting, paging, full
+matching summaries, namespace facets and matching CSV replace per-workload lazy
+reads in the primary views. Both exports cap at 100,000 profiles and report
+truncation. Shared namespace/name profiles are deduplicated across workload kinds;
+ambiguous owners remain explicit and cannot be selected arbitrarily for writes.
+Exact owned pod references can contribute evidence; guessed names cannot.
+
+Process summaries cover all retained process events; the separate detail view
+still labels its latest-1,000-event sample. Agent bundles and cached allowed sets
+preserve older retained process identities, hash and parent constraints across
+restart, detail reads and mode changes. File summaries likewise aggregate all
+retained matching events. Configured modes and retained observations do not
+establish collection completeness or active enforcement. Lifecycle cards are
+explicitly scoped to the current server page.
+
+Both primary pages use shared table geometry, preferences, pagination and compact
+Details disclosures. URL filters/sort/pages survive navigation; unavailable,
+malformed, invalidated or changed-owner evidence withholds rows and exports.
+File-rule forms preserve drafts and compare refreshed configuration before review;
+update/delete can atomically require the reviewed timestamp and return 409 for a
+conflict. Legacy clients may omit that optional revision. A conflict performs no
+rule write, audit entry or federation tombstone; legacy state hydration may still
+run before the comparison.
+
+Asset and Finding lists, detail evidence and matching CSV now expose the same
+backend-evaluated platform role. Exact workload ownership is required; image,
+repository, cloud, node, ambiguous and unsupported identities remain unclassified.
+Role columns are available through shared column preferences and hidden by default.
+A common route-error page also provides explicit reload and Clusters recovery for
+failed lazy imports or render errors, preserves the current URL on reload, and
+keeps internal error details out of the interface.
+
+Validation passes **1,887 frontend tests across 137 files**, full frontend lint,
+production typecheck/build, affected Go vet, generated OpenAPI and server contract
+checks. The broader runtime package passes **568 fresh PostgreSQL race/shuffle
+executions**, count2, without failures or skips; **36 separate Asset/Finding role
+executions** also pass. Profile fixtures cover over 600 profiles, over 1,000
+retained events, truly older cached identities, duplicate owners, revision
+conflicts, full matching counts/CSV and malformed or stale frontend evidence.
+Evidence: `/tmp/profile-runtime-regression-db/`,
+`/tmp/asset-finding-roles-final-db/`, `/tmp/profile-full-frontend.log`.
+
+Helm **70** deploys API/frontend `profile-inventory-20261012`, retaining migration
+`audit-lookup-20261012` and schema173; all seven deployments are ready. Read-only
+live profile API/CSV checks agree on **17** profiles in each inventory and **6**
+when platform profiles are hidden; empty filters and offset **2,000,000** preserve
+correct totals. This live cohort has no retained process/file events, so positive
+event/count behavior is fixture-qualified. Baseline reads measured roughly
+0.3–2.9 seconds; file reads were roughly 0.02–0.04 seconds in these bounded checks.
+Sampled Asset/Finding detail roles agree with their list records, and matching
+CSVs include the role field. See `/tmp/profile-inventories-live-results.json` and
+`/tmp/profile-evidence-role-live-results.json`.
+
+Native browser checks verify profile sorting/filtering, lifecycle and rule tabs,
+Back restoration, empty-page recovery, matching downloads and file-rule
+Advanced/Cancel navigation without submitting authoring changes. Header/body
+alignment matches at desktop and 640px widths, with no document overflow or
+clipped actions; collapsed status disclosures remain **32px**. Existing saved
+column selections are preserved; Reset columns restores the new baseline defaults.
+The live file profile has no custom rules, so concurrent edit/delete acceptance
+remains covered by the fresh database and frontend fixtures, not a live mutation.
+
+The remaining UI-3 matrix includes Deployment direct workload findings: its
+compatibility payload still caps findings at 100, including detail/risk page CSV.
+This requires its own full inventory contract because primary Findings excludes
+workload vulnerability records. Dormant SSE remains unqualified and disabled.
+The live cluster has no discovered custom-namespace installation candidate; a
+real isolated chart installation and discovery proof remains outstanding. Named
+saved views and the full accessibility/cross-dataset acceptance matrix remain
+open. The legacy bounded detail payloads remain compatibility surfaces; primary
+Asset/Node/CVE/raw Compliance inventories have independent full-cohort contracts.
+Fleet-scale role-export latency remains unqualified; correctness fixtures do not
+establish performance at the 100,000-row export cap.
 
 The admission-engine continuation adds migration **172** and persists normalized
 engine outcomes atomically with image scan completion. The built-in vulnerability

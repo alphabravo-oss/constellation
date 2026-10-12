@@ -98,6 +98,7 @@ export type FindingKind =
   | "secret" | "signature" | "ml-model" | "compliance" | "runtime";
 
 export interface Finding {
+  platform_role?: string;
   risk?: { composite: number; factors: Array<{ name: string; description: string; score: number; raw: number; weight: number }> };
   id: string;
   kind: FindingKind;
@@ -228,6 +229,7 @@ export const sbom = {
 };
 
 export interface Asset {
+  platform_role?: string;
   id: string;
   cluster_id?: string;
   kind: string;
@@ -252,6 +254,7 @@ export interface Asset {
 }
 
 export interface AssetFinding {
+  platform_role?: string;
   id: string;
   kind: FindingKind;
   external_id: string;
@@ -1129,7 +1132,19 @@ export interface BaselineDetail extends BaselineSummary {
   rules: ProcessRule[];
 }
 
+export interface BaselineInventoryParams {
+ cluster_id: string; q?: string; namespace?: string; mode?: BaselineMode; hide_platform?: boolean; limit?: number; offset?: number; sort?: string; order?: "asc" | "desc";
+}
+export interface BaselineInventoryRow extends BaselineSummary {
+ row_id: string; cluster_id: string; owner_count: number; owner_ambiguous: boolean; platform_role: string; configured: boolean; rule_count: number;
+}
+export interface BaselineInventoryResponse {
+ profiles: BaselineInventoryRow[]; total: number; has_more: boolean; limit: number; offset: number; sort: string; order: "asc" | "desc"; cluster_id: string;
+ summary: Record<string,number>; filters: {q:string;namespace:string;mode:string;hide_platform:boolean}; namespaces:string[]; source_complete:boolean; summary_scope:string;
+}
 export const baselines = {
+ inventory: (params: BaselineInventoryParams) => api.get<BaselineInventoryResponse>("/runtime/baselines/inventory",{params}).then(r=>r.data),
+ inventoryCSV: (params: BaselineInventoryParams) => downloadScanInventoryCSV("/runtime/baselines/inventory.csv",params,"process-baselines.csv"),
   list: (params: { cluster_id?: string; namespace?: string } = {}) =>
     api
       .get<{ profiles: BaselineSummary[]; summary: { total: number; learn: number; monitor: number; enforce: number } }>(
@@ -1310,7 +1325,13 @@ export interface FileProfileDetail extends FileProfileSummary {
   watched_files: FileProfileWatch[];
 }
 
+export interface FileProfileInventoryParams { cluster_id: string; q?: string; namespace?: string; mode?: "learn" | "monitor" | "enforce"; platform_role?: "core" | "unknown"; hide_platform?: boolean; sort?: string; order?: "asc" | "desc"; limit?: number; offset?: number }
+export interface FileProfileInventoryRow extends FileProfileSummary { row_id: string; owner_count: number; owner_ambiguous: boolean; platform_role: string; retained_events: number; last_observed_at: string }
+export interface FileProfileInventoryResponse { profiles: FileProfileInventoryRow[]; total: number; limit: number; offset: number; has_more: boolean; sort: string; order: "asc" | "desc"; org_id: string; cluster_id: string; summary: Record<string,number>; filters: {q:string; namespace:string;mode:string;platform_role:string;hide_platform:boolean}; namespaces: string[]; source:"retained_file_events"; source_complete:boolean; summary_scope:"matching_shared_profiles" }
+
 export const fileProfiles = {
+  inventory: (params: FileProfileInventoryParams) => api.get<FileProfileInventoryResponse>("/runtime/file-profiles/inventory", {params}).then(r=>r.data),
+  inventoryCSV: (params: FileProfileInventoryParams) => downloadScanInventoryCSV("/runtime/file-profiles/inventory.csv",params,"file-monitor-profiles.csv"),
   list: (params: { cluster_id?: string; namespace?: string } = {}) =>
     api
       .get<{ profiles: FileProfileSummary[]; summary: { total: number; learn: number; monitor: number; enforce: number } }>(
@@ -1365,13 +1386,14 @@ export const fileProfiles = {
       enabled?: boolean;
       description?: string;
       reason: string;
+      expected_updated_at?: string;
     },
     params: { cluster_id?: string } = {},
   ) =>
     api
       .put<FileProfileRule>(`/runtime/file-profiles/${encodeURIComponent(workloadID)}/rules/${encodeURIComponent(ruleID)}`, body, { params })
       .then((r) => r.data),
-  deleteRule: (workloadID: string, ruleID: string, body: { reason: string }, params: { cluster_id?: string } = {}) =>
+  deleteRule: (workloadID: string, ruleID: string, body: { reason: string; expected_updated_at?: string }, params: { cluster_id?: string } = {}) =>
     api
       .delete<{ deleted: string }>(`/runtime/file-profiles/${encodeURIComponent(workloadID)}/rules/${encodeURIComponent(ruleID)}`, { data: body, params })
       .then((r) => r.data),
@@ -1410,7 +1432,7 @@ export const fileProfiles = {
     api
       .put<FileProfileException>(`/runtime/file-profiles/${encodeURIComponent(workloadID)}/exceptions/${encodeURIComponent(exceptionID)}`, body, { params })
       .then((r) => r.data),
-  deleteException: (workloadID: string, exceptionID: string, body: { reason: string }, params: { cluster_id?: string } = {}) =>
+  deleteException: (workloadID: string, exceptionID: string, body: { reason: string; expected_updated_at?: string }, params: { cluster_id?: string } = {}) =>
     api
       .delete<{ deleted: string }>(`/runtime/file-profiles/${encodeURIComponent(workloadID)}/exceptions/${encodeURIComponent(exceptionID)}`, { data: body, params })
       .then((r) => r.data),

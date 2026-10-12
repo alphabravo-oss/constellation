@@ -1,3 +1,4 @@
+import { downloadCsv } from "@/lib/csv";
 /* global HTMLSelectElement */
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -27,6 +28,7 @@ const identity = { org_id: "org", user_id: "operator" };
 const fixture = (index: number): Finding => ({ id: `finding-${index}`, asset_id: `asset-${index % 2}`, kind: "vulnerability", title: `Finding ${index}`, external_id: `CVE-fixture-${index}`, severity: "critical", lifecycle: "open", risk_score: 99, first_seen_at: "2026-01-01T00:00:00Z", last_seen_at: "2026-01-01T00:00:00Z", kev: false } as Finding);
 const counts = { open: 701, triaged: 22, in_progress: 33, accepted: 44, suppressed: 55, resolved: 66 };
 const listed = (offset = 0, total = 705) => ({ findings: Array.from({ length: Math.min(10, Math.max(0, total - offset)) }, (_, index) => fixture(offset + index)), limit: 100, offset, total, has_more: offset + 100 < total, lifecycle_counts: counts });
+vi.mock("@/lib/csv", () => ({ downloadCsv: vi.fn() }));
 let root: Root; let host: HTMLDivElement; let client: QueryClient;
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -277,4 +279,18 @@ it("clears selected instances after a mode change and restores a saved exact mod
  await settled(() => expect(findings.list).toHaveBeenLastCalledWith(expect.objectContaining({ group_mode: "discover", id_scope: "all", offset: 0 })));
  await click("Views (2)"); await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(b=>b.textContent?.startsWith("Legacy cohort"))!.click());
  await settled(() => { expect(params().has("group_mode")).toBe(false); expect(params().has("id_scope")).toBe(false); });
+});
+
+it("retains reported and explicitly unknown roles in the visible-column page export", async () => {
+  vi.mocked(findings.list).mockResolvedValue({ ...listed(0, 3), findings: [{ ...fixture(0), platform_role: "core" }, { ...fixture(1), platform_role: "" }, fixture(2)] });
+  await renderPage(); await settled(() => expect(host.textContent).toContain("Finding 0"));
+  expect(host.querySelector('[data-testid="findings-table"] thead')?.textContent).not.toContain("Platform role");
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="findings-table-columns-trigger"]')!.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 })));
+  await settled(() => expect(document.querySelector('[role="menuitemcheckbox"]')).not.toBeNull());
+  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find(item => item.textContent === "Platform role")!.click());
+  expect(host.textContent).toContain("Core"); expect(host.textContent).toContain("Unclassified"); expect(host.textContent).toContain("Not reported");
+  await click("Export this page CSV");
+  const [, headers, rows] = vi.mocked(downloadCsv).mock.calls.at(-1)!;
+  const role = headers.indexOf("Platform role"); expect(role).toBeGreaterThanOrEqual(0);
+  expect(rows.map(row => row[role])).toEqual(["core", "", ""]);
 });

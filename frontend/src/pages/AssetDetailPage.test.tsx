@@ -1,3 +1,4 @@
+import { downloadCsv } from "@/lib/csv";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { createMemoryHistory, type RouterHistory } from "@tanstack/react-router";
@@ -26,6 +27,7 @@ function findingPage(id = "asset-a", params: Parameters<typeof assets.findings>[
   const offset = params.offset ?? 0, limit = params.limit ?? 100;
   return { asset_id: id, cluster_id: params.cluster_id ?? "cluster-a", items: all.slice(offset, offset + limit), total: all.length, summary: { total: all.length, high: all.length, critical: 0, open: all.length, asset_findings: all.length, image_scan_findings: 0 }, limit, offset, has_more: all.length > offset + limit, sort: params.sort ?? "risk", order: params.order ?? "desc", q: params.q ?? "", severity: params.severity ?? "", lifecycle: params.lifecycle ?? "", source: params.source ?? "" };
 }
+vi.mock("@/lib/csv", () => ({ downloadCsv: vi.fn() }));
 let root: Root; let host: HTMLDivElement; let client: QueryClient; let history: RouterHistory;
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -161,4 +163,21 @@ it("identifies a URL sort on the hidden observed column and lets it be revealed"
   expect([...host.querySelectorAll('th')].some(th => th.textContent === "Observed")).toBe(false);
   await act(async () => button("Show sort column").click());
   expect([...host.querySelectorAll('th')].some(th => th.textContent === "Observed")).toBe(true);
+});
+
+it("exports the asset finding inventory's actual roles in the visible page columns", async () => {
+  vi.mocked(assets.findings).mockImplementation(async (id, params) => {
+    const response = findingPage(id, params);
+    return { ...response, items: response.items.map(row => ({ ...row, platform_role: "" })) };
+  });
+  await render(); await settled(() => expect(host.querySelector('[data-testid="asset-findings-table"]')).not.toBeNull());
+  expect(host.querySelector('[data-testid="asset-findings-table"] thead')?.textContent).not.toContain("Platform role");
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="asset-findings-table-columns-trigger"]')!.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 })));
+  await settled(() => expect(document.querySelector('[role="menuitemcheckbox"]')).not.toBeNull());
+  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find(item => item.textContent === "Platform role")!.click());
+  expect(host.textContent).toContain("Unclassified");
+  await act(async () => button("Export this page CSV").click());
+  const [, headers, rows] = vi.mocked(downloadCsv).mock.calls.at(-1)!;
+  const role = headers.indexOf("Platform role"); expect(role).toBeGreaterThanOrEqual(0);
+  expect(rows.map(row => row[role])).toEqual([""]);
 });

@@ -115,7 +115,9 @@ SELECT org_id, cluster_id::text, workload_id, COALESCE(namespace,''), COALESCE(n
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	// Resolve observations after the cursor is drained (each does its own query).
+	// Hydration obtains the full retained allowed identities once per cluster.
+	allowed := map[string]map[string][]processObservation{}
+
 	for _, hr := range pending {
 		clusterID, perr := uuid.Parse(hr.clusterID)
 		if perr != nil {
@@ -136,12 +138,17 @@ SELECT org_id, cluster_id::text, workload_id, COALESCE(namespace,''), COALESCE(n
 		if hr.enforceAt != nil {
 			st.EnforceStartedAt = *hr.enforceAt
 		}
-		if procs, alerts, blocks, lastNew, oerr := h.processObservations(ctx, hr.orgID, clusterID, hr.workloadID); oerr == nil {
-			st.Processes = procs
-			st.Alerts24h = alerts
-			st.Blocks24h = blocks
-			st.LastNewProcessAt = lastNew
+		key := hr.orgID.String() + ":" + clusterID.String()
+		byWorkload, ok := allowed[key]
+		if !ok {
+			var err error
+			byWorkload, err = h.fullProcessObservations(ctx, hr.orgID, clusterID, "")
+			if err != nil {
+				return err
+			}
+			allowed[key] = byWorkload
 		}
+		st.Processes = byWorkload[hr.workloadID]
 		h.cacheState(st)
 	}
 	return nil
@@ -436,6 +443,12 @@ func (h *Baselines) SetMode(w http.ResponseWriter, r *http.Request) {
 	// and behavior is unchanged.
 	h.mu.Lock()
 	applyBaselineTransition(state, subj.UserID.String(), from, target, reason, now)
+	key := state.ClusterID + "::" + state.WorkloadID
+	if cached := h.state[key]; sameBaselineScope(cached, subj.OrgID, state.ClusterID, state.WorkloadID) {
+		copy := *state
+		copy.Processes = cached.Processes
+		h.state[key] = &copy
+	}
 	h.mu.Unlock()
 
 	// Mirror into the engine so the actual lifecycle math reflects the new mode.
@@ -448,7 +461,8 @@ func (h *Baselines) SetMode(w http.ResponseWriter, r *http.Request) {
 	// LogFedRevision no-ops otherwise). Memory-backed states have no cluster, so
 	// there is no DB-derived allowed set to ship — skip them.
 	if clusterID, perr := uuid.Parse(wl.ClusterID); perr == nil {
-		if obs, _, _, _, oerr := h.processObservations(r.Context(), subj.OrgID, clusterID, wl.WorkloadID); oerr == nil {
+		if observations, oerr := h.fullProcessObservations(r.Context(), subj.OrgID, clusterID, wl.WorkloadID); oerr == nil {
+			obs := observations[wl.WorkloadID]
 			recordFedBaseline(r.Context(), h.db.Pool(), subj.OrgID, processBaselineBundleRow{
 				WorkloadID: wl.WorkloadID,
 				Namespace:  wl.Namespace,
@@ -536,6 +550,7 @@ func pathBasename(path string) string {
 // ----- helpers --------------------------------------------------------------
 
 type observedWorkload struct {
+	OwnerCount int
 	OrgID      uuid.UUID
 	WorkloadID string
 	ClusterID  string
@@ -552,12 +567,13 @@ func (h *Baselines) observedWorkloads(ctx context.Context, orgID uuid.UUID, clus
 		return nil, nil
 	}
 	rows, err := h.db.Pool().Query(ctx, `
-SELECT COALESCE(cluster_id::text, ''), namespace, name, COALESCE(labels,'{}'::jsonb)
+SELECT COALESCE(cluster_id::text, ''), namespace, name, CASE WHEN count(*)=1 THEN (jsonb_agg(COALESCE(labels,'{}'::jsonb) ORDER BY id)->0) ELSE '{}'::jsonb END,count(*)::int
   FROM deployments
  WHERE org_id = $1
    AND ($2::uuid IS NULL OR cluster_id = $2)
    AND ($3::text = '' OR namespace = $3)
- ORDER BY namespace, name`, orgID, clusterArg, namespace)
+ GROUP BY cluster_id,namespace,name
+ ORDER BY namespace, name,cluster_id`, orgID, clusterArg, namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -566,7 +582,8 @@ SELECT COALESCE(cluster_id::text, ''), namespace, name, COALESCE(labels,'{}'::js
 	for rows.Next() {
 		var clusterID, ns, name string
 		var labelsRaw []byte
-		if err := rows.Scan(&clusterID, &ns, &name, &labelsRaw); err != nil {
+		var ownerCount int
+		if err := rows.Scan(&clusterID, &ns, &name, &labelsRaw, &ownerCount); err != nil {
 			return nil, err
 		}
 		var labels map[string]string
@@ -574,6 +591,7 @@ SELECT COALESCE(cluster_id::text, ''), namespace, name, COALESCE(labels,'{}'::js
 			_ = json.Unmarshal(labelsRaw, &labels)
 		}
 		out = append(out, observedWorkload{
+			OwnerCount: ownerCount,
 			OrgID:      orgID,
 			WorkloadID: ns + "/" + name,
 			ClusterID:  clusterID,
@@ -594,6 +612,9 @@ func (h *Baselines) findWorkload(ctx context.Context, orgID uuid.UUID, clusterAr
 	found := false
 	for _, wl := range all {
 		if wl.WorkloadID == workloadID {
+			if wl.OwnerCount > 1 {
+				return observedWorkload{}, false, errBaselineAmbiguous
+			}
 			if found {
 				return observedWorkload{}, false, errBaselineAmbiguous
 			}
@@ -659,7 +680,13 @@ RETURNING workload_id, cluster_id::text, namespace, name, mode,
 	// RT-DRIFT-50: keep the hot-path BaselineMode map current on every List/Get/SetMode
 	// (in addition to the startup Hydrate), so a DB-backed workload's mode + learned set
 	// are served to the drift classifier without waiting for the next full hydrate.
-	h.cacheState(&state)
+	allowed, err := h.fullProcessObservations(ctx, orgID, clusterID, wl.WorkloadID)
+	if err != nil {
+		return nil, err
+	}
+	cached := state
+	cached.Processes = allowed[wl.WorkloadID]
+	h.cacheState(&cached)
 	return &state, nil
 }
 
@@ -681,12 +708,11 @@ func (h *Baselines) processObservations(ctx context.Context, orgID, clusterID uu
 	workloadRefs := []string{workloadID}
 	seenWorkloadRefs := map[string]struct{}{workloadID: {}}
 	linkRows, err := h.db.Pool().Query(ctx, `
-SELECT pod_workload_id
-  FROM pod_workload_links
- WHERE org_id = $1
-   AND cluster_id = $2
-   AND owner_workload_id = $3
-   AND pod_workload_id <> ''`, orgID, clusterID, workloadID)
+SELECT l.pod_workload_id FROM pod_workload_links l
+ JOIN deployments d ON d.id=l.deployment_id AND d.org_id=$1 AND d.cluster_id=$2 AND d.namespace=l.namespace
+ WHERE l.org_id=$1 AND l.cluster_id=$2 AND l.owner_workload_id=$3
+ AND d.namespace||'/'||d.name=$3 AND l.pod_workload_id<>''
+ AND (SELECT count(*) FROM deployments owner WHERE owner.org_id=$1 AND owner.cluster_id=$2 AND owner.namespace=d.namespace AND owner.name=d.name)=1`, orgID, clusterID, workloadID)
 	if err != nil {
 		return nil, 0, 0, time.Time{}, err
 	}
@@ -722,7 +748,7 @@ SELECT severity,
    AND cluster_id = $2
    AND kind = 'process_exec'
    AND workload_id = ANY($3::text[])
- ORDER BY at DESC
+ ORDER BY at DESC,id ASC
  LIMIT 1000`, orgID, clusterID, workloadRefs)
 	if err != nil {
 		return nil, 0, 0, time.Time{}, err

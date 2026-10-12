@@ -256,6 +256,7 @@ export function FindingsPage() {
       exportValue: (f) => f.kind,
       sort: (a, b) => a.kind.localeCompare(b.kind),
     },
+    { id: "platform-role", header: "Platform role", kind: "status", exportValue: f => f.platform_role ?? "", cell: f => <span className="text-xs">{f.platform_role === "core" ? "Core" : f.platform_role === "" ? "Unclassified" : "Not reported"}</span> },
     {
       id: "age", kind: "age", size: 144, minSize: 128,
       header: "Age",
@@ -459,7 +460,7 @@ export function FindingsPage() {
                 rows={rows} columns={columns} rowKey={(finding) => finding.id}
                 density={density} onDensityChange={setDensity} selectable selected={selected} onSelectedChange={setSelected}
                 onRowClick={openFinding} sort={{ id: sort === "last_seen" ? "age" : sort, dir: order }} onSortChange={onSortChange} manualSorting pagination={false}
-                preferencesKey={INSTANCE_TABLE_KEY} defaultHiddenColumnIds={["package", "fixed"]}
+                preferencesKey={INSTANCE_TABLE_KEY} defaultHiddenColumnIds={["package", "fixed", "platform-role"]}
                 exportFileName="constellation-findings-page" exportLabel="Export this page CSV" testId="findings-table"
                 emptyState={<EmptyState title="No findings match" hint="Adjust your filters or clear the query." icon={<Tag className="h-8 w-8" />} action={<Button variant="outline" onClick={() => setFilters({ q: "", kind: "", group_mode: "", id_scope: "", target_type: "", severity: "", lifecycle: "open", fixable: "", page: "" })}>Reset filters</Button>} />}
               />
@@ -470,7 +471,7 @@ export function FindingsPage() {
                   <DataTable rows={group.items} columns={columns} rowKey={(finding) => finding.id} density={density} onDensityChange={setDensity}
                     selectable selected={selected} onSelectedChange={(ids) => { const merged = new Set(selected); for (const item of group.items) merged.delete(item.id); for (const id of ids) if (group.items.some((item) => item.id === id)) merged.add(id); setSelected(merged); }} onRowClick={openFinding}
                     sort={{ id: sort === "last_seen" ? "age" : sort, dir: order }} onSortChange={onSortChange} manualSorting pagination={false}
-                    showDensityToggle={false} showColumnChooser={false} preferencesKey={INSTANCE_TABLE_KEY} defaultHiddenColumnIds={["package", "fixed"]}
+                    showDensityToggle={false} showColumnChooser={false} preferencesKey={INSTANCE_TABLE_KEY} defaultHiddenColumnIds={["package", "fixed", "platform-role"]}
                     exportFileName={`constellation-findings-page-${safeFilename(group.label)}`} exportLabel="Export this group on this page CSV" className="rounded-none border-0" />
                 </details>)}
                 {!rows.length && <EmptyState title="No findings match" hint="Adjust your filters or clear the query." />}

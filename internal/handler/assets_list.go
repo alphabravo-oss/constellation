@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/alphabravocompany/constellation/internal/handler/platformrole"
 	"net/http"
 	"strconv"
 	"strings"
@@ -12,7 +13,7 @@ import (
 	searchdsl "github.com/alphabravocompany/constellation/pkg/search/dsl"
 )
 
-const assetInventorySQL = `WITH generic_finding_rollup AS (
+var assetInventorySQL = `WITH generic_finding_rollup AS (
              SELECT asset_id,
                     count(*)::int AS finding_count,
                     count(*) FILTER (WHERE severity = 'critical')::int AS critical_findings,
@@ -60,7 +61,7 @@ const assetInventorySQL = `WITH generic_finding_rollup AS (
                   COALESCE(fr.high_findings, 0), COALESCE(fr.open_findings, 0),
                   COALESCE(sr.sbom_count, 0), i.signed, COALESCE(i.registry, ''),
                   COALESCE(i.repository, ''), COALESCE(i.tag, ''), i.size_bytes,
-                  a.first_seen_at, a.last_seen_at
+                  a.first_seen_at, a.last_seen_at, ` + platformrole.AssetPlatformRoleSQL("a") + ` AS platform_role
              FROM assets a
              LEFT JOIN generic_finding_rollup gfr ON gfr.asset_id = a.id
              LEFT JOIN image_finding_rollup ifr ON ifr.asset_id = a.id
@@ -145,13 +146,13 @@ func assetInventoryDefinition(r *http.Request) (inventorylist.Definition, invent
 		}
 		where = append(where, "ai_workload="+bind(ai))
 	}
-	return inventorylist.Definition{SQL: sql, Columns: "id,cluster_id,kind,name,display_name,digest,labels,ai_workload,criticality,finding_count,critical_findings,high_findings,open_findings,sbom_count,image_signed,registry,repository,tag,size_bytes,first_seen_at,last_seen_at", Where: strings.Join(where, " AND "), Args: args, Summary: `jsonb_build_object('total',count(*),'images',count(*) FILTER(WHERE kind='image'),'workloads',count(*) FILTER(WHERE kind='workload'),'critical_high',COALESCE(sum(critical_findings+high_findings),0),'open_findings',COALESCE(sum(open_findings),0),'signed_images',count(*) FILTER(WHERE kind='image' AND image_signed=true),'unsigned_images',count(*) FILTER(WHERE kind='image' AND image_signed=false),'signature_unknown',count(*) FILTER(WHERE kind='image' AND image_signed IS NULL),'with_sbom',count(*) FILTER(WHERE sbom_count>0),'missing_sbom',count(*) FILTER(WHERE kind='image' AND sbom_count=0),'ai',count(*) FILTER(WHERE ai_workload))`}, o, nil
+	return inventorylist.Definition{SQL: sql, Columns: "id,cluster_id,kind,name,display_name,digest,labels,ai_workload,criticality,finding_count,critical_findings,high_findings,open_findings,sbom_count,image_signed,registry,repository,tag,size_bytes,first_seen_at,last_seen_at,platform_role", Where: strings.Join(where, " AND "), Args: args, Summary: `jsonb_build_object('total',count(*),'images',count(*) FILTER(WHERE kind='image'),'workloads',count(*) FILTER(WHERE kind='workload'),'critical_high',COALESCE(sum(critical_findings+high_findings),0),'open_findings',COALESCE(sum(open_findings),0),'signed_images',count(*) FILTER(WHERE kind='image' AND image_signed=true),'unsigned_images',count(*) FILTER(WHERE kind='image' AND image_signed=false),'signature_unknown',count(*) FILTER(WHERE kind='image' AND image_signed IS NULL),'with_sbom',count(*) FILTER(WHERE sbom_count>0),'missing_sbom',count(*) FILTER(WHERE kind='image' AND sbom_count=0),'ai',count(*) FILTER(WHERE ai_workload))`}, o, nil
 }
 
 func scanAssetInventoryRow(row inventorylist.Row) (assetDTO, error) {
 	var item assetDTO
 	var labels []byte
-	err := row.Scan(&item.ID, &item.ClusterID, &item.Kind, &item.Name, &item.DisplayName, &item.Digest, &labels, &item.AIWorkload, &item.Criticality, &item.FindingCount, &item.CriticalFindings, &item.HighFindings, &item.OpenFindings, &item.SBOMCount, &item.ImageSigned, &item.Registry, &item.Repository, &item.Tag, &item.SizeBytes, &item.FirstSeenAt, &item.LastSeenAt)
+	err := row.Scan(&item.ID, &item.ClusterID, &item.Kind, &item.Name, &item.DisplayName, &item.Digest, &labels, &item.AIWorkload, &item.Criticality, &item.FindingCount, &item.CriticalFindings, &item.HighFindings, &item.OpenFindings, &item.SBOMCount, &item.ImageSigned, &item.Registry, &item.Repository, &item.Tag, &item.SizeBytes, &item.FirstSeenAt, &item.LastSeenAt, &item.PlatformRole)
 	item.Labels = json.RawMessage(labels)
 	return item, err
 }
@@ -209,7 +210,7 @@ func (a *Assets) ExportCSV(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 400, err.Error())
 		return
 	}
-	body, meta, err := inventorylist.CSV(r.Context(), a.db.Pool(), d, o, scanAssetInventoryRow, []string{"ID", "Cluster ID", "Kind", "Name", "Display name", "Digest", "Criticality", "AI workload", "Findings", "Critical findings", "High findings", "Open findings", "SBOM formats", "Image signed", "Registry", "Repository", "Tag", "Size bytes", "First seen", "Last seen", "Labels"}, func(item assetDTO) []string {
+	body, meta, err := inventorylist.CSV(r.Context(), a.db.Pool(), d, o, scanAssetInventoryRow, []string{"ID", "Cluster ID", "Kind", "Name", "Display name", "Digest", "Criticality", "AI workload", "Findings", "Critical findings", "High findings", "Open findings", "SBOM formats", "Image signed", "Registry", "Repository", "Tag", "Size bytes", "First seen", "Last seen", "Labels", "Platform role"}, func(item assetDTO) []string {
 		cluster, digest, signed, size := "", "", "", ""
 		if item.ClusterID != nil {
 			cluster = item.ClusterID.String()
@@ -223,7 +224,7 @@ func (a *Assets) ExportCSV(w http.ResponseWriter, r *http.Request) {
 		if item.SizeBytes != nil {
 			size = strconv.FormatInt(*item.SizeBytes, 10)
 		}
-		return []string{item.ID.String(), cluster, item.Kind, item.Name, item.DisplayName, digest, item.Criticality, strconv.FormatBool(item.AIWorkload), strconv.Itoa(item.FindingCount), strconv.Itoa(item.CriticalFindings), strconv.Itoa(item.HighFindings), strconv.Itoa(item.OpenFindings), strconv.Itoa(item.SBOMCount), signed, item.Registry, item.Repository, item.Tag, size, item.FirstSeenAt.UTC().Format(time.RFC3339Nano), item.LastSeenAt.UTC().Format(time.RFC3339Nano), string(item.Labels)}
+		return []string{item.ID.String(), cluster, item.Kind, item.Name, item.DisplayName, digest, item.Criticality, strconv.FormatBool(item.AIWorkload), strconv.Itoa(item.FindingCount), strconv.Itoa(item.CriticalFindings), strconv.Itoa(item.HighFindings), strconv.Itoa(item.OpenFindings), strconv.Itoa(item.SBOMCount), signed, item.Registry, item.Repository, item.Tag, size, item.FirstSeenAt.UTC().Format(time.RFC3339Nano), item.LastSeenAt.UTC().Format(time.RFC3339Nano), string(item.Labels), item.PlatformRole}
 	})
 	if err != nil {
 		jsonError(w, 500, err.Error())

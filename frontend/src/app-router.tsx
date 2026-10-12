@@ -15,6 +15,7 @@ import { lazy } from "react";
 import { parseURLSearch, stringifyURLSearch } from "@/lib/route-search";
 import { createRootRoute, createRoute, createRouter, Link, Navigate, Outlet, redirect, type ParsedLocation, type RouterHistory } from "@tanstack/react-router";
 import { SuspenseRoute, LegacyClusterRedirect } from "./components/RouteLayouts";
+import { RouteErrorPage } from "./components/RouteErrorPage";
 
 import { AppShell } from "./components/AppShell";
 import { RequireAuth } from "./components/RequireAuth";
@@ -640,7 +641,7 @@ authenticatedRoute.addChildren([
 ]);
 
 export function createAppRouter(history?: RouterHistory) {
-  return createRouter({ routeTree, history, parseSearch: parseURLSearch, stringifySearch: stringifyURLSearch, defaultPreload: false, scrollRestoration: true });
+  return createRouter({ routeTree, history, parseSearch: parseURLSearch, stringifySearch: stringifyURLSearch, defaultPreload: false, scrollRestoration: true, defaultErrorComponent: RouteErrorPage });
 }
 
 export const router = createAppRouter();

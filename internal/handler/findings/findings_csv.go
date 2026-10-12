@@ -16,6 +16,7 @@ import (
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
+	"github.com/alphabravocompany/constellation/internal/handler/platformrole"
 )
 
 type FindingsCSV struct {
@@ -48,7 +49,7 @@ func (h *FindingsCSV) Stream(w http.ResponseWriter, r *http.Request) {
 	args = append(args, limit, findingOffset(values))
 	rows, err := h.db.Pool().Query(r.Context(), `
 SELECT id, kind, COALESCE(external_id,'') AS external_id, title, severity, risk_score, lifecycle,
-       asset_id, first_seen_at, last_seen_at, COALESCE(accepted_until, 'epoch'::timestamptz) AS accepted_until
+       asset_id, first_seen_at, last_seen_at, COALESCE(accepted_until, 'epoch'::timestamptz) AS accepted_until, `+platformrole.FindingPlatformRoleSQL("findings")+`
   FROM findings WHERE `+where+` ORDER BY `+order+`
  LIMIT $`+strconv.Itoa(len(args)-1)+` OFFSET $`+strconv.Itoa(len(args)), args...)
 	if err != nil {
@@ -64,7 +65,7 @@ SELECT id, kind, COALESCE(external_id,'') AS external_id, title, severity, risk_
 
 	if err := cw.Write([]string{
 		"id", "kind", "external_id", "title", "severity", "risk_score", "lifecycle",
-		"asset_id", "first_seen_at", "last_seen_at", "accepted_until",
+		"asset_id", "first_seen_at", "last_seen_at", "accepted_until", "platform_role",
 	}); err != nil {
 		return // client gone
 	}
@@ -72,12 +73,12 @@ SELECT id, kind, COALESCE(external_id,'') AS external_id, title, severity, risk_
 	var (
 		id, kindCol, extID, title, severity, lifecycleCol string
 		risk                                              int
-		assetID                                           string
+		assetID, platformRole                             string
 		firstSeen, lastSeen, acceptedUntil                time.Time
 	)
 	for rows.Next() {
 		if err := rows.Scan(&id, &kindCol, &extID, &title, &severity, &risk, &lifecycleCol,
-			&assetID, &firstSeen, &lastSeen, &acceptedUntil); err != nil {
+			&assetID, &firstSeen, &lastSeen, &acceptedUntil, &platformRole); err != nil {
 			panic(http.ErrAbortHandler) // Do not deliver a successful partial export.
 		}
 		acc := ""
@@ -86,7 +87,7 @@ SELECT id, kind, COALESCE(external_id,'') AS external_id, title, severity, risk_
 		}
 		if err := cw.Write([]string{
 			id, kindCol, extID, title, severity, fmt.Sprintf("%d", risk), lifecycleCol,
-			assetID, firstSeen.UTC().Format(time.RFC3339), lastSeen.UTC().Format(time.RFC3339), acc,
+			assetID, firstSeen.UTC().Format(time.RFC3339), lastSeen.UTC().Format(time.RFC3339), acc, platformRole,
 		}); err != nil {
 			panic(http.ErrAbortHandler)
 		}

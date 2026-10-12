@@ -91,6 +91,7 @@ export function AssetsPage() {
         </>
       ),
     },
+    { id: "platform-role", header: "Platform role", kind: "status", exportValue: asset => asset.platform_role ?? "", cell: asset => <span className="text-xs">{asset.platform_role === "core" ? "Core" : asset.platform_role === "" ? "Unclassified" : "Not reported"}</span> },
     { id: "risk", header: "Risk", sort: () => 0, exportValue: (asset) => `critical=${asset.critical_findings}; high=${asset.high_findings}; open=${asset.open_findings}`, kind: "text", wrap: true, size: 192, minSize: 176, maxSize: 280, cell: (asset) => <RiskStack asset={asset} /> },
     { id: "supply-chain", header: "Supply Chain", sort: () => 0, exportValue: (asset) => `signed=${asset.image_signed ?? "not reported"}; sboms=${asset.sbom_count}; registry=${asset.registry ?? ""}; digest=${asset.digest ?? ""}`, kind: "text", wrap: true, size: 208, minSize: 192, maxSize: 320, cell: (asset) => <SupplyChainStack asset={asset} /> },
     { id: "criticality", header: "Criticality", sort: () => 0, exportValue: (asset) => asset.criticality, kind: "status", cell: (asset) => <span className="text-xs">{asset.criticality}</span> },
@@ -177,7 +178,7 @@ export function AssetsPage() {
       {exportError?.scope === exportScope && <ErrorState title="Asset export failed" error={exportError.error} />}
       {exportResult?.scope === exportScope && <p role="status" className="text-xs text-muted-foreground">Exported {exportResult.exported} of {exportResult.total} matching assets.{exportResult.truncated ? " The 100,000-row limit was reached." : ""}</p>}
       {ready && <section className="flex flex-col gap-4">
-        <DataTable rows={filtered} columns={columns} rowKey={asset => asset.id} onRowClick={asset => setSelectedID(asset.id)} selected={new Set(selected ? [selected.id] : [])} preferencesKey="assets" manualSorting sort={{ id: sort, dir: order }} onSortChange={setSort} pagination={false} exportFileName="constellation-assets-page" exportLabel="Export this page CSV" testId="assets-table" rowTestId={() => "asset-row"} emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">No assets match the current filters or page.</div>} />
+        <DataTable rows={filtered} columns={columns} rowKey={asset => asset.id} onRowClick={asset => setSelectedID(asset.id)} selected={new Set(selected ? [selected.id] : [])} preferencesKey="assets" defaultHiddenColumnIds={["platform-role"]} manualSorting sort={{ id: sort, dir: order }} onSortChange={setSort} pagination={false} exportFileName="constellation-assets-page" exportLabel="Export this page CSV" testId="assets-table" rowTestId={() => "asset-row"} emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">No assets match the current filters or page.</div>} />
         <p className="text-xs text-muted-foreground" data-testid="assets-page-scope">Showing {filtered.length ? page * ASSET_PAGE_SIZE + 1 : 0}–{filtered.length ? page * ASSET_PAGE_SIZE + filtered.length : 0} of {q.data.total} matching assets. Preview and table CSV cover this page.</p>
         {filtered.length > 0 && <Pager page={page} pageSize={ASSET_PAGE_SIZE} total={q.data.total} hasMore={q.data.has_more} rowsOnPage={filtered.length} onPage={setPage} />}
         {page > 0 && !filtered.length && <Button onClick={() => setPage(0)}>First page</Button>}

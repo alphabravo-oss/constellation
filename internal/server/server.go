@@ -832,6 +832,8 @@ func (s *Server) buildRouter() chi.Router {
 			// synthesized from observed deployments so the kanban renders against live data.
 			// `baselines` is constructed at /api/v1 scope above and shared with the ingest path.
 			r.Get("/runtime/baselines", s.requireVerb(rbac.VerbReadFindings, baselines.List))
+			r.Get("/runtime/baselines/inventory", s.requireVerb(rbac.VerbReadFindings, baselines.Inventory))
+			r.Get("/runtime/baselines/inventory.csv", s.requireVerb(rbac.VerbReadFindings, baselines.InventoryCSV))
 			r.Get("/runtime/baselines/{workload_id}", s.requireVerb(rbac.VerbReadFindings, baselines.Get))
 			r.Post("/runtime/baselines/{workload_id}/mode", s.requireVerb(rbac.VerbManageRuntimeRules, baselines.SetMode))
 			r.Get("/runtime/baselines/{workload_id}/rules", s.requireVerb(rbac.VerbReadFindings, baselines.ListRules))
@@ -840,6 +842,8 @@ func (s *Server) buildRouter() chi.Router {
 			r.Delete("/runtime/baselines/{workload_id}/rules/{rule_id}", s.requireVerb(rbac.VerbManageRuntimeRules, baselines.DeleteRule))
 			fileProfiles := runtime.NewFileProfiles(s.db, s.auditLog)
 			r.Get("/runtime/file-profiles", s.requireVerb(rbac.VerbReadFindings, fileProfiles.List))
+			r.Get("/runtime/file-profiles/inventory", s.requireVerb(rbac.VerbReadFindings, fileProfiles.Inventory))
+			r.Get("/runtime/file-profiles/inventory.csv", s.requireVerb(rbac.VerbReadFindings, fileProfiles.InventoryCSV))
 			r.Get("/runtime/file-profiles/{workload_id}", s.requireVerb(rbac.VerbReadFindings, fileProfiles.Get))
 			r.Get("/runtime/file-profiles/{workload_id}/export", s.requireVerb(rbac.VerbReadFindings, fileProfiles.Export))
 			r.Post("/runtime/file-profiles/{workload_id}/mode", s.requireVerb(rbac.VerbManageRuntimeRules, fileProfiles.SetMode))

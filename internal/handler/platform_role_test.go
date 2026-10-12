@@ -57,6 +57,10 @@ func TestPlatformRoleInventoryAPIs(t *testing.T) {
 		($4, $2, $3, 'payments', 'api', 'Deployment', '{}'::jsonb)`, coreID, orgID, clusterID, uuid.New()); err != nil {
 		t.Fatal(err)
 	}
+	// Core container attribution requires exact pod ownership, not a name prefix.
+	if _, err := pool.Exec(ctx, `INSERT INTO pod_workload_links(org_id,cluster_id,namespace,pod_name,pod_uid,pod_workload_id,owner_kind,owner_name,owner_workload_id,deployment_id) VALUES($1,$2,'security','agent-abc','platform-role-positive-pod','security/pod/agent-abc','Deployment','agent','security/agent',$3)`, orgID, clusterID, coreID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := pool.Exec(ctx, `INSERT INTO host_containers (org_id, cluster_id, node, container_count, payload, observed_at) VALUES
 		($1, $2, 'node-1', 2, '{"items":[{"id":"core","name":"agent","pod_namespace":"security","pod_name":"agent-abc","state":"running"},{"id":"user","name":"api","pod_namespace":"payments","pod_name":"api-abc","state":"running"}]}'::jsonb, $3)`, orgID, clusterID, time.Now()); err != nil {
 		t.Fatal(err)

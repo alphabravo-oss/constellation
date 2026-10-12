@@ -131,6 +131,14 @@ func TestAssetFindingsFullInventoryAndExport(t *testing.T) {
 	if err != nil || len(records) != 1413 {
 		t.Fatalf("CSV %d %v", len(records), err)
 	}
+	if records[0][len(records[0])-1] != "platform_role" {
+		t.Fatal("role export column missing")
+	}
+	for _, row := range records[1:] {
+		if row[len(row)-1] != "" {
+			t.Fatal("image evidence must not inherit a workload role")
+		}
+	}
 	w = request(asset, "q=%25_", true, true)
 	records, err = csv.NewReader(strings.NewReader(w.Body.String())).ReadAll()
 	if err != nil || len(records) != 2 {

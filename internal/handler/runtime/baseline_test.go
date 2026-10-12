@@ -18,7 +18,7 @@ import (
 
 func TestBaselinesSetModePersistsAcrossHandlers(t *testing.T) {
 	d := openTestDB(t)
-	defer d.Close()
+	t.Cleanup(d.Close)
 
 	ctx := context.Background()
 	pool := d.Pool()
@@ -109,7 +109,7 @@ INSERT INTO events (
 // for DB-backed workloads and drift classification silently never fired post-restart.
 func TestBaselinesHydrateFromDB(t *testing.T) {
 	d := openTestDB(t)
-	defer d.Close()
+	t.Cleanup(d.Close)
 
 	ctx := context.Background()
 	pool := d.Pool()

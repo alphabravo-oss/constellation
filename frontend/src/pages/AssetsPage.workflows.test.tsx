@@ -1,3 +1,4 @@
+import { downloadCsv } from "@/lib/csv";
 /* global HTMLSelectElement */
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -10,6 +11,7 @@ import { AssetsPage } from "./AssetsPage";
 const scope=vi.hoisted(()=>({clusterId:"cluster",cluster:{id:"cluster"} as {id:string}|undefined,isLoading:false,error:null as Error|null}));
 vi.mock("@/hooks/useCluster",()=>({useCluster:()=>scope}));
 vi.mock("@/api/client",()=>({assets:{list:vi.fn(),exportCsv:vi.fn()}}));
+vi.mock("@/lib/csv", () => ({ downloadCsv: vi.fn() }));
 let root:Root,host:HTMLDivElement,client:QueryClient,history:RouterHistory;
 const row=(name="needle"):Asset=>({id:name,cluster_id:"cluster",kind:"workload",name,labels:{team:"prod"},ai_workload:true,criticality:"high",finding_count:1,critical_findings:1,high_findings:0,open_findings:1,sbom_count:0,first_seen_at:"2026-10-12T00:00:00Z",last_seen_at:"2026-10-12T00:00:00Z"});
 const response=(rows:Asset[],total=rows.length,offset=0,sort="risk",order:"asc"|"desc"="desc")=>({assets:rows,total,offset,limit:100,has_more:offset+rows.length<total,sort,order,summary:{total,images:0,workloads:total,critical_high:total,open_findings:total,signed_images:0,unsigned_images:0,signature_unknown:0,with_sbom:0,missing_sbom:0,ai:total}});
@@ -42,4 +44,18 @@ it("shows image names and reveals their digest only on request",async()=>{
   await act(async()=>disclosure.querySelector("summary")!.click());expect(disclosure.open).toBe(true);
   expect(host.querySelector('[data-testid="asset-preview"] h2')?.textContent).toBe("docker.io/team/api:v2");
   expect(host.querySelector('[data-testid="asset-preview"] details')?.hasAttribute("open")).toBe(false);
+});
+
+it("exports evaluated platform roles from the selected page columns without inferring labels", async () => {
+  vi.mocked(assets.list).mockResolvedValue(response([{ ...row("core"), platform_role: "core" }, { ...row("unknown"), platform_role: "" }, row("legacy")], 3));
+  await render("/clusters/cluster/assets"); await settled(() => expect(host.querySelector('[data-testid="assets-table"]')).not.toBeNull());
+  expect(host.querySelector('[data-testid="assets-table"] thead')?.textContent).not.toContain("Platform role");
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="assets-table-columns-trigger"]')!.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 })));
+  await settled(() => expect(document.querySelector('[role="menuitemcheckbox"]')).not.toBeNull());
+  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find(item => item.textContent === "Platform role")!.click());
+  expect(host.textContent).toContain("Core"); expect(host.textContent).toContain("Unclassified"); expect(host.textContent).toContain("Not reported");
+  await act(async () => button("Export this page CSV").click());
+  const [, headers, rows] = vi.mocked(downloadCsv).mock.calls.at(-1)!;
+  const role = headers.indexOf("Platform role"); expect(role).toBeGreaterThanOrEqual(0);
+  expect(rows.map(row => row[role])).toEqual(["core", "", ""]);
 });

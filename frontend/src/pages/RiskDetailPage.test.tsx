@@ -168,3 +168,16 @@ it("keeps embedded runtime cluster and role in risk process CSV",async()=>{
 it.each(["network","process"])("withholds foreign embedded deployment evidence in risk%s",async kind=>{
  const d=deployment();d.network_flows=[{...d.network_flows[0],cluster_id:"foreign",src:"private/source"}];d.runtime_events=[{...d.runtime_events[0],cluster_id:"foreign",workload_id:"private/workload"}];vi.mocked(deployments.get).mockResolvedValue(d);await render("deployment","deployment",`?tab=${kind}`);await settled(()=>expect(host.textContent).toContain(`Embedded ${kind==="network"?"network flows":"runtime events"} do not match this cluster`));expect(host.textContent).not.toContain(kind==="network"?"private/source":"private/workload");expect(downloadCsv).not.toHaveBeenCalled();
 });
+
+it("exports the selected finding's actual platform role when its optional column is selected", async () => {
+  vi.mocked(findings.get).mockResolvedValue({ ...finding(), platform_role: "core" });
+  await render("finding", "finding", "?tab=findings"); await settled(() => expect(host.querySelector('[data-testid="risk-generic-findings"]')).not.toBeNull());
+  expect(host.querySelector('[data-testid="risk-generic-findings"] thead')?.textContent).not.toContain("Platform role");
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="risk-generic-findings-columns-trigger"]')!.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 })));
+  await settled(() => expect(document.querySelector('[role="menuitemcheckbox"]')).not.toBeNull());
+  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find(item => item.textContent === "Platform role")!.click());
+  expect(host.querySelector('[data-testid="risk-generic-findings"] tbody')?.textContent).toContain("Core");
+  await act(async () => button("Export returned findings").click());
+  const [, headers, rows] = vi.mocked(downloadCsv).mock.calls.at(-1)!;
+  expect(rows[0][headers.indexOf("Platform role")]).toBe("core");
+});

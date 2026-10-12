@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"github.com/alphabravocompany/constellation/internal/handler/platformrole"
 	"net/http"
 	"time"
 
@@ -20,6 +21,7 @@ type Assets struct {
 func NewAssets(database *db.DB) *Assets { return &Assets{db: database} }
 
 type assetDTO struct {
+	PlatformRole     string          `json:"platform_role"`
 	ID               uuid.UUID       `json:"id"`
 	ClusterID        *uuid.UUID      `json:"cluster_id,omitempty"`
 	Kind             string          `json:"kind"`
@@ -60,10 +62,10 @@ func (a *Assets) Get(w http.ResponseWriter, r *http.Request) {
 	var d assetDTO
 	var labels []byte
 	err = a.db.Pool().QueryRow(r.Context(),
-		`SELECT a.id, a.cluster_id, a.kind, a.name, `+assetDisplayNameSQL+`, a.digest, a.labels, a.ai_workload, a.criticality, a.first_seen_at, a.last_seen_at
+		`SELECT a.id, a.cluster_id, a.kind, a.name, `+assetDisplayNameSQL+`, a.digest, a.labels, a.ai_workload, a.criticality, a.first_seen_at, a.last_seen_at, `+platformrole.AssetPlatformRoleSQL("a")+`
            FROM assets a LEFT JOIN images i ON i.asset_id=a.id WHERE a.id = $1 AND a.org_id = $2`, id, subj.OrgID).
 		Scan(&d.ID, &d.ClusterID, &d.Kind, &d.Name, &d.DisplayName, &d.Digest, &labels, &d.AIWorkload,
-			&d.Criticality, &d.FirstSeenAt, &d.LastSeenAt)
+			&d.Criticality, &d.FirstSeenAt, &d.LastSeenAt, &d.PlatformRole)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
@@ -105,13 +107,13 @@ SELECT id FROM image_scan_results
 			}
 			for _, f := range canonicalFindings {
 				findings = append(findings, map[string]any{
-					"id": f.ID.String(), "kind": "vulnerability", "external_id": f.ExternalID, "title": f.Title, "severity": f.Severity, "risk_score": f.RiskScore, "lifecycle": "open", "last_seen_at": f.LastSeenAt.UTC().Format(time.RFC3339), "image_scan_result_id": f.ImageScanResultID.String(), "finding_key": f.FindingKey,
+					"id": f.ID.String(), "kind": "vulnerability", "external_id": f.ExternalID, "title": f.Title, "severity": f.Severity, "risk_score": f.RiskScore, "lifecycle": "open", "last_seen_at": f.LastSeenAt.UTC().Format(time.RFC3339), "image_scan_result_id": f.ImageScanResultID.String(), "finding_key": f.FindingKey, "platform_role": "",
 				})
 			}
 		}
 	}
 	rows, err := a.db.Pool().Query(r.Context(), `
-SELECT id, kind, COALESCE(external_id,''), title, severity, risk_score, lifecycle, last_seen_at
+SELECT id, kind, COALESCE(external_id,''), title, severity, risk_score, lifecycle, last_seen_at, `+platformrole.FindingPlatformRoleSQL("findings")+`
   FROM findings
  WHERE org_id = $1 AND asset_id = $2 AND cluster_id IS NOT DISTINCT FROM $3::uuid
  ORDER BY risk_score DESC, last_seen_at DESC, id, first_seen_at
@@ -123,18 +125,18 @@ SELECT id, kind, COALESCE(external_id,''), title, severity, risk_score, lifecycl
 	defer rows.Close()
 	for rows.Next() {
 		var (
-			fid, kind, externalID, title, severity, lifecycle string
-			risk                                              int
-			lastSeen                                          time.Time
+			fid, kind, externalID, title, severity, lifecycle, role string
+			risk                                                    int
+			lastSeen                                                time.Time
 		)
-		if err := rows.Scan(&fid, &kind, &externalID, &title, &severity, &risk, &lifecycle, &lastSeen); err != nil {
+		if err := rows.Scan(&fid, &kind, &externalID, &title, &severity, &risk, &lifecycle, &lastSeen, &role); err != nil {
 			fail()
 			return
 		}
 		findings = append(findings, map[string]any{
 			"id": fid, "kind": kind, "external_id": externalID, "title": title,
 			"severity": severity, "risk_score": risk, "lifecycle": lifecycle,
-			"last_seen_at": lastSeen.UTC().Format(time.RFC3339),
+			"last_seen_at": lastSeen.UTC().Format(time.RFC3339), "platform_role": role,
 		})
 	}
 

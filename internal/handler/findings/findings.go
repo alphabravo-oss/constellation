@@ -3,7 +3,9 @@ package findings
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,6 +17,7 @@ import (
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
+	"github.com/alphabravocompany/constellation/internal/handler/platformrole"
 	"github.com/alphabravocompany/constellation/internal/scanner"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/notify"
@@ -35,6 +38,7 @@ func NewFindings(database *db.DB, auditLog *audit.Logger, dispatcher *notify.Dis
 }
 
 type findingDTO struct {
+	PlatformRole        string                         `json:"platform_role"`
 	ID                  uuid.UUID                      `json:"id"`
 	Kind                string                         `json:"kind"`
 	ExternalID          *string                        `json:"external_id,omitempty"`
@@ -93,7 +97,7 @@ func (f *Findings) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := f.db.Pool().Query(r.Context(), `
 SELECT id, kind, external_id, title, severity, risk_score, lifecycle, asset_id, cluster_id,
        attack_techniques, accepted_until, first_seen_at, last_seen_at, risk_inputs,
-       COALESCE(canonical_engine, ''), engines, detail_json
+       COALESCE(canonical_engine, ''), engines, detail_json, `+platformrole.FindingPlatformRoleSQL("findings")+`
   FROM findings WHERE `+where+` ORDER BY `+order+`
  LIMIT $`+strconv.Itoa(len(args)-1)+` OFFSET $`+strconv.Itoa(len(args)), args...)
 	if err != nil {
@@ -109,7 +113,7 @@ SELECT id, kind, external_id, title, severity, risk_score, lifecycle, asset_id, 
 		var techniques []string
 		if err := rows.Scan(&d.ID, &d.Kind, &d.ExternalID, &d.Title, &d.Severity, &d.RiskScore,
 			&d.Lifecycle, &d.AssetID, &d.ClusterID, &techniques, &d.AcceptedUntil, &d.FirstSeen, &d.LastSeen, &inputs,
-			&d.CanonicalEngine, &enginesRaw, &detailRaw); err != nil {
+			&d.CanonicalEngine, &enginesRaw, &detailRaw, &d.PlatformRole); err != nil {
 			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
@@ -172,13 +176,17 @@ func (f *Findings) Get(w http.ResponseWriter, r *http.Request) {
 	err = f.db.Pool().QueryRow(r.Context(), `
 SELECT id, kind, external_id, title, severity, risk_score, lifecycle, asset_id, cluster_id,
        attack_techniques, accepted_until, first_seen_at, last_seen_at, risk_inputs,
-       COALESCE(risk_factors,'[]'::jsonb), COALESCE(canonical_engine, ''), engines, detail_json
+       COALESCE(risk_factors,'[]'::jsonb), COALESCE(canonical_engine, ''), engines, detail_json, `+platformrole.FindingPlatformRoleSQL("findings")+`
   FROM findings WHERE id = $1 AND org_id = $2 LIMIT 1`, id, subj.OrgID).
 		Scan(&d.ID, &d.Kind, &d.ExternalID, &d.Title, &d.Severity, &d.RiskScore,
 			&d.Lifecycle, &d.AssetID, &d.ClusterID, &techniques, &d.AcceptedUntil, &d.FirstSeen, &d.LastSeen, &inputs, &factors,
-			&d.CanonicalEngine, &enginesRaw, &detailRaw)
-	if err != nil {
+			&d.CanonicalEngine, &enginesRaw, &detailRaw, &d.PlatformRole)
+	if errors.Is(err, pgx.ErrNoRows) {
 		httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "finding evidence unavailable"})
 		return
 	}
 	d.AttackIDs = techniques
@@ -199,6 +207,7 @@ SELECT id, kind, external_id, title, severity, risk_score, lifecycle, asset_id, 
 		"lifecycle":         d.Lifecycle,
 		"asset_id":          d.AssetID,
 		"cluster_id":        d.ClusterID,
+		"platform_role":     d.PlatformRole,
 		"attack_techniques": d.AttackIDs,
 		"accepted_until":    d.AcceptedUntil,
 		"first_seen_at":     d.FirstSeen,

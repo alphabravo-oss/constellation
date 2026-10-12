@@ -10,7 +10,7 @@ export function ColumnResizeHandle({ label, width, min, max, onResize, onReset }
   return <div role="separator" aria-orientation="vertical" aria-label={`Resize ${label}`}
     aria-valuemin={Math.round(min)} aria-valuemax={Math.round(max)} aria-valuenow={Math.round(width)}
     aria-valuetext={`${Math.round(width)} pixels`} tabIndex={0} className="app-table-resize"
-    title="Drag or use Left/Right arrows to resize. Home/End sets minimum/maximum. Double-click to reset."
+    title="Drag or use Left/Right arrows to resize. Hold Shift for larger steps. Home/End sets minimum/maximum. Press Enter or double-click to reset."
     onClick={event => event.stopPropagation()}
     onDoubleClick={event => { event.stopPropagation(); onReset(); }}
     onPointerDown={event => {

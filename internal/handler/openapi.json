@@ -1051,7 +1051,7 @@
           },
           "duration_s": {
             "type": "integer",
-            "description": "Defaults to 30 seconds; clamped to 5\u2013300 seconds."
+            "description": "Defaults to 30 seconds; clamped to 5–300 seconds."
           },
           "src_ip": {
             "type": "string"
@@ -3668,7 +3668,8 @@
           "risk_score",
           "lifecycle",
           "source",
-          "last_seen_at"
+          "last_seen_at",
+          "platform_role"
         ],
         "properties": {
           "row_id": {
@@ -3707,6 +3708,14 @@
           },
           "finding_key": {
             "type": "string"
+          },
+          "platform_role": {
+            "type": "string",
+            "enum": [
+              "",
+              "core"
+            ],
+            "description": "Backend-evaluated platform role. Empty means unknown. Only exact same-organization, same-cluster workload ownership can supply an installation-derived role; image, repository, cloud, node and ambiguous identities do not borrow workload roles."
           }
         }
       },
@@ -5814,6 +5823,618 @@
           "after",
           "before"
         ]
+      },
+      "ProcessProfileInventoryRecord": {
+        "type": "object",
+        "properties": {
+          "row_id": {
+            "type": "string",
+            "description": "Stable JSON tuple [cluster_id, workload_id]. A profile is shared by namespace/name across Kubernetes kinds."
+          },
+          "workload_id": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "learn",
+              "monitor",
+              "enforce"
+            ]
+          },
+          "owner_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "owner_ambiguous": {
+            "type": "boolean"
+          },
+          "platform_role": {
+            "type": "string",
+            "enum": [
+              "",
+              "core"
+            ],
+            "description": "Empty means unknown. Exact same-tenant, same-cluster ownership is required for installation-label classification."
+          },
+          "rule_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "monitored_alerts_24h": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "enforced_blocks_24h": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "learned_processes_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "configured": {
+            "type": "boolean",
+            "description": "A persisted mode state exists; otherwise the default is learn."
+          },
+          "learn_started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "monitor_started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "enforce_started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_new_process_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "top_processes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 5,
+            "description": "At most five most-observed process names; the retained process count is not capped."
+          }
+        },
+        "required": [
+          "row_id",
+          "workload_id",
+          "namespace",
+          "name",
+          "cluster_id",
+          "mode",
+          "owner_count",
+          "owner_ambiguous",
+          "platform_role",
+          "rule_count",
+          "monitored_alerts_24h",
+          "enforced_blocks_24h",
+          "learned_processes_count",
+          "configured"
+        ]
+      },
+      "ProcessProfileInventorySummary": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "learn": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "monitor": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "enforce": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "processes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "alerts_24h": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "blocks_24h": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "rules": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "ambiguous_owners": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "total",
+          "learn",
+          "monitor",
+          "enforce",
+          "processes",
+          "alerts_24h",
+          "blocks_24h",
+          "rules",
+          "ambiguous_owners"
+        ]
+      },
+      "ProcessProfileInventoryResponse": {
+        "type": "object",
+        "properties": {
+          "profiles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProcessProfileInventoryRecord"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "sort": {
+            "type": "string",
+            "enum": [
+              "workload",
+              "namespace",
+              "mode",
+              "processes",
+              "alerts",
+              "blocks",
+              "rules",
+              "last_new",
+              "learn_started"
+            ]
+          },
+          "order": {
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ]
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "filters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "",
+                  "learn",
+                  "monitor",
+                  "enforce"
+                ]
+              },
+              "hide_platform": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "q",
+              "namespace",
+              "mode",
+              "hide_platform"
+            ]
+          },
+          "summary": {
+            "$ref": "#/components/schemas/ProcessProfileInventorySummary"
+          },
+          "namespaces": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Distinct namespaces in the exact cluster profile inventory, before list filters."
+          },
+          "source_complete": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "summary_scope": {
+            "type": "string",
+            "enum": [
+              "matching_retained_process_events"
+            ]
+          }
+        },
+        "required": [
+          "profiles",
+          "total",
+          "limit",
+          "offset",
+          "has_more",
+          "sort",
+          "order",
+          "cluster_id",
+          "filters",
+          "summary",
+          "namespaces",
+          "source_complete",
+          "summary_scope"
+        ]
+      },
+      "FileProfileInventoryRecord": {
+        "type": "object",
+        "properties": {
+          "row_id": {
+            "type": "string",
+            "description": "Stable JSON tuple [cluster_id, workload_id]. A profile is shared by namespace/name across Kubernetes kinds."
+          },
+          "workload_id": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "learn",
+              "monitor",
+              "enforce"
+            ]
+          },
+          "owner_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "owner_ambiguous": {
+            "type": "boolean"
+          },
+          "platform_role": {
+            "type": "string",
+            "enum": [
+              "",
+              "core"
+            ],
+            "description": "Empty means unknown. Exact same-tenant, same-cluster ownership is required for installation-label classification."
+          },
+          "rule_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "monitored_alerts_24h": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "enforced_blocks_24h": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "learned_paths_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "sensitive_path_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "watched_file_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "retained_events": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "learn_started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "monitor_started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "enforce_started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_new_path_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_observed_at": {
+            "type": "string",
+            "description": "RFC3339 timestamp, or empty when no retained file activity exists."
+          }
+        },
+        "required": [
+          "row_id",
+          "workload_id",
+          "namespace",
+          "name",
+          "cluster_id",
+          "mode",
+          "owner_count",
+          "owner_ambiguous",
+          "platform_role",
+          "rule_count",
+          "monitored_alerts_24h",
+          "enforced_blocks_24h",
+          "learned_paths_count",
+          "sensitive_path_count",
+          "watched_file_count",
+          "retained_events",
+          "last_observed_at"
+        ]
+      },
+      "FileProfileInventorySummary": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "learn": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "monitor": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "enforce": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "rules": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "alerts": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "blocks": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "retained_events": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "ambiguous": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "total",
+          "learn",
+          "monitor",
+          "enforce",
+          "rules",
+          "alerts",
+          "blocks",
+          "retained_events",
+          "ambiguous"
+        ]
+      },
+      "FileProfileInventoryResponse": {
+        "type": "object",
+        "properties": {
+          "profiles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FileProfileInventoryRecord"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2000
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "sort": {
+            "type": "string",
+            "enum": [
+              "workload",
+              "namespace",
+              "mode",
+              "rules",
+              "paths",
+              "alerts",
+              "blocks",
+              "last_observed"
+            ]
+          },
+          "order": {
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ]
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "filters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "",
+                  "learn",
+                  "monitor",
+                  "enforce"
+                ]
+              },
+              "hide_platform": {
+                "type": "boolean"
+              },
+              "platform_role": {
+                "type": "string",
+                "enum": [
+                  "",
+                  "core",
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "q",
+              "namespace",
+              "mode",
+              "hide_platform",
+              "platform_role"
+            ]
+          },
+          "summary": {
+            "$ref": "#/components/schemas/FileProfileInventorySummary"
+          },
+          "namespaces": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Distinct namespaces in the exact cluster profile inventory, before list filters."
+          },
+          "source_complete": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "summary_scope": {
+            "type": "string",
+            "enum": [
+              "matching_shared_profiles"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "retained_file_events"
+            ]
+          },
+          "org_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "profiles",
+          "total",
+          "limit",
+          "offset",
+          "has_more",
+          "sort",
+          "order",
+          "cluster_id",
+          "filters",
+          "summary",
+          "namespaces",
+          "source_complete",
+          "summary_scope",
+          "source",
+          "org_id"
+        ]
       }
     },
     "responses": {
@@ -6142,7 +6763,20 @@
                     "assets": {
                       "type": "array",
                       "items": {
-                        "type": "object"
+                        "type": "object",
+                        "properties": {
+                          "platform_role": {
+                            "type": "string",
+                            "enum": [
+                              "",
+                              "core"
+                            ],
+                            "description": "Backend-evaluated platform role. Empty means unknown. Only exact same-organization, same-cluster workload ownership can supply an installation-derived role; image, repository, cloud, node and ambiguous identities do not borrow workload roles."
+                          }
+                        },
+                        "required": [
+                          "platform_role"
+                        ]
                       }
                     },
                     "limit": {
@@ -6182,7 +6816,7 @@
     "/api/v1/assets.csv": {
       "get": {
         "summary": "Export matching asset inventory CSV",
-        "description": "Same filters and ordering as asset inventory; pagination does not restrict export. Explicit100000-record cap and metadata headers. Image assets expose display_name as the reported repository/tag reference without its digest suffix; raw name and digest remain unchanged. Asset-name sorting and literal search use this display identity. Matching CSV includes Display name alongside raw Name and Digest.",
+        "description": "Same filters and ordering as asset inventory; pagination does not restrict export. Explicit100000-record cap and metadata headers. Image assets expose display_name as the reported repository/tag reference without its digest suffix; raw name and digest remain unchanged. Asset-name sorting and literal search use this display identity. Matching CSV includes Display name alongside raw Name and Digest. Includes the same backend-evaluated platform role as the matching API records. Empty role means unknown; image and other non-workload evidence does not borrow workload classification.",
         "parameters": [
           {
             "name": "cluster_id",
@@ -6339,8 +6973,41 @@
     },
     "/api/v1/assets/{id}": {
       "get": {
-        "summary": "Get one asset with image, findings, SBOM context, and image accept-risk history",
-        "description": " Image assets expose display_name as the reported repository/tag reference without its digest suffix; raw name and digest remain unchanged. Asset-name sorting and literal search use this display identity. Matching CSV includes Display name alongside raw Name and Digest."
+        "summary": "Get asset evidence",
+        "description": " Image assets expose display_name as the reported repository/tag reference without its digest suffix; raw name and digest remain unchanged. Asset-name sorting and literal search use this display identity. Matching CSV includes Display name alongside raw Name and Digest.",
+        "responses": {
+          "200": {
+            "description": "Owned asset evidence with evaluated platform role.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "asset"
+                  ],
+                  "properties": {
+                    "asset": {
+                      "type": "object",
+                      "properties": {
+                        "platform_role": {
+                          "type": "string",
+                          "enum": [
+                            "",
+                            "core"
+                          ],
+                          "description": "Backend-evaluated platform role. Empty means unknown. Only exact same-organization, same-cluster workload ownership can supply an installation-derived role; image, repository, cloud, node and ambiguous identities do not borrow workload roles."
+                        }
+                      },
+                      "required": [
+                        "platform_role"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/assets/{id}/findings": {
@@ -6501,7 +7168,7 @@
     "/api/v1/assets/{id}/findings.csv": {
       "get": {
         "summary": "Export all matching asset findings",
-        "description": "Organization-owned asset findings in the exact asset cluster plus canonical findings from the latest organization-owned image scan matching the exact asset digest (asset-ID fallback only when the digest is absent). Distinct evidence records are counted; this is not a unique-CVE count. Search, severity, lifecycle and source filters apply before full summary, stable sorting and pagination. A zero count does not establish scan coverage. CSV ignores page/limit and exports up to 100,000 matching records.",
+        "description": "Organization-owned asset findings in the exact asset cluster plus canonical findings from the latest organization-owned image scan matching the exact asset digest (asset-ID fallback only when the digest is absent). Distinct evidence records are counted; this is not a unique-CVE count. Search, severity, lifecycle and source filters apply before full summary, stable sorting and pagination. A zero count does not establish scan coverage. CSV ignores page/limit and exports up to 100,000 matching records. Includes the same backend-evaluated platform role as the matching API records. Empty role means unknown; image and other non-workload evidence does not borrow workload classification.",
         "parameters": [
           {
             "name": "id",
@@ -12880,7 +13547,7 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard \u2014 the target host is never caller-supplied).",
+            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard — the target host is never caller-supplied).",
             "schema": {
               "type": "string"
             }
@@ -12921,7 +13588,7 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard \u2014 the target host is never caller-supplied).",
+            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard — the target host is never caller-supplied).",
             "schema": {
               "type": "string"
             }
@@ -12962,7 +13629,7 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard \u2014 the target host is never caller-supplied).",
+            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard — the target host is never caller-supplied).",
             "schema": {
               "type": "string"
             }
@@ -13014,7 +13681,7 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard \u2014 the target host is never caller-supplied).",
+            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard — the target host is never caller-supplied).",
             "schema": {
               "type": "string"
             }
@@ -13066,7 +13733,7 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard \u2014 the target host is never caller-supplied).",
+            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard — the target host is never caller-supplied).",
             "schema": {
               "type": "string"
             }
@@ -13114,7 +13781,7 @@
     "/api/v1/federation/join": {
       "post": {
         "summary": "Exchange a federation join token for a per-cluster sync secret",
-        "description": "Anonymous exchange endpoint (D1/D2). A joining cluster presents a join token (a signed, master-minted token or the pre-shared fixed GitOps token) plus its cluster id/name and receives a per-cluster signed sync ticket it then presents on every /federation/sync poll. Only the sha256 of the ticket is persisted by the master (like api_tokens). Authenticated by the join token itself, so it carries no bearer security. When per-joint mTLS (D2) is enabled the response also includes a per-joint client certificate, its private key (shown once), and the master CA: the joint presents the client cert on every /sync poll and the master verifies it against the CA, so a leaked bearer ticket alone \u2014 without the matching client key \u2014 is rejected.",
+        "description": "Anonymous exchange endpoint (D1/D2). A joining cluster presents a join token (a signed, master-minted token or the pre-shared fixed GitOps token) plus its cluster id/name and receives a per-cluster signed sync ticket it then presents on every /federation/sync poll. Only the sha256 of the ticket is persisted by the master (like api_tokens). Authenticated by the join token itself, so it carries no bearer security. When per-joint mTLS (D2) is enabled the response also includes a per-joint client certificate, its private key (shown once), and the master CA: the joint presents the client cert on every /sync poll and the master verifies it against the CA, so a leaked bearer ticket alone — without the matching client key — is rejected.",
         "security": [],
         "requestBody": {
           "required": true,
@@ -13578,7 +14245,8 @@
                           "asset_id",
                           "attack_techniques",
                           "first_seen_at",
-                          "last_seen_at"
+                          "last_seen_at",
+                          "platform_role"
                         ],
                         "properties": {
                           "kind": {
@@ -13690,6 +14358,14 @@
                           },
                           "vulndb_bundle": {
                             "type": "object"
+                          },
+                          "platform_role": {
+                            "type": "string",
+                            "enum": [
+                              "",
+                              "core"
+                            ],
+                            "description": "Backend-evaluated platform role. Empty means unknown. Only exact same-organization, same-cluster workload ownership can supply an installation-derived role; image, repository, cloud, node and ambiguous identities do not borrow workload roles."
                           }
                         }
                       }
@@ -13781,7 +14457,7 @@
     "/api/v1/findings.csv": {
       "get": {
         "summary": "Export filtered finding instances as CSV",
-        "description": "Organization-scoped instance export using the same q, kind, lifecycle, cluster_id, fixable and allowlisted sort/order semantics as GET /api/v1/findings, including exclusion of workload-targeted vulnerability duplicates. Exports at most the effective limit after skipping offset; this is not an unbounded export and does not emit total, has_more or lifecycle counts. X-Export-Limit reports the effective row cap, not the number of exported rows or whether additional matches exist. CSV columns are id, kind, external_id, title, severity, risk_score, lifecycle, asset_id, first_seen_at, last_seen_at, accepted_until. Timestamps use UTC RFC3339; absent accepted_until is empty. Read/write errors after streaming starts abort the response rather than deliver a successful partial export.",
+        "description": "Organization-scoped instance export using the same q, kind, lifecycle, cluster_id, fixable and allowlisted sort/order semantics as GET /api/v1/findings, including exclusion of workload-targeted vulnerability duplicates. Exports at most the effective limit after skipping offset; this is not an unbounded export and does not emit total, has_more or lifecycle counts. X-Export-Limit reports the effective row cap, not the number of exported rows or whether additional matches exist. CSV columns are id, kind, external_id, title, severity, risk_score, lifecycle, asset_id, first_seen_at, last_seen_at, accepted_until. Timestamps use UTC RFC3339; absent accepted_until is empty. Read/write errors after streaming starts abort the response rather than deliver a successful partial export. Includes the same backend-evaluated platform role as the matching API records. Empty role means unknown; image and other non-workload evidence does not borrow workload classification.",
         "parameters": [
           {
             "name": "q",
@@ -14277,11 +14953,20 @@
                     "id": {
                       "format": "uuid",
                       "type": "string"
+                    },
+                    "platform_role": {
+                      "type": "string",
+                      "enum": [
+                        "",
+                        "core"
+                      ],
+                      "description": "Backend-evaluated platform role. Empty means unknown. Only exact same-organization, same-cluster workload ownership can supply an installation-derived role; image, repository, cloud, node and ambiguous identities do not borrow workload roles."
                     }
                   },
                   "required": [
                     "id",
-                    "cluster_id"
+                    "cluster_id",
+                    "platform_role"
                   ],
                   "type": "object"
                 }
@@ -16665,13 +17350,13 @@
           }
         },
         "summary": "Get exposure",
-        "description": " Workload platform_role is always explicit: core or empty for evaluated unknown, including namespace-scoped IPs and ambiguous same-name workload kinds. Exact pod ownership and actual source cluster determine custom-install roles. Map rows sharing an identity across clusters cannot borrow one cluster\u2019s labels. Sessions, peers, protocols and ports aggregate from observed flows before MAX vulnerability enrichment, so duplicate workload kinds cannot multiply sessions. Up to50 rows per direction; this bounded exposure response has no continuation."
+        "description": " Workload platform_role is always explicit: core or empty for evaluated unknown, including namespace-scoped IPs and ambiguous same-name workload kinds. Exact pod ownership and actual source cluster determine custom-install roles. Map rows sharing an identity across clusters cannot borrow one cluster’s labels. Sessions, peers, protocols and ports aggregate from observed flows before MAX vulnerability enrichment, so duplicate workload kinds cannot multiply sessions. Up to50 rows per direction; this bounded exposure response has no continuation."
       }
     },
     "/api/v1/network/map": {
       "get": {
         "summary": "Cluster-scoped Network Traffic Map workloads and observed flow edges",
-        "description": " Read responses carry platform-role metadata resolved from exact organization/cluster/workload identity. Network map flows and recent entries use src_platform_role/dst_platform_role; threats and captures use platform_role. Unknown or ambiguous identities return an empty role string; older APIs may omit role fields. Classification does not change collection, detection or enforcement. Workload platform_role is always explicit: core or empty for evaluated unknown, including namespace-scoped IPs and ambiguous same-name workload kinds. Exact pod ownership and actual source cluster determine custom-install roles. Map rows sharing an identity across clusters cannot borrow one cluster\u2019s labels."
+        "description": " Read responses carry platform-role metadata resolved from exact organization/cluster/workload identity. Network map flows and recent entries use src_platform_role/dst_platform_role; threats and captures use platform_role. Unknown or ambiguous identities return an empty role string; older APIs may omit role fields. Classification does not change collection, detection or enforcement. Workload platform_role is always explicit: core or empty for evaluated unknown, including namespace-scoped IPs and ambiguous same-name workload kinds. Exact pod ownership and actual source cluster determine custom-install roles. Map rows sharing an identity across clusters cannot borrow one cluster’s labels."
       }
     },
     "/api/v1/network/peers": {
@@ -20920,6 +21605,371 @@
         "summary": "Get baselines"
       }
     },
+    "/api/v1/runtime/baselines/inventory": {
+      "get": {
+        "summary": "List process baseline profiles",
+        "description": "Read-only, repeatable-read inventory of shared namespace/name profiles. Observed workloads, saved profile state and authored-rule-only profiles are deduplicated. Ambiguous workload kinds remain explicit; only a single exact owner contributes pod-linked evidence. Canonical profile-name events remain included. Counts and summaries cover all matching retained process_exec events, with alert/block counts restricted to the last 24 hours. This is not proof of collection completeness or enforcement. Namespace facets cover the whole exact-cluster profile inventory. No state is created by this read. Duplicate parameters and invalid paging/filter values return 400. The legacy detail observations remain a separately labeled 1,000-event sample; authored rules and agent bundles are not page-limited.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": true,
+            "description": "Required exact cluster owned by the authenticated organization.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Literal case-insensitive workload search; surrounding whitespace is trimmed.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "namespace",
+            "in": "query",
+            "required": false,
+            "description": "Exact namespace.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "required": false,
+            "description": "Configured mode, including default learn for profiles without state.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "learn",
+                "monitor",
+                "enforce",
+                "all"
+              ]
+            }
+          },
+          {
+            "name": "hide_platform",
+            "in": "query",
+            "required": false,
+            "description": "Exclude known core profiles before summaries, filtering, paging and export.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "description": "Server-side ordering with stable profile identity as the tie-breaker.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "workload",
+                "namespace",
+                "mode",
+                "processes",
+                "alerts",
+                "blocks",
+                "rules",
+                "last_new",
+                "learn_started"
+              ],
+              "default": "workload"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "description": "Sort direction.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "asc"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Rows per page.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "description": "Zero-based offset; empty deep pages retain full summaries.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483647,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Malformed query encoding or invalid filter, sort, page or group scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authenticated user subject required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "read-findings permission required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Scope, evidence or metadata could not be read; not an empty-success inventory or a downloadable export.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Cluster not found in the authenticated organization.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Complete matching profile summary and requested page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessProfileInventoryResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/runtime/baselines/inventory.csv": {
+      "get": {
+        "summary": "Export matching process baseline profiles",
+        "description": "Read-only, repeatable-read inventory of shared namespace/name profiles. Observed workloads, saved profile state and authored-rule-only profiles are deduplicated. Ambiguous workload kinds remain explicit; only a single exact owner contributes pod-linked evidence. Canonical profile-name events remain included. Counts and summaries cover all matching retained process_exec events, with alert/block counts restricted to the last 24 hours. This is not proof of collection completeness or enforcement. Namespace facets cover the whole exact-cluster profile inventory. No state is created by this read. Duplicate parameters and invalid paging/filter values return 400. The legacy detail observations remain a separately labeled 1,000-event sample; authored rules and agent bundles are not page-limited. CSV ignores valid limit/offset and exports up to 100,000 matching profiles in the requested order. X-Export-Total, X-Export-Limit and X-Export-Truncated disclose the bound. This is evidence, not an importable configuration.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": true,
+            "description": "Required exact cluster owned by the authenticated organization.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Literal case-insensitive workload search; surrounding whitespace is trimmed.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "namespace",
+            "in": "query",
+            "required": false,
+            "description": "Exact namespace.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "required": false,
+            "description": "Configured mode, including default learn for profiles without state.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "learn",
+                "monitor",
+                "enforce",
+                "all"
+              ]
+            }
+          },
+          {
+            "name": "hide_platform",
+            "in": "query",
+            "required": false,
+            "description": "Exclude known core profiles before summaries, filtering, paging and export.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "description": "Server-side ordering with stable profile identity as the tie-breaker.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "workload",
+                "namespace",
+                "mode",
+                "processes",
+                "alerts",
+                "blocks",
+                "rules",
+                "last_new",
+                "learn_started"
+              ],
+              "default": "workload"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "description": "Sort direction.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "asc"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Malformed query encoding or invalid filter, sort, page or group scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authenticated user subject required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "read-findings permission required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Scope, evidence or metadata could not be read; not an empty-success inventory or a downloadable export.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Cluster not found in the authenticated organization.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Matching CSV across pages, capped at 100,000 records with explicit scope and truncation metadata.",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Export-Total": {
+                "description": "Total matching records before the CSV cap.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-Export-Limit": {
+                "description": "Maximum exported matching records.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "enum": [
+                    100000
+                  ]
+                }
+              },
+              "X-Export-Truncated": {
+                "description": "True exactly when matching total exceeds 100,000. Narrow filters for an uncapped matching export.",
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/runtime/baselines/{workload_id}": {
       "get": {
         "responses": {
@@ -21645,6 +22695,397 @@
         "summary": "Get file-profiles"
       }
     },
+    "/api/v1/runtime/file-profiles/inventory": {
+      "get": {
+        "summary": "List file monitoring profiles",
+        "description": "Read-only, repeatable-read inventory of shared namespace/name profiles. Observed workloads, saved profile state and authored-rule-only profiles are deduplicated. Ambiguous workload kinds remain explicit; only a single exact owner contributes pod-linked evidence. Canonical profile-name events remain included. Counts and summaries cover all matching retained file_open events, with alert/block counts restricted to the last 24 hours. This is not proof of collection completeness or enforcement. Namespace facets cover the whole exact-cluster profile inventory. No state is created by this read. Duplicate parameters and invalid paging/filter values return 400. The legacy detail observations remain a separately labeled 1,000-event sample; authored rules and agent bundles are not page-limited.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": true,
+            "description": "Required exact cluster owned by the authenticated organization.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Literal case-insensitive workload search; surrounding whitespace is trimmed.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "namespace",
+            "in": "query",
+            "required": false,
+            "description": "Exact namespace.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "required": false,
+            "description": "Configured mode, including default learn for profiles without state.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "learn",
+                "monitor",
+                "enforce",
+                "all"
+              ]
+            }
+          },
+          {
+            "name": "hide_platform",
+            "in": "query",
+            "required": false,
+            "description": "Exclude known core profiles before summaries, filtering, paging and export.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "name": "platform_role",
+            "in": "query",
+            "required": false,
+            "description": "Filter by exact backend role; unknown includes ambiguous or unattributed profiles.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "core",
+                "unknown",
+                "all"
+              ]
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "description": "Server-side ordering with stable profile identity as the tie-breaker.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "workload",
+                "namespace",
+                "mode",
+                "rules",
+                "paths",
+                "alerts",
+                "blocks",
+                "last_observed"
+              ],
+              "default": "workload"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "description": "Sort direction.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Rows per page.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2000,
+              "default": 100
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "description": "Zero-based offset; empty deep pages retain full summaries.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483647,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Malformed query encoding or invalid filter, sort, page or group scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authenticated user subject required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "read-findings permission required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Scope, evidence or metadata could not be read; not an empty-success inventory or a downloadable export.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Cluster not found in the authenticated organization.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Complete matching profile summary and requested page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileProfileInventoryResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/runtime/file-profiles/inventory.csv": {
+      "get": {
+        "summary": "Export matching file monitoring profiles",
+        "description": "Read-only, repeatable-read inventory of shared namespace/name profiles. Observed workloads, saved profile state and authored-rule-only profiles are deduplicated. Ambiguous workload kinds remain explicit; only a single exact owner contributes pod-linked evidence. Canonical profile-name events remain included. Counts and summaries cover all matching retained file_open events, with alert/block counts restricted to the last 24 hours. This is not proof of collection completeness or enforcement. Namespace facets cover the whole exact-cluster profile inventory. No state is created by this read. Duplicate parameters and invalid paging/filter values return 400. The legacy detail observations remain a separately labeled 1,000-event sample; authored rules and agent bundles are not page-limited. CSV ignores valid limit/offset and exports up to 100,000 matching profiles in the requested order. X-Export-Total, X-Export-Limit and X-Export-Truncated disclose the bound. This is evidence, not an importable configuration.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": true,
+            "description": "Required exact cluster owned by the authenticated organization.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Literal case-insensitive workload search; surrounding whitespace is trimmed.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "namespace",
+            "in": "query",
+            "required": false,
+            "description": "Exact namespace.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "required": false,
+            "description": "Configured mode, including default learn for profiles without state.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "learn",
+                "monitor",
+                "enforce",
+                "all"
+              ]
+            }
+          },
+          {
+            "name": "hide_platform",
+            "in": "query",
+            "required": false,
+            "description": "Exclude known core profiles before summaries, filtering, paging and export.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "name": "platform_role",
+            "in": "query",
+            "required": false,
+            "description": "Filter by exact backend role; unknown includes ambiguous or unattributed profiles.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "core",
+                "unknown",
+                "all"
+              ]
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "description": "Server-side ordering with stable profile identity as the tie-breaker.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "workload",
+                "namespace",
+                "mode",
+                "rules",
+                "paths",
+                "alerts",
+                "blocks",
+                "last_observed"
+              ],
+              "default": "workload"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "description": "Sort direction.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Malformed query encoding or invalid filter, sort, page or group scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authenticated user subject required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "read-findings permission required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Scope, evidence or metadata could not be read; not an empty-success inventory or a downloadable export.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Cluster not found in the authenticated organization.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Matching CSV across pages, capped at 100,000 records with explicit scope and truncation metadata.",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Export-Total": {
+                "description": "Total matching records before the CSV cap.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-Export-Limit": {
+                "description": "Maximum exported matching records.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "enum": [
+                    100000
+                  ]
+                }
+              },
+              "X-Export-Truncated": {
+                "description": "True exactly when matching total exceeds 100,000. Narrow filters for an uncapped matching export.",
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/runtime/file-profiles/{workload_id}": {
       "get": {
         "responses": {
@@ -21653,6 +23094,16 @@
           },
           "default": {
             "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "Workload namespace/name matches multiple owners; resolve ownership before reviewing or changing its configuration.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "summary": "Get file-profiles"
@@ -21666,6 +23117,16 @@
           },
           "default": {
             "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "Workload namespace/name matches multiple owners; resolve ownership before reviewing or changing its configuration.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "summary": "Create exceptions"
@@ -21679,6 +23140,16 @@
           },
           "default": {
             "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "Workload namespace/name matches multiple owners; resolve ownership before reviewing or changing its configuration.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "summary": "Delete exceptions"
@@ -21690,6 +23161,16 @@
           },
           "default": {
             "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "Workload namespace/name matches multiple owners; resolve ownership before reviewing or changing its configuration.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "summary": "Replace exceptions"
@@ -21703,6 +23184,16 @@
           },
           "default": {
             "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "Workload namespace/name matches multiple owners; resolve ownership before reviewing or changing its configuration.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "summary": "Get export"
@@ -21716,6 +23207,16 @@
           },
           "default": {
             "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "Workload namespace/name matches multiple owners; resolve ownership before reviewing or changing its configuration.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "summary": "Create mode"
@@ -21729,6 +23230,16 @@
           },
           "default": {
             "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "Workload namespace/name matches multiple owners; resolve ownership before reviewing or changing its configuration.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "summary": "Create rules"
@@ -21742,9 +23253,123 @@
           },
           "default": {
             "$ref": "#/components/responses/Error"
+          },
+          "400": {
+            "description": "Invalid request, cluster identifier, revision timestamp or missing nonblank reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient permission for this rule change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Owned workload or rule not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Rule revision or workload ownership changed; refresh and review before submitting.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unable to read or update file monitoring state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
-        "summary": "Delete rules"
+        "summary": "Delete file monitoring rule",
+        "description": "Scope is resolved from the authenticated organization and exact cluster/workload. Console edits send the reviewed expected_updated_at timestamp. The write atomically checks this timestamp and returns 409 when it changed; a conflict causes no rule write, audit entry or federation tombstone. Legacy clients may omit the precondition. Rules for ambiguous workload kinds cannot be authored through an arbitrary owner.",
+        "parameters": [
+          {
+            "name": "workload_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "rule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Exact owned cluster for the workload; the console always supplies it."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expected_updated_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "Reviewed rule timestamp, preserving fractional seconds. Omission retains legacy unconditional semantics."
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Nonblank reason for the rule change."
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              }
+            }
+          }
+        }
       },
       "put": {
         "responses": {
@@ -21753,9 +23378,148 @@
           },
           "default": {
             "$ref": "#/components/responses/Error"
+          },
+          "400": {
+            "description": "Invalid request, cluster identifier, revision timestamp or missing nonblank reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient permission for this rule change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Owned workload or rule not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Rule revision or workload ownership changed; refresh and review before submitting.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unable to read or update file monitoring state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
-        "summary": "Replace rules"
+        "summary": "Update file monitoring rule",
+        "description": "Scope is resolved from the authenticated organization and exact cluster/workload. Console edits send the reviewed expected_updated_at timestamp. The write atomically checks this timestamp and returns 409 when it changed; a conflict causes no rule write, audit entry or federation tombstone. Legacy clients may omit the precondition. Rules for ambiguous workload kinds cannot be authored through an arbitrary owner.",
+        "parameters": [
+          {
+            "name": "workload_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "rule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Exact owned cluster for the workload; the console always supplies it."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expected_updated_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "Reviewed rule timestamp, preserving fractional seconds. Omission retains legacy unconditional semantics."
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Nonblank reason for the rule change."
+                  },
+                  "filter": {
+                    "type": "string"
+                  },
+                  "recursive": {
+                    "type": "boolean"
+                  },
+                  "behavior": {
+                    "type": "string",
+                    "enum": [
+                      "monitor_change",
+                      "block_access"
+                    ]
+                  },
+                  "applications": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/runtime/file-profiles/{workload_id}:import": {
@@ -21766,6 +23530,16 @@
           },
           "default": {
             "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "Workload namespace/name matches multiple owners; resolve ownership before reviewing or changing its configuration.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "summary": "Create file-profiles"
