@@ -154,7 +154,7 @@
           },
           "priority": {
             "type": "integer",
-            "description": "Non-positive values default to 1000."
+            "description": "Defaults to 1000 when omitted. Explicit zero and negative priorities are preserved; lower values have higher precedence."
           }
         }
       },

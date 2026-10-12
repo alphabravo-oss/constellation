@@ -263,7 +263,7 @@ func (h *Network) UpsertNetworkRule(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster id"})
 		return
 	}
-	var body ruleMutation
+	body := ruleMutation{Priority: 1000}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
@@ -282,9 +282,6 @@ func (h *Network) UpsertNetworkRule(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Applications == nil {
 		body.Applications = []string{}
-	}
-	if body.Priority <= 0 {
-		body.Priority = 1000
 	}
 	// Whether this pair exists in the learned set determines cfg_type.
 	var learned bool

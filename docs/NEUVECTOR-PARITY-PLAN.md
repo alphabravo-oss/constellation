@@ -197,6 +197,29 @@ collapsed preview, Policy Center tabs and direct-link reload. The fixture was
 removed; no live enforcement mode was changed. UI-1 and the broader console audit
 remain open.
 
+The network-rule and navigation continuation is deployed at Helm revision **31**.
+Clusters is the first, persistent sidebar entry on both cluster and organization
+routes; the selected cluster's navigation sits directly beneath it. Network rules
+have dedicated edit routes that resolve the saved source/destination pair within
+the selected cluster, including disambiguation of display-ID collisions. Legacy
+query-based edit links load saved values instead of trusting copied form fields.
+Failed, missing, and cross-cluster loads cannot open a blank editor. Drafts survive
+background refresh and failed saves. Advanced status/priority controls retain
+existing values; the API defaults only omitted priority to 1000, preserving explicit
+zero and negative precedence. Learned ports/applications remain read-only because
+they are derived from observed traffic. The list exposes disabled status, shared
+table preferences/export, and explicit load/action failures.
+
+Validation: **185 frontend tests**, repeated race-enabled network-handler tests
+against a freshly migrated/seeded PostgreSQL database, focused OpenAPI tests,
+production builds, changed-file lint and endpoint/plan checks pass. Live browser
+checks confirm primary Clusters navigation on landing/settings/cluster routes,
+dedicated edit links and direct reload, server values overriding stale URL fields,
+save/cancel returning to the same cluster, and an explicit deleted-rule error.
+A temporary disabled rule retained priority -10 after editing, Cancel left its saved
+comment unchanged, and the fixture was removed. No active traffic rule was changed.
+UI-1 and the broader console audit remain open; acceptance totals remain 56/97.
+
 The admission-engine continuation adds migration **172** and persists normalized
 engine outcomes atomically with image scan completion. The built-in vulnerability
 profiles now require successful Trivy and Grype results rather than retired

@@ -203,3 +203,37 @@ func TestMoveNetworkRuleToTopRollsBackWhenCompletionAuditFails(t *testing.T) {
 		t.Fatalf("failed move changed priority or completion receipt: priority=%d attempts=%d completions=%d", priority, attempts, completions)
 	}
 }
+
+func TestUpsertNetworkRulePreservesExplicitPrecedence(t *testing.T) {
+	database, orgID, userID, clusterID := moveRuleFixture(t)
+	router := chi.NewRouter()
+	router.Put("/clusters/{id}/network-rules", NewNetwork(database).UpsertNetworkRule)
+	for _, tc := range []struct {
+		name         string
+		priorityJSON string
+		want         int
+	}{
+		{"omitted", "", 1000},
+		{"zero", `,"priority":0`, 0},
+		{"negative", `,"priority":-10`, -10},
+		{"positive", `,"priority":42`, 42},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPut, "/clusters/"+clusterID.String()+"/network-rules", strings.NewReader(`{"from":"default/lower","to":"default/db","disable":true,"comment":"edited"`+tc.priorityJSON+`}`))
+			request = request.WithContext(authctx.WithSubject(request.Context(), authctx.Subject{OrgID: orgID, UserID: userID}))
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			if response.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+			var priority int
+			var disabled bool
+			if err := database.Pool().QueryRow(context.Background(), `SELECT priority, disable FROM network_rule_overrides WHERE org_id=$1 AND cluster_id=$2 AND from_ep='default/lower' AND to_ep='default/db'`, orgID, clusterID).Scan(&priority, &disabled); err != nil {
+				t.Fatal(err)
+			}
+			if priority != tc.want || !disabled {
+				t.Fatalf("priority=%d disabled=%v, want %d/true", priority, disabled, tc.want)
+			}
+		})
+	}
+}

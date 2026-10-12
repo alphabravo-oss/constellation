@@ -239,6 +239,7 @@ const cluster_networkRoute = createRoute({ getParentRoute: () => app_clusters_id
 const cluster_network_activityRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "network-activity", beforeLoad: aliasRedirect({ to: "network", cluster: true }) });
 const cluster_network_rulesRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "network-rules", component: () => (<SuspenseRoute><NetworkRulesPage /></SuspenseRoute>) });
 const cluster_network_rules_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "network-rules/new", component: () => (<SuspenseRoute><NetworkRuleFormPage /></SuspenseRoute>) });
+const cluster_network_rules_editRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "network-rules/$ruleId/edit", component: () => (<SuspenseRoute><NetworkRuleFormPage /></SuspenseRoute>) });
 const cluster_waf_splatRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "waf/$", beforeLoad: aliasRedirect({ to: "runtime-signatures", cluster: true, from: "waf" }) });
 const cluster_dlp_splatRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "dlp/$", beforeLoad: aliasRedirect({ to: "runtime-dlp", cluster: true, from: "dlp" }) });
 const cluster_runtime_policiesRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "runtime-policies", component: () => (<SuspenseRoute><RuntimePoliciesPage /></SuspenseRoute>) });
@@ -442,6 +443,7 @@ authenticatedRoute.addChildren([
   cluster_network_activityRoute,
   cluster_network_rulesRoute,
   cluster_network_rules_newRoute,
+  cluster_network_rules_editRoute,
   cluster_waf_splatRoute,
   cluster_dlp_splatRoute,
   cluster_runtime_policiesRoute,

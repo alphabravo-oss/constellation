@@ -1,8 +1,3 @@
-// NetworkRulesPage — NeuVector-parity Network Rules table. Presents the cluster's
-// observed connectivity as an ordered allow/deny rule list (ID, From, To, Applications,
-// Ports, Action, Learned, Enabled, Match count) so NeuVector users see their network
-// policy in exactly the shape they expect. Rules are learned from flow rollups (as NV
-// learns from observed conversations); edit/deny/reorder CRUD is the next step.
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
@@ -15,7 +10,8 @@ import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { StatCard } from "@/components/ui/stat-card";
 import { EmptyState } from "@/components/ui/empty-state";
-import { downloadCsv } from "@/lib/csv";
+import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { ErrorState } from "@/components/ui/states";
 import { fmtRelative } from "@/lib/format";
 
 function endpointLabel(w: string): string {
@@ -52,9 +48,9 @@ export function NetworkRulesPage() {
     onSuccess: invalidate,
   });
   const editHref = (r: NetworkRule) =>
-    `${clusterId ? `/clusters/${clusterId}` : ""}/network-rules/new?from=${encodeURIComponent(r.from)}&to=${encodeURIComponent(r.to)}&ports=${encodeURIComponent(r.ports)}&applications=${encodeURIComponent(r.applications.join(", "))}&action=${r.action}&comment=${encodeURIComponent(r.comment)}`;
+    `${clusterId ? `/clusters/${clusterId}` : ""}/network-rules/${r.id}/edit?from=${encodeURIComponent(r.from)}&to=${encodeURIComponent(r.to)}`;
   const all = useMemo(() => q.data?.rules ?? [], [q.data?.rules]);
-  const summary = q.data?.summary ?? { total: 0, allow: 0, deny: 0, learned: 0 };
+  const summary = q.data?.summary;
   const rows = useMemo(() => {
     const n = search.trim().toLowerCase();
     if (!n) return all;
@@ -62,27 +58,28 @@ export function NetworkRulesPage() {
   }, [all, search]);
 
   const columns: Column<NetworkRule>[] = [
-    { id: "id", header: "ID", width: "72px", numeric: true, cell: (r) => <span className="text-mono text-[11px] text-muted-foreground">{r.id}</span>, sort: (a, b) => a.id - b.id },
-    { id: "priority", header: "Priority", width: "82px", numeric: true, cell: (r) => <span className="text-mono text-xs">{r.priority}</span>, sort: (a, b) => a.priority - b.priority },
-    { id: "from", header: "From", cell: (r) => <span className="text-mono text-xs">{endpointLabel(r.from)}</span>, sort: (a, b) => a.from.localeCompare(b.from) },
-    { id: "to", header: "To", cell: (r) => <span className="text-mono text-xs">{endpointLabel(r.to)}</span>, sort: (a, b) => a.to.localeCompare(b.to) },
-    { id: "apps", header: "Applications", cell: (r) => (
+    { id: "id", exportValue: (r) => r.id, header: "ID", width: "72px", numeric: true, cell: (r) => <span className="text-mono text-[11px] text-muted-foreground">{r.id}</span>, sort: (a, b) => a.id - b.id },
+    { id: "priority", exportValue: (r) => r.priority, header: "Priority", width: "82px", numeric: true, cell: (r) => <span className="text-mono text-xs">{r.priority}</span>, sort: (a, b) => a.priority - b.priority },
+    { id: "from", exportValue: (r) => r.from, header: "From", cell: (r) => <span className="text-mono text-xs">{endpointLabel(r.from)}</span>, sort: (a, b) => a.from.localeCompare(b.from) },
+    { id: "to", exportValue: (r) => r.to, header: "To", cell: (r) => <span className="text-mono text-xs">{endpointLabel(r.to)}</span>, sort: (a, b) => a.to.localeCompare(b.to) },
+    { id: "apps", exportValue: (r) => r.applications.join(", ") || "any", header: "Applications", cell: (r) => (
         r.applications.length === 0 ? <span className="text-xs text-muted-foreground">any</span>
           : <span className="flex flex-wrap gap-1">{r.applications.slice(0, 5).map((a) => <span key={a} className="rounded bg-muted px-1.5 py-px text-[10px] font-medium uppercase text-muted-foreground">{a}</span>)}</span>
       ) },
-    { id: "ports", header: "Ports", width: "120px", cell: (r) => <span className="text-mono text-[11px] text-muted-foreground">{r.ports}</span> },
-    { id: "action", header: "Action", width: "92px", cell: (r) => (
+    { id: "ports", exportValue: (r) => r.ports, header: "Ports", width: "120px", cell: (r) => <span className="text-mono text-[11px] text-muted-foreground">{r.ports}</span> },
+    { id: "action", exportValue: (r) => r.action, header: "Action", width: "92px", cell: (r) => (
         r.action === "deny"
           ? <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold" style={{ background: "color-mix(in oklab, var(--color-severity-critical) 16%, transparent)", color: "var(--color-severity-critical)" }}><Ban className="h-3 w-3" />deny</span>
           : <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold" style={{ background: "color-mix(in oklab, var(--color-severity-low) 16%, transparent)", color: "var(--color-severity-low)" }}><Check className="h-3 w-3" />allow</span>
       ), sort: (a, b) => a.action.localeCompare(b.action) },
-    { id: "learned", header: "Type", width: "88px", cell: (r) => <span className="rounded bg-muted px-1.5 py-px text-[10px] text-muted-foreground">{r.learned ? "learned" : r.cfg_type}</span> },
-    { id: "matches", header: "Matches", numeric: true, width: "96px", cell: (r) => <span className="text-mono text-xs">{r.match_counter.toLocaleString()}</span>, sort: (a, b) => a.match_counter - b.match_counter },
-    { id: "last", header: "Last match", numeric: true, width: "110px", cell: (r) => <span className="text-[10px] text-muted-foreground">{r.last_match_timestamp ? fmtRelative(new Date(r.last_match_timestamp * 1000).toISOString()) : "—"}</span>, sort: (a, b) => a.last_match_timestamp - b.last_match_timestamp },
-    { id: "actions", header: "", width: "160px", cell: (r) => {
-        const busy = upsert.isPending || remove.isPending || moveTop.isPending;
+    { id: "status", header: "Status", cell: (r) => <span className="text-xs">{r.disable ? "Disabled" : "Enabled"}</span>, exportValue: (r) => r.disable ? "Disabled" : "Enabled" },
+    { id: "learned", exportValue: (r) => r.learned ? "learned" : r.cfg_type, header: "Type", width: "88px", cell: (r) => <span className="rounded bg-muted px-1.5 py-px text-[10px] text-muted-foreground">{r.learned ? "learned" : r.cfg_type}</span> },
+    { id: "matches", exportValue: (r) => r.match_counter, header: "Matches", numeric: true, width: "96px", cell: (r) => <span className="text-mono text-xs">{r.match_counter.toLocaleString()}</span>, sort: (a, b) => a.match_counter - b.match_counter },
+    { id: "last", exportValue: (r) => r.last_match_timestamp ? new Date(r.last_match_timestamp * 1000).toISOString() : "", header: "Last match", numeric: true, width: "110px", cell: (r) => <span className="text-[10px] text-muted-foreground">{r.last_match_timestamp ? fmtRelative(new Date(r.last_match_timestamp * 1000).toISOString()) : "—"}</span>, sort: (a, b) => a.last_match_timestamp - b.last_match_timestamp },
+    { id: "actions", hideable: false, exportable: false, header: "", width: "160px", cell: (r) => {
+        const busy = q.isError || upsert.isPending || remove.isPending || moveTop.isPending;
         const overridden = r.cfg_type !== "learned"; // has a persisted override / manual rule
-        const isTop = all.length > 0 && r.id === all[0].id;
+        const isTop = all.length > 0 && r.from === all[0].from && r.to === all[0].to;
         return (
           <div className="flex items-center justify-end gap-1">
             <button type="button" title={isTop ? "Already highest precedence" : "Move to top (evaluate first)"} disabled={busy || isTop}
@@ -100,7 +97,7 @@ export function NetworkRulesPage() {
               className="rounded p-1 hover:bg-accent disabled:opacity-40">
               {r.disable ? <Power className="h-3.5 w-3.5" /> : <PowerOff className="h-3.5 w-3.5" />}
             </button>
-            <Link to="." href={editHref(r)} title="Edit" className="rounded p-1 hover:bg-accent"><Pencil className="h-3.5 w-3.5" /></Link>
+            <Link to="." href={editHref(r)} title="Edit" aria-label={`Edit rule from ${r.from} to ${r.to}`} className="rounded p-1 hover:bg-accent"><Pencil className="h-3.5 w-3.5" /></Link>
             {overridden && (
               <button type="button" title={r.learned ? "Revert to learned" : "Delete rule"} disabled={busy}
                 onClick={() => remove.mutate(r)}
@@ -117,7 +114,7 @@ export function NetworkRulesPage() {
     <div className="space-y-4" data-cluster-id={clusterId ?? ""}>
       <PageHeader
         title="Network Rules"
-        description="The cluster's connectivity as an ordered allow/deny rule set, learned from observed conversations — NeuVector-style network policy."
+        description="Review learned traffic rules and manage configured allow or deny rules for this cluster."
         actions={
           <div className="flex items-center gap-2">
             {clusterId ? (
@@ -131,38 +128,39 @@ export function NetworkRulesPage() {
             ) : null}
             <button
               type="button"
-              onClick={() => downloadCsv("constellation-network-rules", ["ID", "From", "To", "Applications", "Ports", "Action", "Type", "Matches"],
-                rows.map((r) => [r.id, r.from, r.to, r.applications.join(" "), r.ports, r.action, r.learned ? "learned" : r.cfg_type, r.match_counter]))}
-              className="rounded-md border border-border bg-card px-3 py-2 text-sm hover:bg-accent"
-            >Export CSV</button>
-            <button
-              type="button"
               onClick={() => navigate({ href: `${clusterId ? `/clusters/${clusterId}` : ""}/network-rules/new` })}
               className="inline-flex items-center gap-1.5 rounded-md bg-[color:var(--color-primary)] px-3 py-2 text-sm font-medium text-white hover:opacity-90"
             ><Plus className="h-4 w-4" />Add rule</button>
           </div>
         }
       />
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard label="Rules" value={summary.total} icon={<NetworkIcon className="h-3.5 w-3.5" />} />
-        <StatCard label="Allow" value={summary.allow} tone="low" />
-        <StatCard label="Deny" value={summary.deny} tone={summary.deny > 0 ? "critical" : "neutral"} />
-        <StatCard label="Learned" value={summary.learned} tone="neutral" />
+      <VerdictBanner status={q.isError ? "degraded" : "info"}
+        title={q.isError ? "Network rules could not be refreshed" : q.isPending ? "Loading network rules" : `${summary?.total ?? 0} network rules returned`}
+        detail="Configured rules appear before learned rules. Rule counts describe configuration and observed traffic; they do not confirm enforcement on workloads." />
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+        <StatCard label="Rules" value={summary?.total ?? "—"} icon={<NetworkIcon className="h-3.5 w-3.5" />} />
+        <StatCard label="Allow" value={summary?.allow ?? "—"} tone="low" />
+        <StatCard label="Deny" value={summary?.deny ?? "—"} tone={(summary?.deny ?? 0) > 0 ? "critical" : "neutral"} />
+        <StatCard label="Learned" value={summary?.learned ?? "—"} tone="neutral" />
+        <StatCard label="Disabled" value={summary?.disabled ?? "—"} tone="neutral" />
       </section>
       <input
+        aria-label="Search network rules"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         placeholder="Search from, to, application, port…"
         className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
       />
+      {(upsert.isError || remove.isError || moveTop.isError) && <p role="alert" className="text-sm text-status-error">Could not update this network rule. Try the action again.</p>}
+      {q.isError && <ErrorState title="Could not load network rules." action={<button type="button" onClick={() => void q.refetch()}>Retry</button>} />}
       {q.isPending ? (
         <p className="text-sm text-muted-foreground">Loading rules…</p>
-      ) : rows.length === 0 ? (
-        <EmptyState title="No network rules" hint="Rules are learned from observed traffic; none have been recorded for this cluster yet." />
+      ) : q.isError && !q.data ? null : rows.length === 0 ? (
+        <EmptyState title={search ? "No matching network rules" : "No network rules"} hint={search ? "Change the search to see other rules." : "Add a rule or wait for learned traffic to appear."} />
       ) : (
         <div>
           <p className="mb-2 text-xs text-muted-foreground">Initially shown in server evaluation order. Column sorting changes only the view; Move to top changes rule precedence.</p>
-          <DataTable rows={rows} sourceLimit={3000} sourceCount={all.length} columns={columns} rowKey={(r) => String(r.id)} />
+          <DataTable preferencesKey="network-rules" exportFileName="constellation-network-rules" rows={rows} sourceLimit={3000} sourceCount={all.length} columns={columns} rowKey={(r) => JSON.stringify([r.from, r.to])} />
         </div>
       )}
     </div>

@@ -33,13 +33,14 @@ function rule(id: number, from: string, priority: number, matches: number): Netw
   };
 }
 
-async function renderRules() {
+async function renderRules(failed = false) {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.spyOn(networkRules, "list").mockResolvedValue({
     cluster_id: "cluster-1",
     rules: [rule(1001, "default/top", 1, 1), rule(1002, "default/lower", 2, 100)],
     summary: { total: 2, allow: 2, deny: 0, learned: 0, disabled: 0 },
   });
+  if (failed) vi.mocked(networkRules.list).mockRejectedValue(new Error("private details"));
   vi.spyOn(networkRules, "moveTop").mockResolvedValue({ ok: true, priority: 0 });
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -49,7 +50,7 @@ async function renderRules() {
   await act(async () => root?.render(
     <QueryClientProvider client={client}><TestRouter><NetworkRulesPage /></TestRouter></QueryClientProvider>,
   ));
-  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+  await vi.waitFor(async () => { await act(async () => {}); expect(host?.textContent).toContain(failed ? "Could not load network rules." : "default/top"); });
 }
 
 it("starts in server evaluation order rather than match-count order", async () => {
@@ -78,4 +79,19 @@ it("does not mistake the first filtered row for the highest-precedence rule", as
   expect(action?.disabled).toBe(false);
   await act(async () => action?.click());
   expect(networkRules.moveTop).toHaveBeenCalledWith("cluster-1", "default/lower", "default/db");
+});
+
+
+it("opens a dedicated edit route using only the rule identity", async () => {
+  await renderRules();
+  const href = host?.querySelector<HTMLAnchorElement>('a[title="Edit"]')?.getAttribute("href");
+  expect(href).toBe("/clusters/cluster-1/network-rules/1001/edit?from=default%2Ftop&to=default%2Fdb");
+  expect(host?.textContent).toContain("Enabled");
+});
+
+it("shows failed loads instead of an empty rule inventory", async () => {
+  await renderRules(true);
+  expect(host?.textContent).not.toContain("No network rules");
+  expect(host?.textContent).not.toContain("private details");
+  expect(host?.textContent).toContain("Retry");
 });

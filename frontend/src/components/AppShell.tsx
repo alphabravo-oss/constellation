@@ -154,6 +154,13 @@ export const CLUSTER_NAV: NavGroup[] = [
 
 const SCOPE_NAV: NavGroup[] = [
   {
+    id: "cluster",
+    label: "Clusters",
+    items: [
+      { path: "/clusters", icon: ServerCog, label: "Clusters", exact: true },
+    ],
+  },
+  {
     id: "organization",
     label: "Organization",
     items: [
@@ -178,13 +185,6 @@ const SCOPE_NAV: NavGroup[] = [
     items: [
       { path: "/settings/integrations", icon: Bell, label: "Integrations & Routing" },
       { path: "/settings/connectors", icon: Plug, label: "Connectors" },
-    ],
-  },
-  {
-    id: "cluster",
-    label: "Cluster",
-    items: [
-      { path: "/clusters", icon: ServerCog, label: "Clusters", exact: true },
     ],
   },
 ];
@@ -413,6 +413,15 @@ function SidebarGroup({
   nested?: boolean;
   children?: ReactNode;
 }) {
+  // The primary workspace entry stays visible on every route, including settings.
+  if (group.id === "cluster" && !nested) {
+    return (
+      <div role="group" aria-label="Clusters" className="mb-2 border-b border-sidebar-border pb-2">
+        {group.items.map((item) => <SidebarRow key={item.path} item={item} pathname={pathname} clusterId={clusterId} collapsed={collapsed} />)}
+        {children}
+      </div>
+    );
+  }
   if (collapsed) {
     return (
       <div role="group" aria-label={group.label} className="space-y-px">
