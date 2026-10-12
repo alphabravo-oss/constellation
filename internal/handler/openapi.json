@@ -6655,33 +6655,738 @@
     },
     "/api/v1/findings": {
       "get": {
-        "summary": "List findings (kind, lifecycle filter)"
+        "summary": "List filtered finding instances",
+        "description": "Organization-scoped finding instances. Vulnerability rows targeted at workloads are excluded to avoid duplicate image findings. Filters, ordering and pagination run on the server; totals are not limited to the returned page.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Search DSL applied to individual findings before pagination or CVE grouping. Unquoted bare text matches case-insensitive literal substrings across title, external ID and package name/version. Ordinary string searches treat %, _ and backslash literally; use g/ for glob matching. Terms use field:value; whitespace AND-combines terms; OR and parentheses combine groups; ! negates terms. String modifiers include r/ (case-insensitive regex), c/ (case-sensitive equality), g/ (glob); quoted field values use exact equality. Time fields accept RFC3339 or tr/[start,end] ranges (end exclusive). Supported fields: text, status (lifecycle alias), asset, canonical, canonical_engine, engine, kev, severity, kind, lifecycle, title, external_id, cve (external_id alias), risk (integer), package (including name@version), purl, fixed, disagreement, reachable, last_seen, first_seen. Unknown fields, invalid typed values or malformed expressions return 400.",
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "bare_text": {
+                "value": "openssl"
+              },
+              "dsl": {
+                "value": "severity:critical package:g/log4j*"
+              },
+              "grouped": {
+                "value": "(cve:CVE-2026-0001 OR package:openssl) lifecycle:open"
+              }
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "description": "Exact finding-kind filter. Omit to include all kinds.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "lifecycle",
+            "in": "query",
+            "required": false,
+            "description": "Exact finding lifecycle filter. Omit to include all lifecycles. Common values: open, triaged, in_progress, accepted, suppressed, resolved.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "description": "Limit findings to this cluster within the authenticated organization. Invalid UUIDs return 400.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "fixable",
+            "in": "query",
+            "required": false,
+            "description": "Enable with exactly 1 or true; other values leave this filter disabled. For instance list/CSV, keep only rows with a nonempty fixed version excluding false, not-fixed, wont-fix and won't-fix (case-insensitive).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "description": "Allowlisted instance-row sort key, also used by CSV. If omitted, order is risk_score DESC, last_seen_at DESC, id ASC, regardless of order. With an explicit key, order defaults to ASC and id ASC breaks ties. age sorts the last-seen timestamp. Unknown keys return 400.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "risk",
+                "severity",
+                "cve",
+                "title",
+                "package",
+                "fixed",
+                "asset",
+                "lifecycle",
+                "kind",
+                "last_seen",
+                "age",
+                "cvss_vector",
+                "cvss"
+              ]
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "description": "ASC or DESC, case-insensitive, for an explicit sort key; defaults to ASC. Ignored when sort is absent. Invalid order with an explicit sort returns 400.",
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "ascending": {
+                "value": "asc"
+              },
+              "descending": {
+                "value": "desc"
+              }
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum rows to return. Omitted, nonnumeric, nonpositive or greater than 1000 values use 100; values are not clamped.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 100
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "description": "Number of matching rows to skip. Defaults to 0; negative or nonnumeric values become 0.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching instances with normalized pagination and lifecycle counts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "findings",
+                    "limit",
+                    "offset",
+                    "total",
+                    "has_more",
+                    "lifecycle_counts"
+                  ],
+                  "properties": {
+                    "findings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "kind",
+                          "title",
+                          "severity",
+                          "risk_score",
+                          "lifecycle",
+                          "asset_id",
+                          "attack_techniques",
+                          "first_seen_at",
+                          "last_seen_at"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "severity": {
+                            "type": "string"
+                          },
+                          "lifecycle": {
+                            "type": "string"
+                          },
+                          "canonical_engine": {
+                            "type": "string"
+                          },
+                          "package_name": {
+                            "type": "string"
+                          },
+                          "package_version": {
+                            "type": "string"
+                          },
+                          "package_ecosystem": {
+                            "type": "string"
+                          },
+                          "package_purl": {
+                            "type": "string"
+                          },
+                          "fixed_version": {
+                            "type": "string"
+                          },
+                          "cvss_vector": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "asset_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "cluster_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "first_seen_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "last_seen_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "accepted_until": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "external_id": {
+                            "type": "string"
+                          },
+                          "attack_techniques": {
+                            "type": [
+                              "array",
+                              "null"
+                            ],
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "risk_score": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "reconciliation_count": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "cvss": {
+                            "type": "number"
+                          },
+                          "cvss_base": {
+                            "type": "number"
+                          },
+                          "epss": {
+                            "type": "number"
+                          },
+                          "kev": {
+                            "type": "boolean"
+                          },
+                          "engines": {
+                            "type": "array",
+                            "items": {
+                              "type": "object"
+                            }
+                          },
+                          "reconciliation": {
+                            "type": "array",
+                            "items": {
+                              "type": "object"
+                            }
+                          },
+                          "risk_inputs": {
+                            "type": "object"
+                          },
+                          "affected_range": {
+                            "type": "object"
+                          },
+                          "vulndb_bundle": {
+                            "type": "object"
+                          }
+                        }
+                      }
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 1000
+                    },
+                    "offset": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Number of matching finding instances across all pages, including the dedicated lifecycle query parameter."
+                    },
+                    "has_more": {
+                      "type": "boolean",
+                      "description": "True when offset plus returned row count is less than total."
+                    },
+                    "lifecycle_counts": {
+                      "type": "object",
+                      "description": "Instance counts matching kind, q, cluster_id and fixable, without the dedicated lifecycle query parameter. Lifecycle restrictions inside q still apply. The six known lifecycle keys are always included; additional stored lifecycle keys may also appear.",
+                      "required": [
+                        "open",
+                        "accepted",
+                        "suppressed",
+                        "triaged",
+                        "resolved",
+                        "in_progress"
+                      ],
+                      "properties": {
+                        "open": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "accepted": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "suppressed": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "triaged": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "resolved": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "in_progress": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "additionalProperties": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid cluster UUID, search expression, sort key or explicit sort order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/api/v1/findings.csv": {
       "get": {
+        "summary": "Export filtered finding instances as CSV",
+        "description": "Organization-scoped instance export using the same q, kind, lifecycle, cluster_id, fixable and allowlisted sort/order semantics as GET /api/v1/findings, including exclusion of workload-targeted vulnerability duplicates. Exports at most the effective limit after skipping offset; this is not an unbounded export and does not emit total, has_more or lifecycle counts. X-Export-Limit reports the effective row cap, not the number of exported rows or whether additional matches exist. CSV columns are id, kind, external_id, title, severity, risk_score, lifecycle, asset_id, first_seen_at, last_seen_at, accepted_until. Timestamps use UTC RFC3339; absent accepted_until is empty. Read/write errors after streaming starts abort the response rather than deliver a successful partial export.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Search DSL applied to individual findings before pagination or CVE grouping. Unquoted bare text matches case-insensitive literal substrings across title, external ID and package name/version. Ordinary string searches treat %, _ and backslash literally; use g/ for glob matching. Terms use field:value; whitespace AND-combines terms; OR and parentheses combine groups; ! negates terms. String modifiers include r/ (case-insensitive regex), c/ (case-sensitive equality), g/ (glob); quoted field values use exact equality. Time fields accept RFC3339 or tr/[start,end] ranges (end exclusive). Supported fields: text, status (lifecycle alias), asset, canonical, canonical_engine, engine, kev, severity, kind, lifecycle, title, external_id, cve (external_id alias), risk (integer), package (including name@version), purl, fixed, disagreement, reachable, last_seen, first_seen. Unknown fields, invalid typed values or malformed expressions return 400.",
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "bare_text": {
+                "value": "openssl"
+              },
+              "dsl": {
+                "value": "severity:critical package:g/log4j*"
+              },
+              "grouped": {
+                "value": "(cve:CVE-2026-0001 OR package:openssl) lifecycle:open"
+              }
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "description": "Exact finding-kind filter. Omit to include all kinds.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "lifecycle",
+            "in": "query",
+            "required": false,
+            "description": "Exact finding lifecycle filter. Omit to include all lifecycles. Common values: open, triaged, in_progress, accepted, suppressed, resolved.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "description": "Limit findings to this cluster within the authenticated organization. Invalid UUIDs return 400.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "fixable",
+            "in": "query",
+            "required": false,
+            "description": "Enable with exactly 1 or true; other values leave this filter disabled. For instance list/CSV, keep only rows with a nonempty fixed version excluding false, not-fixed, wont-fix and won't-fix (case-insensitive).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "description": "Allowlisted instance-row sort key, also used by CSV. If omitted, order is risk_score DESC, last_seen_at DESC, id ASC, regardless of order. With an explicit key, order defaults to ASC and id ASC breaks ties. age sorts the last-seen timestamp. Unknown keys return 400.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "risk",
+                "severity",
+                "cve",
+                "title",
+                "package",
+                "fixed",
+                "asset",
+                "lifecycle",
+                "kind",
+                "last_seen",
+                "age",
+                "cvss_vector",
+                "cvss"
+              ]
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "description": "ASC or DESC, case-insensitive, for an explicit sort key; defaults to ASC. Ignored when sort is absent. Invalid order with an explicit sort returns 400.",
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "ascending": {
+                "value": "asc"
+              },
+              "descending": {
+                "value": "desc"
+              }
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum rows to return. Omitted, nonnumeric, nonpositive or greater than 100000 values use 10000; values are not clamped.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000,
+              "default": 10000
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "description": "Number of matching rows to skip. Defaults to 0; negative or nonnumeric values become 0.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "CSV attachment, possibly fewer than the effective row cap.",
+            "headers": {
+              "X-Export-Limit": {
+                "description": "Effective maximum number of data rows for this request after default normalization; excludes the header row.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100000
+                }
+              },
+              "Content-Disposition": {
+                "description": "Attachment filename.",
+                "schema": {
+                  "type": "string",
+                  "const": "attachment; filename=\"findings.csv\""
+                }
+              }
+            },
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                },
+                "example": "id,kind,external_id,title,severity,risk_score,lifecycle,asset_id,first_seen_at,last_seen_at,accepted_until\n"
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid cluster UUID, search expression, sort key or explicit sort order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
-        },
-        "summary": "Get findings.csv"
+        }
       }
     },
     "/api/v1/findings/by-cve": {
       "get": {
+        "summary": "List findings grouped by CVE",
+        "description": "Organization-scoped vulnerability findings with external IDs starting CVE-, grouped after q, lifecycle and cluster filtering. The kind query parameter is overridden to vulnerability; workload-targeted vulnerability rows are excluded. Ordered by maximum risk_score DESC, then CVE ASC; sort/order query parameters are not supported. total counts qualifying CVE groups across all pages. This response does not include has_more or lifecycle_counts.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Search DSL applied to individual findings before pagination or CVE grouping. Unquoted bare text matches case-insensitive literal substrings across title, external ID and package name/version. Ordinary string searches treat %, _ and backslash literally; use g/ for glob matching. Terms use field:value; whitespace AND-combines terms; OR and parentheses combine groups; ! negates terms. String modifiers include r/ (case-insensitive regex), c/ (case-sensitive equality), g/ (glob); quoted field values use exact equality. Time fields accept RFC3339 or tr/[start,end] ranges (end exclusive). Supported fields: text, status (lifecycle alias), asset, canonical, canonical_engine, engine, kev, severity, kind, lifecycle, title, external_id, cve (external_id alias), risk (integer), package (including name@version), purl, fixed, disagreement, reachable, last_seen, first_seen. Unknown fields, invalid typed values or malformed expressions return 400.",
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "bare_text": {
+                "value": "openssl"
+              },
+              "dsl": {
+                "value": "severity:critical package:g/log4j*"
+              },
+              "grouped": {
+                "value": "(cve:CVE-2026-0001 OR package:openssl) lifecycle:open"
+              }
+            }
+          },
+          {
+            "name": "lifecycle",
+            "in": "query",
+            "required": false,
+            "description": "Exact finding lifecycle filter. Omit to include all lifecycles. Common values: open, triaged, in_progress, accepted, suppressed, resolved.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "description": "Limit findings to this cluster within the authenticated organization. Invalid UUIDs return 400.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "fixable",
+            "in": "query",
+            "required": false,
+            "description": "Enable with exactly 1 or true; other values leave this filter disabled. Keep CVE groups where at least one otherwise-matching instance has a nonempty fixed version excluding false, not-fixed, wont-fix and won't-fix (case-insensitive). This is a group-level HAVING condition: unfixed instances within a qualifying group remain in instance/image/cluster counts and image samples.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum rows to return. Omitted, nonnumeric, nonpositive or greater than 2000 values use 200; values are not clamped.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2000,
+              "default": 200
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "description": "Number of matching rows to skip. Defaults to 0; negative or nonnumeric values become 0.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Matching CVE groups with full instance counts and normalized pagination.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "cves",
+                    "limit",
+                    "offset",
+                    "total"
+                  ],
+                  "properties": {
+                    "cves": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "cve",
+                          "severity",
+                          "risk_score",
+                          "instances",
+                          "affected_images",
+                          "affected_clusters",
+                          "images",
+                          "last_seen_at",
+                          "kev",
+                          "has_fix"
+                        ],
+                        "properties": {
+                          "cve": {
+                            "type": "string"
+                          },
+                          "severity": {
+                            "type": "string"
+                          },
+                          "package": {
+                            "type": "string"
+                          },
+                          "fixed_version": {
+                            "type": "string"
+                          },
+                          "cvss_vector": {
+                            "type": "string"
+                          },
+                          "risk_score": {
+                            "type": "number"
+                          },
+                          "cvss": {
+                            "type": "number"
+                          },
+                          "cvss_base": {
+                            "type": "number"
+                          },
+                          "instances": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "affected_images": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "affected_clusters": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "images": {
+                            "type": "array",
+                            "maxItems": 25,
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "Sample of distinct target references, capped at 25; affected_images is the full distinct count."
+                          },
+                          "last_seen_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "kev": {
+                            "type": "boolean"
+                          },
+                          "has_fix": {
+                            "type": "boolean",
+                            "description": "At least one matching instance has a fixed version."
+                          }
+                        }
+                      }
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 2000
+                    },
+                    "offset": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Number of qualifying CVE groups across all pages, after group-level fixable filtering."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid cluster UUID or search expression.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
-        },
-        "summary": "Get by-cve"
+        }
       }
     },
     "/api/v1/findings/{id}": {

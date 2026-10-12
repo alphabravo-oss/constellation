@@ -72,7 +72,7 @@ export function AttestationTrustPage() {
   const policyColumns: Column<RepositoryAttestationTrustPolicy>[] = [
     {
       id: "policy",
-      header: "Policy",
+      header: "Policy", kind: "name", wrap: true,
       className: "align-top",
       cell: (policy) => (
         <>
@@ -89,7 +89,7 @@ export function AttestationTrustPage() {
     },
     {
       id: "scope",
-      header: "Scope",
+      header: "Scope", kind: "text", size: 224, minSize: 160, maxSize: 320, wrap: true,
       className: "align-top text-xs",
       cell: (policy) => (
         <>
@@ -101,7 +101,7 @@ export function AttestationTrustPage() {
     },
     {
       id: "trust",
-      header: "Trust",
+      header: "Trust", kind: "text", size: 224, minSize: 160, maxSize: 320, wrap: true,
       className: "align-top text-xs",
       cell: (policy) => (
         <>
@@ -119,7 +119,7 @@ export function AttestationTrustPage() {
     },
     {
       id: "actions",
-      header: "Actions",
+      header: "Actions", kind: "actions", size: 208, minSize: 192, maxSize: 240,
       className: "align-top text-right",
       cell: (policy) => (
         <div className="flex justify-end gap-1">

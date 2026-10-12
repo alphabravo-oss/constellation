@@ -25,33 +25,42 @@ type FindingsCSV struct {
 func NewFindingsCSV(d *db.DB) *FindingsCSV { return &FindingsCSV{db: d} }
 
 func (h *FindingsCSV) Stream(w http.ResponseWriter, r *http.Request) {
-	subj, _ := authctx.SubjectFrom(r.Context())
-	kind := r.URL.Query().Get("kind")
-	lifecycle := r.URL.Query().Get("lifecycle")
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	subj, ok := authctx.SubjectFrom(r.Context())
+	if !ok {
+		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "no subject"})
+		return
+	}
+	values := r.URL.Query()
+	limit, _ := strconv.Atoi(values.Get("limit"))
 	if limit <= 0 || limit > 100000 {
 		limit = 10000
 	}
-
+	where, args, err := findingFilter(subj.OrgID, values, true, true)
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	order, err := findingOrder(values)
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	args = append(args, limit, findingOffset(values))
 	rows, err := h.db.Pool().Query(r.Context(), `
 SELECT id, kind, COALESCE(external_id,'') AS external_id, title, severity, risk_score, lifecycle,
        asset_id, first_seen_at, last_seen_at, COALESCE(accepted_until, 'epoch'::timestamptz) AS accepted_until
-  FROM findings
- WHERE org_id = $1
-   AND ($2::text = '' OR kind = $2)
-   AND ($3::text = '' OR lifecycle = $3)
- ORDER BY risk_score DESC, last_seen_at DESC
- LIMIT $4`, subj.OrgID, kind, lifecycle, limit)
+  FROM findings WHERE `+where+` ORDER BY `+order+`
+ LIMIT $`+strconv.Itoa(len(args)-1)+` OFFSET $`+strconv.Itoa(len(args)), args...)
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	defer rows.Close()
 
+	w.Header().Set("X-Export-Limit", strconv.Itoa(limit))
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="findings.csv"`)
 	cw := csv.NewWriter(w)
-	defer cw.Flush()
 
 	if err := cw.Write([]string{
 		"id", "kind", "external_id", "title", "severity", "risk_score", "lifecycle",
@@ -69,15 +78,24 @@ SELECT id, kind, COALESCE(external_id,'') AS external_id, title, severity, risk_
 	for rows.Next() {
 		if err := rows.Scan(&id, &kindCol, &extID, &title, &severity, &risk, &lifecycleCol,
 			&assetID, &firstSeen, &lastSeen, &acceptedUntil); err != nil {
-			return
+			panic(http.ErrAbortHandler) // Do not deliver a successful partial export.
 		}
 		acc := ""
 		if !acceptedUntil.IsZero() && acceptedUntil.Year() > 1971 {
 			acc = acceptedUntil.UTC().Format(time.RFC3339)
 		}
-		_ = cw.Write([]string{
+		if err := cw.Write([]string{
 			id, kindCol, extID, title, severity, fmt.Sprintf("%d", risk), lifecycleCol,
 			assetID, firstSeen.UTC().Format(time.RFC3339), lastSeen.UTC().Format(time.RFC3339), acc,
-		})
+		}); err != nil {
+			panic(http.ErrAbortHandler)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		panic(http.ErrAbortHandler)
+	}
+	cw.Flush()
+	if err := cw.Error(); err != nil {
+		panic(http.ErrAbortHandler)
 	}
 }

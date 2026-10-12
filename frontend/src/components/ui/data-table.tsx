@@ -68,6 +68,8 @@ export interface DataTableProps<T> {
    * `null` means sort was cleared. Client-side-only tables can ignore it.
    */
   onSortChange?: (sort: { id: string; dir: "asc" | "desc" } | null) => void;
+  /** Preserve server ordering while allowing sort controls to request a new page. */
+  manualSorting?: boolean;
   /** Show density toggle in header right slot. */
   showDensityToggle?: boolean;
   /** Stable key used to persist density/column visibility for this table. */
@@ -130,6 +132,7 @@ function DataTableView<T>({
   className,
   defaultSort,
   onSortChange,
+  manualSorting = false,
   showDensityToggle = true,
   preferencesKey,
   showColumnChooser,
@@ -157,14 +160,10 @@ function DataTableView<T>({
   );
   const handleSortingChange: typeof setSorting = (updater) => {
     setRequestedPage(0);
-    setSorting((prev) => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      if (onSortChange) {
-        const s = next[0];
-        onSortChange(s ? { id: s.id, dir: s.desc ? "desc" : "asc" } : null);
-      }
-      return next;
-    });
+    const next = typeof updater === "function" ? updater(sorting) : updater;
+    setSorting(next);
+    const first = next[0];
+    onSortChange?.(first ? { id: first.id, dir: first.desc ? "desc" : "asc" } : null);
   };
 
   const hiddenIds = useMemo(
@@ -265,6 +264,7 @@ function DataTableView<T>({
     onSortingChange: handleSortingChange,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
+    manualSorting,
     getRowId: (row) => String(rowKey(row)),
     enableSortingRemoval: true,
     enableMultiSort: false,

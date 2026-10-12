@@ -9,27 +9,29 @@ import { GroupDetailPage } from "./GroupDetailPage";
 import { GroupsPage } from "./GroupsPage";
 import { GroupSettingsPage } from "./GroupSettingsPage";
 
-const route = vi.hoisted(() => ({ groupId: "group", clusterId: "cluster" as string | undefined, search: "", navigate: vi.fn(), setSearch: vi.fn() }));
+const route = vi.hoisted(() => ({ groupId: "group", clusterId: "cluster" as string | undefined, resolvedClusterId: "cluster" as string | undefined, clusterLoading: false, clusterError: null as Error | null, search: "", navigate: vi.fn(), setSearch: vi.fn() }));
 vi.mock("@/api/client", () => ({ policies: { serviceModeDefaults: vi.fn(), updateServiceModeDefaults: vi.fn() }, groupsApi: { list: vi.fn(), usage: vi.fn(), update: vi.fn(), create: vi.fn(), delete: vi.fn(), promote: vi.fn(), exportYaml: vi.fn(), importYaml: vi.fn() } }));
-vi.mock("@/hooks/useCluster", () => ({ useCluster: () => ({ clusterId: route.clusterId, isLoading: false, cluster: route.clusterId ? { id: route.clusterId } : undefined, error: null }) }));
+vi.mock("@/hooks/useCluster", () => ({ useCluster: () => ({ clusterId: route.clusterId, isLoading: route.clusterLoading, cluster: route.resolvedClusterId ? { id: route.resolvedClusterId } : undefined, error: route.clusterError }) }));
 vi.mock("@tanstack/react-router", () => ({ useParams: () => ({ groupId: route.groupId || undefined }), useNavigate: () => route.navigate, Link: ({ children, href, to: _to, ...props }: { children: ReactNode; href?: string; to?: string }) => <a href={href} {...props}>{children}</a> }));
 vi.mock("@/lib/route-search", () => ({ useRouteSearchParams: () => [new URLSearchParams(route.search), route.setSearch] }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const group: Group = { id: "group", name: "Saved group", kind: "ground", comment: "Saved description", criteria: [{ key: "namespace", op: "eq", value: "production" }], members: ["production/api"], learned_from: "", cfg_type: "user", policy_mode: "monitor", profile_mode: "discover" };
 const usage: GroupUsage = { group_id: "group", group_name: "Saved group", summary: { total_references: 1, blocking_references: 1, network_rules: 1, dpi_sensor_bindings: 0, process_profiles: 0, file_profiles: 0, response_rules: 0, admission_rules: 0, derived_references: 0, member_targets: 1, delete_blocked: true }, references: [{ id: "rule", family: "network", name: "Allow API", kind: "rule", blocking: true, route: "/clusters/cluster/network-rules" }], coverage: [] };
-beforeEach(() => vi.mocked(policies.serviceModeDefaults).mockResolvedValue({ cluster_id: "cluster", policy_mode: "monitor", profile_mode: "discover" }));
+beforeEach(() => { vi.mocked(policies.serviceModeDefaults).mockResolvedValue({ cluster_id: "cluster", policy_mode: "monitor", profile_mode: "discover" }); });
 let root: Root;
 let host: HTMLDivElement;
 let client: QueryClient;
 afterEach(() => {
   act(() => root?.unmount()); client?.clear(); host?.remove(); vi.resetAllMocks(); vi.restoreAllMocks();
-  route.groupId = "group"; route.clusterId = "cluster"; route.search = "";
+  route.groupId = "group"; route.clusterId = "cluster"; route.resolvedClusterId = "cluster"; route.clusterLoading = false; route.clusterError = null; route.search = "";
 });
-async function renderPage(page: ReactNode) {
+async function renderPage(page: ReactNode, beforeRender?: (queryClient: QueryClient) => void | Promise<void>) {
   host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  await beforeRender?.(client);
   await act(async () => root.render(<QueryClientProvider client={client}>{page}</QueryClientProvider>));
 }
+async function rerenderPage(page: ReactNode) { await act(async () => root.render(<QueryClientProvider client={client}>{page}</QueryClientProvider>)); }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
 async function submit() { await act(async () => { host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); }); }
 function button(text: string) { return [...host.querySelectorAll("button")].find((item) => item.textContent?.trim() === text)!; }
@@ -249,4 +251,102 @@ it("preserves no selectors when a saved group has a null criteria array", async 
   expect(host.textContent).toContain("Without selectors this group will have no matching members");
   await submit();
   await settled(() => expect(groupsApi.update).toHaveBeenCalledWith("group", expect.objectContaining({ criteria: [] }), { cluster_id: "cluster" }));
+});
+const authoringKinds = ["create", "edit", "settings"] as const;
+type AuthoringKind = typeof authoringKinds[number];
+function authoringPage(kind: AuthoringKind) { route.groupId = kind === "create" ? "" : "group"; return kind === "settings" ? <GroupSettingsPage /> : <GroupFormPage />; }
+async function draftAuthoring(kind: AuthoringKind) {
+  if (kind === "settings") await act(async () => { const select = host.querySelector<HTMLSelectElement>("#default-network-mode")!; select.value = "protect"; select.dispatchEvent(new Event("change", { bubbles: true })); });
+  else await changeInput("#group-name", "Retained authoring draft");
+}
+function expectAuthoringDraft(kind: AuthoringKind) {
+  if (kind === "settings") expect(host.querySelector<HTMLSelectElement>("#default-network-mode")?.value).toBe("protect");
+  else expect(host.querySelector<HTMLInputElement>("#group-name")?.value).toBe("Retained authoring draft");
+}
+function expectNoAuthoringWrite() { expect(groupsApi.create).not.toHaveBeenCalled(); expect(groupsApi.update).not.toHaveBeenCalled(); expect(policies.updateServiceModeDefaults).not.toHaveBeenCalled(); }
+
+it.each(authoringKinds.flatMap((kind) => ["missing", "foreign", "error-with-stale", "loading"].map((scenario) => [kind, scenario] as const)))("blocks initial %s authoring while cluster resolution is %s", async (kind, scenario) => {
+  const page = authoringPage(kind);
+  if (scenario === "missing") route.resolvedClusterId = undefined;
+  if (scenario === "foreign") route.resolvedClusterId = "other";
+  if (scenario === "error-with-stale") route.clusterError = new Error("private scope details");
+  if (scenario === "loading") route.clusterLoading = true;
+  await renderPage(page);
+  expect(host.querySelector("form")).toBeNull(); expect(groupsApi.list).not.toHaveBeenCalled(); expect(policies.serviceModeDefaults).not.toHaveBeenCalled(); expectNoAuthoringWrite(); expect(host.textContent).not.toContain("private scope details");
+});
+it.each(authoringKinds)("does not expose %s authoring while an old cached cluster is refreshing", async (kind) => {
+  const page = authoringPage(kind); vi.mocked(groupsApi.list).mockResolvedValue({ groups: [group] });
+  let resolveRegistry!: (value: { clusters: Array<{ id: string }> }) => void;
+  await renderPage(page, (queryClient) => {
+    queryClient.setQueryData(["clusters"], { clusters: [{ id: "cluster" }] });
+    void queryClient.fetchQuery({ queryKey: ["clusters"], queryFn: () => new Promise<{ clusters: Array<{ id: string }> }>((resolve) => { resolveRegistry = resolve; }) }).catch(() => {});
+  });
+  expect(host.querySelector("form")).toBeNull(); expect(host.textContent).toContain("Loading cluster"); expect(groupsApi.list).not.toHaveBeenCalled(); expect(policies.serviceModeDefaults).not.toHaveBeenCalled();
+  await act(async () => resolveRegistry({ clusters: [{ id: "cluster" }] }));
+  await settled(() => expect(host.querySelector("form")).not.toBeNull());
+});
+it.each(authoringKinds)("blocks %s authoring when cached cluster identity is foreign", async (kind) => {
+  await renderPage(authoringPage(kind), (queryClient) => { queryClient.setQueryData(["cluster", "cluster"], { id: "foreign" }); });
+  expect(host.querySelector("form")).toBeNull(); expect(groupsApi.list).not.toHaveBeenCalled(); expect(policies.serviceModeDefaults).not.toHaveBeenCalled(); expect(host.textContent).toContain("selected cluster could not be resolved");
+});
+it.each(authoringKinds)("blocks %s authoring when cached registry failed despite a stale active cluster", async (kind) => {
+  await renderPage(authoringPage(kind), async (queryClient) => {
+    queryClient.setQueryData(["clusters"], { clusters: [{ id: "cluster" }] });
+    await queryClient.fetchQuery({ queryKey: ["clusters"], queryFn: () => Promise.reject(new Error("private registry details")), retry: false }).catch(() => {});
+  });
+  expect(host.querySelector("form")).toBeNull(); expect(groupsApi.list).not.toHaveBeenCalled(); expect(policies.serviceModeDefaults).not.toHaveBeenCalled(); expect(host.textContent).not.toContain("private registry details");
+});
+it.each(authoringKinds.flatMap((kind) => ["missing", "foreign", "error-with-stale", "loading"].map((scenario) => [kind, scenario] as const)))("preserves %s draft and pauses Save during transient %s scope", async (kind, scenario) => {
+  const page = authoringPage(kind); vi.mocked(groupsApi.list).mockResolvedValue({ groups: [group] });
+  await renderPage(page); await settled(() => expect(host.querySelector("form")).not.toBeNull()); await draftAuthoring(kind);
+  if (scenario === "missing") route.resolvedClusterId = undefined;
+  if (scenario === "foreign") route.resolvedClusterId = "other";
+  if (scenario === "error-with-stale") route.clusterError = new Error("private scope details");
+  if (scenario === "loading") route.clusterLoading = true;
+  await rerenderPage(authoringPage(kind)); expectAuthoringDraft(kind); expect(button("Save").disabled).toBe(true); expect(host.textContent).toContain("saving is paused until the cluster resolves");
+  await submit(); expectNoAuthoringWrite();
+  route.resolvedClusterId = "cluster"; route.clusterError = null; route.clusterLoading = false;
+  await rerenderPage(authoringPage(kind)); await settled(() => expect(button("Save").disabled).toBe(false)); expectAuthoringDraft(kind);
+});
+it.each(authoringKinds)("preserves %s draft during actual background registry fetching", async (kind) => {
+  const page = authoringPage(kind); vi.mocked(groupsApi.list).mockResolvedValue({ groups: [group] });
+  await renderPage(page, (queryClient) => { queryClient.setQueryData(["clusters"], { clusters: [{ id: "cluster" }] }); });
+  await settled(() => expect(host.querySelector("form")).not.toBeNull()); await draftAuthoring(kind);
+  let resolveRegistry!: (value: { clusters: Array<{ id: string }> }) => void;
+  await act(async () => { void client.fetchQuery({ queryKey: ["clusters"], queryFn: () => new Promise<{ clusters: Array<{ id: string }> }>((resolve) => { resolveRegistry = resolve; }) }).catch(() => {}); });
+  await settled(() => expect(button("Save").disabled).toBe(true)); expectAuthoringDraft(kind); await submit(); expectNoAuthoringWrite();
+  await act(async () => resolveRegistry({ clusters: [{ id: "cluster" }] }));
+  await settled(() => expect(button("Save").disabled).toBe(false)); expectAuthoringDraft(kind);
+});
+it.each(authoringKinds)("rechecks latest cluster scope before %s writes even before observer notification", async (kind) => {
+  const page = authoringPage(kind); vi.mocked(groupsApi.list).mockResolvedValue({ groups: [group] });
+  await renderPage(page, (queryClient) => { queryClient.setQueryData(["clusters"], { clusters: [{ id: "cluster" }] }); });
+  await settled(() => expect(host.querySelector("form")).not.toBeNull()); await draftAuthoring(kind);
+  await act(async () => { client.setQueryData(["clusters"], { clusters: [] }); host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
+  await settled(() => expect(host.textContent).toContain("Your draft is preserved")); expectNoAuthoringWrite(); expectAuthoringDraft(kind);
+});
+it.each(authoringKinds)("rechecks latest %s data before mutation when the backing record loses scope", async (kind) => {
+  const page = authoringPage(kind); vi.mocked(groupsApi.list).mockResolvedValue({ groups: [group] });
+  await renderPage(page); await settled(() => expect(host.querySelector("form")).not.toBeNull()); await draftAuthoring(kind);
+  await act(async () => {
+    if (kind === "edit") client.setQueryData(["group-editor", "cluster", "group"], { groups: [] });
+    else client.setQueryData(["service-mode-defaults", "cluster"], { cluster_id: "foreign", policy_mode: "monitor", profile_mode: "discover" });
+    host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  });
+  await settled(() => expect(host.textContent).toContain("Your draft is preserved")); expectNoAuthoringWrite(); expectAuthoringDraft(kind);
+});
+it.each(authoringKinds)("does not initialize a %s draft if cluster scope is lost while its initial data is loading", async (kind) => {
+  let resolveData!: () => void;
+  if (kind === "edit") vi.mocked(groupsApi.list).mockResolvedValue({ groups: [group] }).mockImplementationOnce(() => new Promise((resolve) => { resolveData = () => resolve({ groups: [group] }); }));
+  else vi.mocked(policies.serviceModeDefaults).mockResolvedValue({ cluster_id: "cluster", policy_mode: "monitor", profile_mode: "discover" }).mockImplementationOnce(() => new Promise((resolve) => { resolveData = () => resolve({ cluster_id: "cluster", policy_mode: "monitor", profile_mode: "discover" }); }));
+  await renderPage(authoringPage(kind));
+  expect(host.querySelector("form")).toBeNull();
+  route.clusterError = new Error("scope refresh failed");
+  await rerenderPage(authoringPage(kind));
+  await act(async () => resolveData());
+  await settled(() => expect(host.textContent).toContain("saving is paused until the cluster resolves"));
+  expect(host.querySelector("form")).toBeNull(); expectNoAuthoringWrite();
+  route.clusterError = null;
+  await rerenderPage(authoringPage(kind));
+  await settled(() => expect(host.querySelector("form")).not.toBeNull());
 });

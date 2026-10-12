@@ -161,7 +161,7 @@ function HostVulnerabilitiesTable({ vulnerabilities }: { vulnerabilities: HostVu
   const columns: Column<HostVulnerability>[] = [
     {
       id: "cve",
-      header: "CVE",
+      header: "CVE", kind: "name", wrap: true,
       cell: (vulnerability) => (
         <>
           {vulnerability.vuln_id ? (
@@ -171,13 +171,13 @@ function HostVulnerabilitiesTable({ vulnerabilities }: { vulnerabilities: HostVu
           ) : (
             <span className="font-mono text-xs">-</span>
           )}
-          <div className="mt-1 max-w-[420px] truncate text-xs text-muted-foreground">{vulnerability.summary || vulnerability.aliases?.join(", ") || "-"}</div>
+          <div className="mt-1 text-xs text-muted-foreground">{vulnerability.summary || vulnerability.aliases?.join(", ") || "-"}</div>
         </>
       ),
     },
     {
       id: "package",
-      header: "Package",
+      header: "Package", kind: "text", code: true, wrap: true, size: 200, minSize: 144, maxSize: 280,
       cell: (vulnerability) => (
         <>
           <div className="font-mono text-xs">{vulnerability.package_name || "-"}</div>
@@ -187,17 +187,17 @@ function HostVulnerabilitiesTable({ vulnerabilities }: { vulnerabilities: HostVu
     },
     {
       id: "severity",
-      header: "Severity",
+      header: "Severity", kind: "status",
       cell: (vulnerability) => <SeverityPill severity={vulnerability.severity || "unknown"} />,
     },
     {
       id: "fix",
-      header: "Fix",
+      header: "Fix", kind: "version", size: 160, minSize: 112, maxSize: 224, wrap: true,
       cell: (vulnerability) => <span className="font-mono text-xs">{vulnerability.fixed_version || "-"}</span>,
     },
     {
       id: "observed",
-      header: "Observed",
+      header: "Observed", kind: "date", size: 224, minSize: 208, maxSize: 240, wrap: true,
       cell: (vulnerability) => (
         <div className="text-xs">
           <div>{formatDate(vulnerability.observed_at)}</div>
@@ -231,14 +231,14 @@ function NodeContainersTable({ containers, observedAt, clusterId }: { containers
     return Array.isArray(raw) ? raw : [];
   }, [containers]);
   const columns: Column<Record<string, unknown>>[] = [
-    { id: "name", header: "Container", cell: (c) => <span className="text-xs font-medium">{String(c.name ?? "—")}</span>, sort: (a, b) => String(a.name ?? "").localeCompare(String(b.name ?? "")) },
-    { id: "pod", header: "Pod", cell: (c) => (
+    { id: "name", header: "Container", kind: "name", wrap: true, cell: (c) => <span className="text-xs font-medium">{String(c.name ?? "—")}</span>, sort: (a, b) => String(a.name ?? "").localeCompare(String(b.name ?? "")) },
+    { id: "pod", header: "Pod", kind: "text", code: true, wrap: true, size: 240, minSize: 176, maxSize: 360, cell: (c) => (
         clusterId && c.pod_name
           ? <Link to="." href={`/clusters/${clusterId}/deployments?q=${encodeURIComponent(String(c.pod_name).replace(/-[a-z0-9]+-[a-z0-9]+$/, ""))}`} className="text-mono text-[11px] text-[color:var(--color-primary)] hover:underline">{String(c.pod_namespace ?? "")}/{String(c.pod_name ?? "")}</Link>
           : <span className="text-mono text-[11px] text-muted-foreground">{String(c.pod_namespace ?? "")}/{String(c.pod_name ?? "—")}</span>
       ) },
-    { id: "image", header: "Image", cell: (c) => <span className="text-mono text-[11px] text-muted-foreground max-w-[300px] truncate block" title={String(c.image_ref ?? c.image ?? "")}>{String(c.image_ref ?? c.image ?? "—").replace("sha256:", "").slice(0, 24)}</span> },
-    { id: "state", header: "State", width: "120px", cell: (c) => {
+    { id: "image", header: "Image", kind: "text", code: true, wrap: true, size: 240, minSize: 176, maxSize: 360, cell: (c) => <span className="text-mono text-[11px] text-muted-foreground block" title={String(c.image_ref ?? c.image ?? "")}>{String(c.image_ref ?? c.image ?? "—").replace("sha256:", "").slice(0, 24)}</span> },
+    { id: "state", header: "State", kind: "status",  cell: (c) => {
         const st = String(c.state ?? "").replace("CONTAINER_", "").toLowerCase();
         return <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", st === "running" ? "bg-[color-mix(in_oklab,var(--color-severity-low)_16%,transparent)] text-[color:var(--color-severity-low)]" : "bg-muted text-muted-foreground")}>{st || "—"}</span>;
       }, sort: (a, b) => String(a.state ?? "").localeCompare(String(b.state ?? "")) },
@@ -262,10 +262,10 @@ function NodeProcessesTable({ processes, observedAt }: { processes?: unknown; ob
     return Array.isArray(raw) ? raw : [];
   }, [processes]);
   const columns: Column<Record<string, unknown>>[] = [
-    { id: "pid", header: "PID", width: "70px", numeric: true, cell: (p) => <span className="text-mono text-[11px]">{String(p.pid ?? "—")}</span>, sort: (a, b) => Number(a.pid ?? 0) - Number(b.pid ?? 0) },
-    { id: "comm", header: "Process", width: "150px", cell: (p) => <span className="text-xs font-medium">{String(p.comm ?? "—")}</span>, sort: (a, b) => String(a.comm ?? "").localeCompare(String(b.comm ?? "")) },
-    { id: "uid", header: "User", width: "70px", cell: (p) => <span className={cn("text-mono text-[11px]", Number(p.uid) === 0 && "text-[color:var(--color-severity-high)]")}>{Number(p.uid) === 0 ? "root" : String(p.uid ?? "—")}</span>, sort: (a, b) => Number(a.uid ?? 0) - Number(b.uid ?? 0) },
-    { id: "cmdline", header: "Command line", cell: (p) => <span className="text-mono text-[10px] text-muted-foreground max-w-[520px] truncate block" title={String(p.cmdline ?? "")}>{String(p.cmdline ?? "—")}</span> },
+    { id: "pid", header: "PID", kind: "count",  numeric: true, cell: (p) => <span className="text-mono text-[11px]">{String(p.pid ?? "—")}</span>, sort: (a, b) => Number(a.pid ?? 0) - Number(b.pid ?? 0) },
+    { id: "comm", header: "Process", kind: "name", wrap: true, code: true,  cell: (p) => <span className="text-xs font-medium">{String(p.comm ?? "—")}</span>, sort: (a, b) => String(a.comm ?? "").localeCompare(String(b.comm ?? "")) },
+    { id: "uid", header: "User", kind: "text", wrap: true, size: 104, minSize: 88, maxSize: 144,  cell: (p) => <span className={cn("text-mono text-[11px]", Number(p.uid) === 0 && "text-[color:var(--color-severity-high)]")}>{Number(p.uid) === 0 ? "root" : String(p.uid ?? "—")}</span>, sort: (a, b) => Number(a.uid ?? 0) - Number(b.uid ?? 0) },
+    { id: "cmdline", header: "Command line", kind: "text", code: true, wrap: true, size: 320, minSize: 240, maxSize: 640, grow: true, cell: (p) => <span className="text-mono text-[10px] text-muted-foreground block" title={String(p.cmdline ?? "")}>{String(p.cmdline ?? "—")}</span> },
   ];
   return (
     <section className="overflow-hidden rounded-lg border border-border bg-card">
@@ -289,12 +289,12 @@ function CisBenchmarkTable({ cis, observedAt }: { cis?: unknown; observedAt?: st
   }, [cis]);
   const rank: Record<string, number> = { fail: 0, warn: 1, info: 2, note: 2, pass: 3, skip: 4 };
   const columns: Column<{ id?: string; title?: string; result?: string; detail?: string }>[] = [
-    { id: "result", header: "Result", width: "88px",
+    { id: "result", header: "Result", kind: "status",
       cell: (c) => <CisResultBadge result={c.result} />,
       sort: (a, b) => (rank[(a.result || "").toLowerCase()] ?? 9) - (rank[(b.result || "").toLowerCase()] ?? 9) },
-    { id: "id", header: "Control", width: "120px", cell: (c) => <span className="text-mono text-xs">{c.id || "—"}</span>, sort: (a, b) => (a.id || "").localeCompare(b.id || "") },
-    { id: "title", header: "Title", cell: (c) => <span className="text-xs">{c.title || "—"}</span>, sort: (a, b) => (a.title || "").localeCompare(b.title || "") },
-    { id: "detail", header: "Remediation / detail", cell: (c) => <span className="block max-w-[520px] truncate text-[11px] text-muted-foreground" title={c.detail}>{c.detail || "—"}</span> },
+    { id: "id", header: "Control", kind: "id", size: 144, minSize: 112, maxSize: 192,  cell: (c) => <span className="text-mono text-xs">{c.id || "—"}</span>, sort: (a, b) => (a.id || "").localeCompare(b.id || "") },
+    { id: "title", header: "Title", kind: "name", wrap: true, cell: (c) => <span className="text-xs">{c.title || "—"}</span>, sort: (a, b) => (a.title || "").localeCompare(b.title || "") },
+    { id: "detail", header: "Remediation / detail", kind: "text", wrap: true, size: 320, minSize: 240, maxSize: 560, grow: true, cell: (c) => <span className="block text-[11px] text-muted-foreground" title={c.detail}>{c.detail || "—"}</span> },
   ];
   const fails = checks.filter((c) => (c.result || "").toLowerCase() === "fail").length;
   return (

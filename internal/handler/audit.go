@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -110,42 +111,8 @@ func (a *Audit) List(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// audit_events is hash-chained and intentionally has no cluster_id column
-	// (writes would have to update the chain). Cluster-mode scoping instead
-	// pivots on target_id: an audit row scopes to a cluster iff its target_id
-	// matches a row in one of the cluster-bearing tables for that cluster.
-	// This is a best-effort filter — events with no DB target (login, logout,
-	// generic actions) are excluded from cluster mode, which is the intended
-	// behavior: they belong to the org-level activity feed, not a cluster's.
-	// The action filter combines an exact-match clause (?action=foo) with
-	// a prefix-list clause (?framework=X&control=Y). At most one is set;
-	// when neither is, both clauses degrade to TRUE.
-	rows, err := a.db.Pool().Query(r.Context(), `
-SELECT id, org_id, actor_id, action, COALESCE(target_kind,''), COALESCE(target_id,''),
-       prev_hash, chain_hash, at
-  FROM audit_events
- WHERE org_id = $1
-   AND ($7::bigint IS NULL OR id = $7)
-   AND ($8::uuid IS NULL OR (target_kind = 'support_bundle_job' AND target_id = $8::text))
-   AND ($2::text = '' OR action = $2)
-   AND ($6::text[] IS NULL OR EXISTS (
-        SELECT 1 FROM unnest($6::text[]) AS p WHERE action LIKE p || '%'
-       ))
-   AND ($3::uuid IS NULL OR target_id IN (
-        SELECT id::text FROM findings           WHERE org_id = $1 AND cluster_id = $3
-        UNION ALL
-        SELECT id::text FROM assets             WHERE org_id = $1 AND cluster_id = $3
-        UNION ALL
-        SELECT id::text FROM deployments        WHERE org_id = $1 AND cluster_id = $3
-        UNION ALL
-        SELECT id::text FROM compliance_checks  WHERE org_id = $1 AND cluster_id = $3
-        UNION ALL
-        SELECT id::text FROM policies           WHERE org_id = $1 AND (cluster_id IS NULL OR cluster_id = $3)
-        UNION ALL
-        SELECT $3::text
-       ))
- ORDER BY id DESC
- LIMIT $4 OFFSET $5`, subj.OrgID, action, clusterArg, fetch, offset, controlPrefixes, eventID, supportBundleJobID)
+	query, args := auditListQuery(subj.OrgID, clusterArg, action, controlPrefixes, eventID, supportBundleJobID, fetch, offset)
+	rows, err := a.db.Pool().Query(r.Context(), query, args...)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -156,18 +123,10 @@ SELECT id, org_id, actor_id, action, COALESCE(target_kind,''), COALESCE(target_i
 	// doesn't render them and the table costs ~200 bytes/row to ship.
 	withControls := strings.EqualFold(r.URL.Query().Get("with_controls"), "1") ||
 		strings.EqualFold(r.URL.Query().Get("with_controls"), "true")
-	out := make([]auditDTO, 0, limit)
-	for rows.Next() {
-		var d auditDTO
-		if err := rows.Scan(&d.ID, &d.OrgID, &d.ActorID, &d.Action, &d.TargetKind, &d.TargetID,
-			&d.PrevHash, &d.ChainHash, &d.At); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		if withControls {
-			d.Controls = auditlog.ControlIDsFor(d.Action)
-		}
-		out = append(out, d)
+	out, err := readAuditListRows(rows, limit, withControls)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
 	}
 	// Trim the probe row and report whether another page exists.
 	hasMore := false
@@ -184,6 +143,94 @@ SELECT id, org_id, actor_id, action, COALESCE(target_kind,''), COALESCE(target_i
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// auditListQuery preserves the target-based cluster scope without walking the
+// entire append-only log looking for sparse matches. Each distinct target probes
+// idx_audit_org_target_id, then the outer query merges those events by ID. The
+// first offset+fetch events per target contain every possible global page row.
+// No target-kind restrictions are added: historical scoping matches target IDs
+// across all five target tables, inherited policies, and the cluster itself.
+func auditListQuery(orgID uuid.UUID, clusterID any, action string, controlPrefixes []string, eventID *int64, supportBundleJobID *uuid.UUID, fetch, offset int) (string, []any) {
+	args := []any{orgID, fetch, offset}
+	bind := func(value any) string {
+		args = append(args, value)
+		return "$" + strconv.Itoa(len(args))
+	}
+	var clusterParam, targetFetchParam string
+	if clusterID != nil {
+		clusterParam = bind(clusterID)
+		// Keep an accepted maximum offset from overflowing the per-target bound.
+		targetFetch := int64(offset)
+		if targetFetch > math.MaxInt64-int64(fetch) {
+			targetFetch = math.MaxInt64
+		} else {
+			targetFetch += int64(fetch)
+		}
+		targetFetchParam = bind(targetFetch)
+	}
+	filters := []string{"a.org_id = $1"}
+	if action != "" {
+		filters = append(filters, "a.action = "+bind(action))
+	}
+	if controlPrefixes != nil {
+		filters = append(filters, "EXISTS (SELECT 1 FROM unnest("+bind(controlPrefixes)+"::text[]) AS p WHERE a.action LIKE p || '%')")
+	}
+	if eventID != nil {
+		filters = append(filters, "a.id = "+bind(*eventID))
+	}
+	if supportBundleJobID != nil {
+		filters = append(filters, "a.target_kind = 'support_bundle_job' AND a.target_id = "+bind(supportBundleJobID.String())+"::text")
+	}
+	const columns = `a.id, a.org_id, a.actor_id, a.action,
+       COALESCE(a.target_kind,'') AS target_kind, COALESCE(a.target_id,'') AS target_id,
+       a.prev_hash, a.chain_hash, a.at`
+	if clusterID == nil {
+		return "SELECT " + columns + " FROM audit_events a WHERE " + strings.Join(filters, " AND ") + " ORDER BY a.id DESC LIMIT $2 OFFSET $3", args
+	}
+	// UNION deduplicates IDs, including findings retained in multiple partitions
+	// and IDs shared by different target tables. A duplicate must not repeat an
+	// audit event or change has_more/page boundaries.
+	return `WITH cluster_targets AS MATERIALIZED (
+ SELECT id::text AS target_id FROM findings WHERE org_id = $1 AND cluster_id = ` + clusterParam + `
+ UNION SELECT id::text FROM assets WHERE org_id = $1 AND cluster_id = ` + clusterParam + `
+ UNION SELECT id::text FROM deployments WHERE org_id = $1 AND cluster_id = ` + clusterParam + `
+ UNION SELECT id::text FROM compliance_checks WHERE org_id = $1 AND cluster_id = ` + clusterParam + `
+ UNION SELECT id::text FROM policies WHERE org_id = $1 AND (cluster_id IS NULL OR cluster_id = ` + clusterParam + `)
+ UNION SELECT ` + clusterParam + `::text
+)
+SELECT page.* FROM cluster_targets t
+CROSS JOIN LATERAL (
+ SELECT ` + columns + ` FROM audit_events a
+ WHERE a.target_id = t.target_id AND ` + strings.Join(filters, " AND ") + `
+ ORDER BY a.id DESC LIMIT ` + targetFetchParam + `
+) page
+ORDER BY page.id DESC LIMIT $2 OFFSET $3`, args
+}
+
+type auditListRows interface {
+	Next() bool
+	Scan(...any) error
+	Err() error
+}
+
+func readAuditListRows(rows auditListRows, limit int, withControls bool) ([]auditDTO, error) {
+	out := make([]auditDTO, 0, limit)
+	for rows.Next() {
+		var d auditDTO
+		if err := rows.Scan(&d.ID, &d.OrgID, &d.ActorID, &d.Action, &d.TargetKind, &d.TargetID,
+			&d.PrevHash, &d.ChainHash, &d.At); err != nil {
+			return nil, err
+		}
+		if withControls {
+			d.Controls = auditlog.ControlIDsFor(d.Action)
+		}
+		out = append(out, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // ControlMappings exposes the static compliance mapping table. UIs use this

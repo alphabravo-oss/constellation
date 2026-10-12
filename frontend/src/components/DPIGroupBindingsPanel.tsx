@@ -50,10 +50,10 @@ export function DPIGroupBindingsPanel({ clusterId, kind, title, description, tes
     },
   });
   const columns: Column<Group>[] = [
-    { id: "name", header: "Group", hideable: false, exportValue: (group) => group.name, cell: (group) => <button type="button" className="font-mono text-sm text-primary hover:underline" onClick={() => navigate({ href: `/clusters/${encodeURIComponent(clusterId)}/groups/${encodeURIComponent(group.id)}${search.size ? `?${search}` : ""}` })}>{group.name}</button>, sort: (a, b) => a.name.localeCompare(b.name) },
-    { id: "kind", header: "Kind", cell: (group) => group.kind },
-    { id: "members", header: "Matching workloads", numeric: true, cell: (group) => (group.members ?? []).length },
-    { id: "actions", header: "Actions", hideable: false, exportable: false, cell: (group) => <Button type="button" size="sm" variant="ghost" disabled={error || unbind.isPending} onClick={() => { if (window.confirm(`Remove ${group.name} from this detector's scope?`)) unbind.mutate(group.id); }}><Trash2 className="mr-1 h-3.5 w-3.5" /> Remove</Button> },
+    { id: "name", header: "Group", kind: "name", code: true, hideable: false, exportValue: (group) => group.name, cell: (group) => <button type="button" className="font-mono text-sm text-primary hover:underline" onClick={() => navigate({ href: `/clusters/${encodeURIComponent(clusterId)}/groups/${encodeURIComponent(group.id)}${search.size ? `?${search}` : ""}` })}>{group.name}</button>, sort: (a, b) => a.name.localeCompare(b.name) },
+    { id: "kind", header: "Kind", kind: "status", cell: (group) => group.kind },
+    { id: "members", header: "Matching workloads", kind: "count", numeric: true, cell: (group) => (group.members ?? []).length },
+    { id: "actions", header: "Actions", kind: "actions", size: 144, minSize: 136, maxSize: 160, hideable: false, exportable: false, cell: (group) => <Button type="button" size="sm" variant="ghost" disabled={error || unbind.isPending} onClick={() => { if (window.confirm(`Remove ${group.name} from this detector's scope?`)) unbind.mutate(group.id); }}><Trash2 className="mr-1 h-3.5 w-3.5" /> Remove</Button> },
   ];
   const listPath = `/clusters/${encodeURIComponent(clusterId)}/${kind === "dlp" ? "runtime-dlp" : "runtime-signatures"}`;
   return <section className="space-y-4 rounded-lg border border-border bg-card p-4" data-testid={testId}>

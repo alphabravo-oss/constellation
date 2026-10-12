@@ -192,11 +192,16 @@ export interface CVERollup {
 }
 
 export const findings = {
-  list: (params: { kind?: FindingKind; lifecycle?: Lifecycle; cluster_id?: string; q?: string; limit?: number; offset?: number; fixable?: boolean } = {}) =>
-    api.get<{ findings: Finding[]; limit: number; offset: number; lifecycle_counts?: Record<Lifecycle, number> }>("/findings", { params: { ...params, fixable: params.fixable ? "1" : undefined } }).then((r) => r.data),
+  list: (params: { kind?: FindingKind; lifecycle?: Lifecycle; cluster_id?: string; q?: string; limit?: number; offset?: number; fixable?: boolean; sort?: string; order?: "asc" | "desc" } = {}) =>
+    api.get<{ findings: Finding[]; limit: number; offset: number; total: number; has_more: boolean; lifecycle_counts?: Record<Lifecycle, number> }>("/findings", { params: { ...params, fixable: params.fixable ? "1" : undefined } }).then((r) => r.data),
   // NeuVector-style rollup: one row per CVE with its blast radius (affected images/clusters).
   byCVE: (params: { cluster_id?: string; lifecycle?: Lifecycle; limit?: number; offset?: number; fixable?: boolean; q?: string } = {}) =>
     api.get<{ cves: CVERollup[]; limit: number; offset: number; total: number }>("/findings/by-cve", { params: { ...params, fixable: params.fixable ? "true" : undefined, q: params.q || undefined } }).then((r) => r.data),
+  exportCSV: (params: { kind?: FindingKind; lifecycle?: Lifecycle; cluster_id?: string; q?: string; limit?: number; offset?: number; fixable?: boolean; sort?: string; order?: "asc" | "desc" } = {}) => {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) if (value !== undefined && value !== false && value !== "") query.set(key, value === true ? "1" : String(value));
+    return downloadAPIFile(`/findings.csv?${query}`, "constellation-findings-instances.csv");
+  },
   get: (id: string) => api.get<Finding>(`/findings/${id}`).then((r) => r.data),
   triage:     (id: string, body: { assignee_id?: string; priority?: string }) =>
     api.post(`/findings/${id}/triage`, body).then((r) => r.data),

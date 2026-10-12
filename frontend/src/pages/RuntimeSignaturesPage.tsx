@@ -62,25 +62,25 @@ export function RuntimeSignaturesPage() {
   const monitorCount = rules.filter((r) => r.mode === "monitor").length;
 
   const columns: Column<DLPRule>[] = [
-    { id: "name", header: "Name", hideable: false, exportValue: (r) => r.name, cell: (r) => <span className="font-mono">{r.name}</span>, sort: (a, b) => a.name.localeCompare(b.name) },
+    { id: "name", header: "Name", kind: "name", code: true, hideable: false, exportValue: (r) => r.name, cell: (r) => <span className="font-mono">{r.name}</span>, sort: (a, b) => a.name.localeCompare(b.name) },
     {
       id: "category",
-      header: "Type",
+      header: "Type", kind: "badge",
       exportValue: (r) => r.category,
       cell: (r) => <StatusPill label={r.category === "waf" ? "WAF" : "DPI"} tone={r.category === "waf" ? "accent" : "info"} />,
       sort: (a, b) => a.category.localeCompare(b.category),
     },
-    { id: "severity", header: "Severity", numeric: true, cell: (r) => r.severity, sort: (a, b) => a.severity - b.severity },
+    { id: "severity", header: "Severity", kind: "count", numeric: true, cell: (r) => r.severity, sort: (a, b) => a.severity - b.severity },
     {
       id: "direction",
-      header: "Direction",
+      header: "Direction", kind: "status", size: 136, minSize: 112, maxSize: 176,
       exportValue: (r) => APPLY_DIR_LABEL[r.apply_dir] ?? "Unknown",
       cell: (r) => <span className="text-mono text-[10px] text-muted-foreground">{APPLY_DIR_LABEL[r.apply_dir] ?? "—"}</span>,
       sort: (a, b) => (APPLY_DIR_LABEL[a.apply_dir] ?? "").localeCompare(APPLY_DIR_LABEL[b.apply_dir] ?? ""),
     },
     {
       id: "mode",
-      header: "Configured mode",
+      header: "Configured mode", kind: "status",
       exportValue: (r) => r.mode,
       cell: (r) => {
         const badge = MODE_BADGE[r.mode] ?? { label: "Unknown", tone: "neutral" as const };
@@ -90,7 +90,7 @@ export function RuntimeSignaturesPage() {
     },
     {
       id: "origin",
-      header: "Origin",
+      header: "Origin", kind: "status", size: 144, minSize: 112, maxSize: 176,
       exportValue: (r) => runtimeRuleOrigin(r).label,
       cell: (r) => {
         const origin = runtimeRuleOrigin(r);
@@ -104,12 +104,12 @@ export function RuntimeSignaturesPage() {
     },
     {
       id: "patterns",
-      header: "Patterns",
+      header: "Patterns", kind: "count",
       numeric: true,
       cell: (r) => (Array.isArray(r.patterns) ? r.patterns.length : 0),
       sort: (a, b) => (Array.isArray(a.patterns) ? a.patterns.length : 0) - (Array.isArray(b.patterns) ? b.patterns.length : 0),
     },
-    { id: "actions", header: "Actions", hideable: false, exportable: false, className: "text-right", cell: (r) => <SignatureActions clusterID={clusterID} disabled={q.isError} r={r} onEdit={() => navigate({ href: `${listPath}/${encodeURIComponent(r.id)}${scopedSearch}` })} /> },
+    { id: "actions", header: "Actions", kind: "actions", size: 208, minSize: 192, maxSize: 240, wrap: true, hideable: false, exportable: false, className: "text-right", cell: (r) => <SignatureActions clusterID={clusterID} disabled={q.isError} r={r} onEdit={() => navigate({ href: `${listPath}/${encodeURIComponent(r.id)}${scopedSearch}` })} /> },
   ];
 
   if (!clusterID) {

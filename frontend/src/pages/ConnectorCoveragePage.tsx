@@ -19,7 +19,7 @@ type CloudConnector = ConnectorCoverageOverview["cloud_connectors"][number];
 const cloudColumns: Column<CloudConnector>[] = [
   {
     id: "connector",
-    header: "Connector",
+    header: "Connector", kind: "name", wrap: true,
     cell: (c) => (
       <>
         <div className="font-medium">{c.name}</div>
@@ -27,11 +27,11 @@ const cloudColumns: Column<CloudConnector>[] = [
       </>
     ),
   },
-  { id: "account", header: "Account", cell: (c) => <span className="font-mono text-xs">{c.account}</span> },
-  { id: "regions", header: "Regions", cell: (c) => <span className="text-xs">{c.regions.join(", ")}</span> },
-  { id: "coverage", header: "Coverage", cell: (c) => <span className="text-xs">{c.resources_assessed}/{c.resources_observed}</span> },
-  { id: "findings", header: "Findings", cell: (c) => <span className="text-xs">{c.findings_open}</span> },
-  { id: "status", header: "Status", cell: (c) => <Status value={c.status} /> },
+  { id: "account", header: "Account", kind: "text", code: true, wrap: true, size: 192, minSize: 144, maxSize: 280, cell: (c) => <span className="font-mono text-xs">{c.account}</span> },
+  { id: "regions", header: "Regions", kind: "text", wrap: true, size: 192, minSize: 144, maxSize: 280, cell: (c) => <span className="text-xs">{c.regions.join(", ")}</span> },
+  { id: "coverage", header: "Coverage", kind: "count", size: 128, minSize: 112, maxSize: 160, cell: (c) => <span className="text-xs">{c.resources_assessed}/{c.resources_observed}</span> },
+  { id: "findings", header: "Findings", kind: "count", cell: (c) => <span className="text-xs">{c.findings_open}</span> },
+  { id: "status", header: "Status", kind: "status", cell: (c) => <Status value={c.status} /> },
 ];
 
 type ScanJobAction = "pause" | "resume" | "retry" | "cancel";

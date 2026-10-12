@@ -15,12 +15,10 @@ import (
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
-	"github.com/alphabravocompany/constellation/internal/handler/sqlx"
 	"github.com/alphabravocompany/constellation/internal/scanner"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/notify"
 	"github.com/alphabravocompany/constellation/pkg/risk"
-	searchdsl "github.com/alphabravocompany/constellation/pkg/search/dsl"
 )
 
 // Findings serves the /api/v1/findings tree.
@@ -70,63 +68,33 @@ type findingDTO struct {
 }
 
 func (f *Findings) List(w http.ResponseWriter, r *http.Request) {
-	subj, _ := authctx.SubjectFrom(r.Context())
-	kind := r.URL.Query().Get("kind")
-	lifecycle := r.URL.Query().Get("lifecycle")
-	// fixable=1 hides vulnerabilities with no available fix ("won't-fix"/"not-fixed") —
-	// a detail_json.fixed that is empty or "false". Fixed carries the fix version(s).
-	fixable := r.URL.Query().Get("fixable") == "1" || r.URL.Query().Get("fixable") == "true"
-	qstr := r.URL.Query().Get("q")
-	clusterIDStr := r.URL.Query().Get("cluster_id")
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	subj, ok := authctx.SubjectFrom(r.Context())
+	if !ok {
+		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "no subject"})
+		return
+	}
+	values := r.URL.Query()
+	limit, _ := strconv.Atoi(values.Get("limit"))
 	if limit <= 0 || limit > 1000 {
 		limit = 100
 	}
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-
-	var clusterArg any
-	if clusterIDStr != "" {
-		cid, err := uuid.Parse(clusterIDStr)
-		if err != nil {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster_id"})
-			return
-		}
-		clusterArg = cid
-	}
-
-	compiled, err := searchdsl.Compile(qstr, findingsSearchSchema)
+	offset := findingOffset(values)
+	where, args, err := findingFilter(subj.OrgID, values, true, true)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "search: " + err.Error()})
+		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	// $1=org, $2=kind, $3=lifecycle, $4=cluster_id (nullable)
-	args := []any{subj.OrgID, kind, lifecycle, clusterArg}
-	extraWhere := ""
-	if !compiled.Empty() {
-		extraWhere = " AND " + sqlx.ShiftPlaceholders(compiled.Where, len(args))
-		args = append(args, compiled.Args...)
-	}
-	// Literal condition — no positional arg, so LIMIT/OFFSET placeholder indices are unchanged.
-	if fixable {
-		extraWhere += ` AND COALESCE(detail_json->>'fixed','') NOT IN ('', 'false')`
+	order, err := findingOrder(values)
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
 	}
 	args = append(args, limit, offset)
 	rows, err := f.db.Pool().Query(r.Context(), `
 SELECT id, kind, external_id, title, severity, risk_score, lifecycle, asset_id, cluster_id,
        attack_techniques, accepted_until, first_seen_at, last_seen_at, risk_inputs,
        COALESCE(canonical_engine, ''), engines, detail_json
-  FROM findings
- WHERE org_id = $1
-   AND ($2::text = '' OR kind = $2)
-   AND ($3::text = '' OR lifecycle = $3)
-   AND ($4::uuid IS NULL OR cluster_id = $4)
-   -- Exclude the runtime-agent pod-scan duplicate: every running container's vulns are
-   -- also recorded as 'image-workload' (image scan → workload), which is the canonical,
-   -- deduped/named/cross-engine-merged representation. The 'workload' rows are a second
-   -- copy of the same CVEs that only power the Deployment detail page; counting them here
-   -- double-counted every vuln. See dashboard.go + findings_by_cve.go (same exclusion).
-   AND (kind <> 'vulnerability' OR COALESCE(target_type, '') <> 'workload')`+extraWhere+`
- ORDER BY risk_score DESC, last_seen_at DESC
+  FROM findings WHERE `+where+` ORDER BY `+order+`
  LIMIT $`+strconv.Itoa(len(args)-1)+` OFFSET $`+strconv.Itoa(len(args)), args...)
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -152,14 +120,14 @@ SELECT id, kind, external_id, title, severity, risk_score, lifecycle, asset_id, 
 		hydrateFindingProvenance(&d, enginesRaw, detailRaw)
 		out = append(out, d)
 	}
-	countRows, err := f.db.Pool().Query(r.Context(), `
-SELECT lifecycle, count(*)
-  FROM findings
- WHERE org_id = $1
-   AND ($2::text = '' OR kind = $2)
-   AND ($3::uuid IS NULL OR cluster_id = $3)
-   AND (kind <> 'vulnerability' OR COALESCE(target_type, '') <> 'workload')
- GROUP BY lifecycle`, subj.OrgID, kind, clusterArg)
+	if err := rows.Err(); err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read findings"})
+		return
+	}
+	// Lifecycle tabs retain all statuses, but match the current kind, search,
+	// cluster and fixability filters. The selected status gives the page total.
+	countWhere, countArgs, _ := findingFilter(subj.OrgID, values, false, true)
+	countRows, err := f.db.Pool().Query(r.Context(), `SELECT lifecycle, count(*) FROM findings WHERE `+countWhere+` GROUP BY lifecycle`, countArgs...)
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -175,8 +143,18 @@ SELECT lifecycle, count(*)
 		}
 		lifecycleCounts[lifecycle] = count
 	}
+	if err := countRows.Err(); err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not count findings"})
+		return
+	}
+	total := 0
+	for lifecycle, count := range lifecycleCounts {
+		if values.Get("lifecycle") == "" || values.Get("lifecycle") == lifecycle {
+			total += count
+		}
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"findings": out, "limit": limit, "offset": offset,
+		"findings": out, "limit": limit, "offset": offset, "total": total, "has_more": offset+len(out) < total,
 		"lifecycle_counts": lifecycleCounts,
 	})
 }
@@ -296,21 +274,42 @@ func (n *tolerantJSONFloat) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+type tolerantJSONBool bool
+
+func (b *tolerantJSONBool) UnmarshalJSON(raw []byte) error {
+	value := string(raw)
+	if strings.HasPrefix(value, `"`) {
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return err
+		}
+	}
+	switch strings.ToLower(value) {
+	case "true", "t", "1", "yes":
+		*b = true
+	default:
+		*b = false
+	}
+	return nil
+}
+
 func hydrateFindingProvenance(d *findingDTO, enginesRaw, detailRaw []byte) {
 	if len(enginesRaw) > 0 && string(enginesRaw) != "null" {
 		_ = json.Unmarshal(enginesRaw, &d.Engines)
 	}
 	var detail struct {
-		CanonicalEngine string                         `json:"canonical_engine"`
-		Reconciliation  []scanner.ReconciliationSignal `json:"reconciliation"`
-		Package         scanner.Package                `json:"package"`
-		FixedVersion    string                         `json:"fixed"`
-		AffectedRange   *scanner.AffectedRange         `json:"affected_range"`
-		VulnDBBundle    *scanner.BundleMetadata        `json:"vulndb_bundle"`
-		CVSSBase        tolerantJSONFloat              `json:"cvss_base"`
-		CVSSVector      string                         `json:"cvss_vector"`
-		KEV             bool                           `json:"kev"`
-		EPSS            float64                        `json:"epss"`
+		CanonicalEngine    string                         `json:"canonical_engine"`
+		Reconciliation     []scanner.ReconciliationSignal `json:"reconciliation"`
+		PackageName        string                         `json:"package_name"`
+		PackageVersion     string                         `json:"package_version"`
+		FixedVersionLegacy string                         `json:"fixed_version"`
+		Package            scanner.Package                `json:"package"`
+		FixedVersion       string                         `json:"fixed"`
+		AffectedRange      *scanner.AffectedRange         `json:"affected_range"`
+		VulnDBBundle       *scanner.BundleMetadata        `json:"vulndb_bundle"`
+		CVSSBase           tolerantJSONFloat              `json:"cvss_base"`
+		CVSSVector         string                         `json:"cvss_vector"`
+		KEV                tolerantJSONBool               `json:"kev"`
+		EPSS               float64                        `json:"epss"`
 	}
 	if len(detailRaw) > 0 && string(detailRaw) != "null" {
 		_ = json.Unmarshal(detailRaw, &detail)
@@ -325,6 +324,15 @@ func hydrateFindingProvenance(d *findingDTO, enginesRaw, detailRaw []byte) {
 	d.PackageEcosystem = detail.Package.Ecosystem
 	d.PackagePURL = detail.Package.Purl
 	d.FixedVersion = detail.FixedVersion
+	if d.PackageName == "" {
+		d.PackageName = detail.PackageName
+	}
+	if d.PackageVersion == "" {
+		d.PackageVersion = detail.PackageVersion
+	}
+	if d.FixedVersion == "" {
+		d.FixedVersion = detail.FixedVersionLegacy
+	}
 	d.AffectedRange = detail.AffectedRange
 	if d.AffectedRange != nil {
 		if d.PackageName == "" {
@@ -344,7 +352,7 @@ func hydrateFindingProvenance(d *findingDTO, enginesRaw, detailRaw []byte) {
 	d.CVSSBase = float64(detail.CVSSBase)
 	d.CVSS = d.CVSSBase
 	d.CVSSVector = detail.CVSSVector
-	d.KEV = detail.KEV
+	d.KEV = bool(detail.KEV)
 	d.EPSS = detail.EPSS
 }
 

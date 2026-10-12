@@ -63,7 +63,7 @@ export function AssetsPage() {
   const columns: Column<Asset>[] = [
     {
       id: "asset",
-      header: "Asset",
+      header: "Asset", kind: "name", wrap: true,
       cell: (asset) => (
         <>
           <div className="flex flex-wrap items-center gap-2">
@@ -77,10 +77,10 @@ export function AssetsPage() {
         </>
       ),
     },
-    { id: "risk", header: "Risk", cell: (asset) => <RiskStack asset={asset} /> },
-    { id: "supply-chain", header: "Supply Chain", cell: (asset) => <SupplyChainStack asset={asset} /> },
-    { id: "criticality", header: "Criticality", cell: (asset) => <span className="text-xs">{asset.criticality}</span> },
-    { id: "last-seen", header: "Last Seen", cell: (asset) => <span className="text-xs text-muted-foreground">{formatDate(asset.last_seen_at)}</span> },
+    { id: "risk", header: "Risk", kind: "text", wrap: true, size: 224, minSize: 176, maxSize: 280, cell: (asset) => <RiskStack asset={asset} /> },
+    { id: "supply-chain", header: "Supply Chain", kind: "text", wrap: true, size: 240, minSize: 192, maxSize: 320, cell: (asset) => <SupplyChainStack asset={asset} /> },
+    { id: "criticality", header: "Criticality", kind: "status", cell: (asset) => <span className="text-xs">{asset.criticality}</span> },
+    { id: "last-seen", header: "Last Seen", kind: "date", size: 224, minSize: 208, maxSize: 240, cell: (asset) => <span className="text-xs text-muted-foreground">{formatDate(asset.last_seen_at)}</span> },
   ];
 
   if (clusterLoading) {

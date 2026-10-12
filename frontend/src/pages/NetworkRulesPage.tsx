@@ -58,25 +58,25 @@ export function NetworkRulesPage() {
   }, [all, search]);
 
   const columns: Column<NetworkRule>[] = [
-    { id: "id", exportValue: (r) => r.id, header: "ID", width: "72px", numeric: true, cell: (r) => <span className="text-mono text-[11px] text-muted-foreground">{r.id}</span>, sort: (a, b) => a.id - b.id },
-    { id: "priority", exportValue: (r) => r.priority, header: "Priority", width: "82px", numeric: true, cell: (r) => <span className="text-mono text-xs">{r.priority}</span>, sort: (a, b) => a.priority - b.priority },
-    { id: "from", exportValue: (r) => r.from, header: "From", cell: (r) => <span className="text-mono text-xs">{endpointLabel(r.from)}</span>, sort: (a, b) => a.from.localeCompare(b.from) },
-    { id: "to", exportValue: (r) => r.to, header: "To", cell: (r) => <span className="text-mono text-xs">{endpointLabel(r.to)}</span>, sort: (a, b) => a.to.localeCompare(b.to) },
-    { id: "apps", exportValue: (r) => r.applications.join(", ") || "any", header: "Applications", cell: (r) => (
+    { id: "id", exportValue: (r) => r.id, header: "ID", kind: "count",  numeric: true, cell: (r) => <span className="text-mono text-[11px] text-muted-foreground">{r.id}</span>, sort: (a, b) => a.id - b.id },
+    { id: "priority", exportValue: (r) => r.priority, header: "Priority", kind: "count",  numeric: true, cell: (r) => <span className="text-mono text-xs">{r.priority}</span>, sort: (a, b) => a.priority - b.priority },
+    { id: "from", exportValue: (r) => r.from, header: "From", kind: "name", code: true, cell: (r) => <span className="text-mono text-xs">{endpointLabel(r.from)}</span>, sort: (a, b) => a.from.localeCompare(b.from) },
+    { id: "to", exportValue: (r) => r.to, header: "To", kind: "text", code: true, size: 224, minSize: 160, maxSize: 320, cell: (r) => <span className="text-mono text-xs">{endpointLabel(r.to)}</span>, sort: (a, b) => a.to.localeCompare(b.to) },
+    { id: "apps", exportValue: (r) => r.applications.join(", ") || "any", header: "Applications", kind: "badge", size: 184, minSize: 160, maxSize: 240, wrap: true, cell: (r) => (
         r.applications.length === 0 ? <span className="text-xs text-muted-foreground">any</span>
           : <span className="flex flex-wrap gap-1">{r.applications.slice(0, 5).map((a) => <span key={a} className="rounded bg-muted px-1.5 py-px text-[10px] font-medium uppercase text-muted-foreground">{a}</span>)}</span>
       ) },
-    { id: "ports", exportValue: (r) => r.ports, header: "Ports", width: "120px", cell: (r) => <span className="text-mono text-[11px] text-muted-foreground">{r.ports}</span> },
-    { id: "action", exportValue: (r) => r.action, header: "Action", width: "92px", cell: (r) => (
+    { id: "ports", exportValue: (r) => r.ports, header: "Ports", kind: "text", code: true, size: 128, minSize: 104, maxSize: 176, wrap: true,  cell: (r) => <span className="text-mono text-[11px] text-muted-foreground">{r.ports}</span> },
+    { id: "action", exportValue: (r) => r.action, header: "Action", kind: "status",  cell: (r) => (
         r.action === "deny"
           ? <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold" style={{ background: "color-mix(in oklab, var(--color-severity-critical) 16%, transparent)", color: "var(--color-severity-critical)" }}><Ban className="h-3 w-3" />deny</span>
           : <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold" style={{ background: "color-mix(in oklab, var(--color-severity-low) 16%, transparent)", color: "var(--color-severity-low)" }}><Check className="h-3 w-3" />allow</span>
       ), sort: (a, b) => a.action.localeCompare(b.action) },
-    { id: "status", header: "Status", cell: (r) => <span className="text-xs">{r.disable ? "Disabled" : "Enabled"}</span>, exportValue: (r) => r.disable ? "Disabled" : "Enabled" },
-    { id: "learned", exportValue: (r) => r.learned ? "learned" : r.cfg_type, header: "Type", width: "88px", cell: (r) => <span className="rounded bg-muted px-1.5 py-px text-[10px] text-muted-foreground">{r.learned ? "learned" : r.cfg_type}</span> },
-    { id: "matches", exportValue: (r) => r.match_counter, header: "Matches", numeric: true, width: "96px", cell: (r) => <span className="text-mono text-xs">{r.match_counter.toLocaleString()}</span>, sort: (a, b) => a.match_counter - b.match_counter },
-    { id: "last", exportValue: (r) => r.last_match_timestamp ? new Date(r.last_match_timestamp * 1000).toISOString() : "", header: "Last match", numeric: true, width: "110px", cell: (r) => <span className="text-[10px] text-muted-foreground">{r.last_match_timestamp ? fmtRelative(new Date(r.last_match_timestamp * 1000).toISOString()) : "—"}</span>, sort: (a, b) => a.last_match_timestamp - b.last_match_timestamp },
-    { id: "actions", hideable: false, exportable: false, header: "", width: "160px", cell: (r) => {
+    { id: "status", header: "Status", kind: "status", cell: (r) => <span className="text-xs">{r.disable ? "Disabled" : "Enabled"}</span>, exportValue: (r) => r.disable ? "Disabled" : "Enabled" },
+    { id: "learned", exportValue: (r) => r.learned ? "learned" : r.cfg_type, header: "Type", kind: "badge",  cell: (r) => <span className="rounded bg-muted px-1.5 py-px text-[10px] text-muted-foreground">{r.learned ? "learned" : r.cfg_type}</span> },
+    { id: "matches", exportValue: (r) => r.match_counter, header: "Matches", kind: "count", numeric: true,  cell: (r) => <span className="text-mono text-xs">{r.match_counter.toLocaleString()}</span>, sort: (a, b) => a.match_counter - b.match_counter },
+    { id: "last", exportValue: (r) => r.last_match_timestamp ? new Date(r.last_match_timestamp * 1000).toISOString() : "", header: "Last match", kind: "age", size: 160, minSize: 144, maxSize: 192, align: "right", numeric: true,  cell: (r) => <span className="text-[10px] text-muted-foreground">{r.last_match_timestamp ? fmtRelative(new Date(r.last_match_timestamp * 1000).toISOString()) : "—"}</span>, sort: (a, b) => a.last_match_timestamp - b.last_match_timestamp },
+    { id: "actions", hideable: false, exportable: false, header: "", kind: "actions", size: 168, minSize: 160, maxSize: 192,  cell: (r) => {
         const busy = q.isError || upsert.isPending || remove.isPending || moveTop.isPending;
         const overridden = r.cfg_type !== "learned"; // has a persisted override / manual rule
         const isTop = all.length > 0 && r.from === all[0].from && r.to === all[0].to;

@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useIsFetching, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 
 import { groupsApi, policies, type Group, type GroupCriterion, type GroupKind, type GroupMode } from "@/api/client";
@@ -22,49 +22,83 @@ export function GroupFormPage() {
     <PageHeader title={groupId ? "Edit group" : "Add group"}
       description="Choose workload selectors and the network and process modes applied to matching members."
       backLink={<Link to="." href={listPath} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Groups</Link>} />
-    {isLoading ? <LoadingState label="Loading cluster…" />
-      : !clusterId || (error && !cluster) ? <ErrorState title="Select an available cluster to manage groups." />
-      : <GroupFormLoader key={`${clusterId}:${groupId ?? "new"}`} clusterId={clusterId} groupId={groupId} listPath={listPath} />}
+    {!clusterId ? <ErrorState title="Select an available cluster to manage groups." />
+      : <GroupAuthoringScope key={`${clusterId}:${groupId ?? "new"}`} clusterId={clusterId} resolvedClusterId={cluster?.id} isLoading={isLoading} hasError={Boolean(error)}>
+          {(scopeReady, recheckScope) => <GroupFormLoader clusterId={clusterId} groupId={groupId} listPath={listPath} scopeReady={scopeReady} recheckScope={recheckScope} />}
+        </GroupAuthoringScope>}
   </div>;
 }
 
-function GroupFormLoader({ clusterId, groupId, listPath }: { clusterId: string; groupId?: string; listPath: string }) {
+export function GroupAuthoringScope({ clusterId, resolvedClusterId, isLoading, hasError, children }: {
+  clusterId: string; resolvedClusterId?: string; isLoading: boolean; hasError: boolean;
+  children: (scopeReady: boolean, recheckScope: () => boolean) => ReactNode;
+}) {
+  const qc = useQueryClient();
+  const registryFetching = useIsFetching({ queryKey: ["clusters"] });
+  const detailFetching = useIsFetching({ queryKey: ["cluster", clusterId] });
+  const cachedScopeReady = () => {
+    const registry = qc.getQueryState<{ clusters: Array<{ id: string }> }>(["clusters"]);
+    const detail = qc.getQueryState<{ id: string }>(["cluster", clusterId]);
+    if (registry && (registry.status !== "success" || registry.fetchStatus !== "idle")) return false;
+    if (detail && (detail.status === "error" || detail.fetchStatus !== "idle")) return false;
+    if (!registry && !detail) return true;
+    const matched = registry?.data?.clusters.find((cluster) => cluster.id === clusterId) ?? detail?.data;
+    return matched?.id === clusterId;
+  };
+  const scopeReady = resolvedClusterId === clusterId && !isLoading && !hasError && registryFetching === 0 && detailFetching === 0 && cachedScopeReady();
+  const recheckScope = () => scopeReady && cachedScopeReady();
+  const [wasReady, setWasReady] = useState(false);
+  if (scopeReady && !wasReady) setWasReady(true);
+  const retryScope = () => {
+    void qc.invalidateQueries({ queryKey: ["clusters"] });
+    void qc.invalidateQueries({ queryKey: ["cluster", clusterId] });
+  };
+  if (!scopeReady && !wasReady) return isLoading || registryFetching > 0 || detailFetching > 0 ? <LoadingState label="Loading cluster…" />
+    : <ErrorState title="The selected cluster could not be resolved. Review its registration and retry." action={<Button onClick={retryScope}>Retry cluster</Button>} />;
+  return <>
+    {!scopeReady && <ErrorState title="Current cluster scope is unavailable or refreshing. Your draft is preserved; saving is paused until the cluster resolves." action={<Button onClick={retryScope}>Retry cluster</Button>} />}
+    {children(scopeReady, recheckScope)}
+  </>;
+}
+
+function GroupFormLoader({ clusterId, groupId, listPath, scopeReady, recheckScope }: { clusterId: string; groupId?: string; listPath: string; scopeReady: boolean; recheckScope: () => boolean }) {
   const q = useQuery({
     queryKey: ["group-editor", clusterId, groupId],
     queryFn: () => groupsApi.list({ cluster_id: clusterId }),
-    enabled: Boolean(groupId),
+    enabled: scopeReady && Boolean(groupId),
     gcTime: 0,
   });
   const defaultsQ = useQuery({
     queryKey: ["service-mode-defaults", clusterId],
     queryFn: () => policies.serviceModeDefaults({ cluster_id: clusterId }),
-    enabled: !groupId,
+    enabled: scopeReady && !groupId,
     gcTime: 0,
   });
   const defaultsValid = defaultsQ.isSuccess && defaultsQ.data.cluster_id === clusterId && MODES.includes(defaultsQ.data.policy_mode as GroupMode) && MODES.includes(defaultsQ.data.profile_mode as GroupMode);
   const [loadedDefaults, setLoadedDefaults] = useState<{ policy_mode: GroupMode; profile_mode: GroupMode } | null>(null);
-  if (!loadedDefaults && defaultsValid) setLoadedDefaults({ policy_mode: defaultsQ.data.policy_mode as GroupMode, profile_mode: defaultsQ.data.profile_mode as GroupMode });
+  if (!loadedDefaults && scopeReady && defaultsValid && !defaultsQ.isFetching) setLoadedDefaults({ policy_mode: defaultsQ.data.policy_mode as GroupMode, profile_mode: defaultsQ.data.profile_mode as GroupMode });
   const matches = q.data?.groups.filter((group) => group.id === groupId) ?? [];
   const [loadedGroup, setLoadedGroup] = useState<Group | null>(null);
-  const initial = loadedGroup ?? (q.isSuccess && matches.length === 1 ? matches[0] : undefined);
+  const initial = loadedGroup ?? (scopeReady && q.isSuccess && !q.isFetching && matches.length === 1 ? matches[0] : undefined);
   // Capture the first confirmed record once. Refetching must never replace a draft.
   if (!loadedGroup && initial) setLoadedGroup(initial);
-  if (groupId && q.isPending && !initial) return <LoadingState label="Loading group…" />;
-  if (!groupId && defaultsQ.isPending && !loadedDefaults) return <LoadingState label="Loading group defaults…" />;
+  if (groupId && (q.isPending || q.isFetching) && !initial) return <LoadingState label="Loading group…" />;
+  if (!groupId && (defaultsQ.isPending || defaultsQ.isFetching) && !loadedDefaults) return <LoadingState label="Loading group defaults…" />;
   if (!groupId && !loadedDefaults) return <ErrorState title="Group defaults could not be loaded for the selected cluster." action={<Button onClick={() => void defaultsQ.refetch()}>Retry</Button>} />;
   if (groupId && !initial) return <ErrorState
     title={q.isError ? "This group could not be loaded for the selected cluster." : "This group was not found in the selected cluster."}
     action={<Button onClick={() => void q.refetch()}>Retry</Button>} />;
   if (initial?.cfg_type === "fed") return <ErrorState title="This group is managed by its federation master and cannot be edited here." />;
-  const unavailable = groupId ? q.isError || matches.length !== 1 : !defaultsValid;
+  const recordUnavailable = groupId ? !q.isSuccess || q.fetchStatus !== "idle" || matches.length !== 1 || matches[0]?.cfg_type === "fed" : !defaultsValid || defaultsQ.fetchStatus !== "idle";
+  const unavailable = !scopeReady || recordUnavailable;
   return <>
-    {unavailable && <ErrorState title={`${groupId ? "The saved group" : "Group defaults"} could not be refreshed. Your draft is preserved; retry before saving.`}
+    {recordUnavailable && scopeReady && <ErrorState title={`${groupId ? "The saved group" : "Group defaults"} could not be refreshed. Your draft is preserved; retry before saving.`}
       action={<Button onClick={() => groupId ? void q.refetch() : void defaultsQ.refetch()}>Retry</Button>} />}
-    <GroupEditor clusterId={clusterId} initial={initial} initialModes={loadedDefaults ?? undefined} listPath={listPath} unavailable={unavailable} />
+    <GroupEditor clusterId={clusterId} initial={initial} initialModes={loadedDefaults ?? undefined} listPath={listPath} unavailable={unavailable} recheckScope={recheckScope} />
   </>;
 }
 
-function GroupEditor({ clusterId, initial, initialModes, listPath, unavailable }: { clusterId: string; initial?: Group; initialModes?: { policy_mode: GroupMode; profile_mode: GroupMode }; listPath: string; unavailable: boolean }) {
+function GroupEditor({ clusterId, initial, initialModes, listPath, unavailable, recheckScope }: { clusterId: string; initial?: Group; initialModes?: { policy_mode: GroupMode; profile_mode: GroupMode }; listPath: string; unavailable: boolean; recheckScope: () => boolean }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [name, setName] = useState(initial?.name ?? "");
@@ -77,6 +111,15 @@ function GroupEditor({ clusterId, initial, initialModes, listPath, unavailable }
   const valid = Boolean(name.trim()) && criteria.every((criterion) => Boolean(criterion.key.trim()));
   const save = useMutation({
     mutationFn: () => {
+      if (!valid || unavailable || !recheckScope()) throw new Error("Group scope is unavailable");
+      if (initial) {
+        const current = qc.getQueryState<Awaited<ReturnType<typeof groupsApi.list>>>(["group-editor", clusterId, initial.id]);
+        const matching = current?.data?.groups.filter((group) => group.id === initial.id) ?? [];
+        if (current?.status !== "success" || current.fetchStatus !== "idle" || matching.length !== 1 || matching[0].cfg_type === "fed") throw new Error("Group is unavailable");
+      } else {
+        const current = qc.getQueryState<Awaited<ReturnType<typeof policies.serviceModeDefaults>>>(["service-mode-defaults", clusterId]);
+        if (current?.status !== "success" || current.fetchStatus !== "idle" || current.data?.cluster_id !== clusterId || !MODES.includes(current.data.policy_mode as GroupMode) || !MODES.includes(current.data.profile_mode as GroupMode)) throw new Error("Group defaults are unavailable");
+      }
       const body = { name: name.trim(), comment, kind, learned_from: learnedFrom,
         cfg_type: initial?.cfg_type ?? "user", policy_mode: policyMode, profile_mode: profileMode,
         criteria: criteria.map((criterion) => ({ ...criterion, key: criterion.key.trim() })),

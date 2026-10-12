@@ -64,11 +64,11 @@ export function RuntimePoliciesPage() {
   const monitorCount = policies.filter((p) => p.mode === "monitor").length;
 
   const columns: Column<RuntimePolicy>[] = [
-    { id: "workload", header: "Workload", cell: (p) => <span className="font-mono">{p.workload}</span>, sort: (a, b) => a.workload.localeCompare(b.workload) },
-    { id: "name", header: "Policy", cell: (p) => p.name, sort: (a, b) => a.name.localeCompare(b.name) },
+    { id: "workload", header: "Workload", kind: "text", code: true, size: 224, minSize: 160, maxSize: 320, cell: (p) => <span className="font-mono">{p.workload}</span>, sort: (a, b) => a.workload.localeCompare(b.workload) },
+    { id: "name", header: "Policy", kind: "name", cell: (p) => p.name, sort: (a, b) => a.name.localeCompare(b.name) },
     {
       id: "mode",
-      header: "Mode",
+      header: "Mode", kind: "status",
       cell: (p) => {
         const badge = MODE_BADGE[p.mode];
         return <StatusPill label={badge.label} tone={badge.tone} />;
@@ -77,20 +77,20 @@ export function RuntimePoliciesPage() {
     },
     {
       id: "rules",
-      header: "Rules",
+      header: "Rules", kind: "count",
       numeric: true,
       cell: (p) => (Array.isArray(p.rules) ? p.rules.length : 0),
       sort: (a, b) => (Array.isArray(a.rules) ? a.rules.length : 0) - (Array.isArray(b.rules) ? b.rules.length : 0),
     },
     {
       id: "updated",
-      header: "Updated",
+      header: "Updated", kind: "date", size: 224, minSize: 208, maxSize: 240,
       cell: (p) => <span className="text-muted-foreground">{new Date(p.updated_at).toLocaleString()}</span>,
       sort: (a, b) => a.updated_at.localeCompare(b.updated_at),
     },
     {
       id: "actions",
-      header: "Actions",
+      header: "Actions", kind: "actions", size: 224, minSize: 208, maxSize: 256, wrap: true,
       className: "text-right",
       cell: (p) => (
         <PolicyActions
@@ -181,7 +181,7 @@ function PolicyActions({
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["runtime-policies"] }),
   });
   return (
-    <div className="inline-flex items-center gap-1" data-testid={`runtime-policy-row-${p.id}`}>
+    <div className="inline-flex flex-wrap items-center justify-end gap-1" data-testid={`runtime-policy-row-${p.id}`}>
       {p.mode === "monitor" && (
         <Button size="sm" variant="outline" onClick={onPromoteClick} data-testid={`runtime-policy-promote-${p.id}`}>
           Promote
@@ -207,7 +207,7 @@ function PolicyActions({
       >
         <Trash2 className="h-3.5 w-3.5" />
       </Button>
-      {(demote.isError || remove.isError) && <span role="alert" className="text-xs text-status-error">Action failed. Check your permissions and try again.</span>}
+      {(demote.isError || remove.isError) && <span role="alert" className="w-full text-xs text-status-error">Action failed. Check your permissions and try again.</span>}
     </div>
   );
 }

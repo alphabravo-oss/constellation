@@ -951,9 +951,9 @@ function PlatformPanel({
     .slice(0, 8)
     .map((pkg, index) => ({ ...pkg, _rk: `${pkg.namespace_name}-${pkg.name}-${pkg.version}-${index}` }));
   const packageColumns: Column<PkgRow>[] = [
-    { id: "name", header: "Package", cell: (r) => <span className="font-mono">{r.name || "-"}</span> },
-    { id: "version", header: "Version", cell: (r) => <span className="font-mono text-muted-foreground">{r.version || "-"}</span> },
-    { id: "namespace", header: "Namespace", cell: (r) => <span className="font-mono text-muted-foreground">{r.namespace_name || r.ecosystem || "generic"}</span> },
+    { id: "name", header: "Package", kind: "name", wrap: true, code: true, cell: (r) => <span className="font-mono">{r.name || "-"}</span> },
+    { id: "version", header: "Version", kind: "version", size: 160, minSize: 112, maxSize: 224, wrap: true, cell: (r) => <span className="font-mono text-muted-foreground">{r.version || "-"}</span> },
+    { id: "namespace", header: "Namespace", kind: "text", code: true, wrap: true, size: 184, minSize: 144, maxSize: 240, cell: (r) => <span className="font-mono text-muted-foreground">{r.namespace_name || r.ecosystem || "generic"}</span> },
   ];
   return (
     <Panel

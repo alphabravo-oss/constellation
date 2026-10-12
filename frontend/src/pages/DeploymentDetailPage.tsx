@@ -184,24 +184,24 @@ function ThreatPivotsPanel({ pivots }: { pivots: DeploymentThreatPivot[] }) {
   const columns: Column<DeploymentThreatPivot>[] = [
     {
       id: "type",
-      header: "Type",
+      header: "Type", kind: "badge", size: 160, minSize: 144, maxSize: 192,
       cell: (pivot) => (
         <span data-testid={`deployment-threat-row-${pivot.kind}`}><ThreatKindPill kind={pivot.kind} /></span>
       ),
     },
     {
       id: "signal",
-      header: "Signal",
+      header: "Signal", kind: "name", wrap: true,
       cell: (pivot) => (
         <>
-          <div className="max-w-[360px] truncate text-xs font-medium">{pivot.title}</div>
+          <div className="text-xs font-medium">{pivot.title}</div>
           <div className="mt-1 font-mono text-[11px] text-muted-foreground">{pivot.workload_id}</div>
         </>
       ),
     },
     {
       id: "verdict",
-      header: "Verdict",
+      header: "Verdict", kind: "badge", size: 192, minSize: 160, maxSize: 240, wrap: true,
       cell: (pivot) => (
         <div className="flex flex-wrap gap-1">
           <SeverityPill severity={pivot.severity} />
@@ -211,13 +211,13 @@ function ThreatPivotsPanel({ pivots }: { pivots: DeploymentThreatPivot[] }) {
     },
     {
       id: "evidence",
-      header: "Evidence",
+      header: "Evidence", kind: "text", wrap: true, size: 280, minSize: 208, maxSize: 400, grow: true,
       cell: (pivot) => pivotEvidenceLabel(pivot),
       className: "text-xs text-muted-foreground",
     },
     {
       id: "at",
-      header: "Last Seen",
+      header: "Last Seen", kind: "date", size: 224, minSize: 208, maxSize: 240,
       cell: (pivot) => formatDate(pivot.at),
       className: "text-xs text-muted-foreground",
     },
@@ -324,7 +324,7 @@ function ImageEvidenceTable({ images, clusterId }: { images: DeploymentImageEvid
   const columns: Column<DeploymentImageEvidence>[] = [
     {
       id: "image",
-      header: "Image",
+      header: "Image", kind: "name", wrap: true, code: true,
       cell: (image) => (
         <>
           {image.image_scan_result_id ? (
@@ -340,7 +340,7 @@ function ImageEvidenceTable({ images, clusterId }: { images: DeploymentImageEvid
     },
     {
       id: "scan",
-      header: "Scan",
+      header: "Scan", kind: "text", wrap: true, size: 224, minSize: 208, maxSize: 240,
       cell: (image) => (
         <>
           <StatusPill status={image.image_scan_result_id ? "scanned" : "missing"} />
@@ -351,9 +351,9 @@ function ImageEvidenceTable({ images, clusterId }: { images: DeploymentImageEvid
     },
     {
       id: "risk",
-      header: "Risk",
+      header: "Risk", kind: "text", wrap: true, size: 208, minSize: 160, maxSize: 280, align: "right",
       cell: (image) => (
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-wrap justify-end gap-1">
           <Pill tone={image.critical_count > 0 ? "danger" : "neutral"}>C: {image.critical_count}</Pill>
           <Pill tone={image.high_count > 0 ? "warn" : "neutral"}>H: {image.high_count}</Pill>
           <Pill tone={image.finding_count > 0 ? "warn" : "ok"}>{image.finding_count} total</Pill>
@@ -362,7 +362,7 @@ function ImageEvidenceTable({ images, clusterId }: { images: DeploymentImageEvid
     },
     {
       id: "bundle",
-      header: "Bundle",
+      header: "Bundle", kind: "version", size: 192, minSize: 144, maxSize: 256, wrap: true,
       cell: (image) => (
         <>
           <div className="font-mono">{image.vulndb_bundle_version || "-"}</div>
@@ -396,7 +396,7 @@ function ImageFileRisksPanel({ risks, clusterId }: { risks: DeploymentFileRisk[]
   const fileRiskColumns: Column<DeploymentFileRisk>[] = [
     {
       id: "image",
-      header: "Image",
+      header: "Image", kind: "name", wrap: true, code: true,
       cell: (risk) => (
         <>
           {risk.image_scan_result_id ? (
@@ -412,9 +412,9 @@ function ImageFileRisksPanel({ risks, clusterId }: { risks: DeploymentFileRisk[]
     },
     {
       id: "risk",
-      header: "Risk",
+      header: "Risk", kind: "text", wrap: true, size: 208, minSize: 160, maxSize: 280, align: "right",
       cell: (risk) => (
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-wrap justify-end gap-1">
           <StatusPill status={risk.status || "observed"} />
           <Pill tone={risk.file_risk_count > 0 ? "warn" : "ok"}>{risk.file_risk_count} file risks</Pill>
           {risk.truncated ? <Pill tone="warn">truncated</Pill> : null}
@@ -423,7 +423,7 @@ function ImageFileRisksPanel({ risks, clusterId }: { risks: DeploymentFileRisk[]
     },
     {
       id: "evidence",
-      header: "Evidence",
+      header: "Evidence", kind: "text", wrap: true, size: 280, minSize: 208, maxSize: 400, grow: true,
       cell: (risk) => (
         <>
           {risk.findings.slice(0, 2).map((finding) => (
@@ -439,7 +439,7 @@ function ImageFileRisksPanel({ risks, clusterId }: { risks: DeploymentFileRisk[]
     },
     {
       id: "observed",
-      header: "Observed",
+      header: "Observed", kind: "date", size: 224, minSize: 208, maxSize: 240,
       cell: (risk) => formatDate(risk.created_at),
       className: "text-xs text-muted-foreground",
     },
@@ -471,7 +471,7 @@ function FindingsTable({ findings, clusterId }: { findings: DeploymentFinding[];
   const columns: Column<DeploymentFinding>[] = [
     {
       id: "finding",
-      header: "Finding",
+      header: "Finding", kind: "name", wrap: true,
       cell: (finding) => (
         <>
           {finding.external_id ? (
@@ -479,13 +479,13 @@ function FindingsTable({ findings, clusterId }: { findings: DeploymentFinding[];
           ) : (
             <Link to="." href={`/clusters/${clusterId}/findings/${finding.id}`} className="font-mono text-xs font-medium hover:underline">{finding.kind}</Link>
           )}
-          <div className="mt-1 max-w-[420px] truncate text-xs text-muted-foreground">{finding.title}</div>
+          <div className="mt-1 text-xs text-muted-foreground">{finding.title}</div>
         </>
       ),
     },
     {
       id: "package",
-      header: "Package",
+      header: "Package", kind: "text", code: true, wrap: true, size: 200, minSize: 144, maxSize: 280,
       cell: (finding) => (
         <>
           <div className="font-mono text-xs">{finding.package_name || "-"}</div>
@@ -495,12 +495,12 @@ function FindingsTable({ findings, clusterId }: { findings: DeploymentFinding[];
     },
     {
       id: "severity",
-      header: "Severity",
+      header: "Severity", kind: "status",
       cell: (finding) => <SeverityPill severity={finding.severity} />,
     },
     {
       id: "risk",
-      header: "Risk",
+      header: "Risk", kind: "count",
       cell: (finding) => finding.risk_score,
       className: "font-semibold",
     },
@@ -528,7 +528,7 @@ function FindingsTable({ findings, clusterId }: { findings: DeploymentFinding[];
 const networkFlowColumns: Column<DeploymentNetworkFlow>[] = [
   {
     id: "peer",
-    header: "Peer",
+    header: "Peer", kind: "name", wrap: true, code: true,
     cell: (flow) => (
       <>
         <div className="break-all font-mono text-xs">{flow.src}</div>
@@ -538,7 +538,7 @@ const networkFlowColumns: Column<DeploymentNetworkFlow>[] = [
   },
   {
     id: "protocol",
-    header: "Protocol",
+    header: "Protocol", kind: "text", wrap: true, size: 184, minSize: 144, maxSize: 240,
     cell: (flow) => (
       <>
         <div className="font-medium">{flow.protocol.toUpperCase()} {flow.dst_port || ""}</div>
@@ -549,7 +549,7 @@ const networkFlowColumns: Column<DeploymentNetworkFlow>[] = [
   },
   {
     id: "traffic",
-    header: "Traffic",
+    header: "Traffic", kind: "text", wrap: true, align: "right", size: 144, minSize: 112, maxSize: 184,
     cell: (flow) => (
       <>
         <div>{formatBytes(flow.bytes)}</div>
@@ -560,7 +560,7 @@ const networkFlowColumns: Column<DeploymentNetworkFlow>[] = [
   },
   {
     id: "last_seen",
-    header: "Last Seen",
+    header: "Last Seen", kind: "date", size: 224, minSize: 208, maxSize: 240,
     cell: (flow) => formatDate(flow.last_seen_at),
     className: "text-xs text-muted-foreground",
   },

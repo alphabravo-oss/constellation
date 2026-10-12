@@ -57,7 +57,7 @@ export function AssetDetailPage() {
   const findingColumns: Column<AssetFinding>[] = [
     {
       id: "finding",
-      header: "Finding",
+      header: "Finding", kind: "name", wrap: true,
       cell: (f) => (
         <>
           {f.image_scan_result_id ? (
@@ -69,9 +69,9 @@ export function AssetDetailPage() {
         </>
       ),
     },
-    { id: "kind", header: "Kind", cell: (f) => f.kind, className: "text-xs" },
-    { id: "severity", header: "Severity", cell: (f) => f.severity, className: "text-xs" },
-    { id: "risk", header: "Risk", cell: (f) => f.risk_score, className: "font-semibold" },
+    { id: "kind", header: "Kind", kind: "status", cell: (f) => f.kind, className: "text-xs" },
+    { id: "severity", header: "Severity", kind: "status", cell: (f) => f.severity, className: "text-xs" },
+    { id: "risk", header: "Risk", kind: "count", cell: (f) => f.risk_score, className: "font-semibold" },
   ];
   return (
     <PageContainer>

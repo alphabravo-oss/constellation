@@ -435,7 +435,7 @@ function FindingsTable({ findings }: { findings: ImageScanFinding[] }) {
   const columns: Column<ImageScanFinding>[] = [
     {
       id: "cve",
-      header: "CVE",
+      header: "CVE", kind: "name", wrap: true,
       cell: (finding) => (
         <>
           <span className="flex items-center gap-1.5">
@@ -446,13 +446,13 @@ function FindingsTable({ findings }: { findings: ImageScanFinding[] }) {
             )}
             {finding.kev_listed && <span className="rounded px-1 py-px text-[9px] font-semibold text-white" style={{ background: "var(--color-severity-critical)" }} title="CISA Known-Exploited">KEV</span>}
           </span>
-          <div className="mt-1 max-w-[360px] truncate text-xs text-muted-foreground">{finding.title}</div>
+          <div className="mt-1 text-xs text-muted-foreground">{finding.title}</div>
         </>
       ),
     },
     {
       id: "package",
-      header: "Package",
+      header: "Package", kind: "text", code: true, wrap: true, size: 200, minSize: 144, maxSize: 280,
       cell: (finding) => (
         <>
           <div className="font-mono text-xs">{finding.package_name || "-"}</div>
@@ -460,10 +460,10 @@ function FindingsTable({ findings }: { findings: ImageScanFinding[] }) {
         </>
       ),
     },
-    { id: "severity", header: "Severity", cell: (finding) => <SeverityPill severity={finding.severity} /> },
-    { id: "cvss", header: "CVSS", numeric: true, cell: (finding) => <span className="font-mono text-xs" style={{ color: (finding.cvss_base ?? 0) >= 9 ? "var(--color-severity-critical)" : (finding.cvss_base ?? 0) >= 7 ? "var(--color-severity-high)" : "var(--color-foreground)" }}>{finding.cvss_base ? finding.cvss_base.toFixed(1) : "—"}</span>, sort: (a, b) => (a.cvss_base ?? 0) - (b.cvss_base ?? 0) },
-    { id: "risk", header: "Risk", cell: (finding) => <span className="font-semibold">{finding.risk_score}</span> },
-    { id: "fix", header: "Fix", cell: (finding) => <span className="font-mono text-xs">{finding.fixed_version || "-"}</span> },
+    { id: "severity", header: "Severity", kind: "status", cell: (finding) => <SeverityPill severity={finding.severity} /> },
+    { id: "cvss", header: "CVSS", kind: "count", numeric: true, cell: (finding) => <span className="font-mono text-xs" style={{ color: (finding.cvss_base ?? 0) >= 9 ? "var(--color-severity-critical)" : (finding.cvss_base ?? 0) >= 7 ? "var(--color-severity-high)" : "var(--color-foreground)" }}>{finding.cvss_base ? finding.cvss_base.toFixed(1) : "—"}</span>, sort: (a, b) => (a.cvss_base ?? 0) - (b.cvss_base ?? 0) },
+    { id: "risk", header: "Risk", kind: "count", cell: (finding) => <span className="font-semibold">{finding.risk_score}</span> },
+    { id: "fix", header: "Fix", kind: "version", size: 160, minSize: 112, maxSize: 224, wrap: true, cell: (finding) => <span className="font-mono text-xs">{finding.fixed_version || "-"}</span> },
   ];
   const [fixableOnly, setFixableOnly] = useState(false);
   const shown = fixableOnly

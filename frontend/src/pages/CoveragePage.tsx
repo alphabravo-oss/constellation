@@ -759,8 +759,8 @@ export function CoveragePage() {
   const columns: Column<CapabilityRow>[] = [
     {
       id: "name",
-      header: "Capability",
-      width: "26%",
+      header: "Capability", kind: "name", size: 264, minSize: 200, grow: false,
+
       sort: (a, b) => a.name.localeCompare(b.name),
       cell: (r) => (
         <div className="flex flex-col gap-0.5">
@@ -773,21 +773,21 @@ export function CoveragePage() {
     },
     {
       id: "evidence",
-      header: "Live evidence",
+      header: "Live evidence", kind: "text", grow: true, minSize: 240, wrap: true,
       sort: (a, b) => a.signal - b.signal,
       cell: (r) => <div className="text-sm text-muted-foreground">{r.loading ? <Skeleton /> : r.evidence}</div>,
     },
     {
       id: "status",
-      header: "Status",
-      width: "12%",
+      header: "Status", kind: "status", size: 144, minSize: 128, maxSize: 176,
+
       sort: (a, b) => statusOrder(a.status) - statusOrder(b.status),
       cell: (r) => <StatusPill label={statusLabel(r.status)} tone={tone(r.status)} />,
     },
     {
       id: "last",
-      header: "Last activity",
-      width: "12%",
+      header: "Last activity", kind: "age", size: 144, minSize: 120, maxSize: 176,
+
       sort: (a, b) => (new Date(a.lastAt ?? 0).getTime()) - (new Date(b.lastAt ?? 0).getTime()),
       cell: (r) => (
         <span className="text-mono text-xs text-muted-foreground" title={r.lastAt ?? ""}>
@@ -797,8 +797,8 @@ export function CoveragePage() {
     },
     {
       id: "action",
-      header: "",
-      width: "8%",
+      header: "", kind: "actions", size: 96, minSize: 96, maxSize: 112,
+
       cell: (r) =>
         r.href ? (
           <Link

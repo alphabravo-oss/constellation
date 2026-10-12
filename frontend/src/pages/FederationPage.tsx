@@ -8,10 +8,10 @@ import { DataTable, type Column } from "@/components/ui/data-table";
 import { StatCard } from "@/components/ui/stat-card";
 
 const memberColumns: Column<FedMember>[] = [
-  { id: "name", header: "Cluster", cell: (m) => m.name, className: "text-xs font-medium" },
-  { id: "role", header: "Role", cell: (m) => m.role, className: "text-xs" },
-  { id: "status", header: "Status", cell: (m) => m.status, className: "text-xs" },
-  { id: "revision", header: "Revision", cell: (m) => m.revision, className: "text-xs" },
+  { id: "name", header: "Cluster", kind: "name", wrap: true, cell: (m) => m.name, className: "text-xs font-medium" },
+  { id: "role", header: "Role", kind: "status", cell: (m) => m.role, className: "text-xs" },
+  { id: "status", header: "Status", kind: "status", cell: (m) => m.status, className: "text-xs" },
+  { id: "revision", header: "Revision", kind: "count", cell: (m) => m.revision, className: "text-xs" },
 ];
 
 export function FederationPage() {

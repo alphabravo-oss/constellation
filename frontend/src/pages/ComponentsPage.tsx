@@ -23,11 +23,13 @@ import { PageHeader } from "@/components/ui/page";
 import { StatCard } from "@/components/ui/stat-card";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
+import { ErrorState, LoadingState } from "@/components/ui/states";
 
 const statuses = ["all", "healthy", "degraded", "stale", "drift", "crashlooping", "missing", "not-observed"];
 
 export function ComponentsPage() {
-  const { clusterId, isLoading: clusterLoading } = useCluster();
+  const { clusterId, cluster, isLoading: clusterLoading, error: clusterError } = useCluster();
+  const clusterResolved = !!clusterId && cluster?.id === clusterId;
   const [searchParams, setSearchParams] = useRouteSearchParams();
   const roleParam = normalizeNVRole(searchParams.get("role"));
   const queryParam = searchParams.get("q") ?? "";
@@ -72,13 +74,13 @@ export function ComponentsPage() {
   const q = useQuery({
     queryKey: ["components-inventory", clusterId],
     queryFn: () => componentsInventory.list({ cluster_id: clusterId, limit: 1000 }),
-    enabled: !!clusterId,
+    enabled: clusterResolved,
     refetchInterval: 30_000,
   });
   const selectedQ = useQuery({
     queryKey: ["component-instance", clusterId, selectedID],
     queryFn: () => componentsInventory.get(selectedID!),
-    enabled: !!selectedID,
+    enabled: clusterResolved && !!selectedID,
     refetchInterval: 30_000,
   });
 
@@ -119,18 +121,24 @@ export function ComponentsPage() {
   const diagnosticsQ = useQuery({
     queryKey: ["component-diagnostics", clusterId, selected?.id],
     queryFn: () => componentsInventory.diagnostics(selected!.id),
-    enabled: !!selected?.id,
+    enabled: clusterResolved && !!selected?.id && !q.isError,
     refetchInterval: 30_000,
     retry: (failureCount, error) => !isForbidden(error) && failureCount < 2,
   });
   const summary = q.data?.summary;
 
-  if (clusterLoading) return <p className="text-sm text-muted-foreground">Loading cluster...</p>;
+  if (clusterLoading) return <LoadingState label="Loading cluster…" />;
+  if (!clusterResolved) return <ErrorState title="Cluster could not be resolved." error={clusterError} />;
+  if (q.isPending) return <LoadingState label="Loading component inventory…" />;
+  if (q.isError) return <div className="space-y-6" data-testid="components-page">
+    <PageHeader title="Components" description="Health and build inventory for this cluster." />
+    <ErrorState title="Component inventory could not be loaded." error={q.error} action={<Button onClick={() => void q.refetch()}>Retry</Button>} />
+  </div>;
 
   const columns: Column<ComponentInstance>[] = [
     {
       id: "component",
-      header: "Component",
+      header: "Component", kind: "name", wrap: true,
       exportValue: (item) => item.display_name || item.component,
       cell: (item) => (
         <>
@@ -146,7 +154,7 @@ export function ComponentsPage() {
     },
     {
       id: "build",
-      header: "Build",
+      header: "Build", kind: "version", size: 184, minSize: 128, maxSize: 240, wrap: true,
       exportValue: (item) => `${item.version || "unknown"} ${item.commit_short || item.commit || ""}`.trim(),
       cell: (item) => (
         <div className="text-xs">
@@ -157,7 +165,7 @@ export function ComponentsPage() {
     },
     {
       id: "runtime",
-      header: "Runtime",
+      header: "Runtime", kind: "age", size: 152, minSize: 112, maxSize: 192, wrap: true,
       exportValue: (item) => `${formatUptime(item.uptime_seconds)}; ${item.restart_count} restarts`,
       cell: (item) => (
         <div className="text-xs">
@@ -168,7 +176,7 @@ export function ComponentsPage() {
     },
     {
       id: "counters",
-      header: "Counters",
+      header: "Counters", kind: "text", size: 224, minSize: 160, maxSize: 320, wrap: true,
       exportValue: (item) => compactComponentCounters(item),
       cell: (item) => (
         <div className="text-xs">
@@ -178,7 +186,7 @@ export function ComponentsPage() {
     },
     {
       id: "status",
-      header: "Status",
+      header: "Status", kind: "text", size: 240, minSize: 208, maxSize: 320, wrap: true,
       exportValue: (item) => `${item.status}; ${item.status_reason || item.last_error || "heartbeat current"}; last_seen=${item.last_seen_at}`,
       cell: (item) => (
         <div className="text-xs">
@@ -191,7 +199,7 @@ export function ComponentsPage() {
   const versionColumns: Column<ComponentVersionRow>[] = [
     {
       id: "component",
-      header: "Component",
+      header: "Component", kind: "name", wrap: true,
       exportValue: (row) => row.displayName,
       cell: (row) => (
         <div className="min-w-0">
@@ -199,15 +207,15 @@ export function ComponentsPage() {
             <Pill tone="accent">{row.roleLabel}</Pill>
             <StatusPill status={row.status} />
           </div>
-          <div className="mt-1 truncate text-xs font-medium" title={row.displayName}>{row.displayName}</div>
-          <div className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground" title={row.component}>{row.component}</div>
+          <div className="mt-1 text-xs font-medium" title={row.displayName}>{row.displayName}</div>
+          <div className="mt-0.5 font-mono text-[10px] text-muted-foreground" title={row.component}>{row.component}</div>
         </div>
       ),
       sort: (a, b) => a.roleRank - b.roleRank || a.displayName.localeCompare(b.displayName),
     },
     {
       id: "build",
-      header: "Build",
+      header: "Build", kind: "version", size: 184, minSize: 128, maxSize: 240, wrap: true,
       exportValue: (row) => `${row.version} ${row.commit}`.trim(),
       cell: (row) => (
         <div className="text-xs">
@@ -219,7 +227,7 @@ export function ComponentsPage() {
     },
     {
       id: "instances",
-      header: "Instances",
+      header: "Instances", kind: "count",
       numeric: true,
       cell: (row) => <span className="font-mono text-xs">{row.healthy}/{row.instances}</span>,
       exportValue: (row) => `${row.healthy}/${row.instances}`,
@@ -227,7 +235,7 @@ export function ComponentsPage() {
     },
     {
       id: "readiness",
-      header: "Readiness",
+      header: "Readiness", kind: "text", size: 224, minSize: 160, maxSize: 280, wrap: true,
       exportValue: (row) => `${row.readiness}; ${row.reason}`,
       cell: (row) => (
         <div className="text-xs">
@@ -239,13 +247,13 @@ export function ComponentsPage() {
     },
     {
       id: "capacity",
-      header: "Scanner capacity",
+      header: "Scanner capacity", kind: "text", size: 224, minSize: 176, maxSize: 320, wrap: true,
       cell: (row) => <span className="text-xs text-muted-foreground">{row.capacity}</span>,
       exportValue: (row) => row.capacity,
     },
     {
       id: "heartbeat",
-      header: "Last heartbeat",
+      header: "Last heartbeat", kind: "date", size: 224, minSize: 208, maxSize: 240,
       cell: (row) => <span className="text-xs text-muted-foreground">{formatDate(row.lastSeenAt)}</span>,
       exportValue: (row) => row.lastSeenAt ?? "",
       sort: (a, b) => timeValue(a.lastSeenAt) - timeValue(b.lastSeenAt),
@@ -364,7 +372,7 @@ export function ComponentsPage() {
           testId="component-inventory-table"
           emptyState={
             <div className="px-3 py-8 text-center text-xs text-muted-foreground">
-              {q.isPending ? "Loading components..." : "No component instances match the current filters."}
+              No component instances match the current filters.
             </div>
           }
         />

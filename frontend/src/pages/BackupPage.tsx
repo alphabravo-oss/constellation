@@ -93,12 +93,12 @@ export function BackupPage() {
   );
 
   const historyColumns: Column<BackupSummary>[] = [
-    { id: "when", header: "When", cell: (b) => <span className="font-mono text-xs">{new Date(b.started_at).toLocaleString()}</span> },
-    { id: "mode", header: "Mode", cell: (b) => b.mode },
-    { id: "size", header: "Size", cell: (b) => <span className="font-mono text-xs">{b.size_bytes ? `${(b.size_bytes / 1024).toFixed(1)} KiB` : "—"}</span> },
+    { id: "when", header: "When", kind: "date", size: 224, minSize: 208, maxSize: 240, cell: (b) => <span className="font-mono text-xs">{new Date(b.started_at).toLocaleString()}</span> },
+    { id: "mode", header: "Mode", kind: "status", cell: (b) => b.mode },
+    { id: "size", header: "Size", kind: "bytes", size: 128, minSize: 104, maxSize: 160, cell: (b) => <span className="font-mono text-xs">{b.size_bytes ? `${(b.size_bytes / 1024).toFixed(1)} KiB` : "—"}</span> },
     {
       id: "status",
-      header: "Status",
+      header: "Status", kind: "status",
       cell: (b) => (
         <>
           {b.status === "succeeded" && <span className="inline-flex items-center gap-1 text-status-success"><CheckCircle2 className="h-3.5 w-3.5" />succeeded</span>}
@@ -107,10 +107,10 @@ export function BackupPage() {
         </>
       ),
     },
-    { id: "signer", header: "Signer", cell: (b) => <span className="inline-block max-w-[16ch] truncate font-mono text-xs align-bottom">{b.signer_identity || "—"}</span> },
+    { id: "signer", header: "Signer", kind: "name", code: true, cell: (b) => <span className="inline-block font-mono text-xs align-bottom">{b.signer_identity || "—"}</span> },
     {
       id: "actions",
-      header: "Actions",
+      header: "Actions", kind: "actions", size: 144, minSize: 136, maxSize: 160,
       className: "text-right",
       cell: (b) =>
         b.status === "succeeded" ? (

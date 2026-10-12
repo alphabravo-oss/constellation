@@ -58,12 +58,12 @@ function PolicyCatalog({ clusterId }: { clusterId: string }) {
   const enforceCount = list.filter((p) => p.enabled && p.mode === "enforce").length;
   const openEditor = (id: string) => void navigate({ href: `/clusters/${clusterId}/policies/${encodeURIComponent(id)}` });
   const columns: Column<Policy>[] = [
-    { id: "name", header: "Policy", hideable: false, cell: (p) => <div><span className="font-medium">{p.name}</span><p className="mt-1 text-xs text-muted-foreground">{p.description}</p></div>, exportValue: (p) => p.name, sort: (a, b) => a.name.localeCompare(b.name) },
-    { id: "category", header: "Category", cell: (p) => p.category || "general", sort: (a, b) => a.category.localeCompare(b.category) },
-    { id: "engine", header: "Engine", cell: (p) => p.engine, sort: (a, b) => a.engine.localeCompare(b.engine) },
-    { id: "enabled", header: "Status", cell: (p) => p.enabled ? "Enabled" : "Disabled", exportValue: (p) => p.enabled, sort: (a, b) => Number(a.enabled) - Number(b.enabled) },
-    { id: "mode", header: "Configured mode", cell: (p) => p.mode, sort: (a, b) => a.mode.localeCompare(b.mode) },
-    { id: "actions", header: "Actions", hideable: false, exportable: false, cell: (p) => <Button variant="ghost" disabled={q.isError} aria-label={`Edit policy ${p.name}`} onClick={() => openEditor(p.id)}><Pencil className="h-4 w-4" /> Edit</Button> },
+    { id: "name", header: "Policy", kind: "name", wrap: true, hideable: false, cell: (p) => <div><span className="font-medium">{p.name}</span><p className="mt-1 text-xs text-muted-foreground">{p.description}</p></div>, exportValue: (p) => p.name, sort: (a, b) => a.name.localeCompare(b.name) },
+    { id: "category", header: "Category", kind: "badge", size: 144, minSize: 112, maxSize: 192, cell: (p) => p.category || "general", sort: (a, b) => a.category.localeCompare(b.category) },
+    { id: "engine", header: "Engine", kind: "status", size: 144, minSize: 112, maxSize: 192, cell: (p) => p.engine, sort: (a, b) => a.engine.localeCompare(b.engine) },
+    { id: "enabled", header: "Status", kind: "status", cell: (p) => p.enabled ? "Enabled" : "Disabled", exportValue: (p) => p.enabled, sort: (a, b) => Number(a.enabled) - Number(b.enabled) },
+    { id: "mode", header: "Configured mode", kind: "status", cell: (p) => p.mode, sort: (a, b) => a.mode.localeCompare(b.mode) },
+    { id: "actions", header: "Actions", kind: "actions", hideable: false, exportable: false, cell: (p) => <Button variant="ghost" disabled={q.isError} aria-label={`Edit policy ${p.name}`} onClick={() => openEditor(p.id)}><Pencil className="h-4 w-4" /> Edit</Button> },
   ];
   const simulatorTab = <div className="space-y-5 rounded-md border border-border bg-card p-5" data-testid="policy-simulator">
     <div><h2 className="text-base font-semibold">Admission simulator</h2><p className="mt-1 text-sm text-muted-foreground">Review how enabled policies evaluate a Kubernetes manifest. This dry run does not change the workload.</p></div>

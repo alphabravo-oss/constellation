@@ -41,7 +41,7 @@ const MAX_EXPORT_BYTES = 2 * 1024 * 1024;
 const vulnerabilityProfileColumns: Column<MigrationVulnerabilityProfile>[] = [
   {
     id: "profile",
-    header: "Vulnerability profile",
+    header: "Vulnerability profile", kind: "name", wrap: true,
     exportValue: (profile) => profile.name,
     cell: (profile) => (
       <div data-testid="migration-preview-vulnerability-profile">
@@ -50,16 +50,16 @@ const vulnerabilityProfileColumns: Column<MigrationVulnerabilityProfile>[] = [
       </div>
     ),
   },
-  { id: "action", header: "Action", cell: (profile) => profile.diff_action, exportValue: (profile) => profile.diff_action },
-  { id: "active", header: "State", cell: (profile) => profile.active ? "Active" : "Inactive", exportValue: (profile) => profile.active ? "Active" : "Inactive" },
-  { id: "scope", header: "Effective scope", cell: migrationVulnerabilityScopeLabel, exportValue: migrationVulnerabilityScopeLabel },
-  { id: "entries", header: "Entries", cell: (profile) => profile.entries.length, exportValue: (profile) => profile.entries.length },
+  { id: "action", header: "Action", kind: "status", cell: (profile) => profile.diff_action, exportValue: (profile) => profile.diff_action },
+  { id: "active", header: "State", kind: "status", cell: (profile) => profile.active ? "Active" : "Inactive", exportValue: (profile) => profile.active ? "Active" : "Inactive" },
+  { id: "scope", header: "Effective scope", kind: "text", wrap: true, size: 264, minSize: 192, maxSize: 400, code: true, cell: migrationVulnerabilityScopeLabel, exportValue: migrationVulnerabilityScopeLabel },
+  { id: "entries", header: "Entries", kind: "count", cell: (profile) => profile.entries.length, exportValue: (profile) => profile.entries.length },
 ];
 
 const registryColumns: Column<MigrationRegistry>[] = [
   {
     id: "registry",
-    header: "Registry",
+    header: "Registry", kind: "name", wrap: true,
     exportValue: (registry) => `${registry.name} (${registry.kind}) ${registry.endpoint}`,
     cell: (registry) => (
       <div data-testid="migration-preview-registry">
@@ -68,12 +68,12 @@ const registryColumns: Column<MigrationRegistry>[] = [
       </div>
     ),
   },
-  { id: "action", header: "Action", cell: (registry) => registry.diff_action, exportValue: (registry) => registry.diff_action },
-  { id: "scope", header: "Effective image scope", cell: (registry) => registry.image_globs.join(", ") || "All images", exportValue: (registry) => registry.image_globs.join(", ") || "All images" },
-  { id: "filters", header: "Image filters", cell: (registry) => registry.image_globs.length, exportValue: (registry) => registry.image_globs.length },
+  { id: "action", header: "Action", kind: "status", cell: (registry) => registry.diff_action, exportValue: (registry) => registry.diff_action },
+  { id: "scope", header: "Effective image scope", kind: "text", wrap: true, size: 264, minSize: 192, maxSize: 400, code: true, cell: (registry) => registry.image_globs.join(", ") || "All images", exportValue: (registry) => registry.image_globs.join(", ") || "All images" },
+  { id: "filters", header: "Image filters", kind: "count", cell: (registry) => registry.image_globs.length, exportValue: (registry) => registry.image_globs.length },
   {
     id: "scanning",
-    header: "Scanning and credentials",
+    header: "Scanning and credentials", kind: "text", wrap: true, size: 264, minSize: 208, maxSize: 360,
     exportValue: (registry) => `Manual scans; no credentials imported${registry.credentials_required ? "; reissue credentials before scanning" : ""}`,
     cell: (registry) => (
       <div className="text-xs">
@@ -100,7 +100,7 @@ const dpiRuleProvenance = (rule: MigrationDPIRule) => {
 const policyColumns: Column<MigrationPolicy>[] = [
   {
     id: "policy",
-    header: "Policy",
+    header: "Policy", kind: "name", wrap: true,
     exportHeader: "Policy",
     exportValue: (p) => p.name,
     cell: (p) => (
@@ -110,14 +110,14 @@ const policyColumns: Column<MigrationPolicy>[] = [
       </div>
     ),
   },
-  { id: "action", header: "Action", cell: (p) => p.diff_action, exportValue: (p) => p.diff_action },
-  { id: "mode", header: "Mode", cell: (p) => p.mode, exportValue: (p) => p.mode },
+  { id: "action", header: "Action", kind: "status", cell: (p) => p.diff_action, exportValue: (p) => p.diff_action },
+  { id: "mode", header: "Mode", kind: "status", cell: (p) => p.mode, exportValue: (p) => p.mode },
 ];
 
 const fileProfileColumns: Column<MigrationFileProfile>[] = [
   {
     id: "profile",
-    header: "File profile",
+    header: "File profile", kind: "name", wrap: true,
     exportHeader: "File profile",
     exportValue: (p) => p.group,
     cell: (p) => (
@@ -127,16 +127,16 @@ const fileProfileColumns: Column<MigrationFileProfile>[] = [
       </div>
     ),
   },
-  { id: "mode", header: "Mode", cell: (p) => p.mode, exportValue: (p) => p.mode },
-  { id: "rules", header: "Rules", cell: (p) => p.rules.length, exportValue: (p) => p.rules.length },
-  { id: "targets", header: "Targets", cell: (p) => p.target_workloads?.length ?? "-", exportValue: (p) => p.target_workloads?.length ?? "" },
-  { id: "action", header: "Action", cell: (p) => p.diff_action, exportValue: (p) => p.diff_action },
+  { id: "mode", header: "Mode", kind: "status", cell: (p) => p.mode, exportValue: (p) => p.mode },
+  { id: "rules", header: "Rules", kind: "count", cell: (p) => p.rules.length, exportValue: (p) => p.rules.length },
+  { id: "targets", header: "Targets", kind: "count", cell: (p) => p.target_workloads?.length ?? "-", exportValue: (p) => p.target_workloads?.length ?? "" },
+  { id: "action", header: "Action", kind: "status", cell: (p) => p.diff_action, exportValue: (p) => p.diff_action },
 ];
 
 const processProfileColumns: Column<MigrationProcessProfile>[] = [
   {
     id: "profile",
-    header: "Process profile",
+    header: "Process profile", kind: "name", wrap: true,
     exportHeader: "Process profile",
     exportValue: (p) => p.group,
     cell: (p) => (
@@ -146,16 +146,16 @@ const processProfileColumns: Column<MigrationProcessProfile>[] = [
       </div>
     ),
   },
-  { id: "mode", header: "Mode", cell: (p) => p.mode, exportValue: (p) => p.mode },
-  { id: "rules", header: "Rules", cell: (p) => p.rules.length, exportValue: (p) => p.rules.length },
-  { id: "targets", header: "Targets", cell: (p) => p.target_workloads?.length ?? "-", exportValue: (p) => p.target_workloads?.length ?? "" },
-  { id: "action", header: "Action", cell: (p) => p.diff_action, exportValue: (p) => p.diff_action },
+  { id: "mode", header: "Mode", kind: "status", cell: (p) => p.mode, exportValue: (p) => p.mode },
+  { id: "rules", header: "Rules", kind: "count", cell: (p) => p.rules.length, exportValue: (p) => p.rules.length },
+  { id: "targets", header: "Targets", kind: "count", cell: (p) => p.target_workloads?.length ?? "-", exportValue: (p) => p.target_workloads?.length ?? "" },
+  { id: "action", header: "Action", kind: "status", cell: (p) => p.diff_action, exportValue: (p) => p.diff_action },
 ];
 
 const groupColumns: Column<MigrationGroup>[] = [
   {
     id: "group",
-    header: "Group",
+    header: "Group", kind: "name", wrap: true,
     exportHeader: "Group",
     exportValue: (group) => group.name,
     cell: (group) => (
@@ -165,21 +165,21 @@ const groupColumns: Column<MigrationGroup>[] = [
       </div>
     ),
   },
-  { id: "kind", header: "Kind", cell: (group) => group.kind, exportValue: (group) => group.kind },
+  { id: "kind", header: "Kind", kind: "badge", cell: (group) => group.kind, exportValue: (group) => group.kind },
   {
     id: "modes",
-    header: "Modes",
+    header: "Modes", kind: "status", size: 176, minSize: 152, maxSize: 208,
     cell: (group) => `${group.policy_mode || "monitor"} / ${group.profile_mode || "monitor"}`,
     exportValue: (group) => `${group.policy_mode || "monitor"} / ${group.profile_mode || "monitor"}`,
   },
-  { id: "criteria", header: "Criteria", cell: (group) => group.criteria.length, exportValue: (group) => group.criteria.length },
-  { id: "action", header: "Action", cell: (group) => group.diff_action, exportValue: (group) => group.diff_action },
+  { id: "criteria", header: "Criteria", kind: "count", cell: (group) => group.criteria.length, exportValue: (group) => group.criteria.length },
+  { id: "action", header: "Action", kind: "status", cell: (group) => group.diff_action, exportValue: (group) => group.diff_action },
 ];
 
 const dpiRuleColumns: Column<MigrationDPIRule>[] = [
   {
     id: "rule",
-    header: "DLP / WAF rule",
+    header: "DLP / WAF rule", kind: "name", wrap: true,
     exportHeader: "DLP / WAF rule",
     exportValue: (r) => `${r.name} (${dpiRuleProvenance(r)})`,
     cell: (r) => (
@@ -189,16 +189,16 @@ const dpiRuleColumns: Column<MigrationDPIRule>[] = [
       </div>
     ),
   },
-  { id: "mode", header: "Mode", cell: (r) => r.mode, exportValue: (r) => r.mode },
-  { id: "direction", header: "Direction", cell: (r) => directionLabel(r.apply_dir), exportValue: (r) => directionLabel(r.apply_dir) },
-  { id: "patterns", header: "Patterns", cell: (r) => r.patterns.length, exportValue: (r) => r.patterns.length },
-  { id: "action", header: "Action", cell: (r) => r.diff_action, exportValue: (r) => r.diff_action },
+  { id: "mode", header: "Mode", kind: "status", cell: (r) => r.mode, exportValue: (r) => r.mode },
+  { id: "direction", header: "Direction", kind: "status", cell: (r) => directionLabel(r.apply_dir), exportValue: (r) => directionLabel(r.apply_dir) },
+  { id: "patterns", header: "Patterns", kind: "count", cell: (r) => r.patterns.length, exportValue: (r) => r.patterns.length },
+  { id: "action", header: "Action", kind: "status", cell: (r) => r.diff_action, exportValue: (r) => r.diff_action },
 ];
 
 const dpiBindingColumns: Column<MigrationDPIBinding>[] = [
   {
     id: "group",
-    header: "DLP / WAF group scope",
+    header: "DLP / WAF group scope", kind: "name", wrap: true,
     exportHeader: "DLP / WAF group scope",
     exportValue: (binding) => binding.target_group_name,
     cell: (binding) => (
@@ -210,46 +210,46 @@ const dpiBindingColumns: Column<MigrationDPIBinding>[] = [
   },
   {
     id: "kind",
-    header: "Detector",
+    header: "Detector", kind: "badge",
     cell: (binding) => <StatusPill label={binding.sensor_kind.toUpperCase()} tone={binding.sensor_kind === "waf" ? "accent" : "info"} />,
     exportValue: (binding) => binding.sensor_kind,
   },
   {
     id: "sensors",
-    header: "Source sensors",
+    header: "Source sensors", kind: "text", wrap: true, size: 224, minSize: 160, maxSize: 320,
     cell: (binding) => binding.source_sensors?.join(", ") || "-",
     exportValue: (binding) => binding.source_sensors?.join(", ") || "",
   },
-  { id: "action", header: "Action", cell: (binding) => binding.diff_action, exportValue: (binding) => binding.diff_action },
+  { id: "action", header: "Action", kind: "status", cell: (binding) => binding.diff_action, exportValue: (binding) => binding.diff_action },
 ];
 
 const networkRuleColumns: Column<MigrationNetworkRule>[] = [
   {
     id: "edge",
-    header: "Network edge",
+    header: "Network edge", kind: "name", wrap: true,
     exportHeader: "Network edge",
     exportValue: (rule) => `${rule.from_group} -> ${rule.to_group}`,
     cell: (rule) => (
       <div data-testid="migration-preview-network-rule">
-        <div className="flex min-w-0 items-center gap-2 font-medium">
-          <span className="truncate">{rule.from_group}</span>
+        <div className="flex min-w-0 flex-wrap items-center gap-2 font-medium">
+          <span className="">{rule.from_group}</span>
           <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-          <span className="truncate">{rule.to_group}</span>
+          <span className="">{rule.to_group}</span>
         </div>
         {rule.comment ? <div className="text-muted-foreground">{rule.comment}</div> : null}
       </div>
     ),
   },
-  { id: "mode", header: "Mode", cell: (rule) => rule.mode, exportValue: (rule) => rule.mode },
-  { id: "ports", header: "Ports", cell: (rule) => networkPortLabel(rule.ports), exportValue: (rule) => networkPortLabel(rule.ports) },
-  { id: "priority", header: "Priority", cell: (rule) => rule.priority || "-", exportValue: (rule) => rule.priority || "" },
-  { id: "action", header: "Action", cell: (rule) => rule.diff_action, exportValue: (rule) => rule.diff_action },
+  { id: "mode", header: "Mode", kind: "status", cell: (rule) => rule.mode, exportValue: (rule) => rule.mode },
+  { id: "ports", header: "Ports", kind: "text", code: true, wrap: true, size: 152, minSize: 112, maxSize: 208, cell: (rule) => networkPortLabel(rule.ports), exportValue: (rule) => networkPortLabel(rule.ports) },
+  { id: "priority", header: "Priority", kind: "count", cell: (rule) => rule.priority || "-", exportValue: (rule) => rule.priority || "" },
+  { id: "action", header: "Action", kind: "status", cell: (rule) => rule.diff_action, exportValue: (rule) => rule.diff_action },
 ];
 
 const unsupportedColumns: Column<MigrationUnsupported>[] = [
   {
     id: "item",
-    header: "Item",
+    header: "Item", kind: "name", wrap: true,
     exportHeader: "Item",
     exportValue: (item) => item.name,
     cell: (item) => (
@@ -261,10 +261,10 @@ const unsupportedColumns: Column<MigrationUnsupported>[] = [
   },
   {
     id: "reason",
-    header: "Reason",
+    header: "Reason", kind: "text", wrap: true, size: 320, minSize: 224, maxSize: 480, grow: true,
     exportValue: (item) => item.suggestion ? `${item.reason} Suggested fix: ${item.suggestion}` : item.reason,
     cell: (item) => (
-      <div className="max-w-xl text-xs leading-relaxed">
+      <div className="text-xs leading-relaxed">
         <div>{item.reason}</div>
         {item.suggestion ? <div className="mt-1 text-muted-foreground">{item.suggestion}</div> : null}
       </div>
@@ -272,10 +272,10 @@ const unsupportedColumns: Column<MigrationUnsupported>[] = [
   },
   {
     id: "source",
-    header: "Source",
+    header: "Source", kind: "text", code: true, wrap: true, size: 264, minSize: 192, maxSize: 400,
     exportValue: (item) => item.source ? JSON.stringify(item.source) : "",
     cell: (item) => (
-      <code className="block max-w-64 truncate rounded bg-muted px-1.5 py-1 text-[11px] text-muted-foreground">
+      <code className="block rounded bg-muted px-1.5 py-1 text-[11px] text-muted-foreground">
         {item.source ? JSON.stringify(item.source) : "-"}
       </code>
     ),
@@ -402,7 +402,7 @@ export function MigrationPage() {
   const historyColumns: Column<MigrationImportListItem>[] = [
     {
       id: "import",
-      header: "Import",
+      header: "Import", kind: "name", wrap: true,
       exportHeader: "Import ID",
       exportValue: (item) => item.id,
       cell: (item) => (
@@ -415,16 +415,16 @@ export function MigrationPage() {
     },
     {
       id: "status",
-      header: "Status",
+      header: "Status", kind: "status", size: 152, minSize: 128, maxSize: 192,
       exportValue: (item) => item.status,
       cell: (item) => <StatusPill label={item.status.replace("_", " ")} tone={migrationStatusTone(item.status)} />,
     },
     {
       id: "summary",
-      header: "Summary",
+      header: "Summary", kind: "text", wrap: true, size: 320, minSize: 240, maxSize: 480, grow: true,
       exportValue: (item) => `${migrationSummaryLabel(item.summary)}; ${item.applied_summary ? migrationAppliedSummaryLabel(item.applied_summary) : "not applied"}${item.status === "rolled_back" ? "; subsequently rolled back" : ""}; ${(item.unsupported ?? []).map((diagnostic) => `${diagnostic.kind}: ${diagnostic.reason} ${diagnostic.suggestion ?? ""}`).join("; ")}`,
       cell: (item) => (
-        <div className="max-w-xl whitespace-normal text-xs text-muted-foreground">
+        <div className="whitespace-normal text-xs text-muted-foreground">
           <div>{migrationSummaryLabel(item.summary)}</div>
           <div>{item.applied_summary ? migrationAppliedSummaryLabel(item.applied_summary) : "Not applied"}{item.status === "rolled_back" ? " (subsequently rolled back)" : ""}</div>
           {item.error ? <div className="mt-1 text-destructive">{item.error}</div> : null}
@@ -446,14 +446,14 @@ export function MigrationPage() {
     },
     {
       id: "created",
-      header: "Created",
+      header: "Created", kind: "date", size: 224, minSize: 208, maxSize: 240,
       cell: (item) => formatDate(item.created_at),
       exportValue: (item) => item.created_at,
       className: "text-xs text-muted-foreground",
     },
     {
       id: "actions",
-      header: "Actions",
+      header: "Actions", kind: "actions", size: 320, minSize: 296, maxSize: 352, wrap: true,
       exportable: false,
       cell: (item) => (
         <div className="flex flex-wrap justify-end gap-2">

@@ -535,13 +535,6 @@ func collapseInstances(hbs []HeartbeatRow, now time.Time, fresh time.Duration) [
 }
 
 func scoreHeartbeats(hbs []HeartbeatRow, clusterNames map[uuid.UUID]string, recentRestarts map[string]int) []heartbeatDTO {
-	// Determine the "current" commit: the most-recent commit across all
-	// components, treated as the canonical control-plane SHA. The spec also
-	// asks for "max(commit)" — taking max by last_seen_at within each
-	// component group is more useful in practice because the strings aren't
-	// monotonic.
-	now := time.Now().UTC()
-
 	// Collapse each (component, cluster) to the instance(s) that matter, so a redeploy
 	// (old pod's row lingers up to 15m before GC), a cronjob's past runs, and horizontal
 	// replicas all render cleanly:
@@ -552,11 +545,16 @@ func scoreHeartbeats(hbs []HeartbeatRow, clusterNames map[uuid.UUID]string, rece
 	// The live window is tight (2m) because every component beats ~every 60s, so a
 	// just-replaced pod's frozen row falls out of "live" quickly instead of masquerading
 	// as a replica. Genuine outages still cross the 5m stale threshold below.
-	hbs = collapseInstances(hbs, now, 2*time.Minute)
+	return scoreHeartbeatInstances(collapseInstances(hbs, time.Now().UTC(), 2*time.Minute), clusterNames, recentRestarts)
+}
 
-	// Determine the "current" commit: the most-recent commit across the surviving
-	// components, treated as the canonical control-plane SHA (drift is measured against it).
-	current := freshestCommitOverall(hbs)
+// scoreHeartbeatInstances preserves every input row and its order. Inventory,
+// exact-ID diagnostics and support bundles need scores for superseded instances
+// too, whereas the health overview deliberately collapses those rows.
+func scoreHeartbeatInstances(hbs []HeartbeatRow, clusterNames map[uuid.UUID]string, recentRestarts map[string]int) []heartbeatDTO {
+	now := time.Now().UTC()
+	// Use the same surviving-instance baseline as the health overview for drift.
+	current := freshestCommitOverall(collapseInstances(hbs, now, 2*time.Minute))
 
 	out := make([]heartbeatDTO, 0, len(hbs))
 	for _, hb := range hbs {

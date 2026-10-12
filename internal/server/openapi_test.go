@@ -800,3 +800,70 @@ func TestOpenAPIMigrationContracts(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenAPIFindingsQueryContracts(t *testing.T) {
+	parametersAt := func(path string) map[string]map[string]any {
+		operation := openAPISchemaAt(t, "paths", path, "get")
+		parameters := map[string]map[string]any{}
+		for _, raw := range operation["parameters"].([]any) {
+			parameter := raw.(map[string]any)
+			if parameter["in"] != "query" || parameter["required"] != false {
+				t.Errorf("%s has invalid optional query parameter: %v", path, parameter)
+			}
+			parameters[parameter["name"].(string)] = parameter
+		}
+		return parameters
+	}
+	list := parametersAt("/api/v1/findings")
+	csv := parametersAt("/api/v1/findings.csv")
+	rollup := parametersAt("/api/v1/findings/by-cve")
+	for _, name := range []string{"q", "kind", "lifecycle", "cluster_id", "fixable", "sort", "order", "offset"} {
+		if list[name] == nil || !reflect.DeepEqual(list[name], csv[name]) {
+			t.Errorf("instance list/CSV must share the %s query contract", name)
+		}
+	}
+	for _, name := range []string{"q", "lifecycle", "cluster_id", "offset"} {
+		if list[name] == nil || !reflect.DeepEqual(list[name], rollup[name]) {
+			t.Errorf("CVE rollup must share the %s query contract", name)
+		}
+	}
+	for _, name := range []string{"kind", "sort", "order"} {
+		if rollup[name] != nil {
+			t.Errorf("CVE rollup must not advertise unsupported %s", name)
+		}
+	}
+	wantSort := []any{"risk", "severity", "cve", "title", "package", "fixed", "asset", "lifecycle", "kind", "last_seen", "age", "cvss_vector", "cvss"}
+	if !reflect.DeepEqual(list["sort"]["schema"].(map[string]any)["enum"], wantSort) {
+		t.Error("finding sort keys must match the handler allowlist")
+	}
+	for _, tc := range []struct {
+		parameters map[string]map[string]any
+		defaultMax float64
+		maximum    float64
+	}{{list, 100, 1000}, {rollup, 200, 2000}, {csv, 10000, 100000}} {
+		limit := tc.parameters["limit"]["schema"].(map[string]any)
+		if limit["minimum"] != float64(1) || limit["default"] != tc.defaultMax || limit["maximum"] != tc.maximum {
+			t.Errorf("finding pagination limit = %v", limit)
+		}
+	}
+	listSchema := openAPISchemaAt(t, "paths", "/api/v1/findings", "get", "responses", "200", "content", "application/json", "schema")
+	assertOpenAPIFields(t, listSchema,
+		[]string{"findings", "limit", "offset", "total", "has_more", "lifecycle_counts"},
+		[]string{"findings", "limit", "offset", "total", "has_more", "lifecycle_counts"})
+	counts := listSchema["properties"].(map[string]any)["lifecycle_counts"].(map[string]any)
+	if !strings.Contains(counts["description"].(string), "without the dedicated lifecycle query parameter") {
+		t.Error("lifecycle totals must describe which filter is omitted")
+	}
+	rollupSchema := openAPISchemaAt(t, "paths", "/api/v1/findings/by-cve", "get", "responses", "200", "content", "application/json", "schema")
+	assertOpenAPIFields(t, rollupSchema,
+		[]string{"cves", "limit", "offset", "total"}, []string{"cves", "limit", "offset", "total"})
+	if !strings.Contains(rollup["fixable"]["description"].(string), "HAVING") ||
+		!strings.Contains(rollup["fixable"]["description"].(string), "unfixed instances") {
+		t.Error("fixable CVE documentation must preserve unfixed matching instances")
+	}
+	csvResponse := openAPISchemaAt(t, "paths", "/api/v1/findings.csv", "get", "responses", "200")
+	capHeader := csvResponse["headers"].(map[string]any)["X-Export-Limit"].(map[string]any)["schema"].(map[string]any)
+	if capHeader["maximum"] != float64(100000) || csvResponse["content"].(map[string]any)["text/csv"] == nil {
+		t.Error("CSV export must document the effective cap header and CSV content")
+	}
+}

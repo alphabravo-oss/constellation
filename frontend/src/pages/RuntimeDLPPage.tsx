@@ -56,11 +56,11 @@ export function RuntimeDLPPage() {
   const monitorCount = rules.filter((r) => r.mode === "monitor").length;
 
   const columns: Column<DLPRule>[] = [
-    { id: "name", header: "Name", hideable: false, exportValue: (r) => r.name, cell: (r) => <span className="font-mono">{r.name}</span>, sort: (a, b) => a.name.localeCompare(b.name) },
-    { id: "severity", header: "Severity", numeric: true, cell: (r) => r.severity, sort: (a, b) => a.severity - b.severity },
+    { id: "name", header: "Name", kind: "name", code: true, hideable: false, exportValue: (r) => r.name, cell: (r) => <span className="font-mono">{r.name}</span>, sort: (a, b) => a.name.localeCompare(b.name) },
+    { id: "severity", header: "Severity", kind: "count", numeric: true, cell: (r) => r.severity, sort: (a, b) => a.severity - b.severity },
     {
       id: "mode",
-      header: "Configured mode",
+      header: "Configured mode", kind: "status",
       exportValue: (r) => r.mode,
       cell: (r) => {
         const badge = MODE_BADGE[r.mode] ?? { label: "Unknown", tone: "neutral" as const };
@@ -70,7 +70,7 @@ export function RuntimeDLPPage() {
     },
     {
       id: "origin",
-      header: "Origin",
+      header: "Origin", kind: "status", size: 144, minSize: 112, maxSize: 176,
       exportValue: (r) => runtimeRuleOrigin(r).label,
       cell: (r) => {
         const origin = runtimeRuleOrigin(r);
@@ -84,12 +84,12 @@ export function RuntimeDLPPage() {
     },
     {
       id: "patterns",
-      header: "Patterns",
+      header: "Patterns", kind: "count",
       numeric: true,
       cell: (r) => (Array.isArray(r.patterns) ? r.patterns.length : 0),
       sort: (a, b) => (Array.isArray(a.patterns) ? a.patterns.length : 0) - (Array.isArray(b.patterns) ? b.patterns.length : 0),
     },
-    { id: "actions", header: "Actions", hideable: false, exportable: false, className: "text-right", cell: (r) => <DLPActions clusterID={clusterID} disabled={q.isError} r={r} onEdit={() => navigate({ href: `${listPath}/${encodeURIComponent(r.id)}${scopedSearch}` })} /> },
+    { id: "actions", header: "Actions", kind: "actions", size: 208, minSize: 192, maxSize: 240, wrap: true, hideable: false, exportable: false, className: "text-right", cell: (r) => <DLPActions clusterID={clusterID} disabled={q.isError} r={r} onEdit={() => navigate({ href: `${listPath}/${encodeURIComponent(r.id)}${scopedSearch}` })} /> },
   ];
 
   if (!clusterID) {

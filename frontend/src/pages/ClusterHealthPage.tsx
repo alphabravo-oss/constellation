@@ -38,7 +38,7 @@ export function ClusterHealthPage() {
   const componentColumns: Column<HealthComponent>[] = [
     {
       id: "name",
-      header: "Component",
+      header: "Component", kind: "name", wrap: true,
       exportValue: (c) => c.name,
       cell: (c) => {
         const role = nvRoleAlias({ name: c.name, kind: c.kind });
@@ -54,10 +54,10 @@ export function ClusterHealthPage() {
         );
       },
     },
-    { id: "kind", header: "Kind", cell: (c) => <span className="text-xs text-muted-foreground">{c.kind}</span>, exportValue: (c) => c.kind },
-    { id: "version", header: "Version", cell: (c) => <span className="font-mono text-xs">{c.version}</span>, exportValue: (c) => c.version },
-    { id: "ready", header: "Ready", cell: (c) => <span className="text-xs">{c.ready}/{c.desired}</span>, exportValue: (c) => `${c.ready}/${c.desired}` },
-    { id: "status", header: "Status", cell: (c) => <Status value={c.status} />, exportValue: (c) => c.status },
+    { id: "kind", header: "Kind", kind: "status", cell: (c) => <span className="text-xs text-muted-foreground">{c.kind}</span>, exportValue: (c) => c.kind },
+    { id: "version", header: "Version", kind: "version", size: 160, minSize: 112, maxSize: 224, wrap: true, cell: (c) => <span className="font-mono text-xs">{c.version}</span>, exportValue: (c) => c.version },
+    { id: "ready", header: "Ready", kind: "count", cell: (c) => <span className="text-xs">{c.ready}/{c.desired}</span>, exportValue: (c) => `${c.ready}/${c.desired}` },
+    { id: "status", header: "Status", kind: "status", cell: (c) => <Status value={c.status} />, exportValue: (c) => c.status },
   ];
 
   return (

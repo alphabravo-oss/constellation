@@ -34,6 +34,10 @@ import (
 // the compiler emit the right operator (e.g. timestamps need ::timestamptz casts).
 type Schema struct {
 	Fields map[string]Field
+	// DefaultField enables bare-text terms for schemas that explicitly opt in.
+	DefaultField string
+	// LiteralSubstrings escapes SQL wildcards in ordinary substring values.
+	LiteralSubstrings bool
 }
 
 // FieldType controls how values are compared in SQL.
@@ -70,6 +74,7 @@ func Compile(q string, s Schema) (Compiled, error) {
 		return Compiled{}, nil
 	}
 	p := newParser(q)
+	p.defaultField = s.DefaultField
 	ast, err := p.parseExpr()
 	if err != nil {
 		return Compiled{}, err
@@ -115,8 +120,9 @@ type token struct {
 }
 
 type parser struct {
-	tokens []token
-	pos    int
+	tokens       []token
+	pos          int
+	defaultField string
 }
 
 func newParser(q string) *parser {
@@ -245,19 +251,40 @@ func (p *parser) parseTerm() (node, error) {
 		return nil, fmt.Errorf("search: expected field, got %q", t.val)
 	}
 	field := p.eat().val
+	negate := strings.HasPrefix(field, "!")
+	field = strings.TrimPrefix(field, "!")
+	var term termNode
 	if c := p.peek(); c == nil || c.kind != "colon" {
-		return nil, fmt.Errorf("search: expected colon after field %q", field)
+		if p.defaultField == "" || field == "" {
+			return nil, fmt.Errorf("search: expected colon after field %q", field)
+		}
+		term = termNode{field: p.defaultField, val: field}
+	} else {
+		p.eat()
+		v := p.peek()
+		if v == nil || v.kind != "ident" {
+			return nil, fmt.Errorf("search: expected value after %q:", field)
+		}
+		val := p.eat().val
+		// Colons inside unquoted values occur in package URLs and RFC3339 times.
+		for next := p.peek(); next != nil && next.kind == "colon"; next = p.peek() {
+			p.eat()
+			part := p.eat()
+			if part == nil || part.kind != "ident" {
+				return nil, fmt.Errorf("search: expected value after colon in %q", field)
+			}
+			val += ":" + part.val
+		}
+		if strings.HasPrefix(val, "!") {
+			negate = !negate
+			val = strings.TrimPrefix(val, "!")
+		}
+		term = termNode{field: field, val: val}
 	}
-	p.eat() // consume colon
-	v := p.peek()
-	if v == nil || v.kind != "ident" {
-		return nil, fmt.Errorf("search: expected value after %q:", field)
+	if negate {
+		return unaryNode{inner: term}, nil
 	}
-	val := p.eat().val
-	if strings.HasPrefix(val, "!") {
-		return unaryNode{inner: termNode{field: field, val: strings.TrimPrefix(val, "!")}}, nil
-	}
-	return termNode{field: field, val: val}, nil
+	return term, nil
 }
 
 // ---- emit (SQL) ----
@@ -335,6 +362,9 @@ func emitTerm(t termNode, s Schema, args *[]any) (string, error) {
 		*args = append(*args, fl)
 		return fmt.Sprintf("%s = $%d", f.Column, len(*args)), nil
 	case FieldBool:
+		if !strings.EqualFold(val, "true") && !strings.EqualFold(val, "false") && val != "1" && val != "0" {
+			return "", fmt.Errorf("search: field %q expects true or false, got %q", t.field, val)
+		}
 		b := strings.EqualFold(val, "true") || val == "1"
 		*args = append(*args, b)
 		return fmt.Sprintf("%s = $%d", f.Column, len(*args)), nil
@@ -345,6 +375,9 @@ func emitTerm(t termNode, s Schema, args *[]any) (string, error) {
 		}
 		*args = append(*args, t)
 		return fmt.Sprintf("%s = $%d", f.Column, len(*args)), nil
+	}
+	if s.LiteralSubstrings {
+		val = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(val)
 	}
 	*args = append(*args, "%"+val+"%")
 	return fmt.Sprintf("%s ILIKE $%d", f.Column, len(*args)), nil

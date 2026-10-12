@@ -1504,16 +1504,16 @@ function NetworkConversationsWorkspaceTab({
     [rows],
   );
   const columns = useMemo<Column<NetworkConversation>[]>(() => [
-    { id: "from", header: "From", cell: (row) => <span className="font-mono">{row.from}</span>, exportValue: (row) => row.from, sort: (a, b) => a.from.localeCompare(b.from) },
-    { id: "from_platform_role", header: "From role", exportHeader: "from_platform_role", cell: (row) => row.from_platform_role ?? "", exportValue: (row) => row.from_platform_role ?? "" },
-    { id: "to", header: "To", cell: (row) => <span className="font-mono">{row.to}</span>, exportValue: (row) => row.to, sort: (a, b) => a.to.localeCompare(b.to) },
-    { id: "to_platform_role", header: "To role", exportHeader: "to_platform_role", cell: (row) => row.to_platform_role ?? "", exportValue: (row) => row.to_platform_role ?? "" },
-    { id: "apps", header: "Apps", cell: (row) => <span className="text-muted-foreground">{(row.apps ?? []).slice(0, 4).join(", ") || "-"}</span>, sort: (a, b) => (a.apps ?? []).join(",").localeCompare((b.apps ?? []).join(",")) },
-    { id: "volume", header: "Volume", cell: (row) => <span className="font-mono">{formatBytes(row.bytes)}</span>, sort: (a, b) => a.bytes - b.bytes, numeric: true },
-    { id: "packets", header: "Packets", cell: (row) => <span className="font-mono">{row.packets.toLocaleString()}</span>, sort: (a, b) => a.packets - b.packets, numeric: true },
-    { id: "streams", header: "Streams", cell: (row) => <span className="font-mono">{row.edges.toLocaleString()}</span>, sort: (a, b) => a.edges - b.edges, numeric: true },
-    { id: "verdict", header: "Verdict", cell: (row) => <span className={cn("rounded px-1.5 py-0.5 text-[10px] uppercase", row.verdict === "deny" || row.verdict === "block" ? "bg-[color:var(--color-status-error)]/15 text-[color:var(--color-status-error)]" : "bg-muted text-muted-foreground")}>{row.verdict || "allow"}</span>, sort: (a, b) => (a.verdict ?? "allow").localeCompare(b.verdict ?? "allow") },
-    { id: "last_seen", header: "Last seen", cell: (row) => <button type="button" className="text-left text-muted-foreground hover:text-foreground" onClick={() => onSelect(row)} data-testid="network-conversation-open">{formatDateTime(row.last_seen)}</button>, sort: (a, b) => Date.parse(a.last_seen) - Date.parse(b.last_seen) },
+    { id: "from", header: "From", kind: "name", wrap: true, code: true, minSize: 192, cell: (row) => <span className="font-mono">{row.from}</span>, exportValue: (row) => row.from, sort: (a, b) => a.from.localeCompare(b.from) },
+    { id: "from_platform_role", header: "From role", kind: "text", wrap: true, size: 144, minSize: 120, maxSize: 184, exportHeader: "from_platform_role", cell: (row) => row.from_platform_role ?? "", exportValue: (row) => row.from_platform_role ?? "" },
+    { id: "to", header: "To", kind: "text", code: true, wrap: true, size: 224, minSize: 192, maxSize: 320, cell: (row) => <span className="font-mono">{row.to}</span>, exportValue: (row) => row.to, sort: (a, b) => a.to.localeCompare(b.to) },
+    { id: "to_platform_role", header: "To role", kind: "text", wrap: true, size: 144, minSize: 120, maxSize: 184, exportHeader: "to_platform_role", cell: (row) => row.to_platform_role ?? "", exportValue: (row) => row.to_platform_role ?? "" },
+    { id: "apps", header: "Apps", kind: "text", wrap: true, size: 176, minSize: 144, maxSize: 240, cell: (row) => <span className="text-muted-foreground">{(row.apps ?? []).slice(0, 4).join(", ") || "-"}</span>, sort: (a, b) => (a.apps ?? []).join(",").localeCompare((b.apps ?? []).join(",")) },
+    { id: "volume", header: "Volume", kind: "bytes", size: 128, minSize: 112, maxSize: 160, cell: (row) => <span className="font-mono">{formatBytes(row.bytes)}</span>, sort: (a, b) => a.bytes - b.bytes, numeric: true },
+    { id: "packets", header: "Packets", kind: "count", cell: (row) => <span className="font-mono">{row.packets.toLocaleString()}</span>, sort: (a, b) => a.packets - b.packets, numeric: true },
+    { id: "streams", header: "Streams", kind: "count", cell: (row) => <span className="font-mono">{row.edges.toLocaleString()}</span>, sort: (a, b) => a.edges - b.edges, numeric: true },
+    { id: "verdict", header: "Verdict", kind: "status", cell: (row) => <span className={cn("rounded px-1.5 py-0.5 text-[10px] uppercase", row.verdict === "deny" || row.verdict === "block" ? "bg-[color:var(--color-status-error)]/15 text-[color:var(--color-status-error)]" : "bg-muted text-muted-foreground")}>{row.verdict || "allow"}</span>, sort: (a, b) => (a.verdict ?? "allow").localeCompare(b.verdict ?? "allow") },
+    { id: "last_seen", header: "Last seen", kind: "date", size: 224, minSize: 208, maxSize: 240, cell: (row) => <button type="button" className="text-left text-muted-foreground hover:text-foreground" onClick={() => onSelect(row)} data-testid="network-conversation-open">{formatDateTime(row.last_seen)}</button>, sort: (a, b) => Date.parse(a.last_seen) - Date.parse(b.last_seen) },
   ], [onSelect]);
   return (
     <section className="space-y-3" data-testid="network-conversations-tab">

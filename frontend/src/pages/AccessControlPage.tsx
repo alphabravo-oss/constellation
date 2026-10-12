@@ -24,7 +24,7 @@ import { Button } from "@/components/ui/button";
 const userColumns: Column<AccessControlUser>[] = [
   {
     id: "user",
-    header: "User",
+    header: "User", kind: "name", wrap: true,
     cell: (u) => (
       <div>
         <div className="font-medium">{u.name}</div>
@@ -32,20 +32,20 @@ const userColumns: Column<AccessControlUser>[] = [
       </div>
     ),
   },
-  { id: "auth", header: "Auth", cell: (u) => <>{u.auth_provider_id} · {u.mfa_enabled ? "MFA" : "no MFA"}</>, className: "text-xs" },
+  { id: "auth", header: "Auth", kind: "text", wrap: true, size: 176, minSize: 144, maxSize: 208, cell: (u) => <>{u.auth_provider_id} · {u.mfa_enabled ? "MFA" : "no MFA"}</>, className: "text-xs" },
   {
     id: "roles",
-    header: "Roles",
+    header: "Roles", kind: "text", wrap: true, size: 224, minSize: 160, maxSize: 320,
     cell: (u) => <div className="flex flex-wrap gap-1">{u.roles.map((role) => <Badge key={role}>{role}</Badge>)}</div>,
   },
-  { id: "status", header: "Status", cell: (u) => <div className="flex flex-wrap gap-1"><Status value={u.status} />{u.locked && <Status value="locked" />}{u.password_reset_required && <Status value="reset required" />}</div> },
-  { id: "last_seen", header: "Last Seen", cell: (u) => formatDate(u.last_login_at), className: "text-xs text-muted-foreground" },
+  { id: "status", header: "Status", kind: "status", size: 176, minSize: 144, maxSize: 224, wrap: true, cell: (u) => <div className="flex flex-wrap gap-1"><Status value={u.status} />{u.locked && <Status value="locked" />}{u.password_reset_required && <Status value="reset required" />}</div> },
+  { id: "last_seen", header: "Last Seen", kind: "date", size: 224, minSize: 208, maxSize: 240, cell: (u) => formatDate(u.last_login_at), className: "text-xs text-muted-foreground" },
 ];
 
 const roleColumns: Column<AccessControlRole>[] = [
   {
     id: "role",
-    header: "Role",
+    header: "Role", kind: "name", wrap: true,
     cell: (r) => (
       <div>
         <div className="font-medium">{r.name}</div>
@@ -53,10 +53,10 @@ const roleColumns: Column<AccessControlRole>[] = [
       </div>
     ),
   },
-  { id: "type", header: "Type", cell: (r) => <Badge>{r.type}</Badge> },
+  { id: "type", header: "Type", kind: "badge", cell: (r) => <Badge>{r.type}</Badge> },
   {
     id: "permissions",
-    header: "Permissions",
+    header: "Permissions", kind: "text", wrap: true, size: 320, minSize: 240, maxSize: 480, grow: true,
     cell: (r) => (
       <div className="flex flex-wrap gap-1">
         {r.permissions.length === 0 ? (
@@ -70,16 +70,16 @@ const roleColumns: Column<AccessControlRole>[] = [
 ];
 
 const permissionColumns: Column<AccessControlPermissionMatrixRow>[] = [
-  { id: "domain", header: "Domain", cell: (row) => row.domain, className: "text-xs font-medium" },
-  { id: "permissions", header: "Permissions", cell: (row) => row.permissions.join(", "), className: "font-mono text-xs" },
-  { id: "roles", header: "Roles", cell: (row) => row.roles.join(", "), className: "text-xs" },
-  { id: "notes", header: "Notes", cell: (row) => row.notes, className: "text-xs text-muted-foreground" },
+  { id: "domain", header: "Domain", kind: "name", wrap: true, cell: (row) => row.domain, className: "text-xs font-medium" },
+  { id: "permissions", header: "Permissions", kind: "text", wrap: true, size: 320, minSize: 240, maxSize: 480, grow: true, cell: (row) => row.permissions.join(", "), className: "font-mono text-xs" },
+  { id: "roles", header: "Roles", kind: "text", wrap: true, size: 224, minSize: 160, maxSize: 320, cell: (row) => row.roles.join(", "), className: "text-xs" },
+  { id: "notes", header: "Notes", kind: "text", wrap: true, size: 240, minSize: 160, maxSize: 360, cell: (row) => row.notes, className: "text-xs text-muted-foreground" },
 ];
 
 const tokenColumns: Column<AccessControlAPIToken>[] = [
   {
     id: "token",
-    header: "Token",
+    header: "Token", kind: "name", wrap: true,
     cell: (token) => (
       <div>
         <div className="font-medium">{token.name}</div>
@@ -87,8 +87,8 @@ const tokenColumns: Column<AccessControlAPIToken>[] = [
       </div>
     ),
   },
-  { id: "status", header: "Status", cell: (token) => <Status value={token.status} /> },
-  { id: "expires", header: "Expires", cell: (token) => formatDate(token.expires_at), className: "text-xs text-muted-foreground" },
+  { id: "status", header: "Status", kind: "status", size: 176, minSize: 144, maxSize: 224, wrap: true, cell: (token) => <Status value={token.status} /> },
+  { id: "expires", header: "Expires", kind: "date", size: 224, minSize: 208, maxSize: 240, cell: (token) => formatDate(token.expires_at), className: "text-xs text-muted-foreground" },
 ];
 
 export function AccessControlPage() {
@@ -127,9 +127,9 @@ export function AccessControlPage() {
     ...userColumns,
     {
       id: "recovery",
-      header: "Recovery",
+      header: "Recovery", kind: "actions", size: 224, minSize: 208, maxSize: 240,
       cell: (user) => user.local_password ? (
-        <div className="flex gap-2">
+        <div className="flex justify-end gap-2">
           <Button variant="ghost" size="sm" disabled={!user.locked || unlockUser.isPending || forceResetUser.isPending} onClick={() => {
             if (window.confirm(`Unlock ${user.email}? This clears the login lockout.`)) unlockUser.mutate(user.id);
           }}>Unlock</Button>

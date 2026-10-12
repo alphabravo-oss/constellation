@@ -65,10 +65,10 @@ export function ApiTokensPage() {
   const expiredCount = tokens.filter((t) => t.status === "expired").length;
   const revokedCount = tokens.filter((t) => t.status === "revoked").length;
   const columns: Column<ApiTokenDTO>[] = [
-    { id: "name", header: "Name", cell: (t) => t.name, className: "font-medium" },
+    { id: "name", header: "Name", kind: "name", wrap: true, cell: (t) => t.name, className: "font-medium" },
     {
       id: "scopes",
-      header: "Scopes",
+      header: "Scopes", kind: "text", wrap: true, size: 224, minSize: 160, maxSize: 320,
       cell: (t) => (
         <div className="flex flex-wrap gap-1">
           {t.scopes.map((s) => (
@@ -79,7 +79,7 @@ export function ApiTokensPage() {
     },
     {
       id: "attached",
-      header: "Attached to",
+      header: "Attached to", kind: "text", wrap: true, size: 192, minSize: 144, maxSize: 240,
       cell: (t) => (
         <>
           <div>{t.attached_to_kind}</div>
@@ -88,16 +88,16 @@ export function ApiTokensPage() {
       ),
       className: "text-xs text-muted-foreground",
     },
-    { id: "expires", header: "Expires", cell: (t) => (t.expires_at ? new Date(t.expires_at).toLocaleString() : "never"), className: "text-xs" },
-    { id: "last_used", header: "Last used", cell: (t) => (t.last_used_at ? new Date(t.last_used_at).toLocaleString() : "—"), className: "text-xs" },
+    { id: "expires", header: "Expires", kind: "date", size: 224, minSize: 208, maxSize: 240, cell: (t) => (t.expires_at ? new Date(t.expires_at).toLocaleString() : "never"), className: "text-xs" },
+    { id: "last_used", header: "Last used", kind: "date", size: 224, minSize: 208, maxSize: 240, cell: (t) => (t.last_used_at ? new Date(t.last_used_at).toLocaleString() : "—"), className: "text-xs" },
     {
       id: "status",
-      header: "Status",
+      header: "Status", kind: "status",
       cell: (t) => <span className={`rounded-md px-2 py-0.5 text-[10px] ${statusClasses(t.status)}`}>{t.status}</span>,
     },
     {
       id: "actions",
-      header: "Actions",
+      header: "Actions", kind: "actions", size: 208, minSize: 192, maxSize: 224,
       className: "text-right",
       cell: (t) => (
         <div className="inline-flex items-center gap-1">

@@ -158,10 +158,10 @@ export function ScannerSourcesPage() {
     () => [
       {
         id: "target",
-        header: "Target",
+        header: "Target", kind: "name", code: true,
         cell: (job) => (
           <div className="min-w-0">
-            <div className="truncate font-mono text-xs text-foreground" title={job.target_ref}>{job.target_ref}</div>
+            <div className="font-mono text-xs text-foreground" title={job.target_ref}>{job.target_ref}</div>
             <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
               <span>{job.target_type}</span>
               {job.source_type ? <span>· {job.source_type}</span> : null}
@@ -173,34 +173,34 @@ export function ScannerSourcesPage() {
       },
       {
         id: "status",
-        header: "Status",
-        width: "112px",
+        header: "Status", kind: "status",
+
         cell: (job) => <StatusPill label={job.status} tone={scanJobStatusTone(job.status)} />,
         sort: (a, b) => a.status.localeCompare(b.status),
       },
       {
         id: "attempts",
-        header: "Attempts",
-        width: "86px",
+        header: "Attempts", kind: "count",
+
         numeric: true,
         cell: (job) => `${job.attempt_count}/${job.max_attempts}`,
         sort: (a, b) => a.attempt_count - b.attempt_count,
       },
       {
         id: "worker",
-        header: "Worker",
-        width: "160px",
-        cell: (job) => <span className="block truncate font-mono text-xs text-muted-foreground" title={job.worker_id}>{job.worker_id || "-"}</span>,
+        header: "Worker", kind: "id", size: 160,
+
+        cell: (job) => <span className="block font-mono text-xs text-muted-foreground" title={job.worker_id}>{job.worker_id || "-"}</span>,
         sort: (a, b) => (a.worker_id ?? "").localeCompare(b.worker_id ?? ""),
       },
       {
         id: "error",
-        header: "Error / next retry",
-        width: "220px",
+        header: "Error / next retry", kind: "text", size: 240, minSize: 176, maxSize: 320, wrap: true,
+
         cell: (job) => (
           <span
             className={cn(
-              "block truncate text-xs",
+              "block text-xs",
               job.error ? "text-[color:var(--color-status-error)]" : "text-muted-foreground",
             )}
             title={job.error || job.next_attempt_at || ""}
@@ -212,15 +212,15 @@ export function ScannerSourcesPage() {
       },
       {
         id: "requested",
-        header: "Requested",
-        width: "170px",
+        header: "Requested", kind: "date", size: 224, minSize: 208, maxSize: 240,
+
         cell: (job) => <span className="text-xs text-muted-foreground">{formatDate(job.requested_at)}</span>,
         sort: (a, b) => a.requested_at.localeCompare(b.requested_at),
       },
       {
         id: "actions",
-        header: "",
-        width: "210px",
+        header: "", kind: "actions", size: 224, minSize: 224, maxSize: 240,
+
         className: "text-right",
         cell: (job) => (
           <div className="flex justify-end gap-1">
@@ -246,38 +246,38 @@ export function ScannerSourcesPage() {
     () => [
       {
         id: "id",
-        header: "Scanner",
+        header: "Scanner", kind: "name", code: true,
         cell: (scanner) => (
           <div className="min-w-0">
-            <div className="truncate font-mono text-xs text-foreground" title={scanner.id}>{scanner.id}</div>
-            <div className="mt-0.5 truncate text-[10px] text-muted-foreground" title={scanner.server}>{scanner.server || "unknown host"}</div>
+            <div className="font-mono text-xs text-foreground" title={scanner.id}>{scanner.id}</div>
+            <div className="mt-0.5 text-[10px] text-muted-foreground" title={scanner.server}>{scanner.server || "unknown host"}</div>
           </div>
         ),
         sort: (a, b) => a.id.localeCompare(b.id),
       },
       {
         id: "joined",
-        header: "Joined",
-        width: "160px",
+        header: "Joined", kind: "date", size: 224, minSize: 208, maxSize: 240,
+
         cell: (scanner) => <span className="text-xs text-muted-foreground">{formatUnixDate(scanner.joined_timestamp)}</span>,
         sort: (a, b) => a.joined_timestamp - b.joined_timestamp,
       },
       {
         id: "db",
-        header: "CVE DB",
-        width: "190px",
+        header: "CVE DB", kind: "version", size: 224, minSize: 208, maxSize: 280, wrap: true,
+
         cell: (scanner) => (
           <div className="min-w-0">
-            <div className="truncate font-mono text-xs">{scanner.cvedb_version || "-"}</div>
-            <div className="mt-0.5 truncate text-[10px] text-muted-foreground">{formatDate(scanner.cvedb_create_time)}</div>
+            <div className="font-mono text-xs">{scanner.cvedb_version || "-"}</div>
+            <div className="mt-0.5 text-[10px] text-muted-foreground">{formatDate(scanner.cvedb_create_time)}</div>
           </div>
         ),
         sort: (a, b) => (a.cvedb_version ?? "").localeCompare(b.cvedb_version ?? ""),
       },
       {
         id: "scanned",
-        header: "Scanned",
-        width: "160px",
+        header: "Scanned", kind: "text", align: "right", size: 184, minSize: 144, maxSize: 240, wrap: true,
+
         numeric: true,
         cell: (scanner) => (
           <span className="text-xs">
@@ -289,8 +289,8 @@ export function ScannerSourcesPage() {
       },
       {
         id: "cache",
-        header: "",
-        width: "120px",
+        header: "", kind: "actions", size: 112, minSize: 112, maxSize: 128,
+
         className: "text-right",
         cell: (scanner) => (
           <Button
@@ -578,17 +578,17 @@ const JOB_STATUS_FILTERS = ["all", "pending", "running", "failed", "paused", "ca
 const QUEUE_COLUMNS: Column<ScanQueueMetric>[] = [
   {
     id: "type",
-    header: "Target type",
+    header: "Target type", kind: "name",
     cell: (row) => <span className="font-mono text-xs">{row.target_type}</span>,
     sort: (a, b) => a.target_type.localeCompare(b.target_type),
   },
-  { id: "pending", header: "Pending", numeric: true, cell: (row) => row.pending.toLocaleString(), sort: (a, b) => a.pending - b.pending },
-  { id: "retry", header: "Retry delay", numeric: true, cell: (row) => row.retry_delayed.toLocaleString(), sort: (a, b) => a.retry_delayed - b.retry_delayed },
-  { id: "running", header: "Running", numeric: true, cell: (row) => row.running.toLocaleString(), sort: (a, b) => a.running - b.running },
-  { id: "stale", header: "Stale", numeric: true, cell: (row) => row.stale_running.toLocaleString(), sort: (a, b) => a.stale_running - b.stale_running },
-  { id: "failed", header: "Failed", numeric: true, cell: (row) => row.failed.toLocaleString(), sort: (a, b) => a.failed - b.failed },
-  { id: "completed", header: "Done 1h", numeric: true, cell: (row) => row.completed_last_hour.toLocaleString(), sort: (a, b) => a.completed_last_hour - b.completed_last_hour },
-  { id: "oldest", header: "Oldest", numeric: true, cell: (row) => formatSeconds(row.oldest_pending_seconds), sort: (a, b) => a.oldest_pending_seconds - b.oldest_pending_seconds },
+  { id: "pending", header: "Pending", kind: "count", numeric: true, cell: (row) => row.pending.toLocaleString(), sort: (a, b) => a.pending - b.pending },
+  { id: "retry", header: "Retry delay", kind: "count", numeric: true, cell: (row) => row.retry_delayed.toLocaleString(), sort: (a, b) => a.retry_delayed - b.retry_delayed },
+  { id: "running", header: "Running", kind: "count", numeric: true, cell: (row) => row.running.toLocaleString(), sort: (a, b) => a.running - b.running },
+  { id: "stale", header: "Stale", kind: "count", numeric: true, cell: (row) => row.stale_running.toLocaleString(), sort: (a, b) => a.stale_running - b.stale_running },
+  { id: "failed", header: "Failed", kind: "count", numeric: true, cell: (row) => row.failed.toLocaleString(), sort: (a, b) => a.failed - b.failed },
+  { id: "completed", header: "Done 1h", kind: "count", numeric: true, cell: (row) => row.completed_last_hour.toLocaleString(), sort: (a, b) => a.completed_last_hour - b.completed_last_hour },
+  { id: "oldest", header: "Oldest", kind: "age", align: "right", size: 104, minSize: 88, maxSize: 128, numeric: true, cell: (row) => formatSeconds(row.oldest_pending_seconds), sort: (a, b) => a.oldest_pending_seconds - b.oldest_pending_seconds },
 ];
 
 function ScanJobActions({

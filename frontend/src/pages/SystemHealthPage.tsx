@@ -34,7 +34,7 @@ import { ScannerDbCapacity } from "@/components/ScannerDbCapacity";
 const heartbeatColumns: Column<SystemHealthHeartbeat>[] = [
   {
     id: "component",
-    header: "Component",
+    header: "Component", kind: "name", wrap: true,
     className: "font-medium",
     exportValue: (hb) => hb.component,
     cell: (hb) => {
@@ -51,15 +51,15 @@ const heartbeatColumns: Column<SystemHealthHeartbeat>[] = [
       );
     },
   },
-  { id: "version", header: "Version", className: "font-mono", cell: (hb) => hb.version, exportValue: (hb) => hb.version },
-  { id: "commit", header: "Commit", className: "font-mono", cell: (hb) => <span title={hb.commit}>{hb.commit_short}</span>, exportValue: (hb) => hb.commit },
-  { id: "hostname", header: "Hostname", className: "font-mono", cell: (hb) => hb.hostname, exportValue: (hb) => hb.hostname },
-  { id: "cluster", header: "Cluster", cell: (hb) => hb.cluster_name ?? <span className="text-muted-foreground">(control-plane)</span>, exportValue: (hb) => hb.cluster_name ?? "control-plane" },
-  { id: "uptime", header: "Uptime", cell: (hb) => formatUptime(hb.uptime_seconds), exportValue: (hb) => formatUptime(hb.uptime_seconds) },
-  { id: "lastSeen", header: "Last seen", cell: (hb) => formatRelative(hb.last_seen_at), exportValue: (hb) => hb.last_seen_at },
-  { id: "restarts", header: "Restarts", cell: (hb) => hb.restart_count, exportValue: (hb) => hb.restart_count },
-  { id: "details", header: "Details", cell: (hb) => <HeartbeatDetails hb={hb} />, exportValue: (hb) => heartbeatDetailsText(hb) },
-  { id: "status", header: "Status", cell: (hb) => <StatusPill status={hb.status} reason={hb.drift_reason} />, exportValue: (hb) => hb.drift_reason ? `${hb.status}; ${hb.drift_reason}` : hb.status },
+  { id: "version", header: "Version", kind: "version", size: 160, minSize: 112, maxSize: 224, wrap: true, className: "font-mono", cell: (hb) => hb.version, exportValue: (hb) => hb.version },
+  { id: "commit", header: "Commit", kind: "id", size: 112, minSize: 104, maxSize: 144, className: "font-mono", cell: (hb) => <span title={hb.commit}>{hb.commit_short}</span>, exportValue: (hb) => hb.commit },
+  { id: "hostname", header: "Hostname", kind: "id", size: 176, minSize: 144, maxSize: 240, className: "font-mono", cell: (hb) => hb.hostname, exportValue: (hb) => hb.hostname },
+  { id: "cluster", header: "Cluster", kind: "text", wrap: true, size: 192, minSize: 152, maxSize: 240, cell: (hb) => hb.cluster_name ?? <span className="text-muted-foreground">(control-plane)</span>, exportValue: (hb) => hb.cluster_name ?? "control-plane" },
+  { id: "uptime", header: "Uptime", kind: "age", size: 128, minSize: 112, maxSize: 160, cell: (hb) => formatUptime(hb.uptime_seconds), exportValue: (hb) => formatUptime(hb.uptime_seconds) },
+  { id: "lastSeen", header: "Last seen", kind: "age", size: 160, minSize: 144, maxSize: 192, cell: (hb) => formatRelative(hb.last_seen_at), exportValue: (hb) => hb.last_seen_at },
+  { id: "restarts", header: "Restarts", kind: "count", cell: (hb) => hb.restart_count, exportValue: (hb) => hb.restart_count },
+  { id: "details", header: "Details", kind: "text", wrap: true, size: 264, minSize: 208, maxSize: 360, cell: (hb) => <HeartbeatDetails hb={hb} />, exportValue: (hb) => heartbeatDetailsText(hb) },
+  { id: "status", header: "Status", kind: "status", size: 192, minSize: 160, maxSize: 240, wrap: true, cell: (hb) => <StatusPill status={hb.status} reason={hb.drift_reason} />, exportValue: (hb) => hb.drift_reason ? `${hb.status}; ${hb.drift_reason}` : hb.status },
 ];
 
 /**
@@ -489,7 +489,7 @@ function HeartbeatDetails({ hb }: { hb: SystemHealthHeartbeat }) {
   const activeTargets = compactCountMap(hb.metadata.active_jobs_by_target_type);
   const targetCapacity = compactCountMap(hb.metadata.target_capacity);
   return (
-    <div className="max-w-[280px] truncate text-[11px] text-muted-foreground">
+    <div className="text-[11px] text-muted-foreground">
       <span className="font-mono text-foreground">{hb.metadata.active_jobs ?? 0}/{hb.metadata.max_concurrent ?? "?"}</span>
       <span> busy</span>
       <span> · idle </span>

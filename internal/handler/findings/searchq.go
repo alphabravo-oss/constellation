@@ -8,8 +8,21 @@ import (
 // names (case-insensitive); values are SQL column expressions that must already
 // be in scope for the wrapping query.
 
+const findingPackageSQL = "COALESCE(NULLIF(detail_json->'package'->>'name',''), NULLIF(detail_json->'package'->>'Name',''), NULLIF(detail_json->>'package_name',''), detail_json->'affected_range'->>'package_name', '')"
+const findingPackageVersionSQL = "COALESCE(NULLIF(detail_json->'package'->>'version',''), NULLIF(detail_json->'package'->>'Version',''), detail_json->>'package_version','')"
+const findingPackageSearchSQL = "(" + findingPackageSQL + " || CASE WHEN " + findingPackageVersionSQL + " <> '' THEN '@' || " + findingPackageVersionSQL + " ELSE '' END)"
+const findingFixedSQL = "COALESCE(NULLIF(detail_json->>'fixed',''), NULLIF(detail_json->>'fixed_version',''), detail_json->'affected_range'->>'fixed_version', '')"
+const findingFixableSQL = "(lower(" + findingFixedSQL + ") NOT IN ('', 'false', 'not-fixed', 'wont-fix', 'won''t-fix'))"
+
 var findingsSearchSchema = searchdsl.Schema{
+	DefaultField:      "text",
+	LiteralSubstrings: true,
 	Fields: map[string]searchdsl.Field{
+		"text":        {Column: "concat_ws(' ', title, external_id, " + findingPackageSearchSQL + ")", Type: searchdsl.FieldString},
+		"status":      {Column: "lifecycle", Type: searchdsl.FieldString},
+		"asset":       {Column: "asset_id::text", Type: searchdsl.FieldString},
+		"canonical":   {Column: "COALESCE(NULLIF(canonical_engine,''), detail_json->>'canonical_engine','')", Type: searchdsl.FieldString},
+		"kev":         {Column: "(lower(COALESCE(detail_json->>'kev','false')) IN ('true','t','1','yes'))", Type: searchdsl.FieldBool},
 		"severity":    {Column: "severity", Type: searchdsl.FieldString},
 		"kind":        {Column: "kind", Type: searchdsl.FieldString},
 		"lifecycle":   {Column: "lifecycle", Type: searchdsl.FieldString},
@@ -19,10 +32,10 @@ var findingsSearchSchema = searchdsl.Schema{
 		// Both `cve:CVE-2021-44228` and `external_id:CVE-2021-44228` should work.
 		"cve":              {Column: "external_id", Type: searchdsl.FieldString},
 		"risk":             {Column: "risk_score", Type: searchdsl.FieldInt},
-		"canonical_engine": {Column: "COALESCE(canonical_engine,'')", Type: searchdsl.FieldString},
+		"canonical_engine": {Column: "COALESCE(NULLIF(canonical_engine,''), detail_json->>'canonical_engine','')", Type: searchdsl.FieldString},
 		"engine":           {Column: "COALESCE(engines::text,'')", Type: searchdsl.FieldString},
 		"package": {
-			Column: "COALESCE(detail_json->'package'->>'name', detail_json->'package'->>'Name', detail_json->'affected_range'->>'package_name', '')",
+			Column: findingPackageSearchSQL,
 			Type:   searchdsl.FieldString,
 		},
 		"purl": {
@@ -30,7 +43,7 @@ var findingsSearchSchema = searchdsl.Schema{
 			Type:   searchdsl.FieldString,
 		},
 		"fixed": {
-			Column: "COALESCE(detail_json->>'fixed', detail_json->'affected_range'->>'fixed_version', '')",
+			Column: findingFixedSQL,
 			Type:   searchdsl.FieldString,
 		},
 		"disagreement": {

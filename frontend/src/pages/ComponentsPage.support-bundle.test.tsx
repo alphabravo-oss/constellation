@@ -6,7 +6,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { componentsInventory, supportBundles, type ComponentDiagnostics, type ComponentInstance } from "@/api/client";
 import { ComponentsPage } from "./ComponentsPage";
 
-vi.mock("@/hooks/useCluster", () => ({ useCluster: () => ({ clusterId: "cluster-1", isLoading: false }) }));
+vi.mock("@/hooks/useCluster", () => ({ useCluster: () => ({ clusterId: "cluster-1", cluster: { id: "cluster-1" }, isLoading: false, error: null }) }));
 vi.mock("@/api/client", () => ({
   componentsInventory: { list: vi.fn(), get: vi.fn(), diagnostics: vi.fn() },
   supportBundles: { createJob: vi.fn() },

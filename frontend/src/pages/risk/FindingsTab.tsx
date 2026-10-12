@@ -23,19 +23,19 @@ export default function FindingsTab({ entityType, entityId }: { entityType: stri
   const columns: Column<Finding>[] = [
     {
       id: "risk",
-      header: "Risk",
+      header: "Risk", kind: "count",
       cell: (f) => <span className="font-mono text-xs">{f.risk_score}</span>,
       sort: (a, b) => a.risk_score - b.risk_score,
     },
     {
       id: "severity",
-      header: "Severity",
+      header: "Severity", kind: "status",
       cell: (f) => <span className={`rounded-md px-2 py-0.5 text-xs ${severityBg[f.severity]}`}>{f.severity}</span>,
       sort: (a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity],
     },
     {
       id: "title",
-      header: "Title",
+      header: "Title", kind: "name", wrap: true,
       cell: (f) => (
         <Link to="." href={clusterId ? `/clusters/${clusterId}/findings/${f.id}` : `/findings/${f.id}`} className="hover:underline">{f.title}</Link>
       ),
@@ -43,7 +43,7 @@ export default function FindingsTab({ entityType, entityId }: { entityType: stri
     },
     {
       id: "kind",
-      header: "Kind",
+      header: "Kind", kind: "status",
       cell: (f) => <span className="text-xs text-muted-foreground">{f.kind}</span>,
       sort: (a, b) => a.kind.localeCompare(b.kind),
     },

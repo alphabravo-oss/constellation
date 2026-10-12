@@ -70,10 +70,10 @@ export function FindingDetailPage() {
     typeof score === "number" || Boolean(f.cvss_vector) || Boolean(f.kev) || typeof f.epss === "number";
 
   const reconColumns: Column<ReconSignal>[] = [
-    { id: "engine", header: "Engine", cell: (s) => <span className="font-mono">{s.engine}</span> },
-    { id: "field", header: "Field", cell: (s) => <span className="font-mono">{s.field}</span> },
-    { id: "canonical", header: "VulnDB", cell: (s) => <span className="font-mono">{s.canonical || "—"}</span> },
-    { id: "evidence", header: "Evidence", cell: (s) => <span className="font-mono">{s.evidence || "—"}</span> },
+    { id: "engine", header: "Engine", kind: "id", size: 160, minSize: 128, maxSize: 192, cell: (s) => <span className="font-mono">{s.engine}</span> },
+    { id: "field", header: "Field", kind: "text", code: true, wrap: true, size: 184, minSize: 144, maxSize: 224, cell: (s) => <span className="font-mono">{s.field}</span> },
+    { id: "canonical", header: "VulnDB", kind: "text", code: true, wrap: true, size: 280, minSize: 200, maxSize: 480, grow: true, cell: (s) => <span className="font-mono">{s.canonical || "—"}</span> },
+    { id: "evidence", header: "Evidence", kind: "text", code: true, wrap: true, size: 280, minSize: 200, maxSize: 480, grow: true, cell: (s) => <span className="font-mono">{s.evidence || "—"}</span> },
   ];
 
   return (

@@ -151,10 +151,10 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
     () => [
       {
         id: "rule",
-        header: "Rule",
+        header: "Rule", kind: "name",
         cell: (rule) => (
           <div className="min-w-0">
-            <div className="truncate font-medium text-foreground" title={rule.name}>{rule.name}</div>
+            <div className="font-medium text-foreground" title={rule.name}>{rule.name}</div>
             <div className="mt-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">{rule.category || "admission"}</div>
           </div>
         ),
@@ -162,17 +162,17 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
       },
       {
         id: "status",
-        header: "State",
-        width: "110px",
+        header: "State", kind: "status",
+
         cell: (rule) => <StatusPill label={rule.enabled ? "enabled" : "disabled"} tone={rule.enabled ? "success" : "neutral"} />,
         sort: (a, b) => Number(a.enabled) - Number(b.enabled),
       },
       {
         id: "group",
-        header: "Group",
-        width: "150px",
+        header: "Group", kind: "text", code: true, size: 176, minSize: 128, maxSize: 240,
+
         cell: (rule) => rule.group ? (
-          <span className="inline-flex max-w-full truncate rounded bg-muted px-1.5 py-px font-mono text-[10px] text-muted-foreground" title={rule.group}>
+          <span className="inline-flex max-w-full rounded bg-muted px-1.5 py-px font-mono text-[10px] text-muted-foreground" title={rule.group}>
             {rule.group}
           </span>
         ) : (
@@ -182,21 +182,21 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
       },
       {
         id: "mode",
-        header: "Mode",
-        width: "105px",
+        header: "Mode", kind: "status",
+
         cell: (rule) => <RuleModePill mode={rule.mode} />,
         sort: (a, b) => a.mode.localeCompare(b.mode),
       },
       {
         id: "action",
-        header: "Action",
-        width: "95px",
+        header: "Action", kind: "status",
+
         cell: (rule) => <ActionPill action={rule.action} />,
         sort: (a, b) => a.action.localeCompare(b.action),
       },
       {
         id: "criteria",
-        header: "Criteria",
+        header: "Criteria", kind: "text", size: 264, minSize: 192, maxSize: 360, wrap: true,
         cell: (rule) => (
           rule.criteria.length === 0 ? (
             <span className="text-xs text-muted-foreground">No parsed criteria</span>
@@ -213,8 +213,8 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
       },
       {
         id: "actions",
-        header: "",
-        width: "88px",
+        header: "", kind: "actions", size: 112, minSize: 112, maxSize: 128,
+
         cell: (rule) => {
           const busy = toggleRule.isPending || deleteRule.isPending;
           return (
@@ -250,7 +250,7 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
     () => [
       {
         id: "criterion",
-        header: "Criterion",
+        header: "Criterion", kind: "name", wrap: true,
         cell: (option) => (
           <div className="min-w-0">
             <div className="font-medium text-foreground">{option.label}</div>
@@ -261,21 +261,21 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
       },
       {
         id: "family",
-        header: "Family",
-        width: "130px",
+        header: "Family", kind: "badge", size: 152, minSize: 144, maxSize: 184,
+
         cell: (option) => <StatusPill label={criterionFamily(option.key)} tone="info" />,
         sort: (a, b) => criterionFamily(a.key).localeCompare(criterionFamily(b.key)),
       },
       {
         id: "value",
-        header: "Input",
-        width: "120px",
+        header: "Input", kind: "version", size: 128, minSize: 104, maxSize: 176,
+
         cell: (option) => <span className="font-mono text-xs text-muted-foreground">{option.value_type}</span>,
         sort: (a, b) => a.value_type.localeCompare(b.value_type),
       },
       {
         id: "notes",
-        header: "Notes",
+        header: "Notes", kind: "text", size: 280, minSize: 176, maxSize: 400, wrap: true,
         cell: (option) => <span className="text-xs text-muted-foreground">{option.help}</span>,
       },
     ],
@@ -286,17 +286,17 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
     () => [
       {
         id: "time",
-        header: "Assessed",
-        width: "150px",
+        header: "Assessed", kind: "date", size: 224, minSize: 208, maxSize: 240,
+
         cell: (entry) => <span className="text-xs text-muted-foreground">{formatDateTime(entry.assessed_at)}</span>,
         sort: (a, b) => a.assessed_at.localeCompare(b.assessed_at),
       },
       {
         id: "image",
-        header: "Image",
+        header: "Image", kind: "name", code: true,
         cell: (entry) => (
           <div className="min-w-0">
-            <div className="truncate font-mono text-xs text-foreground" title={entry.image}>{entry.image}</div>
+            <div className="font-mono text-xs text-foreground" title={entry.image}>{entry.image}</div>
             <div className="mt-0.5 text-[10px] text-muted-foreground">{entry.namespace}</div>
           </div>
         ),
@@ -304,29 +304,29 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
       },
       {
         id: "decision",
-        header: "Decision",
-        width: "110px",
+        header: "Decision", kind: "status",
+
         cell: (entry) => <ActionPill action={entry.decision} />,
         sort: (a, b) => a.decision.localeCompare(b.decision),
       },
       {
         id: "current",
-        header: "Current",
-        width: "120px",
+        header: "Current", kind: "status",
+
         cell: (entry) => <OutcomePill outcome={entry.current_outcome} />,
         sort: (a, b) => a.current_outcome.localeCompare(b.current_outcome),
       },
       {
         id: "protect",
-        header: "Protect",
-        width: "120px",
+        header: "Protect", kind: "status",
+
         cell: (entry) => <OutcomePill outcome={entry.protect_outcome} />,
         sort: (a, b) => a.protect_outcome.localeCompare(b.protect_outcome),
       },
       {
         id: "matches",
-        header: "Matches",
-        width: "90px",
+        header: "Matches", kind: "count",
+
         numeric: true,
         cell: (entry) => entry.matches.toLocaleString(),
         sort: (a, b) => a.matches - b.matches,
@@ -465,18 +465,18 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
                 columns={[
                   {
                     id: "rule",
-                    header: "Rule",
+                    header: "Rule", kind: "name",
                     cell: (match) => <span className="font-mono text-xs">{String(match.policy_name ?? match.rule_id ?? "-")}</span>,
                   },
                   {
                     id: "action",
-                    header: "Action",
-                    width: "95px",
+                    header: "Action", kind: "status",
+
                     cell: (match) => <ActionPill action={String(match.action ?? "-")} />,
                   },
                   {
                     id: "reason",
-                    header: "Reason",
+                    header: "Reason", kind: "text", size: 320, minSize: 200, maxSize: 480, wrap: true,
                     cell: (match) => <span className="text-xs text-muted-foreground">{String(match.reason ?? "")}</span>,
                   },
                 ]}

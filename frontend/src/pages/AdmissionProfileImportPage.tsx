@@ -88,12 +88,12 @@ function AdmissionProfileImporter({ backTo }: { backTo: string }) {
   const rows = matchingPreview?.policies ?? (source === "catalog" && selected ? profileRowsFor(selected, mode, enabled) : []);
   const compareRows = compareProfileRows(rows, installedQ.data?.policies ?? []);
   const columns: Column<CompareRow>[] = [
-    { id: "rule", header: "Rule", hideable: false, cell: (row) => <div><span className="font-medium">{row.policy.rule_name}</span><p className="mt-1 text-xs text-muted-foreground">{row.policy.description}</p></div>, exportValue: (row) => row.policy.rule_name, sort: (a, b) => a.policy.rule_name.localeCompare(b.policy.rule_name) },
-    { id: "engine", header: "Engine", cell: (row) => row.policy.engine },
-    { id: "mode", header: "Mode", cell: (row) => row.policy.mode },
-    { id: "evidence", header: "Evidence", cell: (row) => evidenceBadges(row.policy.spec_yaml).join(" · ") || "—" },
-    { id: "enabled", header: "Rule status", cell: (row) => row.policy.enabled ? "Enabled" : "Disabled", exportValue: (row) => row.policy.enabled },
-    { id: "comparison", header: "Compared with installed", cell: (row) => installedQ.isError || !installedQ.data ? "Unavailable" : row.status },
+    { id: "rule", header: "Rule", kind: "name", wrap: true, hideable: false, cell: (row) => <div><span className="font-medium">{row.policy.rule_name}</span><p className="mt-1 text-xs text-muted-foreground">{row.policy.description}</p></div>, exportValue: (row) => row.policy.rule_name, sort: (a, b) => a.policy.rule_name.localeCompare(b.policy.rule_name) },
+    { id: "engine", header: "Engine", kind: "status", size: 144, minSize: 112, maxSize: 192, cell: (row) => row.policy.engine },
+    { id: "mode", header: "Mode", kind: "status", cell: (row) => row.policy.mode },
+    { id: "evidence", header: "Evidence", kind: "text", size: 240, minSize: 160, maxSize: 320, wrap: true, cell: (row) => evidenceBadges(row.policy.spec_yaml).join(" · ") || "—" },
+    { id: "enabled", header: "Rule status", kind: "status", cell: (row) => row.policy.enabled ? "Enabled" : "Disabled", exportValue: (row) => row.policy.enabled },
+    { id: "comparison", header: "Compared with installed", kind: "status", cell: (row) => installedQ.isError || !installedQ.data ? "Unavailable" : row.status },
   ];
   const resetPreview = () => { preview.reset(); importProfile.reset(); };
   const chooseSource = (value: string) => { if (busy) return; resetPreview(); setSource(value); };

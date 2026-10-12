@@ -32,6 +32,16 @@ afterEach(() => {
 });
 
 describe("DataTable preferences", () => {
+  it("preserves server row order while requesting a changed sort", () => {
+    const onSortChange = vi.fn();
+    const serverRows: Row[] = [{id:"high",name:"z",risk:90,owner:"x"}, {id:"low",name:"a",risk:10,owner:"x"}];
+    render(<DataTable rows={serverRows} columns={[{...columns[0],sort:(a,b)=>a.name.localeCompare(b.name)}]} rowKey={r=>r.id} manualSorting defaultSort={{id:"name",dir:"desc"}} onSortChange={onSortChange} />);
+    expect([...host!.querySelectorAll("tbody td")].map(el=>el.textContent)).toEqual(["z","a"]);
+    act(()=>host?.querySelector<HTMLButtonElement>('th[data-column-id="name"] button')?.click());
+    expect(onSortChange).toHaveBeenCalledWith({id:"name",dir:"asc"});
+    expect([...host!.querySelectorAll("tbody td")].map(el=>el.textContent)).toEqual(["z","a"]);
+  });
+
   it("keeps text and numeric headers aligned with their cells, including sortable and centered columns", () => {
     render(<DataTable rows={rows} columns={[
       { ...columns[0], kind: "name", sort: (a, b) => a.name.localeCompare(b.name) },

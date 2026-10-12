@@ -382,6 +382,50 @@ Cluster-filtered Audit loading took tens of seconds while the unfiltered latest
 event request completed in 0.02 seconds; query diagnosis remains open alongside
 Findings server filtering/export, group scope gates and broader UI-1/2/3/4 work.
 
+The inventory/query continuation completes semantic column metadata across the
+remaining policy, diagnostic and detail tables. All production inventory columns
+now delegate sizing and alignment to DataTable and global CSS; the compact
+Dashboard risk matrix remains the only raw table. Server-sorted tables can preserve
+the API order while requesting a new sort, without locally reordering one page.
+
+Findings now applies query, kind, lifecycle, cluster and fixability on the server,
+with matching instance totals, lifecycle counts, stable ordering and CSV filters.
+Search accepts bare text, field terms, negation and colon-containing package URLs;
+ordinary substring terms treat SQL wildcard characters literally. Legacy string
+KEV evidence agrees between instance and CVE views. URL state retains filters,
+view, grouping, page and sort. Selection and grouped exports are explicitly scoped
+to the current server page; filtered instance export states its 100,000-row cap.
+CVE fixability retains unfixed instances in a matching CVE's blast radius. Its
+filtered total already existed; this increment wires consistent search and paging.
+
+Audit migration **173** adds a concurrent organization/target/event index. Cluster
+pages probe their distinct target IDs and merge matching events rather than scan
+the entire audit log. Interrupted or unrecorded index builds can be retried. Group
+authoring requires settled, exact cluster scope, retains drafts through failed
+refreshes, and rechecks scope before saving. Components inventory, detail and
+support bundles now score the original heartbeat rows without pairing them with a
+collapsed/reordered health summary; SystemHealth retains its summary behavior.
+Components API failures display an error and retry rather than false zero counts.
+
+Validation: Helm revision **42** runs frontend/API
+`query-console-20261012` and migration image `audit-lookup-20261012`; all seven
+deployments are ready. **552 frontend tests** pass, together with production
+build/type-check, changed-file lint, OpenAPI, endpoint mapping, plan and whitespace
+checks. Fresh PostgreSQL applies migration 173 and a second no-op; **140 selected
+backend tests** pass with race detection/shuffling and no skips, including retry
+of invalid/unrecorded index builds, sparse custom/generic query plans, Components
+status association and shared Findings list/CSV predicates beyond row 500.
+
+Live migration finished in 7.55 seconds; the index is ready/valid and the recorded
+pre-migration audit head is unchanged. The cluster Audit request returns 17 rows
+in 2.269 seconds, versus tens of seconds before. Components returns real inventory
+in 0.02 seconds. A critical-vulnerability filter returns 224 matching instances;
+CSV agrees with the list IDs and order, and the CVE view reports 27 matching CVEs.
+Browser checks verify page 2 shows rows 101–200 of 224 and survives URL reload.
+Components' two tables, Findings, and scanner queue/jobs have matching header/body
+geometry at 1280px and 640px with no document overflow or clipped actions. The
+viewport was restored. These checks do not close remaining UI-1/2/3/4 acceptance.
+
 The admission-engine continuation adds migration **172** and persists normalized
 engine outcomes atomically with image scan completion. The built-in vulnerability
 profiles now require successful Trivy and Grype results rather than retired
@@ -2003,8 +2047,8 @@ progressive disclosure, while retaining Constellation's security vocabulary.
   source endpoints.
 - [ ] Link every tile to the exact filtered source view. Browser tests now cover
   dashboard metric destinations and supported component/network filters.
-  Findings severity/lifecycle URLs now filter instance rows and preserve
-  history, but the list caps at 500 and CVE rollups lack a filtered total.
+  Findings filters and server pages now preserve URL state and use matching
+  instance totals; CVE rollups retain their filtered total and share the search DSL.
   Deployment name search is URL-backed yet limited to the API's first 100
   rows. Host CVEs now filters open host vulnerabilities using the source
   cluster and pages matching nodes; its distinct-node total does not equal the
