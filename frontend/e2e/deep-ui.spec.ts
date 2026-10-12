@@ -288,7 +288,7 @@ test("wave-d: ResponseRules guided create", async ({ page }) => {
   // Use a unique name based on timestamp
   const name = `e2e-rule-${Date.now()}`;
   await expect(page.getByRole("heading", { name: "New rule" })).toBeVisible();
-  await page.getByLabel("Name").fill(name);
+  await page.getByLabel("Name", { exact: true }).fill(name);
   await page.getByLabel("Description").fill("Created by the deep-ui smoke test");
   await page.screenshot({ path: path.join(SCREENS_DIR, "rrv2-builder.png"), fullPage: true });
   await page.getByRole("button", { name: /Save/ }).click();

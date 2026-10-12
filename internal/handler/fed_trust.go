@@ -352,18 +352,20 @@ func fedClientCert(r *http.Request, header string) *x509.Certificate {
 
 // fedForwardedClientCert parses the client certificate the trusted terminator placed in the
 // configured header (ingress-nginx's ssl-client-cert is URL-encoded PEM). Returns nil when the
-// header is unconfigured, absent, or unparseable.
+// header is unconfigured, absent, unparseable, or not from a verified proxy peer.
 func fedForwardedClientCert(r *http.Request, header string) *x509.Certificate {
 	header = strings.TrimSpace(header)
-	if header == "" {
+	if header == "" || !authctx.TrustedProxyFrom(r.Context()) {
 		return nil
 	}
 	v := r.Header.Get(header)
 	if v == "" {
 		return nil
 	}
-	if dec, err := neturl.QueryUnescape(v); err == nil {
-		v = dec
+	if !strings.HasPrefix(strings.TrimSpace(v), "-----BEGIN CERTIFICATE-----") {
+		if dec, err := neturl.QueryUnescape(v); err == nil {
+			v = dec
+		}
 	}
 	block, _ := pem.Decode([]byte(v))
 	if block == nil {
@@ -383,7 +385,7 @@ func fedJoinOverTLS(r *http.Request) bool {
 	if r.TLS != nil {
 		return true
 	}
-	return strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
+	return authctx.TrustedProxyFrom(r.Context()) && strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
 }
 
 // fedCertFingerprintPEM parses a PEM-encoded certificate and returns its sha256(DER)

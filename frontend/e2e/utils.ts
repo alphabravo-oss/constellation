@@ -1,4 +1,4 @@
-import type { APIRequestContext, Page } from "@playwright/test";
+import { test, type APIRequestContext, type Page } from "@playwright/test";
 import { setTimeout as delay } from "node:timers/promises";
 import { readAuthState, writeAuthState, type BrowserCookie } from "./auth-state";
 
@@ -33,6 +33,11 @@ export async function loginRequest(request: APIRequestContext, creds: Credential
     const milliseconds = Math.max(1000, Number.isFinite(wait) ? wait : 6000);
     if (Date.now() + milliseconds > deadline) return response;
     await response.dispose();
+    // Preserve the workflow's timeout budget when production throttling delays
+    // setup. This extends only the actual cooldown, not assertion timeouts or
+    // the login retry deadline, and never retries a failed workflow.
+    const info = test.info();
+    info.setTimeout(info.timeout + milliseconds);
     await delay(milliseconds);
   }
 }

@@ -3,6 +3,7 @@ package dpi
 import (
 	"bufio"
 	"bytes"
+	"io"
 	"net/http"
 	"strings"
 
@@ -10,8 +11,8 @@ import (
 	"golang.org/x/net/http2/hpack"
 )
 
-// parseHTTP1 attempts HTTP/1.1 request line + headers parsing. Body is taken raw
-// up to a 64 KiB cap. Pipelined responses get parsed if dir = response.
+// parseHTTP1 parses one HTTP/1.1 message. Decode transfer framing before body
+// inspection, retain at most 64 KiB, and flag incomplete observations.
 func parseHTTP1(flow Flow, dir Direction, payload []byte) *L7Event {
 	br := bufio.NewReader(bytes.NewReader(payload))
 	// Cheap pre-flight: first byte should be a printable ASCII method/ HTTP token.
@@ -23,7 +24,8 @@ func parseHTTP1(flow Flow, dir Direction, payload []byte) *L7Event {
 		if err != nil {
 			return nil
 		}
-		body := readBounded(br, 64<<10)
+		defer func() { _ = req.Body.Close() }()
+		body := readBounded(req.Body, 64<<10)
 		evt := &L7Event{
 			Flow: flow, Protocol: "http", Dir: dir,
 			HTTP: &HTTPEvent{
@@ -44,7 +46,8 @@ func parseHTTP1(flow Flow, dir Direction, payload []byte) *L7Event {
 	if err != nil {
 		return nil
 	}
-	body := readBounded(br, 64<<10)
+	defer func() { _ = resp.Body.Close() }()
+	body := readBounded(resp.Body, 64<<10)
 	return &L7Event{
 		Flow: flow, Protocol: "http", Dir: dir,
 		HTTP: &HTTPEvent{
@@ -73,7 +76,7 @@ type boundedBody struct {
 	truncated bool
 }
 
-func readBounded(r *bufio.Reader, cap int) boundedBody {
+func readBounded(r io.Reader, cap int) boundedBody {
 	buf := make([]byte, 0, 1024)
 	tmp := make([]byte, 4096)
 	for {
@@ -86,7 +89,7 @@ func readBounded(r *bufio.Reader, cap int) boundedBody {
 			buf = append(buf, tmp[:n]...)
 		}
 		if err != nil {
-			return boundedBody{bytes: buf}
+			return boundedBody{bytes: buf, truncated: err != io.EOF}
 		}
 	}
 }

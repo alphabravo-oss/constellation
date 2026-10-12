@@ -80,14 +80,13 @@ RUN test -x /src/third_party/neuvector/dp/dp || (echo "dp build produced no bina
 #
 # FIPS=1 toggles Go 1.26's bundled FIPS 140-3 module:
 #   - GOFIPS140=v1.0.0 selects the validated crypto module
-#   - -tags fips switches pkg/observability + pkg/audit to FIPS-approved hashes
-#   - GODEBUG=fips140=on is set on the final stage to enforce at runtime
+#   - -tags fips enables the pkg/version startup guard
+#   - the binary defaults to FIPS mode; a disabled/unpinned runtime is rejected
 #
 # IMPORTANT scope: this affects the *Go agent's* crypto only. The vendored
 # C data-plane (third_party/neuvector/dp) links against hyperscan + PCRE2 +
-# jemalloc + urcu — none of which carry a FIPS 140-3 certificate. The agent
-# refuses to load policy rules tagged `fips_only=false` when FIPS=1, and
-# docs/fips.md publishes the precise scoping statement we ship.
+# jemalloc + urcu — this native stack has not been FIPS-qualified.
+# See docs/fips.md for the qualification boundary.
 # -----------------------------------------------------------------------------
 FROM golang:${GO_VERSION}-bookworm AS go-build
 WORKDIR /src
@@ -160,11 +159,9 @@ ENV CONSTELLATION_BPF_OBJ=/opt/constellation/runtime.bpf.o
 ENV CONSTELLATION_DP_BIN=/usr/local/bin/dp
 
 # FIPS posture is carried into the runtime stage as an OCI label so that
-# `docker inspect` (and the agent's own /metrics exposition) can report it.
-# When FIPS=1 we additionally set GODEBUG=fips140=on so the Go runtime
-# refuses to boot if the binary wasn't FIPS-built — defense-in-depth
-# against an image-mismatch deploy. The dp side keeps its own scope; see
-# docs/fips.md.
+# `docker inspect` can report the requested build mode. The tagged binary
+# rejects a disabled/unpinned module before main; labels are not runtime
+# attestation. The dp side keeps its own scope; see docs/fips.md.
 ARG FIPS=0
 ENV CONSTELLATION_FIPS_GO=${FIPS}
 LABEL org.alphabravo.constellation.fips.go="${FIPS}" \

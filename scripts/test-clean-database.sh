@@ -55,6 +55,9 @@ export CONSTELLATION_TEST_DATABASE_URL="$DATABASE_URL"
 export GOOSE_DRIVER=postgres GOOSE_DBSTRING="$DATABASE_URL" GOOSE_MIGRATION_DIR=db/migrations
 "$goose_bin" up
 "$goose_bin" up
+# Legacy integration tests require a real org, user and cluster. Seed only this
+# newly-created disposable database so missing fixtures cannot silently skip them.
+go run ./cmd/constellation-seed
 if [[ $# == 0 ]]; then
   set -- ./...
 fi

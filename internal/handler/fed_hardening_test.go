@@ -25,7 +25,7 @@ func kickMemberByCluster(t *testing.T, h *Federation, orgID, userID uuid.UUID, c
 		`SELECT id FROM fed_members WHERE org_id=$1 AND cluster_id=$2`, orgID, clusterID).Scan(&mid); err != nil {
 		t.Fatalf("lookup member id: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/federation/members/"+mid.String(), nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "/api/v1/federation/members/"+mid.String(), nil)
 	req = req.WithContext(WithSubject(req.Context(), Subject{OrgID: orgID, UserID: userID}))
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", mid.String())
@@ -41,7 +41,7 @@ func kickMemberByCluster(t *testing.T, h *Federation, orgID, userID uuid.UUID, c
 // for single-use), as an operator would, and returns the token.
 func mintViaEndpoint(t *testing.T, h *Federation, orgID, userID uuid.UUID) string {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/federation/join-tokens", strings.NewReader(`{}`))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/federation/join-tokens", strings.NewReader(`{}`))
 	req = req.WithContext(WithSubject(req.Context(), Subject{OrgID: orgID, UserID: userID}))
 	rec := httptest.NewRecorder()
 	h.MintJoinToken(rec, req)
@@ -165,7 +165,7 @@ func TestFedHardening_EmptyFingerprintRejectedUnderMTLS(t *testing.T) {
 	// Now enforce mTLS (CA wired). The empty-fingerprint credential must be rejected even
 	// though the bearer ticket itself is valid.
 	srv := startFedMTLSServer(t, pool, signer, ca, hNoCA)
-	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/v1/federation/sync?since=0", nil)
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+"/api/v1/federation/sync?since=0", nil)
 	req.Header.Set("Authorization", "Bearer "+secret)
 	resp, err := fedTestClient(srv, nil).Do(req)
 	if err != nil {
@@ -257,7 +257,7 @@ func TestFedHardening_ProxyStripsTrustHeaders(t *testing.T) {
 		"Ssl-Client-Cert":   "spoofed-cert",
 	}
 	url := "/api/v1/federation/clusters/" + clusterID + "/findings"
-	r := httptest.NewRequest(http.MethodGet, url, nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
 	for k, v := range smuggled {
 		r.Header.Set(k, v)
 	}

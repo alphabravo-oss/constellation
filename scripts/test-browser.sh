@@ -123,7 +123,7 @@ with TemporaryDirectory() as directory:
             apply_rollback_fixture=True)
 PY
 if [[ $# == 0 ]]; then
-  set -- auth.spec.ts browser-session.spec.ts migration-remaining.spec.ts
+  set -- .
 fi
 cd frontend
 npx playwright test "$@"

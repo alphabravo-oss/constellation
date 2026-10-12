@@ -63,6 +63,16 @@ spec:
   policyTypes:
     - Ingress
   ingress:
+{{ if or .Values.ingress.enabled .Values.gateway.enabled }}
+{{ range .Values.networkPolicies.frontendIngressCIDRs }}
+    - from:
+        - ipBlock:
+            cidr: {{ . | quote }}
+      ports:
+        - protocol: TCP
+          port: 8080
+{{ end }}
+{{ end }}
 {{ if .Values.frontend.enabled }}
     - from:
         - podSelector:

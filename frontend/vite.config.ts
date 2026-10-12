@@ -8,6 +8,9 @@ const apiURL = process.env.VITE_API_URL ?? "http://localhost:18080";
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   build: {
+    // /assets is an application route. Keep compiled files in a distinct
+    // namespace so production nginx can serve direct asset-detail navigation.
+    assetsDir: "static",
     rolldownOptions: {
       output: {
         codeSplitting: {

@@ -95,6 +95,45 @@ The lost-acknowledgement/restart test verifies exactly one raw flow, late aggreg
 and rule-hit contribution. Source is pushed to draft PR #2; live remains migration
 167, and the broader hosted release gates remain pending/failing as recorded.
 
+The next source review formatted the Go tree and bound 460 test HTTP requests
+in total to their test lifetimes. Strict lint findings fell from 2,299 to 1,747;
+body-closure, formatting and ineffectual-assignment findings are cleared, while
+security/error handling/context/complexity findings remain blocking. All Go packages passed twice on a fresh database
+through migration 169. The first complete production browser run found an nginx
+`/assets/` collision with the Assets application routes: compiled files now live
+under `/static/`, redirects preserve the public origin, and both Docker and Helm
+serve SPA deep links. Browser setup now extends its timeout only for an actual
+server-mandated login cooldown; production throttling remains enabled. The next
+full run passed 190/191, exposing one ambiguous Name/Namespace test locator, now
+corrected. The final rebuilt production-container suite passes **191/191** with
+zero retries; all **133 frontend unit/component tests** also pass. CI now invokes
+the whole browser suite by default and enables the isolated migration
+apply/idempotency/rollback recipe. These are local results; hosted and live-cluster
+qualification remain open.
+
+Additional security fixes in this continuation:
+
+- Compliance email validates header inputs and mailbox syntax, and uses MIME
+  encoding for Unicode subjects, attachment names and base64 line wrapping.
+  Injection and MIME round-trip tests pass with races.
+- Federation proxy requests cannot follow cross-host or same-host redirects;
+  join-remote requires HTTPS and does not fabricate transport evidence or replay
+  join tokens through redirects. Forwarded TLS/certificate evidence requires a
+  explicitly configured trusted direct peer recorded before client-IP rewriting. Direct TLS, trusted
+  and untrusted forwarding, redirect and credential tests pass with races.
+  The Ingress/Gateway routes `/api` directly to the API, with matching network
+  admission; exact deployed mTLS/ingress qualification remains open.
+- HTTP/1 inspection decodes chunk framing, respects message body boundaries,
+  and reports incomplete/over-budget observations. Request/response framing,
+  pipeline separation and bounded-body tests pass with races. This is Go-parser
+  evidence, not live C data-plane or CNI qualification.
+- A distinct required FIPS job builds API/scanner/operator/runtime-agent with
+  the pinned Go module and checks enabled, disabled and unpinned runtime cases.
+  All three runtime cases and four builds pass locally. The tagged startup guard
+  and crypto-module logs now exist; [FIPS documentation](fips.md) removes earlier
+  unsupported whole-product, CLI and native-library claims. Workflow validation
+  passes; deployed cryptographic qualification remains open.
+
 These fixes do not establish green CI. Historical secret findings need
 classification/remediation and any genuine credentials revoked; do not broadly
 allowlist them or rewrite shared history without a reviewed recovery plan.
@@ -111,6 +150,15 @@ WAL/dead-tuple improvement.
 
 The existing global rollup lock and global control-audit chain remain scaling
 constraints; this change does not claim to remove them.
+
+Local evidence for this continuation: `/tmp/constellation-parity-browser-final/`
+contains image IDs, migration/API logs and generated screenshots;
+`/tmp/constellation-parity-frontend-unit.log` records 133 passing tests;
+`/tmp/constellation-parity-fips/fips/` records the four builds and three runtime
+cases. The expanded seeded/shuffled/race database gate is still running.
+The previous unseeded run exposed legacy skips; passing package totals alone do
+not establish that those skipped workflows ran. The harness now seeds only its
+new disposable database, and new federation redirect tests own their fixtures.
 
 ## Current baseline
 
@@ -1365,8 +1413,10 @@ progressive disclosure, while retaining Constellation's security vocabulary.
   is the browser alias because `/api` is reserved by the server.
 - [ ] Every primary page opens with one verdict, no more than five KPIs, and one
   primary table or workspace.
-- [ ] Use tabs for peer views, drawers for editing, and an Advanced disclosure for
-  expert-only fields.
+- [ ] Use URL-linked tabs for peer views, dedicated `/new` and `/:id/edit` form
+  pages with Save/Cancel/back navigation, and Advanced disclosure for expert-only
+  fields. This follows the established user directive in `frontend/CLAUDE.md`;
+  editing drawers are not the target interaction.
 
 ### UI-2 Shared enterprise tables
 
@@ -1380,8 +1430,9 @@ progressive disclosure, while retaining Constellation's security vocabulary.
   and user-scoped saved views where useful. Astronomer's table-view API and
   state sanitization are reference implementations; require cross-user/tenant
   isolation, stale-column migration and visible reset behavior before closure.
-- [ ] Add detail drawers to repetitive triage tables where full-page navigation
-  interrupts the workflow.
+- [ ] Add transient read-only detail peeks where justified for repetitive triage;
+  prefer detail pages and keep every add/edit form on its own URL. Never use a
+  detail peek as a second editing surface.
 
 ### UI-3 Platform-component visibility
 
@@ -1486,11 +1537,12 @@ progressive disclosure, while retaining Constellation's security vocabulary.
 - [ ] Add performance budgets for network rollups, findings, audit/timeline, and
   dashboard summaries.
 - [ ] Implement durable, bounded per-cluster telemetry delivery and idempotent
-  acceptance. The current memory queues count drops after exhausted retries;
-  the inspected event uploader treats 429 as terminal, and ingest lacks a
-  producer sequence/replay contract. Require capped protected spool, durable
-  acknowledgement, authenticated producer/cluster binding, fair byte/row
-  quotas, retry/Retry-After handling and priority/overflow visibility. Test WAN
+  acceptance. October 12 source implements bounded durable event/flow spools,
+  producer/sequence replay protection, transaction-bound durable ACKs, batched
+  writes and Retry-After handling. Restart/lost-ACK/conflict/late-flow tests pass.
+  Remaining lanes are best effort; require a durable response-action outbox,
+  producer lifecycle/budgets, fair byte/row quotas and priority/overflow
+  visibility. Per-process concurrency caps do not establish fleet fairness. Test WAN
   and API loss, process restart, lost acknowledgement after DB commit, duplicate
   and reordered batches, full spool and one noisy cluster without silently
   losing critical receipts or double-counting flow aggregates. Preserve local
@@ -1538,14 +1590,14 @@ compatibility, supported runtime versions, and upstream changes before pinning.
 | [01 Architecture](https://technology-selection-guide.aws.ablabs.io/01-architecture/) | Go binaries under `cmd/`, internal packages, constructors, and an operator exist. | Partial: SQL remains in handlers, downstream packages read env, substantial implementation resides in `pkg/`; audit layer boundaries, mutable globals, composition roots and operator serialization. | TSG-2 |
 | [02 Data](https://technology-selection-guide.aws.ablabs.io/02-data/) | PostgreSQL, pgx/v5, Goose SQL migrations, tenant columns and encrypted credentials exist. | Partial: no sqlc query/generated-accessor setup found; migrations use the external Goose image, not an embedded runner; encryption key-version metadata, soft-delete applicability, JSONB contracts and cross-tenant FK enforcement need review. | TSG-2, TSG-3 |
 | [03 Surface](https://technology-selection-guide.aws.ablabs.io/03-surface/) | chi REST API, OpenAPI, JWT/RBAC middleware and React/TypeScript SPA exist. Browser cookies, refresh/reuse revocation and a 15-minute access-token cap have API/UI/container-browser regressions. The endpoint-map checker gates explicit API references against OpenAPI/registered routes in CI. | Partial: no Connect/protobuf contract pipeline found; Axios DTOs are hand-maintained, pagination varies, wildcard map references do not prove complete families, and deployed identity/API conformance remains open. | TSG-3, TSG-5 |
-| [04 Infrastructure/tooling](https://technology-selection-guide.aws.ablabs.io/04-infra-tooling/) | Makefile, Vite API proxy, multi-stage Dockerfiles, Helm and k3s exist. A golangci-lint v2 config and failing-on-error lint/format, tool installation, runtime pins and shell checks are wired to CI. | Partial: baseline lint/format/ShellCheck findings still block release; no Air development-loop contract has been verified; runtime images contain Debian/package managers and mutable base tags, and deployed toolchain/reproducibility evidence is open. | TSG-4 |
+| [04 Infrastructure/tooling](https://technology-selection-guide.aws.ablabs.io/04-infra-tooling/) | Makefile, Vite API proxy, multi-stage Dockerfiles, Helm and k3s exist. A golangci-lint v2 config and failing-on-error lint/format, tool installation, runtime pins and shell checks are wired to CI. | Partial: baseline lint findings still block release; repository formatting and ShellCheck now pass locally; no Air development-loop contract has been verified; runtime images contain Debian/package managers and mutable base tags, and deployed toolchain/reproducibility evidence is open. | TSG-4 |
 | [05 Observability](https://technology-selection-guide.aws.ablabs.io/05-observability/) | Shared telemetry package, JSON slog, OTLP/HTTP and a separate Prometheus registry exist. | Partial: differs from prescribed zerolog/stderr, OTLP/gRPC and OTel Prometheus exporter; pgx pool has no composite tracer configured; prove propagation, cardinality, shutdown and full local telemetry stack. | TSG-6 |
 | [06 Security](https://technology-selection-guide.aws.ablabs.io/06-security/) | jwt/v5, RBAC, audit chain, credential sealing, FIPS-related build paths and release signing exist. Cookie/refresh/reuse controls and blocking per-PR security/secret/dependency gates have been added. | Partial: baseline scan findings, hosted gate enforcement, key rotation metadata/job, threat model and complete deployed identity verification remain open. Source/gate presence does not mean guide compliance. | TSG-3, TSG-4 |
 | [07 Testing](https://technology-selection-guide.aws.ablabs.io/07-testing/) | Go/Vitest/Playwright tests, disposable PostgreSQL repeat/race/JUnit gate and production-container browser gate pass locally. Playwright browser auth coverage uses zero PR retries. | Partial: most DB tests lack integration tags and share a DB; no pgtestdb/testcontainers harness found. Seed-dependent skips, CNI/kernel/cloud matrix, hosted CI evidence, and full isolated integration contracts remain open. | TSG-4 |
 | [08 Discipline](https://technology-selection-guide.aws.ablabs.io/08-discipline/) | Canonical evidence-driven plan and real DB tests provide a foundation. | Partial: codify ADR/deviation review, root-cause and transport-boundary testing, layer/enum discipline, offline-first acceptance and contributor commands. | TSG-1, TSG-2, TSG-7 |
 | [09 Air-gap](https://technology-selection-guide.aws.ablabs.io/09-airgap/) | Scanner DB preload/airgap image support and signed release artifacts exist. | Partial: complete signed offline deployment BOM/loader, local-first OCI resolver, closed-egress first boot and all-feature upgrade/restore proof are not established; release images are deliberately amd64-only versus the guide's dual-architecture requirement. | TSG-7 |
-| [10 TypeScript](https://technology-selection-guide.aws.ablabs.io/10-typescript/) | React 19, strict TypeScript, Vite, Tailwind 4, Radix, TanStack Query, lucide, Vitest and Playwright exist. Node is pinned and browser auth/session regressions pass locally. | Partial: no Connect-Web/Zod/react-hook-form stack found; routing uses component auth rather than a root data-loader session contract. Mutation invalidation, inline field errors and version-review obligations need broader acceptance tests. | TSG-5 |
-| [11 Multi-language](https://technology-selection-guide.aws.ablabs.io/11-multi-language/) | Go/TypeScript, native/eBPF runtime code, Python test tooling, shell and Helm coexist. Go/Node/Python CI runtimes are pinned, npm lockfiles are audited, and ShellCheck is a blocking gate. | Partial: language ADRs/ownership, native exceptions, ShellCheck baseline findings, Python type/lint coverage, per-language SBOM/signing and cross-language telemetry remain open. | TSG-1, TSG-4, TSG-7 |
+| [10 TypeScript](https://technology-selection-guide.aws.ablabs.io/10-typescript/) | React 19, strict TypeScript, Vite, Tailwind 4, Radix, TanStack Query, lucide, Vitest and Playwright exist. Node is pinned and browser auth/session regressions pass locally. | Partial: TanStack Router owns routing and the shared TanStack Form/Zod layer is used by Data Retention. The user chose these Astronomer-aligned alternatives to the guide's router/form choices; record the deviation. No Connect-Web pipeline or root session-loader contract is established. Mutation invalidation, inline field errors and version-review obligations need broader acceptance tests. | TSG-5 |
+| [11 Multi-language](https://technology-selection-guide.aws.ablabs.io/11-multi-language/) | Go/TypeScript, native/eBPF runtime code, Python test tooling, shell and Helm coexist. Go/Node/Python CI runtimes are pinned, npm lockfiles are audited, and ShellCheck is a blocking gate. | Partial: language ADRs/ownership, native exceptions, Python type/lint coverage, per-language SBOM/signing and cross-language telemetry remain open. | TSG-1, TSG-4, TSG-7 |
 
 ### TSG-1 Requirement inventory and deliberate adoption
 
@@ -1631,8 +1683,12 @@ custody, threat-model or external-provider release matrix.
   worker-local cookies still hit 429 after test 20. Setup-project auth now
   shares validated state across worker restarts; a 16-case API-backed sample
   had no 429s, and the one asset repeat-workflow failure passed after migration
-  167. Full-suite, hosted CI and distinct FIPS proof remain open; do not loosen
-  production rate limiting merely to pass tests.
+  167. October 12 adds actual Retry-After timeout budgeting and fixes production
+  nginx Assets deep links. A subsequent full run passed 190/191; the remaining
+  ambiguous field locator is fixed and the final rebuilt suite passes 191/191.
+  The full suite and migration apply/rollback fixture are now the CI default.
+  The distinct FIPS build/runtime job now passes locally. Hosted CI and deployed FIPS workflow
+  qualification remain open; do not loosen production rate limiting for tests.
 
 ### TSG-5 Typed API and frontend conventions — P1/P2
 

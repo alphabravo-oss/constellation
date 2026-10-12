@@ -87,7 +87,7 @@ func fedTestClient(srv *httptest.Server, cert *tls.Certificate) *http.Client {
 
 func pollSync(t *testing.T, client *http.Client, srv *httptest.Server, bearer string) int {
 	t.Helper()
-	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/v1/federation/sync?since=0", nil)
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+"/api/v1/federation/sync?since=0", nil)
 	req.Header.Set("Authorization", "Bearer "+bearer)
 	resp, err := client.Do(req)
 	if err != nil {

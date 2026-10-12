@@ -1798,7 +1798,7 @@ SELECT EXISTS (SELECT 1 FROM user_sessions WHERE session_id = $1 AND user_id = $
 				// Untracked legacy/test tokens (no session row) skip this entirely.
 				// A1: a per-org SecurityPolicy may override the deploy-time idle window
 				// (falls back to the SESSION_IDLE_TIMEOUT env default when unconfigured).
-				idle := s.cfg.SessionIdleTimeout
+				var idle time.Duration
 				if pol, _, perr := auth.LoadSecurityPolicy(r.Context(), s.db.Pool(), claims.OrgID); perr == nil {
 					idle = pol.IdleTimeout(s.cfg.SessionIdleTimeout)
 				} else {
@@ -2214,12 +2214,16 @@ func rateLimited(w http.ResponseWriter, _ *http.Request) {
 // with no configuration, while a directly internet-exposed server ignores
 // forwarded headers from public clients.
 func (s *Server) trustedProxyRealIP() func(http.Handler) http.Handler {
-	trusted := parseTrustedProxies(os.Getenv("CONSTELLATION_TRUSTED_PROXIES"))
+	rawTrusted := os.Getenv("CONSTELLATION_TRUSTED_PROXIES")
+	trusted := parseTrustedProxies(rawTrusted)
+	explicitTrust := strings.TrimSpace(rawTrusted) != ""
 	realIP := chimw.RealIP
 	return func(next http.Handler) http.Handler {
 		honored := realIP(next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if ipInNets(remoteHostIP(r.RemoteAddr), trusted) {
+			peerTrusted := ipInNets(remoteHostIP(r.RemoteAddr), trusted)
+			r = r.WithContext(authctx.WithTrustedProxy(r.Context(), peerTrusted && explicitTrust))
+			if peerTrusted {
 				honored.ServeHTTP(w, r)
 				return
 			}

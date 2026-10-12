@@ -93,6 +93,8 @@ networkPolicies:
     namespace: cnpg-system
     podLabels:
       app.kubernetes.io/name: cloudnative-pg
+  # Allowed ingress/Gateway sources; also used for its direct /api route.
+  # Set api.env.CONSTELLATION_TRUSTED_PROXIES to the actual proxy peers.
   frontendIngressCIDRs: ["0.0.0.0/0"]
   admissionIngressCIDRs: ["0.0.0.0/0"]
   # Required when NetworkPolicy and the host-network runtime agent are both

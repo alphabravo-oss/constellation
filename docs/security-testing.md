@@ -22,6 +22,7 @@ make test-tooling
 make lint fmt lint-shell
 make test-race
 make test-integration
+make test-fips
 make security
 cd frontend && npm ci && npm run test:ci && npm run build
 ```
@@ -37,7 +38,7 @@ helpers, rather than silently restricting itself to the newly added scripts.
 
 `scripts/test-go.sh unit|integration [package patterns]` runs uncached, shuffled
 race tests through gotestsum. The integration mode starts a disposable pgvector
-PostgreSQL database, migrates twice, and preserves the existing serialized,
+PostgreSQL database, migrates twice, seeds its isolated demo fixtures, and runs the serialized,
 twice-repeated `-tags=integration -p 1 -count=2` suite. Containers are removed on
 failure; cleanup errors do not mask a test failure. The release clean-database
 gate retains its original default execution; `TEST_GO_USE_GOTESTSUM=1` opts that
@@ -130,9 +131,10 @@ separation; a shuffled shared database can expose existing fixture collisions.
 The Python harness has unbounded requirements rather than a reproducible lock;
 its audit reflects current resolution, not a verified deployed environment.
 Python deployment/runtime alignment, type/lint/lock checks and native/vendored
-dependency audits remain separate work. Browser production/auth flows, distinct FIPS checks,
-Air/dev orchestration, Docker runtime alignment/digests/labels and live-cluster
-acceptance are not implemented by this slice. No API or OpenAPI change is needed.
+dependency audits remain separate work. The October 12 continuation adds a distinct
+FIPS build/runtime guard job; see [its exact scope](fips.md). Full deployed
+cryptographic qualification, Air/dev orchestration, Docker runtime
+alignment/digests/labels and live-cluster acceptance remain open. No API or OpenAPI change is needed.
 
 Before claiming acceptance, record actual hosted CI/SARIF uploads, required-check
 configuration and complete unit/integration runs, not only fixture-based tooling
@@ -249,3 +251,22 @@ loader, but real-kernel load/attach/event validation remains required. Signed
 IdP ACS and live Hubble streaming acceptance also remain deployment checks.
 No auth/session implementation, API contract or OpenAPI change was made by
 this dependency slice, and the parent workspace/CI browser job was left alone.
+
+## October 12 continuation
+
+The production browser runner now defaults to the complete suite; pass explicit
+spec names only for a focused local run. CI also enables the loopback-only fixed
+migration apply/idempotency/rollback fixture. The rebuilt local suite passed
+191/191 without retries and the frontend suite passed 133 tests. Compiled assets
+use `/static/`, preserving the application `/assets` route. Login setup honors
+actual Retry-After cooldowns without weakening the production rate limit.
+
+The clean-database runner seeds its newly created disposable database after both
+migration runs. This exercises legacy seed-dependent tests instead of treating
+their skips as coverage. It never seeds an operator-supplied DSN. Per-test fixture
+isolation remains unfinished; the full seeded, shuffled race result is required
+in addition to source compilation. New federation redirect tests own their org.
+
+Repository Go formatting and ShellCheck pass locally. The remaining strict lint
+and security findings still block release; they have not been suppressed.
+See [the canonical tracker](NEUVECTOR-PARITY-PLAN.md) for current gate evidence.

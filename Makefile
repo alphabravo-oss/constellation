@@ -54,6 +54,10 @@ test:
 test-clean-database:
 	bash scripts/test-clean-database.sh
 
+.PHONY: test-fips
+test-fips:
+	bash scripts/test-fips.sh
+
 .PHONY: test-browser
 test-browser:
 	bash scripts/test-browser.sh

@@ -667,3 +667,33 @@ helm upgrade constellation deploy/charts/constellation -n constellation-system
 
 Same fix as scanner. The Secret is `optional: true` on the DaemonSet so the
 agent boots in stdout-only mode without a token.
+
+## Federation transport and proxy trust
+
+Federation `join-remote` requires an absolute HTTPS master URL. Join tokens are
+never replayed through redirects. Configure a certificate trusted by the API
+container; use a TLS test server for local federation testing. The joining API
+no longer fabricates `X-Forwarded-Proto` to make an HTTP connection appear secure.
+
+The chart routes `/api` directly from the Ingress/Gateway to the API service.
+This preserves the terminator's TLS/client-IP evidence instead of passing through
+the frontend's plain-HTTP proxy. The frontend still serves `/` and uses `/static/`
+for compiled assets, leaving `/assets` available to the application router.
+With NetworkPolicies enabled, `networkPolicies.frontendIngressCIDRs` also admits
+the Ingress/Gateway peers to this direct API path. Narrow it to the actual proxy
+networks; do not assume a pod source address is the same as a node source address.
+
+Set `api.env.CONSTELLATION_TRUSTED_PROXIES` to the direct proxy IPs/CIDRs. The
+middleware records peer trust before rewriting the client IP. Federation honors
+forwarded TLS and a configured forwarded client-certificate header only for that
+explicitly configured trusted peer. The terminator must overwrite incoming forwarding/certificate
+headers and perform the client TLS handshake. A forwarded public certificate
+alone does not prove possession of its private key. The compatibility default
+uses private/loopback ranges for client-IP rewriting only; it does not attest
+federation TLS or client certificates. Explicit narrow CIDRs are required for
+forwarded federation transport proof.
+
+Federation admin proxy requests reject redirects, including same-host redirects
+that could escape a reader's path allowlist. Redirect Location/Set-Cookie headers
+are not relayed to the browser. Configure the final member endpoint directly.
+Live ingress/mTLS and multi-cluster acceptance are still required before release.

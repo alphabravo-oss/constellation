@@ -19,6 +19,7 @@
 package version
 
 import (
+	"crypto/fips140"
 	"log/slog"
 	"os"
 	"runtime"
@@ -120,6 +121,8 @@ func LogStartup(logger *slog.Logger, component string) {
 		slog.String("commit_short", ShortCommit()),
 		slog.String("build_time", info.BuildTime.Format(time.RFC3339)),
 		slog.String("go", info.GoVersion),
+		slog.Bool("fips_enabled", fips140.Enabled()),
+		slog.String("crypto_module", fips140.Version()),
 		slog.String("hostname", info.Hostname),
 		slog.Int("pid", info.Pid),
 	)

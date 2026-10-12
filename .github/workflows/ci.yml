@@ -202,6 +202,8 @@ jobs:
       - run: npx playwright install --with-deps chromium
         working-directory: frontend
       - run: bash scripts/test-browser.sh
+        env:
+          API_RECIPES_APPLY_ROLLBACK_FIXTURE: "1"
       - if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -212,9 +214,27 @@ jobs:
             frontend/test-results/
           retention-days: 14
 
+  fips:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - run: bash scripts/test-fips.sh
+      - if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fips-evidence
+          path: artifacts/fips/
+          retention-days: 14
+
   required:
     if: ${{ always() }}
-    needs: [quality, go-tests, security, frontend, npm-dependencies, python-dependencies, browser]
+    needs: [quality, go-tests, security, frontend, npm-dependencies, python-dependencies, browser, fips]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

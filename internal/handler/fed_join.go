@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -86,8 +87,13 @@ func (h *Federation) JoinRemote(w http.ResponseWriter, r *http.Request) {
 	subj, _ := SubjectFrom(r.Context())
 
 	var req fedJoinRemoteRequest
-	// An empty body is allowed (pure env-driven join); ignore a decode error on no body.
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	// An empty body is allowed for an env-driven join, but malformed input
+	// must not silently fall back to deployment credentials.
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid federation join request"})
+		return
+	}
 
 	masterURL := firstNonEmpty(req.MasterURL, os.Getenv("CONSTELLATION_FED_MASTER_URL"))
 	token := firstNonEmpty(req.Token, os.Getenv("CONSTELLATION_FED_MASTER_TOKEN"))
@@ -135,6 +141,10 @@ func (h *Federation) JoinRemote(w http.ResponseWriter, r *http.Request) {
 // rotates the same member rather than registering a new one.
 func performRemoteJoin(ctx context.Context, pool *pgxpool.Pool, sealer auth.Sealer, client *http.Client, orgID uuid.UUID, masterURL, token, clusterID, clusterName string) (fedJoinRemoteResult, error) {
 	masterURL = strings.TrimRight(strings.TrimSpace(masterURL), "/")
+	endpoint, err := url.Parse(masterURL)
+	if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" {
+		return fedJoinRemoteResult{}, fmt.Errorf("federation: master endpoint must be an absolute HTTPS URL without credentials, query or fragment")
+	}
 	clusterID = strings.TrimSpace(clusterID)
 	clusterName = strings.TrimSpace(clusterName)
 	if clusterID == "" {
@@ -162,19 +172,21 @@ func performRemoteJoin(ctx context.Context, pool *pgxpool.Pool, sealer auth.Seal
 		return fedJoinRemoteResult{}, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	// The master's mTLS-join guard (D2-3) refuses to hand out a private key over a non-TLS
-	// connection; behind an ingress terminator it reaches the app as plain HTTP, so attest
-	// the original scheme the way the documented topology does.
-	httpReq.Header.Set("X-Forwarded-Proto", "https")
-
-	resp, err := client.Do(httpReq)
+	// Only the TLS terminator can attest forwarding headers. Never fabricate
+	// transport proof or replay the join token to a redirected destination.
+	joinClient := *client
+	joinClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := joinClient.Do(httpReq)
 	if err != nil {
 		return fedJoinRemoteResult{}, fmt.Errorf("call master /federation/join: %w", err)
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return fedJoinRemoteResult{}, fmt.Errorf("read master join response: %w", err)
+	}
 	if resp.StatusCode != http.StatusOK {
-		return fedJoinRemoteResult{}, fmt.Errorf("master /federation/join status %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+		return fedJoinRemoteResult{}, fmt.Errorf("master /federation/join status %d", resp.StatusCode)
 	}
 	var jr fedMasterJoinResponse
 	if err := json.Unmarshal(raw, &jr); err != nil {

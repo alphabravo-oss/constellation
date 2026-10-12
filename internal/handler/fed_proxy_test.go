@@ -53,7 +53,7 @@ func forwardReq(t *testing.T, h *FedProxy, subj Subject, method, clusterID, subP
 	if body != "" {
 		rdr = strings.NewReader(body)
 	}
-	r := httptest.NewRequest(method, url, rdr)
+	r := httptest.NewRequestWithContext(t.Context(), method, url, rdr)
 	// Simulate a leaked inbound user credential the proxy must NOT forward to the joint.
 	r.Header.Set("Authorization", "Bearer USER-JWT-SECRET")
 	r.Header.Set("Cookie", "session=abc")

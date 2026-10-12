@@ -12,12 +12,13 @@ data:
         server_name _;
         root /usr/share/nginx/html;
         index index.html;
+        absolute_redirect off;
 
         location / {
-            try_files $uri $uri/ /index.html;
+            try_files $uri /index.html;
         }
-        # Vite build output under /assets/ is content-hashed → safe to cache immutably.
-        location ^~ /assets/ {
+        # Build files must not shadow the /assets application route.
+        location ^~ /static/ {
             expires 30d;
             add_header Cache-Control "public, immutable";
         }
