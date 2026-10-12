@@ -366,6 +366,22 @@ restored cluster and restored PVC were removed after passing. Logs are
 `/tmp/constellation-main-recovery-verification.log`; protected receipts are in the
 cutover directory.
 
+### Admission trust across the cutover upgrade
+
+The final dry-run admission check detected that the revision-19 upgrade with
+`--no-hooks` cleared the webhook CA bundle. TLS validation failed, and the existing
+`failurePolicy=Ignore` allowed requests during that interval. The original CA was
+restored from the unchanged admission TLS Secret; unknown-image denial resumed.
+The chart now preserves the existing webhook CA during upgrade, falling back to
+the configured TLS Secret's CA when necessary. Fresh installs still rely on
+bootstrap or cert-manager injection. A server-side render matched the existing
+bundle, and an actual revision-**20** upgrade with hooks disabled preserved it.
+After that upgrade, server-side dry runs denied an unknown image and admitted the
+scanned, digest-pinned helper. No test workload was created, and the failure policy
+was not relaxed. Receipt: `admission-trust-upgrade-verification.json` in the
+protected cutover directory. This closes that upgrade regression, not the broader
+historical certificate/key inventory acceptance.
+
 ### Existing database audit baseline
 
 Read-only verification of the independent existing-data restore fails at audit

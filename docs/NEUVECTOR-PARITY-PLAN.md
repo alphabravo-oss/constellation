@@ -61,13 +61,15 @@ Parity and switchability are release-ready only when:
 ## October 12 implementation continuation
 
 The main development deployment now uses **PostgreSQL 16.14 on CNPG**, schema
-**172**, under Helm revision **19**. Its frozen-source transfer matched all
+**172**, under Helm revision **20** (cutover at revision 19). Its frozen-source transfer matched all
 **138 public root-table counts** and the audit head before changing the DSN.
 The old StatefulSet is stopped with its PVC/credentials retained. Fresh browser
 login and authenticated cluster, scan, settings and registry checks pass;
 continuous WAL archiving and daily Barman/RustFS backup are configured. The first
 main backup and a separate-cluster restore passed session, login, settings,
-encrypted-credential and original audit-anchor checks. See the
+encrypted-credential and original audit-anchor checks. A follow-up chart fix
+preserves admission CA trust across upgrades with hooks disabled; revision 20
+passed both unknown-image denial and scanned-image allow dry runs. See the
 [main cutover evidence](cnpg-recovery.md#main-development-cutover). Earlier dated
 StatefulSet/schema-167 observations below describe the pre-cutover deployment.
 

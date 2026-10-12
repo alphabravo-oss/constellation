@@ -3,8 +3,20 @@
 ValidatingWebhookConfiguration. The caBundle is populated by:
   - the cert-manager Certificate's `cert-manager.io/inject-ca-from` annotation, OR
   - the tls-bootstrap Job (default).
-We render it with an empty caBundle and let the bootstrap Job patch it in-flight.
+Preserve existing trust during upgrades, including upgrades with hooks disabled.
+On first install the certificate controller or bootstrap Job still supplies it.
 */ -}}
+{{- $caBundle := "" -}}
+{{- $existing := lookup "admissionregistration.k8s.io/v1" "ValidatingWebhookConfiguration" "" (printf "%s-admission" (include "constellation.fullname" .)) -}}
+{{- range $existing.webhooks -}}
+{{- if eq .name "pods.constellation.alphabravo.io" -}}
+{{- $caBundle = default "" .clientConfig.caBundle -}}
+{{- end -}}
+{{- end -}}
+{{- if not $caBundle -}}
+{{- $secret := lookup "v1" "Secret" .Release.Namespace (include "constellation.admissionTLSSecret" .) -}}
+{{- $caBundle = default "" (index (default dict $secret.data) "ca.crt") -}}
+{{- end -}}
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 metadata:
@@ -44,6 +56,6 @@ webhooks:
         namespace: {{ .Release.Namespace }}
         path: /validate
         port: {{ .Values.admission.service.port }}
-      caBundle: ""
+      caBundle: {{ $caBundle | quote }}
     rules: {{- toYaml .Values.admission.webhook.rules | nindent 6 }}
 {{- end }}
