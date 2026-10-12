@@ -8,6 +8,7 @@ import {
   type SortingState,
 } from "@tanstack/react-table";
 import { ArrowUpDown, Check, ChevronDown, ChevronUp, Download, RotateCcw, Rows2, Rows3, Rows4, SlidersHorizontal } from "lucide-react";
+import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
 import { cn } from "@/lib/cn";
 import { downloadCsv, type CsvCell } from "@/lib/csv";
 
@@ -91,7 +92,18 @@ const TABLE_PAGE_SIZE = 100;
  * and exposes a small `Column<T>` facade so pages never hand-roll a table.
  * Sticky header · right-align numeric · accent slide-in on row hover · density.
  */
-export function DataTable<T>({
+export function DataTable<T>(props: DataTableProps<T>) {
+  const identity = useTablePreferencesIdentity();
+  const scopedKey = identity && props.preferencesKey
+    ? JSON.stringify([identity.org_id, identity.user_id, props.preferencesKey])
+    : undefined;
+  // Remount table state on identity/table changes so old preferences are never
+  // briefly displayed or written into the next user's storage namespace.
+  return <DataTableView key={JSON.stringify([identity?.org_id, identity?.user_id, props.preferencesKey])}
+    {...props} preferencesKey={scopedKey} showColumnChooser={props.showColumnChooser ?? !!props.preferencesKey} />;
+}
+
+function DataTableView<T>({
   rows,
   columns,
   rowKey,

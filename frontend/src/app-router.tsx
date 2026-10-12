@@ -75,6 +75,8 @@ const AssetsPage            = lazy(() => import("./pages/AssetsPage").then((m) =
 const AssetDetailPage       = lazy(() => import("./pages/AssetDetailPage").then((m) => ({ default: m.AssetDetailPage })));
 const PolicyCenterPage      = lazy(() => import("./pages/PolicyCenterPage").then((m) => ({ default: m.PolicyCenterPage })));
 const PoliciesPage          = lazy(() => import("./pages/PoliciesPage").then((m) => ({ default: m.PoliciesPage })));
+const AdmissionProfileImportPage = lazy(() => import("./pages/AdmissionProfileImportPage").then((m) => ({ default: m.AdmissionProfileImportPage })));
+const GroupSettingsPage = lazy(() => import("./pages/GroupSettingsPage").then((m) => ({ default: m.GroupSettingsPage })));
 const AdmissionPage         = lazy(() => import("./pages/AdmissionPage").then((m) => ({ default: m.AdmissionPage })));
 const AdmissionSettingsPage = lazy(() => import("./pages/AdmissionSettingsPage").then((m) => ({ default: m.AdmissionSettingsPage })));
 const AdmissionRuleFormPage = lazy(() => import("./pages/AdmissionRuleFormPage").then((m) => ({ default: m.AdmissionRuleFormPage })));
@@ -87,6 +89,8 @@ const ResponsePage          = lazy(() => import("./pages/ResponsePage").then((m)
 const ResponseRulesPage     = lazy(() => import("./pages/ResponseRulesPage").then((m) => ({ default: m.ResponseRulesPage })));
 const VulnProfilePage       = lazy(() => import("./pages/VulnProfilePage").then((m) => ({ default: m.VulnProfilePage })));
 const GroupsPage            = lazy(() => import("./pages/GroupsPage").then((m) => ({ default: m.GroupsPage })));
+const GroupFormPage = lazy(() => import("./pages/GroupFormPage").then((m) => ({ default: m.GroupFormPage })));
+const DPIGroupBindingFormPage = lazy(() => import("./pages/DPIGroupBindingFormPage").then((m) => ({ default: m.DPIGroupBindingFormPage })));
 const GroupDetailPage       = lazy(() => import("./pages/GroupDetailPage").then((m) => ({ default: m.GroupDetailPage })));
 const FileMonitorPage       = lazy(() => import("./pages/FileMonitorPage").then((m) => ({ default: m.FileMonitorPage })));
 const TimelinePage          = lazy(() => import("./pages/TimelinePage").then((m) => ({ default: m.TimelinePage })));
@@ -227,6 +231,11 @@ const cluster_response_rules_ruleIdRoute = createRoute({ getParentRoute: () => a
 const cluster_vuln_profilesRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "vuln-profiles", component: () => (<SuspenseRoute><VulnProfilePage /></SuspenseRoute>) });
 const cluster_vulnerability_profilesRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "vulnerability-profiles", beforeLoad: aliasRedirect({ to: "vuln-profiles", cluster: true }) });
 const cluster_groupsRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "groups", component: () => (<SuspenseRoute><GroupsPage /></SuspenseRoute>) });
+const cluster_groups_settingsRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "groups/settings", component: () => (<SuspenseRoute><GroupSettingsPage /></SuspenseRoute>) });
+const cluster_groups_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "groups/new", component: () => (<SuspenseRoute><GroupFormPage /></SuspenseRoute>) });
+const cluster_groups_editRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "groups/$groupId/edit", component: () => (<SuspenseRoute><GroupFormPage /></SuspenseRoute>) });
+const cluster_dlp_scope_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "runtime-dlp/scope/new", component: () => (<SuspenseRoute><DPIGroupBindingFormPage kind="dlp" /></SuspenseRoute>) });
+const cluster_waf_scope_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "runtime-signatures/scope/new", component: () => (<SuspenseRoute><DPIGroupBindingFormPage kind="waf" /></SuspenseRoute>) });
 const cluster_groups_groupIdRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "groups/$groupId", component: () => (<SuspenseRoute><GroupDetailPage /></SuspenseRoute>) });
 const cluster_file_monitorRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "file-monitor", component: () => (<SuspenseRoute><FileMonitorPage /></SuspenseRoute>) });
 const cluster_file_monitor_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "file-monitor/new", component: () => (<SuspenseRoute><FileMonitorFormPage /></SuspenseRoute>) });
@@ -255,7 +264,7 @@ const cluster_runtime_signatures_sigIdRoute = createRoute({ getParentRoute: () =
 const cluster_admissionRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "admission", component: () => (<SuspenseRoute><AdmissionPage /></SuspenseRoute>) });
 const cluster_admission_control_splatRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "admission-control/$", beforeLoad: aliasRedirect({ to: "admission", cluster: true, from: "admission-control" }) });
 const cluster_admission_settingsRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "admission/settings", component: () => (<SuspenseRoute><AdmissionSettingsPage /></SuspenseRoute>) });
-const cluster_admission_importRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "admission/import", component: () => (<SuspenseRoute><AdmissionPage view="import" /></SuspenseRoute>) });
+const cluster_admission_importRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "admission/import", component: () => (<SuspenseRoute><AdmissionProfileImportPage /></SuspenseRoute>) });
 const cluster_admission_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "admission/new", component: () => (<SuspenseRoute><AdmissionRuleFormPage /></SuspenseRoute>) });
 const cluster_policyRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "policy", component: () => (<SuspenseRoute><PolicyCenterPage /></SuspenseRoute>) });
 const cluster_policiesRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "policies", component: () => (<SuspenseRoute><PoliciesPage /></SuspenseRoute>) });
@@ -433,6 +442,11 @@ authenticatedRoute.addChildren([
   cluster_vuln_profilesRoute,
   cluster_vulnerability_profilesRoute,
   cluster_groupsRoute,
+  cluster_groups_settingsRoute,
+  cluster_groups_newRoute,
+  cluster_groups_editRoute,
+  cluster_dlp_scope_newRoute,
+  cluster_waf_scope_newRoute,
   cluster_groups_groupIdRoute,
   cluster_file_monitorRoute,
   cluster_file_monitor_newRoute,

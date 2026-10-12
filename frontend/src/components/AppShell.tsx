@@ -285,7 +285,7 @@ export function AppShell() {
               <BrandMark />
               <div className="flex flex-col min-w-0 leading-tight">
                 <span className="text-sm font-semibold text-foreground tracking-tight truncate">Constellation</span>
-                <span className="text-[10px] text-muted-foreground truncate">Security Platform</span>
+                <span className="text-[10px] text-muted-foreground truncate">by Alphabravo</span>
               </div>
             </Link>
           )}

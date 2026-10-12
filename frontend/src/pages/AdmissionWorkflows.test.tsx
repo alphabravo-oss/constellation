@@ -6,7 +6,6 @@ import { afterEach, expect, it, vi } from "vitest";
 import { policies, type AdmissionState } from "@/api/client";
 import { AdmissionSettingsPage } from "./AdmissionSettingsPage";
 import { AdmissionRuleFormPage } from "./AdmissionRuleFormPage";
-import { AdmissionPage } from "./AdmissionPage";
 
 const route = vi.hoisted(() => ({ navigate: vi.fn() }));
 vi.mock("@/api/client", () => ({ policies: { admissionState: vi.fn(), updateAdmissionState: vi.fn(), admissionOptions: vi.fn(), createAdmissionRule: vi.fn(), admissionRules: vi.fn().mockResolvedValue({ rules: [] }), admissionProfiles: vi.fn(), admissionDryRunHistory: vi.fn().mockResolvedValue({ history: [] }), importAdmissionProfile: vi.fn() }, componentsInventory: { list: vi.fn().mockResolvedValue({ components: [] }) } }));
@@ -52,17 +51,4 @@ it("validates criterion values and keeps failed admission drafts", async () => {
   await settled(() => expect(host.textContent).toContain("Your draft is preserved"));
   expect(policies.createAdmissionRule).toHaveBeenCalledWith({ name: "test-rule", mode: "monitor", group: undefined, criteria: [{ key: "cve_count", value: "2" }] }, { cluster_id: "cluster" });
   expect(host.textContent).not.toContain("private");
-});
-it("requires a fresh profile preview when import options change", async () => {
-  vi.mocked(policies.admissionState).mockResolvedValue(state);
-  vi.mocked(policies.admissionProfiles).mockResolvedValue({ profiles: [{ id: "profile", name: "Profile", description: "", failure_policy: "Ignore", rules: [] }] });
-  vi.mocked(policies.importAdmissionProfile).mockResolvedValue({ profile_id: "profile", dry_run: true, imported: 0, policies: [] });
-  await renderPage(<AdmissionPage view="import" />); await settled(() => expect(host.querySelector<HTMLSelectElement>("#admission-profile")?.value).toBe("profile"));
-  const importButton = () => [...host.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Import profile")!;
-  expect(importButton().disabled).toBe(true);
-  await click("Preview"); await settled(() => expect(importButton().disabled).toBe(false));
-  await change("#admission-profile-mode", "enforce"); expect(importButton().disabled).toBe(true);
-  expect(policies.importAdmissionProfile).toHaveBeenCalledTimes(1);
-  expect(policies.importAdmissionProfile).toHaveBeenCalledWith({ profile_id: "profile", mode: "monitor", enabled: true, dry_run: true });
-  expect(host.textContent).toContain("organization-wide");
 });

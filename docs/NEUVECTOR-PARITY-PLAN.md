@@ -243,6 +243,36 @@ namespace retained; it was removed, then its direct link showed a non-editable e
 No profile import or live enforcement change was performed. The updated full
 browser specs were not rerun; these checks do not close UI-1 or broader acceptance.
 
+The group/DPI/file-monitor console continuation is deployed at Helm revision **33**.
+Groups and new-service defaults now use dedicated forms; the dashboard links to
+those canonical workflows instead of saving default modes inline. DLP/WAF group
+scope has dedicated add pages. Rule editors validate loaded identity/scope and
+preserve structured patterns and failed-save drafts. File-monitor forms require a
+resolved workload and cluster. Lists use shared preferences/CSV, explicit errors,
+and configuration language that does not imply confirmed detector deployment.
+Admission profile catalog/bundle import and installed-policy comparison now share
+one dedicated page; the old Policies profile tab redirects there. Import requires a
+preview matching its inputs. The policy catalog no longer slices to 100 rows before
+shared-table pagination.
+
+The dashboard opens with a verdict and five server-derived metrics, with posture,
+network, operations and trends behind URL-linked tabs. Sampled findings are labeled;
+unknown summaries do not become zero-risk verdicts. Exposure CSV now includes the
+server platform role, and the executive report states its organization-wide scope.
+Shared table density/column preferences are partitioned by organization and user;
+identity changes remount table state, legacy ownerless entries are not adopted, and
+stale column IDs are pruned. The header reads Constellation with by Alphabravo below.
+
+Validation: **288 frontend tests**, production type-check/build, changed-file lint,
+endpoint mapping and whitespace checks pass. Live browser checks confirm the brand,
+five dashboard metrics, Network tab reload, canonical profile-import redirect and
+preview gating. Editing a temporary disabled DLP rule preserved disabled mode;
+Cancel retained its saved description, and the fixture was deleted. Group settings
+Cancel left server defaults unchanged. No admission profile or scope binding was
+imported/applied during verification. These bounded checks do not close UI-1/2/3/4:
+remaining legacy forms, separately stored saved views, source pagination/exact
+links, and the complete API/export/live-install matrix remain open.
+
 The admission-engine continuation adds migration **172** and persists normalized
 engine outcomes atomically with image scan completion. The built-in vulnerability
 profiles now require successful Trivy and Grype results rather than retired
@@ -1854,8 +1884,8 @@ progressive disclosure, while retaining Constellation's security vocabulary.
   container/deployment/session/conversation CSV now carry the role. Multi-cluster
   org-wide conversations omit ambiguous label-derived roles. Conversation
   detail includes roles for matching flows; the conversation table CSV also
-  includes endpoint roles with browser coverage. Dashboard exposure export,
-  other exports and live-install proof remain open.
+  includes endpoint roles with browser coverage. Dashboard exposure CSV also includes the server role. Other exports and
+  live-install proof remain open.
 
 ### UI-4 Dashboard and operational posture
 

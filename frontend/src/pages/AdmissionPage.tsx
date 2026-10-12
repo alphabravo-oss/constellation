@@ -2,9 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
-  Download,
   FileCheck2,
-  FileText,
   ListChecks,
   Plus,
   Pencil,
@@ -13,15 +11,12 @@ import {
   ShieldAlert,
   ShieldCheck,
   Trash2,
-  UploadCloud,
 } from "lucide-react";
 
 import {
   componentsInventory,
   policies as policiesApi,
   type AdmissionCriterionOption,
-  type AdmissionProfile,
-  type AdmissionProfileImportPolicy,
   type AdmissionRuleRow,
   type AdmissionState,
 } from "@/api/client";
@@ -29,7 +24,7 @@ import { useCluster } from "@/hooks/useCluster";
 import { PageHeader } from "@/components/ui/page";
 import { Card, DetailRow } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Switch, Field, Select, TextInput } from "@/components/ui/form";
+import { TextInput } from "@/components/ui/form";
 import { VerdictBanner, type VerdictStatus } from "@/components/ui/verdict-banner";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { StatCard } from "@/components/ui/stat-card";
@@ -48,14 +43,13 @@ import {
   type AdmissionDryRunHistoryEntry as DryRunHistoryEntry,
 } from "@/lib/admission-ops";
 
-type ProfileMode = "monitor" | "enforce";
 
-export function AdmissionPage({ view }: { view?: "import" }) {
+export function AdmissionPage() {
   const { clusterId } = useCluster();
-  return <AdmissionWorkspace key={clusterId ?? "none"} clusterId={clusterId} view={view} />;
+  return <AdmissionWorkspace key={clusterId ?? "none"} clusterId={clusterId} />;
 }
 
-function AdmissionWorkspace({ clusterId, view }: { clusterId?: string; view?: "import" }) {
+function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
   const [requestedTab, setTab] = useTabParam("tab", "rules");
   const tab = ["rules", "assessment", "catalog", "webhook"].includes(requestedTab) ? requestedTab : "rules";
   const navigate = useNavigate();
@@ -73,7 +67,6 @@ function AdmissionWorkspace({ clusterId, view }: { clusterId?: string; view?: "i
     enabled: !!clusterId,
   });
   const optionsQ = useQuery({ queryKey: ["admission-options"], queryFn: () => policiesApi.admissionOptions() });
-  const profilesQ = useQuery({ queryKey: ["admission-profiles"], queryFn: () => policiesApi.admissionProfiles() });
   const admissionComponentsQ = useQuery({
     queryKey: ["components", "admission", clusterId],
     queryFn: () => componentsInventory.list({ cluster_id: clusterId, component: "admission", limit: 20 }),
@@ -96,44 +89,6 @@ function AdmissionWorkspace({ clusterId, view }: { clusterId?: string; view?: "i
   const deleteRule = useMutation({
     mutationFn: (id: string) => policiesApi.delete(id),
     onSuccess: invalidateRules,
-  });
-
-  const [profileSelection, setProfileSelection] = useState("");
-  const [profileMode, setProfileMode] = useState<ProfileMode>("monitor");
-  const [profileEnabled, setProfileEnabled] = useState(true);
-  const [profileMessage, setProfileMessage] = useState("");
-
-  const profiles = useMemo(() => profilesQ.data?.profiles ?? [], [profilesQ.data?.profiles]);
-  const selectedProfileId = profileSelection || profiles[0]?.id || "";
-  const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId);
-
-  const previewProfile = useMutation({
-    mutationFn: () =>
-      policiesApi.importAdmissionProfile({
-        profile_id: selectedProfileId,
-        mode: profileMode,
-        enabled: profileEnabled,
-        dry_run: true,
-      }),
-    onSuccess: () => setProfileMessage(""),
-  });
-  const importProfile = useMutation({
-    mutationFn: () =>
-      policiesApi.importAdmissionProfile({
-        profile_id: selectedProfileId,
-        mode: profileMode,
-        enabled: profileEnabled,
-        dry_run: false,
-      }),
-    onSuccess: (result) => {
-      invalidateRules();
-      setProfileMessage(`Imported ${result.imported} admission rules from ${result.profile_id}.`);
-      previewProfile.reset();
-    },
-  });
-  const exportProfile = useMutation({
-    mutationFn: (id: string) => policiesApi.exportAdmissionProfile(id),
-    onSuccess: (bundle) => downloadJSON(`${bundle.profile.id}-admission-profile.json`, bundle),
   });
 
   const state = stateQ.data;
@@ -188,10 +143,6 @@ function AdmissionWorkspace({ clusterId, view }: { clusterId?: string; view?: "i
   const mergedDryRunHistory = useMemo(
     () => mergeAdmissionDryRunHistory(serverDryRunHistory, dryRunHistory),
     [serverDryRunHistory, dryRunHistory],
-  );
-  const selectedProfileStats = useMemo(
-    () => summarizeProfile(selectedProfile),
-    [selectedProfile],
   );
   const verdict = stateQ.isError ? { status: "degraded" as const, title: "Admission state could not be refreshed", detail: "Retry before relying on the displayed configuration." } : admissionVerdict(state);
   const dryRunOutcome = state && assess.data ? admissionOutcome(state, assess.data.decision) : null;
@@ -331,42 +282,6 @@ function AdmissionWorkspace({ clusterId, view }: { clusterId?: string; view?: "i
     [],
   );
 
-  const previewColumns = useMemo<Column<AdmissionProfileImportPolicy>[]>(
-    () => [
-      {
-        id: "policy",
-        header: "Policy",
-        cell: (policy) => (
-          <div className="min-w-0">
-            <div className="truncate font-medium text-foreground" title={policy.policy_name}>{policy.policy_name}</div>
-            <div className="mt-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">{policy.category}</div>
-          </div>
-        ),
-        sort: (a, b) => a.policy_name.localeCompare(b.policy_name),
-      },
-      {
-        id: "mode",
-        header: "Mode",
-        width: "105px",
-        cell: (policy) => <RuleModePill mode={policy.mode} />,
-        sort: (a, b) => a.mode.localeCompare(b.mode),
-      },
-      {
-        id: "enabled",
-        header: "State",
-        width: "110px",
-        cell: (policy) => <StatusPill label={policy.enabled ? "enabled" : "disabled"} tone={policy.enabled ? "success" : "neutral"} />,
-        sort: (a, b) => Number(a.enabled) - Number(b.enabled),
-      },
-      {
-        id: "description",
-        header: "Description",
-        cell: (policy) => <span className="text-xs text-muted-foreground">{policy.description}</span>,
-      },
-    ],
-    [],
-  );
-
   const historyColumns = useMemo<Column<DryRunHistoryEntry>[]>(
     () => [
       {
@@ -420,7 +335,6 @@ function AdmissionWorkspace({ clusterId, view }: { clusterId?: string; view?: "i
     [],
   );
 
-  const resetProfilePreview = () => { previewProfile.reset(); importProfile.reset(); setProfileMessage(""); };
   const rulesView = (
       <Card
         title="Admission Rules"
@@ -494,88 +408,6 @@ function AdmissionWorkspace({ clusterId, view }: { clusterId?: string; view?: "i
           ) : (
             <p className="text-sm text-muted-foreground">Loading...</p>
           )}
-        </Card>
-  );
-  const profileView = (
-        <Card
-          title="Import profile"
-          description="Import organization-wide admission rules. These templates apply across clusters; review the preview before importing."
-          action={
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={!selectedProfileId || exportProfile.isPending}
-              onClick={() => exportProfile.mutate(selectedProfileId)}
-            >
-              <Download className="h-3.5 w-3.5" /> Export
-            </Button>
-          }
-        >
-          {profilesQ.isError && <ErrorState title="Could not load profiles." action={<Button onClick={() => void profilesQ.refetch()}>Retry</Button>} />}
-          <fieldset disabled={previewProfile.isPending || importProfile.isPending || profilesQ.isPending || profilesQ.isError} className="space-y-4" data-testid="admission-profile-templates">
-            <div className="grid gap-4 lg:grid-cols-3">
-              <Field label="Profile" htmlFor="admission-profile">
-                <Select id="admission-profile" value={selectedProfileId} onChange={(event) => { resetProfilePreview(); setProfileSelection(event.target.value); }}>
-                  {profiles.map((profile) => (
-                    <option key={profile.id} value={profile.id}>{profile.name}</option>
-                  ))}
-                </Select>
-              </Field>
-              <Field label="Import mode" htmlFor="admission-profile-mode">
-                <Select id="admission-profile-mode" value={profileMode} onChange={(event) => { resetProfilePreview(); setProfileMode(event.target.value as ProfileMode); }}>
-                  <option value="monitor">Monitor</option>
-                  <option value="enforce">Enforce</option>
-                </Select>
-              </Field>
-              <div className="pt-5">
-                <Switch checked={profileEnabled} onCheckedChange={(enabled) => { resetProfilePreview(); setProfileEnabled(enabled); }} label="Enabled" />
-              </div>
-            </div>
-
-            {selectedProfile ? <ProfileSummary profile={selectedProfile} stats={selectedProfileStats} /> : null}
-
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={!selectedProfileId || previewProfile.isPending}
-                onClick={() => previewProfile.mutate()}
-              >
-                <FileText className="h-3.5 w-3.5" /> {previewProfile.isPending ? "Previewing..." : "Preview"}
-              </Button>
-              <Button
-                type="button"
-                variant="primary"
-                size="sm"
-                disabled={!selectedProfileId || importProfile.isPending || !previewProfile.data || previewProfile.isError}
-                onClick={() => importProfile.mutate()}
-              >
-                <UploadCloud className="h-3.5 w-3.5" /> {importProfile.isPending ? "Importing..." : "Import profile"}
-              </Button>
-              {profileMessage ? <span className="text-xs text-status-success">{profileMessage}</span> : null}
-            </div>
-
-            {previewProfile.isError ? <p className="text-sm text-status-error">{errorMessage()}</p> : null}
-            {importProfile.isError ? <p className="text-sm text-status-error">{errorMessage()}</p> : null}
-            {exportProfile.isError ? <p className="text-sm text-status-error">{errorMessage()}</p> : null}
-
-            {previewProfile.data ? (
-              <div data-testid="admission-profile-preview">
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <span className="text-xs font-medium text-foreground">Preview</span>
-                  <span className="text-xs text-muted-foreground">{previewProfile.data.policies.length} rules</span>
-                </div>
-                <DataTable<AdmissionProfileImportPolicy>
-                  rows={previewProfile.data.policies}
-                  columns={previewColumns}
-                  rowKey={(policy) => policy.policy_name}
-                  density="compact"
-                  showDensityToggle={false}
-                />
-              </div>
-            ) : null}
-          </fieldset>
         </Card>
   );
   const assessmentView = (
@@ -693,13 +525,6 @@ function AdmissionWorkspace({ clusterId, view }: { clusterId?: string; view?: "i
         ) : null}
       </Card>
   );
-  if (view === "import") return <div className="space-y-6">
-    <PageHeader title="Import admission profile" description="Review an organization-wide template before adding its rules."
-      backLink={<Link to="." href={`/clusters/${clusterId}/admission`}>Back to Admission Control</Link>} />
-    {profileView}
-    <Button disabled={importProfile.isPending} onClick={() => navigate({ href: `/clusters/${clusterId}/admission` })}>Cancel</Button>
-  </div>;
-
   return (
     <div className="space-y-5">
       <PageHeader
@@ -797,19 +622,6 @@ function summarizeRules(rules: AdmissionRuleRow[]) {
   );
 }
 
-function summarizeProfile(profile?: AdmissionProfile) {
-  if (!profile) return { total: 0, enforce: 0, monitor: 0, enabled: 0 };
-  return profile.rules.reduce(
-    (acc, rule) => {
-      acc.total += 1;
-      if (rule.enabled) acc.enabled += 1;
-      if (rule.mode === "enforce") acc.enforce += 1; else acc.monitor += 1;
-      return acc;
-    },
-    { total: 0, enforce: 0, monitor: 0, enabled: 0 },
-  );
-}
-
 function groupCriteria(criteria: AdmissionCriterionOption[]) {
   const counts = new Map<string, number>();
   for (const option of criteria) {
@@ -869,35 +681,6 @@ function OutcomePill({ outcome }: { outcome: string }) {
   return <StatusPill label={outcome || "-"} tone={tone} />;
 }
 
-function ProfileSummary({ profile, stats }: { profile: AdmissionProfile; stats: ReturnType<typeof summarizeProfile> }) {
-  return (
-    <div className="rounded-md border border-border bg-background p-3">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="font-medium text-foreground">{profile.name}</div>
-          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{profile.description}</p>
-        </div>
-        <StatusPill label={profile.failure_policy === "Fail" ? "fail closed" : "fail open"} tone={profile.failure_policy === "Fail" ? "success" : "warning"} />
-      </div>
-      <div className="mt-3 grid gap-2 sm:grid-cols-4">
-        <MiniMetric label="Rules" value={stats.total} />
-        <MiniMetric label="Enabled" value={stats.enabled} />
-        <MiniMetric label="Enforce" value={stats.enforce} />
-        <MiniMetric label="Monitor" value={stats.monitor} />
-      </div>
-    </div>
-  );
-}
-
-function MiniMetric({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded border border-border bg-card px-2 py-1.5">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="text-base font-semibold tabular-nums text-foreground">{value.toLocaleString()}</div>
-    </div>
-  );
-}
-
 function labelCase(value: string) {
   if (!value) return "-";
   return value.charAt(0).toUpperCase() + value.slice(1).replace(/_/g, " ");
@@ -912,14 +695,4 @@ function formatDateTime(value?: string) {
 
 function errorMessage() {
   return "Request failed. Your inputs are preserved. Try again.";
-}
-
-function downloadJSON(filename: string, value: unknown) {
-  const blob = new Blob([JSON.stringify(value, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  URL.revokeObjectURL(url);
 }

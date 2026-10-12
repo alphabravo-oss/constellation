@@ -1,155 +1,100 @@
-// Routes: /clusters/:id/file-monitor/new (create) and
-// /clusters/:id/file-monitor/:ruleId (edit).
-//
-// Dedicated form page (the Astronomer add/edit-as-a-page pattern, replacing the
-// old right-side Drawer) for authoring / editing a workload's file-monitor (FIM)
-// rules. The target workload is threaded in via the `?workload=` query param set
-// by the list page.
-//
-// SAFETY: new rules default to `monitor_change` (observe). `block_access` is an
-// explicit opt-in and is never selected by default, so authoring a rule here
-// never blocks a live workload.
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { useRouteSearchParams } from "@/lib/route-search";
-import { ArrowLeft, FileText, Plus, Save } from "lucide-react";
-
-import { fileProfiles, type FileProfileRuleBehavior } from "@/api/client";
+import { ArrowLeft, Save } from "lucide-react";
+import { fileProfiles, type FileProfileDetail, type FileProfileRule, type FileProfileRuleBehavior } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
-import { LoadingState } from "@/components/ui/states";
+import { useRouteSearchParams } from "@/lib/route-search";
+import { LoadingState, ErrorState } from "@/components/ui/states";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
+import { Collapse } from "@/components/ui/collapse";
+import { VerdictBanner } from "@/components/ui/verdict-banner";
 
 export function FileMonitorFormPage() {
-  const { clusterId, isLoading: clusterLoading } = useCluster();
-  const navigate = useNavigate();
-  const qc = useQueryClient();
+  const { clusterId, cluster, isLoading: clusterLoading } = useCluster();
   const { ruleId } = useParams({ strict: false });
   const [search] = useRouteSearchParams();
   const workload = search.get("workload") ?? "";
-  const isEdit = Boolean(ruleId);
+  const backTo = clusterId ? `/clusters/${clusterId}/file-monitor${workload ? `?workload=${encodeURIComponent(workload)}` : ""}` : "/clusters";
+  return <div className="space-y-6" data-testid="file-monitor-form-page" data-cluster-id={clusterId ?? ""}>
+    <PageHeader title={ruleId ? "Edit monitor rule" : "Add monitor rule"} description="Choose a file path to watch on this workload. Observation is the default; blocking access is an explicit choice."
+      backLink={<Link to="." href={backTo} className="inline-flex items-center gap-2 hover:text-foreground"><ArrowLeft className="h-4 w-4" /> File Monitor</Link>} />
+    {clusterLoading ? <LoadingState label="Loading cluster…" />
+      : !clusterId || !cluster ? <ErrorState title="The selected cluster could not be loaded. Return to the cluster list and try again." />
+      : !workload ? <ErrorState title="Choose a workload from File Monitor before authoring a rule." />
+      : <FileMonitorFormScope key={`${clusterId}:${workload}:${ruleId ?? "new"}`} clusterId={clusterId} workload={workload} ruleId={ruleId} backTo={backTo} />}
+  </div>;
+}
 
-  const backTo = `/clusters/${clusterId}/file-monitor${workload ? `?workload=${encodeURIComponent(workload)}` : ""}`;
-
-  const [filter, setFilter] = useState("/etc/");
-  const [behavior, setBehavior] = useState<FileProfileRuleBehavior>("monitor_change");
-  const [recursive, setRecursive] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  // Edit: load the workload's profile and prefill from the rule being edited.
+function FileMonitorFormScope({ clusterId, workload, ruleId, backTo }: { clusterId: string; workload: string; ruleId?: string; backTo: string }) {
+  const [initial, setInitial] = useState<{ profile: FileProfileDetail; rule?: FileProfileRule } | null>(null);
   const detailQ = useQuery({
     queryKey: ["file-monitor-detail", clusterId, workload],
-    queryFn: () => fileProfiles.get(workload, { cluster_id: clusterId }),
-    enabled: isEdit && !!workload,
-  });
-  const editingRule = detailQ.data?.rules?.find((r) => r.id === ruleId) ?? null;
-
-  useEffect(() => {
-    if (editingRule) {
-      setFilter(editingRule.filter);
-      setBehavior(editingRule.behavior);
-      setRecursive(editingRule.recursive);
-    }
-  }, [editingRule]);
-
-  const invalidate = () => {
-    void qc.invalidateQueries({ queryKey: ["file-monitor-detail", clusterId, workload] });
-    void qc.invalidateQueries({ queryKey: ["file-monitor-profiles", clusterId] });
-  };
-
-  const save = useMutation({
-    mutationFn: () =>
-      isEdit
-        ? fileProfiles.updateRule(
-            workload,
-            ruleId!,
-            { filter, behavior, recursive, reason: "edited via file-monitor console" },
-            { cluster_id: clusterId },
-          )
-        : fileProfiles.createRule(
-            workload,
-            { filter, behavior, recursive, reason: "authored via file-monitor console" },
-            { cluster_id: clusterId },
-          ),
-    onSuccess: () => {
-      setError(null);
-      invalidate();
-      navigate({ href: backTo });
+    queryFn: async () => {
+      const profile = await fileProfiles.get(workload, { cluster_id: clusterId });
+      if (profile.workload_id !== workload || (profile.cluster_id && profile.cluster_id !== clusterId)) throw new Error("Scope mismatch");
+      return profile;
     },
-    onError: (e) => setError(e instanceof Error ? e.message : "failed to save rule"),
   });
+  const loadedRule = detailQ.data?.rules.find((r) => r.id === ruleId);
+  const validTarget = !!detailQ.data && (!ruleId || !!loadedRule);
+  useEffect(() => {
+    if (!initial && detailQ.isSuccess && validTarget) setInitial({ profile: detailQ.data!, rule: loadedRule });
+  }, [initial, detailQ.isSuccess, validTarget, detailQ.data, loadedRule]);
+  if (!initial) {
+    if (detailQ.isPending || (detailQ.isSuccess && validTarget)) return <LoadingState label="Loading workload and rule…" />;
+    return <ErrorState title={ruleId ? "This rule could not be loaded for the selected workload and cluster." : "This workload could not be loaded for the selected cluster."} action={<Button onClick={() => void detailQ.refetch()}>Retry</Button>} />;
+  }
+  const canSave = validTarget && detailQ.isSuccess && !detailQ.isFetching;
+  return <>
+    {(detailQ.isError || !validTarget) && <ErrorState title="Could not refresh the selected workload or rule. Your draft is preserved. Refresh before saving." action={<Button onClick={() => void detailQ.refetch()}>Retry</Button>} />}
+    <FileMonitorRuleEditor clusterId={clusterId} workload={workload} ruleId={ruleId} initial={initial.rule} profile={detailQ.data ?? initial.profile} backTo={backTo} canSave={canSave} />
+  </>;
+}
 
-  if (clusterLoading) return <LoadingState label="Loading cluster…" />;
-
-  return (
-    <div className="space-y-6" data-testid="file-monitor-form-page" data-cluster-id={clusterId ?? ""}>
-      <PageHeader
-        backLink={
-          <Link to="." href={backTo} className="inline-flex items-center gap-1 hover:text-foreground">
-            <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> File Monitor
-          </Link>
-        }
-        title={
-          <span className="flex items-center gap-2">
-            <FileText className="h-5 w-5" aria-hidden />
-            {isEdit ? "Edit monitor rule" : "Add monitor rule"}
-          </span>
-        }
-        description={
-          <>
-            Watch a path on <span className="font-mono">{workload || "the selected workload"}</span> for tampering
-            (file-integrity monitoring). New rules default to <span className="font-mono">monitor_change</span> — they
-            observe and alert, they don't block.
-          </>
-        }
-      />
-
-      <Card title="Rule" description="Which path to watch, and whether to observe or block on change.">
-        <form
-          className="flex flex-col gap-3"
-          onSubmit={(e) => { e.preventDefault(); save.mutate(); }}
-        >
-          <label className="flex flex-col gap-1 text-[11px]">
-            <span className="text-muted-foreground">Path filter</span>
-            <input
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              className="w-full rounded border border-border bg-background px-2 py-1 font-mono text-xs"
-              placeholder="/etc/ or /bin/*"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-[11px]">
-            <span className="text-muted-foreground">Behavior</span>
-            <select
-              value={behavior}
-              onChange={(e) => setBehavior(e.target.value as FileProfileRuleBehavior)}
-              className="rounded border border-border bg-background px-2 py-1 text-xs"
-            >
-              <option value="monitor_change">monitor_change (observe)</option>
-              <option value="block_access">block_access (enforce)</option>
-            </select>
-          </label>
-          <label className="flex items-center gap-1.5 text-[11px]">
-            <input type="checkbox" checked={recursive} onChange={(e) => setRecursive(e.target.checked)} />
-            recursive
-          </label>
-          <div className="flex items-center gap-3">
-            <Button
-              type="submit"
-              variant="primary"
-              size="lg"
-              disabled={!workload || !filter.trim() || save.isPending}
-            >
-              {isEdit ? <Save className="h-4 w-4" /> : <Plus className="h-3 w-3" />}
-              {isEdit ? (save.isPending ? "Saving…" : "Save changes") : (save.isPending ? "Adding…" : "Add")}
-            </Button>
-            <Button type="button" variant="ghost" size="lg" onClick={() => navigate({ href: backTo })}>Cancel</Button>
-          </div>
-          {error && <p className="text-[11px] text-status-error">{error}</p>}
-        </form>
-      </Card>
-    </div>
-  );
+function FileMonitorRuleEditor({ clusterId, workload, ruleId, initial, profile, backTo, canSave }: {
+  clusterId: string; workload: string; ruleId?: string; initial?: FileProfileRule; profile: FileProfileDetail; backTo: string; canSave: boolean;
+}) {
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const [filter, setFilter] = useState(initial?.filter ?? "/etc/");
+  const [behavior, setBehavior] = useState<FileProfileRuleBehavior>(initial?.behavior ?? "monitor_change");
+  const [recursive, setRecursive] = useState(initial?.recursive ?? true);
+  const [enabled, setEnabled] = useState(initial?.enabled ?? true);
+  const [description, setDescription] = useState(initial?.description ?? "");
+  const save = useMutation({
+    mutationFn: () => {
+      const body = { filter: filter.trim(), behavior, recursive, enabled, description, reason: ruleId ? "edited via file-monitor console" : "authored via file-monitor console" };
+      return ruleId ? fileProfiles.updateRule(workload, ruleId, body, { cluster_id: clusterId }) : fileProfiles.createRule(workload, body, { cluster_id: clusterId });
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["file-monitor-detail", clusterId, workload] });
+      void qc.invalidateQueries({ queryKey: ["file-monitor-profiles", clusterId] });
+      void navigate({ href: backTo });
+    },
+  });
+  return <>
+    <VerdictBanner status="info" title={`Rule for ${profile.name || workload}`} detail={`Workload profile mode: ${profile.mode}. Saving configures the rule; enforcement depends on the workload's profile mode and monitoring agent.`} />
+    <Card title="File monitoring rule" description="Watch a path for changes. Open Advanced to change blocking behavior or rule status.">
+      <form className="space-y-6" onSubmit={(e) => { e.preventDefault(); if (canSave && filter.trim() && !save.isPending) save.mutate(); }}>
+        <fieldset disabled={save.isPending} className="space-y-5">
+          <label className="block space-y-2 text-sm"><span className="font-medium">Path filter</span><input required value={filter} onChange={(e) => setFilter(e.target.value)} className="h-10 w-full rounded-md border border-border bg-background px-3 font-mono text-sm" placeholder="/etc/ or /bin/*" /><span className="block text-xs text-muted-foreground">Enter the file or directory path to watch, for example /etc/.</span></label>
+          <label className="flex items-center gap-3 text-sm"><input type="checkbox" className="h-4 w-4" checked={recursive} onChange={(e) => setRecursive(e.target.checked)} /> Include subdirectories</label>
+          <p className="text-sm text-muted-foreground">Current behavior: {behavior === "block_access" ? "block access" : "observe changes"}. Rule is {enabled ? "enabled" : "disabled"}.</p>
+          <Collapse label="Advanced">
+            <div className="space-y-5 rounded-md border border-border p-4">
+              <label className="block space-y-2 text-sm"><span className="font-medium">Behavior</span><select value={behavior} onChange={(e) => setBehavior(e.target.value as FileProfileRuleBehavior)} className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"><option value="monitor_change">Observe changes</option><option value="block_access">Block access</option></select></label>
+              {behavior === "block_access" && <p className="text-sm text-status-warning">Blocking can prevent file access when the workload profile is enforcing. Check the path before saving.</p>}
+              <label className="flex items-center gap-3 text-sm"><input type="checkbox" className="h-4 w-4" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> Enable rule</label>
+              <label className="block space-y-2 text-sm"><span className="font-medium">Description</span><input value={description} onChange={(e) => setDescription(e.target.value)} className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm" /></label>
+            </div>
+          </Collapse>
+        </fieldset>
+        {save.isError && <p role="alert" className="text-sm text-status-error">Could not save this rule. Your draft is preserved. Try again.</p>}
+        <div className="flex justify-end gap-3 border-t border-border pt-5"><Button type="button" variant="ghost" size="lg" disabled={save.isPending} onClick={() => void navigate({ href: backTo })}>Cancel</Button><Button type="submit" variant="primary" size="lg" disabled={!canSave || !filter.trim() || save.isPending}><Save className="h-4 w-4" />{save.isPending ? "Saving…" : "Save"}</Button></div>
+      </form>
+    </Card>
+  </>;
 }

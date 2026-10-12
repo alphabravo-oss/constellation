@@ -2,6 +2,7 @@ import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { TablePreferencesProvider } from "@/contexts/TablePreferencesContext";
 import { DataTable, type Column } from "./data-table";
 
 type Row = { id: string; name: string; risk: number; owner: string };
@@ -46,7 +47,7 @@ describe("DataTable preferences", () => {
 
   it("restores hidden columns and density from the table preference key", () => {
     localStorage.setItem(
-      "constellation.table.unit-findings.v1",
+      storageKey("unit-findings"),
       JSON.stringify({ hiddenColumnIds: ["owner"], density: "compact" }),
     );
 
@@ -70,7 +71,7 @@ describe("DataTable preferences", () => {
 
   it("keeps non-hideable columns visible even when stored preferences hide them", () => {
     localStorage.setItem(
-      "constellation.table.unit-required.v1",
+      storageKey("unit-required"),
       JSON.stringify({ hiddenColumnIds: ["name", "owner"] }),
     );
 
@@ -109,7 +110,7 @@ describe("DataTable preferences", () => {
       exportedName = this.download;
     });
     localStorage.setItem(
-      "constellation.table.unit-export.v1",
+      storageKey("unit-export"),
       JSON.stringify({ hiddenColumnIds: ["owner"] }),
     );
 
@@ -150,7 +151,7 @@ function render(ui: ReactNode) {
   document.body.appendChild(host);
   root = createRoot(host);
   act(() => {
-    root?.render(ui);
+    root?.render(<TablePreferencesProvider identity={{ org_id: "org", user_id: "user" }}>{ui}</TablePreferencesProvider>);
   });
 }
 
@@ -161,3 +162,28 @@ function restoreUrlFunction(name: "createObjectURL" | "revokeObjectURL", value: 
   }
   delete (URL as unknown as Record<string, unknown>)[name];
 }
+
+function storageKey(table: string, org = "org", user = "user") {
+  return `constellation.table.${JSON.stringify([org, user, table])}.v1`;
+}
+
+it("isolates preferences across identities without copying stale columns or density", () => {
+  localStorage.setItem(storageKey("scoped"), JSON.stringify({ hiddenColumnIds: ["owner", "removed-column"], density: "compact" }));
+  const table = <DataTable rows={rows} columns={columns} rowKey={(row) => row.id} preferencesKey="scoped" />;
+  render(table);
+  expect(host?.textContent).not.toContain("Owner");
+  act(() => root?.render(<TablePreferencesProvider identity={{ org_id: "other-org", user_id: "user" }}>{table}</TablePreferencesProvider>));
+  expect(host?.textContent).toContain("Owner");
+  expect(host?.querySelector("tbody tr")?.className).not.toContain("h-6");
+  expect(JSON.parse(localStorage.getItem(storageKey("scoped", "other-org"))!).hiddenColumnIds).toEqual([]);
+  act(() => root?.render(<TablePreferencesProvider identity={{ org_id: "org", user_id: "other-user" }}>{table}</TablePreferencesProvider>));
+  expect(host?.textContent).toContain("Owner");
+  expect(JSON.parse(localStorage.getItem(storageKey("scoped"))!).hiddenColumnIds).toEqual(["owner"]);
+});
+
+it("does not adopt legacy preferences with unknown ownership", () => {
+  localStorage.setItem("constellation.table.legacy.v1", JSON.stringify({ hiddenColumnIds: ["owner"], density: "compact" }));
+  render(<DataTable rows={rows} columns={columns} rowKey={(row) => row.id} preferencesKey="legacy" />);
+  expect(host?.textContent).toContain("Owner");
+  expect(host?.querySelector("tbody tr")?.className).not.toContain("h-6");
+});

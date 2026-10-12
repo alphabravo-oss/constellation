@@ -4785,6 +4785,7 @@ export interface DashboardSummary {
 
 export interface ExposedService {
   workload: string;
+  platform_role?: string;
   namespace: string;
   name: string;
   external_peers: number;
@@ -5425,8 +5426,8 @@ export const groupsApi = {
     api.get<GroupUsage>(`/groups/${id}/usage`, { params }).then((r) => r.data),
   create: (body: Omit<Group, "id"|"created_at"|"updated_at">, params: { cluster_id?: string } = {}) =>
     api.post<{ id: string }>("/groups", body, { params }).then((r) => r.data),
-  update: (id: string, body: Omit<Group, "id"|"created_at"|"updated_at">) =>
-    api.put<{ id: string }>(`/groups/${id}`, body).then((r) => r.data),
+  update: (id: string, body: Omit<Group, "id"|"created_at"|"updated_at">, params: { cluster_id?: string } = {}) =>
+    api.put<{ id: string }>(`/groups/${id}`, body, { params }).then((r) => r.data),
   delete: (id: string) => api.delete(`/groups/${id}`).then((r) => r.data),
   exportYaml: (params: { cluster_id?: string } = {}) =>
     api.get<string>("/groups:export", { params, responseType: "text", headers: { Accept: "application/x-yaml" } }).then((r) => r.data),

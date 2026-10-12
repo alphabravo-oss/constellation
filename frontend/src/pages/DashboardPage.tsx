@@ -1,24 +1,3 @@
-// DashboardPage — security ops console.
-//
-// Layout (top → bottom):
-//
-//   ┌──────────────────────────────────────────────────────────────────┐
-//   │ Scope bar                                                        │
-//   ├──────────────────────────────────────────────────────────────────┤
-//   │ Hero band: composite risk gauge · 4 severity tiles + sparklines  │
-//   ├───────────────────────────────────┬──────────────────────────────┤
-//   │ Action items (top critical/high)  │  Recent activity rail        │
-//   ├───────────────────────────────────┴──────────────────────────────┤
-//   │ Posture tiles: compliance pass % · runtime threats today          │
-//   ├──────────────────────────────────────────────────────────────────┤
-//   │ Heatmap matrix (asset id × severity × finding count)             │
-//   ├──────────────────────────────────────────────────────────────────┤
-//   │ Severity distribution · CVE DB · New-findings trend               │
-//   └──────────────────────────────────────────────────────────────────┘
-//
-// All KPIs link to pre-filtered drill-downs; action items launch the Triage
-// drawer in place so the analyst never loses dashboard context.
-
 import { useMemo } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -27,7 +6,7 @@ import { Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis
 import {
   AlertOctagon, AlertTriangle, ShieldAlert, ShieldCheck, Activity,
   TrendingUp, ArrowUpRight, ExternalLink, Database, FileWarning,
-  ServerCog, PackageCheck, RefreshCw, ArrowUp, ScanSearch, GitBranch,
+  ServerCog, PackageCheck, RefreshCw, ScanSearch, GitBranch,
 } from "lucide-react";
 
 import {
@@ -40,8 +19,6 @@ import {
   federation,
   network,
   downloadAPIFile,
-  groupsApi,
-  policies,
   scannerOperations,
   systemHealth,
   type CVEBundleStatus,
@@ -63,11 +40,14 @@ import { Sparkline } from "@/components/ui/sparkline";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ScannerDbCapacity } from "@/components/ScannerDbCapacity";
+import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { Tabs, useTabParam } from "@/components/ui/tabs";
+import { Collapse } from "@/components/ui/collapse";
+import { ErrorState } from "@/components/ui/states";
 import { PageHeader } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { fmtBytes, fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/cn";
-import { toast } from "sonner";
 
 const SEVERITY_COLORS: Record<Severity, string> = {
   info:     "var(--color-severity-info)",
@@ -92,6 +72,8 @@ export function DashboardPage() {
   // Under /clusters/:id/dashboard, scope all data fetches to that cluster.
   // At org-level (legacy/back-compat) clusterId is undefined → fetch unscoped.
   const { clusterId, cluster } = useCluster();
+  const [requestedTab, setTab] = useTabParam("tab", "overview");
+  const tab = ["overview", "posture", "network", "operations", "trends"].includes(requestedTab) ? requestedTab : "overview";
   // Severity/lifecycle totals come from dashboard.summary (server-aggregated),
   // so we only need a top slice of open findings for the visuals (composite
   // risk, top actions, heatmap, trend). One 250-row fetch instead of two
@@ -167,59 +149,20 @@ export function DashboardPage() {
     mutationFn: () => clusters.scanPlatform(clusterId!),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["cluster-platform", clusterId] }),
   });
-  // Bulk mode promotion (NV Discover→Monitor→Protect) — advances all eligible groups one step.
-  const promoteMut = useMutation({
-    mutationFn: (body: { dimension: "policy" | "profile"; from: "discover" | "monitor" }) =>
-      groupsApi.promote(body, { cluster_id: clusterId }),
-    onSuccess: (res) => {
-      toast.success(res.promoted > 0 ? `Promoted ${res.promoted} group${res.promoted === 1 ? "" : "s"}: ${res.from} → ${res.to}` : `No groups in ${res.from} mode to promote`);
-      void qc.invalidateQueries({ queryKey: ["dashboard", clusterId] });
-    },
-    onError: () => toast.error("Failed to promote groups"),
-  });
-  // NV NewServiceMode: the mode newly-discovered service groups start in.
-  const newSvcMut = useMutation({
-    mutationFn: (body: { policy_mode?: string; profile_mode?: string }) =>
-      policies.updateServiceModeDefaults(body, { cluster_id: clusterId }),
-    onSuccess: () => {
-      toast.success("New-service default mode updated");
-      void qc.invalidateQueries({ queryKey: ["dashboard", clusterId] });
-    },
-    onError: () => toast.error("Failed to update new-service mode"),
-  });
-
   const openItems = useMemo(() => open.data?.findings ?? [], [open.data]);
-  const allItems  = openItems; // counts/trends fall back to the open slice; authoritative totals come from sum.data
+  const allItems = openItems; // Finding trends describe only this loaded sample.
   const clusterPath = (path: string) => clusterId ? `/clusters/${clusterId}${path}` : path;
 
-  // Prefer the server-side summary for severity/lifecycle totals: the findings
-  // list is paginated (limit 1000), so tallying it client-side under-counts
-  // once a cluster has more findings than one page. Fall back to the client
-  // tally only until the summary loads.
-  const counts = useMemo(() => {
-    const s = sum.data;
-    if (s?.findings_by_severity) {
-      const base = bucketByLifecycle(allItems);
-      return {
-        ...base,
-        total: s.findings_total ?? base.total,
-        open: s.open_findings ?? base.open,
-        critical: s.findings_by_severity.critical ?? base.critical,
-        high: s.findings_by_severity.high ?? base.high,
-        accepted: s.accepted_risks ?? base.accepted,
-      };
-    }
-    return bucketByLifecycle(allItems);
-  }, [sum.data, allItems]);
-  const severityCounts = useMemo(() => {
-    const s = sum.data?.findings_by_severity;
-    if (s) {
-      return (["critical", "high", "medium", "low", "info"] as Severity[])
-        .map((severity) => ({ severity, value: s[severity] ?? 0 }))
-        .filter((entry) => entry.value > 0);
-    }
-    return bucketBySeverity(openItems);
-  }, [sum.data, openItems]);
+  // Counts always come from the complete server aggregate, never the loaded sample.
+  const counts = {
+    open: sum.data?.open_findings ?? 0,
+    critical: sum.data?.findings_by_severity?.critical ?? 0,
+    high: sum.data?.findings_by_severity?.high ?? 0,
+    accepted: sum.data?.accepted_risks ?? 0,
+  };
+  const severityCounts = (["critical", "high", "medium", "low", "info"] as Severity[])
+    .map((severity) => ({ severity, value: sum.data?.findings_by_severity?.[severity] ?? 0 }))
+    .filter((entry) => entry.value > 0);
   const posture = sum.data?.posture;
   const risk = posture?.security_score ?? 0;
   const eventsTimelineQ = useQuery({
@@ -273,30 +216,303 @@ export function DashboardPage() {
   // Runtime threats in the last 24h: alerting/blocking events from the overview.
   const runtimeThreats = runtimeToday.data?.summary;
 
-  // Triage drawer (in-place from action items)
   const navigate = useNavigate();
 
-  return (
-    <div className="space-y-5" data-testid="dashboard-page" data-cluster-id={clusterId ?? ""}>
-      <PageHeader
-        title={cluster?.name ? `${cluster.name} — Dashboard` : "Security Dashboard"}
-        description={
-          clusterId
-            ? "Risk-first snapshot for this cluster. Click any tile to drill in."
-            : "A risk-first snapshot of your fleet. Click any tile to drill in."
-        }
-        actions={
-          <button
-            type="button"
-            title="Download the executive security report (open it to print or save as PDF)"
-            onClick={() => downloadAPIFile("/reports/executive.pdf", "constellation-executive-report.html")}
-            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-2 text-sm hover:bg-accent"
-          >
-            <FileWarning className="h-4 w-4" /> Executive report
-          </button>
-        }
-      />
+  const overviewView = <div className="space-y-5">
+      {/* Action items + recent activity */}
+      <section className="c-rise c-rise-3 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Panel
+          className="min-w-0"
+          title="Action Items"
+          subtitle="Top 10 critical/high findings from the latest 250 open findings, sorted by risk"
+          icon={<ShieldAlert className="h-3.5 w-3.5" />}
+          rightSlot={<Link to="." href={clusterPath("/findings")} className="text-[11px] text-muted-foreground hover:text-foreground">view all <ArrowUpRight className="inline h-3 w-3" /></Link>}
+        >
+          {open.isError ? <ErrorState title="Could not load action items." action={<Button onClick={() => void open.refetch()}>Retry</Button>} /> : open.isPending ? <p className="p-3 text-sm text-muted-foreground">Loading action items…</p> : topActions.length === 0 ? (
+            <EmptyState
+              title="No critical or high findings in the loaded sample"
+              hint="When new severe findings appear they'll show up here for one-click triage."
+              icon={<ShieldCheck className="h-8 w-8" />}
+            />
+          ) : (
+            <ul className="divide-y divide-border">
+              {topActions.map((f) => (
+                <li key={f.id} className="accent-slide flex items-center gap-3 px-3 py-2 hover:bg-muted/40 transition-colors">
+                  <SeverityBadge severity={f.severity} kev={false} />
+                  <div className="min-w-0 flex-1">
+                    <Link to="." href={clusterPath(`/findings/${f.id}`)} className="text-sm hover:underline truncate block" title={f.title}>
+                      {f.title}
+                    </Link>
+                    <div className="text-[10px] text-mono text-muted-foreground">
+                      {f.external_id ?? f.id.slice(0, 10)} · {f.kind} · {fmtRelative(f.last_seen_at)}
+                    </div>
+                  </div>
+                  <RiskScore score={f.risk_score} size="sm" />
+                  <Button size="sm" variant="outline" onClick={() => navigate({ href: clusterPath(`/findings/${f.id}`) })}>Triage</Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Panel>
 
+        <Panel
+          title="Security Events"
+          subtitle="High + critical alerts · last 14 days"
+          icon={<AlertTriangle className="h-3.5 w-3.5" />}
+        >
+          {(() => {
+            if (eventsTimelineQ.isError) return <ErrorState title="Could not load event history." />;
+            if (eventsTimelineQ.isPending) return <p className="p-3 text-xs text-muted-foreground">Loading events…</p>;
+            const raw = eventsTimelineQ.data?.events_timeline ?? [];
+            const totalAlerts = raw.reduce((a, d) => a + d.total, 0);
+            if (totalAlerts === 0) return <EmptyState title="No alerting events" hint="No high/critical security events in the last 14 days." />;
+            const tl = raw.map((d) => ({ date: d.date, high: Math.max(0, d.total - d.critical), critical: d.critical }));
+            return (
+              <div className="p-3">
+                <div className="mb-1 text-xs text-muted-foreground">{totalAlerts.toLocaleString()} alerts · {raw.reduce((a, d) => a + d.critical, 0).toLocaleString()} critical</div>
+                <ResponsiveContainer width="100%" height={140}>
+                  <BarChart data={tl} barCategoryGap={2}>
+                    <XAxis dataKey="date" tickFormatter={(d: string) => d.slice(5)} tick={{ fontSize: 9, fill: "var(--color-muted-foreground)" }} interval={1} axisLine={false} tickLine={false} />
+                    <Tooltip contentStyle={tooltipStyle} labelFormatter={(d) => d} formatter={(v: number, n: string) => [v, n === "critical" ? "Critical" : "High"]} />
+                    <Bar dataKey="high" stackId="a" fill="var(--color-severity-high)" radius={[0, 0, 0, 0]} />
+                    <Bar dataKey="critical" stackId="a" fill="var(--color-severity-critical)" radius={[2, 2, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            );
+          })()}
+        </Panel>
+
+        <Panel
+          title="Recent Activity"
+          icon={<Activity className="h-3.5 w-3.5" />}
+        >
+          {sum.isError ? <ErrorState title="Could not load recent activity." /> : sum.isPending ? <p className="p-3 text-xs text-muted-foreground">Loading activity…</p> : recent.length === 0 ? (
+            <EmptyState title="No recent activity" hint="Triage actions and runtime events will appear here." />
+          ) : (
+            <ul className="divide-y divide-border">
+              {recent.slice(0, 8).map((r, i) => (
+                <li key={i} className="px-3 py-2 text-xs">
+                  <div className="flex items-center gap-1.5">
+                    <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-mono">{r.action}</span>
+                    <span className="text-muted-foreground text-[10px]">{r.target_kind}</span>
+                  </div>
+                  <div className="mt-0.5 text-mono text-[10px] text-muted-foreground truncate">
+                    {r.target_id} · {fmtRelative(r.at)}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Panel>
+      </section>
+
+
+  </div>;
+  const postureView = <div className="space-y-5">
+      {/* Hero band — Security RISK Score (NV model: higher = worse) + its 6 weighted factors */}
+      <section className="c-rise c-rise-1 grid grid-cols-1 gap-6 rounded-md border border-border bg-card p-5 star-field lg:grid-cols-2">
+        <div className="flex flex-col items-center justify-center gap-3 border-b border-border/60 pb-5 lg:border-b-0 lg:border-r lg:pb-0 lg:pr-5">
+          {posture ? <RiskGauge score={risk} label="risk score" size={132} /> : <p className="text-sm text-muted-foreground">Risk score unavailable</p>}
+          <div className="text-center">
+            <div className="text-display text-sm font-semibold leading-none" style={{ color: risk <= 20 ? "var(--color-severity-low)" : risk <= 50 ? "var(--color-severity-medium)" : "var(--color-severity-critical)" }}>
+              {!posture ? "—" : risk <= 20 ? "Good" : risk <= 50 ? "Fair" : "Poor"}
+            </div>
+            <div className="mt-1 text-[11px] text-muted-foreground">{sum.data?.open_findings ?? "—"} open findings</div>
+          </div>
+        </div>
+        <div className="flex flex-col justify-between gap-5">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <StatCard label="Critical" value={sum.data ? counts.critical : "—"} tone="critical" icon={<AlertOctagon className="h-3 w-3" />} href={clusterPath("/findings?severity=critical&lifecycle=open")} trend={trends.critical} />
+            <StatCard label="High" value={sum.data ? counts.high : "—"} tone="high" icon={<AlertTriangle className="h-3 w-3" />} href={clusterPath("/findings?severity=high&lifecycle=open")} trend={trends.high} />
+            <StatCard label="Open" value={sum.data ? counts.open : "—"} tone="accent" icon={<Activity className="h-3 w-3" />} href={clusterPath("/findings")} trend={trends.open} />
+            <StatCard label="Accepted" value={sum.data ? counts.accepted : "—"} tone="neutral" icon={<ShieldCheck className="h-3 w-3" />} href={clusterPath("/findings?lifecycle=accepted")} />
+          </div>
+          {/* Risk factors — NV's 6 weighted contributors (bar = share of its cap). */}
+          <div>
+            <div className="mb-2 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Risk factors · points of 100</div>
+            <div className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2 xl:grid-cols-3">
+              {SCORE_FACTORS.map(({ k, label, cap }) => {
+                const v = posture?.score_breakdown?.[k] ?? 0;
+                const ratio = v / cap;
+                return (
+                  <div key={k} className="flex items-center gap-2 text-[11px]">
+                    <span className="w-[104px] shrink-0 text-muted-foreground">{label}</span>
+                    <div className="h-1.5 flex-1 rounded-full bg-muted overflow-hidden">
+                      <div className="h-full rounded-full" style={{ width: `${Math.round(ratio * 100)}%`, background: ratio >= 0.66 ? "var(--color-severity-critical)" : ratio >= 0.33 ? "var(--color-severity-high)" : "var(--color-severity-medium)" }} />
+                    </div>
+                    <span className="w-11 shrink-0 text-right text-mono tabular-nums text-muted-foreground">{posture ? v : "—"}/{cap}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <Collapse label="Additional posture metrics">
+      {/* Posture metrics — one uniform, scannable grid (compliance · runtime · vuln location · hardening) */}
+      <section className="c-rise c-rise-2 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8">
+        <StatCard label="Compliance" value={complianceSum.isPending ? "…" : compliancePosture.pct == null ? "—" : `${compliancePosture.pct}%`}
+          tone={compliancePosture.pct == null ? "neutral" : compliancePosture.pct >= 90 ? "low" : compliancePosture.pct >= 70 ? "medium" : "high"}
+          icon={<ShieldCheck className="h-3 w-3" />} href={clusterPath("/compliance")}
+          hint={complianceSum.isError ? "Unavailable" : compliancePosture.pct == null ? "no graded controls" : `${compliancePosture.fail} failing`} />
+        <StatCard label="Runtime · 24h" value={runtimeToday.isPending ? "…" : (runtimeThreats?.alerts ?? "—")}
+          tone={(runtimeThreats?.alerts ?? 0) > 0 ? "critical" : "neutral"} icon={<ShieldAlert className="h-3 w-3" />} href={clusterPath("/runtime")}
+          hint={runtimeThreats ? `${runtimeThreats.blocks} blocked` : "Unavailable"} />
+        <StatCard label="Image CVEs" value={posture?.vulns_by_location?.image ?? "—"} tone="accent" icon={<AlertTriangle className="h-3 w-3" />} href={clusterPath("/findings")} hint="in container images" />
+        <StatCard label="Host CVEs" value={posture?.vulns_by_location?.host ?? "—"} tone={(posture?.vulns_by_location?.host ?? 0) > 0 ? "high" : "neutral"} icon={<AlertTriangle className="h-3 w-3" />} href={clusterPath("/nodes?risk=host-cves")} hint="on cluster nodes" />
+        <StatCard label="Fixable now" value={posture?.vuln_signals?.fixable ?? "—"} tone="low" icon={<ShieldCheck className="h-3 w-3" />} href={clusterPath("/findings")} hint="patched version exists" />
+        <StatCard label="Privileged" value={posture?.hardening?.privileged ?? "—"} tone={(posture?.hardening?.privileged ?? 0) > 0 ? "critical" : "low"} icon={<ShieldAlert className="h-3 w-3" />} href={clusterPath("/deployments")} hint="privileged workloads" />
+        <StatCard label="Run as root" value={posture?.hardening?.run_as_root ?? "—"} tone={(posture?.hardening?.run_as_root ?? 0) > 0 ? "high" : "low"} icon={<ShieldAlert className="h-3 w-3" />} href={clusterPath("/deployments")} hint="no non-root enforce" />
+        <StatCard label="Exposed WLs" value={posture?.hardening?.exposed ?? "—"} tone={(posture?.hardening?.exposed ?? 0) > 0 ? "medium" : "low"} icon={<Activity className="h-3 w-3" />} href={clusterPath("/network")} hint="externally reachable" />
+      </section>
+
+      </Collapse>
+
+  </div>;
+  const networkView = <div className="space-y-5">
+      {/* Exposed services (ingress/egress) + enforcement coverage — NV signature panels */}
+      <section className="c-rise c-rise-2 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="space-y-4">
+          <Panel title="Exposed Services" rightSlot={<Button size="sm" disabled={!exposureQ.data} onClick={() => downloadCsv("constellation-exposure", ["Direction", "Workload", "Namespace", "Platform role", "External peers", "Sessions", "Policy mode"], [
+            ...(exposureQ.data?.ingress ?? []).map((service) => ["ingress", service.workload, service.namespace, service.platform_role ?? "", service.external_peers, service.sessions, service.policy_mode]),
+            ...(exposureQ.data?.egress ?? []).map((service) => ["egress", service.workload, service.namespace, service.platform_role ?? "", service.external_peers, service.sessions, service.policy_mode]),
+          ])}>Export CSV</Button>} subtitle="Workloads talking to the outside world — correlated with their vulnerabilities" icon={<Activity className="h-3.5 w-3.5" />}>
+            {exposureQ.isError ? <ErrorState title="Could not load exposure." action={<Button onClick={() => void exposureQ.refetch()}>Retry</Button>} /> : exposureQ.isPending ? (
+              <p className="p-3 text-xs text-muted-foreground">Loading exposure…</p>
+            ) : ((exposureQ.data?.ingress.length ?? 0) + (exposureQ.data?.egress.length ?? 0)) === 0 ? (
+              <EmptyState title="No external exposure observed" hint="No ingress/egress traffic to external endpoints in the last 7 days." />
+            ) : (
+              <div className="divide-y divide-border">
+                {(exposureQ.data?.ingress ?? []).map((s) => <ExposedRow key={"in" + s.workload} s={s} dir="ingress" clusterPath={clusterPath} />)}
+                {(exposureQ.data?.egress ?? []).map((s) => <ExposedRow key={"eg" + s.workload} s={s} dir="egress" clusterPath={clusterPath} />)}
+              </div>
+            )}
+          </Panel>
+
+          <Panel
+            title="Top Network Denies"
+            subtitle="Blocked service pairs in the last 24h"
+            icon={<ShieldAlert className="h-3.5 w-3.5" />}
+            rightSlot={<Link to="." href={clusterPath("/network?tab=conversations&hours=24&verdict=deny")} className="text-[11px] text-muted-foreground hover:text-foreground">view conversations <ArrowUpRight className="inline h-3 w-3" /></Link>}
+          >
+            <div data-testid="dashboard-network-denies">
+              {conversationsQ.isError ? <ErrorState title="Could not load network conversations." /> : conversationsQ.isPending ? (
+                <p className="p-3 text-xs text-muted-foreground">Loading denied conversations...</p>
+              ) : topNetworkDenies.length === 0 ? (
+                <EmptyState title="No network denies observed" hint="Denied or blocked service pairs will rank here when enforcement drops traffic." />
+              ) : (
+                <ul className="divide-y divide-border">
+                  {topNetworkDenies.map((row, index) => (
+                    <li key={`${row.from}-${row.to}-${index}`}>
+                      <Link to="." href={clusterPath(`/network?tab=conversations&hours=24&verdict=${encodeURIComponent(row.verdict ?? "deny")}&workload=${encodeURIComponent(row.from)}`)} className="flex items-center gap-3 px-3 py-2 hover:bg-muted/40 transition-colors">
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-xs font-medium">
+                            <span className="font-mono">{row.from}</span>
+                            <span className="px-1.5 text-muted-foreground">→</span>
+                            <span className="font-mono">{row.to}</span>
+                          </div>
+                          <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
+                            {fmtBytes(row.bytes)} · {row.packets.toLocaleString()} packets
+                            {(row.apps?.length ?? 0) > 0 && ` · ${row.apps?.slice(0, 3).join(", ")}`}
+                            {row.last_seen && ` · ${fmtRelative(row.last_seen)}`}
+                          </div>
+                        </div>
+                        <span className="shrink-0 rounded bg-[color-mix(in_oklab,var(--color-status-error)_16%,transparent)] px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-[color:var(--color-status-error)]">
+                          {row.verdict || "deny"}
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </Panel>
+        </div>
+        <div className="space-y-4">
+        <Panel title="Policy Mode Maturity" subtitle="Current group enforcement modes" icon={<ShieldCheck className="h-3.5 w-3.5" />}>
+          <div className="p-3 space-y-4">
+            {(() => {
+              if (!posture) return <p className="text-sm text-muted-foreground">Enforcement summary unavailable.</p>;
+              const e = posture.enforcement ?? {};
+              const groups = e.groups ?? 0;
+              return (
+                <>
+                  <ModeMaturity label="Network mode" groups={groups} discover={e.discover ?? 0} monitor={e.monitor ?? 0} protect={e.protect ?? 0} />
+                  <ModeMaturity label="Process / File mode" groups={groups} discover={e.profile_discover ?? 0} monitor={e.profile_monitor ?? 0} protect={e.profile_protect ?? 0} />
+                  {(() => {
+                    const cm = posture?.cves_by_mode ?? {};
+                    const em = posture?.exposed_by_mode ?? {};
+                    const cell = (v: number, warn?: boolean) => <span className={warn && v > 0 ? "font-medium text-[color:var(--color-severity-high)]" : "text-foreground"}>{v}</span>;
+                    return (
+                      <div className="border-t border-border pt-2 space-y-1 text-xs">
+                        <div className="text-muted-foreground">Risk by mode <span className="text-muted-foreground/70">(CVEs · exposed workloads)</span></div>
+                        <table className="app-semantic-table w-full">
+                          <tbody>
+                            <tr className="text-muted-foreground"><td>Discover <span className="text-muted-foreground/70">(unprotected)</span></td><td className="text-right">{cell(cm.discover ?? 0, true)} CVEs</td><td className="text-right">{cell(em.discover ?? 0, true)} exp.</td></tr>
+                            <tr className="text-muted-foreground"><td>Monitor</td><td className="text-right">{cell(cm.monitor ?? 0)} CVEs</td><td className="text-right">{cell(em.monitor ?? 0)} exp.</td></tr>
+                            <tr className="text-muted-foreground"><td>Protect</td><td className="text-right">{cell(cm.protect ?? 0)} CVEs</td><td className="text-right">{cell(em.protect ?? 0)} exp.</td></tr>
+                            <tr className="text-muted-foreground/80"><td>Platform / Host</td><td className="text-right" colSpan={2}>{cell(cm.platform ?? 0)} / {cell(cm.host ?? 0)} CVEs</td></tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })()}
+                  <div className="flex flex-wrap gap-4 border-t border-border pt-3 text-xs">
+                    <Link to="." href={clusterPath("/groups")} className="text-primary hover:underline">Manage group modes</Link>
+                    <Link to="." href={clusterPath("/groups/settings")} className="text-primary hover:underline">Edit new-service defaults</Link>
+                  </div>
+                  <div className="flex items-center justify-between border-t border-border pt-2 text-xs">
+                    <span className="text-muted-foreground">Admission control</span>
+                    {(e.admission_enforcing ?? 0) > 0 ? (
+                      <span className="flex items-center gap-1.5 text-[color:var(--color-severity-low)]"><span className="inline-block h-2 w-2 rounded-full" style={{ background: "var(--color-severity-low)" }} />enforcing · {e.admission_enforcing} rule{(e.admission_enforcing ?? 0) === 1 ? "" : "s"}</span>
+                    ) : (e.admission_policies ?? 0) > 0 ? (
+                      <span className="text-[color:var(--color-severity-medium)]">monitor only</span>
+                    ) : (
+                      <span className="text-[color:var(--color-severity-high)]">not enforcing</span>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        </Panel>
+        <Panel title="Top Vulnerable Assets" subtitle="Workloads with the most critical + high CVEs" icon={<AlertOctagon className="h-3.5 w-3.5" />}
+          rightSlot={(posture?.top_vulnerable?.length ?? 0) > 0 ? (
+            <button type="button"
+              onClick={() => downloadCsv("constellation-vulnerable-workloads", ["Namespace", "Workload", "Critical", "High"],
+                (posture?.top_vulnerable ?? []).map((t) => [t.namespace, t.name, t.critical, t.high]))}
+              className="rounded-md border border-border bg-card px-2 py-1 text-[10px] font-medium hover:bg-accent">
+              Export CSV
+            </button>
+          ) : undefined}
+        >
+          {!posture ? <p className="p-3 text-xs text-muted-foreground">Vulnerability summary unavailable.</p> : (posture.top_vulnerable?.length ?? 0) === 0 ? (
+            <EmptyState title="No vulnerable workloads" hint="Workloads with critical/high CVEs will rank here." />
+          ) : (
+            <ul className="divide-y divide-border">
+              {(posture?.top_vulnerable ?? []).map((t) => (
+                <li key={`${t.namespace}/${t.name}`}>
+                  <Link to="." href={clusterPath(`/deployments?q=${encodeURIComponent(t.name)}`)} className="flex items-center gap-2 px-3 py-2 hover:bg-muted/40 transition-colors">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-medium truncate">{t.name}</div>
+                      <div className="text-[10px] text-muted-foreground truncate">{t.namespace}</div>
+                    </div>
+                    {t.critical > 0 && <span className="rounded px-1.5 py-0.5 text-[10px] text-mono font-semibold text-white" style={{ background: "var(--color-severity-critical)" }}>{t.critical}C</span>}
+                    {t.high > 0 && <span className="rounded px-1.5 py-0.5 text-[10px] text-mono font-semibold text-white" style={{ background: "var(--color-severity-high)" }}>{t.high}H</span>}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Panel>
+        </div>
+      </section>
+
+
+  </div>;
+  const operationsView = <div className="space-y-5">
       {!clusterId && (
         <section className="rounded-md border border-border bg-card p-4" data-testid="dashboard-scanner-db-capacity">
           <div className="mb-3 flex items-center justify-between gap-2">
@@ -308,7 +524,7 @@ export function DashboardPage() {
       )}
 
       {clusterId && (
-        <section className="c-rise c-rise-1 grid gap-3 xl:grid-cols-[minmax(0,1fr)_360px]" data-testid="dashboard-operator-strip">
+        <section className="c-rise c-rise-1 grid gap-3 xl:grid-cols-2" data-testid="dashboard-operator-strip">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5" data-testid="dashboard-component-health">
             {COMPONENT_ROLES.map((role) => {
               const health = componentHealth.roles[role.id];
@@ -316,7 +532,7 @@ export function DashboardPage() {
                 <div key={role.id} data-testid={`dashboard-component-link-${role.id}`}>
                   <StatCard
                     label={role.label}
-                    value={clusterHealth.isPending ? "..." : `${health.healthy}/${health.total}`}
+                    value={!clusterHealth.data ? "—" : `${health.healthy}/${health.total}`}
                     tone={componentRoleTone(health)}
                     icon={role.icon}
                     href={clusterPath(`/components?role=${role.id}`)}
@@ -399,215 +615,6 @@ export function DashboardPage() {
         </section>
       )}
 
-      {/* Hero band — Security RISK Score (NV model: higher = worse) + its 6 weighted factors */}
-      <section className="c-rise c-rise-1 grid grid-cols-1 gap-6 rounded-md border border-border bg-card p-5 star-field lg:grid-cols-[200px_1fr]">
-        <div className="flex flex-col items-center justify-center gap-3 border-b border-border/60 pb-5 lg:border-b-0 lg:border-r lg:pb-0 lg:pr-5">
-          <RiskGauge score={risk} label="risk score" size={132} />
-          <div className="text-center">
-            <div className="text-display text-sm font-semibold leading-none" style={{ color: risk <= 20 ? "var(--color-severity-low)" : risk <= 50 ? "var(--color-severity-medium)" : "var(--color-severity-critical)" }}>
-              {risk <= 20 ? "Good" : risk <= 50 ? "Fair" : "Poor"}
-            </div>
-            <div className="mt-1 text-[11px] text-muted-foreground">{openItems.length} open findings</div>
-          </div>
-        </div>
-        <div className="flex flex-col justify-between gap-5">
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <StatCard label="Critical" value={counts.critical} tone="critical" icon={<AlertOctagon className="h-3 w-3" />} href={clusterPath("/findings?severity=critical")} trend={trends.critical} />
-            <StatCard label="High" value={counts.high} tone="high" icon={<AlertTriangle className="h-3 w-3" />} href={clusterPath("/findings?severity=high")} trend={trends.high} />
-            <StatCard label="Open" value={counts.open} tone="accent" icon={<Activity className="h-3 w-3" />} href={clusterPath("/findings")} trend={trends.open} />
-            <StatCard label="Accepted" value={counts.accepted} tone="neutral" icon={<ShieldCheck className="h-3 w-3" />} href={clusterPath("/findings?lifecycle=accepted")} />
-          </div>
-          {/* Risk factors — NV's 6 weighted contributors (bar = share of its cap). */}
-          <div>
-            <div className="mb-2 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Risk factors · points of 100</div>
-            <div className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2 xl:grid-cols-3">
-              {SCORE_FACTORS.map(({ k, label, cap }) => {
-                const v = posture?.score_breakdown?.[k] ?? 0;
-                const ratio = v / cap;
-                return (
-                  <div key={k} className="flex items-center gap-2 text-[11px]">
-                    <span className="w-[104px] shrink-0 text-muted-foreground">{label}</span>
-                    <div className="h-1.5 flex-1 rounded-full bg-muted overflow-hidden">
-                      <div className="h-full rounded-full" style={{ width: `${Math.round(ratio * 100)}%`, background: ratio >= 0.66 ? "var(--color-severity-critical)" : ratio >= 0.33 ? "var(--color-severity-high)" : "var(--color-severity-medium)" }} />
-                    </div>
-                    <span className="w-11 shrink-0 text-right text-mono tabular-nums text-muted-foreground">{v}/{cap}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Posture metrics — one uniform, scannable grid (compliance · runtime · vuln location · hardening) */}
-      <section className="c-rise c-rise-2 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8">
-        <StatCard label="Compliance" value={complianceSum.isPending ? "…" : compliancePosture.pct == null ? "—" : `${compliancePosture.pct}%`}
-          tone={compliancePosture.pct == null ? "neutral" : compliancePosture.pct >= 90 ? "low" : compliancePosture.pct >= 70 ? "medium" : "high"}
-          icon={<ShieldCheck className="h-3 w-3" />} href={clusterPath("/compliance")}
-          hint={compliancePosture.pct == null ? "no graded controls" : `${compliancePosture.fail} failing`} />
-        <StatCard label="Runtime · 24h" value={runtimeToday.isPending ? "…" : (runtimeThreats?.alerts ?? 0)}
-          tone={(runtimeThreats?.alerts ?? 0) > 0 ? "critical" : "neutral"} icon={<ShieldAlert className="h-3 w-3" />} href={clusterPath("/runtime")}
-          hint={`${runtimeThreats?.blocks ?? 0} blocked`} />
-        <StatCard label="Image CVEs" value={posture?.vulns_by_location?.image ?? 0} tone="accent" icon={<AlertTriangle className="h-3 w-3" />} href={clusterPath("/findings")} hint="in container images" />
-        <StatCard label="Host CVEs" value={posture?.vulns_by_location?.host ?? 0} tone={(posture?.vulns_by_location?.host ?? 0) > 0 ? "high" : "neutral"} icon={<AlertTriangle className="h-3 w-3" />} href={clusterPath("/nodes?risk=host-cves")} hint="on cluster nodes" />
-        <StatCard label="Fixable now" value={posture?.vuln_signals?.fixable ?? 0} tone="low" icon={<ShieldCheck className="h-3 w-3" />} href={clusterPath("/findings")} hint="patched version exists" />
-        <StatCard label="Privileged" value={posture?.hardening?.privileged ?? 0} tone={(posture?.hardening?.privileged ?? 0) > 0 ? "critical" : "low"} icon={<ShieldAlert className="h-3 w-3" />} href={clusterPath("/deployments")} hint="privileged workloads" />
-        <StatCard label="Run as root" value={posture?.hardening?.run_as_root ?? 0} tone={(posture?.hardening?.run_as_root ?? 0) > 0 ? "high" : "low"} icon={<ShieldAlert className="h-3 w-3" />} href={clusterPath("/deployments")} hint="no non-root enforce" />
-        <StatCard label="Exposed WLs" value={posture?.hardening?.exposed ?? 0} tone={(posture?.hardening?.exposed ?? 0) > 0 ? "medium" : "low"} icon={<Activity className="h-3 w-3" />} href={clusterPath("/network")} hint="externally reachable" />
-      </section>
-
-      {/* Exposed services (ingress/egress) + enforcement coverage — NV signature panels */}
-      <section className="c-rise c-rise-2 grid grid-cols-1 gap-4 lg:grid-cols-[1fr_300px]">
-        <div className="space-y-4">
-          <Panel title="Exposed Services" subtitle="Workloads talking to the outside world — correlated with their vulnerabilities" icon={<Activity className="h-3.5 w-3.5" />}>
-            {exposureQ.isPending ? (
-              <p className="p-3 text-xs text-muted-foreground">Loading exposure…</p>
-            ) : ((exposureQ.data?.ingress.length ?? 0) + (exposureQ.data?.egress.length ?? 0)) === 0 ? (
-              <EmptyState title="No external exposure observed" hint="No ingress/egress traffic to external endpoints in the last 7 days." />
-            ) : (
-              <div className="divide-y divide-border">
-                {(exposureQ.data?.ingress ?? []).map((s) => <ExposedRow key={"in" + s.workload} s={s} dir="ingress" clusterPath={clusterPath} />)}
-                {(exposureQ.data?.egress ?? []).map((s) => <ExposedRow key={"eg" + s.workload} s={s} dir="egress" clusterPath={clusterPath} />)}
-              </div>
-            )}
-          </Panel>
-
-          <Panel
-            title="Top Network Denies"
-            subtitle="Blocked service pairs in the last 24h"
-            icon={<ShieldAlert className="h-3.5 w-3.5" />}
-            rightSlot={<Link to="." href={clusterPath("/network?tab=conversations&hours=24&verdict=deny")} className="text-[11px] text-muted-foreground hover:text-foreground">view conversations <ArrowUpRight className="inline h-3 w-3" /></Link>}
-          >
-            <div data-testid="dashboard-network-denies">
-              {conversationsQ.isPending ? (
-                <p className="p-3 text-xs text-muted-foreground">Loading denied conversations...</p>
-              ) : topNetworkDenies.length === 0 ? (
-                <EmptyState title="No network denies observed" hint="Denied or blocked service pairs will rank here when enforcement drops traffic." />
-              ) : (
-                <ul className="divide-y divide-border">
-                  {topNetworkDenies.map((row, index) => (
-                    <li key={`${row.from}-${row.to}-${index}`}>
-                      <Link to="." href={clusterPath(`/network?tab=conversations&hours=24&verdict=${encodeURIComponent(row.verdict ?? "deny")}&workload=${encodeURIComponent(row.from)}`)} className="flex items-center gap-3 px-3 py-2 hover:bg-muted/40 transition-colors">
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-xs font-medium">
-                            <span className="font-mono">{row.from}</span>
-                            <span className="px-1.5 text-muted-foreground">→</span>
-                            <span className="font-mono">{row.to}</span>
-                          </div>
-                          <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
-                            {fmtBytes(row.bytes)} · {row.packets.toLocaleString()} packets
-                            {(row.apps?.length ?? 0) > 0 && ` · ${row.apps?.slice(0, 3).join(", ")}`}
-                            {row.last_seen && ` · ${fmtRelative(row.last_seen)}`}
-                          </div>
-                        </div>
-                        <span className="shrink-0 rounded bg-[color-mix(in_oklab,var(--color-status-error)_16%,transparent)] px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-[color:var(--color-status-error)]">
-                          {row.verdict || "deny"}
-                        </span>
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </Panel>
-        </div>
-        <div className="space-y-4">
-        <Panel title="Policy Mode Maturity" subtitle="Advance groups Discover → Monitor → Protect" icon={<ShieldCheck className="h-3.5 w-3.5" />}>
-          <div className="p-3 space-y-4">
-            {(() => {
-              const e = posture?.enforcement ?? {};
-              const groups = e.groups ?? 0;
-              return (
-                <>
-                  <ModeMaturity label="Network mode" groups={groups} discover={e.discover ?? 0} monitor={e.monitor ?? 0} protect={e.protect ?? 0}
-                    onPromote={(from) => promoteMut.mutate({ dimension: "policy", from })} pending={promoteMut.isPending} />
-                  <ModeMaturity label="Process / File mode" groups={groups} discover={e.profile_discover ?? 0} monitor={e.profile_monitor ?? 0} protect={e.profile_protect ?? 0}
-                    onPromote={(from) => promoteMut.mutate({ dimension: "profile", from })} pending={promoteMut.isPending} />
-                  {(() => {
-                    const cm = posture?.cves_by_mode ?? {};
-                    const em = posture?.exposed_by_mode ?? {};
-                    const cell = (v: number, warn?: boolean) => <span className={warn && v > 0 ? "font-medium text-[color:var(--color-severity-high)]" : "text-foreground"}>{v}</span>;
-                    return (
-                      <div className="border-t border-border pt-2 space-y-1 text-xs">
-                        <div className="text-muted-foreground">Risk by mode <span className="text-muted-foreground/70">(CVEs · exposed workloads)</span></div>
-                        <table className="app-semantic-table w-full">
-                          <tbody>
-                            <tr className="text-muted-foreground"><td>Discover <span className="text-muted-foreground/70">(unprotected)</span></td><td className="text-right">{cell(cm.discover ?? 0, true)} CVEs</td><td className="text-right">{cell(em.discover ?? 0, true)} exp.</td></tr>
-                            <tr className="text-muted-foreground"><td>Monitor</td><td className="text-right">{cell(cm.monitor ?? 0)} CVEs</td><td className="text-right">{cell(em.monitor ?? 0)} exp.</td></tr>
-                            <tr className="text-muted-foreground"><td>Protect</td><td className="text-right">{cell(cm.protect ?? 0)} CVEs</td><td className="text-right">{cell(em.protect ?? 0)} exp.</td></tr>
-                            <tr className="text-muted-foreground/80"><td>Platform / Host</td><td className="text-right" colSpan={2}>{cell(cm.platform ?? 0)} / {cell(cm.host ?? 0)} CVEs</td></tr>
-                          </tbody>
-                        </table>
-                      </div>
-                    );
-                  })()}
-                  <div className="border-t border-border pt-2 space-y-1.5">
-                    <div className="text-xs text-muted-foreground">New services start in <span className="text-muted-foreground/70">(NV new-service mode)</span></div>
-                    <div className="flex items-center gap-2">
-                      {([["Network", "new_service_policy_mode", "policy_mode"], ["Process", "new_service_profile_mode", "profile_mode"]] as const).map(([lbl, field, key]) => (
-                        <label key={key} className="flex items-center gap-1 text-xs">
-                          <span className="text-muted-foreground">{lbl}</span>
-                          <select
-                            className="rounded border border-border bg-background px-1.5 py-0.5 text-xs capitalize disabled:opacity-50"
-                            value={posture?.[field] ?? "monitor"}
-                            disabled={newSvcMut.isPending}
-                            onChange={(ev) => newSvcMut.mutate({ [key]: ev.target.value })}
-                          >
-                            <option value="discover">Discover</option>
-                            <option value="monitor">Monitor</option>
-                            <option value="protect">Protect</option>
-                          </select>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between border-t border-border pt-2 text-xs">
-                    <span className="text-muted-foreground">Admission control</span>
-                    {(e.admission_enforcing ?? 0) > 0 ? (
-                      <span className="flex items-center gap-1.5 text-[color:var(--color-severity-low)]"><span className="inline-block h-2 w-2 rounded-full" style={{ background: "var(--color-severity-low)" }} />enforcing · {e.admission_enforcing} rule{(e.admission_enforcing ?? 0) === 1 ? "" : "s"}</span>
-                    ) : (e.admission_policies ?? 0) > 0 ? (
-                      <span className="text-[color:var(--color-severity-medium)]">monitor only</span>
-                    ) : (
-                      <span className="text-[color:var(--color-severity-high)]">not enforcing</span>
-                    )}
-                  </div>
-                </>
-              );
-            })()}
-          </div>
-        </Panel>
-        <Panel title="Top Vulnerable Assets" subtitle="Workloads with the most critical + high CVEs" icon={<AlertOctagon className="h-3.5 w-3.5" />}
-          rightSlot={(posture?.top_vulnerable?.length ?? 0) > 0 ? (
-            <button type="button"
-              onClick={() => downloadCsv("constellation-exposure", ["Namespace", "Workload", "Critical", "High"],
-                (posture?.top_vulnerable ?? []).map((t) => [t.namespace, t.name, t.critical, t.high]))}
-              className="rounded-md border border-border bg-card px-2 py-1 text-[10px] font-medium hover:bg-accent">
-              Export CSV
-            </button>
-          ) : undefined}
-        >
-          {(posture?.top_vulnerable?.length ?? 0) === 0 ? (
-            <EmptyState title="No vulnerable workloads" hint="Workloads with critical/high CVEs will rank here." />
-          ) : (
-            <ul className="divide-y divide-border">
-              {(posture?.top_vulnerable ?? []).map((t) => (
-                <li key={`${t.namespace}/${t.name}`}>
-                  <Link to="." href={clusterPath(`/deployments?q=${encodeURIComponent(t.name)}`)} className="flex items-center gap-2 px-3 py-2 hover:bg-muted/40 transition-colors">
-                    <div className="min-w-0 flex-1">
-                      <div className="text-xs font-medium truncate">{t.name}</div>
-                      <div className="text-[10px] text-muted-foreground truncate">{t.namespace}</div>
-                    </div>
-                    {t.critical > 0 && <span className="rounded px-1.5 py-0.5 text-[10px] text-mono font-semibold text-white" style={{ background: "var(--color-severity-critical)" }}>{t.critical}C</span>}
-                    {t.high > 0 && <span className="rounded px-1.5 py-0.5 text-[10px] text-mono font-semibold text-white" style={{ background: "var(--color-severity-high)" }}>{t.high}H</span>}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Panel>
-        </div>
-      </section>
-
       {clusterId && (
         <section className="c-rise c-rise-2">
           <PlatformPanel
@@ -619,97 +626,13 @@ export function DashboardPage() {
         </section>
       )}
 
-      {/* Action items + recent activity */}
-      <section className="c-rise c-rise-3 grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px]">
-        <Panel
-          className="min-w-0"
-          title="Action Items"
-          subtitle="Top 10 open critical and high findings · sorted by composite risk"
-          icon={<ShieldAlert className="h-3.5 w-3.5" />}
-          rightSlot={<Link to="." href={clusterPath("/findings")} className="text-[11px] text-muted-foreground hover:text-foreground">view all <ArrowUpRight className="inline h-3 w-3" /></Link>}
-        >
-          {topActions.length === 0 ? (
-            <EmptyState
-              title="No outstanding critical or high findings"
-              hint="When new severe findings appear they'll show up here for one-click triage."
-              icon={<ShieldCheck className="h-8 w-8" />}
-            />
-          ) : (
-            <ul className="divide-y divide-border">
-              {topActions.map((f) => (
-                <li key={f.id} className="accent-slide flex items-center gap-3 px-3 py-2 hover:bg-muted/40 transition-colors">
-                  <SeverityBadge severity={f.severity} kev={false} />
-                  <div className="min-w-0 flex-1">
-                    <Link to="." href={clusterPath(`/findings/${f.id}`)} className="text-sm hover:underline truncate block" title={f.title}>
-                      {f.title}
-                    </Link>
-                    <div className="text-[10px] text-mono text-muted-foreground">
-                      {f.external_id ?? f.id.slice(0, 10)} · {f.kind} · {fmtRelative(f.last_seen_at)}
-                    </div>
-                  </div>
-                  <RiskScore score={f.risk_score} size="sm" />
-                  <Button size="sm" variant="outline" onClick={() => navigate({ href: clusterPath(`/findings/${f.id}`) })}>Triage</Button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Panel>
 
-        <Panel
-          title="Security Events"
-          subtitle="High + critical alerts · last 14 days"
-          icon={<AlertTriangle className="h-3.5 w-3.5" />}
-        >
-          {(() => {
-            if (eventsTimelineQ.isPending) return <p className="p-3 text-xs text-muted-foreground">Loading events…</p>;
-            const raw = eventsTimelineQ.data?.events_timeline ?? [];
-            const totalAlerts = raw.reduce((a, d) => a + d.total, 0);
-            if (totalAlerts === 0) return <EmptyState title="No alerting events" hint="No high/critical security events in the last 14 days." />;
-            const tl = raw.map((d) => ({ date: d.date, high: Math.max(0, d.total - d.critical), critical: d.critical }));
-            return (
-              <div className="p-3">
-                <div className="mb-1 text-xs text-muted-foreground">{totalAlerts.toLocaleString()} alerts · {raw.reduce((a, d) => a + d.critical, 0).toLocaleString()} critical</div>
-                <ResponsiveContainer width="100%" height={140}>
-                  <BarChart data={tl} barCategoryGap={2}>
-                    <XAxis dataKey="date" tickFormatter={(d: string) => d.slice(5)} tick={{ fontSize: 9, fill: "var(--color-muted-foreground)" }} interval={1} axisLine={false} tickLine={false} />
-                    <Tooltip contentStyle={tooltipStyle} labelFormatter={(d) => d} formatter={(v: number, n: string) => [v, n === "critical" ? "Critical" : "High"]} />
-                    <Bar dataKey="high" stackId="a" fill="var(--color-severity-high)" radius={[0, 0, 0, 0]} />
-                    <Bar dataKey="critical" stackId="a" fill="var(--color-severity-critical)" radius={[2, 2, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            );
-          })()}
-        </Panel>
-
-        <Panel
-          title="Recent Activity"
-          icon={<Activity className="h-3.5 w-3.5" />}
-        >
-          {recent.length === 0 ? (
-            <EmptyState title="No recent activity" hint="Triage actions and runtime events will appear here." />
-          ) : (
-            <ul className="divide-y divide-border">
-              {recent.slice(0, 8).map((r, i) => (
-                <li key={i} className="px-3 py-2 text-xs">
-                  <div className="flex items-center gap-1.5">
-                    <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-mono">{r.action}</span>
-                    <span className="text-muted-foreground text-[10px]">{r.target_kind}</span>
-                  </div>
-                  <div className="mt-0.5 text-mono text-[10px] text-muted-foreground truncate">
-                    {r.target_id} · {fmtRelative(r.at)}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Panel>
-      </section>
-
+  </div>;
+  const trendsView = <div className="space-y-5">
       {/* Bottom row: distribution · CVE DB · trend */}
       <section className="c-rise c-rise-5 grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Panel title="Severity Distribution" icon={<AlertTriangle className="h-3.5 w-3.5" />}>
-          {severityCounts.length === 0 ? (
+          {sum.isError ? <ErrorState title="Could not load severity totals." /> : sum.isPending ? <p className="p-3 text-xs text-muted-foreground">Loading severity totals…</p> : severityCounts.length === 0 ? (
             <EmptyState title="No open findings" />
           ) : (
             <div className="grid grid-cols-2 items-center">
@@ -793,11 +716,11 @@ export function DashboardPage() {
           )}
         </Panel>
 
-        <Panel title="New Findings · 14 day trend" icon={<TrendingUp className="h-3.5 w-3.5" />}>
+        <Panel title="Loaded findings · 14 day trend" icon={<TrendingUp className="h-3.5 w-3.5" />}>
           <div className="px-2">
             <Sparkline data={trends.openSeries} width={300} height={80} color="var(--color-primary)" />
             <div className="mt-2 flex items-center justify-between text-[10px] text-muted-foreground">
-              <span>14d ago</span>
+              <span>Latest 250 open findings · 14d ago</span>
               <span>today</span>
             </div>
             <div className="mt-2 text-mono text-[11px]">
@@ -808,6 +731,48 @@ export function DashboardPage() {
           </div>
         </Panel>
       </section>
+  </div>;
+  return (
+    <div className="space-y-5" data-testid="dashboard-page" data-cluster-id={clusterId ?? ""}>
+      <PageHeader
+        title={cluster?.name ? `${cluster.name} — Dashboard` : "Security Dashboard"}
+        description={
+          clusterId
+            ? "Risk-first snapshot for this cluster. Click any tile to drill in."
+            : "A risk-first snapshot of your fleet. Click any tile to drill in."
+        }
+        actions={
+          <button
+            type="button"
+            title="Download the organization-wide executive security report"
+            onClick={() => downloadAPIFile("/reports/executive.pdf", "constellation-executive-report.html")}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-2 text-sm hover:bg-accent"
+          >
+            <FileWarning className="h-4 w-4" /> Organization report
+          </button>
+        }
+      />
+
+
+      <VerdictBanner status={sum.isError ? "degraded" : !posture ? "info" : risk > 50 ? "critical" : risk > 20 ? "degraded" : "ok"}
+        title={sum.isError ? "Security summary unavailable" : !posture ? "Loading security posture" : `Security risk: ${risk}/100`}
+        detail={`Higher scores indicate more risk. Summary counts cover ${clusterId ? "this cluster" : "the organization"}; action items and finding trends use a bounded sample.`} />
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-5" data-testid="dashboard-summary">
+        <StatCard label="Risk score" value={posture?.security_score ?? "—"} />
+        <StatCard label="Critical" value={sum.data ? counts.critical : "—"} tone="critical" href={clusterPath("/findings?severity=critical&lifecycle=open")} />
+        <StatCard label="High" value={sum.data ? counts.high : "—"} tone="high" href={clusterPath("/findings?severity=high&lifecycle=open")} />
+        <StatCard label="Open" value={sum.data?.open_findings ?? "—"} href={clusterPath("/findings?lifecycle=open")} />
+        <StatCard label="Accepted" value={sum.data?.accepted_risks ?? "—"} href={clusterPath("/findings?lifecycle=accepted")} />
+      </section>
+      {sum.isError && <ErrorState title="Could not refresh dashboard totals." action={<Button onClick={() => void sum.refetch()}>Retry</Button>} />}
+      <Tabs value={tab} onValueChange={setTab} items={[
+        { value: "overview", label: "Overview", content: overviewView },
+        { value: "posture", label: "Posture", content: postureView },
+        { value: "network", label: "Network", content: networkView },
+        { value: "operations", label: "Operations", content: operationsView },
+        { value: "trends", label: "Trends", content: trendsView },
+      ]} />
+
     </div>
   );
 }
@@ -903,11 +868,9 @@ function ExposedRow({ s, dir, clusterPath }: { s: import("@/api/client").Exposed
   );
 }
 
-// ModeMaturity renders one dimension's Discover/Monitor/Protect distribution as a stacked bar
-// with a "Promote" control to advance every eligible group one step up (NeuVector's workflow).
-function ModeMaturity({ label, groups, discover, monitor, protect, onPromote, pending }: {
+// Read-only distribution; mode changes live in the Groups workflow.
+function ModeMaturity({ label, groups, discover, monitor, protect }: {
   label: string; groups: number; discover: number; monitor: number; protect: number;
-  onPromote: (from: "discover" | "monitor") => void; pending: boolean;
 }) {
   const total = groups || 1;
   const modes = [
@@ -919,20 +882,7 @@ function ModeMaturity({ label, groups, discover, monitor, protect, onPromote, pe
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
         <span className="text-[11px] font-medium text-foreground">{label}</span>
-        <div className="flex items-center gap-1">
-          {discover > 0 && (
-            <button type="button" disabled={pending} onClick={() => onPromote("discover")} title="Promote all Discover groups to Monitor"
-              className="inline-flex items-center gap-0.5 rounded border border-border bg-card px-1.5 py-0.5 text-[10px] hover:bg-accent disabled:opacity-40">
-              <ArrowUp className="h-3 w-3" />Discover→Monitor
-            </button>
-          )}
-          {monitor > 0 && (
-            <button type="button" disabled={pending} onClick={() => onPromote("monitor")} title="Promote all Monitor groups to Protect"
-              className="inline-flex items-center gap-0.5 rounded border border-border bg-card px-1.5 py-0.5 text-[10px] hover:bg-accent disabled:opacity-40">
-              <ArrowUp className="h-3 w-3" />Monitor→Protect
-            </button>
-          )}
-        </div>
+
       </div>
       <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-muted">
         {modes.map((m) => m.v > 0 && <div key={m.label} style={{ width: `${(m.v / total) * 100}%`, background: m.color }} title={`${m.label}: ${m.v}`} />)}
@@ -1240,27 +1190,6 @@ function isDeniedVerdict(verdict?: string): boolean {
 function timeValue(iso?: string): number {
   const t = Date.parse(iso ?? "");
   return Number.isFinite(t) ? t : 0;
-}
-
-function bucketByLifecycle(items: Finding[]) {
-  const out = { total: 0, open: 0, critical: 0, high: 0, suppressed: 0, accepted: 0 };
-  for (const f of items) {
-    out.total++;
-    if (f.severity === "critical") out.critical++;
-    if (f.severity === "high") out.high++;
-    if (f.lifecycle === "suppressed") out.suppressed++;
-    if (f.lifecycle === "accepted") out.accepted++;
-    if (f.lifecycle === "open" || f.lifecycle === "triaged" || f.lifecycle === "in_progress") out.open++;
-  }
-  return out;
-}
-
-function bucketBySeverity(items: Finding[]) {
-  const counts: Record<Severity, number> = { info: 0, low: 0, medium: 0, high: 0, critical: 0 };
-  for (const f of items) counts[f.severity]++;
-  return (["critical", "high", "medium", "low", "info"] as Severity[])
-    .map((severity) => ({ severity, value: counts[severity] }))
-    .filter((entry) => entry.value > 0);
 }
 
 function prioritizeActionItems(items: Finding[]): Finding[] {
