@@ -77,9 +77,11 @@ flowchart LR
 
 `internal/scanner/aggregator.go` configures the active engines and package
 matchers. `internal/handler/findings/cve_intel_import.go`, `nvd_import.go`, and
-`cve_records_writer.go` own the API catalog. Reducing redundant catalog writes
-and persisting feed checkpoints are open DB-18 work. Merely moving the catalog
-to a second PostgreSQL database would not reduce its data volume.
+`cve_records_writer.go` own the API catalog. Conditional writes and bounded
+persistent feed checkpoints now avoid unchanged imports across restarts; see
+[checkpoint semantics and evidence](cve-feed-checkpoints.md). DB-18 real-feed/live
+qualification remains open. Moving the catalog to a second PostgreSQL database
+would not reduce its data volume.
 
 ## Proposed fleet topology — qualification work, not deployed behavior
 

@@ -60,8 +60,8 @@ Parity and switchability are release-ready only when:
 
 ## October 12 implementation continuation
 
-**Parity is not release-complete.** The feature checklist still has 53 checked
-and 100 open items. Counts describe acceptance items, not a percentage of code
+**Parity is not release-complete.** The feature checklist has 54 checked
+and 99 open items. Counts describe acceptance items, not a percentage of code
 implemented. The complete scope and remaining gates are retained below; do not
 convert partially implemented items into checked boxes.
 
@@ -151,8 +151,14 @@ regional ownership/transfer, simultaneous ingest/read/prune/backup failure and
 capacity tests, live deployment smoke, and the complete A–K acceptance matrix.
 Unchanged CVE import rows now skip UPDATE after comparing the fully merged row;
 a real PostgreSQL test verifies unchanged/sparse input preserves xmin and changed
-input still updates. DB-18 remains open for persistent feed checkpoints and measured
-WAL/dead-tuple improvement.
+input still updates. Migration 170 now adds bounded persistent KEV/EPSS and NVD
+checkpoints, cross-replica serialization and completed-window resume. Repeated
+real-PostgreSQL tests cover restart, failure, correction, catch-up and rollback.
+A 1,200-row unconditional replay rewrote 1,200 tuples and generated about 1.35 MB
+WAL; three checkpointed repeats rewrote no tuples/checkpoints and measured zero
+additional WAL in both runs. See [feed checkpoint contract](cve-feed-checkpoints.md).
+DB-18 source/local qualification is implemented; real-feed/live measurement stays
+open, as do DB-19 catalog semantics/bootstrap and DB-23 freshness alerts.
 
 The existing global rollup lock and global control-audit chain remain scaling
 constraints; this change does not claim to remove them.
@@ -203,7 +209,7 @@ evidence that CI is missing. This documentation update is subsequent work.
 Old stashed UI edits, historical local branches and untracked smoke artifacts
 need separate disposition; do not replay them blindly into the current code.
 
-The published checklist is now **53 checked / 100 open**. No acceptance row
+The published checklist at the October 11 snapshot was **53 checked / 100 open**. No acceptance row
 was newly closed by this review; two fleet-scale acceptance items were added
 after comparing ingestion and failure boundaries with NeuVector. Many open parents contain source fixes and
 focused tests already recorded in the September implementation review. Their
@@ -508,14 +514,15 @@ Unchecked parent items remain open until **all** their acceptance requirements
 are met. Code present is not the same as verified or release-ready. The older
 deficiency ledger includes findings that already have fixes; do not use its
 historical counts as a count of currently open defects.
-Acceptance backlog: **100 open**. The September reconciliation reached 98;
+Acceptance backlog: **99 open**. The October 12 browser/FIPS CI gate closes one
+bounded item with local and hosted evidence. The September reconciliation reached 98;
 the October 11 fleet review adds two explicit ingestion/isolation gates.
 Since the `800b0ef` baseline of 107 open,
 **thirteen existing items closed** (four OPS-1 items, three SIEM-1 items, one
 POL-1 item, one IAM-1 item, two UI-1 items, one UI-2 item and one UI-3 item), and four new items were added: vendor interoperability, legacy
 DPI binding tenant validation, registration/proof of the unreachable
 group-edge HTTP workflow, and durable storage-growth controls.
-The checklist contains **53 checked bounded rows** (39 at baseline); one new
+The checklist contains **54 checked bounded rows** (39 at baseline); one new
 bounded OPS-2 database-reclaim item was added as complete. Earlier
 rounds added bounded POL-1, POL-2 and API-1 fixes without closing their parent
 acceptance item. Those rounds added an eight-object cutover fixture and opt-in
@@ -1684,7 +1691,7 @@ custody, threat-model or external-provider release matrix.
 - [ ] Separate unit and DB integration suites with build tags, introduce isolated
   real-backend fixtures, run races without result caching, emit/upload JUnit,
   and prove repeated/shuffled execution without shared-fixture leakage.
-- [ ] Run Playwright through production-serving paths with setup-project auth
+- [x] Run Playwright through production-serving paths with setup-project auth
   state, zero PR retries, configurable base URL and retained failure artifacts;
   wire browser tests and distinct FIPS builds/status checks into CI. A fresh
   164-case local suite attempt hit the intentional 10/minute per-IP login guard
@@ -1696,8 +1703,12 @@ custody, threat-model or external-provider release matrix.
   nginx Assets deep links. A subsequent full run passed 190/191; the remaining
   ambiguous field locator is fixed and the final rebuilt suite passes 193/193.
   The full suite and migration apply/rollback fixture are now the CI default.
-  The distinct FIPS build/runtime job now passes locally. Hosted CI and deployed FIPS workflow
-  qualification remain open; do not loosen production rate limiting for tests.
+  The distinct FIPS build/runtime job passes locally and in hosted CI. Hosted
+  [run 38190053858](https://github.com/alphabravo-oss/constellation/actions/runs/38190053858)
+  passes both browser and FIPS jobs. This closes this bounded CI/browser item;
+  overall CI remains blocked by quality/gosec/history-secret findings, and the
+  separate deployed FIPS qualification remains open. Production rate limiting
+  remains enabled in browser tests.
 
 ### TSG-5 Typed API and frontend conventions — P1/P2
 

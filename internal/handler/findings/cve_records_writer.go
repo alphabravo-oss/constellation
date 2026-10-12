@@ -4,15 +4,10 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/pgconn"
 )
-
-// cveImportMu serializes imports so the periodic reconcilers (KEV+EPSS, NVD)
-// never run two full cve_records writes at once.
-var cveImportMu sync.Mutex
 
 // cveImportRow is one cve_records upsert row. Shared by the KEV+EPSS importer
 // (cve_intel_import.go) and the NVD importer (nvd_import.go).
@@ -35,7 +30,11 @@ type cveImportRow struct {
 // upsertCVERows writes one multi-row INSERT ... ON CONFLICT, merging with
 // COALESCE so a sparser duplicate (e.g. a distro advisory) never clobbers a
 // richer existing row (e.g. NVD).
-func upsertCVERows(ctx context.Context, pool *pgxpool.Pool, rows []cveImportRow) error {
+type cveRowWriter interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+}
+
+func upsertCVERows(ctx context.Context, pool cveRowWriter, rows []cveImportRow) error {
 	if len(rows) == 0 {
 		return nil
 	}

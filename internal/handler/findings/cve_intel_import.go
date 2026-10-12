@@ -2,18 +2,22 @@ package findings
 
 import (
 	"bufio"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -90,6 +94,17 @@ func parseKEV(b []byte) (*kevFeed, error) {
 	if err := json.Unmarshal(b, &f); err != nil {
 		return nil, fmt.Errorf("kev decode: %w", err)
 	}
+	if f.CatalogVersion == "" || f.Count != len(f.Vulnerabilities) {
+		return nil, fmt.Errorf("kev incomplete catalog")
+	}
+	seen := make(map[string]bool, len(f.Vulnerabilities))
+	for _, v := range f.Vulnerabilities {
+		id := strings.ToUpper(strings.TrimSpace(v.CveID))
+		if !strings.HasPrefix(id, "CVE-") || seen[id] {
+			return nil, fmt.Errorf("kev invalid or duplicate CVE")
+		}
+		seen[id] = true
+	}
 	return &f, nil
 }
 
@@ -126,14 +141,19 @@ func parseEPSS(r io.Reader) (map[string]epssScore, string, error) {
 				sawHeader = true
 			} else {
 				parts := strings.Split(trimmed, ",")
-				if len(parts) >= 3 {
-					cve := strings.ToUpper(strings.TrimSpace(parts[0]))
-					prob, e1 := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
-					pct, _ := strconv.ParseFloat(strings.TrimSpace(parts[2]), 64)
-					if cve != "" && e1 == nil {
-						out[cve] = epssScore{prob: prob, percentile: pct}
-					}
+				if !sawHeader || len(parts) != 3 {
+					return nil, "", fmt.Errorf("epss invalid row")
 				}
+				cve := strings.ToUpper(strings.TrimSpace(parts[0]))
+				prob, e1 := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+				pct, e2 := strconv.ParseFloat(strings.TrimSpace(parts[2]), 64)
+				if !strings.HasPrefix(cve, "CVE-") || e1 != nil || e2 != nil || math.IsNaN(prob) || math.IsNaN(pct) || prob < 0 || prob > 1 || pct < 0 || pct > 1 {
+					return nil, "", fmt.Errorf("epss invalid score")
+				}
+				if _, exists := out[cve]; exists {
+					return nil, "", fmt.Errorf("epss duplicate CVE")
+				}
+				out[cve] = epssScore{prob: prob, percentile: pct}
 			}
 		}
 		if err != nil {
@@ -143,26 +163,63 @@ func parseEPSS(r io.Reader) (map[string]epssScore, string, error) {
 			return nil, "", fmt.Errorf("epss read: %w", err)
 		}
 	}
+	if _, err := time.Parse("2006-01-02", scoreDate); err != nil || !sawHeader {
+		return nil, "", fmt.Errorf("epss missing header or valid score date")
+	}
 	return out, scoreDate, nil
 }
 
-// ImportCVEIntel fetches KEV + EPSS and upserts them into cve_records. Returns the
-// number of rows upserted and a content marker (KEV catalogVersion + EPSS
-// score_date) the caller uses to skip an unchanged re-import.
+// ImportCVEIntel commits a complete KEV+EPSS snapshot and its persistent content
+// checkpoint atomically. Identical snapshots skip CVE writes across restarts.
 func ImportCVEIntel(ctx context.Context, pool *pgxpool.Pool, cfg CVEIntelConfig) (int, string, error) {
-	// Serialize with the bundle importer so two full cve_records writes never race.
-	cveImportMu.Lock()
-	defer cveImportMu.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+	total, marker := 0, ""
+	err := withCVEImportConnection(ctx, pool, func(conn *pgxpool.Conn) error {
+		var err error
+		total, marker, err = importCVEIntel(ctx, conn, cfg)
+		return err
+	})
+	return total, marker, err
+}
 
-	kev, err := fetchKEV(ctx, cfg)
+func importCVEIntel(ctx context.Context, conn *pgxpool.Conn, cfg CVEIntelConfig) (int, string, error) {
+	kevBytes, err := httpGet(ctx, cfg.client(), cfg.kevURL())
+	if err != nil {
+		return 0, "", fmt.Errorf("fetch kev: %w", err)
+	}
+	kev, err := parseKEV(kevBytes)
 	if err != nil {
 		return 0, "", err
 	}
-	epss, scoreDate, err := fetchEPSS(ctx, cfg)
+	epssBytes, err := fetchEPSSBytes(ctx, cfg)
 	if err != nil {
 		return 0, "", err
 	}
-	marker := "kev:" + kev.CatalogVersion + "+epss:" + scoreDate
+	sourceHash := cveFeedHash(cfg.kevURL(), cfg.epssURL())
+	contentHash := cveFeedHash(string(kevBytes), string(epssBytes))
+	var previous string
+	err = conn.QueryRow(ctx, `SELECT content_hash FROM cve_feed_checkpoints WHERE feed='kev-epss' AND source_hash=$1`, sourceHash).Scan(&previous)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return 0, "", err
+	}
+	if previous == contentHash {
+		return 0, contentHash, nil
+	}
+	epss, scoreDate, err := parseEPSS(bytes.NewReader(epssBytes))
+	if err != nil {
+		return 0, "", err
+	}
+	marker := contentHash
+
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return 0, marker, err
+	}
+	defer rollbackCVEImport(tx)
+	if _, err := tx.Exec(ctx, `SET LOCAL synchronous_commit=on`); err != nil {
+		return 0, marker, err
+	}
 
 	// Merge into one row per CVE: KEV entries carry name/description/kev flag; every
 	// EPSS score is applied (creating a bare row for EPSS-only CVEs).
@@ -209,7 +266,7 @@ func ImportCVEIntel(ctx context.Context, pool *pgxpool.Pool, cfg CVEIntelConfig)
 		if len(rows) == 0 {
 			return nil
 		}
-		if err := upsertCVERows(ctx, pool, rows); err != nil {
+		if err := upsertCVERows(ctx, tx, rows); err != nil {
 			return err
 		}
 		total += len(rows)
@@ -220,48 +277,62 @@ func ImportCVEIntel(ctx context.Context, pool *pgxpool.Pool, cfg CVEIntelConfig)
 		rows = append(rows, *r)
 		if len(rows) >= batch {
 			if err := flush(); err != nil {
-				return total, marker, err
+				return 0, marker, err
 			}
 		}
 	}
 	if err := flush(); err != nil {
-		return total, marker, err
+		return 0, marker, err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO cve_feed_checkpoints(feed,source_hash,content_hash,row_count)
+        VALUES ('kev-epss',$1,$2,$3) ON CONFLICT(feed) DO UPDATE SET source_hash=EXCLUDED.source_hash,
+        content_hash=EXCLUDED.content_hash,row_count=EXCLUDED.row_count,updated_at=now()`, sourceHash, contentHash, total); err != nil {
+		return 0, marker, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, marker, err
 	}
 	return total, marker, nil
 }
 
-func fetchKEV(ctx context.Context, cfg CVEIntelConfig) (*kevFeed, error) {
-	b, err := httpGet(ctx, cfg.client(), cfg.kevURL())
-	if err != nil {
-		return nil, fmt.Errorf("fetch kev: %w", err)
-	}
-	return parseKEV(b)
-}
-
-func fetchEPSS(ctx context.Context, cfg CVEIntelConfig) (map[string]epssScore, string, error) {
+func fetchEPSSBytes(ctx context.Context, cfg CVEIntelConfig) ([]byte, error) {
 	url := cfg.epssURL()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	resp, err := cfg.client().Do(req)
 	if err != nil {
-		return nil, "", fmt.Errorf("fetch epss: %w", err)
+		return nil, fmt.Errorf("fetch epss: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, "", fmt.Errorf("fetch epss: status %d", resp.StatusCode)
+		return nil, fmt.Errorf("fetch epss: status %d", resp.StatusCode)
 	}
 	var r io.Reader = resp.Body
 	if strings.HasSuffix(url, ".gz") || resp.Header.Get("Content-Type") == "application/gzip" {
 		gz, err := gzip.NewReader(resp.Body)
 		if err != nil {
-			return nil, "", fmt.Errorf("epss gunzip: %w", err)
+			return nil, fmt.Errorf("epss gunzip: %w", err)
 		}
 		defer gz.Close()
 		r = gz
 	}
-	return parseEPSS(r)
+	return readCVEFeed(r)
+}
+
+// Limit decompressed bytes too; a truncated or oversized feed must never advance
+// the checkpoint even when its prefix happens to be syntactically valid.
+func readCVEFeed(r io.Reader) ([]byte, error) {
+	const limit = 64 << 20
+	b, err := io.ReadAll(io.LimitReader(r, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(b) > limit {
+		return nil, fmt.Errorf("CVE feed exceeds %d bytes", limit)
+	}
+	return b, nil
 }
 
 func httpGet(ctx context.Context, c *http.Client, url string) ([]byte, error) {
@@ -277,12 +348,12 @@ func httpGet(ctx context.Context, c *http.Client, url string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("status %d", resp.StatusCode)
 	}
-	return io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+	return readCVEFeed(resp.Body)
 }
 
 // ReconcileCVEIntelLoop keeps cve_records fed with live KEV + EPSS intel. Skips a
-// re-import when the content marker (KEV version + EPSS date) is unchanged. The
-// marker is process-local — a fresh pod re-imports once, which is idempotent.
+// re-import using a durable content hash, including after a pod restart. Catalog
+// labels alone are not trusted: same-version corrections are imported too.
 func ReconcileCVEIntelLoop(ctx context.Context, pool *pgxpool.Pool, cfg CVEIntelConfig, logger *slog.Logger) {
 	if logger == nil {
 		logger = slog.Default()
@@ -291,17 +362,15 @@ func ReconcileCVEIntelLoop(ctx context.Context, pool *pgxpool.Pool, cfg CVEIntel
 	if interval <= 0 {
 		interval = 6 * time.Hour
 	}
-	lastMarker := ""
 	run := func() {
 		total, marker, err := ImportCVEIntel(ctx, pool, cfg)
 		if err != nil {
 			logger.Warn("cve-intel import failed", slog.String("err", err.Error()))
 			return
 		}
-		if marker == lastMarker {
+		if total == 0 {
 			return
 		}
-		lastMarker = marker
 		logger.Info("cve-intel imported", slog.Int("records", total), slog.String("marker", marker))
 	}
 	run()
