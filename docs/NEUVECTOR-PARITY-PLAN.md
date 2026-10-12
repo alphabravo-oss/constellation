@@ -60,6 +60,10 @@ Parity and switchability are release-ready only when:
 
 ## October 12 implementation continuation
 
+The user selected **Astronomer-style console behavior and workflows** as the
+current delivery scope. Broader NeuVector security, infrastructure and provider
+qualification requirements remain tracked separately in this canonical plan.
+
 The main development deployment now uses **PostgreSQL 16.14 on CNPG**, schema
 **172**, under Helm revision **20** (cutover at revision 19). Its frozen-source transfer matched all
 **138 public root-table counts** and the audit head before changing the DSN.
@@ -156,6 +160,21 @@ and the deleted-registry error state. The existing production-browser navigation
 spec was updated for the tabs; its full runner was not rerun in this continuation.
 Matching live revision/capacity evidence on the dashboard, health and scanner
 surfaces closes that bounded REG-1 item; the broader UI gates remain open.
+
+The cluster-workflow continuation removes the competing registration modal.
+The cluster list now navigates to the canonical registration page, with distribution,
+region and expiry preserved under Advanced settings. Overview and registration
+bundles are URL-linked tabs. Rotation has a dedicated confirmation/result page;
+it no longer discards the returned replacement bundle. Successful registration
+refreshes cluster and bundle lists, and navigation protects a pending request or
+an unsaved one-time result. Raw results are not persisted in browser storage.
+
+Validation: **168 frontend tests**, production build, changed-file lint and
+endpoint/plan checks pass. Component tests cover cancel-without-create and explicit
+rotation with retained results even when the old bundle disappears from the list.
+Live shared-browser checks cover list tabs, dedicated registration, advanced
+settings, Cancel and hard reload. Live credential rotation was not exercised.
+This advances UI-1; the full console audit and its acceptance items remain open.
 
 The admission-engine continuation adds migration **172** and persists normalized
 engine outcomes atomically with image scan completion. The built-in vulnerability

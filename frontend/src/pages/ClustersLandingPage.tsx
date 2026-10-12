@@ -7,8 +7,8 @@
 //
 // The "Org overview" callout below the grid links to the surfaces that legitimately
 // span clusters (CVE DB, Settings, Federation) so they remain one click away.
-import { useMemo, useState } from "react";
-import { Link } from "@tanstack/react-router";
+import { useMemo } from "react";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertOctagon,
@@ -40,12 +40,17 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/cn";
 import { sortClustersByActivity } from "@/lib/clusters";
-import { ClusterInitBundleWizard } from "@/pages/ClusterInitBundleWizard";
+import { Tabs, useTabParam } from "@/components/ui/tabs";
+import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { StatCard } from "@/components/ui/stat-card";
 
 export function ClustersLandingPage() {
   const list = useQuery({ queryKey: ["clusters"], queryFn: () => clusters.list(), staleTime: 30_000 });
   const data = useMemo(() => sortClustersByActivity(list.data?.clusters ?? []), [list.data?.clusters]);
-  const [wizardOpen, setWizardOpen] = useState(false);
+  const navigate = useNavigate();
+  const [requestedTab, setTab] = useTabParam("tab", "overview");
+  const tab = requestedTab === "bundles" ? "bundles" : "overview";
+  const needsAttention = data.filter((c) => !["healthy", "connected", "ready"].includes(c.state)).length;
 
   return (
     <PageContainer>
@@ -56,7 +61,7 @@ export function ClustersLandingPage() {
           <Button
             variant="primary"
             size="md"
-            onClick={() => setWizardOpen(true)}
+            onClick={() => void navigate({ href: "/settings/clusters/new" })}
             data-testid="register-cluster-button"
           >
             <Plus className="h-3.5 w-3.5" />
@@ -65,16 +70,26 @@ export function ClustersLandingPage() {
         }
       />
 
-      <ClusterInitBundleWizard open={wizardOpen} onOpenChange={setWizardOpen} />
+      <VerdictBanner status={list.isError || needsAttention > 0 ? "degraded" : list.isPending || data.length === 0 ? "info" : "ok"}
+        title={list.isError ? "Cluster inventory could not be loaded" : list.isPending ? "Loading clusters" : data.length === 0 ? "Connect your first cluster" : needsAttention > 0 ? "Some clusters need attention" : "Clusters are reporting healthy states"}
+        detail="Select a cluster to investigate its security posture. Manage registration credentials in the Registration bundles tab." />
+      <section className="grid gap-3 sm:grid-cols-3">
+        <StatCard label="Clusters" value={list.data ? data.length : "—"} />
+        <StatCard label="Need attention" value={list.data ? needsAttention : "—"} />
+        <StatCard label="Critical findings" value={list.data ? data.reduce((total, c) => total + (c.stats?.critical_open ?? 0), 0) : "—"} />
+      </section>
+      <Tabs value={tab} onValueChange={setTab} items={[
+        { value: "overview", label: "Overview", content: <div className="space-y-4">
 
       {list.isPending && (
         <p className="text-sm text-muted-foreground">Loading clusters…</p>
       )}
 
-      {!list.isPending && data.length === 0 && (
+      {list.isError && <p role="alert">Cluster inventory is unavailable. Refresh to try again.</p>}
+      {!list.isPending && !list.isError && data.length === 0 && (
         <EmptyState
           title="No clusters registered"
-          hint="Register your first cluster via the Helm command in Settings to begin collecting findings."
+          hint="Select Register cluster to generate its installation command."
         />
       )}
 
@@ -89,9 +104,10 @@ export function ClustersLandingPage() {
         </section>
       )}
 
-      <InitBundlesPanel />
-
       <OrgOverviewCallout />
+        </div> },
+        { value: "bundles", label: "Registration bundles", content: <InitBundlesPanel /> },
+      ]} />
     </PageContainer>
   );
 }
@@ -100,15 +116,12 @@ export function ClustersLandingPage() {
 // Rotate / Revoke actions. The "single download" semantics mean we don't expose a
 // re-fetch action here; operators who lost the YAML must rotate.
 function InitBundlesPanel() {
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const list = useQuery({
     queryKey: ["cluster-init-bundles"],
     queryFn: () => clusterInitBundles.list(),
     staleTime: 15_000,
-  });
-  const rotate = useMutation({
-    mutationFn: (id: string) => clusterInitBundles.rotate(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["cluster-init-bundles"] }),
   });
   const revoke = useMutation({
     mutationFn: (id: string) => clusterInitBundles.revoke(id),
@@ -117,10 +130,11 @@ function InitBundlesPanel() {
 
   const bundles = list.data ?? [];
   if (list.isPending) {
-    return null;
+    return <p>Loading registration bundles...</p>;
   }
+  if (list.isError) return <p role="alert">Registration bundles could not be loaded.</p>;
   if (bundles.length === 0) {
-    return null;
+    return <EmptyState title="No registration bundles" hint="Register a cluster to generate its installation credentials." />;
   }
   return (
     <section className="rounded-md border border-border bg-card p-4" data-testid="init-bundles-panel">
@@ -133,6 +147,7 @@ function InitBundlesPanel() {
           {bundles.filter((b) => b.status === "revoked").length} revoked
         </span>
       </header>
+      {revoke.isError && <p role="alert">Could not revoke the bundle. Try again.</p>}
       <DataTable
         rows={bundles}
         columns={bundleColumns()}
@@ -199,8 +214,8 @@ function InitBundlesPanel() {
             <Button
               size="sm"
               variant="outline"
-              disabled={rotate.isPending || revoke.isPending || b.status === "revoked"}
-              onClick={() => rotate.mutate(b.id)}
+              disabled={revoke.isPending || b.status === "revoked"}
+              onClick={() => void navigate({ href: `/settings/clusters/bundles/${b.id}/rotate` })}
               data-testid="rotate-bundle"
             >
               <RotateCw className="h-3 w-3" />
@@ -209,7 +224,7 @@ function InitBundlesPanel() {
             <Button
               size="sm"
               variant="outline"
-              disabled={rotate.isPending || revoke.isPending || b.status === "revoked"}
+              disabled={revoke.isPending || b.status === "revoked"}
               onClick={() => {
                 if (confirm(`Revoke bundle for ${b.name}? Its scanner + runtime-agent tokens will be invalidated.`)) {
                   revoke.mutate(b.id);

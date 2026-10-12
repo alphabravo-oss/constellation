@@ -300,6 +300,7 @@ const settings_attestation_splatRoute = createRoute({ getParentRoute: () => app_
 const settings_access_control_splatRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "access-control/$", beforeLoad: aliasRedirect({ to: "/settings/access", from: "settings/access-control" }) });
 const settings_notifications_splatRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "notifications/$", beforeLoad: aliasRedirect({ to: "/settings/integrations", from: "settings/notifications" }) });
 const settings_clusters_newRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "clusters/new", component: () => (<SuspenseRoute><RegisterClusterPage /></SuspenseRoute>) });
+const settings_cluster_bundle_rotateRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "clusters/bundles/$bundleId/rotate", component: () => (<SuspenseRoute><RegisterClusterPage /></SuspenseRoute>) });
 const settings_accessRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "access", component: () => (<SuspenseRoute><AccessControlPage /></SuspenseRoute>) });
 const settings_access_bindings_newRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "access/bindings/new", component: () => (<SuspenseRoute><RoleBindingFormPage /></SuspenseRoute>) });
 const settings_access_service_accounts_newRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "access/service-accounts/new", component: () => (<SuspenseRoute><ServiceAccountFormPage /></SuspenseRoute>) });
@@ -503,6 +504,7 @@ authenticatedRoute.addChildren([
   settings_access_control_splatRoute,
   settings_notifications_splatRoute,
   settings_clusters_newRoute,
+  settings_cluster_bundle_rotateRoute,
   settings_accessRoute,
   settings_access_bindings_newRoute,
   settings_access_service_accounts_newRoute,
