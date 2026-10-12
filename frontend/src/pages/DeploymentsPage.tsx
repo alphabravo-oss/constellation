@@ -16,7 +16,7 @@ import { Pager } from "@/components/ui/pager";
 import { Button } from "@/components/ui/button";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { ErrorState, LoadingState } from "@/components/ui/states";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { usePlatformComponentVisibility } from "@/hooks/usePlatformComponentVisibility";
 
 const PAGE_SIZE = 100;
@@ -170,12 +170,12 @@ export function DeploymentsPage() {
       </div>
       {exportError ? <ErrorState title="Deployment export failed" error={exportError} /> : null}
 
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4" data-testid="deployments-summary">
+      <StatGrid data-testid="deployments-summary">
         <StatCard label="Deployments" value={summary?.total.toLocaleString() ?? "—"} icon={<Layers className="h-3.5 w-3.5" />} />
         <StatCard label="At risk" value={summary?.at_risk.toLocaleString() ?? "—"} icon={<AlertTriangle className="h-3.5 w-3.5" />} tone={(summary?.at_risk ?? 0) > 0 ? "high" : "neutral"} hint="risk score ≥ 60" />
         <StatCard label="Critical findings" value={summary?.critical_count.toLocaleString() ?? "—"} icon={<Flame className="h-3.5 w-3.5" />} tone={(summary?.critical_count ?? 0) > 0 ? "critical" : "neutral"} />
         <StatCard label="High findings" value={summary?.high_count.toLocaleString() ?? "—"} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={(summary?.high_count ?? 0) > 0 ? "high" : "neutral"} />
-      </section>
+      </StatGrid>
 
       {!scopeReady ? clusterError ? <ErrorState title="Cluster inventory is unavailable" error={clusterError} /> : clusterLoading ? <LoadingState label="Resolving cluster…" /> : <p className="text-sm text-muted-foreground">Select a resolved cluster to view deployments.</p> : q.isPending ? <LoadingState label="Loading deployments…" /> : q.isError ? <ErrorState title="Could not load deployments" error={q.error} action={<Button variant="outline" onClick={() => void q.refetch()}>Retry</Button>} /> : <>
         <DataTable

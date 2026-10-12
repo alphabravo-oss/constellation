@@ -4,7 +4,7 @@ export const NETWORK_SAVED_VIEW_SCHEMA_VERSION = 2;
 export const NETWORK_SAVED_VIEW_KIND = "constellation.networkActivity.savedViews";
 
 export const NETWORK_SAVED_WORKSPACE_TABS = ["map", "conversations", "sessions", "pcap", "rules", "threats"] as const;
-export const NETWORK_SAVED_VERDICTS = ["", "allow", "alert", "block"] as const;
+export const NETWORK_SAVED_VERDICTS = ["", "allow", "alert", "deny", "block"] as const;
 export const NETWORK_SAVED_VERDICT_GROUPS = ["allow", "alert", "block"] as const;
 export const NETWORK_SAVED_NODE_KINDS = ["workload", "host", "unmanaged", "external"] as const;
 export const NETWORK_SAVED_SCOPE_MODES = ["both", "internal", "external"] as const;
@@ -16,6 +16,7 @@ export type NetworkSavedNodeKind = (typeof NETWORK_SAVED_NODE_KINDS)[number];
 export type NetworkSavedScopeMode = (typeof NETWORK_SAVED_SCOPE_MODES)[number];
 
 export interface NetworkSavedViewSnapshot {
+  conversation_filters?: { from: string; to: string; verdict_group: "" | "blocked" };
   schema_version: typeof NETWORK_SAVED_VIEW_SCHEMA_VERSION;
   workspace_tab: NetworkSavedWorkspaceTab;
   hours: number;
@@ -87,8 +88,10 @@ export function buildNetworkSavedViewSnapshot(input: {
   scopeMode: NetworkSavedScopeMode;
   sessionFilters?: Partial<NetworkSessionSavedFilters>;
   pcapFilters?: Partial<NetworkPcapSavedFilters>;
+  conversationFilters?: { from?: string; to?: string; verdict_group?: string };
 }): NetworkSavedViewSnapshot {
   return {
+    conversation_filters: normalizeConversationFilters(input.conversationFilters),
     schema_version: NETWORK_SAVED_VIEW_SCHEMA_VERSION,
     workspace_tab: normalizeWorkspaceTab(input.workspaceTab),
     hours: normalizeHours(input.hours),
@@ -109,6 +112,7 @@ export function buildNetworkSavedViewSnapshot(input: {
 export function normalizeNetworkSavedViewSnapshot(value: unknown): NetworkSavedViewSnapshot | null {
   if (!isRecord(value)) return null;
   return {
+    conversation_filters: normalizeConversationFilters(value.conversation_filters),
     schema_version: NETWORK_SAVED_VIEW_SCHEMA_VERSION,
     workspace_tab: normalizeWorkspaceTab(value.workspace_tab),
     hours: normalizeHours(value.hours),
@@ -333,4 +337,9 @@ function normalizeTokenList(values: unknown[], options: { upper?: boolean } = {}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function normalizeConversationFilters(value: unknown): { from: string; to: string; verdict_group: "" | "blocked" } {
+  const input = isRecord(value) ? value : {};
+  return { from: typeof input.from === "string" ? input.from.trim() : "", to: typeof input.to === "string" ? input.to.trim() : "", verdict_group: input.verdict_group === "blocked" ? "blocked" : "" };
 }

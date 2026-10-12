@@ -42,7 +42,7 @@ import { cn } from "@/lib/cn";
 import { sortClustersByActivity } from "@/lib/clusters";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 
 export function ClustersLandingPage() {
   const list = useQuery({ queryKey: ["clusters"], queryFn: () => clusters.list(), staleTime: 30_000 });
@@ -73,11 +73,11 @@ export function ClustersLandingPage() {
       <VerdictBanner status={list.isError || needsAttention > 0 ? "degraded" : list.isPending || data.length === 0 ? "info" : "ok"}
         title={list.isError ? "Cluster inventory could not be loaded" : list.isPending ? "Loading clusters" : data.length === 0 ? "Connect your first cluster" : needsAttention > 0 ? "Some clusters need attention" : "Clusters are reporting healthy states"}
         detail="Select a cluster to investigate its security posture. Manage registration credentials in the Registration bundles tab." />
-      <section className="grid gap-3 sm:grid-cols-3">
+      <StatGrid>
         <StatCard label="Clusters" value={list.data ? data.length : "—"} />
         <StatCard label="Need attention" value={list.data ? needsAttention : "—"} />
         <StatCard label="Critical findings" value={list.data ? data.reduce((total, c) => total + (c.stats?.critical_open ?? 0), 0) : "—"} />
-      </section>
+      </StatGrid>
       <Tabs value={tab} onValueChange={setTab} items={[
         { value: "overview", label: "Overview", content: <div className="space-y-4">
 

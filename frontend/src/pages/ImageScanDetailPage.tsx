@@ -24,7 +24,7 @@ import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 
 export function ImageScanDetailPage() {
   const { resultId } = useParams({ strict: false });
@@ -71,13 +71,13 @@ export function ImageScanDetailPage() {
 
       <EngineVerdict result={result} />
 
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-5" data-testid="image-scan-stats">
+      <StatGrid data-testid="image-scan-stats">
         <StatCard label="Findings" value={result.finding_count} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={result.finding_count > 0 ? "high" : "neutral"} />
         <StatCard label="Packages" value={result.package_count} icon={<Database className="h-3.5 w-3.5" />} />
         <StatCard label="Secrets" value={result.secret_count} icon={<KeyRound className="h-3.5 w-3.5" />} tone={result.secret_count > 0 ? "critical" : "neutral"} />
         <StatCard label="Workloads" value={clusterWorkloads.length} icon={<Layers className="h-3.5 w-3.5" />} tone={clusterWorkloads.length > 0 ? "accent" : "neutral"} />
         <StatCard label="Risk" value={result.max_risk_score} icon={<Boxes className="h-3.5 w-3.5" />} />
-      </section>
+      </StatGrid>
 
       <Tabs value={tab} onValueChange={setTab} items={[
         { value: "findings", label: "Vulnerabilities", count: result.finding_count, content: <FindingsTable findings={detail.findings} /> },

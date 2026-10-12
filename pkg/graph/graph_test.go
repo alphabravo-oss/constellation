@@ -83,3 +83,17 @@ func TestGraph_NodesSorted(t *testing.T) {
 		t.Fatalf("nodes not sorted: %v", got)
 	}
 }
+
+func TestConversationDeniedAliasesRemainWorstVerdict(t *testing.T) {
+	for _, verdict := range []string{"deny", "denied", "block", "blocked"} {
+		t.Run(verdict, func(t *testing.T) {
+			g := New()
+			g.AddEdge("source", "target", Attrs{Protocol: "tcp", Port: 80, Verdict: "allow", Bytes: 100})
+			g.AddEdge("source", "target", Attrs{Protocol: "tcp", Port: 443, Verdict: verdict, Bytes: 2})
+			rows := g.Conversations()
+			if len(rows) != 1 || rows[0].Verdict != verdict || rows[0].Bytes != 102 {
+				t.Fatalf("lost blocked verdict: %+v", rows)
+			}
+		})
+	}
+}

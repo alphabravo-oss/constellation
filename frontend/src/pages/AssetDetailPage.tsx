@@ -9,7 +9,7 @@ import { dateInputDaysFromNow, dateInputEndOfDayWithinDays } from "@/lib/format"
 import { useCluster } from "@/hooks/useCluster";
 import { PageHeader, PageContainer } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 
 const ACCEPT_RISK_MAX_DAYS = 30;
 
@@ -81,11 +81,11 @@ export function AssetDetailPage() {
         description={`${asset.kind} · ${asset.criticality} criticality — image, supply-chain evidence, and accepted-risk history for this asset.`}
       />
 
-      <section className="grid grid-cols-3 gap-3" data-testid="asset-stats">
+      <StatGrid data-testid="asset-stats">
         <StatCard label="Findings" value={findings.length} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={findings.length > 0 ? "high" : "neutral"} />
         <StatCard label="SBOMs" value={sboms.length} icon={<FileJson className="h-3.5 w-3.5" />} />
         <StatCard label="Layers" value={image?.layers.length ?? 0} icon={<Boxes className="h-3.5 w-3.5" />} />
-      </section>
+      </StatGrid>
 
       <div className="space-y-4">
         <div className="rounded-lg border border-border bg-card p-4" data-testid="asset-image-card">

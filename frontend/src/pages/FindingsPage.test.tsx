@@ -21,7 +21,7 @@ vi.mock("@/lib/route-search", async () => {
   } };
 });
 vi.mock("@/hooks/useCluster", () => ({ useCluster: () => ({ clusterId: route.clusterId, cluster: { id: route.clusterId }, error: route.clusterError, isLoading: false }) }));
-vi.mock("@tanstack/react-router", () => ({ useNavigate: () => route.navigate, Link: ({ children, href }: { children: ReactNode; href?: string }) => <a href={href}>{children}</a> }));
+vi.mock("@tanstack/react-router", () => ({ useNavigate: () => route.navigate, useLocation: () => "", Link: ({ children, href }: { children: ReactNode; href?: string }) => <a href={href}>{children}</a> }));
 vi.mock("@/api/client", () => ({ findings: { list: vi.fn(), byCVE: vi.fn(), exportCSV: vi.fn(), triage: vi.fn(), suppress: vi.fn(), acceptRisk: vi.fn() } }));
 const identity = { org_id: "org", user_id: "operator" };
 const fixture = (index: number): Finding => ({ id: `finding-${index}`, asset_id: `asset-${index % 2}`, kind: "vulnerability", title: `Finding ${index}`, external_id: `CVE-fixture-${index}`, severity: "critical", lifecycle: "open", risk_score: 99, first_seen_at: "2026-01-01T00:00:00Z", last_seen_at: "2026-01-01T00:00:00Z", kev: false } as Finding);
@@ -149,19 +149,14 @@ it("shows export failure without discarding filters or results", async () => {
   await click("Export filtered instances CSV"); await settled(() => expect(host.textContent).toContain("Could not export matching instances"));
   expect(host.textContent).toContain("Finding 0"); expect(host.textContent).not.toContain("private export detail"); expect(host.querySelector<HTMLInputElement>('[aria-label="Search findings"]')!.value).toBe("openssl");
 });
-it("saves complete URL filters under the operator identity and reapplies them atomically", async () => {
-  route.initial = "view=instances&group=asset&kind=runtime&lifecycle=accepted&severity=low&fixable=true&q=api&sort=title&order=asc";
-  vi.stubGlobal("prompt", vi.fn().mockReturnValue("API risk"));
+it("navigates to a dedicated saved-view form with exact filters and context without prompting", async () => {
+  route.initial = "view=instances&group=asset&kind=runtime&lifecycle=accepted&severity=low&fixable=true&q=api&sort=title&order=asc&page=2&context=keep";
   await renderPage(); await settled(() => expect(host.querySelector('[data-testid="findings-group-scope"]')).not.toBeNull());
   await click("Save view");
-  const key = operatorStorageKey("constellation.findings.views.v1", identity)!;
-  await settled(() => expect(JSON.parse(localStorage.getItem(key)!)[0]).toMatchObject({ name: "API risk", kind: "runtime", lifecycle: "accepted", query: "api", severity: "low", fixable: true, view: "instances", group: "asset", sort: "title", order: "asc" }));
-  expect(localStorage.getItem("constellation.findings.views.v1")).toBeNull();
-  await selectFilter("Kind", "vulnerability");
-  await click("Views (1)"); const apply = [...host.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.startsWith("API risk"))!; await act(async () => apply.click());
-  await settled(() => expect(findings.list).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "runtime", q: "api severity:low", lifecycle: "accepted", fixable: true, sort: "title", order: "asc" })));
-  expect(params().get("group")).toBe("asset"); expect(params().has("page")).toBe(false);
+  expect(route.navigate).toHaveBeenCalledWith({ href: `/clusters/cluster/findings/views/new?${route.initial}` });
+  expect(localStorage.getItem(operatorStorageKey("constellation.findings.views.v1", identity)!)).toBeNull();
 });
+
 it("merges selections across page-scoped groups and only mutates those selected IDs", async () => {
   route.initial = "view=instances&group=asset"; vi.mocked(findings.list).mockResolvedValue({ ...listed(), findings: [fixture(0), fixture(1)] });
   await renderPage(); await settled(() => expect(host.querySelector('[data-testid="findings-group-scope"]')).not.toBeNull());
@@ -216,4 +211,19 @@ it("does not query across the organization while cluster context is missing", as
   route.clusterId = ""; await renderPage();
   expect(findings.list).not.toHaveBeenCalled(); expect(findings.byCVE).not.toHaveBeenCalled();
   expect(host.textContent).toContain("The active cluster could not be resolved");
+});
+it("ignores malformed saved view payloads and applies only a validated named view", async () => {
+  localStorage.setItem(operatorStorageKey("constellation.findings.views.v1", identity)!, JSON.stringify([{ id: "valid", name: "Valid saved filters", kind: "runtime", lifecycle: "accepted", query: "api" }, { id: "bad", name: "Malformed", kind: [], lifecycle: {}, query: null }]));
+  await renderPage(); await settled(() => expect(host.textContent).toContain("Finding 0")); await click("Views (1)");
+  expect(host.textContent).toContain("1 saved view record was rejected");
+  expect(host.textContent).not.toContain("Malformed"); const apply = [...host.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent?.startsWith("Valid saved filters"))!; await act(async () => apply.click());
+  await settled(() => expect(findings.list).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "runtime", lifecycle: "accepted", q: "api" })));
+});
+it("reports a failed saved-view delete without removing the persisted or visible record", async () => {
+  const key = operatorStorageKey("constellation.findings.views.v1", identity)!;
+  localStorage.setItem(key, JSON.stringify([{ id: "valid", name: "Retained view", kind: "runtime", lifecycle: "open", query: "api" }]));
+  await renderPage(); await settled(() => expect(host.textContent).toContain("Finding 0")); await click("Views (1)");
+  const original = localStorage; vi.stubGlobal("localStorage", { getItem: original.getItem.bind(original), setItem: () => { throw new Error("quota"); } });
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="delete view Retained view"]')!.click()); await settled(() => expect(host.textContent).toContain("could not be stored")); expect(host.textContent).toContain("Retained view");
+  vi.unstubAllGlobals(); expect(JSON.parse(localStorage.getItem(key)!)).toHaveLength(1);
 });

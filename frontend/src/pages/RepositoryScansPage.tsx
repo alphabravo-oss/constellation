@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { repositoryScanAttestations, repositoryScans, type RepositoryScan } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { PageHeader } from "@/components/ui/page";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { cn } from "@/lib/cn";
 
@@ -110,13 +110,13 @@ export function RepositoryScansPage() {
         description="Source-repository scans — package inventory, scan jobs, findings, and provenance attestations."
       />
 
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5" data-testid="repository-summary">
+      <StatGrid data-testid="repository-summary">
         <StatCard label="Repositories" value={summary.total.toLocaleString()} icon={<GitBranch className="h-3.5 w-3.5" />} hint={`${summary.branches} branches · ${summary.workflows} workflows`} />
         <StatCard label="Packages" value={summary.packages.toLocaleString()} icon={<PackageSearch className="h-3.5 w-3.5" />} hint={`${summary.withEvidence} with evidence`} />
         <StatCard label="Open Findings" value={summary.findings.toLocaleString()} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={summary.criticalHigh > 0 ? "high" : "neutral"} hint={`${summary.criticalHigh} critical/high`} />
         <StatCard label="Active Jobs" value={summary.activeJobs.toLocaleString()} icon={<Clock className="h-3.5 w-3.5" />} hint={`${summary.staleEvidence} stale evidence`} />
         <StatCard label="Attestations" value={summary.attestations.toLocaleString()} icon={<Fingerprint className="h-3.5 w-3.5" />} hint={`${summary.trustedAttestations} trusted · ${summary.unverifiedAttestations} unverified`} />
-      </section>
+      </StatGrid>
 
       <section className="rounded-lg border border-border bg-card p-3">
         <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_170px]">

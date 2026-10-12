@@ -11,7 +11,7 @@ import { Pager } from "@/components/ui/pager";
 import { Button } from "@/components/ui/button";
 import { ErrorState, LoadingState } from "@/components/ui/states";
 import { cve, type CVEResult, type Severity } from "@/api/client";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { FilterChip } from "@/components/ui/filter-chip";
 import { SeverityBadge } from "@/components/ui/severity-badge";
 import { KevBadge } from "@/components/ui/kev-badge";
@@ -218,7 +218,7 @@ export function CVEPage() {
       )}
 
       {/* Stat tiles */}
-      <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <StatGrid>
         <StatCard
           label="Total CVEs"
           value={stats.data ? stats.data.total.toLocaleString() : "—"}
@@ -247,7 +247,7 @@ export function CVEPage() {
           icon={<AlertTriangle className="h-3 w-3" />}
           hint="High / critical severity"
         />
-      </section>
+      </StatGrid>
 
       {bundle.data?.available && (
         <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs">

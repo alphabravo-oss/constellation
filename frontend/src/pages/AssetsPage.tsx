@@ -9,7 +9,7 @@ import { useCluster } from "@/hooks/useCluster";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { downloadCsv } from "@/lib/csv";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 
 const kinds = ["all", "image", "workload", "iac-resource", "ml-model", "cloud-resource"];
 const criticalities = ["all", "critical", "high", "medium", "low"];
@@ -125,12 +125,12 @@ export function AssetsPage() {
 
       {q.isError && !q.data && <p role="alert" className="text-sm text-destructive">Could not load assets. Retry the page.</p>}
 
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4" data-testid="assets-summary">
+      <StatGrid data-testid="assets-summary">
         <StatCard label={incomplete ? "Loaded Assets" : "Assets"} value={summary.total.toLocaleString()} icon={<Boxes className="h-3.5 w-3.5" />} hint={`${summary.images} images · ${summary.workloads} workloads`} />
         <StatCard label="Critical / High" value={summary.criticalHigh.toLocaleString()} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={summary.criticalHigh > 0 ? "high" : "neutral"} hint={`${summary.openFindings} open findings`} />
         <StatCard label="Unsigned Images" value={summary.unsignedImages.toLocaleString()} icon={<BadgeCheck className="h-3.5 w-3.5" />} tone={summary.unsignedImages > 0 ? "medium" : "neutral"} hint={`${summary.signedImages} signed`} />
         <StatCard label="Missing SBOM" value={summary.missingSBOM.toLocaleString()} icon={<FileJson className="h-3.5 w-3.5" />} hint={`${summary.withSBOM} with SBOM evidence`} />
-      </section>
+      </StatGrid>
 
       <section className="rounded-lg border border-border bg-card p-3">
         <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_170px_170px]">

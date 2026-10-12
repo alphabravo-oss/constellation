@@ -5,7 +5,7 @@ import { Crown, GitBranch, Hash, LogOut as LeaveIcon, Plus, Users } from "lucide
 import { federation, type FedMember } from "@/api/client";
 import { PageHeader, PageContainer } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 
 const memberColumns: Column<FedMember>[] = [
   { id: "name", header: "Cluster", kind: "name", wrap: true, cell: (m) => m.name, className: "text-xs font-medium" },
@@ -36,12 +36,12 @@ export function FederationPage() {
         description="Share security policies and user groups across multiple Constellation clusters. One cluster is the master; joint clusters receive its synced config. Runtime data stays local to each cluster."
       />
 
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <StatGrid>
         <StatCard label="State" value={cur?.state ?? "unknown"} tone="accent" icon={<Crown className="h-3.5 w-3.5" aria-hidden />} />
         <StatCard label="Master" value={cur?.master_id ? cur.master_id.slice(0, 12) : "—"} hint={cur?.master_id ?? undefined} icon={<GitBranch className="h-3.5 w-3.5" aria-hidden />} />
         <StatCard label="Revision" value={cur?.revision ?? 0} icon={<Hash className="h-3.5 w-3.5" aria-hidden />} />
         <StatCard label="Members" value={memberRows.length} icon={<Users className="h-3.5 w-3.5" aria-hidden />} />
-      </section>
+      </StatGrid>
 
       <section className="rounded-lg border border-border bg-card p-4 space-y-3">
         <h2 className="text-sm font-medium">Membership actions</h2>

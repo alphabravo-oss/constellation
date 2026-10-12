@@ -8,7 +8,7 @@ import { useRouteSearchParams } from "@/lib/route-search";
 import { LoadingState, ErrorState, EmptyState } from "@/components/ui/states";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
@@ -88,12 +88,12 @@ export function FileMonitorPage() {
       : !listQ.data ? <ErrorState title="Could not load file profiles for this cluster." action={<Button onClick={() => void listQ.refetch()}>Retry</Button>} />
       : <>
         <VerdictBanner status={listQ.isError ? "degraded" : "info"} title={listQ.isError ? "File profiles could not be refreshed" : profiles.length ? `${profiles.length} workloads have file profiles` : "No file profiles reported"} detail={listQ.isError ? "Showing the last loaded profiles. Refresh before changing rules." : "Profile configuration and recent activity are shown below. Enabled rules alone do not confirm that monitoring is active on a workload."} />
-        <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatGrid>
           <StatCard label="Reported workloads" value={profiles.length} icon={<FolderTree className="h-4 w-4" />} />
           <StatCard label="Configured rules" value={profiles.reduce((n, p) => n + p.rule_count, 0)} icon={<ListChecks className="h-4 w-4" />} />
           <StatCard label="Alerts · last 24h" value={profiles.reduce((n, p) => n + p.monitored_alerts_24h, 0)} icon={<FileText className="h-4 w-4" />} />
           <StatCard label="Blocks · last 24h" value={profiles.reduce((n, p) => n + p.enforced_blocks_24h, 0)} />
-        </section>
+        </StatGrid>
         {profiles.length === 0 ? <EmptyState title="No file profiles" hint="No workloads are reporting file monitoring yet." /> : <>
           <label className="block space-y-2 text-sm"><span className="font-medium">Selected workload</span><select className="h-10 w-full rounded-md border border-border bg-card px-3" value={activeWorkload ?? ""} onChange={(e) => selectWorkload(e.target.value)}>
             {selected && !activeProfile && <option value={selected}>Unavailable workload: {selected}</option>}

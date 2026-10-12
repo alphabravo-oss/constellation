@@ -14,7 +14,7 @@ import {
 } from "@/api/client";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { SeverityBadge } from "@/components/ui/severity-badge";
 import { useCluster } from "@/hooks/useCluster";
 import { cn } from "@/lib/cn";
@@ -57,12 +57,12 @@ export function ServerlessFunctionDetailPage() {
         description={<span className="break-all font-mono">{fn.function_ref}</span>}
       />
 
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4" data-testid="serverless-function-stats">
+      <StatGrid data-testid="serverless-function-stats">
         <StatCard label="Open Findings" value={fn.open_findings} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={fn.open_findings > 0 ? "high" : "neutral"} />
         <StatCard label="Packages" value={fn.package_count} icon={<Database className="h-3.5 w-3.5" />} />
         <StatCard label="Layers" value={fn.layers?.length ?? 0} icon={<Layers className="h-3.5 w-3.5" />} />
         <StatCard label="Role Risk" value={fn.critical_findings + fn.high_findings} icon={<KeyRound className="h-3.5 w-3.5" />} tone={fn.critical_findings + fn.high_findings > 0 ? "critical" : "neutral"} />
-      </section>
+      </StatGrid>
 
       <div className="space-y-4">
         <div className="grid gap-4 lg:grid-cols-2 lg:items-start">

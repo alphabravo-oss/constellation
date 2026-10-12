@@ -215,3 +215,18 @@ it("keeps the runtime posture drilldown on its evidence window", async () => {
   route.params = new URLSearchParams("tab=posture"); await renderPage();
   expect(host.querySelector('a[href="/clusters/cluster/runtime?tab=evidence&hours=24"]')).not.toBeNull();
 });
+
+it("links denied pairs and exposure to exact directed server-filtered conversations", async () => {
+  route.params = new URLSearchParams("tab=network");
+  vi.mocked(network.conversations).mockResolvedValue({ conversations: [{ from: "prod/api", to: "other/api", bytes: 50, packets: 2, edges: 1, last_seen: "2026-10-12T00:00:00Z", verdict: "block" }], nodes: [], node_kinds: {}, edges: [], window_hours: 24 });
+  vi.mocked(network.exposure).mockResolvedValue({ ingress: [{ workload: "prod/api", namespace: "prod", name: "api", protocols: [], ports: [], external_peers: 1, sessions: 1, critical: 0, high: 0, risk_score: 0, policy_mode: "monitor" }], egress: [] });
+  await renderPage();
+  await settled(() => expect(host.querySelector('[data-testid="dashboard-network-denies"] a')).not.toBeNull());
+  expect(network.conversations).toHaveBeenCalledWith({ hours: 24, cluster_id: "cluster", verdict_group: "blocked", limit: 5000 });
+  const pair = new URL(host.querySelector<HTMLAnchorElement>('[data-testid="dashboard-network-denies"] a')!.href, "http://localhost");
+  expect(pair.searchParams.get("from")).toBe("prod/api"); expect(pair.searchParams.get("to")).toBe("other/api");
+  expect(pair.searchParams.get("verdict_group")).toBe("blocked"); expect(pair.searchParams.get("hide_platform")).toBe("false");
+  const exposure = [...host.querySelectorAll<HTMLAnchorElement>("a")].find(a => new URL(a.href, "http://localhost").searchParams.get("from") === "external")!;
+  expect(exposure).toBeDefined(); const target = new URL(exposure.href, "http://localhost");
+  expect(target.searchParams.get("to")).toBe("prod/api"); expect(target.searchParams.get("hours")).toBe("168");
+});

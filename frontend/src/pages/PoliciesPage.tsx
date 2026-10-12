@@ -6,7 +6,7 @@ import { policies, type Policy, type PolicySimulation } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { useRouteSearchParams } from "@/lib/route-search";
 import { PageHeader } from "@/components/ui/page";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { DataTable, type Column } from "@/components/ui/data-table";
@@ -83,7 +83,7 @@ function PolicyCatalog({ clusterId }: { clusterId: string }) {
       actions={<><Button disabled={q.isFetching} onClick={() => void q.refetch()}><RefreshCw className="h-4 w-4" /> Refresh</Button><Button onClick={() => void navigate({ href: `/clusters/${clusterId}/admission/import` })}><UploadCloud className="h-4 w-4" /> Import profile</Button><Button variant="primary" disabled={q.isError || !q.data} data-testid="policies-create-cta" onClick={() => void navigate({ href: `/clusters/${clusterId}/policies/new` })}><Plus className="h-4 w-4" /> Create policy</Button></>} />
     {q.isPending ? <LoadingState label="Loading policies…" /> : !q.data ? <ErrorState title="Could not load policies for this cluster." action={<Button onClick={() => void q.refetch()}>Retry</Button>} /> : <>
       <VerdictBanner status={q.isError ? "degraded" : "info"} title={q.isError ? "Policies could not be refreshed" : `${enabledCount} of ${list.length} loaded policies are enabled`} detail={q.isError ? "Showing the last loaded configuration. Refresh before editing." : "These counts describe configuration. They do not confirm enforcement or webhook health."} />
-      <section className="grid grid-cols-2 gap-4 lg:grid-cols-4"><StatCard label="Loaded policies" value={list.length} icon={<ListChecks className="h-4 w-4" />} /><StatCard label="Enabled policies" value={enabledCount} icon={<Power className="h-4 w-4" />} /><StatCard label="Enabled · enforce" value={enforceCount} icon={<ShieldCheck className="h-4 w-4" />} /><StatCard label="Enabled · monitor" value={enabledCount - enforceCount} /></section>
+      <StatGrid><StatCard label="Loaded policies" value={list.length} icon={<ListChecks className="h-4 w-4" />} /><StatCard label="Enabled policies" value={enabledCount} icon={<Power className="h-4 w-4" />} /><StatCard label="Enabled · enforce" value={enforceCount} icon={<ShieldCheck className="h-4 w-4" />} /><StatCard label="Enabled · monitor" value={enabledCount - enforceCount} /></StatGrid>
       <Tabs value={tab} onValueChange={setTab} items={[{ value: "catalog", label: "Policy catalog", count: list.length, content: <DataTable rows={list} columns={columns} rowKey={(p) => p.id} onRowClick={q.isError ? undefined : (p) => openEditor(p.id)} preferencesKey="policy-catalog" exportFileName="policies.csv" testId="policy-catalog-table" rowTestId={(p) => `policy-row-${p.name}`} emptyState={<EmptyState title="No policies" hint="Create a policy or import an admission profile to get started." />} /> }, { value: "simulator", label: "Admission simulator", content: simulatorTab }]} />
     </>}
   </div>;

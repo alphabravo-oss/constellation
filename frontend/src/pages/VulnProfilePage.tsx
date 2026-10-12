@@ -11,7 +11,7 @@ import { Card } from "@/components/ui/card";
 import { DataTable } from "@/components/ui/data-table";
 import { TextInput } from "@/components/ui/form";
 import { PageHeader } from "@/components/ui/page";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
@@ -43,7 +43,7 @@ export function VulnProfilePage() {
         <VerdictBanner status={activeWithoutRules ? "degraded" : active.length ? "ok" : "info"}
           title={activeWithoutRules ? `${activeWithoutRules} active profile${activeWithoutRules === 1 ? " has" : "s have"} no rules` : active.length ? `${active.length} active vulnerability profile${active.length === 1 ? "" : "s"}` : "No vulnerability profiles are active"}
           detail="Active profiles evaluate ordered matching rules on future scan completion. The list includes profiles for this cluster and shared organization profiles." />
-        <section className="grid grid-cols-2 gap-4 lg:grid-cols-4"><StatCard label="Visible profiles" value={profiles.length} /><StatCard label="Active profiles" value={active.length} /><StatCard label="Suppression rules" value={entries.filter((entry) => entry.action === "suppress").length} /><StatCard label="Escalation rules" value={entries.filter((entry) => entry.action === "escalate").length} /></section>
+        <StatGrid><StatCard label="Visible profiles" value={profiles.length} /><StatCard label="Active profiles" value={active.length} /><StatCard label="Suppression rules" value={entries.filter((entry) => entry.action === "suppress").length} /><StatCard label="Escalation rules" value={entries.filter((entry) => entry.action === "escalate").length} /></StatGrid>
         <Tabs value={tab === "transfer" ? "transfer" : "profiles"} onValueChange={setTab} items={[
           { value: "profiles", label: "Profiles", count: profiles.length, content: <Card title="Vulnerability profiles" description="Search profiles, vulnerability expressions, images, and scope. Open a profile to edit its ordered rules.">
             <TextInput aria-label="Search vulnerability profiles" className="mb-4" value={search} placeholder="Search profiles, rules, or scope…" onChange={(event) => setParams((current) => { if (event.target.value) current.set("q", event.target.value); else current.delete("q"); return current; }, { replace: true })} />

@@ -24,7 +24,7 @@ import { PageHeader } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 
 export function AttestationTrustPage() {
@@ -182,11 +182,11 @@ export function AttestationTrustPage() {
         }
       />
 
-      <section className="grid gap-3 sm:grid-cols-3">
+      <StatGrid>
         <StatCard label="Policies" value={stats.total} icon={<Fingerprint className="h-3.5 w-3.5" aria-hidden />} />
         <StatCard label="Enabled" value={stats.enabled} tone="accent" icon={<CheckCircle2 className="h-3.5 w-3.5" aria-hidden />} />
         <StatCard label="Auto verify" value={stats.autoVerify} icon={<BadgeCheck className="h-3.5 w-3.5" aria-hidden />} />
-      </section>
+      </StatGrid>
 
       <section data-testid="attestation-trust-table">
         <Card

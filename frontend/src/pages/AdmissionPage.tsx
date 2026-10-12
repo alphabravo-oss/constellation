@@ -27,7 +27,7 @@ import { Button } from "@/components/ui/button";
 import { TextInput } from "@/components/ui/form";
 import { VerdictBanner, type VerdictStatus } from "@/components/ui/verdict-banner";
 import { DataTable, type Column } from "@/components/ui/data-table";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { ErrorState, LoadingState } from "@/components/ui/states";
 import { StatusPill } from "@/components/ui/status-pill";
@@ -434,7 +434,7 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
 
         {assess.data ? (
           <div className="mt-4 space-y-4">
-            <div className="grid gap-3 md:grid-cols-3" data-testid="admission-dry-run-diff">
+            <StatGrid data-testid="admission-dry-run-diff">
               <StatCard
                 label="Rule decision"
                 value={labelCase(assess.data.decision)}
@@ -456,7 +456,7 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
                 icon={<Power className="h-3.5 w-3.5" />}
                 hint="if protect is enabled"
               />
-            </div>
+            </StatGrid>
             {assess.data.matches.length === 0 ? (
               <p className="text-xs text-muted-foreground">No admission rules matched.</p>
             ) : (
@@ -535,7 +535,7 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
 
       <VerdictBanner status={verdict.status} title={verdict.title} detail={verdict.detail} />
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5" data-testid="admission-summary">
+      <StatGrid data-testid="admission-summary">
         <StatCard
           label="Webhook"
           value={!admissionComponentsQ.data ? "—" : webhookHealth.label}
@@ -570,7 +570,7 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
           hint={`${groupedCriteria.length} families`}
         />
 
-      </div>
+      </StatGrid>
 
 
       <Tabs value={tab} onValueChange={setTab} items={[

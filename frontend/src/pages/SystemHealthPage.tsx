@@ -20,7 +20,7 @@ import {
   type SystemHealthHeartbeat,
   type SystemHealthLicense,
 } from "@/api/client";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { PageHeader } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
@@ -324,8 +324,7 @@ export function SystemHealthPage() {
       </Card>
 
       {/* ------------- FLEET STAT TILES ------------- */}
-      <section
-        className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"
+      <StatGrid
         data-testid="system-health-fleet-tiles"
       >
         <StatCard
@@ -363,7 +362,7 @@ export function SystemHealthPage() {
           tone={(data.summary.crashlooping ?? 0) > 0 ? "critical" : "neutral"}
           hint=">3 restarts/hour"
         />
-      </section>
+      </StatGrid>
 
       {/* ------------- DETAIL TABS (progressive disclosure) ------------- */}
       <Tabs value={tab} onValueChange={setTab} items={tabs} />

@@ -9243,6 +9243,35 @@
     },
     "/api/v1/network/conversations": {
       "get": {
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Exact directed source workload identity, applied before pagination.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Exact directed destination workload identity, applied before pagination.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "verdict_group",
+            "in": "query",
+            "description": "Include deny, denied, block and blocked records.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "blocked"
+              ]
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "ok"

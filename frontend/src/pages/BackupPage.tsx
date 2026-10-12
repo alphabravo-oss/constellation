@@ -49,7 +49,7 @@ import {
 } from "@/api/client";
 import { PageHeader } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { Card, DetailRow } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -162,12 +162,12 @@ export function BackupPage() {
       {/* Status — latest backup metrics as a full-width stat row. */}
       <section data-testid="backup-status" className="space-y-3">
         {last ? (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <StatGrid>
             <StatCard label="Created" value={<span className="text-base font-mono">{new Date(last.started_at).toLocaleString()}</span>} />
             <StatCard label="Size" value={<span className="font-mono">{(last.size_bytes / 1024).toFixed(1)} KiB</span>} />
             <StatCard label="Signer" value={<span className="text-base font-mono">{last.signer_identity || (last.signed ? "(signed)" : "unsigned")}</span>} tone={last.signed ? "low" : "neutral"} />
             <StatCard label="Destination" value={<span className="text-base font-mono">{last.s3_uri || "Local"}</span>} tone={last.s3_uri ? "accent" : "neutral"} icon={last.s3_uri ? <Cloud className="h-3 w-3" /> : <HardDrive className="h-3 w-3" />} />
-          </div>
+          </StatGrid>
         ) : (
           <Card title="Latest backup" description="The most recent successful backup and where it landed.">
             <p className="text-sm text-muted-foreground">No backups yet. Click "Take backup now" to create the first one.</p>

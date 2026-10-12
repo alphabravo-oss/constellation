@@ -7,7 +7,7 @@ import { componentsInventory, systemConfigApi, type ComponentInstance, type Conf
 import { PageContainer, PageHeader, PageSection } from "@/components/ui/page";
 import { DataTable } from "@/components/ui/data-table";
 import { Card } from "@/components/ui/card";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { Button } from "@/components/ui/button";
 import { ErrorState, LoadingState } from "@/components/ui/states";
 
@@ -105,12 +105,12 @@ export function EffectiveConfigPage() {
         }
       />
 
-      <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+      <StatGrid>
         <StatCard label="Config revision" value={q.data.revision} hint="Revision returned by the API" icon={<SlidersHorizontal className="h-3.5 w-3.5" />} />
         <StatCard label="Persistence" value={source} hint="Per-key sources are listed below" icon={<Database className="h-3.5 w-3.5" />} />
         <StatCard label="Last changed" value={formatDateTime(q.data.updated_at)} hint={q.data.updated_by_email || q.data.updated_by || "Not recorded"} icon={<Clock3 className="h-3.5 w-3.5" />} />
         <StatCard label="Database values" value={items.filter((item) => item.source === "database").length} hint="Keys attributed to the database" icon={<Database className="h-3.5 w-3.5" />} />
-      </section>
+      </StatGrid>
 
       <section className="rounded-md border border-border bg-card p-4" data-testid="effective-config-provider-applied">
         <div className="flex flex-wrap items-center justify-between gap-2">

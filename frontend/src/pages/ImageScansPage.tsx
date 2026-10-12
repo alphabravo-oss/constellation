@@ -12,7 +12,7 @@ import { PageHeader } from "@/components/ui/page";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { Collapse } from "@/components/ui/collapse";
 import { scanEngineEvidence } from "@/lib/scan-evidence";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 
 const severities = ["all", "critical", "high", "medium", "low", "info"];
 
@@ -121,12 +121,12 @@ export function ImageScansPage() {
       <VerdictBanner status={q.isError ? "degraded" : q.isPending || summary.total === 0 ? "info" : summary.incomplete > 0 || summary.criticalHigh > 0 || summary.stale > 0 ? "degraded" : "ok"}
         title={q.isError ? "Image scans could not be loaded" : q.isPending ? "Loading image scans" : summary.total === 0 ? "No image scans recorded" : summary.incomplete > 0 ? "Some images have incomplete scanner coverage" : summary.criticalHigh > 0 ? "Image vulnerabilities need attention" : summary.stale > 0 ? "Some image scans are stale" : "Scanned images have no critical or high findings"}
         detail={`Metrics and filters cover the latest 500 image results for this cluster. ${summary.incomplete} results have missing or failed engine outcomes.`} />
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4" data-testid="image-scan-summary">
+      <StatGrid data-testid="image-scan-summary">
         <StatCard label="Images" value={summary.total.toLocaleString()} icon={<Boxes className="h-3.5 w-3.5" />} hint={`${summary.exposed} running · ${summary.local} local`} />
         <StatCard label="Critical / High" value={summary.criticalHigh.toLocaleString()} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={summary.criticalHigh > 0 ? "high" : "neutral"} hint={`${summary.findings} image findings`} />
         <StatCard label="Packages" value={summary.packages.toLocaleString()} icon={<Database className="h-3.5 w-3.5" />} hint="across loaded image results" />
         <StatCard label="Stale Scans" value={summary.stale.toLocaleString()} icon={<Clock3 className="h-3.5 w-3.5" />} tone={summary.stale > 0 ? "medium" : "neutral"} hint="older than 7 days" />
-      </section>
+      </StatGrid>
 
       <section className="rounded-lg border border-border bg-card p-3">
         <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_170px]">

@@ -1,6 +1,6 @@
 // Findings inventory — server filtering, ordered pages, URL state, and page-scoped selection.
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { useRouteSearchParams } from "@/lib/route-search";
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { Save, Tag, Bookmark, ChevronDown, ListFilter } from "lucide-react";
@@ -8,7 +8,6 @@ import { Save, Tag, Bookmark, ChevronDown, ListFilter } from "lucide-react";
 import {
   findings,
   type Finding,
-  type FindingKind,
   type Lifecycle,
   type Severity,
   type CVERollup,
@@ -25,7 +24,7 @@ import { Button } from "@/components/ui/button";
 import { ActionBar } from "@/components/ui/action-bar";
 import { ErrorState, LoadingState } from "@/components/ui/states";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { fmtRelative } from "@/lib/format";
 import { SEVERITY_RANK } from "@/lib/severity";
@@ -33,21 +32,10 @@ import { cn } from "@/lib/cn";
 import { Pager } from "@/components/ui/pager";
 import { useDebounced } from "@/hooks/useDebounced";
 import { useOperatorDensity } from "@/hooks/useOperatorDensity";
-import { useSavedViews, type SavedViewBase } from "@/hooks/useSavedViews";
+import { useSavedViews } from "@/hooks/useSavedViews";
 
-interface SavedView extends SavedViewBase {
-  kind: FindingKind | "";
-  lifecycle: Lifecycle | "";
-  query: string;
-  severity?: Severity | "";
-  fixable?: boolean;
-  view?: "instances" | "cve";
-  group?: GroupBy;
-  sort?: string;
-  order?: "asc" | "desc";
-}
+import { FINDING_VIEWS_KEY, isFindingSavedView, inventoryViewHref, type FindingSavedView as SavedView } from "@/lib/inventory-saved-views";
 
-const SAVED_VIEWS_KEY = "constellation.findings.views.v1";
 const DENSITY_KEY     = "constellation.findings.density";
 const INSTANCE_TABLE_KEY = "findings.instances";
 const CVE_TABLE_KEY = "findings.cve-rollup";
@@ -86,6 +74,7 @@ export function FindingsPage() {
   const { clusterId, cluster, isLoading: clusterLoading, error: clusterError } = useCluster();
   const scopeReady = !!clusterId && cluster?.id === clusterId && !clusterLoading && !clusterError;
   const [searchParams, setSearchParams] = useRouteSearchParams();
+  const locationHash = useLocation({ select: location => location.hash });
   const severity = (["critical", "high", "medium", "low", "info"] as const).find((value) => value === searchParams.get("severity")) ?? "";
   const kind = (["vulnerability", "iac", "license", "cloud-config", "drift", "signature", "ml-model", "compliance", "runtime"] as const).find((value) => value === searchParams.get("kind")) ?? "";
   const lifecycleValue = searchParams.get("lifecycle");
@@ -118,7 +107,7 @@ export function FindingsPage() {
   const setPage = (value: number) => setFilters({ page: value ? String(value + 1) : "" }, false);
   const onSortChange = (value: { id: string; dir: "asc" | "desc" } | null) => setFilters({ sort: value?.id ?? "risk", order: value?.dir ?? "desc" });
   const [density, setDensity] = useOperatorDensity(DENSITY_KEY);
-  const { views, saveView: saveStoredView, deleteView } = useSavedViews<SavedView>(SAVED_VIEWS_KEY);
+  const { views, deleteView, persistenceError } = useSavedViews<SavedView>(FINDING_VIEWS_KEY, { validate: isFindingSavedView });
   const navigate = useNavigate();
   const openFinding = (finding: Finding) => navigate({ href: clusterId ? `/clusters/${clusterId}/findings/${finding.id}` : `/findings/${finding.id}` });
   const request: NonNullable<Parameters<typeof findings.list>[0]> = { kind: activeView === "cve" ? "vulnerability" as const : kind || undefined, lifecycle: lifecycle || undefined, cluster_id: clusterId, q: serverQuery || undefined, fixable: fixableOnly || undefined, sort: activeView === "cve" ? "risk" : sort, order: activeView === "cve" ? "desc" as const : order };
@@ -144,10 +133,6 @@ export function FindingsPage() {
   if (lifecycle !== "open") activeChips.push({ label: "lifecycle", value: lifecycle || "all", onRemove: () => setUrlFilter("lifecycle", "open") });
   if (query) activeChips.push({ label: "q", value: query, onRemove: () => setQuery("") });
   if (fixableOnly) activeChips.push({ label: "fixable", value: "true", onRemove: () => setUrlFilter("fixable", "") });
-  function saveView() {
-    const name = prompt("Name this view");
-    if (name) saveStoredView(name, { kind, lifecycle, query, severity, fixable: fixableOnly, view: activeView, group: groupBy, sort, order });
-  }
   function applyView(value: SavedView) {
     setFilters({ kind: value.kind, lifecycle: value.lifecycle || "all", q: value.query, severity: value.severity ?? "", fixable: value.fixable ? "true" : "", view: value.view ?? ((value.kind && value.kind !== "vulnerability") || (value.lifecycle && value.lifecycle !== "open") || value.severity ? "instances" : "cve"), group: value.group ?? "none", sort: value.sort ?? "risk", order: value.order ?? "desc" });
   }
@@ -296,19 +281,20 @@ export function FindingsPage() {
             {views.length > 0 && (
               <SavedViewsMenu views={views} onApply={applyView} onDelete={deleteView} />
             )}
-            <Button size="sm" variant="outline" onClick={saveView}>
+            <Button size="sm" variant="outline" disabled={!scopeReady} onClick={() => { if (clusterId) void navigate({ href: inventoryViewHref(clusterId, "findings", searchParams, locationHash, true) }); }}>
               <Save className="h-3.5 w-3.5" /> Save view
             </Button>
           </>
         }
       />
 
+      {persistenceError && <ErrorState title={persistenceError} />}
       <VerdictBanner status={activeQ.isError || !scopeReady ? "degraded" : "info"} title={ready ? `${total?.toLocaleString()} matching ${activeView === "cve" ? "CVEs" : "finding instances"}` : "Finding results are unavailable or updating"} detail={activeView === "cve" ? "Rollups are ordered by highest risk across all matching CVEs." : "Search and ordering apply to the complete matching inventory."} />
-      <div className="grid gap-3 sm:grid-cols-3">
+      <StatGrid className="gap-3">
         <StatCard label={activeView === "cve" ? "Matching CVEs" : "Matching instances"} value={total?.toLocaleString() ?? "—"} />
         <StatCard label="Rows on this page" value={ready ? activeView === "cve" ? cveRows.length : rows.length : "—"} />
         <StatCard label="Selected on this page" value={totalSelected} />
-      </div>
+      </StatGrid>
       {/* Query input + hints */}
       <div className="space-y-2">
         <div className="flex items-center gap-2">

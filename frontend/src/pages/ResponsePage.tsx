@@ -8,7 +8,7 @@ import { useRouteSearchParams } from "@/lib/route-search";
 import { Button } from "@/components/ui/button";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 
@@ -49,13 +49,13 @@ function ResponseCatalog({ clusterId }: { clusterId: string }) {
       actions={<><Button onClick={() => void navigate({ href: `/clusters/${clusterId}/response-rules` })}>Authored response rules</Button><Button disabled={q.isFetching} onClick={() => void q.refetch()}><RefreshCw className="h-4 w-4" /> Refresh</Button></>} />
     {q.isPending ? <LoadingState label="Loading response catalog…" /> : !q.data ? <ErrorState title="Could not load the organization response catalog." action={<Button onClick={() => void q.refetch()}>Retry</Button>} /> : <>
       <VerdictBanner status={q.isError ? "degraded" : "info"} title={q.isError ? "Response catalog could not be refreshed" : `${rules.filter((r) => r.enabled).length} built-in rules are enabled across the organization`} detail={q.isError ? "Showing the last loaded settings. Refresh before editing an override." : "Configured modes and actions describe response settings. Actual enforcement depends on the runtime agents and action delivery."} />
-      <section className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+      <StatGrid>
         <StatCard label="Built-in rules" value={rules.length} />
         <StatCard label="Enabled" value={rules.filter((r) => r.enabled).length} />
         <StatCard label="Enabled · monitor" value={rules.filter((r) => r.enabled && r.mode === "monitor").length} />
         <StatCard label="Enabled · enforce" value={rules.filter((r) => r.enabled && r.mode === "enforce").length} />
         <StatCard label="Organization overrides" value={rules.filter((r) => r.managed).length} />
-      </section>
+      </StatGrid>
       <div className="grid gap-4 sm:grid-cols-2" data-testid="response-rule-filters">
         <label className="block space-y-2 text-sm"><span className="font-medium">Search built-in rules</span><input value={filter} onChange={(e) => setFilter("q", e.target.value)} className="h-10 w-full rounded-md border border-border bg-card px-3" placeholder="Rule name, match or action" /></label>
         <label className="block space-y-2 text-sm"><span className="font-medium">Event type</span><select value={eventType} onChange={(e) => setFilter("event", e.target.value)} className="h-10 w-full rounded-md border border-border bg-card px-3"><option value="all">All event types</option>{eventType !== "all" && !eventTypes.includes(eventType) && <option value={eventType}>Unknown event type: {eventType}</option>}{eventTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>

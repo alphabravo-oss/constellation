@@ -509,6 +509,66 @@ includes risk-detail scoping, saved-view authoring/persistence, broader shared
 layout/export acceptance and route consistency. Broader security/infrastructure
 acceptance remains tracked separately.
 
+The workflow/layout continuation extends shared `StatGrid` adoption to 44 more
+page files (48 metric rows), plus Findings, risk, Network and remaining Dashboard
+rows. Entity headers wrap their metrics/actions, and shared page titles now wrap
+long identifiers instead of overlapping actions. Deployment and migration pages
+keep at most five primary metrics and disclose secondary counts. Semantic table
+column sizing/alignment and typography remain centralized in the shared table
+primitives and global CSS; pages declare content kinds rather than equal widths.
+
+Risk workspaces resolve the exact cluster/entity before querying or displaying
+related evidence. Asset responses now expose their cluster identity. Generic
+asset findings use exact server predicates, stable pagination and matching counts;
+canonical image evidence stays separately labeled. Fabricated factors and
+substring-related activity are removed. Unsupported workload mappings are explicit.
+Source limits remain visible: deployment findings 100, runtime events 50, network
+flows 100, node vulnerabilities 2,000 and generic asset CSV up to 10,000.
+
+Findings and Timeline saved views now have dedicated `/views/new` pages with
+Save/Cancel, Advanced filter details and preserved return URLs/fragments. Writes
+complete before navigation, remain scoped to organization/user, and report browser
+storage failures or rejected malformed records. Held callbacks cannot write after
+identity/inventory changes. Timeline timestamps retain offsets and milliseconds.
+Network saved-view payloads preserve exact conversation endpoints and honor write
+outcomes; its inline authoring still needs migration to a dedicated page.
+
+Dashboard network links now request exact directed pairs and their original 24h
+or 168h window. A server-side blocked cohort includes deny/denied/block/blocked
+before counting and pagination; count/page reads share one snapshot. Network
+filters, tabs, pair detail and conversation pages retain URL/history context.
+Exact pair detail uses returned streams independently of the map's 300-flow sample,
+and labels its own 200-stream cap. Network status describes 10–15s automatic
+refresh instead of falsely claiming an active stream. Livegraph streaming remains
+disabled; enabling it requires explicit cluster scoping and connection-state work.
+
+Validation: Helm revision **48** runs frontend `workflow-canvas-20261012` and
+API `workflow-console-20261012`, with migration `audit-lookup-20261012` and schema
+173. All seven deployments are ready. The combined frontend run passed **847
+tests across 84 files**; the final header/polling-label/row-selection refinements
+passed 42 relevant tests and a rebuilt production bundle/typecheck. Changed-file
+lint, generated OpenAPI/endpoint mapping, parity-plan checks, graph race tests and
+handler vet pass. Fresh migrated PostgreSQL runs passed **26 test executions**
+with race/shuffle and no skips: 20 conversation and six asset-scope executions.
+They cover exact pairs beyond the first page, literal wildcard identities,
+deny/block aliases, count/page agreement, durable-cache bypass and tenant scope.
+The four affected dashboard browser cases were discovered, not rerun as a suite.
+
+Live read-only API checks confirm exact pair/missing pair/blocked filtering and
+asset cluster identity. Browser checks cover risk asset/deployment/node evidence,
+exact conversation stream selection and reload, and saved-view direct routes,
+required-name gates and Cancel context (including timestamp offsets/milliseconds).
+Risk and conversation/stream table geometry matches at desktop/narrow widths;
+metrics wrap without overflow, and a long-digest screenshot prompted the shared
+header correction, verified at 640px and 1280px. The map canvas received an
+explicit responsive height after the scrolling layout exposed a zero-height
+ReactFlow surface; its rendered canvas was rechecked. Assets also uses the responsive
+shared metrics. These are bounded checks, not full mobile/accessibility or all-page
+acceptance. No live security actions or saved-view writes were submitted.
+UI-1/2/3/4 remain open for the remaining canonical-page, form, table/export,
+platform-role and destination-matrix acceptance; broader infrastructure/security
+gates stay separate.
+
 The admission-engine continuation adds migration **172** and persists normalized
 engine outcomes atomically with image scan completion. The built-in vulnerability
 profiles now require successful Trivy and Grype results rather than retired
@@ -1245,8 +1305,9 @@ CSV, but its API returns only the default first 100 rows. Host CVEs now opens
 a cluster-scoped, paged node view filtered to open host vulnerability findings;
 it labels loaded-only search, sort, and CSV. The tile counts findings, whereas
 the node list counts distinct named hosts, so these are not identical totals.
-Exact network pair/exposure drill-downs
-and the deny/block aggregate link remain open, so UI-4 stays unchecked.
+The October 12 workflow continuation below supersedes these network limitations
+with exact endpoint/window predicates and a combined deny/block cohort. Broader
+destination and source-total acceptance still leaves UI-4 unchecked.
 An attempted 164-case full Playwright run on another isolated migration-166
 database was stopped after 38 cases: 24 failures were HTTP 429 from the
 intentional 10-per-minute per-IP login guard, not verified feature regressions.
@@ -2136,8 +2197,10 @@ progressive disclosure, while retaining Constellation's security vocabulary.
   pagination, with matching totals and full filtered CSV. Host CVEs filters open host vulnerabilities using the source
   cluster and pages matching nodes; its distinct-node total does not equal the
   tile's finding count, and unnamed findings cannot appear as nodes. Network
-  pair and exposure drill-downs remain broad, and the deny-only conversation header
-  cannot represent blocked records too.
+  pair and exposure drill-downs now preserve exact directed endpoints, source
+  windows and visible platform context. The conversation header requests a combined
+  deny/block cohort before server pagination. Top-vulnerable deployment links and
+  the complete destination/source-total matrix still need acceptance.
 - [ ] Prefer downloadable HTML/CSV/JSON evidence; add PDF only when it materially
   improves a customer workflow.
 

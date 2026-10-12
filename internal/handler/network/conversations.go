@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler"
@@ -193,6 +194,13 @@ func (h *NetworkConversations) List(w http.ResponseWriter, r *http.Request) {
 	// Namespace + verdict filters (previously accepted by the UI but silently ignored).
 	namespace := strings.TrimSpace(r.URL.Query().Get("namespace"))
 	verdict := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("verdict")))
+	from := strings.TrimSpace(r.URL.Query().Get("from"))
+	to := strings.TrimSpace(r.URL.Query().Get("to"))
+	verdictGroup := strings.TrimSpace(r.URL.Query().Get("verdict_group"))
+	if verdictGroup != "" && verdictGroup != "blocked" {
+		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid verdict_group"})
+		return
+	}
 	limit := 5000
 	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
 		parsed, err := strconv.Atoi(raw)
@@ -242,7 +250,7 @@ func (h *NetworkConversations) List(w http.ResponseWriter, r *http.Request) {
 	// when it has nothing for this org we fall through to the durable SQL path.
 	// The in-memory graph can't apply namespace/verdict filters, so skip it when
 	// either is set and serve the filterable SQL path instead.
-	if h.live != nil && namespace == "" && verdict == "" && !groupActive && port == 0 && peer == "" && application == "" && offset == 0 && r.URL.Query().Get("limit") == "" {
+	if h.live != nil && namespace == "" && verdict == "" && !groupActive && port == 0 && peer == "" && application == "" && from == "" && to == "" && verdictGroup == "" && offset == 0 && r.URL.Query().Get("limit") == "" {
 		g := h.live.Snapshot(subj.OrgID, clusterUUID)
 		if n, _ := g.Len(); n > 0 {
 			nodes := g.Nodes()
@@ -277,19 +285,28 @@ func (h *NetworkConversations) List(w http.ResponseWriter, r *http.Request) {
    AND (NOT $6::boolean OR src_workload = ANY($7::text[]) OR dst_workload = ANY($7::text[]))
    AND ($8::int = 0 OR dst_port = $8 OR min_src_port = $8)
    AND ($9::text = '' OR strpos(lower(src_workload), $9) > 0 OR strpos(lower(dst_workload), $9) > 0 OR strpos(lower(min_src_addr), $9) > 0 OR strpos(lower(min_dst_addr), $9) > 0)
-   AND ($10::text = '' OR lower(l7_protocol) = $10 OR max_application::text = $10)`
-	args := []any{subj.OrgID, clusterID, hours, verdict, namespace, groupActive, groupMembers, port, peer, application}
+   AND ($10::text = '' OR lower(l7_protocol) = $10 OR max_application::text = $10)
+   AND ($11::text = '' OR src_workload = $11)
+   AND ($12::text = '' OR dst_workload = $12)
+   AND ($13::text = '' OR lower(verdict) IN ('deny', 'denied', 'block', 'blocked'))`
+	args := []any{subj.OrgID, clusterID, hours, verdict, namespace, groupActive, groupMembers, port, peer, application, from, to, verdictGroup}
+	tx, err := h.db.Pool().BeginTx(r.Context(), pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read conversations"})
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
 	var total int
-	if err := h.db.Pool().QueryRow(r.Context(), `SELECT COUNT(DISTINCT (src_workload, dst_workload))::int FROM network_flow_rollups`+where, args...).Scan(&total); err != nil {
+	if err := tx.QueryRow(r.Context(), `SELECT COUNT(DISTINCT (src_workload, dst_workload))::int FROM network_flow_rollups`+where, args...).Scan(&total); err != nil {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	rows, err := h.db.Pool().Query(r.Context(), `
+	rows, err := tx.Query(r.Context(), `
 WITH scoped AS (SELECT * FROM network_flow_rollups`+where+`),
 pairs AS (
   SELECT src_workload, dst_workload, SUM(sum_bytes) AS volume
     FROM scoped GROUP BY src_workload, dst_workload
-   ORDER BY volume DESC, src_workload, dst_workload LIMIT $11 OFFSET $12)
+   ORDER BY volume DESC, src_workload, dst_workload LIMIT $14 OFFSET $15)
 SELECT scoped.src_workload, scoped.dst_workload, protocol, dst_port,
        l7_protocol, verdict, COALESCE(MAX(max_severity),0)::int,
        SUM(sum_bytes)::bigint, SUM(sum_packets)::bigint, MAX(max_at)
@@ -308,12 +325,22 @@ SELECT scoped.src_workload, scoped.dst_workload, protocol, dst_port,
 		var bytes, pkts int64
 		var lastSeen time.Time
 		if err := rows.Scan(&src, &dst, &proto, &port, &l7, &verdict, &severity, &bytes, &pkts, &lastSeen); err != nil {
-			continue
+			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read conversations"})
+			return
 		}
 		g.AddEdge(src, dst, graph.Attrs{
 			Bytes: bytes, Packets: pkts, Protocol: proto, Port: port, LastSeen: lastSeen,
 			L7: strings.ToLower(l7), Verdict: strings.ToLower(verdict), Severity: severity,
 		})
+	}
+	if err := rows.Err(); err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read conversations"})
+		return
+	}
+	rows.Close()
+	if err := tx.Commit(r.Context()); err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not finish reading conversations"})
+		return
 	}
 	nodes := g.Nodes()
 	response := map[string]any{

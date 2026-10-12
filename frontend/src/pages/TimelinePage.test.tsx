@@ -4,6 +4,8 @@ import { createMemoryHistory, type RouterHistory } from "@tanstack/react-router"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { securityTimeline, type TimelineItem } from "@/api/client";
+import { TablePreferencesProvider } from "@/contexts/TablePreferencesContext";
+import { operatorStorageKey } from "@/lib/operator-preferences";
 import { TestRouter } from "@/test/router";
 import { TimelinePage } from "./TimelinePage";
 
@@ -18,6 +20,7 @@ const item: TimelineItem = { id: "same-id", source: "runtime_event", severity: "
 const response = { items: [item], limit: 100, offset: 0, has_more: true, from: "2026-10-11T00:00:00Z", to: "2026-10-12T00:00:00Z" };
 
 beforeEach(() => {
+  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   vi.clearAllMocks(); localStorage.clear();
   Object.assign(scope, { clusterId: "cluster", cluster: { id: "cluster", name: "Primary" }, isLoading: false, error: null });
   vi.mocked(securityTimeline.list).mockResolvedValue(response);
@@ -27,7 +30,7 @@ beforeEach(() => {
 afterEach(() => { act(() => root.unmount()); client.clear(); host.remove(); });
 async function render(url = "/clusters/cluster/timeline") {
   history = createMemoryHistory({ initialEntries: [url] });
-  await act(async () => root.render(<QueryClientProvider client={client}><TestRouter history={history}><TimelinePage /></TestRouter></QueryClientProvider>));
+  await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{ org_id: "org", user_id: "user" }}><TestRouter history={history}><TimelinePage /></TestRouter></TablePreferencesProvider></QueryClientProvider>));
   await act(async () => new Promise(resolve => setTimeout(resolve, 20)));
 }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
@@ -100,4 +103,28 @@ it("hides stale counts and detail when a refresh fails and offers Retry", async 
   expect(host.querySelector('[data-testid="timeline-summary"]')).toBeNull();
   expect(document.querySelector('[data-testid="timeline-detail-drawer"]')).toBeNull();
   expect([...host.querySelectorAll("button")].some(button => button.textContent === "Retry")).toBe(true);
+});
+
+it("opens a dedicated saved-view form with complete filter, page, selected event and hash context", async () => {
+  await render("/clusters/cluster/timeline?tab=custom&type=runtime_event&severity=high&q=api&namespace=prod&page=3&event=runtime_event:same-id&context=keep#evidence");
+  click("Save view"); await settled(() => expect(history.location.pathname).toBe("/clusters/cluster/timeline/views/new"));
+  const params = new URLSearchParams(history.location.search); expect(params.get("q")).toBe("api"); expect(params.get("page")).toBe("3"); expect(params.get("event")).toBe("runtime_event:same-id"); expect(params.get("context")).toBe("keep"); expect(history.location.hash).toBe("#evidence");
+});
+it("ignores malformed timeline payloads and applies validated advanced filters", async () => {
+  const key = operatorStorageKey("constellation.timeline.views.v1", { org_id: "org", user_id: "user" })!;
+  localStorage.setItem(key, JSON.stringify([{ id: "valid", name: "Named investigation", category: "custom", sources: ["runtime_event"], severities: ["high"], query: "api", namespace: "prod", workload: "web", reference: "rule", from: "2026-10-10T00:00", to: "2026-10-12T00:00" }, { id: "bad", name: "Malformed", category: "custom", sources: {}, query: [] }]));
+  await render(); click("Views (1)"); expect(host.textContent).not.toContain("Malformed");
+  expect(host.textContent).toContain("1 saved view record was rejected");
+  const apply = [...host.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent?.startsWith("Named investigation"))!; await act(async () => apply.click());
+  await settled(() => expect(securityTimeline.list).toHaveBeenLastCalledWith(expect.objectContaining({ type: "runtime_event", severity: "high", q: "api", namespace: "prod", workload: "web", ref: "rule", from: "2026-10-10T00:00:00.000Z", to: "2026-10-12T00:00:00.000Z", offset: 0 })));
+});
+it("retains ISO timestamp offsets and milliseconds when applying a saved view", async () => {
+  const from = "2026-10-10T12:34:56.789+05:30"; const to = "2026-10-10T12:35:01.123+05:30";
+  const key = operatorStorageKey("constellation.timeline.views.v1", { org_id: "org", user_id: "user" })!;
+  localStorage.setItem(key, JSON.stringify([{ id: "precise", name: "Exact interval", category: "audit", sources: ["audit"], severities: [], query: "", namespace: "", workload: "", reference: "", from, to }]));
+  await render(); click("Views (1)");
+  const apply = [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent?.startsWith("Exact interval"))!;
+  await act(async () => apply.click());
+  await settled(() => expect(securityTimeline.list).toHaveBeenLastCalledWith(expect.objectContaining({ type: "audit", from: "2026-10-10T07:04:56.789Z", to: "2026-10-10T07:05:01.123Z" })));
+  const params = new URLSearchParams(history.location.search); expect(params.get("from")).toBe(from); expect(params.get("to")).toBe(to);
 });

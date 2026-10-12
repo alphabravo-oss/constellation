@@ -12,7 +12,7 @@ import { useDebounced } from "@/hooks/useDebounced";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Pager } from "@/components/ui/pager";
 import { fmtRelative } from "@/lib/format";
@@ -68,12 +68,12 @@ export function RegistryImagesPage() {
       <VerdictBanner status={reg.isError || imgs.isError ? "degraded" : imgs.isPending || rows.length === 0 ? "info" : totalCrit + totalHigh > 0 || scanned < rows.length ? "degraded" : "ok"}
         title={reg.isError || imgs.isError ? "Registry inventory could not be loaded" : imgs.isPending ? "Loading registry images" : rows.length === 0 ? (q ? "No images match this search" : "No images discovered") : scanned < rows.length ? "Some images on this page need scanning" : totalCrit + totalHigh > 0 ? "Image vulnerabilities need attention" : "No critical or high findings on this page"}
         detail="Scan and vulnerability metrics describe this page. Inspect engine coverage and findings on the Images page." />
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <StatGrid>
         <StatCard label="Images" value={total} icon={<Boxes className="h-3.5 w-3.5" />} />
         <StatCard label="Scanned (page)" value={scanned} tone={scanned < rows.length ? "medium" : "low"} hint={`${rows.length - scanned} unscanned on page`} />
         <StatCard label="Critical (page)" value={totalCrit} tone={totalCrit > 0 ? "critical" : "neutral"} />
         <StatCard label="High (page)" value={totalHigh} tone={totalHigh > 0 ? "high" : "neutral"} />
-      </section>
+      </StatGrid>
       <input
         value={search}
         onChange={(e) => { setSearch(e.target.value); setPage(0); }}

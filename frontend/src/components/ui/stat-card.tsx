@@ -1,5 +1,4 @@
 import { type HTMLAttributes, type ReactNode } from "react";
-import { Link } from "@tanstack/react-router";
 import { ArrowUpRight } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Sparkline } from "./sparkline";
@@ -90,6 +89,6 @@ export function StatCard({
     </div>
   );
 
-  if (href) return <Link to="." href={href} className="block">{inner}</Link>;
+  if (href) return <a href={href} className="block">{inner}</a>;
   return inner;
 }

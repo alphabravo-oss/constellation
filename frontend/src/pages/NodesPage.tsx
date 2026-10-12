@@ -13,7 +13,7 @@ import {
 import { api, type NodeListResponse, type NodeSummary } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { PageHeader } from "@/components/ui/page";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { cn } from "@/lib/cn";
 
@@ -221,12 +221,12 @@ export function NodesPage() {
         }
       />
 
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4" data-testid="nodes-summary">
+      <StatGrid data-testid="nodes-summary">
         <StatCard label="Nodes" value={total.toLocaleString()} icon={<Server className="h-3.5 w-3.5" />} hint={`${inventory.length} loaded`} />
         <StatCard label="Loaded agents" value={summary.runtime_agent_healthy.toLocaleString()} icon={<Activity className="h-3.5 w-3.5" />} hint={`${summary.runtime_agent_stale} stale · ${summary.runtime_agent_missing} missing`} />
         <StatCard label="Loaded critical / high" value={(summary.critical_vulns + summary.high_vulns).toLocaleString()} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={summary.critical_vulns + summary.high_vulns > 0 ? "high" : "neutral"} hint={`${summary.critical_vulns} critical · ${summary.high_vulns} high`} />
         <StatCard label="Loaded CIS failures" value={summary.cis_failed.toLocaleString()} icon={<CheckCircle2 className="h-3.5 w-3.5" />} tone={summary.cis_failed > 0 ? "medium" : "neutral"} hint={`${summary.scan_gaps} loaded nodes with scan gaps`} />
-      </section>
+      </StatGrid>
 
       <section className="rounded-lg border border-border bg-card p-3">
         <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_170px_170px]">

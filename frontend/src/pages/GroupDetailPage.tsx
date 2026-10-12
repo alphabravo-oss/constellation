@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { groupsApi, type Group, type GroupUsage } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { PageHeader } from "@/components/ui/page";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Collapse } from "@/components/ui/collapse";
@@ -67,13 +67,13 @@ export function GroupDetailPage() {
         {group.cfg_type !== "fed" && <Button asChild variant="primary"><Link to="." href={`${listPath}/${group.id}/edit`}><Pencil className="h-4 w-4" /> Edit group</Link></Button>}</div>} />
     <VerdictBanner status={learning ? "degraded" : fullyProtected ? "ok" : "info"} title={learning ? "This group is still learning" : fullyProtected ? "Network and process/file protection is enforced" : "This group monitors policy violations"}
       detail={group.cfg_type === "fed" ? "Configuration is managed by the federation master." : "Review matching members before moving from discovery to monitoring or protection."} />
-    <section className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+    <StatGrid>
       <StatCard label="Members" value={membership?.member_count ?? group.members?.length ?? 0} />
       <StatCard label="Selectors" value={membership?.criteria_count ?? group.criteria?.length ?? 0} />
       <StatCard label="Network mode" value={group.policy_mode ?? "monitor"} />
       <StatCard label="Process/file mode" value={group.profile_mode ?? "monitor"} />
       <StatCard label="Policy references" value={usage ? usage.summary.total_references : "—"} hint={usageError ? "Usage unavailable" : usageQ.isPending ? "Loading usage" : "All concrete dependencies"} />
-    </section>
+    </StatGrid>
     {promote.isError && <p role="alert" className="text-sm text-status-error">Could not change this group's mode. Refresh to verify its current modes, then try again.</p>}
     <Tabs value={["members", "criteria", "usage", "configuration"].includes(tab) ? tab : "members"} onValueChange={setTab} items={[
       { value: "members", label: "Members", count: group.members?.length ?? 0, content: <Card title="Matching workloads" description="Current membership computed from the selectors and observed workloads.">

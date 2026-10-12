@@ -7,7 +7,7 @@ import { responseRulesV2, type ResponseRuleV2 } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { ErrorState, LoadingState } from "@/components/ui/states";
 import { ImportExportButtons } from "@/components/ImportExportButtons";
@@ -135,11 +135,11 @@ function ResponseRulesWorkspace({ clusterId }: { clusterId: string }) {
         detail="Rules run in evaluation order. Enabled rules describe configured automation; delivery and workload actions still depend on their receivers and agents." />
       <p className="text-xs text-muted-foreground">YAML export includes cluster-owned rules only; organization-wide rules remain separate.</p>
 
-      <section className="grid grid-cols-3 gap-3">
+      <StatGrid>
         <StatCard label="Rules" value={q.data ? rules.length : "—"} />
         <StatCard label="Enabled" value={q.data ? rules.filter((r) => r.enabled).length : "—"} tone="accent" />
         <StatCard label="Disabled" value={q.data ? rules.filter((r) => !r.enabled).length : "—"} />
-      </section>
+      </StatGrid>
 
       {(delMut.isError || reorderMut.isError) && <p role="alert" className="text-sm text-status-error">Could not update response rules. Try the action again.</p>}
       {q.isError && <ErrorState title="Could not load response rules." action={<button type="button" onClick={() => void q.refetch()}>Retry</button>} />}

@@ -9,7 +9,7 @@ import { nodes as nodesApi, type HostVulnerability, type NodeSummary } from "@/a
 import { useCluster } from "@/hooks/useCluster";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 import { fmtBytes } from "@/lib/format";
@@ -68,13 +68,13 @@ export function NodeDetailPage() {
         ) : undefined}
       />
 
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5" data-testid="node-stats">
+      <StatGrid data-testid="node-stats">
         <StatCard label="Open CVEs" value={node.last_scanned_at ? node.open_vulns : "Not scanned"} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={node.open_vulns > 0 ? "high" : "neutral"} />
         <StatCard label="Packages" value={node.packages_observed_at ? node.package_count : "Not collected"} icon={<Database className="h-3.5 w-3.5" />} />
         <StatCard label="Containers" value={node.containers_observed_at ? node.container_count : "Not collected"} icon={<Layers className="h-3.5 w-3.5" />} />
         <StatCard label="Processes" value={node.processes_observed_at ? node.process_count : "Not collected"} icon={<TerminalSquare className="h-3.5 w-3.5" />} />
         <StatCard label="CIS Failed" value={node.cis_observed_at ? node.cis_failed : "Not collected"} icon={<ShieldCheck className="h-3.5 w-3.5" />} tone={node.cis_failed > 0 ? "critical" : "neutral"} />
-      </section>
+      </StatGrid>
 
       <div className="space-y-4">
         <div className="grid gap-4 lg:grid-cols-2 lg:items-start">

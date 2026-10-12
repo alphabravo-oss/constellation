@@ -8,7 +8,7 @@ import { useCluster } from "@/hooks/useCluster";
 import { useRouteSearchParams } from "@/lib/route-search";
 import { LoadingState, ErrorState, EmptyState } from "@/components/ui/states";
 import { PageHeader } from "@/components/ui/page";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { Collapse } from "@/components/ui/collapse";
 import { Button } from "@/components/ui/button";
@@ -176,13 +176,13 @@ export function CompliancePage() {
       <VerdictBanner status={workspaceFailed ? "degraded" : !summary.data || totals.total === 0 ? "info" : totals.fail > 0 ? "degraded" : "ok"}
         title={workspaceFailed ? "Compliance data could not be refreshed" : !summary.data ? "Loading evaluated compliance checks" : totals.total === 0 ? "No compliance checks evaluated" : totals.fail > 0 ? `${totals.fail} compliance checks need review` : "Evaluated checks have no active failures"}
         detail="Results describe collected evidence. Exemptions are time-bound acceptances; schedules describe report configuration and do not confirm execution or delivery." />
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-5" data-testid="compliance-summary">
+      <StatGrid data-testid="compliance-summary">
         <StatCard label="Evaluated checks" value={summary.data ? totals.total : "—"} />
         <StatCard label="Passing" value={summary.data ? totals.pass : "—"} icon={<ShieldCheck className="h-3.5 w-3.5" />} />
         <StatCard label="Failing" value={summary.data ? totals.fail : "—"} tone={summary.data && totals.fail > 0 ? "high" : "neutral"} />
         <StatCard label="Manual review" value={summary.data ? totals.manual : "—"} />
         <StatCard label="Exempted" value={summary.data ? totals.exempted : "—"} />
-      </section>
+      </StatGrid>
       {summary.isError && <ErrorState title={summary.data ? "Could not refresh totals. Showing the last loaded summary." : "Compliance totals are unavailable."} action={<Button onClick={() => void summary.refetch()}>Retry</Button>} />}
       <Tabs value={tab} onValueChange={setTab} items={[
         { value: "frameworks", label: "Frameworks", count: fws.data?.frameworks.length, content: <div className="space-y-5">

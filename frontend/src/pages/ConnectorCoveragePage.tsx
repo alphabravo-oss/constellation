@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { connectorCoverage, scanJobs, scanJobsAdmin } from "@/api/client";
 import type { ConnectorCoverageOverview, ScanJob } from "@/api/client";
 import { PageHeader, PageContainer } from "@/components/ui/page";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { VerdictBanner, type VerdictStatus } from "@/components/ui/verdict-banner";
@@ -454,12 +454,12 @@ export function ConnectorCoveragePage() {
 
       <VerdictBanner status={verdictStatus} title={verdictTitle} detail={verdictDetail} />
 
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <StatGrid>
         <StatCard label="Registries ready" value={`${summary?.registry_connectors_ready ?? 0}/${summary?.registry_connectors_total ?? 0}`} />
         <StatCard label="Clouds ready" value={`${summary?.cloud_connectors_ready ?? 0}/${summary?.cloud_connectors_total ?? 0}`} />
         <StatCard label="Unscanned images" value={unscanned} tone={unscanned > 0 ? "medium" : "neutral"} />
         <StatCard label="Queued scans" value={summary?.queued_scans ?? 0} />
-      </section>
+      </StatGrid>
 
       <Tabs value={tab} onValueChange={setTab} items={tabs} />
     </PageContainer>

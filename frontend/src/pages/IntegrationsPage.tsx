@@ -6,7 +6,7 @@ import { integrationDeliveries, receivers as receiversApi, routing as routingApi
 import { isRevisionConflict, parseRouting, serializeRouting, validRoutingSnapshot, type RoutingRule } from "@/lib/integration-routing";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { Collapse } from "@/components/ui/collapse";
 import { Card } from "@/components/ui/card";
@@ -43,12 +43,12 @@ function OperationsTab() {
   return (
     <div className="space-y-6">
       <VerdictBanner status={q.isError ? "degraded" : "info"} title={q.isError ? "Delivery operations could not be refreshed" : "Observed organization delivery activity"} detail="These results describe loaded delivery evidence. Routing previews do not send a notification." />
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <StatGrid>
         <StatCard label="Integrations" value={overview?.summary.integration_instances_total ?? 0} />
         <StatCard label="Healthy" value={overview?.summary.healthy_receivers ?? 0} tone="accent" />
         <StatCard label="Degraded" value={overview?.summary.degraded_receivers ?? 0} tone={(overview?.summary.degraded_receivers ?? 0) > 0 ? "medium" : "neutral"} />
         <StatCard label="DLQ" value={overview?.summary.dead_letters_open ?? 0} tone={(overview?.summary.dead_letters_open ?? 0) > 0 ? "high" : "neutral"} />
-      </section>
+      </StatGrid>
 
       <section className="grid gap-3 lg:grid-cols-3" data-testid="integration-connectors">
         {instances.length === 0 && <p className="text-xs text-muted-foreground">No integration receivers configured.</p>}
@@ -226,7 +226,7 @@ function ReceiversTab() {
   if (!q.data) return <ErrorState title="Could not load organization receivers." action={<Button onClick={() => void q.refetch()}>Retry</Button>} />;
   return <div className="space-y-6">
     <VerdictBanner status={q.isError ? "degraded" : "info"} title={q.isError ? "Receivers could not be refreshed" : `${recs.length} organization receivers configured`} detail={q.isError ? "Showing the last loaded receivers. Refresh before changing delivery settings." : "Receivers and routing are shared across clusters. Health labels describe the last observed delivery state."} />
-    <section className="grid grid-cols-2 gap-4 lg:grid-cols-4"><StatCard label="Observed healthy" value={recs.filter((r) => r.status === "healthy" && !r.paused).length} /><StatCard label="Observed degraded" value={recs.filter((r) => r.status === "degraded").length} /><StatCard label="Paused" value={recs.filter((r) => r.paused).length} /><StatCard label="Configured receivers" value={recs.length} /></section>
+    <StatGrid><StatCard label="Observed healthy" value={recs.filter((r) => r.status === "healthy" && !r.paused).length} /><StatCard label="Observed degraded" value={recs.filter((r) => r.status === "degraded").length} /><StatCard label="Paused" value={recs.filter((r) => r.paused).length} /><StatCard label="Configured receivers" value={recs.length} /></StatGrid>
     <div className="flex flex-wrap justify-between gap-3"><p className="text-sm text-muted-foreground">Select a receiver to inspect deliveries and operational actions.</p><div className="flex gap-3"><Button disabled={!!rotatingID} onClick={() => void navigate({ href: "/settings/integrations/smtp/edit" })}>Edit email server</Button><Button variant="primary" disabled={disabled} onClick={() => void navigate({ href: "/settings/integrations/receivers/new" })} data-testid="receiver-add"><Plus className="h-4 w-4" /> Add receiver</Button></div></div>
     <div data-testid="receivers-table"><DataTable rows={recs} columns={columns} rowKey={(r) => r.id} onRowClick={rotatingID ? undefined : (r) => setSelectedID(r.id)} selected={new Set(selectedID ? [selectedID] : [])} preferencesKey="integration-receivers" exportFileName="integration-receivers.csv" rowTestId={(r) => `receiver-row-${r.id}`} emptyState={<EmptyState title="No receivers configured" hint="Add a receiver to choose an alert destination." />} /></div>
     {rotatingID && <p role="status" className="text-sm text-muted-foreground">Rotating this receiver's secret. Wait for its result before changing selection.</p>}
@@ -296,7 +296,7 @@ function RoutesTab() {
   if (q.isPending) return <LoadingState label="Loading saved routing…" />;
   if (!validRoutingSnapshot(q.data)) return <ErrorState title="Could not load saved notification routing." action={<Button onClick={() => void q.refetch()}>Retry</Button>} />;
   return <div className="space-y-6" data-testid="routes-tab"><VerdictBanner status={q.isError ? "degraded" : "info"} title={q.isError ? "Saved routing could not be refreshed" : `Organization routing revision ${q.data.revision}`} detail="Alerts follow routes in order. Saving a route immediately updates the organization-wide document; continue matching allows later routes to run." />
-    <section className="grid grid-cols-2 gap-4 lg:grid-cols-4"><StatCard label="Saved child routes" value={model ? rows.length : "Advanced tree"} /><StatCard label="Continue matching" value={model ? rows.filter((r) => r.rule.continue).length : "—"} /><StatCard label="Loaded receivers" value={recQ.data ? recQ.data.receivers.length : "—"} /><StatCard label="Saved revision" value={q.data.revision} /></section>
+    <StatGrid><StatCard label="Saved child routes" value={model ? rows.length : "Advanced tree"} /><StatCard label="Continue matching" value={model ? rows.filter((r) => r.rule.continue).length : "—"} /><StatCard label="Loaded receivers" value={recQ.data ? recQ.data.receivers.length : "—"} /><StatCard label="Saved revision" value={q.data.revision} /></StatGrid>
     <div className="flex flex-wrap justify-end gap-3"><Button disabled={q.isFetching || remove.isPending} onClick={() => void q.refetch()}><RefreshCw className="h-4 w-4" /> Refresh</Button><Button disabled={!canChange || remove.isPending} onClick={() => void navigate({ href: "/settings/integrations/routing/edit" })}>Edit complete routing</Button><Button variant="primary" disabled={!canChange || !model || remove.isPending} onClick={() => void navigate({ href: "/settings/integrations/routes/new" })} data-testid="routes-add"><Plus className="h-4 w-4" /> Add route</Button></div>
     <Card title="Default receiver" description="Used when no child route matches."><p className="font-mono text-sm">{model?.defaultReceiver || (model ? "No default receiver" : "Defined in complete YAML")}</p></Card>
     {model ? <DataTable rows={rows} columns={columns} rowKey={(r) => r.index} preferencesKey="notification-routes" exportFileName="notification-routes.csv" testId="routes-list" emptyState={<EmptyState title="No child routes" hint="Alerts use the default receiver. Add a route to choose destinations for matching alerts." />} /> : <p className="text-sm text-muted-foreground">{parsed && !parsed.ok ? parsed.reason : "Open the complete routing editor to inspect this configuration."}</p>}

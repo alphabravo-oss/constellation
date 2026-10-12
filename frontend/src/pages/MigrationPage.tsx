@@ -7,7 +7,8 @@ import { toast } from "sonner";
 import { clusters as clustersApi, enterprise, type MigrationImportListItem, type MigrationPreview, type MigrationUnsupported } from "@/api/client";
 import { PageHeader } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
+import { Collapse } from "@/components/ui/collapse";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Field, Select, Textarea } from "@/components/ui/form";
@@ -505,12 +506,12 @@ export function MigrationPage() {
           title="Switch Readiness"
           description="Current import state, manual mapping work, and rollback evidence for a NeuVector cutover."
         >
-          <div className="grid gap-3 sm:grid-cols-4">
+          <StatGrid>
             <StatCard label="Blockers" value={readinessCounts.blocker} tone={readinessCounts.blocker > 0 ? "critical" : "neutral"} />
             <StatCard label="Warnings" value={readinessCounts.warning} tone={readinessCounts.warning > 0 ? "medium" : "neutral"} />
             <StatCard label="Ready" value={readinessCounts.ready} tone={readinessCounts.ready > 0 ? "accent" : "neutral"} />
             <StatCard label="Imports" value={imports.length} />
-          </div>
+          </StatGrid>
           <div className="mt-4 space-y-2" data-testid="migration-readiness-checklist">
             {readiness.map((item) => (
               <article key={item.id} className="rounded-md border border-border bg-background p-3">
@@ -680,23 +681,27 @@ export function MigrationPage() {
               </Button>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-[repeat(12,minmax(0,1fr))]">
+          <StatGrid>
             <StatCard label="Source Objects" value={data.summary.source_total ?? data.summary.total} />
-            <StatCard label="Policies" value={data.policies.length} />
             <StatCard label="Create" value={data.summary.create} tone="low" />
             <StatCard label="Update" value={data.summary.update} tone="medium" />
-            <StatCard label="Unchanged" value={data.summary.unchanged ?? 0} />
             <StatCard label="Enforce" value={data.summary.enforce} tone="high" />
-            <StatCard label="File Profiles" value={data.summary.file_profiles} />
-            <StatCard label="Process Profiles" value={data.summary.process_profiles ?? processProfiles.length} />
-            <StatCard label="Groups" value={data.summary.groups ?? groups.length} />
-            <StatCard label="Network Rules" value={data.summary.network_rules ?? networkRules.length} />
-            <StatCard label="DLP / WAF" value={data.summary.dpi_rules} />
-            <StatCard label="Group Scopes" value={data.summary.dpi_bindings ?? dpiBindings.length} />
-            <StatCard label="Vulnerability Profiles" value={data.summary.vulnerability_profiles ?? vulnerabilityProfiles.length} />
-            <StatCard label="Registries" value={data.summary.registries ?? registries.length} />
             <StatCard label="Unsupported Diagnostics" value={data.summary.unsupported} tone={data.summary.unsupported > 0 ? "medium" : "neutral"} />
-          </div>
+          </StatGrid>
+          <Collapse label="Additional import object counts">
+            <StatGrid>
+              <StatCard label="Policies" value={data.policies.length} />
+              <StatCard label="Unchanged" value={data.summary.unchanged ?? 0} />
+              <StatCard label="File Profiles" value={data.summary.file_profiles} />
+              <StatCard label="Process Profiles" value={data.summary.process_profiles ?? processProfiles.length} />
+              <StatCard label="Groups" value={data.summary.groups ?? groups.length} />
+              <StatCard label="Network Rules" value={data.summary.network_rules ?? networkRules.length} />
+              <StatCard label="DLP / WAF" value={data.summary.dpi_rules} />
+              <StatCard label="Group Scopes" value={data.summary.dpi_bindings ?? dpiBindings.length} />
+              <StatCard label="Vulnerability Profiles" value={data.summary.vulnerability_profiles ?? vulnerabilityProfiles.length} />
+              <StatCard label="Registries" value={data.summary.registries ?? registries.length} />
+            </StatGrid>
+          </Collapse>
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
             <DataTable
               rows={data.policies}

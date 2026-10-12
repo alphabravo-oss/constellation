@@ -8,7 +8,7 @@ import { useCluster } from "@/hooks/useCluster";
 import { ImportExportButtons } from "@/components/ImportExportButtons";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { ErrorState } from "@/components/ui/states";
@@ -137,13 +137,13 @@ export function NetworkRulesPage() {
       <VerdictBanner status={q.isError ? "degraded" : "info"}
         title={q.isError ? "Network rules could not be refreshed" : q.isPending ? "Loading network rules" : `${summary?.total ?? 0} network rules returned`}
         detail="Configured rules appear before learned rules. Rule counts describe configuration and observed traffic; they do not confirm enforcement on workloads." />
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+      <StatGrid>
         <StatCard label="Rules" value={summary?.total ?? "—"} icon={<NetworkIcon className="h-3.5 w-3.5" />} />
         <StatCard label="Allow" value={summary?.allow ?? "—"} tone="low" />
         <StatCard label="Deny" value={summary?.deny ?? "—"} tone={(summary?.deny ?? 0) > 0 ? "critical" : "neutral"} />
         <StatCard label="Learned" value={summary?.learned ?? "—"} tone="neutral" />
         <StatCard label="Disabled" value={summary?.disabled ?? "—"} tone="neutral" />
-      </section>
+      </StatGrid>
       <input
         aria-label="Search network rules"
         value={search}

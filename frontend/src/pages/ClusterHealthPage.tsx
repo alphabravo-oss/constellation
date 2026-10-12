@@ -6,7 +6,7 @@ import { Activity, Boxes, KeyRound, PackageCheck, ShieldCheck, UploadCloud } fro
 import { clusters } from "@/api/client";
 import { PageHeader, PageContainer } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { sortClustersByActivity } from "@/lib/clusters";
 import { componentDiagnosticsHref, nvRoleAlias } from "@/lib/component-roles";
 
@@ -67,11 +67,11 @@ export function ClusterHealthPage() {
         description="Sensor readiness, registration bundles, upgrade posture, and health gates for the selected cluster."
       />
 
-      <section className="grid grid-cols-3 gap-3" data-testid="clusters-stats">
+      <StatGrid data-testid="clusters-stats">
         <StatCard label="Clusters" value={clusterList.length} icon={<Boxes className="h-3.5 w-3.5" />} />
         <StatCard label="Sensors" value={health.data?.summary.connected_sensors ?? 0} icon={<Activity className="h-3.5 w-3.5" />} />
         <StatCard label="Gates" value={health.data?.gates.length ?? 0} icon={<ShieldCheck className="h-3.5 w-3.5" />} />
-      </section>
+      </StatGrid>
 
       <section className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
         <div className="space-y-3" data-testid="clusters-list">

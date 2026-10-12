@@ -63,7 +63,7 @@ export function PageHeader({
           <div className="flex flex-wrap items-center gap-2">
             <h1
               className={cn(
-                "text-2xl font-semibold tracking-tight text-foreground",
+                "min-w-0 max-w-full [overflow-wrap:anywhere] text-2xl font-semibold tracking-tight text-foreground",
                 mono && "font-mono",
               )}
             >
@@ -72,7 +72,7 @@ export function PageHeader({
             {badges}
           </div>
           {description ? (
-            <p className="text-sm text-muted-foreground">{description}</p>
+            <p className="[overflow-wrap:anywhere] text-sm text-muted-foreground">{description}</p>
           ) : null}
         </div>
         {actions ? <div className="flex max-w-full flex-wrap items-center gap-2">{actions}</div> : null}
@@ -99,9 +99,9 @@ export function PageSection({
       {title || actions ? (
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="min-w-0 flex-1 basis-64 space-y-0.5">
-            {title ? <h2 className="text-sm font-semibold text-foreground">{title}</h2> : null}
+            {title ? <h2 className="[overflow-wrap:anywhere] text-sm font-semibold text-foreground">{title}</h2> : null}
             {description ? (
-              <p className="text-xs text-muted-foreground">{description}</p>
+              <p className="[overflow-wrap:anywhere] text-xs text-muted-foreground">{description}</p>
             ) : null}
           </div>
           {actions ? <div className="flex max-w-full flex-wrap items-center gap-2">{actions}</div> : null}

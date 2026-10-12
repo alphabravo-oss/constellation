@@ -9,7 +9,7 @@ import { FindingScope } from "./FindingActionFormPage";
 import { Button } from "@/components/ui/button";
 import { ErrorState, LoadingState } from "@/components/ui/states";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { Collapse } from "@/components/ui/collapse";
 import { DataTable, type Column } from "@/components/ui/data-table";
 
@@ -68,7 +68,7 @@ function FindingDetail({ finding: f, clusterId, listPath, unavailable }: { findi
         actions={!unavailable ? <><a href={`${detailPath}/suppress`} className="rounded-md border border-border bg-card px-3 py-1.5 text-sm hover:bg-accent">Suppress</a><a href={`${detailPath}/accept-risk`} className="rounded-md border border-border bg-card px-3 py-1.5 text-sm hover:bg-accent">Accept risk</a></> : undefined}
       />
       <VerdictBanner status={f.lifecycle === "open" ? "degraded" : "info"} title={`This finding is ${f.lifecycle}`} detail={f.accepted_until ? `Risk acceptance expires ${new Date(f.accepted_until).toLocaleString()}.` : "Review the evidence and recorded history before changing its lifecycle."} />
-      <div className="grid gap-3 sm:grid-cols-3"><StatCard label="Risk score" value={f.risk_score} /><StatCard label="CVSS base" value={typeof score === "number" ? score.toFixed(1) : "—"} /><StatCard label="Lifecycle" value={f.lifecycle} /></div>
+      <StatGrid><StatCard label="Risk score" value={f.risk_score} /><StatCard label="CVSS base" value={typeof score === "number" ? score.toFixed(1) : "—"} /><StatCard label="Lifecycle" value={f.lifecycle} /></StatGrid>
 
       {f.asset_id ? (
         <section

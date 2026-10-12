@@ -1,47 +1,20 @@
-import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { network } from "@/api/client";
-import { useCluster } from "@/hooks/useCluster";
+import { type DeploymentNetworkFlow } from "@/api/client";
+import { DataTable, type Column } from "@/components/ui/data-table";
+import { EvidenceUnavailable } from "./EvidenceUnavailable";
+import { type RiskTabProps } from "./workspace";
 
-export default function NetworkTab({ entityType, entityId }: { entityType: string; entityId: string }) {
-  const { clusterId } = useCluster();
-  const q = useQuery({
-    queryKey: ["risk-network", clusterId, entityType, entityId],
-    queryFn: () => network.map({ hours: 24, cluster_id: clusterId }),
-    enabled: !!entityId,
-  });
-
-  // B2: the map endpoint returns cluster-wide flows; filter to the ones that
-  // actually touch this entity so the drill-down is workload-scoped rather
-  // than a duplicate of the cluster network map. Match is by workload
-  // identity (src/dst names) with a substring fallback for id-vs-name skew.
-  // TODO(matrix): resolve the entity → canonical workload id server-side so
-  // this filter is exact instead of best-effort string matching.
-  const flows = useMemo(() => {
-    const all = q.data?.flows ?? [];
-    const needle = entityId.toLowerCase();
-    return all.filter((f) => {
-      const src = (f.src ?? "").toLowerCase();
-      const dst = (f.dst ?? "").toLowerCase();
-      return src === needle || dst === needle || src.includes(needle) || dst.includes(needle);
-    });
-  }, [q.data, entityId]);
-
-  if (q.isPending) return <p className="text-xs text-muted-foreground">Loading flows…</p>;
-  return (
-    <div className="space-y-2" data-testid="risk-network-tab">
-      <p className="text-xs text-muted-foreground">
-        Last-24h network flows touching <span className="font-mono">{entityId}</span> ({flows.length} loaded; showing first {Math.min(50, flows.length)}). Narrow the network view for more.
-      </p>
-      <ul className="space-y-1 text-xs">
-        {flows.slice(0, 50).map((f) => (
-          <li key={f.id} className="flex items-center justify-between rounded-md border border-border bg-card px-3 py-2">
-            <span className="font-mono">{f.src} → {f.dst}:{f.dst_port}</span>
-            <span className="text-muted-foreground">{f.verdict} · {f.protocol}</span>
-          </li>
-        ))}
-        {flows.length === 0 && <li className="text-muted-foreground">No flows touching this entity in the last 24h.</li>}
-      </ul>
-    </div>
-  );
+export default function NetworkTab({ workspace }: RiskTabProps) {
+  const { entity, clusterId } = workspace;
+  const root = `/clusters/${clusterId}/network`;
+  if (entity?.type !== "deployment") return <div className="space-y-3" data-testid="risk-network-tab"><EvidenceUnavailable workspace={workspace} evidence="Network" /><a href={`${root}?tab=conversations&hours=24`} className="text-sm text-primary hover:underline">Open cluster network context · last 24 hours</a></div>;
+  const rows = (entity.data.network_flows ?? []).map((row, index) => ({ ...row, _key: `${row.id}-${index}` }));
+  const columns: Column<DeploymentNetworkFlow>[] = [
+    { id: "from", header: "From", kind: "name", wrap: true, code: true, cell: row => row.src, exportValue: row => row.src },
+    { id: "to", header: "To", kind: "text", wrap: true, code: true, cell: row => `${row.dst}:${row.dst_port ?? "—"}`, exportValue: row => `${row.dst}:${row.dst_port ?? ""}` },
+    { id: "protocol", header: "Protocol", kind: "status", cell: row => row.protocol, exportValue: row => row.protocol },
+    { id: "verdict", header: "Verdict", kind: "status", cell: row => row.verdict, exportValue: row => row.verdict },
+    { id: "observed", header: "Last observed", kind: "date", wrap: true, cell: row => row.last_seen_at, exportValue: row => row.last_seen_at },
+    { id: "pivot", header: "Conversation context", kind: "actions", size: 160, minSize: 144, maxSize: 176, cell: row => <a href={`${root}?${new URLSearchParams({ tab: "conversations", hours: "24", from: row.src, to: row.dst, hide_platform: "false" })}`} className="text-primary hover:underline">Exact pair · 24h</a>, exportable: false },
+  ];
+  return <div className="space-y-3" data-testid="risk-network-tab"><p className="text-sm text-muted-foreground">At most 100 network flows returned for this deployment’s resolved owned workloads, ordered by last observation. Pair links open exact directed endpoints in the cluster’s 24-hour conversation view.</p><DataTable rows={rows} columns={columns} rowKey={row => row._key} preferencesKey="risk-deployment-network" exportFileName="risk-returned-deployment-network" sourceLimit={100} sourceCount={rows.length} emptyState={<p className="p-4 text-sm text-muted-foreground">No network flows in returned deployment evidence. This does not establish network coverage.</p>} /></div>;
 }

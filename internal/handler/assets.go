@@ -21,6 +21,7 @@ func NewAssets(database *db.DB) *Assets { return &Assets{db: database} }
 
 type assetDTO struct {
 	ID               uuid.UUID       `json:"id"`
+	ClusterID        *uuid.UUID      `json:"cluster_id,omitempty"`
 	Kind             string          `json:"kind"`
 	Name             string          `json:"name"`
 	Digest           *string         `json:"digest,omitempty"`
@@ -113,7 +114,7 @@ func (a *Assets) List(w http.ResponseWriter, r *http.Request) {
                ) sb
               GROUP BY asset_id
            )
-           SELECT a.id, a.kind, a.name, a.digest, a.labels, a.ai_workload, a.criticality,
+           SELECT a.id, a.cluster_id, a.kind, a.name, a.digest, a.labels, a.ai_workload, a.criticality,
                   COALESCE(fr.finding_count, 0), COALESCE(fr.critical_findings, 0),
                   COALESCE(fr.high_findings, 0), COALESCE(fr.open_findings, 0),
                   COALESCE(sr.sbom_count, 0), i.signed, COALESCE(i.registry, ''),
@@ -158,7 +159,7 @@ func (a *Assets) List(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var d assetDTO
 		var labels []byte
-		if err := rows.Scan(&d.ID, &d.Kind, &d.Name, &d.Digest, &labels, &d.AIWorkload,
+		if err := rows.Scan(&d.ID, &d.ClusterID, &d.Kind, &d.Name, &d.Digest, &labels, &d.AIWorkload,
 			&d.Criticality, &d.FindingCount, &d.CriticalFindings, &d.HighFindings,
 			&d.OpenFindings, &d.SBOMCount, &d.ImageSigned, &d.Registry, &d.Repository,
 			&d.Tag, &d.SizeBytes, &d.FirstSeenAt, &d.LastSeenAt); err != nil {
@@ -189,9 +190,9 @@ func (a *Assets) Get(w http.ResponseWriter, r *http.Request) {
 	var d assetDTO
 	var labels []byte
 	err = a.db.Pool().QueryRow(r.Context(),
-		`SELECT id, kind, name, digest, labels, ai_workload, criticality, first_seen_at, last_seen_at
+		`SELECT id, cluster_id, kind, name, digest, labels, ai_workload, criticality, first_seen_at, last_seen_at
            FROM assets WHERE id = $1 AND org_id = $2`, id, subj.OrgID).
-		Scan(&d.ID, &d.Kind, &d.Name, &d.Digest, &labels, &d.AIWorkload,
+		Scan(&d.ID, &d.ClusterID, &d.Kind, &d.Name, &d.Digest, &labels, &d.AIWorkload,
 			&d.Criticality, &d.FirstSeenAt, &d.LastSeenAt)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})

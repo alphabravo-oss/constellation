@@ -15,7 +15,7 @@ import {
 } from "@/api/client";
 import { PageHeader, PageContainer } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { Card } from "@/components/ui/card";
 import { Collapse } from "@/components/ui/collapse";
@@ -366,12 +366,12 @@ export function AccessControlPage() {
         description="Who can do what in your organization — users, roles, scoped bindings, SSO, and service accounts."
       />
 
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <StatGrid>
         <StatCard label="Users" value={data?.summary.users_total ?? 0} icon={<UsersRound className="h-3.5 w-3.5" />} />
         <StatCard label="Roles" value={data?.summary.roles_total ?? 0} icon={<ShieldCheck className="h-3.5 w-3.5" />} />
         <StatCard label="Bindings" value={data?.summary.role_bindings_total ?? 0} icon={<UserRoundCog className="h-3.5 w-3.5" />} />
         <StatCard label="API tokens" value={data?.summary.api_tokens_total ?? 0} icon={<KeyRound className="h-3.5 w-3.5" />} href="/settings/api-tokens" />
-      </section>
+      </StatGrid>
 
       <Tabs value={tab} onValueChange={setTab} items={tabs} />
     </PageContainer>

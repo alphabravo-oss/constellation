@@ -214,7 +214,7 @@ export function DashboardPage() {
   });
   const conversationsQ = useQuery({
     queryKey: ["network-conversations", "dashboard-denies", clusterId],
-    queryFn: () => network.conversations({ hours: 24, cluster_id: clusterId }),
+    queryFn: () => network.conversations({ hours: 24, cluster_id: clusterId, verdict_group: "blocked", limit: 5000 }),
     enabled: scopeReady,
     staleTime: 60_000,
   });
@@ -360,12 +360,12 @@ export function DashboardPage() {
           </div>
         </div>
         <div className="flex flex-col justify-between gap-5">
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <StatGrid>
             <StatCard label="Critical" value={summaryData ? counts.critical : "—"} tone="critical" icon={<AlertOctagon className="h-3 w-3" />} href={clusterPath("/findings?severity=critical&lifecycle=open")} trend={trends.critical} />
             <StatCard label="High" value={summaryData ? counts.high : "—"} tone="high" icon={<AlertTriangle className="h-3 w-3" />} href={clusterPath("/findings?severity=high&lifecycle=open")} trend={trends.high} />
             <StatCard label="Open" value={summaryData ? counts.open : "—"} tone="accent" icon={<Activity className="h-3 w-3" />} href={clusterPath("/findings")} trend={trends.open} />
             <StatCard label="Accepted" value={summaryData ? counts.accepted : "—"} tone="neutral" icon={<ShieldCheck className="h-3 w-3" />} href={clusterPath("/findings?lifecycle=accepted")} />
-          </div>
+          </StatGrid>
           {/* Risk factors — NV's 6 weighted contributors (bar = share of its cap). */}
           <div>
             <div className="mb-2 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Risk factors · points of 100</div>
@@ -390,7 +390,7 @@ export function DashboardPage() {
 
       <Collapse label="Additional posture metrics">
       {/* Posture metrics — one uniform, scannable grid (compliance · runtime · vuln location · hardening) */}
-      <section className="c-rise c-rise-2 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8">
+      <StatGrid className="c-rise c-rise-2">
         <StatCard label="Compliance" value={complianceSum.isPending ? "…" : compliancePosture.pct == null ? "—" : `${compliancePosture.pct}%`}
           tone={compliancePosture.pct == null ? "neutral" : compliancePosture.pct >= 90 ? "low" : compliancePosture.pct >= 70 ? "medium" : "high"}
           icon={<ShieldCheck className="h-3 w-3" />} href={clusterPath("/compliance")}
@@ -404,7 +404,7 @@ export function DashboardPage() {
         <StatCard label="Privileged" value={posture?.hardening?.privileged ?? "—"} tone={(posture?.hardening?.privileged ?? 0) > 0 ? "critical" : "low"} icon={<ShieldAlert className="h-3 w-3" />} href={clusterPath("/deployments")} hint="privileged workloads" />
         <StatCard label="Run as root" value={posture?.hardening?.run_as_root ?? "—"} tone={(posture?.hardening?.run_as_root ?? 0) > 0 ? "high" : "low"} icon={<ShieldAlert className="h-3 w-3" />} href={clusterPath("/deployments")} hint="no non-root enforce" />
         <StatCard label="Exposed WLs" value={posture?.hardening?.exposed ?? "—"} tone={(posture?.hardening?.exposed ?? 0) > 0 ? "medium" : "low"} icon={<Activity className="h-3 w-3" />} href={clusterPath("/network")} hint="externally reachable" />
-      </section>
+      </StatGrid>
 
       </Collapse>
 
@@ -431,9 +431,9 @@ export function DashboardPage() {
 
           <Panel
             title="Top Network Denies"
-            subtitle="Blocked service pairs in the last 24h"
+            subtitle="Top blocked service pairs in the loaded last-24h sample (up to 5,000 pairs)"
             icon={<ShieldAlert className="h-3.5 w-3.5" />}
-            rightSlot={<a href={clusterPath("/network?tab=conversations&hours=24&verdict=deny")} className="text-[11px] text-muted-foreground hover:text-foreground">view conversations <ArrowUpRight className="inline h-3 w-3" /></a>}
+            rightSlot={<a href={clusterPath("/network?tab=conversations&hours=24&verdict_group=blocked&hide_platform=false")} className="text-[11px] text-muted-foreground hover:text-foreground">view conversations <ArrowUpRight className="inline h-3 w-3" /></a>}
           >
             <div data-testid="dashboard-network-denies">
               {conversationsQ.isError ? <ErrorState title="Could not load network conversations." /> : conversationsQ.isPending ? (
@@ -444,7 +444,7 @@ export function DashboardPage() {
                 <ul className="divide-y divide-border">
                   {topNetworkDenies.map((row, index) => (
                     <li key={`${row.from}-${row.to}-${index}`}>
-                      <a href={clusterPath(`/network?tab=conversations&hours=24&verdict=${encodeURIComponent(row.verdict ?? "deny")}&workload=${encodeURIComponent(row.from)}`)} className="flex items-center gap-3 px-3 py-2 hover:bg-muted/40 transition-colors">
+                      <a href={clusterPath(`/network?tab=conversations&hours=24&verdict_group=blocked&from=${encodeURIComponent(row.from)}&to=${encodeURIComponent(row.to)}&hide_platform=false`)} className="flex items-center gap-3 px-3 py-2 hover:bg-muted/40 transition-colors">
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-xs font-medium">
                             <span className="font-mono">{row.from}</span>
@@ -564,7 +564,7 @@ export function DashboardPage() {
 
       {clusterId && (
         <section className="c-rise c-rise-1 space-y-4" data-testid="dashboard-operator-strip">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5" data-testid="dashboard-component-health">
+          <StatGrid data-testid="dashboard-component-health">
             {COMPONENT_ROLES.map((role) => {
               const health = componentHealth.roles[role.id];
               return (
@@ -580,7 +580,7 @@ export function DashboardPage() {
                 </div>
               );
             })}
-          </div>
+          </StatGrid>
 
           <div className="grid gap-4 lg:grid-cols-2">
             <Link
@@ -885,7 +885,7 @@ const COMPONENT_ROLES: Array<{ id: ComponentRoleID; label: string; icon: React.R
 
 function ExposedRow({ s, dir, clusterPath }: { s: import("@/api/client").ExposedService; dir: "ingress" | "egress"; clusterPath: (p: string) => string }) {
   return (
-    <a href={clusterPath(`/deployments?q=${encodeURIComponent(s.name)}`)} className="flex items-center gap-3 px-3 py-2 hover:bg-muted/40 transition-colors">
+    <a href={clusterPath(`/network?tab=conversations&hours=168&from=${encodeURIComponent(dir === "ingress" ? "external" : s.workload)}&to=${encodeURIComponent(dir === "ingress" ? s.workload : "external")}&hide_platform=false`)} className="flex items-center gap-3 px-3 py-2 hover:bg-muted/40 transition-colors">
       <span className={cn("shrink-0 rounded px-1.5 py-0.5 text-[9px] uppercase tracking-wide font-medium",
         dir === "ingress" ? "bg-[color-mix(in_oklab,var(--color-severity-high)_16%,transparent)] text-[color:var(--color-severity-high)]" : "bg-muted text-muted-foreground")}>
         {dir === "ingress" ? "in" : "out"}

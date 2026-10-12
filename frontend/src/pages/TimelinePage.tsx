@@ -4,13 +4,14 @@
 // consoles (DPI threats · runtime events · network violations · audit) into a
 // single time-ordered stream with type + severity filters. Backed by
 // GET /api/v1/security/timeline.
+import { useLocation, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Bookmark, Save, SlidersHorizontal } from "lucide-react";
 
 import { securityTimeline, type TimelineItem, type TimelineSource } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
-import { useSavedViews, type SavedViewBase } from "@/hooks/useSavedViews";
+import { useSavedViews } from "@/hooks/useSavedViews";
 import { PageHeader } from "@/components/ui/page";
 import { Pager } from "@/components/ui/pager";
 import { useRouteSearchParams } from "@/lib/route-search";
@@ -44,7 +45,7 @@ const SOURCE_META: Record<TimelineSource, { label: string; tone: "error" | "warn
 const ALL_SOURCES = Object.keys(SOURCE_META) as TimelineSource[];
 const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const;
 const TIMELINE_PAGE = 100;
-const SAVED_VIEWS_KEY = "constellation.timeline.views.v1";
+
 const CATEGORY_TABS: Array<{ id: string; label: string; sources: TimelineSource[] }> = [
   { id: "all", label: "All", sources: ALL_SOURCES },
   { id: "activity", label: "Activity", sources: ["runtime_event", "audit"] },
@@ -56,12 +57,14 @@ const CATEGORY_TABS: Array<{ id: string; label: string; sources: TimelineSource[
   { id: "security", label: "Security", sources: ["dpi_threat", "runtime_event", "network_violation"] },
 ];
 
-interface TimelineSavedView extends SavedViewBase, TimelineFilterPayload {}
+import { TIMELINE_VIEWS_KEY, isTimelineSavedView, inventoryViewHref, type TimelineSavedView } from "@/lib/inventory-saved-views";
 
 export function TimelinePage() {
   const { clusterId, cluster, isLoading: clusterLoading, error: clusterError } = useCluster();
   const scopeReady = !!clusterId && cluster?.id === clusterId && !clusterLoading && !clusterError;
   const [params, setParams] = useRouteSearchParams();
+  const navigate = useNavigate();
+  const locationHash = useLocation({ select: location => location.hash });
   const category = params.get("tab") ?? "all";
   const activeCategory = category === "custom" || CATEGORY_TABS.some(tab => tab.id === category) ? category : "all";
   const sources = useMemo(() => new Set<TimelineSource>(activeCategory === "custom"
@@ -92,7 +95,7 @@ export function TimelinePage() {
   const setTo = (value: string) => updateFilters({to:value}, true);
   const setPage = (value: number) => updateFilters({page:value ? String(value+1) : null,event:null}, false, false);
   const setSelected = (value: TimelineItem | null) => updateFilters({event:value ? `${value.source}:${value.id}` : null},false,false);
-  const { views, saveView: saveStoredView, deleteView } = useSavedViews<TimelineSavedView>(SAVED_VIEWS_KEY);
+  const { views, deleteView, persistenceError } = useSavedViews<TimelineSavedView>(TIMELINE_VIEWS_KEY, { validate: isTimelineSavedView });
 
   const filters = useMemo(() => compactTimelineFilters({
     category: activeCategory,
@@ -143,11 +146,6 @@ export function TimelinePage() {
     updateFilters({tab:tabID === "all" ? null : tabID,type:nextSources.length === ALL_SOURCES.length ? null : nextSources.join(",")});
   };
 
-  const saveView = () => {
-    const name = window.prompt("Name this timeline view", timelineSavedViewSummary(filters));
-    if (name) saveStoredView(name, filters);
-  };
-
   const applyView = (view: TimelineSavedView) => updateFilters({
     tab:view.category || "custom",type:view.sources.length ? view.sources.join(",") : "none",
     severity:(view.severities ?? []).join(","),q:view.query ?? "",namespace:view.namespace ?? "",
@@ -178,7 +176,7 @@ export function TimelinePage() {
           <>
             <Button variant="outline" disabled={q.isFetching || sources.size === 0 || invalidWindow} onClick={() => void q.refetch()}>Refresh</Button>
             {views.length > 0 && <TimelineSavedViewsMenu views={views} onApply={applyView} onDelete={deleteView} />}
-            <Button type="button" size="sm" variant="outline" onClick={saveView}>
+            <Button type="button" size="sm" variant="outline" onClick={() => { if (clusterId) void navigate({ href: inventoryViewHref(clusterId, "timeline", params, locationHash, true) }); }}>
               <Save className="h-3.5 w-3.5" aria-hidden /> Save view
             </Button>
             <Button
@@ -195,6 +193,7 @@ export function TimelinePage() {
         }
       />
 
+      {persistenceError && <ErrorState title={persistenceError} />}
       <VerdictBanner status={q.isError || invalidWindow ? "degraded" : "info"}
         title={invalidWindow ? "Invalid timeline window" : q.isError ? "Timeline is unavailable" : sources.size === 0 ? "Choose an event source" : q.isPending ? "Loading timeline" : `${items.length} events on this page`}
         detail="Investigate one ordered page of matching events. Page counts and CSV describe this page; filters and selection are saved in the URL." />

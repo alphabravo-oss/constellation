@@ -23,7 +23,7 @@ import {
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { StatusPill } from "@/components/ui/status-pill";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { useCluster } from "@/hooks/useCluster";
 import { KINDS } from "@/lib/registry-form";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
@@ -189,13 +189,13 @@ export function RegistriesPage() {
       <VerdictBanner status={q.isPending ? "info" : q.isError || scanQueue.isError ? "degraded" : summary.failedSync > 0 || summary.failedJobs > 0 ? "degraded" : summary.total === 0 ? "info" : "ok"}
         title={q.isPending ? "Loading registry inventory" : q.isError ? "Registry inventory could not be loaded" : scanQueue.isError ? "Registry scan jobs could not be loaded" : summary.failedSync > 0 || summary.failedJobs > 0 ? "Registry scans need attention" : summary.total === 0 ? "Add a registry to begin scanning" : "Registry inventory is available"}
         detail="Review synchronization and scan jobs below. Queue metrics cover registry jobs in the latest 200 image jobs. Connection testing uses saved configuration." />
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" data-testid="registry-operator-summary">
+      <StatGrid data-testid="registry-operator-summary">
         <StatCard label="Registries" value={summary.total.toLocaleString()} icon={<Database className="h-3.5 w-3.5" />} />
         <StatCard label="Healthy Sync" value={summary.healthy.toLocaleString()} icon={<PlayCircle className="h-3.5 w-3.5" />} tone={summary.failedSync > 0 ? "medium" : "accent"} hint={`${summary.failedSync} failed`} />
         <StatCard label="Images Seen" value={summary.images.toLocaleString()} icon={<Boxes className="h-3.5 w-3.5" />} />
         <StatCard label="Active Jobs" value={summary.activeJobs.toLocaleString()} icon={<Clock className="h-3.5 w-3.5" />} tone={summary.activeJobs > 0 ? "low" : "neutral"} hint={`${summary.pendingJobs} pending`} />
         <StatCard label="Failed Jobs" value={summary.failedJobs.toLocaleString()} icon={<AlertTriangle className="h-3.5 w-3.5" />} tone={summary.failedJobs > 0 ? "high" : "neutral"} />
-      </section>
+      </StatGrid>
 
       <DataTable<RegistryDTO>
         rows={rows}

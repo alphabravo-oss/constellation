@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { DataTable } from "@/components/ui/data-table";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { TextInput } from "@/components/ui/form";
@@ -56,12 +56,12 @@ export function GroupsPage() {
         <VerdictBanner status={discovery ? "degraded" : groups.length ? "ok" : "info"}
           title={discovery ? `${discovery} group${discovery === 1 ? " is" : "s are"} still learning` : groups.length ? "All groups have moved beyond discovery" : "No workload groups yet"}
           detail="Discover learns behavior, Monitor reports violations, and Protect enforces policy. These configured modes do not confirm deployment. Open a group to review its members and dependencies." />
-        <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatGrid>
           <StatCard label="Groups" value={groups.length} />
           <StatCard label="Learning" value={discovery} />
           <StatCard label="Protect configured" value={protectedCount} />
           <StatCard label="Member assignments" value={groups.reduce((count, group) => count + (group.members?.length ?? 0), 0)} />
-        </section>
+        </StatGrid>
         <Tabs value={tab === "operations" ? "operations" : "groups"} onValueChange={setTab} items={[
           { value: "groups", label: "Workload groups", count: groups.length, content: <Card title="Workload groups" description="Search selectors, member names, and modes; open a group to inspect its workload coverage.">
             <div className="mb-4"><TextInput aria-label="Search groups" placeholder="Search groups, selectors, or members…" value={search} onChange={(event) => setParams((current) => { if (event.target.value) current.set("q", event.target.value); else current.delete("q"); return current; }, { replace: true })} /></div>

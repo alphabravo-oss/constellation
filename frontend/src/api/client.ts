@@ -98,6 +98,7 @@ export type FindingKind =
   | "secret" | "signature" | "ml-model" | "compliance" | "runtime";
 
 export interface Finding {
+  risk?: { composite: number; factors: Array<{ name: string; description: string; score: number; raw: number; weight: number }> };
   id: string;
   kind: FindingKind;
   external_id?: string;
@@ -228,6 +229,7 @@ export const sbom = {
 
 export interface Asset {
   id: string;
+  cluster_id?: string;
   kind: string;
   name: string;
   digest?: string;
@@ -2370,7 +2372,7 @@ export const network = {
     api.get<NetworkMap>("/network/map", { params }).then((r) => r.data),
   exposure: (params: { hours?: number; cluster_id?: string } = {}) =>
     api.get<ExposureResponse>("/network/exposure", { params }).then((r) => r.data),
-  conversations: (params: { hours?: number; cluster_id?: string; namespace?: string; verdict?: string; group?: string; port?: number; peer?: string; application?: string; limit?: number; offset?: number } = {}) =>
+  conversations: (params: { from?: string; to?: string; verdict_group?: "blocked"; hours?: number; cluster_id?: string; namespace?: string; verdict?: string; group?: string; port?: number; peer?: string; application?: string; limit?: number; offset?: number } = {}) =>
     api.get<NetworkConversations>("/network/conversations", { params }).then((r) => r.data),
   // NV per-conversation drill-down: every protocol/port/app stream between from→to,
   // with directional (in/out) bytes + session counts.

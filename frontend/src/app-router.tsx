@@ -66,6 +66,8 @@ const EffectiveConfigPage = lazy(() => import("./pages/EffectiveConfigPage").the
 // Cluster-scoped pages — lazy-loaded so the picker stays cheap.
 const DashboardPage         = lazy(() => import("./pages/DashboardPage").then((m) => ({ default: m.DashboardPage })));
 const FindingsPage          = lazy(() => import("./pages/FindingsPage").then((m) => ({ default: m.FindingsPage })));
+const FindingSavedViewFormPage = lazy(() => import("./pages/InventorySavedViewFormPage").then(m => ({ default: m.FindingSavedViewFormPage })));
+const TimelineSavedViewFormPage = lazy(() => import("./pages/InventorySavedViewFormPage").then(m => ({ default: m.TimelineSavedViewFormPage })));
 const FindingDetailPage     = lazy(() => import("./pages/FindingDetailPage").then((m) => ({ default: m.FindingDetailPage })));
 const FindingAcceptRiskFormPage = lazy(() => import("./pages/FindingActionFormPage").then(m => ({default:m.FindingAcceptRiskFormPage})));
 const FindingSuppressFormPage = lazy(() => import("./pages/FindingActionFormPage").then(m => ({default:m.FindingSuppressFormPage})));
@@ -209,6 +211,8 @@ const cluster_dashboardRoute = createRoute({ getParentRoute: () => app_clusters_
 const cluster_neuvectorRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "neuvector", component: () => (<SuspenseRoute><NeuVectorSwitchboardPage /></SuspenseRoute>) });
 const cluster_network_actionRoute = createRoute({getParentRoute:()=>app_clusters_idRoute,path:"network/actions/$action",component:()=><SuspenseRoute><NetworkActionFormPage /></SuspenseRoute>});
 const cluster_findingsRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "findings", component: () => (<SuspenseRoute><FindingsPage /></SuspenseRoute>) });
+const cluster_findings_savedViewRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "findings/views/new", component: () => <SuspenseRoute><FindingSavedViewFormPage /></SuspenseRoute> });
+const cluster_timeline_savedViewRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "timeline/views/new", component: () => <SuspenseRoute><TimelineSavedViewFormPage /></SuspenseRoute> });
 const cluster_findings_fidRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "findings/$fid", component: () => (<SuspenseRoute><FindingDetailPage /></SuspenseRoute>) });
 const cluster_finding_acceptRoute = createRoute({getParentRoute:()=>app_clusters_idRoute,path:"findings/$fid/accept-risk",component:()=><SuspenseRoute><FindingAcceptRiskFormPage /></SuspenseRoute>});
 const cluster_finding_suppressRoute = createRoute({getParentRoute:()=>app_clusters_idRoute,path:"findings/$fid/suppress",component:()=><SuspenseRoute><FindingSuppressFormPage /></SuspenseRoute>});
@@ -433,6 +437,8 @@ authenticatedRoute.addChildren([
   cluster_neuvectorRoute,
   cluster_findingsRoute,
   cluster_network_actionRoute,
+  cluster_findings_savedViewRoute,
+  cluster_timeline_savedViewRoute,
   cluster_findings_fidRoute,
   cluster_finding_acceptRoute,
   cluster_finding_suppressRoute,

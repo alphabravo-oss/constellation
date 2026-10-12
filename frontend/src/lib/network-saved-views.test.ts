@@ -48,6 +48,7 @@ describe("network activity saved views", () => {
     });
 
     expect(snapshot).toEqual({
+      conversation_filters: { from: "", to: "", verdict_group: "" },
       schema_version: 2,
       workspace_tab: "threats",
       hours: 24,
@@ -117,6 +118,7 @@ describe("network activity saved views", () => {
         cluster_id: "cluster-1",
         saved_at: "2026-08-23T00:00:00.000Z",
         filters: {
+          conversation_filters: { from: "", to: "", verdict_group: "" },
           schema_version: 2,
           workspace_tab: "map",
           hours: 168,
@@ -153,6 +155,13 @@ describe("network activity saved views", () => {
         },
       },
     ]);
+  });
+
+  it("round-trips exact directed conversation filters in a saved view", () => {
+    const view = makeView("pair", "Exact blocked pair");
+    view.filters.conversation_filters = { from: `prod/${"a".repeat(180)}`, to: "other/api", verdict_group: "blocked" };
+    const bundle = buildNetworkSavedViewsExport("cluster-1", [view], "2026-10-12T00:00:00Z");
+    expect(parseNetworkSavedViewsImport(JSON.stringify(bundle), "cluster-1")[0].filters.conversation_filters).toEqual(view.filters.conversation_filters);
   });
 
   it("merges imports without reusing an existing id", () => {

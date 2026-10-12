@@ -51,7 +51,8 @@ import { Button } from "@/components/ui/button";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { ModePill } from "@/components/ui/status-pill";
 import { PageHeader } from "@/components/ui/page";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
+import { Collapse } from "@/components/ui/collapse";
 import { useCluster } from "@/hooks/useCluster";
 import { cn } from "@/lib/cn";
 
@@ -96,14 +97,16 @@ export function DeploymentDetailPage() {
         description={detail.workload_ids.join(" · ") || "workload identity pending"}
       />
 
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6" data-testid="deployment-stats">
+      <StatGrid data-testid="deployment-stats">
         <StatCard label="Findings" value={detail.finding_count} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={openHigh > 0 ? "high" : "neutral"} />
         <StatCard label="Images" value={detail.images.length} icon={<PackageSearch className="h-3.5 w-3.5" />} />
         <StatCard label="Packages" value={sumPackages(detail.package_evidence)} icon={<Database className="h-3.5 w-3.5" />} />
         <StatCard label="Events" value={detail.runtime_events.length} icon={<Activity className="h-3.5 w-3.5" />} />
-        <StatCard label="Flows" value={detail.network_flows.length} icon={<Network className="h-3.5 w-3.5" />} />
         <StatCard label="Compliance" value={complianceOpen} icon={<ShieldCheck className="h-3.5 w-3.5" />} tone={complianceOpen > 0 ? "medium" : "neutral"} />
-      </section>
+      </StatGrid>
+      <Collapse label="Additional workload metrics"><StatGrid>
+        <StatCard label="Flows" value={detail.network_flows.length} icon={<Network className="h-3.5 w-3.5" />} />
+      </StatGrid></Collapse>
 
       <div className="space-y-4">
         <WorkloadPosture detail={detail} />

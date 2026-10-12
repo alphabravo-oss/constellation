@@ -26,7 +26,7 @@ import {
 import { useCluster } from "@/hooks/useCluster";
 import { PageContainer, PageHeader, PageSection } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { Button } from "@/components/ui/button";
 
 type RouteLink = { label: string; to: string; id?: string };
@@ -204,11 +204,11 @@ export function NeuVectorSwitchboardPage() {
         }
       />
 
-      <section className="grid grid-cols-1 gap-3 md:grid-cols-3">
+      <StatGrid>
         <StatCard label="NV areas mapped" value={mappings.length} hint="Primary console areas" icon={<ClipboardCheck className="h-3.5 w-3.5" />} />
         <StatCard label="Parity+ areas" value={mappings.filter((m) => m.status === "better").length} hint="Stronger than NV today" tone="accent" icon={<BadgeCheck className="h-3.5 w-3.5" />} />
         <StatCard label="Migration path" value="Apply" hint="Preview, apply, rollback" tone="medium" href="/settings/migration" icon={<Wand2 className="h-3.5 w-3.5" />} />
-      </section>
+      </StatGrid>
 
       <PageSection title="Navigation Map" description="Use the NeuVector term on the left and jump to the Constellation equivalent on the right.">
         <div className="grid gap-3">

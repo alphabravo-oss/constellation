@@ -18,7 +18,7 @@ import { useCluster } from "@/hooks/useCluster";
 import { PageContainer, PageHeader, PageSection } from "@/components/ui/page";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/status-pill";
@@ -234,11 +234,11 @@ export function PolicyCenterPage() {
       <VerdictBanner status={!clusterId || importsQuery.isError ? "degraded" : "info"}
         title={!clusterId ? "Select a cluster to manage policies" : importsQuery.isError ? "Migration diagnostics could not be refreshed" : "Choose a policy family to review or change"}
         detail="This directory links to configured policies. Enforcement status must be checked in the selected policy workflow." />
-      <section className="grid gap-3 sm:grid-cols-3">
+      <StatGrid>
         <StatCard label="Policy families" value={policyFamilies.length} />
         <StatCard label="Families with YAML transfer" value={policyFamilies.filter((family) => family.portable).length} />
         <StatCard label="Loaded import diagnostics" value={importsQuery.data ? diagnostics.length : "—"} hint="Organization import history" />
-      </section>
+      </StatGrid>
       <Tabs value={tab} onValueChange={setTab} items={[
         { value: "families", label: "Policy families", content: (
       <PageSection

@@ -1,6 +1,6 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { defaultScheduler, notifyManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { network, quarantine, type NetworkMap, type NetworkPolicyLifecycle, type NetworkPolicyActionResponse } from "@/api/client";
 import { NetworkActionFormPage } from "./NetworkActionFormPage";
@@ -108,6 +108,20 @@ it("rejects a policy candidate that changes during submit preflight", async () =
 it("pauses an in-flight approval when cached candidate changes before the response arrives", async () => {
  route.action = "approve-policy"; await render(); await settled(() => expect(host.querySelector('form')).not.toBeNull()); await reason();
  let release!: (value: ReturnType<typeof lifecycle>) => void; vi.mocked(network.lifecycle).mockImplementationOnce(() => new Promise((resolve) => { release = resolve; })); await submit(); await settled(() => expect(release).toBeDefined());
- await act(async () => client.setQueryData(["network-action-candidate", "cluster-1", "team/api"], lifecycle({ ...candidate, candidate_hash: "new-cached-hash" })));
- await act(async () => release(lifecycle())); await settled(() => expect(host.textContent).toContain("Review the updated candidate before approving")); expect(network.policyAction).not.toHaveBeenCalled();
+ // Keep observer renders pending to exercise the cache guard before React sees
+ // the changed candidate. A settled render exercises the earlier validity guard.
+ const notifications: Array<() => void> = [];
+ notifyManager.setScheduler((notification) => notifications.push(notification));
+ try {
+  client.setQueryData(["network-action-candidate", "cluster-1", "team/api"], lifecycle({ ...candidate, candidate_hash: "new-cached-hash" }));
+  await act(async () => release(lifecycle()));
+  await settled(() => expect(client.getMutationCache().getAll()[0]?.state.error?.message).toContain("Review the updated candidate before approving"));
+  expect(network.policyAction).not.toHaveBeenCalled();
+ } finally {
+  notifyManager.setScheduler(defaultScheduler);
+  await act(async () => { for (const notification of notifications) notification(); });
+ }
+ await settled(() => expect(host.textContent).toContain("Review the updated candidate before approving"));
+ expect(host.querySelector<HTMLTextAreaElement>('#network-action-reason')?.value).toBe("Investigating unexpected traffic");
+ expect(network.policyAction).not.toHaveBeenCalled();
 });

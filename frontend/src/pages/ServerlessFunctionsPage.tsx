@@ -7,7 +7,7 @@ import { CloudCog, Database, KeyRound, Search, ShieldAlert } from "lucide-react"
 import { serverlessFunctions, type ServerlessFunction } from "@/api/client";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { SeverityBadge } from "@/components/ui/severity-badge";
 import { useCluster } from "@/hooks/useCluster";
 import { cn } from "@/lib/cn";
@@ -116,12 +116,12 @@ export function ServerlessFunctionsPage() {
         }
       />
 
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4" data-testid="serverless-summary">
+      <StatGrid data-testid="serverless-summary">
         <StatCard label="Functions" value={summary.total.toLocaleString()} icon={<CloudCog className="h-3.5 w-3.5" />} hint={`${summary.providers} providers · ${summary.regions} regions`} />
         <StatCard label="Open Findings" value={summary.findings.toLocaleString()} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={summary.criticalHigh > 0 ? "high" : "neutral"} hint={`${summary.criticalHigh} critical/high`} />
         <StatCard label="Packages" value={summary.packages.toLocaleString()} icon={<Database className="h-3.5 w-3.5" />} hint={`${summary.scanned} with evidence`} />
         <StatCard label="Role Risks" value={summary.roleRisks.toLocaleString()} icon={<KeyRound className="h-3.5 w-3.5" />} tone={summary.roleRisks > 0 ? "high" : "neutral"} hint="critical/high role posture" />
-      </section>
+      </StatGrid>
 
       <section className="rounded-lg border border-border bg-card p-3">
         <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_170px]">

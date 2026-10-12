@@ -54,7 +54,7 @@ test.beforeEach(async ({ page }) => {
         body = { ingress: [{ workload: "default/frontend", namespace: "default", name: "frontend", external_peers: 2, protocols: ["TCP"], ports: [443], sessions: 4, critical: 2, high: 1, risk_score: 70, policy_mode: "monitor" }], egress: [] };
         break;
       case "/network/conversations":
-        body = { conversations: url.searchParams.get("verdict") === "deny" ? [deny] : [deny, { ...deny, from: "default/worker", verdict: "allow" }], nodes: [], node_kinds: {}, edges: [], window_hours: 24 };
+        body = { conversations: url.searchParams.get("verdict_group") === "blocked" ? [deny] : [deny, { ...deny, from: "default/worker", verdict: "allow" }], nodes: [], node_kinds: {}, edges: [], window_hours: 24 };
         break;
       case "/network/map":
         body = { workloads: [], flows: [], summary: { deny_capable_cni: false } };
@@ -147,9 +147,9 @@ test("panel links preserve the source, time window, and supported filters", asyn
   const dashboard = page.getByTestId("dashboard-page");
   await expect(dashboard.getByRole("link", { name: /view all/i })).toHaveAttribute("href", `${root}/findings`);
   await selectDashboardTab(page, "network", "Network");
-  await expect(dashboard.getByRole("link", { name: /view conversations/i })).toHaveAttribute("href", `${root}/network?tab=conversations&hours=24&verdict=deny`);
-  await expect(dashboard.getByTestId("dashboard-network-denies").getByRole("link")).toHaveAttribute("href", `${root}/network?tab=conversations&hours=24&verdict=deny&workload=default%2Ffrontend`);
-  await expect(dashboard.getByRole("link", { name: /default\/frontend/ }).first()).toHaveAttribute("href", `${root}/deployments?q=frontend`);
+  await expect(dashboard.getByRole("link", { name: /view conversations/i })).toHaveAttribute("href", `${root}/network?tab=conversations&hours=24&verdict_group=blocked&hide_platform=false`);
+  await expect(dashboard.getByTestId("dashboard-network-denies").getByRole("link")).toHaveAttribute("href", `${root}/network?tab=conversations&hours=24&verdict_group=blocked&from=default%2Ffrontend&to=default%2Fdatabase&hide_platform=false`);
+  await expect(dashboard.getByRole("link", { name: /default\/frontend/ }).first()).toHaveAttribute("href", `${root}/network?tab=conversations&hours=168&from=external&to=default%2Ffrontend&hide_platform=false`);
   await expect(dashboard.getByRole("link", { name: /^frontend default 2C 1H$/ })).toHaveAttribute("href", `${root}/deployments?q=frontend`);
   await selectDashboardTab(page, "trends", "Trends");
   await expect(dashboard.getByRole("link", { name: /Open CVE DB/i })).toHaveAttribute("href", "/cve");
@@ -168,24 +168,28 @@ test("component role and denied conversation links activate source filters", asy
     return url.pathname === "/api/v1/network/conversations"
       && url.searchParams.get("cluster_id") === clusterId
       && url.searchParams.get("hours") === "24"
-      && url.searchParams.get("verdict") === "deny";
+      && url.searchParams.get("verdict_group") === "blocked"
+      && url.searchParams.get("from") === "default/frontend"
+      && url.searchParams.get("to") === "default/database";
   });
   await page.getByTestId("dashboard-network-denies").getByRole("link").click();
   await filteredRequest;
   await expect(page.getByTestId("network-workspace-tab-conversations")).toHaveAttribute("data-state", "active");
   await expect(page.getByTestId("network-window-select")).toHaveValue("24");
-  await expect(page.getByTestId("network-verdict-select")).toHaveValue("deny");
+  await expect(page.getByRole("combobox", { name: "Conversation outcome" })).toHaveValue("blocked");
+  await expect(page.getByRole("textbox", { name: "Conversation from" })).toHaveValue("default/frontend");
+  await expect(page.getByRole("textbox", { name: "Conversation to" })).toHaveValue("default/database");
   await expect(page.getByTestId("network-conversations-table")).toContainText("default/frontend");
 });
 
-test("network-denies header requests denied conversations for 24 hours", async ({ page }) => {
+test("network-denies header requests both denied and blocked conversations for 24 hours", async ({ page }) => {
   await selectDashboardTab(page, "network", "Network");
   const filteredRequest = page.waitForRequest((request) => {
     const url = new URL(request.url());
     return url.pathname === "/api/v1/network/conversations"
       && url.searchParams.get("cluster_id") === clusterId
       && url.searchParams.get("hours") === "24"
-      && url.searchParams.get("verdict") === "deny";
+      && url.searchParams.get("verdict_group") === "blocked";
   });
   await page.getByRole("link", { name: /view conversations/i }).click();
   await filteredRequest;

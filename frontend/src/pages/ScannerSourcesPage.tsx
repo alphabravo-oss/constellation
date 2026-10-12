@@ -39,7 +39,7 @@ import { Button } from "@/components/ui/button";
 import { Drawer } from "@/components/ui/drawer";
 import { Field, TextInput } from "@/components/ui/form";
 import { DataTable, type Column } from "@/components/ui/data-table";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { StatusPill } from "@/components/ui/status-pill";
 import { ScannerDbCapacity } from "@/components/ScannerDbCapacity";
 import { cn } from "@/lib/cn";
@@ -341,13 +341,13 @@ export function ScannerSourcesPage() {
         ].filter(Boolean).join(" · ")}
       />
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" data-testid="scanner-operator-summary">
+      <StatGrid data-testid="scanner-operator-summary">
         <StatCard label="Scanned" value={lifecycle ? lifecycle.scanned.toLocaleString() : "—"} icon={<CheckCircle2 className="h-3.5 w-3.5" />} tone="accent" />
         <StatCard label="Scheduled" value={lifecycle ? lifecycle.scheduled.toLocaleString() : scanJobList.data ? pendingTotal.toLocaleString() : "—"} icon={<Clock className="h-3.5 w-3.5" />} tone={pendingTotal > 0 ? "medium" : "neutral"} hint={typeof lifecycle?.paused === "number" ? `${lifecycle.paused} paused` : "Paused count unavailable"} />
         <StatCard label="Running" value={lifecycle ? lifecycle.scanning.toLocaleString() : scanJobList.data ? runningTotal.toLocaleString() : "—"} icon={<RefreshCw className="h-3.5 w-3.5" />} tone={runningTotal > 0 ? "low" : "neutral"} />
         <StatCard label="Failed" value={lifecycle ? lifecycle.failed.toLocaleString() : "—"} icon={<AlertTriangle className="h-3.5 w-3.5" />} tone={failedTotal > 0 ? "high" : "neutral"} />
         <StatCard label="Scanners" value={scannerWorkers.data ? workers.length.toLocaleString() : "—"} icon={<Database className="h-3.5 w-3.5" />} hint="last 24h" />
-      </section>
+      </StatGrid>
 
       <Tabs value={tab} onValueChange={setTab} items={[
         { value: "jobs", label: "Scan jobs", content: (

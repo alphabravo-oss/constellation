@@ -11,7 +11,7 @@ import { containers, type ContainerRow } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PlatformVisibilityToggle } from "@/components/ui/platform-visibility-toggle";
 import { cn } from "@/lib/cn";
@@ -103,12 +103,12 @@ export function ContainersPage() {
           </div>
         }
       />
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <StatGrid>
         <StatCard label="Containers" value={summary.total} icon={<Boxes className="h-3.5 w-3.5" />} hint={`${summary.running} running`} />
         <StatCard label="Running" value={summary.running} tone="low" />
         <StatCard label="In privileged workloads" value={summary.privileged} tone={summary.privileged > 0 ? "critical" : "neutral"} icon={<ShieldAlert className="h-3.5 w-3.5" />} />
         <StatCard label="In root workloads" value={summary.run_as_root} tone={summary.run_as_root > 0 ? "high" : "neutral"} />
-      </section>
+      </StatGrid>
       <input
         value={search}
         onChange={(e) => setSearch(e.target.value)}

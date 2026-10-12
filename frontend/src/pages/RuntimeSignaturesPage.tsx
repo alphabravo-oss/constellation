@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { ImportExportButtons } from "@/components/ImportExportButtons";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { Collapse } from "@/components/ui/collapse";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { StatusPill } from "@/components/ui/status-pill";
@@ -146,11 +146,11 @@ export function RuntimeSignaturesPage() {
         detail={q.isError && q.data ? "Showing the last loaded configuration. Retry to see current settings. Deployment status is not available here." : "Configured modes describe intended behavior. Group scope and successful detector deployment determine what is inspected or blocked."}
       />
 
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <StatGrid>
         <StatCard label="Configured signatures" value={q.data ? rules.length : "—"} icon={<ListChecks className="h-3.5 w-3.5" />} />
         <StatCard label="Monitor configured" value={q.data ? monitorCount : "—"} icon={<ShieldAlert className="h-3.5 w-3.5" />} />
         <StatCard label="Enforce configured" value={q.data ? enforceCount : "—"} icon={<ShieldCheck className="h-3.5 w-3.5" />} tone="neutral" />
-      </section>
+      </StatGrid>
 
 
       <div className="overflow-x-auto rounded-lg border border-border bg-card" data-testid="runtime-signatures-list">

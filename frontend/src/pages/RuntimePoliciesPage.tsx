@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { StatusPill } from "@/components/ui/status-pill";
 import { LoadingState, ErrorState, EmptyState } from "@/components/ui/states";
 
@@ -129,11 +129,11 @@ export function RuntimePoliciesPage() {
       <VerdictBanner status={q.isError ? "degraded" : "info"}
         title={q.isError ? "Runtime policies could not be loaded" : q.isPending ? "Loading runtime policies" : policies.length === 0 ? "No runtime policies configured" : `${enforceCount} policies configured to enforce`}
         detail="Configured modes describe policy intent. Review observed matches before promotion; mode alone does not prove agent enforcement." />
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <StatGrid>
         <StatCard label="Total policies" value={q.data ? policies.length : "—"} icon={<ListChecks className="h-3.5 w-3.5" />} />
         <StatCard label="Monitoring" value={q.data ? monitorCount : "—"} icon={<ShieldAlert className="h-3.5 w-3.5" />} />
         <StatCard label="Enforcing" value={q.data ? enforceCount : "—"} icon={<ShieldCheck className="h-3.5 w-3.5" />} tone={enforceCount > 0 ? "accent" : "neutral"} />
-      </section>
+      </StatGrid>
 
       <div className="overflow-x-auto rounded-lg border border-border bg-card" data-testid="runtime-policies-list">
         {q.isLoading && <LoadingState />}

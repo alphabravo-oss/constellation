@@ -27,7 +27,7 @@ import {
 } from "@/api/client";
 import { PageHeader } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
@@ -155,12 +155,12 @@ export function ApiTokensPage() {
         }
       />
 
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <StatGrid>
         <StatCard label="Tokens" value={tokens.length} icon={<KeyRound className="h-3.5 w-3.5" aria-hidden />} />
         <StatCard label="Active" value={activeCount} tone="accent" />
         <StatCard label="Expired" value={expiredCount} tone={expiredCount ? "medium" : "neutral"} />
         <StatCard label="Revoked" value={revokedCount} tone={revokedCount ? "high" : "neutral"} />
-      </section>
+      </StatGrid>
 
       <Card padded={false}>
         <div data-testid="api-tokens-table">
