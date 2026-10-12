@@ -1734,60 +1734,26 @@ function NetworkSessionsWorkspaceTab({
         </div>
       )}
       <div className="overflow-hidden rounded-md border border-border bg-card">
-        <table className="app-semantic-table w-full text-xs" data-testid="network-sessions-table">
-          <thead className="bg-muted/50 text-left text-[10px] uppercase tracking-wider text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2 font-medium">Client</th>
-              <th className="px-3 py-2 font-medium">Server</th>
-              <th className="px-3 py-2 font-medium">Workload</th>
-              <th className="px-3 py-2 font-medium">App</th>
-              <th className="px-3 py-2 font-medium">State</th>
-              <th className="px-3 py-2 text-right font-medium">Client</th>
-              <th className="px-3 py-2 text-right font-medium">Server</th>
-              <th className="px-3 py-2 text-right font-medium">Age</th>
-              <th className="px-3 py-2 font-medium"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && (
-              <tr>
-                <td colSpan={9} className="px-3 py-8 text-center text-muted-foreground">Loading sessions...</td>
-              </tr>
-            )}
-            {!loading && rows.length === 0 && (
-              <tr>
-                <td colSpan={9} className="px-3 py-8 text-center text-muted-foreground">No live sessions reported.</td>
-              </tr>
-            )}
-            {!loading && visibleRows.map((row) => (
-              <tr key={`${row.node}-${row.id}`} className="border-t border-border/60 hover:bg-accent/50">
-                <td className="px-3 py-2 font-mono">{row.client_ip}:{row.client_port}</td>
-                <td className="px-3 py-2 font-mono">{row.server_ip}:{row.server_port}</td>
-                <td className="max-w-[220px] truncate px-3 py-2 font-mono text-muted-foreground">{row.workload_id || "-"}</td>
-                <td className="px-3 py-2 text-muted-foreground">{row.application || row.ip_proto}</td>
-                <td className="px-3 py-2 text-muted-foreground">
-                  {row.client_state || row.server_state || row.ip_proto}
-                  {row.threat_id ? <span className="ml-1 text-[color:var(--color-status-error)]" title={`threat ${row.threat_id}`}>!</span> : null}
-                </td>
-                <td className="px-3 py-2 text-right font-mono">{formatBytes(row.client_bytes)}</td>
-                <td className="px-3 py-2 text-right font-mono">{formatBytes(row.server_bytes)}</td>
-                <td className="px-3 py-2 text-right font-mono text-muted-foreground">{row.age}s</td>
-                <td className="px-3 py-2 text-right">
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    disabled={killing}
-                    onClick={() => { if (window.confirm(`Terminate session ${row.id} on ${row.node}?`)) onKill(row.id, row.node); }}
-                    title="Kill session"
-                    data-testid="network-session-kill"
-                  >
-                    <X className="h-3.5 w-3.5" aria-hidden />
-                  </Button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <DataTable<NetworkSession>
+          testId="network-sessions-table"
+          className="rounded-none border-0"
+          rows={loading ? [] : visibleRows}
+          rowKey={(row) => `${row.node}-${row.id}`}
+          showDensityToggle={false}
+          showColumnChooser={false}
+          emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">{loading ? "Loading sessions..." : "No live sessions reported."}</div>}
+          columns={[
+            { id: "client", header: "Client", kind: "id", size: 180, cell: (row) => `${row.client_ip}:${row.client_port}` },
+            { id: "server", header: "Server", kind: "id", size: 180, cell: (row) => `${row.server_ip}:${row.server_port}` },
+            { id: "workload", header: "Workload", kind: "name", code: true, cell: (row) => row.workload_id || "-" },
+            { id: "application", header: "App", kind: "text", size: 120, cell: (row) => row.application || row.ip_proto },
+            { id: "state", header: "State", kind: "status", cell: (row) => <>{row.client_state || row.server_state || row.ip_proto}{row.threat_id ? <span className="ml-1 text-[color:var(--color-status-error)]" title={`threat ${row.threat_id}`}>!</span> : null}</> },
+            { id: "clientBytes", header: "Client", kind: "bytes", cell: (row) => formatBytes(row.client_bytes) },
+            { id: "serverBytes", header: "Server", kind: "bytes", cell: (row) => formatBytes(row.server_bytes) },
+            { id: "age", header: "Age", kind: "age", numeric: true, cell: (row) => `${row.age}s` },
+            { id: "actions", header: "", kind: "actions", size: 48, minSize: 48, maxSize: 48, cell: (row) => <Button size="icon" variant="ghost" disabled={killing} onClick={() => { if (window.confirm(`Terminate session ${row.id} on ${row.node}?`)) onKill(row.id, row.node); }} title="Kill session" data-testid="network-session-kill"><X className="h-3.5 w-3.5" aria-hidden /></Button> },
+          ]}
+        />
       </div>
       <Pager page={page} pageSize={100} total={total} rowsOnPage={visibleRows.length} onPage={onPage} />
     </section>
@@ -2065,73 +2031,29 @@ function PcapWorkspaceTab({
         </Button>
       </div>
       <div className="overflow-hidden rounded-md border border-border bg-card">
-        <table className="app-semantic-table w-full text-xs" data-testid="network-pcap-table">
-          <thead className="bg-muted/50 text-left text-[10px] uppercase tracking-wider text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2 font-medium">Workload</th>
-              <th className="px-3 py-2 font-medium">Filter</th>
-              <th className="px-3 py-2 font-medium">Status</th>
-              <th className="px-3 py-2 font-medium">Node</th>
-              <th className="px-3 py-2 text-right font-medium">Packets</th>
-              <th className="px-3 py-2 text-right font-medium">Size</th>
-              <th className="px-3 py-2 font-medium">Requested</th>
-              <th className="px-3 py-2 font-medium"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {capturesQ.isPending && (
-              <tr>
-                <td colSpan={8} className="px-3 py-8 text-center text-muted-foreground">Loading captures...</td>
-              </tr>
-            )}
-            {!capturesQ.isPending && captures.length === 0 && (
-              <tr>
-                <td colSpan={8} className="px-3 py-8 text-center text-muted-foreground">No packet captures match this filter.</td>
-              </tr>
-            )}
-            {!capturesQ.isPending && visibleCaptures.map((capture) => (
-              <tr key={capture.id} className="border-t border-border/60 hover:bg-accent/50">
-                <td className="max-w-[240px] truncate px-3 py-2 font-mono">{capture.workload}</td>
-                <td className="max-w-[260px] truncate px-3 py-2 text-muted-foreground">
-                  {pcapCaptureFilterLabel(capture)}
-                </td>
-                <td className="px-3 py-2"><PcapStatusPill status={capture.status} /></td>
-                <td className="max-w-[180px] truncate px-3 py-2 text-muted-foreground">{capture.claimed_by_node || "-"}</td>
-                <td className="px-3 py-2 text-right font-mono">{(capture.packet_count ?? 0).toLocaleString()}</td>
-                <td className="px-3 py-2 text-right font-mono">{formatBytes(capture.file_size_bytes ?? 0)}</td>
-                <td className="px-3 py-2 text-muted-foreground">{formatDateTime(capture.requested_at)}</td>
-                <td className="px-3 py-2 text-right">
-                  <div className="flex justify-end gap-1">
-                    {capture.status === "completed" && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => void runtimePcap.download(capture.id).catch((err: Error) => toast.error(`PCAP download failed: ${err.message}`))}
-                        data-testid="network-pcap-download"
-                      >
-                        <Download className="h-3.5 w-3.5" aria-hidden />
-                        Download
-                      </Button>
-                    )}
-                    {capture.error_message ? (
-                      <span className="text-[color:var(--color-status-error)]">{capture.error_message}</span>
-                    ) : null}
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      disabled={remove.isPending}
-                      onClick={() => { if (window.confirm(`Remove PCAP capture ${capture.id.slice(0, 8)}?`)) remove.mutate(capture.id); }}
-                      title={capture.status === "pending" || capture.status === "running" ? "Cancel capture" : "Remove capture"}
-                      data-testid="network-pcap-delete"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" aria-hidden />
-                    </Button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <DataTable<PcapCapture>
+          testId="network-pcap-table"
+          className="rounded-none border-0"
+          rows={capturesQ.isPending ? [] : visibleCaptures}
+          rowKey={(capture) => capture.id}
+          showDensityToggle={false}
+          showColumnChooser={false}
+          emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">{capturesQ.isPending ? "Loading captures..." : "No packet captures match this filter."}</div>}
+          columns={[
+            { id: "workload", header: "Workload", kind: "name", code: true, cell: (capture) => capture.workload },
+            { id: "filter", header: "Filter", kind: "text", wrap: true, size: 220, cell: pcapCaptureFilterLabel },
+            { id: "status", header: "Status", kind: "status", cell: (capture) => <PcapStatusPill status={capture.status} /> },
+            { id: "node", header: "Node", kind: "id", cell: (capture) => capture.claimed_by_node || "-" },
+            { id: "packets", header: "Packets", kind: "count", cell: (capture) => (capture.packet_count ?? 0).toLocaleString() },
+            { id: "size", header: "Size", kind: "bytes", cell: (capture) => formatBytes(capture.file_size_bytes ?? 0) },
+            { id: "requested", header: "Requested", kind: "date", cell: (capture) => formatDateTime(capture.requested_at) },
+            { id: "actions", header: "", kind: "actions", size: 160, minSize: 160, maxSize: 240, wrap: true, cell: (capture) => <div className="flex flex-wrap items-center justify-end gap-1">
+              {capture.status === "completed" && <Button size="sm" variant="outline" onClick={() => void runtimePcap.download(capture.id).catch((err: Error) => toast.error(`PCAP download failed: ${err.message}`))} data-testid="network-pcap-download"><Download className="h-3.5 w-3.5" aria-hidden />Download</Button>}
+              {capture.error_message ? <span className="min-w-0 break-words text-[color:var(--color-status-error)]">{capture.error_message}</span> : null}
+              <Button size="icon" variant="ghost" disabled={remove.isPending} onClick={() => { if (window.confirm(`Remove PCAP capture ${capture.id.slice(0, 8)}?`)) remove.mutate(capture.id); }} title={capture.status === "pending" || capture.status === "running" ? "Cancel capture" : "Remove capture"} data-testid="network-pcap-delete"><Trash2 className="h-3.5 w-3.5" aria-hidden /></Button>
+            </div> },
+          ]}
+        />
       </div>
       <p className="text-xs text-muted-foreground">Showing {visibleCaptures.length ? capturePage * 100 + 1 : 0}–{capturePage * 100 + visibleCaptures.length} of {captures.length} loaded captures. Server fetch is capped at 200; filters apply to loaded captures.</p>
       <Pager page={capturePage} pageSize={100} total={captures.length} rowsOnPage={visibleCaptures.length} onPage={setRequestedCapturePage} />
@@ -2283,51 +2205,24 @@ function NetworkThreatsWorkspaceTab({
         </label>
       </div>
       <div className="overflow-hidden rounded-md border border-border bg-card">
-        <table className="app-semantic-table w-full text-xs" data-testid="network-threats-table">
-          <thead className="bg-muted/50 text-left text-[10px] uppercase tracking-wider text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2 font-medium">Threat</th>
-              <th className="px-3 py-2 font-medium">Category</th>
-              <th className="px-3 py-2 font-medium">Flow</th>
-              <th className="px-3 py-2 font-medium">Severity</th>
-              <th className="px-3 py-2 font-medium">Action</th>
-              <th className="px-3 py-2 font-medium">Reported</th>
-              <th className="px-3 py-2 font-medium"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">No DPI threats in this window.</td>
-              </tr>
-            )}
-            {visibleThreats.map((row) => (
-              <tr key={row.id} className="border-t border-border/60 hover:bg-accent/50">
-                <td className="max-w-[300px] truncate px-3 py-2">
-                  <button
-                    type="button"
-                    className="truncate text-left font-medium hover:text-[color:var(--color-primary)]"
-                    onClick={() => setDrilldownID(row.id)}
-                    data-testid="network-threats-open"
-                  >
-                    {row.threat_name || row.msg || `signature ${row.threat_id}`}
-                  </button>
-                  {row.msg && <div className="truncate text-[10px] text-muted-foreground">{row.msg}</div>}
-                </td>
-                <td className="px-3 py-2 text-muted-foreground">{threatCategoryLabel(row.threat_id)}</td>
-                <td className="px-3 py-2 font-mono text-muted-foreground">{row.src_ip}:{row.src_port} -&gt; {row.dst_ip}:{row.dst_port}</td>
-                <td className="px-3 py-2">{severityLabel(row.severity)}</td>
-                <td className="px-3 py-2 text-muted-foreground">{threatActionLabel(row.action)}</td>
-                <td className="px-3 py-2 text-muted-foreground">{formatDateTime(row.reported_at || row.at)}</td>
-                <td className="px-3 py-2 text-right">
-                  <Button size="sm" variant="outline" onClick={() => onPivot(row)} data-testid="network-threats-pivot">
-                    Pivot
-                  </Button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <DataTable<RuntimeThreat>
+          testId="network-threats-table"
+          className="rounded-none border-0"
+          rows={visibleThreats}
+          rowKey={(row) => row.id}
+          showDensityToggle={false}
+          showColumnChooser={false}
+          emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">No DPI threats in this window.</div>}
+          columns={[
+            { id: "threat", header: "Threat", kind: "name", cell: (row) => <><button type="button" className="block max-w-full truncate text-left font-medium hover:text-[color:var(--color-primary)]" onClick={() => setDrilldownID(row.id)} data-testid="network-threats-open" title={row.threat_name || row.msg || `signature ${row.threat_id}`}>{row.threat_name || row.msg || `signature ${row.threat_id}`}</button>{row.msg && <div className="truncate text-xs text-muted-foreground" title={row.msg}>{row.msg}</div>}</> },
+            { id: "category", header: "Category", kind: "text", size: 140, cell: (row) => threatCategoryLabel(row.threat_id) },
+            { id: "flow", header: "Flow", kind: "id", size: 260, maxSize: 360, cell: (row) => `${row.src_ip}:${row.src_port} -> ${row.dst_ip}:${row.dst_port}` },
+            { id: "severity", header: "Severity", kind: "status", cell: (row) => severityLabel(row.severity) },
+            { id: "action", header: "Action", kind: "status", cell: (row) => threatActionLabel(row.action) },
+            { id: "reported", header: "Reported", kind: "date", cell: (row) => formatDateTime(row.reported_at || row.at) },
+            { id: "actions", header: "", kind: "actions", cell: (row) => <Button size="sm" variant="outline" onClick={() => onPivot(row)} data-testid="network-threats-pivot">Pivot</Button> },
+          ]}
+        />
       </div>
       <p className="text-xs text-muted-foreground">Critical and blocked metrics cover this page of threats.</p>
       <Pager page={page} pageSize={100} total={total} rowsOnPage={visibleThreats.length} onPage={onPage} />

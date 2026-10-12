@@ -36,13 +36,13 @@ function ResponseCatalog({ clusterId }: { clusterId: string }) {
   const setFilter = (key: string, value: string) => setSearch((current) => { if (!value || value === "all") current.delete(key); else current.set(key, value); return current; }, { replace: true });
   const openEditor = (rule: ResponseRule) => void navigate({ href: `/clusters/${clusterId}/response/${encodeURIComponent(rule.id)}/edit${search.size ? `?${search}` : ""}` });
   const columns: Column<ResponseRule>[] = [
-    { id: "name", header: "Built-in rule", hideable: false, cell: (rule) => <div><span className="font-medium">{rule.name}</span><p className="mt-1 text-xs text-muted-foreground">{rule.description}</p></div>, exportValue: (r) => r.name, sort: (a, b) => a.name.localeCompare(b.name) },
-    { id: "event", header: "Event type", cell: (r) => r.event_type, sort: (a, b) => a.event_type.localeCompare(b.event_type) },
-    { id: "mode", header: "Configured mode", cell: (r) => r.mode, sort: (a, b) => a.mode.localeCompare(b.mode) },
-    { id: "enabled", header: "Rule status", cell: (r) => r.enabled ? "Enabled" : "Disabled", exportValue: (r) => r.enabled, sort: (a, b) => Number(a.enabled) - Number(b.enabled) },
-    { id: "actions", header: "Configured actions", cell: (r) => r.actions.join(", "), exportValue: (r) => r.actions.join(", ") },
-    { id: "override", header: "Configuration source", cell: (r) => r.managed ? "Organization override" : "Built-in default" },
-    { id: "edit", header: "Actions", hideable: false, exportable: false, cell: (r) => <Button variant="ghost" disabled={q.isError || q.isFetching} onClick={() => openEditor(r)} aria-label={`Edit override for ${r.name}`}><Pencil className="h-4 w-4" /> Edit override</Button> },
+    { id: "name", kind: "name", grow: true, minSize: 220, wrap: true, header: "Built-in rule", hideable: false, cell: (rule) => <div><span className="font-medium">{rule.name}</span><p className="mt-1 text-xs text-muted-foreground">{rule.description}</p></div>, exportValue: (r) => r.name, sort: (a, b) => a.name.localeCompare(b.name) },
+    { id: "event", kind: "status", size: 112, minSize: 88, header: "Event type", cell: (r) => r.event_type, sort: (a, b) => a.event_type.localeCompare(b.event_type) },
+    { id: "mode", kind: "status", size: 104, minSize: 88, header: "Mode", cell: (r) => r.mode, sort: (a, b) => a.mode.localeCompare(b.mode) },
+    { id: "enabled", kind: "status", size: 112, minSize: 96, header: "Status", cell: (r) => r.enabled ? "Enabled" : "Disabled", exportValue: (r) => r.enabled, sort: (a, b) => Number(a.enabled) - Number(b.enabled) },
+    { id: "actions", kind: "text", size: 176, minSize: 160, wrap: true, header: "Response actions", cell: (r) => r.actions.join(", "), exportValue: (r) => r.actions.join(", ") },
+    { id: "override", kind: "status", size: 160, minSize: 144, wrap: true, header: "Source", cell: (r) => r.managed ? "Organization override" : "Built-in default" },
+    { id: "edit", kind: "actions", size: 176, minSize: 160, maxSize: 192, header: "Manage", hideable: false, exportable: false, cell: (r) => <Button variant="ghost" disabled={q.isError || q.isFetching} onClick={() => openEditor(r)} aria-label={`Edit override for ${r.name}`}><Pencil className="h-4 w-4" /> Edit override</Button> },
   ];
   return <div className="space-y-6" data-testid="response-catalog-page" data-cluster-id={clusterId}>
     <PageHeader title="Response Catalog" description="Review built-in response rules and their organization-wide overrides. These settings are shared across clusters; authored response rules have a separate configuration."

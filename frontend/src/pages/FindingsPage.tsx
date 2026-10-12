@@ -202,15 +202,14 @@ export function FindingsPage() {
 
   const columns: Column<Finding>[] = [
     {
-      id: "severity",
+      id: "severity", kind: "badge", size: 120, minSize: 112,
       header: "Severity",
       cell: (f) => <SeverityBadge severity={f.severity} kev={isKev(f)} />,
       exportValue: (f) => f.severity,
       sort: (a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity],
-      width: "108px",
     },
     {
-      id: "cve",
+      id: "cve", kind: "id", size: 176, minSize: 160,
       header: "CVE / ID",
       cell: (f) => (
         <span className="flex items-center gap-1.5">
@@ -222,13 +221,11 @@ export function FindingsPage() {
       ),
       exportValue: (f) => f.external_id ?? f.id,
       sort: (a, b) => (a.external_id ?? "").localeCompare(b.external_id ?? ""),
-      width: "170px",
     },
     {
-      id: "cvss",
+      id: "cvss", kind: "count", size: 88, minSize: 80,
       header: "CVSS",
       numeric: true,
-      width: "70px",
       cell: (f) => {
         const score = cvssScore(f);
         return <span className="text-mono text-xs" style={{ color: cvssColor(score) }}>{score ? score.toFixed(1) : "—"}</span>;
@@ -237,11 +234,10 @@ export function FindingsPage() {
       sort: (a, b) => (cvssScore(a) ?? 0) - (cvssScore(b) ?? 0),
     },
     {
-      id: "cvss_vector",
+      id: "cvss_vector", kind: "id", size: 208, minSize: 176,
       header: "Vector",
-      width: "230px",
       cell: (f) => (
-        <span className="block max-w-[220px] truncate text-mono text-[10px] text-muted-foreground" title={f.cvss_vector || undefined}>
+        <span className="block truncate text-mono text-[10px] text-muted-foreground" title={f.cvss_vector || undefined}>
           {f.cvss_vector || "—"}
         </span>
       ),
@@ -249,13 +245,13 @@ export function FindingsPage() {
       sort: (a, b) => (a.cvss_vector ?? "").localeCompare(b.cvss_vector ?? ""),
     },
     {
-      id: "title",
+      id: "title", kind: "text", grow: true, minSize: 240,
       header: "Title",
       cell: (f) => (
         <button
           type="button"
           onClick={() => openFinding(f)}
-          className="text-left text-sm hover:text-[color:var(--color-primary)] truncate max-w-[420px] block"
+          className="text-left text-sm hover:text-[color:var(--color-primary)] truncate block"
           title={f.title}
         >
           {f.title}
@@ -265,23 +261,21 @@ export function FindingsPage() {
       sort: (a, b) => a.title.localeCompare(b.title),
     },
     {
-      id: "package",
+      id: "package", kind: "name", size: 152, minSize: 128, grow: false,
       header: "Package",
       cell: (f) => <span className="text-mono text-xs">{f.package_name || "—"}</span>,
       exportValue: (f) => f.package_name ?? "",
       sort: (a, b) => (a.package_name ?? "").localeCompare(b.package_name ?? ""),
-      width: "150px",
     },
     {
-      id: "fixed",
+      id: "fixed", kind: "text", size: 160, minSize: 112, wrap: true,
       header: "Fixed in",
       cell: (f) => <span className="text-mono text-xs text-muted-foreground">{f.fixed_version || "—"}</span>,
       exportValue: (f) => f.fixed_version ?? "",
       sort: (a, b) => (a.fixed_version ?? "").localeCompare(b.fixed_version ?? ""),
-      width: "130px",
     },
     {
-      id: "asset",
+      id: "asset", kind: "id", size: 144, minSize: 128,
       header: "Asset",
       cell: (f) => (
         <Link to="." href={`/clusters/${clusterId}/risk/asset/${encodeURIComponent(f.asset_id)}`} className="text-mono text-[10px] text-muted-foreground hover:text-foreground" title="Open risk workspace">
@@ -290,41 +284,35 @@ export function FindingsPage() {
       ),
       exportValue: (f) => f.asset_id,
       sort: (a, b) => a.asset_id.localeCompare(b.asset_id),
-      width: "150px",
     },
     {
-      id: "risk",
+      id: "risk", kind: "count", size: 88, minSize: 80,
       header: "Risk",
       numeric: true,
       cell: (f) => <RiskScore score={f.risk_score} />,
       exportValue: (f) => f.risk_score,
       sort: (a, b) => a.risk_score - b.risk_score,
-      width: "80px",
     },
     {
-      id: "lifecycle",
+      id: "lifecycle", kind: "status", size: 128, minSize: 112,
       header: "Lifecycle",
       cell: (f) => <LifecycleBadge lifecycle={f.lifecycle} />,
       exportValue: (f) => f.lifecycle,
       sort: (a, b) => a.lifecycle.localeCompare(b.lifecycle),
-      width: "118px",
     },
     {
-      id: "kind",
+      id: "kind", kind: "status",
       header: "Kind",
       cell: (f) => <span className="text-[10px] text-mono text-muted-foreground">{f.kind}</span>,
       exportValue: (f) => f.kind,
       sort: (a, b) => a.kind.localeCompare(b.kind),
-      width: "108px",
     },
     {
-      id: "age",
+      id: "age", kind: "age", size: 144, minSize: 128,
       header: "Age",
-      numeric: true,
       cell: (f) => <span className="text-[10px] text-muted-foreground">{fmtRelative(f.last_seen_at)}</span>,
       exportValue: (f) => f.last_seen_at,
       sort: (a, b) => +new Date(a.last_seen_at) - +new Date(b.last_seen_at),
-      width: "120px",
     },
   ];
 
@@ -591,11 +579,11 @@ export function FindingsPage() {
 // (how many images / clusters it hits and total instances), sorted by risk.
 function CVETable({ rows, loading, clusterId }: { rows: CVERollup[]; loading: boolean; clusterId?: string }) {
   const columns: Column<CVERollup>[] = [
-    { id: "severity", header: "Severity", width: "108px",
+    { id: "severity", kind: "badge", size: 120, minSize: 112, header: "Severity",
       cell: (c) => <SeverityBadge severity={c.severity} />,
       exportValue: (c) => c.severity,
       sort: (a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] },
-    { id: "cve", header: "CVE", width: "190px",
+    { id: "cve", kind: "id", size: 176, minSize: 160, header: "CVE",
       cell: (c) => (
         <span className="flex items-center gap-1.5">
           <Link to="." href={clusterId ? `/clusters/${clusterId}/cve/${c.cve}` : `/cve/${c.cve}`} className="text-mono text-xs hover:text-[color:var(--color-primary)]">{c.cve}</Link>
@@ -604,28 +592,28 @@ function CVETable({ rows, loading, clusterId }: { rows: CVERollup[]; loading: bo
       ),
       exportValue: (c) => c.kev ? `${c.cve} KEV` : c.cve,
       sort: (a, b) => a.cve.localeCompare(b.cve) },
-    { id: "cvss", header: "CVSS", numeric: true, width: "72px",
+    { id: "cvss", kind: "count", size: 88, minSize: 80, header: "CVSS", numeric: true,
       cell: (c) => {
         const score = cvssScore(c);
         return <span className="text-mono text-xs" style={{ color: cvssColor(score) }}>{score ? score.toFixed(1) : "—"}</span>;
       },
       exportValue: (c) => cvssScore(c) ?? "",
       sort: (a, b) => (cvssScore(a) ?? 0) - (cvssScore(b) ?? 0) },
-    { id: "cvss_vector", header: "Vector", width: "230px",
+    { id: "cvss_vector", kind: "id", size: 208, minSize: 176, header: "Vector",
       cell: (c) => (
-        <span className="block max-w-[220px] truncate text-mono text-[10px] text-muted-foreground" title={c.cvss_vector || undefined}>
+        <span className="block truncate text-mono text-[10px] text-muted-foreground" title={c.cvss_vector || undefined}>
           {c.cvss_vector || "—"}
         </span>
       ),
       exportValue: (c) => c.cvss_vector ?? "",
       sort: (a, b) => (a.cvss_vector ?? "").localeCompare(b.cvss_vector ?? "") },
-    { id: "package", header: "Package",
+    { id: "package", kind: "name", size: 152, minSize: 128, grow: false, header: "Package",
       cell: (c) => <span className="text-mono text-xs">{c.package || "—"}</span>,
       exportValue: (c) => c.package ?? "" },
-    { id: "fixed", header: "Fixed in",
+    { id: "fixed", kind: "text", size: 160, minSize: 112, wrap: true, header: "Fixed in",
       cell: (c) => <span className="text-mono text-xs text-muted-foreground">{c.fixed_version || "—"}</span>,
       exportValue: (c) => c.fixed_version ?? "" },
-    { id: "affected", header: "Affected", numeric: true,
+    { id: "affected", kind: "count", size: 176, minSize: 144, maxSize: 200, wrap: true, header: "Affected", numeric: true,
       cell: (c) => (
         <span className="text-xs" title={c.images.join("\n")}>
           {c.affected_images} image{c.affected_images === 1 ? "" : "s"}
@@ -634,15 +622,15 @@ function CVETable({ rows, loading, clusterId }: { rows: CVERollup[]; loading: bo
       ),
       exportValue: (c) => `${c.affected_images} images; ${c.affected_clusters} clusters`,
       sort: (a, b) => a.affected_images - b.affected_images },
-    { id: "instances", header: "Instances", numeric: true, width: "96px",
+    { id: "instances", kind: "count", size: 112, minSize: 96, header: "Instances", numeric: true,
       cell: (c) => <span className="text-mono text-xs">{c.instances}</span>,
       exportValue: (c) => c.instances,
       sort: (a, b) => a.instances - b.instances },
-    { id: "risk", header: "Risk", numeric: true, width: "80px",
+    { id: "risk", kind: "count", size: 88, minSize: 80, header: "Risk", numeric: true,
       cell: (c) => <RiskScore score={c.risk_score} />,
       exportValue: (c) => c.risk_score,
       sort: (a, b) => a.risk_score - b.risk_score },
-    { id: "age", header: "Age", numeric: true,
+    { id: "age", kind: "age", size: 144, minSize: 128, header: "Age",
       cell: (c) => <span className="text-[10px] text-muted-foreground">{fmtRelative(c.last_seen_at)}</span>,
       exportValue: (c) => c.last_seen_at,
       sort: (a, b) => +new Date(a.last_seen_at) - +new Date(b.last_seen_at) },

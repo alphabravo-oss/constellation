@@ -72,25 +72,25 @@ export function CompliancePage() {
   const workspaceFailed = !scopeReady || summary.isError || fws.isError || (tab === "frameworks" && checks.isError) || (tab === "evidence" && evidence.isError) || (tab === "schedules" && schedules.isError);
   const checkColumns: Column<ComplianceCheck>[] = [
     {
-      id: "control",
+      id: "control", kind: "id", size: 160, minSize: 128, wrap: true,
       hideable: false, exportValue: (c) => c.control_id,
       header: "Control",
       cell: (c) => <span className="font-mono text-xs">{c.control_id}</span>,
     },
     {
-      id: "title",
+      id: "title", kind: "text", grow: true, minSize: 280, wrap: true,
       exportValue: (c) => c.title,
       header: "Title",
       cell: (c) => (
         <div>
           <div>{c.title}</div>
           {c.evidence && (
-            <div className="mt-0.5 max-w-xl truncate text-xs text-muted-foreground" title={c.evidence}>
+            <div className="mt-0.5 text-xs text-muted-foreground" title={c.evidence}>
               {c.evidence}
             </div>
           )}
           {c.remediation && c.effective_status === "fail" && (
-            <div className="mt-1 max-w-xl rounded border-l-2 border-[color:var(--color-severity-medium)] bg-muted/40 px-2 py-1 text-[11px] text-muted-foreground">
+            <div className="mt-1 rounded border-l-2 border-[color:var(--color-severity-medium)] bg-muted/40 px-2 py-1 text-[11px] text-muted-foreground">
               <span className="font-medium text-foreground">Remediation: </span>{c.remediation}
             </div>
           )}
@@ -115,7 +115,7 @@ export function CompliancePage() {
       ),
     },
     {
-      id: "status",
+      id: "status", kind: "status", size: 120, minSize: 104,
       exportValue: (c) => c.effective_status ?? c.status,
       header: "Status",
       cell: (c) => {
@@ -128,13 +128,13 @@ export function CompliancePage() {
       },
     },
     {
-      id: "severity",
+      id: "severity", kind: "badge", size: 112, minSize: 104,
       exportValue: (c) => c.severity,
       header: "Severity",
       cell: (c) => <span className="text-xs text-muted-foreground">{c.severity}</span>,
     },
     {
-      id: "action",
+      id: "action", kind: "actions", size: 136, minSize: 128,
       hideable: false, exportable: false,
       header: "Action",
       cell: (c) => {
@@ -219,35 +219,35 @@ export function CompliancePage() {
 
 const evidenceColumns: Column<ComplianceEvidenceItem>[] = [
   {
-    id: "scope",
+    id: "scope", kind: "status", size: 112, minSize: 96,
     exportValue: (item) => item.scope,
     header: "Scope",
     cell: (item) => <span className="text-xs text-muted-foreground">{item.scope}</span>,
   },
   {
-    id: "target",
+    id: "target", kind: "name", grow: true, minSize: 200, wrap: true,
     exportValue: (item) => item.target,
     header: "Target",
     cell: (item) => (
       <>
-        <div className="max-w-[220px] truncate font-medium" title={item.target}>{item.target}</div>
+        <div className="font-medium" title={item.target}>{item.target}</div>
         <div className="text-xs text-muted-foreground">{item.target_kind}</div>
       </>
     ),
   },
   {
-    id: "control",
+    id: "control", kind: "id", size: 160, minSize: 128, wrap: true,
     exportValue: (item) => `${item.framework} · ${item.control_id}`,
     header: "Control",
     cell: (item) => (
       <>
         <div className="font-mono text-xs">{item.framework} · {item.control_id}</div>
-        <div className="max-w-md truncate text-xs text-muted-foreground" title={item.title}>{item.title}</div>
+        <div className="text-xs text-muted-foreground" title={item.title}>{item.title}</div>
       </>
     ),
   },
   {
-    id: "status",
+    id: "status", kind: "status", size: 120, minSize: 104,
     exportValue: (item) => item.effective_status ?? item.status,
     header: "Status",
     cell: (item) => {
@@ -260,16 +260,16 @@ const evidenceColumns: Column<ComplianceEvidenceItem>[] = [
     },
   },
   {
-    id: "evidence",
+    id: "evidence", kind: "text", grow: true, minSize: 280, wrap: true,
     exportValue: (item) => item.evidence ?? "",
     header: "Evidence",
     cell: (item) => (
       <>
-        <div className="max-w-xl truncate text-xs text-muted-foreground" title={item.evidence || ""}>
+        <div className="text-xs text-muted-foreground" title={item.evidence || ""}>
           {item.evidence || "No evidence text"}
         </div>
         {item.exemption && (
-          <div className="mt-0.5 max-w-xl truncate text-xs text-muted-foreground" title={item.exemption.reason}>
+          <div className="mt-0.5 text-xs text-muted-foreground" title={item.exemption.reason}>
             Exempt until {formatDateTime(item.exemption.expires_at)} · {item.exemption.reason}
           </div>
         )}
@@ -466,65 +466,18 @@ function ScheduleRow({
             <p className="text-xs text-muted-foreground">No runs recorded yet.</p>
           )}
           {runs.data && runs.data.runs.length > 0 && (
-            <table className="app-semantic-table w-full text-xs">
-              <thead className="text-muted-foreground">
-                <tr className="border-b border-border">
-                  <th className="px-1.5 py-1 text-left">Started</th>
-                  <th className="px-1.5 py-1 text-left">Status</th>
-                  <th className="px-1.5 py-1 text-left">Pass / Fail / Manual</th>
-                  <th className="px-1.5 py-1 text-left">Signature</th>
-                  <th className="px-1.5 py-1 text-left">Artifact</th>
-                </tr>
-              </thead>
-              <tbody>
-                {runs.data.runs.map((r) => (
-                  <tr key={r.id} className="border-b border-border/40">
-                    <td className="px-1.5 py-1">{new Date(r.started_at).toLocaleString()}</td>
-                    <td className="px-1.5 py-1">
-                      <span
-                        className={`rounded-md px-1.5 py-0.5 text-[10px] ${
-                          r.status === "succeeded"
-                            ? "bg-[color:var(--color-status-success)]/15 text-[color:var(--color-status-success)]"
-                            : r.status === "failed"
-                              ? "bg-[color:var(--color-status-error)]/15 text-[color:var(--color-status-error)]"
-                              : "bg-muted text-muted-foreground"
-                        }`}
-                      >
-                        {r.status}
-                      </span>
-                    </td>
-                    <td className="px-1.5 py-1 font-mono">
-                      {r.summary.pass ?? 0} / {r.summary.fail ?? 0} / {r.summary.manual ?? 0}
-                    </td>
-                    <td className="px-1.5 py-1 font-mono text-[10px]" title={r.artifact_signature ?? ""}>
-                      {r.artifact_signature ? (
-                        <span className="rounded bg-[color:var(--color-status-success)]/15 px-1.5 py-0.5 text-[color:var(--color-status-success)]">
-                          Signature recorded
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </td>
-                    <td className="px-1.5 py-1">
-                      {r.artifact_uri ? (
-                        <button
-                          type="button"
-                          disabled={unavailable}
-                          onClick={() => compliance.downloadRunArtifact(r.id).catch(() => toast.error("Artifact download failed. Try again."))}
-                          className="inline-flex items-center gap-1 text-foreground hover:underline"
-                          data-testid={`run-download-${r.id}`}
-                        >
-                          <Download className="h-3 w-3" aria-hidden />
-                          Download
-                        </button>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <DataTable
+              rows={runs.data.runs}
+              rowKey={(run) => run.id}
+              showDensityToggle={false}
+              columns={[
+                { id: "started", header: "Started", kind: "date", size: 192, minSize: 176, cell: (run) => new Date(run.started_at).toLocaleString() },
+                { id: "status", header: "Status", kind: "status", size: 144, minSize: 128, cell: (run) => <span className={`rounded-md px-1.5 py-0.5 text-[10px] ${run.status === "succeeded" ? "bg-[color:var(--color-status-success)]/15 text-[color:var(--color-status-success)]" : run.status === "failed" ? "bg-[color:var(--color-status-error)]/15 text-[color:var(--color-status-error)]" : "bg-muted text-muted-foreground"}`}>{run.status}</span> },
+                { id: "summary", header: "Pass / Fail / Manual", kind: "count", numeric: true, size: 184, minSize: 176, cell: (run) => `${run.summary.pass ?? 0} / ${run.summary.fail ?? 0} / ${run.summary.manual ?? 0}` },
+                { id: "signature", header: "Signature", kind: "status", size: 176, minSize: 160, cell: (run) => run.artifact_signature ? <span title={run.artifact_signature} className="rounded bg-[color:var(--color-status-success)]/15 px-1.5 py-0.5 text-[color:var(--color-status-success)]">Signature recorded</span> : <span className="text-muted-foreground">—</span> },
+                { id: "artifact", header: "Artifact", kind: "actions", size: 144, minSize: 136, cell: (run) => run.artifact_uri ? <button type="button" disabled={unavailable} onClick={() => compliance.downloadRunArtifact(run.id).catch(() => toast.error("Artifact download failed. Try again."))} className="inline-flex items-center gap-1 text-foreground hover:underline" data-testid={`run-download-${run.id}`}><Download className="h-3 w-3" aria-hidden /> Download</button> : <span className="text-muted-foreground">—</span> },
+              ]}
+            />
           )}
         </div>
       )}

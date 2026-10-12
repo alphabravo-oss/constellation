@@ -62,20 +62,20 @@ export function FileMonitorPage() {
     },
   });
   const columns: Column<FileProfileRule>[] = [
-    { id: "filter", header: "Path filter", cell: (r) => r.filter, code: true, hideable: false, sort: (a, b) => a.filter.localeCompare(b.filter) },
-    { id: "behavior", header: "Behavior", cell: (r) => r.behavior === "block_access" ? "Block access" : "Observe changes", exportValue: (r) => r.behavior, sort: (a, b) => a.behavior.localeCompare(b.behavior) },
-    { id: "enabled", header: "Rule status", cell: (r) => r.enabled ? "Enabled" : "Disabled", exportValue: (r) => r.enabled, sort: (a, b) => Number(a.enabled) - Number(b.enabled) },
-    { id: "recursive", header: "Subdirectories", cell: (r) => r.recursive ? "Included" : "Excluded", exportValue: (r) => r.recursive },
-    { id: "actions", header: "Actions", hideable: false, exportable: false, cell: (r) => <div className="flex gap-2">
+    { id: "filter", header: "Path filter", kind: "name", cell: (r) => r.filter, code: true, hideable: false, sort: (a, b) => a.filter.localeCompare(b.filter) },
+    { id: "behavior", header: "Behavior", kind: "status", size: 152, minSize: 144, maxSize: 176, cell: (r) => r.behavior === "block_access" ? "Block access" : "Observe changes", exportValue: (r) => r.behavior, sort: (a, b) => a.behavior.localeCompare(b.behavior) },
+    { id: "enabled", header: "Rule status", kind: "status", cell: (r) => r.enabled ? "Enabled" : "Disabled", exportValue: (r) => r.enabled, sort: (a, b) => Number(a.enabled) - Number(b.enabled) },
+    { id: "recursive", header: "Subdirectories", kind: "status", cell: (r) => r.recursive ? "Included" : "Excluded", exportValue: (r) => r.recursive },
+    { id: "actions", header: "Actions", kind: "actions", hideable: false, exportable: false, cell: (r) => <div className="flex justify-end gap-2">
       <Button variant="ghost" size="sm" disabled={!canAuthor || delMut.isPending} aria-label={`Edit rule ${r.filter}`} onClick={() => gotoForm(r.id)}><Edit3 className="h-4 w-4" /></Button>
       <Button variant="ghost" size="sm" disabled={!canAuthor || delMut.isPending} aria-label={`Delete rule ${r.filter}`} onClick={() => { delMut.reset(); setPendingDelete({ workload: activeWorkload!, cluster: clusterId!, rule: r }); }}><Trash2 className="h-4 w-4" /></Button>
     </div> },
   ];
   const workloadColumns: Column<FileProfileSummary>[] = [
-    { id: "name", header: "Workload", hideable: false, cell: (p) => <button type="button" className="text-primary hover:underline" onClick={() => { setPendingDelete(null); setParams((current) => { current.set("workload", p.workload_id); current.delete("tab"); return current; }); }}>{p.name || p.workload_id}</button>, exportValue: (p) => p.name || p.workload_id, sort: (a, b) => a.name.localeCompare(b.name) },
-    { id: "namespace", header: "Namespace", cell: (p) => p.namespace, sort: (a, b) => a.namespace.localeCompare(b.namespace) },
-    { id: "mode", header: "Profile mode", cell: (p) => p.mode, sort: (a, b) => a.mode.localeCompare(b.mode) },
-    { id: "rules", header: "Rules", cell: (p) => p.rule_count, numeric: true, sort: (a, b) => a.rule_count - b.rule_count },
+    { id: "name", header: "Workload", kind: "name", hideable: false, cell: (p) => <button type="button" className="text-primary hover:underline" onClick={() => { setPendingDelete(null); setParams((current) => { current.set("workload", p.workload_id); current.delete("tab"); return current; }); }}>{p.name || p.workload_id}</button>, exportValue: (p) => p.name || p.workload_id, sort: (a, b) => a.name.localeCompare(b.name) },
+    { id: "namespace", header: "Namespace", kind: "text", size: 176, minSize: 144, maxSize: 240, cell: (p) => p.namespace, sort: (a, b) => a.namespace.localeCompare(b.namespace) },
+    { id: "mode", header: "Profile mode", kind: "status", cell: (p) => p.mode, sort: (a, b) => a.mode.localeCompare(b.mode) },
+    { id: "rules", header: "Rules", kind: "count", cell: (p) => p.rule_count, numeric: true, sort: (a, b) => a.rule_count - b.rule_count },
   ];
   const refresh = () => { void listQ.refetch(); if (activeProfile) void detailQ.refetch(); };
 

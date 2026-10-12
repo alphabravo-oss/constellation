@@ -32,6 +32,35 @@ afterEach(() => {
 });
 
 describe("DataTable preferences", () => {
+  it("keeps text and numeric headers aligned with their cells, including sortable and centered columns", () => {
+    render(<DataTable rows={rows} columns={[
+      { ...columns[0], kind: "name", sort: (a, b) => a.name.localeCompare(b.name) },
+      { ...columns[1], kind: "count", sort: (a, b) => a.risk - b.risk },
+      { ...columns[2], kind: "status", align: "center" },
+    ]} rowKey={(row) => row.id} />);
+    for (const [index, align] of ["left", "right", "center"].entries()) {
+      expect((host?.querySelectorAll("th")[index] as HTMLElement).style.textAlign).toBe(align);
+      expect((host?.querySelectorAll("tbody td")[index] as HTMLElement).style.textAlign).toBe(align);
+    }
+    const header = host?.querySelector<HTMLElement>('th[data-column-id="risk"]');
+    act(() => header?.querySelector("button")?.click());
+    expect(header?.getAttribute("aria-sort")).toBe("descending");
+    expect(host?.querySelectorAll("col")).toHaveLength(3);
+  });
+
+  it("retains native sizing for legacy CSS widths and recomputes semantic columns after hiding one", () => {
+    render(<DataTable rows={rows} columns={[
+      { ...columns[0], width: "60%" }, columns[1], columns[2],
+    ]} rowKey={(row) => row.id} />);
+    expect(host?.querySelector("table")?.getAttribute("data-layout")).toBe("auto");
+    const semantic: Column<Row>[] = [{ ...columns[0], kind: "name" }, { ...columns[1], kind: "count" }, { ...columns[2], kind: "status" }];
+    act(() => root?.render(<DataTable rows={rows} columns={semantic} hiddenColumnIds={["owner"]} rowKey={(row) => row.id} selectable selected={new Set()} />));
+    expect(host?.querySelector("table")?.getAttribute("data-layout")).toBe("semantic");
+    expect(host?.querySelectorAll("col")).toHaveLength(3);
+    expect(host?.querySelectorAll("th")).toHaveLength(3);
+    expect(host?.querySelectorAll("tbody td")).toHaveLength(3);
+  });
+
   it("applies global table styling and keyboard activation to clickable rows", () => {
     const onRowClick = vi.fn();
     render(

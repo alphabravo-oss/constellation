@@ -271,7 +271,8 @@
 }
 
 @layer components {
-  .app-data-table {
+  .app-data-table,
+  .app-semantic-table {
     --table-text-primary: var(--color-foreground);
     --table-text-secondary: color-mix(in oklab, var(--color-foreground) 86%, var(--color-background));
     --table-text-tertiary: color-mix(in oklab, var(--color-foreground) 68%, var(--color-background));
@@ -294,9 +295,48 @@
     font-weight: 600;
     letter-spacing: 0;
     text-transform: none;
+    text-align: left;
+    vertical-align: middle;
   }
 
-  .app-data-table tbody td { color: var(--color-foreground); }
+  .app-data-table tbody td { color: var(--color-foreground); vertical-align: middle; }
+
+  /* Never put generated content on a table row: browsers can allocate an
+     anonymous cell for it, shifting body columns away from their headers. */
+  .app-data-table tr::before,
+  .app-data-table tr::after { content: none; }
+
+  .app-table-scroll { max-width: 100%; }
+  .app-table-header-button {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.375rem;
+    text-align: inherit;
+  }
+  .app-data-table th[data-align="right"] .app-table-header-button { justify-content: flex-end; }
+  .app-data-table th[data-align="center"] .app-table-header-button { justify-content: center; }
+  .app-data-table table[data-layout="semantic"] th { white-space: nowrap; }
+  .app-table-cell-content { min-width: 0; max-width: 100%; }
+  .app-table-cell-content[data-overflow="truncate"],
+  .app-table-cell-content[data-overflow="middle"] { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .app-table-cell-content[data-overflow="wrap-2"] {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+  .app-table-cell-content[data-overflow="wrap"] { white-space: normal; overflow-wrap: anywhere; }
+  .app-table-cell-content[data-overflow="nowrap"] { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .app-data-table td[data-kind="actions"] .app-table-cell-content {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 0.5rem;
+  }
 
   .app-data-table tbody td .text-muted-foreground {
     color: var(--table-text-secondary);

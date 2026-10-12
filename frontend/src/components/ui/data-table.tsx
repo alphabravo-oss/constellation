@@ -1,4 +1,4 @@
-import { type ReactNode, type Key, useEffect, useMemo, useState } from "react";
+import { type ReactNode, type Key, useEffect, useMemo, useRef, useState } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
   useReactTable,
@@ -11,6 +11,8 @@ import { ArrowUpDown, Check, ChevronDown, ChevronUp, Download, RotateCcw, Rows2,
 import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
 import { cn } from "@/lib/cn";
 import { downloadCsv, type CsvCell } from "@/lib/csv";
+import { computeColumnWidths, parsePx, resolveColumnLayout, type ColumnKind } from "./data-table-layout";
+import { TableCellContent } from "./table-cell-content";
 
 export type Density = "compact" | "cozy" | "comfy";
 interface StoredTablePreferences {
@@ -25,6 +27,15 @@ export interface Column<T> {
   /** Sort comparator. If omitted, column is not sortable. */
   sort?: (a: T, b: T) => number;
   width?: string;
+  /** Shared semantic sizing; explicit dimensions override the kind defaults. */
+  kind?: ColumnKind;
+  size?: number;
+  minSize?: number;
+  maxSize?: number;
+  grow?: boolean;
+  align?: "left" | "center" | "right";
+  /** Preserve full multiline content instead of the kind's clipping policy. */
+  wrap?: boolean;
   className?: string;
   numeric?: boolean;
   /** Use for image refs, node names, versions, IPs, and other machine identifiers. */
@@ -162,6 +173,29 @@ function DataTableView<T>({
     [columns, hiddenIds],
   );
   const visibleColumnIds = useMemo(() => new Set(visibleColumns.map((c) => c.id)), [visibleColumns]);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element) return;
+    const measure = () => setContainerWidth(element.clientWidth);
+    measure();
+    if (typeof window.ResizeObserver === "undefined") return;
+    const observer = new window.ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  const layouts = useMemo(() => visibleColumns.map((column) => resolveColumnLayout({
+    ...column,
+    sortable: !!column.sort,
+    align: column.align ?? (column.numeric || /(?:^|\s)text-right(?:\s|$)/.test(column.className ?? "") ? "right" : /(?:^|\s)text-center(?:\s|$)/.test(column.className ?? "") ? "center" : undefined),
+  })), [visibleColumns]);
+  // Legacy CSS widths keep native layout. Semantic tables share one measured
+  // colgroup, so headers and cells cannot independently choose their widths.
+  const semanticLayout = layouts.length > 0 && layouts.every((layout) => layout.sized && (!layout.cssWidth || parsePx(layout.cssWidth) !== undefined));
+  const selectionWidth = selectable ? 40 : 0;
+  const columnWidths = semanticLayout ? computeColumnWidths(layouts, Math.max(0, containerWidth - selectionWidth)) : [];
+  const tableWidth = columnWidths.reduce((sum, width) => sum + width, selectionWidth);
 
   useEffect(() => {
     const valid = new Set(columns.map((c) => c.id));
@@ -295,9 +329,9 @@ function DataTableView<T>({
   const shouldShowToolbar = showDensityToggle || shouldShowColumnChooser || shouldShowExport;
 
   return (
-    <div className={cn("app-data-table rounded-md border border-border bg-card overflow-hidden", className)} data-testid={testId}>
+    <div className={cn("app-data-table min-w-0 max-w-full rounded-md border border-border bg-card overflow-hidden", className)} data-testid={testId}>
       {shouldShowToolbar && (
-        <div className="flex items-center justify-end gap-2 border-b border-border px-2 py-1">
+        <div className="flex flex-wrap items-center justify-end gap-2 border-b border-border px-2 py-1">
           {shouldShowExport && (
             <button
               type="button"
@@ -331,8 +365,13 @@ function DataTableView<T>({
           )}
         </div>
       )}
-      <div className="overflow-auto">
-        <table className="w-full text-sm">
+      <div ref={scrollRef} className="app-table-scroll overflow-auto">
+        <table className="w-full text-sm" data-layout={semanticLayout ? "semantic" : "auto"}
+          style={semanticLayout ? { tableLayout: "fixed", width: tableWidth, minWidth: tableWidth } : undefined}>
+          {semanticLayout && <colgroup>
+            {selectable && <col style={{ width: selectionWidth }} />}
+            {visibleColumns.map((column, index) => <col key={column.id} style={{ width: columnWidths[index] }} />)}
+          </colgroup>}
           <thead className="sticky top-0 z-10">
             <tr className="border-b border-border text-xs">
               {selectable && (
@@ -346,38 +385,40 @@ function DataTableView<T>({
                   />
                 </th>
               )}
-              {headers.map((h) => {
+              {headers.map((h, index) => {
                 const c = colById.get(h.column.id);
+                const layout = layouts[index];
                 const dir = h.column.getIsSorted();
                 return (
                   <th
                     key={h.id}
                     scope="col"
+                    data-column-id={h.column.id}
+                    data-align={layout.align}
+                    aria-sort={dir ? (dir === "asc" ? "ascending" : "descending") : undefined}
                     className={cn(
                       "h-10 py-2 font-semibold select-none",
                       cellPad,
-                      c?.numeric && "text-right",
                       c?.sticky && "sticky left-0 bg-card",
                       c?.className,
                     )}
-                    style={c?.width ? { width: c.width } : undefined}
+                    style={{ textAlign: layout.align, ...(!semanticLayout && c?.width ? { width: c.width } : {}) }}
                   >
                     {c?.sort ? (
                       <button
                         type="button"
                         onClick={h.column.getToggleSortingHandler()}
                         className={cn(
-                          "inline-flex items-center gap-1 hover:text-foreground transition-colors",
-                          c.numeric && "ml-auto",
+                          "app-table-header-button hover:text-foreground transition-colors",
                         )}
                       >
-                        {c.header}
+                        <span>{c.header}</span>
                         {dir === "desc" ? (
-                          <ChevronDown className="h-3 w-3" />
+                          <ChevronDown className="h-3 w-3 shrink-0" />
                         ) : dir === "asc" ? (
-                          <ChevronUp className="h-3 w-3" />
+                          <ChevronUp className="h-3 w-3 shrink-0" />
                         ) : (
-                          <ArrowUpDown className="h-3 w-3 opacity-40" />
+                          <ArrowUpDown className="h-3 w-3 shrink-0 opacity-40" />
                         )}
                       </button>
                     ) : (
@@ -401,7 +442,7 @@ function DataTableView<T>({
                   data-selected={isSel || undefined}
                   tabIndex={onRowClick ? 0 : undefined}
                   className={cn(
-                    "accent-slide border-b border-border last:border-b-0 transition-colors",
+                    "border-b border-border last:border-b-0 transition-colors",
                     onRowClick && "app-data-table-row-clickable cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--color-primary)]",
                     !isSel && "hover:bg-[var(--table-row-hover)]",
                     rowH,
@@ -430,19 +471,22 @@ function DataTableView<T>({
                       />
                     </td>
                   )}
-                      {visibleColumns.map((c) => (
+                      {visibleColumns.map((c, index) => (
                     <td
                       key={c.id}
+                      data-column-id={c.id}
+                      data-align={layouts[index].align}
+                      data-kind={c.kind}
+                      style={{ textAlign: layouts[index].align }}
                       className={cn(
                         cellPad,
-                        c.numeric && "text-right text-mono",
-                        c.code && "app-table-code",
-                        c.numeric && "app-table-numeric",
+                        (c.code || layouts[index].mono) && "app-table-code",
+                        (c.numeric || layouts[index].numeric) && "app-table-numeric",
                         c.sticky && "sticky left-0 bg-card",
                         c.className,
                       )}
                     >
-                      {c.cell(row)}
+                      <TableCellContent overflow={semanticLayout ? layouts[index].overflow : "legacy"} width={columnWidths[index]}>{c.cell(row)}</TableCellContent>
                     </td>
                   ))}
                 </tr>

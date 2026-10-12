@@ -312,6 +312,38 @@ Updated browser specs were discovered but the full browser runner was not rerun.
 Remaining table geometry, integration forms, Findings server filtering/export and
 other UI-1/2/3/4 acceptance remain open; these checks do not imply full parity.
 
+The shared-table visual continuation fixes a browser layout defect in the common
+row hover decoration: a `tr::before` generated an anonymous cell and shifted body
+values one column away from the headers. Shared tables now use matching explicit
+header/body alignment, a single measured column layout, and an Astronomer-derived
+semantic sizing model. Names and descriptions can grow; statuses, counts, dates and
+actions remain bounded. Header labels reserve room for sort icons. Legacy tables
+retain native width handling while adopting the alignment fix. Overflow stays
+inside each table, and clipped values remain available on hover or keyboard focus.
+Version lists and compliance evidence wrap fully. Table guidance now lives in
+`frontend/CLAUDE.md` so future pages use these shared rules rather than local CSS.
+
+Primary cluster, deployment, Findings, image, CVE, compliance, response, group,
+vulnerability-profile, node, registry and file-monitor tables now declare semantic
+columns. Network session/PCAP/threat inventories, scanner worker/cache/queue tables,
+image evidence, effective configuration/revision tables and compliance run history
+use the canonical DataTable. Some compact read-only matrices remain semantic HTML;
+this increment does not claim every UI-2 feature or every detail surface is complete.
+
+Validation: deployed at Helm revision **39** with
+`constellation/frontend:table-layout-final-20261012`; all seven deployments are
+ready. The final source passes **408 frontend tests**, production type-check/build,
+changed-source lint, endpoint mapping and plan/whitespace checks. The shared-browser
+response catalog has matching header/body positions at 1440px/cozy,
+1024px/compact and 640px/comfy, with no action clipping or document overflow.
+CVE, Nodes and Findings also have matching column positions and numeric alignment.
+Findings column hide/restore preserves alignment; full version lists wrap without
+spilling; node timestamps fit; nested clipped vector text exposes its complete
+value through the focusable tooltip. The viewport and changed column/density
+preferences were restored. A readonly browser geometry regression was added and
+successfully discovered, but the full browser runner was not executed for this
+increment. Remaining compact detail matrices and broader UI-2 workflows stay open.
+
 The admission-engine continuation adds migration **172** and persists normalized
 engine outcomes atomically with image scan completion. The built-in vulnerability
 profiles now require successful Trivy and Grype results rather than retired

@@ -95,7 +95,7 @@ export function CVEPage() {
   const columns = useMemo<Column<CVEResult>[]>(
     () => [
       {
-        id: "cve_id",
+        id: "cve_id", kind: "id", size: 176, minSize: 160,
         header: "CVE-ID",
         cell: (r) => (
           <Link to="." href={`/cve/${r.cve_id}`} className="text-mono text-[12px] text-[color:var(--color-primary)] hover:underline">
@@ -103,17 +103,15 @@ export function CVEPage() {
           </Link>
         ),
         sort: (a, b) => a.cve_id.localeCompare(b.cve_id),
-        width: "160px",
       },
       {
-        id: "severity",
+        id: "severity", kind: "badge", size: 120, minSize: 112,
         header: "Severity",
         cell: (r) => <SeverityBadge severity={severityOf(r.cvss_base)} kev={r.kev_listed} />,
         sort: (a, b) => (a.cvss_base ?? -1) - (b.cvss_base ?? -1),
-        width: "110px",
       },
       {
-        id: "cvss",
+        id: "cvss", kind: "count", size: 88, minSize: 80,
         header: "CVSS",
         numeric: true,
         cell: (r) => (
@@ -122,24 +120,21 @@ export function CVEPage() {
           </span>
         ),
         sort: (a, b) => (a.cvss_base ?? -1) - (b.cvss_base ?? -1),
-        width: "80px",
       },
       {
-        id: "kev",
+        id: "kev", kind: "badge", size: 88, minSize: 80,
         header: "KEV",
         cell: (r) => (r.kev_listed ? <KevBadge /> : <span className="text-muted-foreground text-[10px]">—</span>),
         sort: (a, b) => Number(a.kev_listed) - Number(b.kev_listed),
-        width: "70px",
       },
       {
-        id: "epss",
+        id: "epss", kind: "percent", size: 144, minSize: 136, maxSize: 160,
         header: "EPSS",
         cell: (r) => <EpssBar value={r.epss_probability} />,
         sort: (a, b) => (a.epss_probability ?? -1) - (b.epss_probability ?? -1),
-        width: "120px",
       },
       {
-        id: "title",
+        id: "title", kind: "text", grow: true, minSize: 240,
         header: "Title",
         cell: (r) => (
           <span className="line-clamp-1 text-[12px] text-foreground/90" title={r.title ?? r.description}>
@@ -148,7 +143,7 @@ export function CVEPage() {
         ),
       },
       {
-        id: "sources",
+        id: "sources", kind: "badge", size: 144, minSize: 128, wrap: true,
         header: "Sources",
         cell: (r) => (
           <div className="flex flex-wrap gap-1">
@@ -159,10 +154,9 @@ export function CVEPage() {
             ))}
           </div>
         ),
-        width: "180px",
       },
       {
-        id: "published",
+        id: "published", kind: "date", size: 136, minSize: 128,
         header: "Published",
         cell: (r) =>
           r.published_at ? (
@@ -173,7 +167,6 @@ export function CVEPage() {
             <span className="text-muted-foreground text-[10px]">—</span>
           ),
         sort: (a, b) => (a.published_at ?? "").localeCompare(b.published_at ?? ""),
-        width: "110px",
       },
     ],
     [],
@@ -379,7 +372,7 @@ function EpssBar({ value }: { value?: number }) {
   const pct = Math.min(100, Math.max(0, value * 100));
   const hot = pct >= 50;
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex items-center justify-end gap-1.5">
       <div className="h-1.5 w-14 overflow-hidden rounded-sm bg-muted">
         <div
           className="h-full rounded-sm"

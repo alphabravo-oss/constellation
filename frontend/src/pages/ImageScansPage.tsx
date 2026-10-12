@@ -53,7 +53,7 @@ export function ImageScansPage() {
 
   const columns: Column<ImageScanResult>[] = [
     {
-      id: "image",
+      id: "image", kind: "name", grow: true, minSize: 280, wrap: true,
       header: "Image",
       cell: (item) => (
         <>
@@ -70,12 +70,12 @@ export function ImageScansPage() {
       ),
     },
     {
-      id: "risk",
+      id: "risk", kind: "count", size: 152, minSize: 136, maxSize: 176, wrap: true,
       header: "Risk",
       cell: (item) => <RiskStack item={item} />,
     },
     {
-      id: "exposure",
+      id: "exposure", kind: "count", size: 144, minSize: 128, maxSize: 160, wrap: true,
       header: "Exposure",
       cell: (item) => (
         <div className="text-xs">
@@ -85,7 +85,7 @@ export function ImageScansPage() {
       ),
     },
     {
-      id: "scan",
+      id: "scan", kind: "text", size: 232, minSize: 200, wrap: true,
       header: "Scan",
       cell: (item) => (
         <div className="text-xs">
@@ -272,7 +272,7 @@ function RiskStack({ item }: { item: ImageScanResult }) {
   return (
     <div className="space-y-1 text-xs">
       <div className="font-semibold">{item.max_risk_score}</div>
-      <div className="flex flex-wrap gap-1">
+      <div className="flex flex-wrap justify-end gap-1">
         {item.critical_count > 0 ? <Pill tone="danger">C {item.critical_count}</Pill> : null}
         {item.high_count > 0 ? <Pill tone="warn">H {item.high_count}</Pill> : null}
         {item.medium_count > 0 ? <Pill tone="neutral">M {item.medium_count}</Pill> : null}

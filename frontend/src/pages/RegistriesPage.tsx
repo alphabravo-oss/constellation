@@ -74,19 +74,23 @@ export function RegistriesPage() {
   const summary = useMemo(() => summarizeRegistries(rows, registryJobs), [rows, registryJobs]);
 
   const columns = useMemo<Column<RegistryDTO>[]>(() => [
-    { id: "name", header: "Name", cell: (r) => <span className="font-medium">{r.name}</span>, sort: (a, b) => a.name.localeCompare(b.name) },
-    { id: "kind", header: "Kind", cell: (r) => <KindBadge kind={r.kind} /> },
-    { id: "endpoint", header: "Endpoint", cell: (r) => <span className="text-mono text-xs text-muted-foreground">{r.endpoint}</span> },
-    { id: "cadence", header: "Cadence", cell: (r) => r.scan_cadence },
-    { id: "status", header: "Last sync", cell: (r) => <SyncPill row={r} />, sort: (a, b) => (a.last_sync_at ?? "").localeCompare(b.last_sync_at ?? "") },
+    { id: "name", header: "Name", kind: "name", hideable: false, cell: (r) => <span className="font-medium">{r.name}</span>, sort: (a, b) => a.name.localeCompare(b.name) },
+    { id: "kind", header: "Kind", kind: "text", size: 176, minSize: 136, maxSize: 216, cell: (r) => <KindBadge kind={r.kind} /> },
+    { id: "endpoint", header: "Endpoint", kind: "id", size: 224, minSize: 160, maxSize: 320, cell: (r) => <span className="text-mono text-xs text-muted-foreground">{r.endpoint}</span> },
+    { id: "cadence", header: "Cadence", kind: "age", size: 104, minSize: 88, maxSize: 128, cell: (r) => r.scan_cadence },
+    { id: "status", header: "Last sync", kind: "status", size: 224, minSize: 208, maxSize: 240, cell: (r) => <SyncPill row={r} />, sort: (a, b) => (a.last_sync_at ?? "").localeCompare(b.last_sync_at ?? "") },
     {
       id: "scan-jobs",
       header: "Scan jobs",
-      width: "150px",
+      kind: "badge",
+      size: 152,
+      minSize: 128,
+      maxSize: 192,
+      wrap: true,
       cell: (r) => <RegistryJobPills counts={registryJobCounts.get(r.id)} />,
       sort: (a, b) => (registryJobCounts.get(a.id)?.active ?? 0) - (registryJobCounts.get(b.id)?.active ?? 0),
     },
-    { id: "images", header: "Images", numeric: true, sort: (a, b) => a.images_seen - b.images_seen,
+    { id: "images", header: "Images", kind: "count", numeric: true, sort: (a, b) => a.images_seen - b.images_seen,
       cell: (r) => (
         <Link to="." href={clusterId ? `/clusters/${clusterId}/registries/${r.id}` : `/registries/${r.id}`} className="text-mono text-[color:var(--color-primary)] hover:underline" onClick={(e) => e.stopPropagation()}>
           {r.images_seen} →
@@ -95,6 +99,12 @@ export function RegistriesPage() {
     {
       id: "actions",
       header: "",
+      kind: "actions",
+      size: 48,
+      minSize: 48,
+      maxSize: 48,
+      hideable: false,
+      exportable: false,
       cell: (r) => {
         const activeJobs = registryJobCounts.get(r.id)?.active ?? 0;
         return (
@@ -144,7 +154,6 @@ export function RegistriesPage() {
           </DropdownMenu.Root>
         );
       },
-      width: "40px",
     },
   ], [base, navigate, clusterId, registryJobCounts, test, sync, cancelScans, remove]);
 
@@ -220,14 +229,14 @@ function SyncPill({ row }: { row: RegistryDTO }) {
     row.last_sync_status === "partial" ? "warning" :
     row.last_sync_status === "failed" ? "error" : "neutral";
   return (
-    <span className="flex items-center gap-2 min-w-0">
+    <div className="space-y-1">
       <StatusPill label={row.last_sync_status || "unknown"} tone={tone} />
       {row.last_sync_at && (
-        <span className="text-[10px] text-muted-foreground text-mono truncate">
+        <span className="block text-xs text-muted-foreground" title={new Date(row.last_sync_at).toLocaleString()}>
           {new Date(row.last_sync_at).toLocaleString()}
         </span>
       )}
-    </span>
+    </div>
   );
 }
 

@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { componentsInventory, systemConfigApi, type ComponentInstance, type ConfigProvenance } from "@/api/client";
 import { PageContainer, PageHeader, PageSection } from "@/components/ui/page";
+import { DataTable } from "@/components/ui/data-table";
 import { Card } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
 import { Button } from "@/components/ui/button";
@@ -153,25 +154,18 @@ export function EffectiveConfigPage() {
             {nonDefaultItems.length === 0 ? (
               <p className="mt-3 text-xs text-muted-foreground">No keys are reported with a non-default source.</p>
             ) : (
-              <div className="mt-3 overflow-x-auto">
-                <table className="app-semantic-table min-w-full text-xs">
-                  <thead className="text-left text-[10px] uppercase tracking-wider text-muted-foreground">
-                    <tr>
-                      <th className="px-2 py-1.5 font-medium">Key</th>
-                      <th className="px-2 py-1.5 font-medium">Current value</th>
-                      <th className="px-2 py-1.5 font-medium">Source / redaction</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {nonDefaultItems.map((item) => (
-                      <tr key={item.key} className="border-t border-border">
-                        <td className="break-all px-2 py-2 font-mono">{item.key}</td>
-                        <td className="max-w-[260px] break-all px-2 py-2 font-mono">{configValue(item)}</td>
-                        <td className="px-2 py-2"><ProvenancePills item={item} /></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="mt-3 min-w-0">
+                <DataTable<ConfigItem>
+                  rows={nonDefaultItems}
+                  rowKey={(item) => item.key}
+                  showDensityToggle={false}
+                  showColumnChooser={false}
+                  columns={[
+                    { id: "key", header: "Key", kind: "name", code: true, wrap: true, cell: (item) => item.key },
+                    { id: "value", header: "Current value", kind: "text", code: true, wrap: true, grow: true, cell: configValue },
+                    { id: "source", header: "Source / redaction", kind: "badge", size: 240, maxSize: 300, wrap: true, cell: (item) => <ProvenancePills item={item} /> },
+                  ]}
+                />
               </div>
             )}
           </section>
@@ -197,32 +191,20 @@ export function EffectiveConfigPage() {
           ) : appliedRows.length === 0 ? (
             <p className="mt-3 text-xs text-muted-foreground">No component heartbeats are available.</p>
           ) : (
-            <div className="mt-3 overflow-x-auto">
-              <table className="app-semantic-table min-w-full text-xs">
-                <thead className="text-left text-[10px] uppercase tracking-wider text-muted-foreground">
-                  <tr>
-                    <th className="px-2 py-1.5 font-medium">Component</th>
-                    <th className="px-2 py-1.5 font-medium">Host</th>
-                    <th className="px-2 py-1.5 font-medium">Reported revision</th>
-                    <th className="px-2 py-1.5 font-medium">Compared with target</th>
-                    <th className="px-2 py-1.5 font-medium">Last seen</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {appliedRows.slice(0, 12).map((row) => (
-                    <tr key={row.id} className="border-t border-border">
-                      <td className="px-2 py-2">
-                        <div className="font-medium">{row.component}</div>
-                        <div className="text-[10px] text-muted-foreground">{row.role} · {row.cluster}</div>
-                      </td>
-                      <td className="px-2 py-2 font-mono text-muted-foreground">{row.hostname}</td>
-                      <td className="px-2 py-2 font-mono">{row.reportedRevision ?? "Unknown"}</td>
-                      <td className="px-2 py-2"><AppliedStatusPill status={row.status} /></td>
-                      <td className="px-2 py-2 text-muted-foreground">{formatDateTime(row.lastSeenAt)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="mt-3 min-w-0">
+              <DataTable<AppliedRevisionRow>
+                rows={appliedRows.slice(0, 12)}
+                rowKey={(row) => row.id}
+                showDensityToggle={false}
+                showColumnChooser={false}
+                columns={[
+                  { id: "component", header: "Component", kind: "name", cell: (row) => <><div className="font-medium">{row.component}</div><div className="text-xs text-muted-foreground">{row.role} · {row.cluster}</div></> },
+                  { id: "host", header: "Host", kind: "id", cell: (row) => row.hostname },
+                  { id: "revision", header: "Reported revision", kind: "count", cell: (row) => row.reportedRevision ?? "Unknown" },
+                  { id: "status", header: "Compared with target", kind: "status", size: 200, cell: (row) => <AppliedStatusPill status={row.status} /> },
+                  { id: "lastSeen", header: "Last seen", kind: "date", cell: (row) => formatDateTime(row.lastSeenAt) },
+                ]}
+              />
               {appliedRows.length > 12 ? <p className="mt-2 text-xs text-muted-foreground">Showing 12 of {appliedRows.length} components.</p> : null}
             </div>
           )}

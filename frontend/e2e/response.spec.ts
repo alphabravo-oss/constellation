@@ -23,6 +23,29 @@ test("Response catalog shows built-in organization rules and URL event filters",
   await expect(page.getByRole("button", { name: "Authored response rules", exact: true })).toBeVisible();
 });
 
+test("shared table headers and cells stay aligned across widths and densities", async ({ page }) => {
+  await page.goto("/response");
+  const table = page.getByTestId("response-rules-table");
+  await expect(table.getByTestId("response-rule-row").first()).toBeVisible();
+  for (const width of [1440, 1024, 640]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const density of ["compact", "cozy", "comfy"]) {
+      await table.getByRole("button", { name: `${density} density`, exact: true }).click();
+      await expect.poll(() => table.evaluate((root) => {
+        const headers = Array.from(root.querySelectorAll("thead th"));
+        const cells = Array.from(root.querySelectorAll("tbody tr:first-child td"));
+        if (!headers.length || headers.length !== cells.length) return false;
+        return headers.every((header, index) => {
+          const h = header.getBoundingClientRect();
+          const c = cells[index].getBoundingClientRect();
+          return Math.abs(h.x - c.x) < 1 && Math.abs(h.width - c.width) < 1
+            && getComputedStyle(header).textAlign === getComputedStyle(cells[index]).textAlign;
+        });
+      })).toBe(true);
+    }
+  }
+});
+
 test("Response catalog overrides use a dedicated form and require a fresh preview", async ({ page }) => {
   await page.goto("/response");
   await page.getByLabel("Event type", { exact: true }).selectOption("dlp");

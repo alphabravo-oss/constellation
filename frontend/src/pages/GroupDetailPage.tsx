@@ -79,14 +79,14 @@ export function GroupDetailPage() {
       { value: "members", label: "Members", count: group.members?.length ?? 0, content: <Card title="Matching workloads" description="Current membership computed from the selectors and observed workloads.">
         <div data-testid="group-membership-preview" className="mb-4 text-sm text-muted-foreground">Last matched {fmtRelative(membership?.last_matched_at)}{membership?.last_matched_member ? ` · ${membership.last_matched_member}` : " · No current deployment evidence"}</div>
         <DataTable rows={(group.members ?? []).map((member) => ({ member }))} rowKey={(row) => row.member} preferencesKey="group-members" exportFileName="group-members.csv" defaultSort={{ id: "member", dir: "asc" }} columns={[
-          { id: "member", header: "Workload", hideable: false, code: true, cell: (row) => <Link to="." href={`/clusters/${clusterId}/deployments?q=${encodeURIComponent(row.member.split("/").pop() ?? row.member)}`} className="text-primary hover:underline">{row.member}</Link>, exportValue: (row) => row.member, sort: (a, b) => a.member.localeCompare(b.member) },
+          { id: "member", kind: "name", grow: true, minSize: 240, header: "Workload", hideable: false, code: true, cell: (row) => <Link to="." href={`/clusters/${clusterId}/deployments?q=${encodeURIComponent(row.member.split("/").pop() ?? row.member)}`} className="text-primary hover:underline">{row.member}</Link>, exportValue: (row) => row.member, sort: (a, b) => a.member.localeCompare(b.member) },
         ]} emptyState={<EmptyState title="No matching members" hint="Review the selectors and confirm matching workloads are reporting to this cluster." />} />
       </Card> },
       { value: "criteria", label: "Membership selectors", count: group.criteria?.length ?? 0, content: <Card title="Membership selectors" description="Every selector must match for a workload to belong to this group.">
         <DataTable rows={(group.criteria ?? []).map((criterion, index) => ({ ...criterion, index }))} rowKey={(row) => row.index} preferencesKey="group-selectors" exportFileName="group-selectors.csv" columns={[
-          { id: "key", header: "Key", cell: (row) => row.key, sort: (a, b) => a.key.localeCompare(b.key), code: true },
-          { id: "op", header: "Operator", cell: (row) => row.op || "eq", sort: (a, b) => (a.op || "eq").localeCompare(b.op || "eq") },
-          { id: "value", header: "Value", cell: (row) => row.value, sort: (a, b) => a.value.localeCompare(b.value), code: true },
+          { id: "key", kind: "id", size: 192, minSize: 160, header: "Key", cell: (row) => row.key, sort: (a, b) => a.key.localeCompare(b.key), code: true },
+          { id: "op", kind: "status", header: "Operator", cell: (row) => row.op || "eq", sort: (a, b) => (a.op || "eq").localeCompare(b.op || "eq") },
+          { id: "value", kind: "text", grow: true, minSize: 240, wrap: true, header: "Value", cell: (row) => row.value, sort: (a, b) => a.value.localeCompare(b.value), code: true },
         ]} emptyState={<EmptyState title="No selectors" hint="This group has no membership selectors and will not match workloads." />} />
       </Card> },
       { value: "usage", label: "Policy usage", count: usage?.summary.total_references, content: <GroupUsagePanel usage={usage} isLoading={usageQ.isPending} isError={usageError} onRetry={() => void usageQ.refetch()} /> },
@@ -107,12 +107,12 @@ function GroupUsagePanel({ usage, isLoading, isError, onRetry }: { usage?: Group
       {isLoading ? <LoadingState label="Loading policy usage…" /> : isError ? <ErrorState title="Policy usage could not be loaded." action={<Button onClick={onRetry}>Retry</Button>} /> : !usage ? <ErrorState title="Policy usage is unavailable." action={<Button onClick={onRetry}>Retry</Button>} /> : <div className="space-y-5">
         <p className="text-sm text-muted-foreground">{usage.summary.delete_blocked ? `Deletion is blocked by ${usage.summary.blocking_references} policy reference${usage.summary.blocking_references === 1 ? "" : "s"}. Remove these dependencies first.` : "No policy references currently block deletion."}</p>
         <DataTable rows={usage.references} rowKey={(row) => `${row.family}:${row.kind}:${row.id}:${row.role ?? ""}`} preferencesKey="group-usage" exportFileName="group-policy-usage.csv" testId="group-usage-references" columns={[
-          { id: "name", header: "Reference", hideable: false, cell: (row) => row.route ? <Link to="." href={row.route} className="text-primary hover:underline">{row.name}</Link> : row.name, sort: (a, b) => a.name.localeCompare(b.name), exportValue: (row) => row.name },
-          { id: "family", header: "Family", cell: (row) => row.family, sort: (a, b) => a.family.localeCompare(b.family) },
-          { id: "kind", header: "Kind", cell: (row) => row.kind, sort: (a, b) => a.kind.localeCompare(b.kind) },
-          { id: "role", header: "Role / mode", cell: (row) => [row.role, row.mode].filter(Boolean).join(" · ") || "—" },
-          { id: "blocking", header: "Dependency", cell: (row) => row.blocking ? "Blocks deletion" : "Derived", sort: (a, b) => Number(a.blocking) - Number(b.blocking) },
-          { id: "detail", header: "Details", cell: (row) => row.detail || "—" },
+          { id: "name", kind: "name", grow: true, minSize: 200, header: "Reference", hideable: false, cell: (row) => row.route ? <Link to="." href={row.route} className="text-primary hover:underline">{row.name}</Link> : row.name, sort: (a, b) => a.name.localeCompare(b.name), exportValue: (row) => row.name },
+          { id: "family", kind: "status", header: "Family", cell: (row) => row.family, sort: (a, b) => a.family.localeCompare(b.family) },
+          { id: "kind", kind: "status", size: 160, minSize: 144, header: "Kind", cell: (row) => row.kind, sort: (a, b) => a.kind.localeCompare(b.kind) },
+          { id: "role", kind: "text", size: 160, minSize: 144, wrap: true, header: "Role / mode", cell: (row) => [row.role, row.mode].filter(Boolean).join(" · ") || "—" },
+          { id: "blocking", kind: "status", size: 144, minSize: 128, header: "Dependency", cell: (row) => row.blocking ? "Blocks deletion" : "Derived", sort: (a, b) => Number(a.blocking) - Number(b.blocking) },
+          { id: "detail", kind: "text", grow: true, minSize: 240, wrap: true, header: "Details", cell: (row) => row.detail || "—" },
         ]} emptyState={<EmptyState title="No concrete references" hint="No policies or member profile artifacts currently reference this group." />} />
         <Collapse label="Modeled coverage"><div className="grid gap-4 sm:grid-cols-2" data-testid="group-usage-coverage">{usage.coverage.map((item) => <div key={item.family} className="rounded-md border border-border p-4"><div className="flex justify-between gap-3 text-sm"><span className="font-medium">{item.family}</span><span className="text-muted-foreground">{item.status.replaceAll("_", " ")}</span></div><p className="mt-2 text-xs text-muted-foreground">{item.detail}</p></div>)}</div></Collapse>
       </div>}

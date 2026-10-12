@@ -44,6 +44,20 @@ When building or editing any page, conform to all of these.
   labeled for what they DO. If a page's purpose isn't obvious, that's a bug.
 
 ## Reusable primitives (build on these, keep consistent)
+- `ui/data-table.tsx` is the canonical inventory table. Declare a semantic column
+  `kind` (name, text, status, count, date, actions, etc.); shared
+  `ui/data-table-layout.ts` owns sizing and alignment, and `src/index.css` owns
+  table spacing, typography, wrapping and overflow. Names/descriptions may grow;
+  counts/statuses/actions stay bounded. Use explicit dimensions only for real
+  content needs, such as a formatted timestamp or multiple action buttons.
+- Headers and cells must share alignment and column geometry. Never attach
+  `::before`/`::after` decorations to table rows: they can create anonymous cells
+  and shift body columns away from headers. Use inset shadows for row hover.
+- Use `wrap: true` for evidence and version lists that must remain fully visible.
+  Shared cell clipping exposes the full value on hover/keyboard focus. Avoid
+  page-specific truncation or width rules that compete with these defaults.
+  Narrow tables scroll inside the shared wrapper; do not clip their actions with
+  a page-level `overflow-hidden` table implementation.
 - `ui/verdict-banner.tsx` — the top-line verdict (ok/degraded/critical/info).
 - `ui/collapse.tsx` — "Advanced"/detail disclosure.
 - `ui/tabs.tsx` — URL-synced tabs.

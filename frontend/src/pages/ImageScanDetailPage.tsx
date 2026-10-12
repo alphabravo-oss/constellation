@@ -198,6 +198,12 @@ function PackagesEvidenceCard({
   unattributedPackageCount: number;
   totalPackageCount: number;
 }) {
+  const rows = packageLayers.flatMap((layer, layerIndex) => layer.packages.slice(0, 4).map((pkg, packageIndex) => ({
+    key: `${layerIndex}:${packageIndex}`,
+    layer,
+    pkg,
+    location: (pkg.locations ?? []).find((item) => item.layer_digest === layer.layer_digest) ?? pkg.locations?.[0],
+  })));
   return (
     <section className="overflow-hidden rounded-lg border border-border bg-card">
       <header className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
@@ -209,43 +215,19 @@ function PackagesEvidenceCard({
       {loading ? (
         <p className="p-3 text-xs text-muted-foreground">Loading package provenance...</p>
       ) : (
-        <table className="app-semantic-table w-full text-sm">
-          <thead className="bg-muted text-xs uppercase text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2 text-left">Layer</th>
-              <th className="px-3 py-2 text-left">Package</th>
-              <th className="px-3 py-2 text-left">Evidence path</th>
-            </tr>
-          </thead>
-          <tbody>
-            {packageLayers.flatMap((layer) =>
-              layer.packages.slice(0, 4).map((pkg) => {
-                const loc = (pkg.locations ?? []).find((item) => item.layer_digest === layer.layer_digest) ?? pkg.locations?.[0];
-                return (
-                  <tr key={`${layer.layer_digest || layer.layer_index}:${pkg.ecosystem}:${pkg.name}:${pkg.version}`} className="border-t border-border">
-                    <td className="max-w-[180px] truncate px-3 py-2 font-mono text-xs" title={layer.layer_digest}>
-                      {layer.layer_digest || `${layer.layer_index ?? "-"}`}
-                    </td>
-                    <td className="px-3 py-2">
-                      <div className="font-mono text-xs">{pkg.name || "-"}</div>
-                      <div className="mt-1 font-mono text-[11px] text-muted-foreground">{pkg.version || pkg.ecosystem || "-"}</div>
-                    </td>
-                    <td className="max-w-[260px] truncate px-3 py-2 font-mono text-xs" title={loc?.path || loc?.real_path || loc?.access_path}>
-                      {loc?.path || loc?.real_path || loc?.access_path || "-"}
-                    </td>
-                  </tr>
-                );
-              }),
-            )}
-            {packageLayers.length === 0 ? (
-              <tr>
-                <td colSpan={3} className="px-3 py-6 text-center text-xs text-muted-foreground">
-                  {unattributedPackageCount > 0 ? "Package inventory is present, but no layer attribution was captured." : "No package inventory recorded."}
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
+        <DataTable
+          className="rounded-none border-0"
+          rows={rows}
+          rowKey={(row) => row.key}
+          showDensityToggle={false}
+          showColumnChooser={false}
+          emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">{unattributedPackageCount > 0 ? "Package inventory is present, but no layer attribution was captured." : "No package inventory recorded."}</div>}
+          columns={[
+            { id: "layer", header: "Layer", kind: "id", cell: ({ layer }) => layer.layer_digest || `${layer.layer_index ?? "-"}` },
+            { id: "package", header: "Package", kind: "name", code: true, cell: ({ pkg }) => <><div>{pkg.name || "-"}</div><div className="mt-1 text-xs text-muted-foreground">{pkg.version || pkg.ecosystem || "-"}</div></> },
+            { id: "path", header: "Evidence path", kind: "id", size: 260, maxSize: 360, grow: true, cell: ({ location }) => location?.path || location?.real_path || location?.access_path || "-" },
+          ]}
+        />
       )}
     </section>
   );
@@ -344,30 +326,20 @@ function SecretsEvidenceCard({ loading, secrets, count }: { loading: boolean; se
       {loading ? (
         <p className="p-3 text-xs text-muted-foreground">Loading secret evidence...</p>
       ) : (
-        <table className="app-semantic-table w-full text-sm">
-          <thead className="bg-muted text-xs uppercase text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2 text-left">Rule</th>
-              <th className="px-3 py-2 text-left">Severity</th>
-              <th className="px-3 py-2 text-left">Path</th>
-              <th className="px-3 py-2 text-left">Lines</th>
-            </tr>
-          </thead>
-          <tbody>
-            {secrets.slice(0, 6).map((secret, index) => (
-              <tr key={`${secret.rule_id || "secret"}:${secret.path || secret.target || index}`} className="border-t border-border">
-                <td className="px-3 py-2">
-                  <div className="font-mono text-xs">{secret.rule_id || "-"}</div>
-                  <div className="mt-1 max-w-[240px] truncate text-xs text-muted-foreground">{secret.title || secret.category || "-"}</div>
-                </td>
-                <td className="px-3 py-2"><SeverityPill severity={secret.severity || "info"} /></td>
-                <td className="max-w-[280px] truncate px-3 py-2 font-mono text-xs" title={secret.path || secret.target}>{secret.path || secret.target || "-"}</td>
-                <td className="px-3 py-2 font-mono text-xs">{lineRange(secret.start_line, secret.end_line)}</td>
-              </tr>
-            ))}
-            {secrets.length === 0 ? <tr><td colSpan={4} className="px-3 py-6 text-center text-xs text-muted-foreground">No secret evidence recorded.</td></tr> : null}
-          </tbody>
-        </table>
+        <DataTable
+          className="rounded-none border-0"
+          rows={secrets.slice(0, 6).map((secret, index) => ({ ...secret, rowKey: `${secret.rule_id || "secret"}:${secret.path || secret.target || ""}:${index}` }))}
+          rowKey={(secret) => secret.rowKey}
+          showDensityToggle={false}
+          showColumnChooser={false}
+          emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">No secret evidence recorded.</div>}
+          columns={[
+            { id: "rule", header: "Rule", kind: "name", cell: (secret) => <><div className="font-mono">{secret.rule_id || "-"}</div><div className="mt-1 truncate text-xs text-muted-foreground" title={secret.title || secret.category}>{secret.title || secret.category || "-"}</div></> },
+            { id: "severity", header: "Severity", kind: "status", cell: (secret) => <SeverityPill severity={secret.severity || "info"} /> },
+            { id: "path", header: "Path", kind: "id", size: 260, maxSize: 360, grow: true, cell: (secret) => secret.path || secret.target || "-" },
+            { id: "lines", header: "Lines", kind: "count", cell: (secret) => lineRange(secret.start_line, secret.end_line) },
+          ]}
+        />
       )}
     </section>
   );
@@ -395,23 +367,18 @@ function ConfigChecksEvidenceCard({ loading, checks }: { loading: boolean; check
       ) : checks.length === 0 ? (
         <p className="px-3 py-6 text-center text-xs text-muted-foreground">No config checks (image predates this scan feature — rescan to populate).</p>
       ) : (
-        <table className="app-semantic-table w-full text-sm">
-          <thead className="bg-muted text-xs uppercase text-muted-foreground">
-            <tr><th className="px-3 py-2 text-left">Check</th><th className="px-3 py-2 text-left">Status</th><th className="px-3 py-2 text-left">Detail</th></tr>
-          </thead>
-          <tbody>
-            {checks.map((c) => (
-              <tr key={c.id} className="border-t border-border">
-                <td className="px-3 py-2">
-                  <div className="text-xs font-medium">{c.title}</div>
-                  {c.status !== "pass" && c.remediation && <div className="mt-0.5 max-w-[320px] text-[11px] text-muted-foreground">{c.remediation}</div>}
-                </td>
-                <td className="px-3 py-2"><Pill tone={tone(c.status)}>{c.status}</Pill></td>
-                <td className="max-w-[220px] truncate px-3 py-2 font-mono text-[11px] text-muted-foreground" title={c.detail}>{c.detail || "-"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <DataTable<ImageConfigCheck>
+          className="rounded-none border-0"
+          rows={checks}
+          rowKey={(check) => check.id}
+          showDensityToggle={false}
+          showColumnChooser={false}
+          columns={[
+            { id: "check", header: "Check", kind: "name", wrap: true, cell: (check) => <><div className="font-medium">{check.title}</div>{check.status !== "pass" && check.remediation && <div className="mt-0.5 text-xs text-muted-foreground">{check.remediation}</div>}</> },
+            { id: "status", header: "Status", kind: "status", cell: (check) => <Pill tone={tone(check.status)}>{check.status}</Pill> },
+            { id: "detail", header: "Detail", kind: "text", code: true, wrap: true, grow: true, cell: (check) => check.detail || "-" },
+          ]}
+        />
       )}
     </section>
   );
@@ -427,33 +394,20 @@ function FileRisksEvidenceCard({ loading, findings, count }: { loading: boolean;
       {loading ? (
         <p className="p-3 text-xs text-muted-foreground">Loading file risk evidence...</p>
       ) : (
-        <table className="app-semantic-table w-full text-sm">
-          <thead className="bg-muted text-xs uppercase text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2 text-left">Path</th>
-              <th className="px-3 py-2 text-left">Risk</th>
-              <th className="px-3 py-2 text-left">Mode</th>
-              <th className="px-3 py-2 text-left">Layer</th>
-            </tr>
-          </thead>
-          <tbody>
-            {findings.slice(0, 6).map((finding, index) => (
-              <tr key={`${finding.path}:${finding.layer_digest || index}`} className="border-t border-border">
-                <td className="px-3 py-2">
-                  <div className="max-w-[260px] truncate font-mono text-xs" title={finding.path}>{finding.path}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">{finding.reason || finding.type || "-"}</div>
-                </td>
-                <td className="px-3 py-2">
-                  <SeverityPill severity={finding.severity || "info"} />
-                  <div className="mt-1 max-w-[220px] truncate text-xs text-muted-foreground">{(finding.risk_types ?? []).join(", ") || "-"}</div>
-                </td>
-                <td className="px-3 py-2 font-mono text-xs">{finding.mode || "-"} · {finding.uid ?? "-"}:{finding.gid ?? "-"}</td>
-                <td className="max-w-[180px] truncate px-3 py-2 font-mono text-xs" title={finding.layer_digest}>{finding.layer_digest || `${finding.layer_index ?? "-"}`}</td>
-              </tr>
-            ))}
-            {findings.length === 0 ? <tr><td colSpan={4} className="px-3 py-6 text-center text-xs text-muted-foreground">No file risk evidence recorded.</td></tr> : null}
-          </tbody>
-        </table>
+        <DataTable
+          className="rounded-none border-0"
+          rows={findings.slice(0, 6).map((finding, index) => ({ ...finding, rowKey: `${finding.path}:${finding.layer_digest || ""}:${index}` }))}
+          rowKey={(finding) => finding.rowKey}
+          showDensityToggle={false}
+          showColumnChooser={false}
+          emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">No file risk evidence recorded.</div>}
+          columns={[
+            { id: "path", header: "Path", kind: "name", cell: (finding) => <><div className="truncate font-mono" title={finding.path}>{finding.path}</div><div className="mt-1 text-xs text-muted-foreground">{finding.reason || finding.type || "-"}</div></> },
+            { id: "risk", header: "Risk", kind: "text", wrap: true, cell: (finding) => <><SeverityPill severity={finding.severity || "info"} /><div className="mt-1 text-xs text-muted-foreground">{(finding.risk_types ?? []).join(", ") || "-"}</div></> },
+            { id: "mode", header: "Mode", kind: "id", cell: (finding) => `${finding.mode || "-"} · ${finding.uid ?? "-"}:${finding.gid ?? "-"}` },
+            { id: "layer", header: "Layer", kind: "id", cell: (finding) => finding.layer_digest || `${finding.layer_index ?? "-"}` },
+          ]}
+        />
       )}
     </section>
   );

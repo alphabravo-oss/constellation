@@ -56,13 +56,13 @@ export function DeploymentsPage() {
 
   const columns: Column<Deployment>[] = [
     {
-      id: "risk",
+      id: "risk", kind: "count", size: 88, numeric: true,
       header: "Risk",
       className: "font-mono",
       cell: (d) => <span className={`rounded-md px-2 py-0.5 ${riskClass(d.risk_score)}`}>{d.risk_score}</span>,
     },
     {
-      id: "deployment",
+      id: "deployment", kind: "name", grow: true, minSize: 280, wrap: true,
       header: "Deployment",
       cell: (d) => (
         <>
@@ -87,7 +87,7 @@ export function DeploymentsPage() {
       ),
     },
     {
-      id: "findings",
+      id: "findings", kind: "count", size: 200, minSize: 176, maxSize: 232, wrap: true,
       header: "Findings",
       className: "text-xs",
       cell: (d) => (
@@ -107,13 +107,13 @@ export function DeploymentsPage() {
       ),
     },
     {
-      id: "factors",
+      id: "factors", kind: "percent", size: 144, minSize: 128, maxSize: 160,
       header: "Risk factors",
       className: "text-xs",
       cell: (d) => <FactorBar factors={d.risk_factors} />,
     },
     {
-      id: "lastSeen",
+      id: "lastSeen", kind: "date", size: 176, minSize: 160,
       header: "Last seen",
       className: "text-xs text-muted-foreground",
       cell: (d) => <>{new Date(d.last_seen_at).toLocaleString()}</>,

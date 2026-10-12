@@ -329,58 +329,23 @@ export function ConnectorCoveragePage() {
               </dl>
               {pool.scanners && pool.scanners.length > 0 ? (
                 <div className="mt-3 overflow-hidden rounded-md border border-border bg-background" data-testid="scanner-workers">
-                  <table className="app-semantic-table w-full text-[11px]">
-                    <thead className="bg-muted/60 text-left text-muted-foreground">
-                      <tr>
-                        <th className="px-2 py-1.5">Scanner</th>
-                        <th className="px-2 py-1.5">Cluster</th>
-                        <th className="px-2 py-1.5">Status</th>
-                        <th className="px-2 py-1.5 text-right">Jobs</th>
-                        <th className="px-2 py-1.5 text-right">Idle</th>
-                        <th className="px-2 py-1.5">VulnDB</th>
-                        <th className="px-2 py-1.5">Cache</th>
-                        <th className="px-2 py-1.5"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {pool.scanners.map((scanner) => {
-                        const cache = scannerCacheSummary(scanner.cache_health);
-                        const scannerID = scanner.instance_id || scanner.hostname;
-                        return (
-                          <tr key={`${scanner.cluster_id ?? "control"}-${scannerID}`} className="border-t border-border">
-                            <td className="px-2 py-1.5 font-mono">{scanner.hostname}</td>
-                            <td className="px-2 py-1.5">{scanner.cluster_name || scanner.cluster_id?.slice(0, 8) || "-"}</td>
-                            <td className="px-2 py-1.5"><Status value={scanner.status} /></td>
-                            <td className="px-2 py-1.5 text-right font-mono">{scanner.active_jobs}/{scanner.max_concurrent || "-"}</td>
-                            <td className="px-2 py-1.5 text-right font-mono">{scanner.idle_capacity}</td>
-                            <td className="px-2 py-1.5">
-                              <div className="truncate">
-                                <Status value={scanner.vulndb_status || "unknown"} />
-                                {scanner.vulndb_bundle_version ? <span className="ml-1 font-mono text-muted-foreground">{scanner.vulndb_bundle_version}</span> : null}
-                              </div>
-                            </td>
-                            <td className="px-2 py-1.5">
-                              <div className="truncate" title={cache.title}>
-                                <Status value={cache.status} />
-                                <span className="ml-1 text-muted-foreground">{cache.label}</span>
-                              </div>
-                            </td>
-                            <td className="px-2 py-1.5 text-right">
-                              <button
-                                type="button"
-                                className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-[10px] hover:bg-accent"
-                                onClick={() => setCacheScannerID(scannerID)}
-                                title="Show scanner cache records"
-                              >
-                                <Database className="h-3 w-3" aria-hidden />
-                                Cache
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                  <DataTable
+                    className="rounded-none border-0"
+                    rows={pool.scanners}
+                    rowKey={(scanner) => `${scanner.cluster_id ?? "control"}-${scanner.instance_id || scanner.hostname}`}
+                    showDensityToggle={false}
+                    showColumnChooser={false}
+                    columns={[
+                      { id: "scanner", header: "Scanner", kind: "name", code: true, cell: (scanner) => scanner.hostname },
+                      { id: "cluster", header: "Cluster", kind: "text", size: 140, cell: (scanner) => scanner.cluster_name || scanner.cluster_id?.slice(0, 8) || "-" },
+                      { id: "status", header: "Status", kind: "status", cell: (scanner) => <Status value={scanner.status} /> },
+                      { id: "jobs", header: "Jobs", kind: "count", cell: (scanner) => `${scanner.active_jobs}/${scanner.max_concurrent || "-"}` },
+                      { id: "idle", header: "Idle", kind: "count", cell: (scanner) => scanner.idle_capacity },
+                      { id: "vulndb", header: "VulnDB", kind: "text", size: 200, wrap: true, cell: (scanner) => <><Status value={scanner.vulndb_status || "unknown"} />{scanner.vulndb_bundle_version ? <span className="ml-1 font-mono text-muted-foreground">{scanner.vulndb_bundle_version}</span> : null}</> },
+                      { id: "cache", header: "Cache", kind: "text", size: 200, wrap: true, cell: (scanner) => { const cache = scannerCacheSummary(scanner.cache_health); return <span title={cache.title}><Status value={cache.status} /><span className="ml-1 text-muted-foreground">{cache.label}</span></span>; } },
+                      { id: "actions", header: "", kind: "actions", cell: (scanner) => <button type="button" className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-xs hover:bg-accent" onClick={() => setCacheScannerID(scanner.instance_id || scanner.hostname)} title="Show scanner cache records"><Database className="h-3 w-3" aria-hidden />Cache</button> },
+                    ]}
+                  />
                 </div>
               ) : null}
               {cacheScannerID ? (
@@ -429,29 +394,21 @@ export function ConnectorCoveragePage() {
                       {(cacheData.data?.cache_records ?? []).length === 0 ? (
                         <div className="mt-3 text-muted-foreground">No cache records reported by this scanner.</div>
                       ) : (
-                        <div className="mt-3 max-h-56 overflow-auto rounded-md border border-border">
-                          <table className="app-semantic-table w-full text-[11px]">
-                            <thead className="bg-muted/60 text-left text-muted-foreground">
-                              <tr>
-                                <th className="px-2 py-1.5">Cache</th>
-                                <th className="px-2 py-1.5">Record</th>
-                                <th className="px-2 py-1.5 text-right">Size</th>
-                                <th className="px-2 py-1.5 text-right">Refs</th>
-                                <th className="px-2 py-1.5">Last ref</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {cacheData.data?.cache_records.map((record) => (
-                                <tr key={`${record.cache}-${record.layer}`} className="border-t border-border">
-                                  <td className="px-2 py-1.5 font-mono">{record.cache}</td>
-                                  <td className="px-2 py-1.5 font-mono">{record.layer}</td>
-                                  <td className="px-2 py-1.5 text-right font-mono">{formatBytes(record.size)}</td>
-                                  <td className="px-2 py-1.5 text-right font-mono">{record.ref_count}</td>
-                                  <td className="px-2 py-1.5">{record.ref_last ? formatDateTime(record.ref_last) : "-"}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                        <div className="mt-3 max-h-56 overflow-y-auto rounded-md border border-border">
+                          <DataTable
+                            className="rounded-none border-0"
+                            rows={cacheData.data?.cache_records ?? []}
+                            rowKey={(record) => `${record.cache}-${record.layer}`}
+                            showDensityToggle={false}
+                            showColumnChooser={false}
+                            columns={[
+                              { id: "cache", header: "Cache", kind: "id", cell: (record) => record.cache },
+                              { id: "record", header: "Record", kind: "name", code: true, cell: (record) => record.layer },
+                              { id: "size", header: "Size", kind: "bytes", cell: (record) => formatBytes(record.size) },
+                              { id: "refs", header: "Refs", kind: "count", cell: (record) => record.ref_count },
+                              { id: "lastRef", header: "Last ref", kind: "date", cell: (record) => record.ref_last ? formatDateTime(record.ref_last) : "-" },
+                            ]}
+                          />
                         </div>
                       )}
                     </>
@@ -460,38 +417,25 @@ export function ConnectorCoveragePage() {
               ) : null}
               {pool.queue_by_target_type && pool.queue_by_target_type.length > 0 ? (
                 <div className="mt-3 overflow-hidden rounded-md border border-border bg-background" data-testid="scanner-queue-by-target">
-                  <table className="app-semantic-table w-full text-[11px]">
-                    <thead className="bg-muted/60 text-left text-muted-foreground">
-                      <tr>
-                        <th className="px-2 py-1.5">Target</th>
-                        <th className="px-2 py-1.5 text-right">Pending</th>
-                        <th className="px-2 py-1.5 text-right">Delayed</th>
-                        <th className="px-2 py-1.5 text-right">Running</th>
-                        <th className="px-2 py-1.5 text-right">Stale</th>
-                        <th className="px-2 py-1.5 text-right">Paused</th>
-                        <th className="px-2 py-1.5 text-right">Canceled</th>
-                        <th className="px-2 py-1.5 text-right">Exhausted</th>
-                        <th className="px-2 py-1.5 text-right">Failed</th>
-                        <th className="px-2 py-1.5 text-right">Oldest</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {pool.queue_by_target_type.map((metric) => (
-                        <tr key={metric.target_type} className="border-t border-border">
-                          <td className="px-2 py-1.5 font-mono">{metric.target_type}</td>
-                          <td className="px-2 py-1.5 text-right font-mono">{metric.pending}</td>
-                          <td className="px-2 py-1.5 text-right font-mono">{metric.retry_delayed}</td>
-                          <td className="px-2 py-1.5 text-right font-mono">{metric.running}</td>
-                          <td className="px-2 py-1.5 text-right font-mono">{metric.stale_running}</td>
-                          <td className="px-2 py-1.5 text-right font-mono">{metric.paused}</td>
-                          <td className="px-2 py-1.5 text-right font-mono">{metric.canceled}</td>
-                          <td className="px-2 py-1.5 text-right font-mono">{metric.exhausted}</td>
-                          <td className="px-2 py-1.5 text-right font-mono">{metric.failed}</td>
-                          <td className="px-2 py-1.5 text-right font-mono">{formatDuration(metric.oldest_pending_seconds)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <DataTable
+                    className="rounded-none border-0"
+                    rows={pool.queue_by_target_type}
+                    rowKey={(metric) => metric.target_type}
+                    showDensityToggle={false}
+                    showColumnChooser={false}
+                    columns={[
+                      { id: "target", header: "Target", kind: "name", code: true, cell: (metric) => metric.target_type },
+                      { id: "pending", header: "Pending", kind: "count", cell: (metric) => metric.pending },
+                      { id: "delayed", header: "Delayed", kind: "count", cell: (metric) => metric.retry_delayed },
+                      { id: "running", header: "Running", kind: "count", cell: (metric) => metric.running },
+                      { id: "stale", header: "Stale", kind: "count", cell: (metric) => metric.stale_running },
+                      { id: "paused", header: "Paused", kind: "count", cell: (metric) => metric.paused },
+                      { id: "canceled", header: "Canceled", kind: "count", cell: (metric) => metric.canceled },
+                      { id: "exhausted", header: "Exhausted", kind: "count", cell: (metric) => metric.exhausted },
+                      { id: "failed", header: "Failed", kind: "count", cell: (metric) => metric.failed },
+                      { id: "oldest", header: "Oldest", kind: "age", numeric: true, cell: (metric) => formatDuration(metric.oldest_pending_seconds) },
+                    ]}
+                  />
                 </div>
               ) : null}
             </article>

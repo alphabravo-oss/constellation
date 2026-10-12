@@ -76,9 +76,12 @@ export function NodesPage() {
     {
       id: "node",
       header: "Node",
+      kind: "name",
+      code: true,
+      hideable: false,
       cell: (item) => (
         <div>
-          <Link to="." href={`/clusters/${clusterId}/nodes/${encodeURIComponent(item.node)}`} className="block break-all font-mono text-xs font-medium hover:underline">
+          <Link to="." href={`/clusters/${clusterId}/nodes/${encodeURIComponent(item.node)}`} className="block font-mono text-sm font-medium hover:underline">
             {item.node}
           </Link>
           {item.coverage_gaps?.length ? <div className="mt-1 text-[11px] text-status-warn">{item.coverage_gaps.length} coverage gap{item.coverage_gaps.length === 1 ? "" : "s"}</div> : null}
@@ -91,6 +94,7 @@ export function NodesPage() {
     {
       id: "agent",
       header: "Agent",
+      kind: "status",
       cell: (item) => <StatusPill status={item.runtime_agent_status} />,
       sort: (a, b) => a.runtime_agent_status.localeCompare(b.runtime_agent_status),
       exportValue: (item) => item.runtime_agent_status,
@@ -98,6 +102,9 @@ export function NodesPage() {
     {
       id: "os",
       header: "Operating system",
+      kind: "text",
+      size: 184,
+      maxSize: 240,
       cell: (item) => <span className="text-xs">{displayOS(item)}</span>,
       sort: (a, b) => displayOS(a).localeCompare(displayOS(b)),
       exportValue: displayOS,
@@ -105,6 +112,11 @@ export function NodesPage() {
     {
       id: "critical",
       header: "Critical",
+      kind: "text",
+      align: "right",
+      size: 112,
+      minSize: 112,
+      maxSize: 136,
       cell: (item) => item.last_scanned_at || item.critical_vulns > 0 ? <RiskCount value={item.critical_vulns} tone="danger" /> : <NotCollected label="Not scanned" />,
       sort: (a, b) => a.critical_vulns - b.critical_vulns,
       numeric: true,
@@ -113,6 +125,11 @@ export function NodesPage() {
     {
       id: "high",
       header: "High",
+      kind: "text",
+      align: "right",
+      size: 112,
+      minSize: 112,
+      maxSize: 136,
       cell: (item) => item.last_scanned_at || item.high_vulns > 0 ? <RiskCount value={item.high_vulns} tone="warn" /> : <NotCollected label="Not scanned" />,
       sort: (a, b) => a.high_vulns - b.high_vulns,
       numeric: true,
@@ -121,6 +138,11 @@ export function NodesPage() {
     {
       id: "open",
       header: "Open",
+      kind: "text",
+      align: "right",
+      size: 112,
+      minSize: 112,
+      maxSize: 136,
       cell: (item) => item.last_scanned_at || item.open_vulns > 0 ? item.open_vulns.toLocaleString() : <NotCollected label="Not scanned" />,
       sort: (a, b) => a.open_vulns - b.open_vulns,
       numeric: true,
@@ -129,6 +151,11 @@ export function NodesPage() {
     {
       id: "packages",
       header: "Packages",
+      kind: "text",
+      align: "right",
+      size: 124,
+      minSize: 112,
+      maxSize: 144,
       cell: (item) => item.packages_observed_at ? item.package_count.toLocaleString() : <NotCollected />,
       sort: (a, b) => a.package_count - b.package_count,
       numeric: true,
@@ -137,6 +164,11 @@ export function NodesPage() {
     {
       id: "containers",
       header: "Containers",
+      kind: "text",
+      align: "right",
+      size: 124,
+      minSize: 112,
+      maxSize: 144,
       cell: (item) => item.containers_observed_at ? item.container_count.toLocaleString() : <NotCollected />,
       sort: (a, b) => a.container_count - b.container_count,
       numeric: true,
@@ -145,6 +177,11 @@ export function NodesPage() {
     {
       id: "cis",
       header: "CIS failed",
+      kind: "text",
+      align: "right",
+      size: 124,
+      minSize: 112,
+      maxSize: 144,
       cell: (item) => item.cis_observed_at ? <RiskCount value={item.cis_failed} tone="warn" /> : <NotCollected />,
       sort: (a, b) => a.cis_failed - b.cis_failed,
       numeric: true,
@@ -153,6 +190,10 @@ export function NodesPage() {
     {
       id: "last_scan",
       header: "Last scan",
+      kind: "date",
+      size: 224,
+      minSize: 208,
+      maxSize: 240,
       cell: (item) => formatDate(item.last_scanned_at),
       sort: (a, b) => timestamp(a.last_scanned_at) - timestamp(b.last_scanned_at),
       exportValue: (item) => item.last_scanned_at ?? "",
@@ -264,7 +305,7 @@ function RiskCount({ value, tone }: { value: number; tone: "warn" | "danger" }) 
 }
 
 function NotCollected({ label = "Not collected" }: { label?: string }) {
-  return <span className="text-xs italic text-muted-foreground">{label}</span>;
+  return <span className="font-sans text-xs italic text-muted-foreground">{label}</span>;
 }
 
 function timestamp(value?: string | null): number {

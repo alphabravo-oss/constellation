@@ -171,19 +171,19 @@ function InitBundlesPanel() {
   function bundleColumns(): Column<ClusterInitBundleSummary>[] {
     return [
       {
-        id: "name",
+        id: "name", kind: "name", grow: true, minSize: 220,
         header: "Name",
         className: "font-medium",
         cell: (b) => <>{b.name}</>,
       },
       {
-        id: "cluster",
+        id: "cluster", kind: "id", size: 128, minSize: 112,
         header: "Cluster ID",
         className: "text-mono text-[10px] text-muted-foreground",
         cell: (b) => <>{b.cluster_id.slice(0, 8)}…</>,
       },
       {
-        id: "status",
+        id: "status", kind: "status", size: 112, minSize: 96,
         header: "Status",
         cell: (b) => {
           const tone = bundleTone(b.status);
@@ -201,13 +201,13 @@ function InitBundlesPanel() {
         },
       },
       {
-        id: "expires",
+        id: "expires", kind: "age", size: 160, minSize: 144,
         header: "Expires",
         className: "text-muted-foreground",
         cell: (b) => <>{fmtRelative(b.expires_at)}</>,
       },
       {
-        id: "actions",
+        id: "actions", kind: "actions", size: 208, minSize: 208, maxSize: 224,
         header: "",
         cell: (b) => (
           <div className="flex justify-end gap-1.5">

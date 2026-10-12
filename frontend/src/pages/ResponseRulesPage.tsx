@@ -53,7 +53,7 @@ function ResponseRulesWorkspace({ clusterId }: { clusterId: string }) {
 
   const columns: Column<ResponseRuleV2>[] = [
     {
-      id: "order",
+      id: "order", kind: "count", size: 88, minSize: 88, align: "left", numeric: true,
       exportValue: (r) => rules.findIndex((x) => x.id === r.id) + 1,
       header: "Order",
       cell: (r) => {
@@ -69,13 +69,13 @@ function ResponseRulesWorkspace({ clusterId }: { clusterId: string }) {
         );
       },
     },
-    { id: "name", exportValue: (r) => r.name, header: "Name", cell: (r) => <span className="font-medium">{r.name}</span> },
-    { id: "event_type", exportValue: (r) => r.event_type, header: "Event type", cell: (r) => <span className="text-xs">{r.event_type}</span> },
-    { id: "conditions", exportValue: (r) => r.conditions.map((c) => `${c.type}: ${c.value}`).join("; "), header: "Conditions", cell: (r) => <span className="text-xs text-muted-foreground">{r.conditions.length} clause(s)</span> },
-    { id: "actions", exportValue: (r) => r.actions.map((a) => a.kind).join(", "), header: "Actions", cell: (r) => <span className="text-xs text-muted-foreground">{r.actions.map((a) => a.kind).join(", ")}</span> },
-    { id: "enabled", exportValue: (r) => r.enabled ? "yes" : "no", header: "Enabled", cell: (r) => <span className="text-xs">{r.enabled ? "yes" : "no"}</span> },
+    { id: "name", kind: "name", grow: true, minSize: 200, exportValue: (r) => r.name, header: "Name", cell: (r) => <span className="font-medium">{r.name}</span> },
+    { id: "event_type", kind: "status", size: 128, minSize: 112, exportValue: (r) => r.event_type, header: "Event type", cell: (r) => <span className="text-xs">{r.event_type}</span> },
+    { id: "conditions", kind: "count", size: 128, minSize: 112, exportValue: (r) => r.conditions.map((c) => `${c.type}: ${c.value}`).join("; "), header: "Conditions", cell: (r) => <span className="text-xs text-muted-foreground">{r.conditions.length} clause(s)</span> },
+    { id: "actions", kind: "text", size: 176, minSize: 160, wrap: true, exportValue: (r) => r.actions.map((a) => a.kind).join(", "), header: "Actions", cell: (r) => <span className="text-xs text-muted-foreground">{r.actions.map((a) => a.kind).join(", ")}</span> },
+    { id: "enabled", kind: "status", exportValue: (r) => r.enabled ? "yes" : "no", header: "Enabled", cell: (r) => <span className="text-xs">{r.enabled ? "yes" : "no"}</span> },
     {
-      id: "row-actions",
+      id: "row-actions", kind: "actions", size: 128, minSize: 120,
       hideable: false, exportable: false,
       header: "",
       cell: (r) => (
