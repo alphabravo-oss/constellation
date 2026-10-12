@@ -147,8 +147,8 @@ export function DeploymentsPage() {
         description="Your riskiest deployments first. The score blends open vulnerabilities, exploit signals (CVSS, KEV), runtime exposure, and workload posture."
       />
       <VerdictBanner
-        status={!scopeReady || q.isPending ? "info" : q.isError ? "degraded" : !total ? "info" : (summary?.at_risk ?? 0) > 0 ? "degraded" : "ok"}
-        title={!scopeReady || q.isPending ? "Loading deployment inventory" : q.isError ? "Deployment inventory is unavailable" : !total ? "No matching deployments" : (summary?.at_risk ?? 0) > 0 ? "Deployments need risk review" : "No high-risk deployments match these filters"}
+        status={clusterError ? "degraded" : !scopeReady || q.isPending ? "info" : q.isError ? "degraded" : !total ? "info" : (summary?.at_risk ?? 0) > 0 ? "degraded" : "ok"}
+        title={clusterError ? "Cluster inventory is unavailable" : !scopeReady ? clusterLoading ? "Resolving cluster" : "Select a resolved cluster" : q.isPending ? "Loading deployment inventory" : q.isError ? "Deployment inventory is unavailable" : !total ? "No matching deployments" : (summary?.at_risk ?? 0) > 0 ? "Deployments need risk review" : "No high-risk deployments match these filters"}
         detail="Search, visibility, counts, paging and CSV use the same source filters. Platform visibility does not change collection or protection."
       />
 

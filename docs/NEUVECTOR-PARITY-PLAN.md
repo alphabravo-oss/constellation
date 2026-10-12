@@ -471,6 +471,44 @@ stays contained, but has no live rows for a body-alignment assertion. Missing li
 exceptions stay explicit, and the viewport was restored. Remaining UI-1/2/3/4 work
 includes Runtime/Components scope/error/disclosure cleanup and Dashboard Operations.
 
+The cockpit continuation puts Runtime live events and Components inventory first,
+with URL-linked secondary workspaces and at most five top-line metrics. Components
+requires an exact cluster/instance/diagnostic match, keeps confirmed previews and
+queued bundle feedback during source polls, and labels support bundles as
+organization-wide. Runtime distinguishes its latest-100 historical feed from
+selected-window totals and bounded recent-event/workload samples; catalog readiness
+is not represented as proof of deployed enforcement. Source failures show Retry
+and withhold failed evidence instead of rendering healthy zeroes.
+
+Dashboard Operations is full width. Its package table and export include every
+returned package, and scanner/federation scope is explicit. Scan submission checks
+current cluster and platform evidence again at mutation time and distinguishes
+queued, unqueued and failed requests. No live scan or support-bundle request was
+submitted during verification. Timeline filters, dates, pages and exact selection
+now persist in the URL; invalid windows and missing selections remain explicit.
+Its unused local scope picker is removed. Shared tabs now push browser history
+while preserving unrelated filters/fragments. Shared headers wrap actions and the
+new global `StatGrid` responds to content width rather than forcing equal columns
+at viewport breakpoints. Components, Runtime, Dashboard, Timeline and Exceptions
+use it; broader metric-row adoption remains part of consistency acceptance.
+
+Validation: Helm revision **45** runs frontend `cockpit-layout-20261012`, retaining
+API `action-console-20261012`, migration `audit-lookup-20261012` and schema 173.
+All seven deployments are ready. **751 frontend tests** across 79 files, production
+build/typecheck, changed-file lint, endpoint mapping and parity-plan checks pass.
+The 41 browser cases in four affected files were discovered, not run as a full
+suite. Live read-only checks verify Components inventory/version tables, Runtime
+live/evidence tables and Dashboard's ten returned packages; measured header/body
+geometry matches and tables stay contained at desktop/narrow widths. Components
+metrics were corrected after a narrow screenshot exposed squeezed labels, then
+verified at 640px (two columns) and 1280px (five columns), without card overflow.
+Timeline page 2 and missing explicit event links load without substituting another
+event. Automated cases cover reload/history, deferred polls, stale scope and source
+failures. These changes do not close UI-1/2/3/4: remaining selected console work
+includes risk-detail scoping, saved-view authoring/persistence, broader shared
+layout/export acceptance and route consistency. Broader security/infrastructure
+acceptance remains tracked separately.
+
 The admission-engine continuation adds migration **172** and persists normalized
 engine outcomes atomically with image scan completion. The built-in vulnerability
 profiles now require successful Trivy and Grype results rather than retired
@@ -2094,8 +2132,8 @@ progressive disclosure, while retaining Constellation's security vocabulary.
   dashboard metric destinations and supported component/network filters.
   Findings filters and server pages now preserve URL state and use matching
   instance totals; CVE rollups retain their filtered total and share the search DSL.
-  Deployment name search is URL-backed yet limited to the API's first 100
-  rows. Host CVEs now filters open host vulnerabilities using the source
+  Deployment search and platform/namespace filters now run before server
+  pagination, with matching totals and full filtered CSV. Host CVEs filters open host vulnerabilities using the source
   cluster and pages matching nodes; its distinct-node total does not equal the
   tile's finding count, and unnamed findings cannot appear as nodes. Network
   pair and exposure drill-downs remain broad, and the deny-only conversation header

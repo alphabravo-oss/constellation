@@ -4,17 +4,18 @@
 // consoles (DPI threats · runtime events · network violations · audit) into a
 // single time-ordered stream with type + severity filters. Backed by
 // GET /api/v1/security/timeline.
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Bookmark, Save, SlidersHorizontal } from "lucide-react";
 
 import { securityTimeline, type TimelineItem, type TimelineSource } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { useSavedViews, type SavedViewBase } from "@/hooks/useSavedViews";
-import { ScopeBar } from "@/components/ScopeBar";
 import { PageHeader } from "@/components/ui/page";
 import { Pager } from "@/components/ui/pager";
-import { useTabParam } from "@/components/ui/tabs";
+import { useRouteSearchParams } from "@/lib/route-search";
+import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { SeverityBadge } from "@/components/ui/severity-badge";
 import { StatusPill } from "@/components/ui/status-pill";
 import { LoadingState, ErrorState, EmptyState } from "@/components/ui/states";
@@ -58,26 +59,40 @@ const CATEGORY_TABS: Array<{ id: string; label: string; sources: TimelineSource[
 interface TimelineSavedView extends SavedViewBase, TimelineFilterPayload {}
 
 export function TimelinePage() {
-  const { clusterId, isLoading: clusterLoading } = useCluster();
-  const [category, setCategory] = useTabParam("tab", "all");
-  const [sources, setSources] = useState<Set<TimelineSource>>(new Set(ALL_SOURCES));
-  const [severities, setSeverities] = useState<Set<string>>(new Set());
-  const [query, setQuery] = useState("");
-  const [namespace, setNamespace] = useState("");
-  const [workload, setWorkload] = useState("");
-  const [reference, setReference] = useState("");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [selected, setSelected] = useState<TimelineItem | null>(null);
-  const [page, setPage] = useState(0);
+  const { clusterId, cluster, isLoading: clusterLoading, error: clusterError } = useCluster();
+  const scopeReady = !!clusterId && cluster?.id === clusterId && !clusterLoading && !clusterError;
+  const [params, setParams] = useRouteSearchParams();
+  const category = params.get("tab") ?? "all";
+  const activeCategory = category === "custom" || CATEGORY_TABS.some(tab => tab.id === category) ? category : "all";
+  const sources = useMemo(() => new Set<TimelineSource>(activeCategory === "custom"
+    ? params.has("type") ? ALL_SOURCES.filter(source => params.get("type")!.split(",").includes(source)) : ALL_SOURCES
+    : (CATEGORY_TABS.find(tab => tab.id === activeCategory) ?? CATEGORY_TABS[0]).sources), [activeCategory, params]);
+  const severities = useMemo(() => new Set<string>(SEVERITIES.filter(value => params.get("severity")?.split(",").includes(value))), [params]);
+  const query = params.get("q") ?? "";
+  const namespace = params.get("namespace") ?? "";
+  const workload = params.get("workload") ?? "";
+  const reference = params.get("ref") ?? "";
+  const from = params.get("from") ?? "";
+  const to = params.get("to") ?? "";
+  const requestedPage = Number(params.get("page") ?? "1");
+  const page = Number.isSafeInteger(requestedPage) && requestedPage > 0 && requestedPage <= Math.floor(Number.MAX_SAFE_INTEGER / TIMELINE_PAGE) ? requestedPage - 1 : 0;
+  const selectedID = params.get("event");
+  const updateFilters = (changes: Record<string, string | null>, replace = false, resetPage = true) => setParams(current => {
+    for (const [key,value] of Object.entries(changes)) {
+      if (value === null || value === "") current.delete(key); else current.set(key,value);
+    }
+    if (resetPage) { current.delete("page"); current.delete("event"); }
+    return current;
+  }, {replace});
+  const setQuery = (value: string) => updateFilters({q:value}, true);
+  const setNamespace = (value: string) => updateFilters({namespace:value}, true);
+  const setWorkload = (value: string) => updateFilters({workload:value}, true);
+  const setReference = (value: string) => updateFilters({ref:value}, true);
+  const setFrom = (value: string) => updateFilters({from:value}, true);
+  const setTo = (value: string) => updateFilters({to:value}, true);
+  const setPage = (value: number) => updateFilters({page:value ? String(value+1) : null,event:null}, false, false);
+  const setSelected = (value: TimelineItem | null) => updateFilters({event:value ? `${value.source}:${value.id}` : null},false,false);
   const { views, saveView: saveStoredView, deleteView } = useSavedViews<TimelineSavedView>(SAVED_VIEWS_KEY);
-  const activeCategory = category === "custom" || CATEGORY_TABS.some((tab) => tab.id === category) ? category : "all";
-
-  useEffect(() => {
-    if (activeCategory === "custom") return;
-    const tab = CATEGORY_TABS.find((item) => item.id === activeCategory) ?? CATEGORY_TABS[0];
-    setSources(new Set(tab.sources));
-  }, [activeCategory]);
 
   const filters = useMemo(() => compactTimelineFilters({
     category: activeCategory,
@@ -100,9 +115,9 @@ export function TimelinePage() {
   const workloadParam = timelineTextParam(filters.workload);
   const refParam = timelineTextParam(filters.reference);
 
-  useEffect(() => { setPage(0); }, [typeParam, sevParam, fromParam, toParam, queryParam, namespaceParam, workloadParam, refParam, clusterId]);
+  const invalidWindow = Boolean((from && !fromParam) || (to && !toParam) || (fromParam && toParam && fromParam > toParam));
   const q = useQuery({
-    queryKey: ["security-timeline", clusterId, typeParam, sevParam, fromParam, toParam, queryParam, namespaceParam, workloadParam, refParam, page],
+    queryKey: ["security-timeline", clusterId, sources.size === 0 ? "none" : typeParam, sevParam, fromParam, toParam, queryParam, namespaceParam, workloadParam, refParam, page],
     queryFn: () =>
       securityTimeline.list({
         cluster_id: clusterId,
@@ -118,14 +133,14 @@ export function TimelinePage() {
         offset: page * TIMELINE_PAGE,
       }),
     // No source selected ⇒ nothing to fetch.
-    enabled: sources.size > 0,
+    enabled: scopeReady && sources.size > 0 && !invalidWindow,
   });
 
-  const items = useMemo<TimelineItem[]>(() => sources.size > 0 ? q.data?.items ?? [] : [], [q.data, sources]);
+  const items = useMemo<TimelineItem[]>(() => scopeReady && !q.isError && !invalidWindow && sources.size > 0 ? q.data?.items ?? [] : [], [q.data, q.isError, scopeReady, invalidWindow, sources]);
+  const selected = items.find(item => `${item.source}:${item.id}` === selectedID) ?? null;
 
   const selectCategory = (tabID: string, nextSources: TimelineSource[]) => {
-    setCategory(tabID);
-    setSources(new Set(nextSources));
+    updateFilters({tab:tabID === "all" ? null : tabID,type:nextSources.length === ALL_SOURCES.length ? null : nextSources.join(",")});
   };
 
   const saveView = () => {
@@ -133,28 +148,13 @@ export function TimelinePage() {
     if (name) saveStoredView(name, filters);
   };
 
-  const applyView = (view: TimelineSavedView) => {
-    setCategory(view.category || "custom");
-    setSources(new Set(view.sources.length ? view.sources : ALL_SOURCES));
-    setSeverities(new Set(view.severities ?? []));
-    setQuery(view.query ?? "");
-    setNamespace(view.namespace ?? "");
-    setWorkload(view.workload ?? "");
-    setReference(view.reference ?? "");
-    setFrom(view.from ?? "");
-    setTo(view.to ?? "");
-    setPage(0);
-  };
+  const applyView = (view: TimelineSavedView) => updateFilters({
+    tab:view.category || "custom",type:view.sources.length ? view.sources.join(",") : "none",
+    severity:(view.severities ?? []).join(","),q:view.query ?? "",namespace:view.namespace ?? "",
+    workload:view.workload ?? "",ref:view.reference ?? "",from:view.from ?? "",to:view.to ?? "",
+  });
 
-  const clearAdvancedFilters = () => {
-    setSeverities(new Set());
-    setQuery("");
-    setNamespace("");
-    setWorkload("");
-    setReference("");
-    setFrom("");
-    setTo("");
-  };
+  const clearAdvancedFilters = () => updateFilters({severity:null,q:null,namespace:null,workload:null,ref:null,from:null,to:null});
 
   const toggle = <T,>(set: Set<T>, v: T): Set<T> => {
     const next = new Set(set);
@@ -167,15 +167,16 @@ export function TimelinePage() {
   };
 
   if (clusterLoading) return <LoadingState label="Loading cluster…" />;
+  if (!scopeReady) return <ErrorState title="Cluster could not be resolved." error={clusterError} />;
 
   return (
     <div className="space-y-4" data-testid="timeline-page" data-cluster-id={clusterId ?? ""}>
-      <ScopeBar />
       <PageHeader
         title="Incident Timeline"
-        description="Unified, time-ordered stream across DPI threats, runtime events, network violations, and audit — NeuVector's four event consoles in one investigation view."
+        description={`DPI threats, runtime events, network violations and audit for ${cluster?.name || clusterId}, in time order.`}
         actions={
           <>
+            <Button variant="outline" disabled={q.isFetching || sources.size === 0 || invalidWindow} onClick={() => void q.refetch()}>Refresh</Button>
             {views.length > 0 && <TimelineSavedViewsMenu views={views} onApply={applyView} onDelete={deleteView} />}
             <Button type="button" size="sm" variant="outline" onClick={saveView}>
               <Save className="h-3.5 w-3.5" aria-hidden /> Save view
@@ -184,7 +185,7 @@ export function TimelinePage() {
               type="button"
               size="sm"
               variant="outline"
-              disabled={items.length === 0}
+              disabled={items.length === 0 || q.isFetching}
               onClick={() => downloadCsv("constellation-security-events", ["Time", "Source", "Severity", "Title", "Namespace", "Workload", "Reference"],
                 items.map((it) => [it.at, it.source, it.severity, it.title, it.namespace ?? "", it.workload_id ?? "", it.ref ?? ""]))}
             >
@@ -193,6 +194,16 @@ export function TimelinePage() {
           </>
         }
       />
+
+      <VerdictBanner status={q.isError || invalidWindow ? "degraded" : "info"}
+        title={invalidWindow ? "Invalid timeline window" : q.isError ? "Timeline is unavailable" : sources.size === 0 ? "Choose an event source" : q.isPending ? "Loading timeline" : `${items.length} events on this page`}
+        detail="Investigate one ordered page of matching events. Page counts and CSV describe this page; filters and selection are saved in the URL." />
+      {!q.isPending && !q.isError && !invalidWindow && <StatGrid data-testid="timeline-summary">
+        <StatCard label="On this page" value={items.length} />
+        <StatCard label="Critical on page" value={items.filter(item => item.severity === "critical").length} />
+        <StatCard label="High on page" value={items.filter(item => item.severity === "high").length} />
+        <StatCard label="Sources on page" value={new Set(items.map(item => item.source)).size} />
+      </StatGrid>}
 
       <div className="flex flex-wrap gap-1 rounded-md border border-border bg-card p-1" data-testid="timeline-category-tabs">
         {CATEGORY_TABS.map((tab) => (
@@ -241,7 +252,7 @@ export function TimelinePage() {
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="text-[11px] font-medium text-muted-foreground mr-1">Type</span>
           {ALL_SOURCES.map((s) => (
-            <FilterChip key={s} active={sources.has(s)} onClick={() => { setCategory("custom"); setSources((prev) => toggle(prev, s)); }}>
+            <FilterChip key={s} active={sources.has(s)} onClick={() => updateFilters({tab:"custom",type:[...toggle(sources,s)].join(",") || "none"})}>
               {SOURCE_META[s].label}
             </FilterChip>
           ))}
@@ -249,7 +260,7 @@ export function TimelinePage() {
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="text-[11px] font-medium text-muted-foreground mr-1">Severity</span>
           {SEVERITIES.map((s) => (
-            <FilterChip key={s} active={severities.has(s)} onClick={() => setSeverities((prev) => toggle(prev, s))}>
+            <FilterChip key={s} active={severities.has(s)} onClick={() => updateFilters({severity:[...toggle(severities,s)].join(",")})}>
               {s}
             </FilterChip>
           ))}
@@ -257,10 +268,12 @@ export function TimelinePage() {
         <TimelineActiveFilters filters={filters} onClear={clearAdvancedFilters} />
       </div>
 
-      {q.isPending && sources.size > 0 ? (
+      {q.isFetching && !q.isPending && <p role="status" className="text-xs text-muted-foreground">Refreshing timeline…</p>}
+      {!q.isError && !invalidWindow && q.data && sources.size > 0 && <p className="text-xs text-muted-foreground">Window: {new Date(q.data.from).toLocaleString()} – {new Date(q.data.to).toLocaleString()}</p>}
+      {invalidWindow ? <ErrorState title="Choose valid dates with From no later than To." /> : q.isPending && sources.size > 0 ? (
         <LoadingState label="Loading timeline…" />
       ) : q.isError ? (
-        <ErrorState title="Failed to load the incident timeline." error={q.error} />
+        <ErrorState title="Failed to load the incident timeline." error={q.error} action={<Button onClick={() => void q.refetch()}>Retry</Button>} />
       ) : items.length === 0 ? (
         <>
           <EmptyState title={page > 0 ? "No events on this page" : "No events"} hint="No events match the current filters in the selected window." />
@@ -302,6 +315,7 @@ export function TimelinePage() {
         <TimelineDetailDrawer item={selected} onClose={() => setSelected(null)} />
         </>
       )}
+      {selectedID && !q.isPending && !q.isError && !selected && <EmptyState title="Selected event is unavailable" hint="It is absent from this page or the active filters." />}
     </div>
   );
 }

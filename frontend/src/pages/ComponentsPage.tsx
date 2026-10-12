@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { useIsFetching, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouteSearchParams } from "@/lib/route-search";
 import { Activity, AlertTriangle, Clock, Gauge, Search, ServerCog, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { toast } from "sonner";
@@ -20,67 +19,53 @@ import { useCluster } from "@/hooks/useCluster";
 import { cn } from "@/lib/cn";
 import { NV_COMPONENT_ROLES, normalizeNVRole, nvRoleAlias } from "@/lib/component-roles";
 import { PageHeader } from "@/components/ui/page";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
+import { Tabs } from "@/components/ui/tabs";
+import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorState, LoadingState } from "@/components/ui/states";
 
 const statuses = ["all", "healthy", "degraded", "stale", "drift", "crashlooping", "missing", "not-observed"];
 
 export function ComponentsPage() {
   const { clusterId, cluster, isLoading: clusterLoading, error: clusterError } = useCluster();
-  const clusterResolved = !!clusterId && cluster?.id === clusterId;
+  const qc = useQueryClient();
+  const registryFetching = useIsFetching({ queryKey: ["clusters"], exact: true });
+  const clusterFetching = useIsFetching({ queryKey: ["cluster", clusterId], exact: true });
+  const registry = qc.getQueryState<{ clusters: Array<{ id: string }> }>(["clusters"]);
+  const clusterDetail = qc.getQueryState<{ id: string }>(["cluster", clusterId]);
+  const cachedScopeValid = (!registry || (registry.status === "success" && registry.fetchStatus === "idle")) && (!clusterDetail || (clusterDetail.status !== "error" && clusterDetail.fetchStatus === "idle"));
+  const clusterResolved = Boolean(clusterId && cluster?.id === clusterId && !clusterLoading && !clusterError && !registryFetching && !clusterFetching && cachedScopeValid && ((!registry && !clusterDetail) || (registry?.data?.clusters.find((item) => item.id === clusterId) ?? clusterDetail?.data)?.id === clusterId));
   const [searchParams, setSearchParams] = useRouteSearchParams();
-  const roleParam = normalizeNVRole(searchParams.get("role"));
-  const queryParam = searchParams.get("q") ?? "";
-  const [query, setQuery] = useState(queryParam);
-  const [status, setStatus] = useState("all");
-  const [nvRole, setNvRole] = useState(roleParam);
-  const selectedParam = searchParams.get("component");
-  const [selectedID, setSelectedID] = useState<string | null>(selectedParam);
-
-  useEffect(() => {
-    setNvRole(roleParam);
-  }, [roleParam]);
-
-  useEffect(() => {
-    setQuery(queryParam);
-  }, [queryParam]);
-
-  useEffect(() => {
-    setSelectedID(selectedParam);
-  }, [selectedParam]);
-
-  function selectNVRole(role: string) {
-    setNvRole(role);
-    setSelectedID(null);
-    const next = new URLSearchParams(searchParams);
-    next.delete("component");
-    if (role === "all") {
-      next.delete("role");
-    } else {
-      next.set("role", role);
-    }
-    setSearchParams(next, { replace: true });
+  const query = searchParams.get("q") ?? "";
+  const status = statuses.includes(searchParams.get("status") ?? "") ? searchParams.get("status")! : "all";
+  const nvRole = normalizeNVRole(searchParams.get("role"));
+  const selectedID = searchParams.get("component");
+  const tab = ["inventory", "families", "versions"].find((value) => value === searchParams.get("tab")) ?? "inventory";
+  function updateURL(changes: Record<string, string | null>, replace = false) {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      for (const [key, value] of Object.entries(changes)) {
+        if (value === null || value === "") next.delete(key); else next.set(key, value);
+      }
+      return next;
+    }, { replace });
   }
-
-  function selectComponent(id: string) {
-    setSelectedID(id);
-    const next = new URLSearchParams(searchParams);
-    next.set("component", id);
-    setSearchParams(next, { replace: true });
-  }
-
+  function selectNVRole(role: string) { updateURL({ role: role === "all" ? null : role }); }
+  function selectComponent(id: string) { updateURL({ component: id }); }
   const q = useQuery({
     queryKey: ["components-inventory", clusterId],
     queryFn: () => componentsInventory.list({ cluster_id: clusterId, limit: 1000 }),
     enabled: clusterResolved,
     refetchInterval: 30_000,
   });
+  const inventoryScopeValid = q.data?.components.every((item) => item.cluster_id === clusterId) ?? false;
   const selectedQ = useQuery({
     queryKey: ["component-instance", clusterId, selectedID],
     queryFn: () => componentsInventory.get(selectedID!),
-    enabled: clusterResolved && !!selectedID,
+    enabled: clusterResolved && tab === "inventory" && q.isSuccess && !q.isFetching && inventoryScopeValid && !!selectedID,
     refetchInterval: 30_000,
   });
 
@@ -97,43 +82,47 @@ export function ComponentsPage() {
   }, [instances]);
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return instances.filter((item) => {
-      if (status !== "all" && item.status !== status) return false;
-      if (nvRole !== "all" && nvRoleAlias(item).id !== nvRole) return false;
-      if (!needle) return true;
-      return [
-        item.component,
-        item.display_name,
-        item.role,
-        nvRoleAlias(item).label,
-        item.scope,
-        item.kind,
-        item.hostname,
-        item.version ?? "",
-        item.commit ?? "",
-        item.cluster_name ?? "",
-        item.status_reason ?? "",
-      ].some((value) => value.toLowerCase().includes(needle));
-    });
+    return instances.filter((item) => matchesComponentFilters(item, needle, status, nvRole));
   }, [instances, query, status, nvRole]);
   const versionRows = useMemo(() => componentVersionRows(rollups, instances), [rollups, instances]);
-  const selected = selectedQ.data?.component ?? filtered.find((item) => item.id === selectedID) ?? filtered[0] ?? null;
+  const detailMatches = Boolean(selectedID && selectedQ.data?.component?.id === selectedID && selectedQ.data.component.cluster_id === clusterId);
+  const selectionKey = `${clusterId}:${selectedID}`;
+  const [confirmedSelection, setConfirmedSelection] = useState<string | null>(null);
+  const detailSettled = clusterResolved && selectedQ.isFetchedAfterMount && selectedQ.isSuccess && !selectedQ.isFetching && detailMatches;
+  if (detailSettled && confirmedSelection !== selectionKey) setConfirmedSelection(selectionKey);
+  const selected = selectedQ.isSuccess && detailMatches && (detailSettled || confirmedSelection === selectionKey) ? selectedQ.data!.component : null;
+  const selectedFilteredOut = Boolean(selected && !matchesComponentFilters(selected, query, status, nvRole));
   const diagnosticsQ = useQuery({
-    queryKey: ["component-diagnostics", clusterId, selected?.id],
-    queryFn: () => componentsInventory.diagnostics(selected!.id),
-    enabled: clusterResolved && !!selected?.id && !q.isError,
+    queryKey: ["component-diagnostics", clusterId, selectedID],
+    queryFn: () => componentsInventory.diagnostics(selectedID!),
+    enabled: clusterResolved && tab === "inventory" && q.isSuccess && !q.isFetching && inventoryScopeValid && !selectedQ.isFetching && Boolean(selected) && !selectedFilteredOut,
     refetchInterval: 30_000,
     retry: (failureCount, error) => !isForbidden(error) && failureCount < 2,
   });
+  const diagnosticsMatches = Boolean(diagnosticsQ.data?.component?.id === selectedID && diagnosticsQ.data?.component.cluster_id === clusterId);
+  const bundleScopeReady = () => {
+    const inventoryState = qc.getQueryState(["components-inventory", clusterId]);
+    const detailState = qc.getQueryState<{ component: ComponentInstance }>(["component-instance", clusterId, selectedID]);
+    const diagnosticState = qc.getQueryState<ComponentDiagnostics>(["component-diagnostics", clusterId, selectedID]);
+    const currentRegistry = qc.getQueryState<{ clusters: Array<{ id: string }> }>(["clusters"]);
+    const currentCluster = qc.getQueryState<{ id: string }>(["cluster", clusterId]);
+    return clusterResolved && inventoryScopeValid && !selectedFilteredOut && ((!currentRegistry && !currentCluster) || (currentRegistry?.data?.clusters.find((item) => item.id === clusterId) ?? currentCluster?.data)?.id === clusterId) && (!currentRegistry || (currentRegistry.status === "success" && currentRegistry.fetchStatus === "idle")) && (!currentCluster || (currentCluster.status !== "error" && currentCluster.fetchStatus === "idle"))
+      && inventoryState?.status === "success" && inventoryState.fetchStatus === "idle"
+      && detailState?.status === "success" && detailState.fetchStatus === "idle" && detailState.data?.component.id === selectedID && detailState.data.component.cluster_id === clusterId
+      && diagnosticState?.status === "success" && diagnosticState.fetchStatus === "idle" && diagnosticState.data?.component.id === selectedID && diagnosticState.data.component.cluster_id === clusterId && diagnosticState.data.debug.support_bundle_enabled;
+  };
   const summary = q.data?.summary;
 
-  if (clusterLoading) return <LoadingState label="Loading cluster…" />;
+  if (clusterLoading || registryFetching || clusterFetching) return <LoadingState label="Loading cluster…" />;
   if (!clusterResolved) return <ErrorState title="Cluster could not be resolved." error={clusterError} />;
   if (q.isPending) return <LoadingState label="Loading component inventory…" />;
+  if (q.isSuccess && !inventoryScopeValid) return <ErrorState title="Component inventory does not match the active cluster." action={<Button onClick={() => void q.refetch()}>Retry</Button>} />;
   if (q.isError) return <div className="space-y-6" data-testid="components-page">
     <PageHeader title="Components" description="Health and build inventory for this cluster." />
     <ErrorState title="Component inventory could not be loaded." error={q.error} action={<Button onClick={() => void q.refetch()}>Retry</Button>} />
   </div>;
+
+  const attention = (summary?.degraded ?? 0) + (summary?.drift ?? 0) + (summary?.stale ?? 0) + (summary?.crashlooping ?? 0) + (summary?.missing ?? 0);
 
   const columns: Column<ComponentInstance>[] = [
     {
@@ -187,11 +176,11 @@ export function ComponentsPage() {
     {
       id: "status",
       header: "Status", kind: "text", size: 240, minSize: 208, maxSize: 320, wrap: true,
-      exportValue: (item) => `${item.status}; ${item.status_reason || item.last_error || "heartbeat current"}; last_seen=${item.last_seen_at}`,
+      exportValue: (item) => `${item.status}; ${item.status_reason || item.last_error || "No status reason recorded"}; last_seen=${item.last_seen_at}`,
       cell: (item) => (
         <div className="text-xs">
           <div className="font-medium">{formatDate(item.last_seen_at)}</div>
-          <div className="mt-1 text-muted-foreground">{item.status_reason || item.last_error || "heartbeat current"}</div>
+          <div className="mt-1 text-muted-foreground">{item.status_reason || item.last_error || "No status reason recorded"}</div>
         </div>
       ),
     },
@@ -267,51 +256,21 @@ export function ComponentsPage() {
         description="Live health and build inventory of every Constellation component — controller, scanner, importer, admission, discoverer, and runtime agents — with heartbeat and drift diagnostics."
       />
 
-      {(() => {
-        const degraded = (summary?.degraded ?? 0) + (summary?.drift ?? 0) + (summary?.stale ?? 0);
-        return (
-          <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6" data-testid="component-summary">
-            <StatCard label="Instances" value={summary?.total_instances ?? 0} icon={<ServerCog className="h-3.5 w-3.5" />} />
-            <StatCard label="Missing" value={summary?.missing ?? 0} tone={(summary?.missing ?? 0) > 0 ? "critical" : "neutral"} icon={<AlertTriangle className="h-3.5 w-3.5" />} />
-            <StatCard label="Degraded" value={degraded} tone={degraded > 0 ? "medium" : "neutral"} icon={<Activity className="h-3.5 w-3.5" />} />
-            <StatCard label="NV Controllers" value={nvRoleCounts.get("controller") ?? 0} icon={<ServerCog className="h-3.5 w-3.5" />} />
-            <StatCard label="NV Enforcers" value={nvRoleCounts.get("enforcer") ?? 0} icon={<ShieldCheck className="h-3.5 w-3.5" />} />
-            <StatCard label="NV Scanners" value={nvRoleCounts.get("scanner") ?? 0} icon={<Gauge className="h-3.5 w-3.5" />} />
-          </section>
-        );
-      })()}
-
-      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4" data-testid="component-rollups">
-        {rollups.map((rollup) => (
-          <RollupCard key={rollup.component} rollup={rollup} />
-        ))}
-      </section>
-
-      <section className="space-y-3 rounded-lg border border-border bg-card p-3" data-testid="component-version-matrix">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h2 className="text-sm font-semibold">Version Drift & Readiness</h2>
-            <p className="mt-1 text-xs text-muted-foreground">Controller, enforcer, scanner, admission, and importer build state with heartbeat reason and scanner capacity.</p>
-          </div>
-          <span className="text-xs text-muted-foreground">{versionRows.length} component families</span>
-        </div>
-        <DataTable<ComponentVersionRow>
-          rows={versionRows}
-          columns={versionColumns}
-          rowKey={(row) => row.id}
-          showDensityToggle={false}
-          defaultSort={{ id: "component", dir: "asc" }}
-          exportFileName="constellation-component-version-matrix"
-          emptyState={
-            <div className="px-3 py-6 text-center text-xs text-muted-foreground">
-              No component rollups have reported yet.
-            </div>
-          }
-          className="rounded-md"
-        />
-      </section>
-
+      <VerdictBanner status={(summary?.crashlooping ?? 0) || (summary?.missing ?? 0) ? "critical" : attention ? "degraded" : (summary?.total_instances ?? 0) ? "ok" : "info"}
+        title={attention ? `${attention} component${attention === 1 ? " needs" : "s need"} attention` : (summary?.total_instances ?? 0) ? "Observed components are healthy" : "No component instances observed"}
+        detail="Health totals cover the active cluster. Inventory search and role/status filters apply to loaded instances." />
+      <StatGrid data-testid="component-summary">
+        <StatCard label="Instances" value={summary?.total_instances ?? 0} icon={<ServerCog className="h-3.5 w-3.5" />} />
+        <StatCard label="Healthy" value={summary?.healthy ?? 0} icon={<Activity className="h-3.5 w-3.5" />} />
+        <StatCard label="Needs attention" value={attention} tone={attention ? "medium" : "neutral"} hint="Unhealthy instances and missing expected component families." />
+        <StatCard label="Crashlooping" value={summary?.crashlooping ?? 0} tone={(summary?.crashlooping ?? 0) ? "critical" : "neutral"} />
+        <StatCard label="Missing" value={summary?.missing ?? 0} tone={(summary?.missing ?? 0) ? "critical" : "neutral"} icon={<AlertTriangle className="h-3.5 w-3.5" />} />
+      </StatGrid>
+      {q.isFetching && <LoadingState label="Refreshing component inventory…" />}
+      <Tabs value={tab} onValueChange={(value) => updateURL({ tab: value === "inventory" ? null : value })} items={[
+        { value: "inventory", label: "Inventory", content: (<div className="space-y-4">
       <section className="rounded-lg border border-border bg-card p-3">
+        <p className="mb-2 text-xs text-muted-foreground">Role counts cover loaded instances.</p>
         <div className="mb-3 flex flex-wrap gap-2" data-testid="component-nv-role-filters">
             {NV_COMPONENT_ROLES.map((item) => {
             const active = nvRole === item.id;
@@ -340,7 +299,8 @@ export function ComponentsPage() {
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
             <input
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              aria-label="Search components"
+              onChange={(event) => updateURL({ q: event.target.value }, true)}
               placeholder="Search component, host, version, role, NV alias"
               className="w-full rounded-md border border-border bg-background py-2 pl-9 pr-3 text-sm"
               data-testid="component-search"
@@ -348,7 +308,8 @@ export function ComponentsPage() {
           </label>
           <select
             value={status}
-            onChange={(event) => setStatus(event.target.value)}
+            aria-label="Component status"
+            onChange={(event) => updateURL({ status: event.target.value === "all" ? null : event.target.value })}
             className="rounded-md border border-border bg-background p-2 text-sm"
             data-testid="component-status-filter"
           >
@@ -368,7 +329,9 @@ export function ComponentsPage() {
           rowKey={(item) => item.id}
           onRowClick={(item) => selectComponent(item.id)}
           selected={selected ? new Set([selected.id]) : undefined}
-          exportFileName="constellation-components"
+          preferencesKey="components.inventory"
+          exportFileName="constellation-components-loaded"
+          exportLabel="Export matching loaded instances CSV"
           testId="component-inventory-table"
           emptyState={
             <div className="px-3 py-8 text-center text-xs text-muted-foreground">
@@ -377,15 +340,63 @@ export function ComponentsPage() {
           }
         />
 
-        <ComponentPreview
-          item={selected}
-          diagnostics={diagnosticsQ.data ?? null}
-          diagnosticsLoading={diagnosticsQ.isFetching}
-          diagnosticsError={diagnosticsQ.error}
+        <p className="text-xs text-muted-foreground">{filtered.length} matching loaded instances. Search, role counts, and inventory CSV cover up to 1,000 loaded instances. Select an instance to inspect its diagnostics.</p>
+        {selectedID && <div><Button size="sm" variant="outline" onClick={() => updateURL({ component: null })}>Clear inspection</Button></div>}
+        {selected && (q.isFetching || selectedQ.isFetching) && <p role="status" className="text-xs text-muted-foreground">Refreshing selected component… The confirmed preview remains visible; bundle creation is paused.</p>}
+        {!selectedID ? <ComponentPreview item={null} diagnostics={null} diagnosticsLoading={false} diagnosticsError={null} onRetryDiagnostics={() => void diagnosticsQ.refetch()} bundleScopeReady={bundleScopeReady} />
+          : !selected && (selectedQ.isPending || selectedQ.isFetching) ? <LoadingState label={selectedQ.isPending ? "Loading selected component…" : "Refreshing selected component…"} />
+          : selectedQ.isError ? <ErrorState title="Selected component could not be loaded." action={<Button onClick={() => void selectedQ.refetch()}>Retry component</Button>} />
+          : !detailMatches ? <ErrorState title="Selected component is unavailable in the active cluster." action={<Button onClick={() => void selectedQ.refetch()}>Retry component</Button>} />
+          : selectedFilteredOut ? <EmptyState title="Selected component is outside the active filters" hint="Clear the inventory filters to inspect this component. Your URL selection is preserved." />
+          : <ComponentPreview key={`${clusterId}:${selectedID}`} item={selected} diagnostics={diagnosticsMatches ? diagnosticsQ.data ?? null : null} diagnosticsLoading={diagnosticsQ.isPending || diagnosticsQ.isFetching}
+              diagnosticsError={diagnosticsQ.isError ? diagnosticsQ.error : diagnosticsQ.isSuccess && !diagnosticsMatches ? new Error("Scope mismatch") : null} onRetryDiagnostics={() => void diagnosticsQ.refetch()} bundleScopeReady={bundleScopeReady} />}
+      </section>
+      </div>) },
+        { value: "families", label: "Families", content: (
+      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4" data-testid="component-rollups">
+        {rollups.map((rollup) => (
+          <RollupCard key={rollup.component} rollup={rollup} />
+        ))}
+      </section>
+
+        ) },
+        { value: "versions", label: "Versions", content: (
+      <section className="space-y-3 rounded-lg border border-border bg-card p-3" data-testid="component-version-matrix">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-semibold">Version Drift & Readiness</h2>
+            <p className="mt-1 text-xs text-muted-foreground">Controller, enforcer, scanner, admission, and importer build state with heartbeat reason and scanner capacity.</p>
+          </div>
+          <span className="text-xs text-muted-foreground">{versionRows.length} component families</span>
+        </div>
+        <DataTable<ComponentVersionRow>
+          rows={versionRows}
+          columns={versionColumns}
+          rowKey={(row) => row.id}
+          showDensityToggle={false}
+          defaultSort={{ id: "component", dir: "asc" }}
+          preferencesKey="components.versions"
+          exportFileName="constellation-component-version-matrix"
+          emptyState={
+            <div className="px-3 py-6 text-center text-xs text-muted-foreground">
+              No component rollups have reported yet.
+            </div>
+          }
+          className="rounded-md"
         />
       </section>
+
+        ) },
+      ]} />
     </div>
   );
+}
+
+function matchesComponentFilters(item: ComponentInstance, query: string, status: string, role: string) {
+  if (status !== "all" && item.status !== status) return false;
+  if (role !== "all" && nvRoleAlias(item).id !== role) return false;
+  const needle = query.trim().toLowerCase();
+  return !needle || [item.component, item.display_name, item.role, nvRoleAlias(item).label, item.scope, item.kind, item.hostname, item.version ?? "", item.commit ?? "", item.cluster_name ?? "", item.status_reason ?? ""].some((value) => value.toLowerCase().includes(needle));
 }
 
 interface ComponentVersionRow {
@@ -458,7 +469,7 @@ function componentVersionRows(rollups: ComponentRollup[], instances: ComponentIn
       version: rollup.latest_version || newestInstanceValue(peers, "version") || "unknown",
       commit: shortCommit(rollup.latest_commit || newestInstanceValue(peers, "commit") || ""),
       readiness: readinessLabel(rollup),
-      reason: rollup.last_status_cause || "heartbeat current",
+      reason: rollup.last_status_cause || "No status reason recorded",
       capacity: alias.id === "scanner" ? scannerCapacitySummary(peers) : "-",
       lastSeenAt: rollup.latest_seen_at || newestInstanceSeen(peers),
     };
@@ -531,11 +542,15 @@ function ComponentPreview({
   diagnostics,
   diagnosticsLoading,
   diagnosticsError,
+  onRetryDiagnostics,
+  bundleScopeReady,
 }: {
   item: ComponentInstance | null;
   diagnostics: ComponentDiagnostics | null;
   diagnosticsLoading: boolean;
   diagnosticsError: unknown;
+  onRetryDiagnostics: () => void;
+  bundleScopeReady: () => boolean;
 }) {
   if (!item) {
     return (
@@ -572,7 +587,7 @@ function ComponentPreview({
           <Field label="Status Reason" value={item.status_reason || item.last_error || "-"} />
         </dl>
       </section>
-      <DiagnosticsPanel diagnostics={diagnostics} loading={diagnosticsLoading} error={diagnosticsError} />
+      <DiagnosticsPanel diagnostics={diagnostics} loading={diagnosticsLoading} error={diagnosticsError} onRetry={onRetryDiagnostics} bundleScopeReady={bundleScopeReady} />
       <section className="rounded-lg border border-border bg-card p-4">
         <h3 className="text-sm font-semibold">Public heartbeat metadata</h3>
         <pre className="mt-3 max-h-[420px] overflow-auto rounded-md border border-border bg-muted p-3 text-xs">
@@ -583,10 +598,10 @@ function ComponentPreview({
   );
 }
 
-function DiagnosticsPanel({ diagnostics, loading, error }: { diagnostics: ComponentDiagnostics | null; loading: boolean; error: unknown }) {
+function DiagnosticsPanel({ diagnostics, loading, error, onRetry, bundleScopeReady }: { diagnostics: ComponentDiagnostics | null; loading: boolean; error: unknown; onRetry: () => void; bundleScopeReady: () => boolean }) {
   const [queuedJobId, setQueuedJobId] = useState<string | null>(null);
   const supportBundle = useMutation({
-    mutationFn: supportBundles.createJob,
+    mutationFn: () => { if (!bundleScopeReady()) throw new Error("Current diagnostics are unavailable"); return supportBundles.createJob(); },
     onSuccess: (job) => {
       setQueuedJobId(job.id);
       toast.success("Support bundle queued. Track it in System Health.");
@@ -601,9 +616,12 @@ function DiagnosticsPanel({ diagnostics, loading, error }: { diagnostics: Compon
           <h3 className="text-sm font-semibold">Diagnostics</h3>
         </div>
         <p className="mt-2 text-xs text-muted-foreground">Global admin access required.</p>
+        <Button className="mt-3" onClick={onRetry}>Retry diagnostics</Button>
       </section>
     );
   }
+  if (error) return <ErrorState title="Component diagnostics could not be loaded." action={<Button onClick={onRetry}>Retry diagnostics</Button>} />;
+  if (loading) return <LoadingState label="Loading or refreshing diagnostics…" />;
   if (!diagnostics) {
     return (
       <section className="rounded-lg border border-border bg-card p-4">
@@ -629,18 +647,20 @@ function DiagnosticsPanel({ diagnostics, loading, error }: { diagnostics: Compon
             size="sm"
             variant="outline"
             onClick={() => supportBundle.mutate()}
-            disabled={!diagnostics.debug.support_bundle_enabled || supportBundle.isPending}
+            disabled={!diagnostics.debug.support_bundle_enabled || supportBundle.isPending || !bundleScopeReady()}
             data-testid="component-support-bundle"
-            title="Queue redacted support bundle"
+            title="Queue a redacted support bundle for the organization"
           >
             <Clock className="h-3.5 w-3.5" aria-hidden />
-            {supportBundle.isPending ? "Queuing..." : "Create bundle"}
+            {supportBundle.isPending ? "Queuing..." : "Create org-wide bundle"}
           </Button>
           <Pill tone="accent">{diagnostics.admin_gate}</Pill>
         </div>
       </div>
+      <p className="text-xs text-muted-foreground">Support bundles cover the organization; they are not limited to this component or cluster.</p>
+      {supportBundle.isError && <ErrorState title="Could not queue an organization support bundle. Try again." />}
       {queuedJobId && <p className="text-xs text-muted-foreground" role="status" data-testid="component-support-bundle-feedback">
-        Bundle job <span className="font-mono">{queuedJobId}</span> queued. <Link to="." href="/settings/health?tab=bundles" className="text-[color:var(--color-primary)] hover:underline">View status and download in System Health</Link>.
+        Bundle job <span className="font-mono">{queuedJobId}</span> queued. <a href="/settings/health?tab=bundles" className="text-[color:var(--color-primary)] hover:underline">View status and download in System Health</a>.
       </p>}
       <div className="grid grid-cols-2 gap-2">
         {counters.map((counter) => (

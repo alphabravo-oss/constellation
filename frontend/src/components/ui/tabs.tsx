@@ -14,10 +14,11 @@ export function useTabParam(key: string, defaultValue: string): [string, (v: str
   const [params, setParams] = useRouteSearchParams();
   const value = params.get(key) ?? defaultValue;
   const setValue = (v: string) => {
-    const next = new URLSearchParams(params);
-    if (v === defaultValue) next.delete(key);
-    else next.set(key, v);
-    setParams(next, { replace: true });
+    setParams(current => {
+      if (v === defaultValue) current.delete(key);
+      else current.set(key, v);
+      return current;
+    });
   };
   return [value, setValue];
 }

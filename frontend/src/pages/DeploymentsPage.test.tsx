@@ -79,6 +79,8 @@ it.each(["loading", "unresolved", "wrong", "error"])("does not query an %s clust
  if (condition === "error") state.error = new Error("cluster unavailable");
  await render("/clusters/cluster/deployments");
  expect(deployments.list).not.toHaveBeenCalled(); expect(button("Export CSV").disabled).toBe(true);
+ expect(host.textContent).not.toContain("Loading deployment inventory");
+ expect(host.textContent).toContain(condition === "error" ? "Cluster inventory is unavailable" : condition === "loading" ? "Resolving cluster" : "Select a resolved cluster");
  expect(host.querySelectorAll('[data-testid="deployment-row"]')).toHaveLength(0);
 });
 

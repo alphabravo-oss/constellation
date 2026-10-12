@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 const clusterId = "11111111-1111-4111-8111-111111111111";
 const root = `/clusters/${clusterId}`;
@@ -62,8 +62,21 @@ test.beforeEach(async ({ page }) => {
       case "/components":
         body = { components: [], rollups: [] };
         break;
+      case "/system-health":
       case "/system-health/clusters/" + clusterId:
         body = { heartbeats: [] };
+        break;
+      case "/clusters/" + clusterId + "/platform-facts":
+        body = { cluster_id: clusterId, cluster_name: "Test cluster", distro: "kubernetes", status: "missing", findings_summary: { open: 0, critical: 0, high: 0, medium: 0, low: 0 }, findings: [] };
+        break;
+      case "/scan/status":
+        body = { scanned: 0, scheduled: 0, scanning: 0, failed: 0 };
+        break;
+      case "/scan/scanner":
+        body = { scanners: [] };
+        break;
+      case "/dashboard/events-timeline":
+        body = { events_timeline: [] };
         break;
       case "/federation/state":
         body = { state: "standalone" };
@@ -90,15 +103,21 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByTestId("dashboard-page")).toBeVisible();
 });
 
+async function selectDashboardTab(page: Page, value: string, label: string) {
+  await page.getByRole("tab", { name: label, exact: true }).click();
+  await expect(page).toHaveURL(`${root}/dashboard?tab=${value}`);
+  await expect(page.getByRole("tab", { name: label, exact: true })).toHaveAttribute("data-state", "active");
+}
+
 test("all metric tiles keep cluster scope and link to their source pages", async ({ page }) => {
   const dashboard = page.getByTestId("dashboard-page");
   const destinations: Array<[string, string]> = [
-    ["Critical", "/findings?severity=critical"],
-    ["High", "/findings?severity=high"],
-    ["Open", "/findings"],
+    ["Critical", "/findings?severity=critical&lifecycle=open"],
+    ["High", "/findings?severity=high&lifecycle=open"],
+    ["Open", "/findings?lifecycle=open"],
     ["Accepted", "/findings?lifecycle=accepted"],
     ["Compliance", "/compliance"],
-    ["Runtime · 24h", "/runtime"],
+    ["Runtime · 24h", "/runtime?tab=evidence&hours=24"],
     ["Image CVEs", "/findings"],
     ["Host CVEs", "/nodes?risk=host-cves"],
     ["Fixable now", "/findings"],
@@ -106,9 +125,18 @@ test("all metric tiles keep cluster scope and link to their source pages", async
     ["Run as root", "/deployments"],
     ["Exposed WLs", "/network"],
   ];
-  for (const [label, destination] of destinations) {
-    await expect(dashboard.locator("a").filter({ has: page.getByText(label, { exact: true }) }).first()).toHaveAttribute("href", `${root}${destination}`);
+  const summary = dashboard.getByTestId("dashboard-summary");
+  for (const [label, destination] of destinations.slice(0, 4)) {
+    await expect(summary.locator("a").filter({ has: page.getByText(label, { exact: true }) })).toHaveAttribute("href", `${root}${destination}`);
   }
+  await selectDashboardTab(page, "posture", "Posture");
+  await dashboard.locator("summary").filter({ hasText: "Additional posture metrics" }).click();
+  for (const [label, destination] of destinations.slice(4)) {
+    const link = dashboard.locator("a").filter({ has: page.getByText(label, { exact: true }) });
+    await expect(link).toBeVisible();
+    await expect(link).toHaveAttribute("href", `${root}${destination}`);
+  }
+  await selectDashboardTab(page, "operations", "Operations");
   for (const role of ["controller", "enforcer", "scanner", "admission", "discoverer"]) {
     await expect(dashboard.getByTestId(`dashboard-component-link-${role}`).locator("a")).toHaveAttribute("href", `${root}/components?role=${role}`);
   }
@@ -117,20 +145,24 @@ test("all metric tiles keep cluster scope and link to their source pages", async
 
 test("panel links preserve the source, time window, and supported filters", async ({ page }) => {
   const dashboard = page.getByTestId("dashboard-page");
+  await expect(dashboard.getByRole("link", { name: /view all/i })).toHaveAttribute("href", `${root}/findings`);
+  await selectDashboardTab(page, "network", "Network");
   await expect(dashboard.getByRole("link", { name: /view conversations/i })).toHaveAttribute("href", `${root}/network?tab=conversations&hours=24&verdict=deny`);
   await expect(dashboard.getByTestId("dashboard-network-denies").getByRole("link")).toHaveAttribute("href", `${root}/network?tab=conversations&hours=24&verdict=deny&workload=default%2Ffrontend`);
   await expect(dashboard.getByRole("link", { name: /default\/frontend/ }).first()).toHaveAttribute("href", `${root}/deployments?q=frontend`);
   await expect(dashboard.getByRole("link", { name: /^frontend default 2C 1H$/ })).toHaveAttribute("href", `${root}/deployments?q=frontend`);
-  await expect(dashboard.getByRole("link", { name: /view all/i })).toHaveAttribute("href", `${root}/findings`);
+  await selectDashboardTab(page, "trends", "Trends");
   await expect(dashboard.getByRole("link", { name: /Open CVE DB/i })).toHaveAttribute("href", "/cve");
 });
 
 test("component role and denied conversation links activate source filters", async ({ page }) => {
+  await selectDashboardTab(page, "operations", "Operations");
   await page.getByTestId("dashboard-component-link-scanner").locator("a").click();
   await expect(page).toHaveURL(`${root}/components?role=scanner`);
   await expect(page.getByTestId("component-nv-role-scanner")).toHaveClass(/border-primary/);
 
-  await page.goto(`${root}/dashboard`);
+  await page.goto(`${root}/dashboard?tab=network`);
+  await expect(page.getByRole("tab", { name: "Network", exact: true })).toHaveAttribute("data-state", "active");
   const filteredRequest = page.waitForRequest((request) => {
     const url = new URL(request.url());
     return url.pathname === "/api/v1/network/conversations"
@@ -147,6 +179,7 @@ test("component role and denied conversation links activate source filters", asy
 });
 
 test("network-denies header requests denied conversations for 24 hours", async ({ page }) => {
+  await selectDashboardTab(page, "network", "Network");
   const filteredRequest = page.waitForRequest((request) => {
     const url = new URL(request.url());
     return url.pathname === "/api/v1/network/conversations"

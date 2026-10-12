@@ -1,3 +1,4 @@
+/* global HTMLTableRowElement */
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { TestRouter } from "@/test/router";
@@ -13,7 +14,7 @@ vi.mock("@/api/client", () => ({
 }));
 
 const component = {
-  id: "scanner-1", component: "scanner", display_name: "Scanner", role: "scanner", scope: "cluster", kind: "deployment",
+  id: "scanner-1", cluster_id: "cluster-1", component: "scanner", display_name: "Scanner", role: "scanner", scope: "cluster", kind: "deployment",
   hostname: "scanner-host", status: "healthy", last_seen_at: "2026-09-26T00:00:00Z", metadata: {},
 } as ComponentInstance;
 
@@ -33,6 +34,7 @@ it("queues a diagnostic bundle and links to persisted job history without downlo
     summary: { generated_at: "2026-09-26T00:00:00Z", components: 1, total_instances: 1, healthy: 1, degraded: 0, stale: 0, drift: 0, crashlooping: 0, missing: 0 },
     components: [component], rollups: [],
   });
+  vi.mocked(componentsInventory.get).mockResolvedValue({ component });
   vi.mocked(componentsInventory.diagnostics).mockResolvedValue({
     component, generated_at: "2026-09-26T00:00:00Z", admin_gate: "global admin",
     status: { state: "healthy", stale: false, drift: false, crashlooping: false, degraded: false, uptime_seconds: 10, restart_count: 0, first_seen_at: "2026-09-26T00:00:00Z", last_seen_at: "2026-09-26T00:00:00Z" },
@@ -48,8 +50,14 @@ it("queues a diagnostic bundle and links to persisted job history without downlo
     <QueryClientProvider client={queryClient}><TestRouter><ComponentsPage /></TestRouter></QueryClientProvider>,
   ));
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+  expect(host.querySelector('[data-testid="component-support-bundle"]')).toBeNull();
+  await act(async () => host.querySelector<HTMLTableRowElement>('[data-testid="component-inventory-table"] tbody tr')!.click());
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
   const button = host.querySelector<HTMLButtonElement>('[data-testid="component-support-bundle"]')!;
   expect(button.disabled).toBe(false);
+  expect(button.textContent).toContain("org-wide");
+  expect(host.textContent).toContain("Support bundles cover the organization");
   await act(async () => button.click());
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
   expect(supportBundles.createJob).toHaveBeenCalledOnce();

@@ -95,6 +95,8 @@ test("Dashboard exposes operator health and scanner freshness links", async ({ p
   await page.goto("/dashboard");
   await page.waitForURL(/\/clusters\/[^/]+\/dashboard/);
 
+  await page.getByRole("tab", { name: "Operations", exact: true }).click();
+  await expect(page).toHaveURL(/\/dashboard\?tab=operations$/);
   await expect(page.getByTestId("dashboard-operator-strip")).toBeVisible();
   await expect(page.getByTestId("dashboard-component-health")).toContainText(/Controllers/i);
   await expect(page.getByTestId("dashboard-component-link-controller").locator("a")).toHaveAttribute("href", /\/components\?role=controller$/);
@@ -104,6 +106,8 @@ test("Dashboard exposes operator health and scanner freshness links", async ({ p
   await expect(page.getByTestId("dashboard-component-link-discoverer").locator("a")).toHaveAttribute("href", /\/components\?role=discoverer$/);
   await expect(page.getByTestId("dashboard-scanner-freshness")).toContainText(/Scanner DB/i);
   await expect(page.getByTestId("dashboard-scanner-freshness")).toHaveAttribute("href", "/settings/scanner");
+  await page.getByRole("tab", { name: "Network", exact: true }).click();
+  await expect(page).toHaveURL(/\/dashboard\?tab=network$/);
   await expect(page.getByTestId("dashboard-network-denies")).toBeVisible();
 });
 
@@ -144,7 +148,8 @@ test("Dashboard and System Health show reported scanner engine DB revisions", as
     await route.fulfill({ response, json: body });
   });
 
-  await page.goto(`/clusters/${clusterID}/dashboard`);
+  await page.goto(`/clusters/${clusterID}/dashboard?tab=operations`);
+  await expect(page.getByRole("tab", { name: "Operations", exact: true })).toHaveAttribute("data-state", "active");
   const dashboard = page.getByTestId("dashboard-scanner-freshness");
   await expect(dashboard).toContainText("3 idle / 4 slots");
   await expect(dashboard).toContainText("host-bundle-test");
@@ -209,8 +214,14 @@ test("Components page exposes NeuVector role filters and version drift matrix", 
   await page.goto(`/clusters/${clusterID}/components`);
   await expect(page.getByRole("heading", { name: /^Components$/i })).toBeVisible();
   await expect(page.getByTestId("component-nv-role-filters")).toContainText(/Controllers/i);
+  await expect(page.getByTestId("component-inventory-table")).toBeVisible();
+  await expect(page.getByTestId("component-version-matrix")).toBeHidden();
+  await page.getByRole("tab", { name: "Versions", exact: true }).click();
+  await expect(page).toHaveURL(/tab=versions/);
   await expect(page.getByTestId("component-version-matrix")).toBeVisible();
   await expect(page.getByTestId("component-version-matrix")).toContainText(/Version Drift/i);
+  await page.getByRole("tab", { name: "Inventory", exact: true }).click();
+  await expect(page.getByTestId("component-nv-role-filters")).toBeVisible();
 });
 
 test("Components role filters show matching instances and diagnostics", async ({ page }) => {

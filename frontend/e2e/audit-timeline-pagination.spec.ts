@@ -81,3 +81,21 @@ test("a single audit page still states its scope", async ({ page }) => {
   expect(requests).toHaveLength(1);
   expect(requests[0].searchParams.get("cluster_id")).toBe(clusterId);
 });
+
+test("timeline reload retains filters, page and exact event selection", async ({ page }) => {
+  const requests = await mockPagedEvents(page, 101);
+  const target = `/clusters/${clusterId}/timeline?tab=event&namespace=prod&page=2&event=runtime_event%3A101&context=dashboard`;
+  await page.goto(target);
+  await expect(page.getByTestId("timeline-page-scope")).toContainText("101–101");
+  await expect(page.getByRole("dialog")).toContainText("timeline-event-101");
+  await page.reload();
+  await expect(page.getByRole("dialog")).toContainText("timeline-event-101");
+  await page.getByRole("button", { name: "Close drawer" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page).toHaveURL(/namespace=prod&page=2&context=dashboard/);
+  await page.goBack();
+  await expect(page.getByRole("dialog")).toContainText("timeline-event-101");
+  const timelineRequests = requests.filter(url => url.pathname.endsWith("/security/timeline"));
+  expect(timelineRequests.length).toBeGreaterThanOrEqual(2);
+  expect(timelineRequests.every(url => url.searchParams.get("cluster_id") === clusterId && url.searchParams.get("offset") === "100" && url.searchParams.get("namespace") === "prod" && url.searchParams.get("type") === "runtime_event")).toBe(true);
+});

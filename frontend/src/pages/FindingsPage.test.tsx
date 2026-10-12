@@ -211,3 +211,9 @@ it("renders the full one-hundred-row server page without a second fifty-row pagi
   expect(host.textContent).toContain("Finding 99"); expect(host.querySelectorAll('[aria-label="Next page"]')).toHaveLength(0);
   expect(findings.list).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 100, offset: 0 }));
 });
+
+it("does not query across the organization while cluster context is missing", async () => {
+  route.clusterId = ""; await renderPage();
+  expect(findings.list).not.toHaveBeenCalled(); expect(findings.byCVE).not.toHaveBeenCalled();
+  expect(host.textContent).toContain("The active cluster could not be resolved");
+});

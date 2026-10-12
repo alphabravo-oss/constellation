@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { downloadCsv } from "@/lib/csv";
@@ -22,6 +22,8 @@ import {
   scannerOperations,
   systemHealth,
   type CVEBundleStatus,
+  type ClusterSummary,
+  type ClusterDetail,
   type FedMember,
   type FedMembership,
   type Finding,
@@ -33,7 +35,7 @@ import {
   type SystemHealthHeartbeat,
 } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { SeverityBadge } from "@/components/ui/severity-badge";
 import { RiskScore, RiskGauge } from "@/components/ui/risk-score";
 import { Sparkline } from "@/components/ui/sparkline";
@@ -69,9 +71,8 @@ const SCORE_FACTORS = [
 ] as const;
 
 export function DashboardPage() {
-  // Under /clusters/:id/dashboard, scope all data fetches to that cluster.
-  // At org-level (legacy/back-compat) clusterId is undefined → fetch unscoped.
-  const { clusterId, cluster } = useCluster();
+  const { clusterId, cluster, isLoading: clusterLoading, error: clusterError } = useCluster();
+  const scopeReady = !!clusterId && cluster?.id === clusterId && !clusterLoading && !clusterError;
   const [requestedTab, setTab] = useTabParam("tab", "overview");
   const tab = ["overview", "posture", "network", "operations", "trends"].includes(requestedTab) ? requestedTab : "overview";
   // Severity/lifecycle totals come from dashboard.summary (server-aggregated),
@@ -81,54 +82,59 @@ export function DashboardPage() {
   const open  = useQuery({
     queryKey: ["findings", "open", clusterId],
     queryFn: () => findings.list({ lifecycle: "open", cluster_id: clusterId, limit: 250 }),
+    enabled: scopeReady,
   });
-  const bundle = useQuery({ queryKey: ["cve", "bundle"],    queryFn: () => cve.bundle() });
-  const cveStats = useQuery({ queryKey: ["cve", "stats"],   queryFn: () => cve.stats(), staleTime: 60_000 });
+  const bundle = useQuery({ queryKey: ["cve", "bundle"],    queryFn: () => cve.bundle(), enabled: scopeReady });
+  const cveStats = useQuery({ queryKey: ["cve", "stats"],   queryFn: () => cve.stats(), enabled: scopeReady, staleTime: 60_000 });
   const sum   = useQuery({
     queryKey: ["dashboard", clusterId],
     queryFn: () => dashboard.summary({ cluster_id: clusterId }),
+    enabled: scopeReady,
   });
   const platform = useQuery({
     queryKey: ["cluster-platform", clusterId],
     queryFn: () => clusters.platformFacts(clusterId!),
-    enabled: !!clusterId,
+    enabled: scopeReady,
     refetchInterval: 30_000,
   });
   const clusterHealth = useQuery({
     queryKey: ["system-health", "cluster", clusterId],
     queryFn: () => systemHealth.cluster(clusterId!),
-    enabled: !!clusterId,
+    enabled: scopeReady,
     staleTime: 30_000,
     refetchInterval: 30_000,
   });
   const fleetHealth = useQuery({
     queryKey: ["system-health"],
     queryFn: systemHealth.overview,
-    enabled: !clusterId,
+    enabled: scopeReady && tab === "operations",
     staleTime: 30_000,
     refetchInterval: 30_000,
   });
   const scanStatus = useQuery({
     queryKey: ["scan-status", "dashboard"],
     queryFn: scannerOperations.status,
+    enabled: scopeReady,
     staleTime: 60_000,
     refetchInterval: 60_000,
   });
   const scannerWorkers = useQuery({
     queryKey: ["scan-scanner-workers", "dashboard"],
     queryFn: scannerOperations.workers,
+    enabled: scopeReady,
     staleTime: 60_000,
     refetchInterval: 60_000,
   });
   const federationState = useQuery({
     queryKey: ["fed-state", "dashboard"],
     queryFn: federation.state,
+    enabled: scopeReady,
     staleTime: 60_000,
   });
   const federationMembers = useQuery({
     queryKey: ["fed-members", "dashboard"],
     queryFn: federation.members,
-    enabled: federationState.data?.state === "master",
+    enabled: scopeReady && !federationState.isError && federationState.data?.state === "master",
     staleTime: 60_000,
   });
   // Compliance posture (pass/fail across frameworks) + runtime threats in the
@@ -137,73 +143,105 @@ export function DashboardPage() {
   const complianceSum = useQuery({
     queryKey: ["compliance", "summary", clusterId],
     queryFn: () => compliance.summary(clusterId),
+    enabled: scopeReady,
     staleTime: 60_000,
   });
   const runtimeToday = useQuery({
     queryKey: ["runtime", "overview", "24h", clusterId],
     queryFn: () => enterprise.runtime({ hours: 24, cluster_id: clusterId }),
+    enabled: scopeReady,
     staleTime: 60_000,
   });
   const qc = useQueryClient();
+  const scanInFlight = useRef(false);
+  const canSubmitPlatformScan = (id: string) => {
+    const registry = qc.getQueryState<{ clusters: ClusterSummary[] }>(["clusters"]);
+    const detail = qc.getQueryState<ClusterDetail>(["cluster", id]);
+    const source = qc.getQueryState<PlatformFactsResponse>(["cluster-platform", id]);
+    if (registry?.status === "error" || registry?.fetchStatus === "fetching" || registry?.isInvalidated || detail?.status === "error" || detail?.fetchStatus === "fetching" || detail?.isInvalidated) return false;
+    const resolved = (registry?.status === "success" && registry.data?.clusters?.some((entry) => entry.id === id))
+      || (detail?.status === "success" && detail.data?.id === id);
+    return !!resolved && source?.status === "success" && source.fetchStatus === "idle" && !source.isInvalidated && source.data?.cluster_id === id && !!source.data.evidence;
+  };
   const scanPlatform = useMutation({
-    mutationFn: () => clusters.scanPlatform(clusterId!),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["cluster-platform", clusterId] }),
+    mutationFn: (id: string) => {
+      if (!canSubmitPlatformScan(id)) throw new Error("Cluster or platform evidence changed before submission.");
+      return clusters.scanPlatform(id);
+    },
+    onSuccess: (_result, id) => qc.invalidateQueries({ queryKey: ["cluster-platform", id] }),
   });
-  const openItems = useMemo(() => open.data?.findings ?? [], [open.data]);
+  const summaryData = scopeReady && !sum.isError ? sum.data : undefined;
+  const healthData = scopeReady && !clusterHealth.isError ? clusterHealth.data : undefined;
+  const complianceData = scopeReady && !complianceSum.isError ? complianceSum.data : undefined;
+  const runtimeData = scopeReady && !runtimeToday.isError ? runtimeToday.data : undefined;
+  const openData = scopeReady && !open.isError ? open.data : undefined;
+  const platformData = scopeReady && !platform.isError && platform.data?.cluster_id === clusterId ? platform.data : undefined;
+  const scannerUnavailable = scanStatus.isError || scannerWorkers.isError || bundle.isError;
+  const federationUnavailable = federationState.isError || (federationState.data?.state === "master" && federationMembers.isError);
+  const currentScan = scanPlatform.variables === clusterId;
+  const requestPlatformScan = async () => {
+    if (!scopeReady || !clusterId || !platformData?.evidence || platform.isFetching || scanPlatform.isPending || scanInFlight.current || !canSubmitPlatformScan(clusterId)) return;
+    scanInFlight.current = true;
+    try { await scanPlatform.mutateAsync(clusterId); } catch { /* Mutation feedback is rendered below. */ }
+    finally { scanInFlight.current = false; }
+  };
+  const openItems = useMemo(() => openData?.findings ?? [], [openData]);
   const allItems = openItems; // Finding trends describe only this loaded sample.
   const clusterPath = (path: string) => clusterId ? `/clusters/${clusterId}${path}` : path;
 
   // Counts always come from the complete server aggregate, never the loaded sample.
   const counts = {
-    open: sum.data?.open_findings ?? 0,
-    critical: sum.data?.findings_by_severity?.critical ?? 0,
-    high: sum.data?.findings_by_severity?.high ?? 0,
-    accepted: sum.data?.accepted_risks ?? 0,
+    open: summaryData?.open_findings ?? 0,
+    critical: summaryData?.findings_by_severity?.critical ?? 0,
+    high: summaryData?.findings_by_severity?.high ?? 0,
+    accepted: summaryData?.accepted_risks ?? 0,
   };
   const severityCounts = (["critical", "high", "medium", "low", "info"] as Severity[])
-    .map((severity) => ({ severity, value: sum.data?.findings_by_severity?.[severity] ?? 0 }))
+    .map((severity) => ({ severity, value: summaryData?.findings_by_severity?.[severity] ?? 0 }))
     .filter((entry) => entry.value > 0);
-  const posture = sum.data?.posture;
+  const posture = summaryData?.posture;
   const risk = posture?.security_score ?? 0;
   const eventsTimelineQ = useQuery({
     queryKey: ["events-timeline", clusterId],
     queryFn: () => dashboard.eventsTimeline({ cluster_id: clusterId }),
+    enabled: scopeReady,
     staleTime: 300_000, // 5min — heavy query, secondary widget
   });
   const exposureQ = useQuery({
     queryKey: ["exposure", clusterId],
     queryFn: () => network.exposure({ cluster_id: clusterId }),
-    enabled: !!clusterId,
+    enabled: scopeReady,
   });
   const conversationsQ = useQuery({
     queryKey: ["network-conversations", "dashboard-denies", clusterId],
     queryFn: () => network.conversations({ hours: 24, cluster_id: clusterId }),
-    enabled: !!clusterId,
+    enabled: scopeReady,
     staleTime: 60_000,
   });
   const trends = useMemo(() => fourteenDayBySeverity(allItems), [allItems]);
   const topActions = useMemo(() => prioritizeActionItems(openItems), [openItems]);
-  const recent = sum.data?.recent_activity ?? [];
+  const recent = summaryData?.recent_activity ?? [];
   const componentHealth = useMemo(
-    () => summarizeComponentHealth(clusterHealth.data?.heartbeats ?? []),
-    [clusterHealth.data?.heartbeats],
+    () => summarizeComponentHealth(healthData?.heartbeats ?? []),
+    [healthData?.heartbeats],
   );
   const scannerFreshness = useMemo(
-    () => summarizeScannerFreshness(scanStatus.data, scannerWorkers.data ?? [], bundle.data),
-    [scanStatus.data, scannerWorkers.data, bundle.data],
+    () => summarizeScannerFreshness(scannerUnavailable ? undefined : scanStatus.data, scannerUnavailable ? [] : scannerWorkers.data ?? [], scannerUnavailable ? undefined : bundle.data),
+    [scannerUnavailable, scanStatus.data, scannerWorkers.data, bundle.data],
   );
+  const conversationData = scopeReady && !conversationsQ.isError ? conversationsQ.data : undefined;
   const topNetworkDenies = useMemo(
-    () => topDeniedConversations(conversationsQ.data?.conversations ?? []),
-    [conversationsQ.data?.conversations],
+    () => topDeniedConversations(conversationData?.conversations ?? []),
+    [conversationData?.conversations],
   );
   const federationHealth = useMemo(
-    () => summarizeFederationHealth(federationState.data, federationMembers.data?.members ?? []),
-    [federationState.data, federationMembers.data?.members],
+    () => summarizeFederationHealth(federationUnavailable ? undefined : federationState.data, federationUnavailable ? [] : federationMembers.data?.members ?? []),
+    [federationUnavailable, federationState.data, federationMembers.data?.members],
   );
 
   // Compliance pass % aggregated across all reported frameworks.
   const compliancePosture = useMemo(() => {
-    const frameworks = complianceSum.data?.frameworks ?? [];
+    const frameworks = complianceData?.frameworks ?? [];
     const pass = frameworks.reduce((s, f) => s + (f.pass ?? 0), 0);
     const fail = frameworks.reduce((s, f) => s + (f.fail ?? 0), 0);
     const graded = pass + fail;
@@ -212,9 +250,9 @@ export function DashboardPage() {
       fail,
       frameworks: frameworks.length,
     };
-  }, [complianceSum.data]);
+  }, [complianceData]);
   // Runtime threats in the last 24h: alerting/blocking events from the overview.
-  const runtimeThreats = runtimeToday.data?.summary;
+  const runtimeThreats = runtimeData?.summary;
 
   const navigate = useNavigate();
 
@@ -226,7 +264,7 @@ export function DashboardPage() {
           title="Action Items"
           subtitle="Top 10 critical/high findings from 250 open findings ranked by risk"
           icon={<ShieldAlert className="h-3.5 w-3.5" />}
-          rightSlot={<Link to="." href={clusterPath("/findings")} className="text-[11px] text-muted-foreground hover:text-foreground">view all <ArrowUpRight className="inline h-3 w-3" /></Link>}
+          rightSlot={<a href={clusterPath("/findings")} className="text-[11px] text-muted-foreground hover:text-foreground">view all <ArrowUpRight className="inline h-3 w-3" /></a>}
         >
           {open.isError ? <ErrorState title="Could not load action items." action={<Button onClick={() => void open.refetch()}>Retry</Button>} /> : open.isPending ? <p className="p-3 text-sm text-muted-foreground">Loading action items…</p> : topActions.length === 0 ? (
             <EmptyState
@@ -240,9 +278,9 @@ export function DashboardPage() {
                 <li key={f.id} className="accent-slide flex items-center gap-3 px-3 py-2 hover:bg-muted/40 transition-colors">
                   <SeverityBadge severity={f.severity} kev={false} />
                   <div className="min-w-0 flex-1">
-                    <Link to="." href={clusterPath(`/findings/${f.id}`)} className="text-sm hover:underline truncate block" title={f.title}>
+                    <a href={clusterPath(`/findings/${f.id}`)} className="text-sm hover:underline truncate block" title={f.title}>
                       {f.title}
-                    </Link>
+                    </a>
                     <div className="text-[10px] text-mono text-muted-foreground">
                       {f.external_id ?? f.id.slice(0, 10)} · {f.kind} · {fmtRelative(f.last_seen_at)}
                     </div>
@@ -318,15 +356,15 @@ export function DashboardPage() {
             <div className="text-display text-sm font-semibold leading-none" style={{ color: risk <= 20 ? "var(--color-severity-low)" : risk <= 50 ? "var(--color-severity-medium)" : "var(--color-severity-critical)" }}>
               {!posture ? "—" : risk <= 20 ? "Good" : risk <= 50 ? "Fair" : "Poor"}
             </div>
-            <div className="mt-1 text-[11px] text-muted-foreground">{sum.data?.open_findings ?? "—"} open findings</div>
+            <div className="mt-1 text-[11px] text-muted-foreground">{summaryData?.open_findings ?? "—"} open findings</div>
           </div>
         </div>
         <div className="flex flex-col justify-between gap-5">
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <StatCard label="Critical" value={sum.data ? counts.critical : "—"} tone="critical" icon={<AlertOctagon className="h-3 w-3" />} href={clusterPath("/findings?severity=critical&lifecycle=open")} trend={trends.critical} />
-            <StatCard label="High" value={sum.data ? counts.high : "—"} tone="high" icon={<AlertTriangle className="h-3 w-3" />} href={clusterPath("/findings?severity=high&lifecycle=open")} trend={trends.high} />
-            <StatCard label="Open" value={sum.data ? counts.open : "—"} tone="accent" icon={<Activity className="h-3 w-3" />} href={clusterPath("/findings")} trend={trends.open} />
-            <StatCard label="Accepted" value={sum.data ? counts.accepted : "—"} tone="neutral" icon={<ShieldCheck className="h-3 w-3" />} href={clusterPath("/findings?lifecycle=accepted")} />
+            <StatCard label="Critical" value={summaryData ? counts.critical : "—"} tone="critical" icon={<AlertOctagon className="h-3 w-3" />} href={clusterPath("/findings?severity=critical&lifecycle=open")} trend={trends.critical} />
+            <StatCard label="High" value={summaryData ? counts.high : "—"} tone="high" icon={<AlertTriangle className="h-3 w-3" />} href={clusterPath("/findings?severity=high&lifecycle=open")} trend={trends.high} />
+            <StatCard label="Open" value={summaryData ? counts.open : "—"} tone="accent" icon={<Activity className="h-3 w-3" />} href={clusterPath("/findings")} trend={trends.open} />
+            <StatCard label="Accepted" value={summaryData ? counts.accepted : "—"} tone="neutral" icon={<ShieldCheck className="h-3 w-3" />} href={clusterPath("/findings?lifecycle=accepted")} />
           </div>
           {/* Risk factors — NV's 6 weighted contributors (bar = share of its cap). */}
           <div>
@@ -358,7 +396,7 @@ export function DashboardPage() {
           icon={<ShieldCheck className="h-3 w-3" />} href={clusterPath("/compliance")}
           hint={complianceSum.isError ? "Unavailable" : compliancePosture.pct == null ? "no graded controls" : `${compliancePosture.fail} failing`} />
         <StatCard label="Runtime · 24h" value={runtimeToday.isPending ? "…" : (runtimeThreats?.alerts ?? "—")}
-          tone={(runtimeThreats?.alerts ?? 0) > 0 ? "critical" : "neutral"} icon={<ShieldAlert className="h-3 w-3" />} href={clusterPath("/runtime")}
+          tone={(runtimeThreats?.alerts ?? 0) > 0 ? "critical" : "neutral"} icon={<ShieldAlert className="h-3 w-3" />} href={clusterPath("/runtime?tab=evidence&hours=24")}
           hint={runtimeThreats ? `${runtimeThreats.blocks} blocked` : "Unavailable"} />
         <StatCard label="Image CVEs" value={posture?.vulns_by_location?.image ?? "—"} tone="accent" icon={<AlertTriangle className="h-3 w-3" />} href={clusterPath("/findings")} hint="in container images" />
         <StatCard label="Host CVEs" value={posture?.vulns_by_location?.host ?? "—"} tone={(posture?.vulns_by_location?.host ?? 0) > 0 ? "high" : "neutral"} icon={<AlertTriangle className="h-3 w-3" />} href={clusterPath("/nodes?risk=host-cves")} hint="on cluster nodes" />
@@ -375,7 +413,7 @@ export function DashboardPage() {
       {/* Exposed services (ingress/egress) + enforcement coverage — NV signature panels */}
       <section className="c-rise c-rise-2 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="space-y-4">
-          <Panel title="Exposed Services" rightSlot={<Button size="sm" disabled={!exposureQ.data} onClick={() => downloadCsv("constellation-exposure", ["Direction", "Workload", "Namespace", "Platform role", "External peers", "Sessions", "Policy mode"], [
+          <Panel title="Exposed Services" rightSlot={<Button size="sm" disabled={!exposureQ.data || exposureQ.isError || exposureQ.isFetching} onClick={() => downloadCsv("constellation-exposure", ["Direction", "Workload", "Namespace", "Platform role", "External peers", "Sessions", "Policy mode"], [
             ...(exposureQ.data?.ingress ?? []).map((service) => ["ingress", service.workload, service.namespace, service.platform_role ?? "", service.external_peers, service.sessions, service.policy_mode]),
             ...(exposureQ.data?.egress ?? []).map((service) => ["egress", service.workload, service.namespace, service.platform_role ?? "", service.external_peers, service.sessions, service.policy_mode]),
           ])}>Export CSV</Button>} subtitle="Workloads talking to the outside world — correlated with their vulnerabilities" icon={<Activity className="h-3.5 w-3.5" />}>
@@ -395,7 +433,7 @@ export function DashboardPage() {
             title="Top Network Denies"
             subtitle="Blocked service pairs in the last 24h"
             icon={<ShieldAlert className="h-3.5 w-3.5" />}
-            rightSlot={<Link to="." href={clusterPath("/network?tab=conversations&hours=24&verdict=deny")} className="text-[11px] text-muted-foreground hover:text-foreground">view conversations <ArrowUpRight className="inline h-3 w-3" /></Link>}
+            rightSlot={<a href={clusterPath("/network?tab=conversations&hours=24&verdict=deny")} className="text-[11px] text-muted-foreground hover:text-foreground">view conversations <ArrowUpRight className="inline h-3 w-3" /></a>}
           >
             <div data-testid="dashboard-network-denies">
               {conversationsQ.isError ? <ErrorState title="Could not load network conversations." /> : conversationsQ.isPending ? (
@@ -406,7 +444,7 @@ export function DashboardPage() {
                 <ul className="divide-y divide-border">
                   {topNetworkDenies.map((row, index) => (
                     <li key={`${row.from}-${row.to}-${index}`}>
-                      <Link to="." href={clusterPath(`/network?tab=conversations&hours=24&verdict=${encodeURIComponent(row.verdict ?? "deny")}&workload=${encodeURIComponent(row.from)}`)} className="flex items-center gap-3 px-3 py-2 hover:bg-muted/40 transition-colors">
+                      <a href={clusterPath(`/network?tab=conversations&hours=24&verdict=${encodeURIComponent(row.verdict ?? "deny")}&workload=${encodeURIComponent(row.from)}`)} className="flex items-center gap-3 px-3 py-2 hover:bg-muted/40 transition-colors">
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-xs font-medium">
                             <span className="font-mono">{row.from}</span>
@@ -422,7 +460,7 @@ export function DashboardPage() {
                         <span className="shrink-0 rounded bg-[color-mix(in_oklab,var(--color-status-error)_16%,transparent)] px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-[color:var(--color-status-error)]">
                           {row.verdict || "deny"}
                         </span>
-                      </Link>
+                      </a>
                     </li>
                   ))}
                 </ul>
@@ -460,8 +498,8 @@ export function DashboardPage() {
                     );
                   })()}
                   <div className="flex flex-wrap gap-4 border-t border-border pt-3 text-xs">
-                    <Link to="." href={clusterPath("/groups")} className="text-primary hover:underline">Manage group modes</Link>
-                    <Link to="." href={clusterPath("/groups/settings")} className="text-primary hover:underline">Edit new-service defaults</Link>
+                    <a href={clusterPath("/groups")} className="text-primary hover:underline">Manage group modes</a>
+                    <a href={clusterPath("/groups/settings")} className="text-primary hover:underline">Edit new-service defaults</a>
                   </div>
                   <div className="flex items-center justify-between border-t border-border pt-2 text-xs">
                     <span className="text-muted-foreground">Admission control</span>
@@ -494,14 +532,14 @@ export function DashboardPage() {
             <ul className="divide-y divide-border">
               {(posture?.top_vulnerable ?? []).map((t) => (
                 <li key={`${t.namespace}/${t.name}`}>
-                  <Link to="." href={clusterPath(`/deployments?q=${encodeURIComponent(t.name)}`)} className="flex items-center gap-2 px-3 py-2 hover:bg-muted/40 transition-colors">
+                  <a href={clusterPath(`/deployments?q=${encodeURIComponent(t.name)}`)} className="flex items-center gap-2 px-3 py-2 hover:bg-muted/40 transition-colors">
                     <div className="min-w-0 flex-1">
                       <div className="text-xs font-medium truncate">{t.name}</div>
                       <div className="text-[10px] text-muted-foreground truncate">{t.namespace}</div>
                     </div>
                     {t.critical > 0 && <span className="rounded px-1.5 py-0.5 text-[10px] text-mono font-semibold text-white" style={{ background: "var(--color-severity-critical)" }}>{t.critical}C</span>}
                     {t.high > 0 && <span className="rounded px-1.5 py-0.5 text-[10px] text-mono font-semibold text-white" style={{ background: "var(--color-severity-high)" }}>{t.high}H</span>}
-                  </Link>
+                  </a>
                 </li>
               ))}
             </ul>
@@ -513,37 +551,38 @@ export function DashboardPage() {
 
   </div>;
   const operationsView = <div className="space-y-5">
-      {!clusterId && (
-        <section className="rounded-md border border-border bg-card p-4" data-testid="dashboard-scanner-db-capacity">
+      {scopeReady && (
+        <Collapse label="Organization scanner database and capacity"><section className="rounded-md border border-border bg-card p-4" data-testid="dashboard-scanner-db-capacity">
           <div className="mb-3 flex items-center justify-between gap-2">
-            <h2 className="text-sm font-semibold">Scanner database and capacity</h2>
+            <h2 className="text-sm font-semibold">Organization scanner database and capacity</h2>
             <Link to="/settings/scanner" className="text-xs text-[color:var(--color-primary)] hover:underline">Scanner details</Link>
           </div>
-          <ScannerDbCapacity heartbeats={fleetHealth.data?.heartbeats} unavailable={fleetHealth.isError} loading={fleetHealth.isPending} />
-        </section>
+          <ScannerDbCapacity heartbeats={fleetHealth.isError ? undefined : fleetHealth.data?.heartbeats} unavailable={fleetHealth.isError} loading={fleetHealth.isPending} />
+          {fleetHealth.isError && <ErrorState title="Could not refresh organization scanner capacity." action={<Button onClick={() => void fleetHealth.refetch()}>Retry</Button>} />}
+        </section></Collapse>
       )}
 
       {clusterId && (
-        <section className="c-rise c-rise-1 grid gap-3 xl:grid-cols-2" data-testid="dashboard-operator-strip">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5" data-testid="dashboard-component-health">
+        <section className="c-rise c-rise-1 space-y-4" data-testid="dashboard-operator-strip">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5" data-testid="dashboard-component-health">
             {COMPONENT_ROLES.map((role) => {
               const health = componentHealth.roles[role.id];
               return (
                 <div key={role.id} data-testid={`dashboard-component-link-${role.id}`}>
                   <StatCard
                     label={role.label}
-                    value={!clusterHealth.data ? "—" : `${health.healthy}/${health.total}`}
+                    value={!healthData ? "—" : `${health.healthy}/${health.total}`}
                     tone={componentRoleTone(health)}
                     icon={role.icon}
                     href={clusterPath(`/components?role=${role.id}`)}
-                    hint={componentRoleHint(health)}
+                    hint={clusterHealth.isError ? "Unavailable" : clusterHealth.isPending ? "Loading…" : componentRoleHint(health)}
                   />
                 </div>
               );
             })}
           </div>
 
-          <div className="space-y-3">
+          <div className="grid gap-4 lg:grid-cols-2">
             <Link
               to="/settings/scanner"
               className="group block rounded-md border border-border bg-card p-3 transition-colors hover:border-[color-mix(in_oklab,var(--color-primary)_30%,var(--color-border))]"
@@ -553,18 +592,18 @@ export function DashboardPage() {
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
                     <Database className="h-3 w-3" />
-                    Scanner DB
+                    Organization Scanner DB
                   </div>
                   <div className="mt-1 truncate text-display text-xl font-semibold">
-                    {scanStatus.isPending && scannerWorkers.isPending ? "Loading..." : scannerFreshness.version || "Not reported"}
+                    {scannerUnavailable ? "Unavailable" : scanStatus.isPending || scannerWorkers.isPending || bundle.isPending ? "Loading..." : scannerFreshness.version || "Not reported"}
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
-                  <StatusChip value={scannerFreshness.status} />
+                  <StatusChip value={scannerUnavailable ? "unavailable" : scanStatus.isPending || scannerWorkers.isPending || bundle.isPending ? "pending" : scannerFreshness.status} />
                   <ArrowUpRight className="h-3.5 w-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
                 </div>
               </div>
-              <dl className="space-y-2 text-xs">
+              {!scannerUnavailable && !scanStatus.isPending && !scannerWorkers.isPending && !bundle.isPending && <dl className="space-y-2 text-xs">
                 <Row k="Freshness" v={<span className="text-mono text-muted-foreground">{scannerFreshness.freshnessLabel}</span>} />
                 <Row k="Workers" v={<span className="text-mono">{scannerFreshness.workersWithDb}/{scannerFreshness.workers}</span>} />
                 <Row k="Queue" v={<span className="text-mono text-muted-foreground">{scannerFreshness.scheduled.toLocaleString()} queued · {scannerFreshness.scanning.toLocaleString()} running</span>} />
@@ -576,13 +615,14 @@ export function DashboardPage() {
                     </span>
                   }
                 />
-              </dl>
+              </dl>}
+              <p className="mt-3 text-xs text-muted-foreground">Scanner database and queue cover the organization; capacity below covers this cluster.</p>
               <div className="mt-3 border-t border-border pt-3">
-                <ScannerDbCapacity heartbeats={clusterHealth.data?.heartbeats} unavailable={clusterHealth.isError} loading={clusterHealth.isPending} />
+                <ScannerDbCapacity heartbeats={healthData?.heartbeats} unavailable={clusterHealth.isError} loading={clusterHealth.isPending} />
               </div>
             </Link>
 
-            {federationHealth.participating && (
+            {(federationUnavailable || federationState.isPending || federationHealth.participating) && (
               <Link
                 to="/federation"
                 className="group block rounded-md border border-border bg-card p-3 transition-colors hover:border-[color-mix(in_oklab,var(--color-primary)_30%,var(--color-border))]"
@@ -592,36 +632,45 @@ export function DashboardPage() {
                   <div className="min-w-0">
                     <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
                       <GitBranch className="h-3 w-3" />
-                      Federation
+                      Organization Federation
                     </div>
                     <div className="mt-1 truncate text-display text-xl font-semibold capitalize">
-                      {federationHealth.state}
+                      {federationUnavailable ? "Unavailable" : federationState.isPending ? "Loading…" : federationHealth.state}
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    <StatusChip value={federationHealth.status} />
+                    <StatusChip value={federationUnavailable ? "unavailable" : federationState.isPending || (federationState.data?.state === "master" && federationMembers.isPending) ? "pending" : federationHealth.status} />
                     <ArrowUpRight className="h-3.5 w-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
                   </div>
                 </div>
-                <dl className="space-y-2 text-xs">
+                {!federationUnavailable && !federationState.isPending && !(federationState.data?.state === "master" && federationMembers.isPending) && <dl className="space-y-2 text-xs">
                   <Row k="Members" v={<span className="text-mono">{federationHealth.activeMembers}/{federationHealth.members}</span>} />
                   <Row k="Revision" v={<span className="text-mono text-muted-foreground">{federationHealth.revision}</span>} />
                   <Row k="Stale" v={<span className={cn("text-mono", federationHealth.staleMembers > 0 ? "text-[color:var(--color-severity-high)]" : "text-muted-foreground")}>{federationHealth.staleMembers}</span>} />
                   <Row k="Updated" v={<span className="text-mono text-muted-foreground">{federationHealth.updatedLabel}</span>} />
-                </dl>
+                </dl>}
+                <p className="mt-3 text-xs text-muted-foreground">Federation membership and revision cover the organization.</p>
               </Link>
             )}
           </div>
         </section>
       )}
 
+      {clusterHealth.isError && <ErrorState title="Could not refresh cluster component health." action={<Button onClick={() => void clusterHealth.refetch()}>Retry</Button>} />}
+      {scannerUnavailable && <ErrorState title="Could not refresh organization scanner health." action={<Button onClick={() => { void scanStatus.refetch(); void scannerWorkers.refetch(); void bundle.refetch(); }}>Retry</Button>} />}
+      {federationUnavailable && <ErrorState title="Could not refresh organization federation health." action={<Button onClick={() => { void federationState.refetch(); if (federationState.data?.state === "master") void federationMembers.refetch(); }}>Retry</Button>} />}
       {clusterId && (
         <section className="c-rise c-rise-2">
           <PlatformPanel
-            data={platform.data}
+            data={platformData}
             loading={platform.isPending}
+            failed={platform.isError || (!platform.isPending && !!platform.data && platform.data.cluster_id !== clusterId)}
+            refreshing={platform.isFetching}
             scanning={scanPlatform.isPending}
-            onScan={() => scanPlatform.mutate()}
+            scanError={currentScan && scanPlatform.isError}
+            scanResult={currentScan ? scanPlatform.data : undefined}
+            onRetry={() => void platform.refetch()}
+            onScan={() => void requestPlatformScan()}
           />
         </section>
       )}
@@ -671,7 +720,7 @@ export function DashboardPage() {
         </Panel>
 
         <Panel title="CVE Database" icon={<Database className="h-3.5 w-3.5" />}>
-          {bundle.data?.available || (cveStats.data?.total ?? 0) > 0 ? (
+          {bundle.isError || cveStats.isError ? <ErrorState title="Could not refresh organization vulnerability database status." action={<Button onClick={() => { void bundle.refetch(); void cveStats.refetch(); }}>Retry</Button>} /> : bundle.isPending || cveStats.isPending ? <p className="text-xs text-muted-foreground">Loading vulnerability database…</p> : bundle.data?.available || (cveStats.data?.total ?? 0) > 0 ? (
             <dl className="space-y-2 text-xs">
               <Row
                 k="CVE rows"
@@ -735,7 +784,7 @@ export function DashboardPage() {
   return (
     <div className="space-y-5" data-testid="dashboard-page" data-cluster-id={clusterId ?? ""}>
       <PageHeader
-        title={cluster?.name ? `${cluster.name} — Dashboard` : "Security Dashboard"}
+        title={scopeReady && cluster?.name ? `${cluster.name} — Dashboard` : "Security Dashboard"}
         description={
           clusterId
             ? "Risk-first snapshot for this cluster. Click any tile to drill in."
@@ -754,24 +803,24 @@ export function DashboardPage() {
       />
 
 
-      <VerdictBanner status={sum.isError ? "degraded" : !posture ? "info" : risk > 50 ? "critical" : risk > 20 ? "degraded" : "ok"}
-        title={sum.isError ? "Security summary unavailable" : !posture ? "Loading security posture" : `Security risk: ${risk}/100`}
+      <VerdictBanner status={clusterError || sum.isError ? "degraded" : !posture ? "info" : risk > 50 ? "critical" : risk > 20 ? "degraded" : "ok"}
+        title={clusterError ? "Cluster context unavailable" : !scopeReady ? clusterLoading ? "Resolving cluster" : "Select a resolved cluster" : sum.isError ? "Security summary unavailable" : !posture ? sum.isPending ? "Loading security posture" : "Security posture not reported" : `Security risk: ${risk}/100`}
         detail={`Higher scores indicate more risk. Summary counts cover ${clusterId ? "this cluster" : "the organization"}; action items and finding trends use a bounded sample.`} />
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-5" data-testid="dashboard-summary">
+      <StatGrid data-testid="dashboard-summary">
         <StatCard label="Risk score" value={posture?.security_score ?? "—"} />
-        <StatCard label="Critical" value={sum.data ? counts.critical : "—"} tone="critical" href={clusterPath("/findings?severity=critical&lifecycle=open")} />
-        <StatCard label="High" value={sum.data ? counts.high : "—"} tone="high" href={clusterPath("/findings?severity=high&lifecycle=open")} />
-        <StatCard label="Open" value={sum.data?.open_findings ?? "—"} href={clusterPath("/findings?lifecycle=open")} />
-        <StatCard label="Accepted" value={sum.data?.accepted_risks ?? "—"} href={clusterPath("/findings?lifecycle=accepted")} />
-      </section>
-      {sum.isError && <ErrorState title="Could not refresh dashboard totals." action={<Button onClick={() => void sum.refetch()}>Retry</Button>} />}
-      <Tabs value={tab} onValueChange={setTab} items={[
+        <StatCard label="Critical" value={summaryData ? counts.critical : "—"} tone="critical" href={scopeReady ? clusterPath("/findings?severity=critical&lifecycle=open") : undefined} />
+        <StatCard label="High" value={summaryData ? counts.high : "—"} tone="high" href={scopeReady ? clusterPath("/findings?severity=high&lifecycle=open") : undefined} />
+        <StatCard label="Open" value={summaryData?.open_findings ?? "—"} href={scopeReady ? clusterPath("/findings?lifecycle=open") : undefined} />
+        <StatCard label="Accepted" value={summaryData?.accepted_risks ?? "—"} href={scopeReady ? clusterPath("/findings?lifecycle=accepted") : undefined} />
+      </StatGrid>
+      {scopeReady && sum.isError && <ErrorState title="Could not refresh dashboard totals." action={<Button onClick={() => void sum.refetch()}>Retry</Button>} />}
+      {!scopeReady ? clusterError ? <ErrorState title="Could not resolve this cluster." action={<Button onClick={() => { void qc.invalidateQueries({ queryKey: ["clusters"] }); void qc.invalidateQueries({ queryKey: ["cluster", clusterId] }); }}>Retry</Button>} /> : <p role="status" className="text-sm text-muted-foreground">{clusterLoading ? "Resolving cluster…" : "Select a resolved cluster to view the dashboard."}</p> : <Tabs value={tab} onValueChange={setTab} items={[
         { value: "overview", label: "Overview", content: overviewView },
         { value: "posture", label: "Posture", content: postureView },
         { value: "network", label: "Network", content: networkView },
         { value: "operations", label: "Operations", content: operationsView },
         { value: "trends", label: "Trends", content: trendsView },
-      ]} />
+      ]} />}
 
     </div>
   );
@@ -836,7 +885,7 @@ const COMPONENT_ROLES: Array<{ id: ComponentRoleID; label: string; icon: React.R
 
 function ExposedRow({ s, dir, clusterPath }: { s: import("@/api/client").ExposedService; dir: "ingress" | "egress"; clusterPath: (p: string) => string }) {
   return (
-    <Link to="." href={clusterPath(`/deployments?q=${encodeURIComponent(s.name)}`)} className="flex items-center gap-3 px-3 py-2 hover:bg-muted/40 transition-colors">
+    <a href={clusterPath(`/deployments?q=${encodeURIComponent(s.name)}`)} className="flex items-center gap-3 px-3 py-2 hover:bg-muted/40 transition-colors">
       <span className={cn("shrink-0 rounded px-1.5 py-0.5 text-[9px] uppercase tracking-wide font-medium",
         dir === "ingress" ? "bg-[color-mix(in_oklab,var(--color-severity-high)_16%,transparent)] text-[color:var(--color-severity-high)]" : "bg-muted text-muted-foreground")}>
         {dir === "ingress" ? "in" : "out"}
@@ -864,7 +913,7 @@ function ExposedRow({ s, dir, clusterPath }: { s: import("@/api/client").Exposed
         {s.high > 0 && <span className="rounded px-1.5 py-0.5 text-[10px] text-mono font-semibold text-white" style={{ background: "var(--color-severity-high)" }}>{s.high}H</span>}
         {s.critical === 0 && s.high === 0 && <span className="text-[10px] text-muted-foreground">no crit/high</span>}
       </div>
-    </Link>
+    </a>
   );
 }
 
@@ -931,53 +980,52 @@ function Row({ k, v }: { k: string; v: React.ReactNode }) {
 }
 
 function PlatformPanel({
-  data,
-  loading,
-  scanning,
-  onScan,
+  data, loading, failed, refreshing, scanning, scanError, scanResult, onRetry, onScan,
 }: {
   data?: PlatformFactsResponse;
   loading: boolean;
+  failed: boolean;
+  refreshing: boolean;
   scanning: boolean;
+  scanError: boolean;
+  scanResult?: Awaited<ReturnType<typeof clusters.scanPlatform>>;
+  onRetry: () => void;
   onScan: () => void;
 }) {
   const facts = data?.facts;
   const packages = data?.evidence?.packages ?? [];
   const components = facts?.components ?? [];
   const bundle = data?.latest_job?.bundle_metadata;
-  const canScan = !!data?.evidence && !scanning;
+  const canScan = !!data?.evidence && !failed && !refreshing && !scanning;
   type PkgRow = (typeof packages)[number] & { _rk: string };
-  const pkgRows: PkgRow[] = packages
-    .slice(0, 8)
-    .map((pkg, index) => ({ ...pkg, _rk: `${pkg.namespace_name}-${pkg.name}-${pkg.version}-${index}` }));
+  const pkgRows: PkgRow[] = packages.map((pkg, index) => ({ ...pkg, _rk: `${pkg.namespace_name}-${pkg.name}-${pkg.version}-${index}` }));
   const packageColumns: Column<PkgRow>[] = [
-    { id: "name", header: "Package", kind: "name", wrap: true, code: true, cell: (r) => <span className="font-mono">{r.name || "-"}</span> },
-    { id: "version", header: "Version", kind: "version", size: 160, minSize: 112, maxSize: 224, wrap: true, cell: (r) => <span className="font-mono text-muted-foreground">{r.version || "-"}</span> },
-    { id: "namespace", header: "Namespace", kind: "text", code: true, wrap: true, size: 184, minSize: 144, maxSize: 240, cell: (r) => <span className="font-mono text-muted-foreground">{r.namespace_name || r.ecosystem || "generic"}</span> },
+    { id: "name", header: "Package", kind: "name", wrap: true, code: true, exportValue: (r) => r.name || "-", cell: (r) => <span className="font-mono">{r.name || "-"}</span> },
+    { id: "version", header: "Version", kind: "version", size: 160, minSize: 112, maxSize: 224, wrap: true, exportValue: (r) => r.version || "-", cell: (r) => <span className="font-mono text-muted-foreground">{r.version || "-"}</span> },
+    { id: "namespace", header: "Namespace / ecosystem", kind: "text", code: true, wrap: true, size: 184, minSize: 144, maxSize: 240, exportValue: (r) => r.namespace_name || r.ecosystem || "generic", cell: (r) => <span className="font-mono text-muted-foreground">{r.namespace_name || r.ecosystem || "generic"}</span> },
   ];
   return (
     <Panel
       title="Platform Scan"
-      subtitle="Kubernetes control plane, kubelet, and platform add-on package evidence"
+      subtitle="Kubernetes control plane, kubelet, and platform add-on evidence for this cluster"
       icon={<ServerCog className="h-3.5 w-3.5" />}
-      rightSlot={
-        <Button size="sm" variant="outline" disabled={!canScan} onClick={onScan}>
-          <RefreshCw className={cn("h-3 w-3", scanning && "animate-spin")} />
-          Scan platform
-        </Button>
-      }
+      rightSlot={<Button size="sm" variant="outline" disabled={!canScan} onClick={onScan}>
+        <RefreshCw className={cn("h-3 w-3", scanning && "animate-spin")} />
+        {scanning ? "Requesting scan…" : "Scan platform"}
+      </Button>}
     >
-      {loading ? (
-        <p className="text-xs text-muted-foreground">Loading platform facts...</p>
-      ) : !facts ? (
-        <EmptyState
-          title="No platform facts reported"
-          hint="The discoverer reports Kubernetes platform facts from the installed cluster."
-          icon={<ServerCog className="h-8 w-8" />}
-        />
-      ) : (
-        <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)_300px]">
-          <dl className="space-y-2 text-xs">
+      <div className="space-y-4" data-testid="dashboard-platform-workspace">
+        {scanError && <ErrorState title="Platform scan request failed. Try again when platform facts are available." />}
+        {scanResult && !scanError && <p role="status" className="text-sm text-muted-foreground">
+          {scanResult.scan_job_enqueued ? "Platform scan queued. Results will appear after the scan completes." : "No new platform scan job was queued for this inventory. Check the latest job status."}
+        </p>}
+        {failed ? <ErrorState title="Could not refresh platform facts." action={<Button disabled={refreshing} onClick={onRetry}>Retry</Button>} /> : loading ? (
+          <p role="status" className="text-xs text-muted-foreground">Loading platform facts…</p>
+        ) : !facts ? (
+          <EmptyState title="No platform facts reported" hint="The discoverer reports Kubernetes platform facts from the installed cluster." icon={<ServerCog className="h-8 w-8" />} />
+        ) : <>
+          {refreshing && <p role="status" className="text-xs text-muted-foreground">Refreshing platform facts… Scan is paused until the refresh succeeds.</p>}
+          <dl className="grid gap-4 text-xs sm:grid-cols-2 xl:grid-cols-3">
             <Row k="Status" v={<StatusChip value={data?.status ?? "reported"} />} />
             <Row k="Kubernetes" v={<span className="text-mono">{facts.kubernetes_git_version || "unknown"}</span>} />
             <Row k="Distro" v={<span className="text-mono">{facts.distro}</span>} />
@@ -985,35 +1033,31 @@ function PlatformPanel({
             <Row k="Nodes" v={<span className="text-mono">{facts.node_count}</span>} />
             <Row k="Observed" v={<span className="text-mono text-muted-foreground">{fmtRelative(facts.observed_at)}</span>} />
           </dl>
-
-          <div className="min-w-0">
-            <div className="mb-2 flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
-              <PackageCheck className="h-3 w-3" />
-              Evidence packages
-              <span className="ml-auto text-mono">{data?.evidence?.package_count ?? packages.length}</span>
-            </div>
-            <DataTable<PkgRow>
-              rows={pkgRows}
-              columns={packageColumns}
-              rowKey={(r) => r._rk}
-              showDensityToggle={false}
-              emptyState={<div className="px-2 py-3 text-center text-xs text-muted-foreground">No package evidence</div>}
-            />
-            {components.length > packages.length && (
-              <p className="mt-1 text-[10px] text-muted-foreground">{components.length} reported platform components</p>
-            )}
+          <div className="min-w-0 space-y-3">
+            <div className="flex flex-wrap items-center gap-2 text-sm font-medium"><PackageCheck className="h-4 w-4" /> Evidence packages</div>
+            <p className="text-xs text-muted-foreground" data-testid="dashboard-platform-package-scope">
+              All {packages.length.toLocaleString()} returned packages are available in this table and its CSV export.
+              {data?.evidence?.package_count !== undefined && data.evidence.package_count !== packages.length && ` Reported inventory contains ${data.evidence.package_count.toLocaleString()} packages; this response includes ${packages.length.toLocaleString()}.`}
+            </p>
+            <DataTable<PkgRow> rows={pkgRows} columns={packageColumns} rowKey={(r) => r._rk}
+              testId="dashboard-platform-packages" preferencesKey="dashboard-platform-packages"
+              exportFileName="constellation-platform-packages" exportLabel="Export returned packages"
+              emptyState={<EmptyState title="No package evidence" />} />
           </div>
-
-          <dl className="space-y-2 text-xs">
-            <Row k="Job" v={<StatusChip value={data?.latest_job?.status ?? "not queued"} />} />
-            <Row k="Findings" v={<span className="text-mono">{data?.findings_summary.open ?? 0} open</span>} />
-            <Row k="Critical / High" v={<span className="text-mono">{data?.findings_summary.critical ?? 0} / {data?.findings_summary.high ?? 0}</span>} />
-            <Row k="Inventory" v={<span className="text-mono text-muted-foreground">{shortHash(data?.evidence?.inventory_hash)}</span>} />
-            <Row k="Bundle" v={<span className="text-mono text-muted-foreground">{bundle?.bundle_version || "pending"}</span>} />
-            <Row k="Bundle rows" v={<span className="text-mono text-muted-foreground">{bundle?.record_count?.toLocaleString() ?? "-"}</span>} />
-          </dl>
-        </div>
-      )}
+          <Collapse label="Advanced: scan job and platform components">
+            <dl className="grid gap-4 text-xs sm:grid-cols-2 xl:grid-cols-3">
+              <Row k="Job" v={<StatusChip value={data?.latest_job?.status ?? "not queued"} />} />
+              <Row k="Findings" v={<span className="text-mono">{data?.findings_summary?.open ?? 0} open</span>} />
+              <Row k="Critical / High" v={<span className="text-mono">{data?.findings_summary?.critical ?? 0} / {data?.findings_summary?.high ?? 0}</span>} />
+              <Row k="Inventory" v={<span className="text-mono text-muted-foreground">{shortHash(data?.evidence?.inventory_hash)}</span>} />
+              <Row k="Bundle" v={<span className="text-mono text-muted-foreground">{bundle?.bundle_version || "pending"}</span>} />
+              <Row k="Bundle rows" v={<span className="text-mono text-muted-foreground">{bundle?.record_count?.toLocaleString() ?? "-"}</span>} />
+            </dl>
+            {components.length > 0 && <p className="mt-3 text-xs text-muted-foreground">{components.length} reported platform components</p>}
+            {data?.latest_job?.error && <p role="alert" className="mt-3 text-xs text-muted-foreground">Latest scan job failed: {data.latest_job.error}</p>}
+          </Collapse>
+        </>}
+      </div>
     </Panel>
   );
 }
