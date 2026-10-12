@@ -159,7 +159,7 @@ test("Dashboard and System Health show reported scanner engine DB revisions", as
     await expect(health).toContainText(revision);
   }
 
-  await page.goto("/settings/scanner");
+  await page.goto("/settings/scanner?tab=workers");
   const scannerSources = page.getByTestId("scanner-db-capacity");
   await expect(scannerSources).toContainText("3 idle / 4 slots");
   await expect(scannerSources).toContainText("trivy-applied-test");
@@ -187,7 +187,10 @@ test("Scanner and registry pages expose operator queue visibility", async ({ pag
   await expect(page.getByTestId("scanner-operator-summary")).toBeVisible();
   await expect(page.getByTestId("scanner-queue-metrics")).toBeVisible();
   await expect(page.getByTestId("scanner-recent-jobs")).toBeVisible();
+  await page.getByRole("tab", { name: "Workers and capacity" }).click();
+  await expect(page).toHaveURL(/tab=workers/);
   await expect(page.getByTestId("scanner-workers")).toBeVisible();
+  await expect(page.getByTestId("scanner-recent-jobs")).not.toBeVisible();
 
   await page.goto("/dashboard");
   await page.waitForURL(/\/clusters\/[^/]+\/dashboard/);

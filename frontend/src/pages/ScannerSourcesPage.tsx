@@ -31,6 +31,7 @@ import {
   type ScannerCacheStat,
   type ScannerWorker,
 } from "@/api/client";
+import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/ui/page";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { Card } from "@/components/ui/card";
@@ -56,6 +57,8 @@ import {
  */
 export function ScannerSourcesPage() {
   const qc = useQueryClient();
+  const [requestedTab, setTab] = useTabParam("tab", "jobs");
+  const tab = ["jobs", "workers", "databases", "sources"].includes(requestedTab) ? requestedTab : "jobs";
   const navigate = useNavigate();
   const systemConfig = useQuery({ queryKey: ["system-config"], queryFn: () => systemConfigApi.get() });
   const scanStatus = useQuery({ queryKey: ["scan-status"], queryFn: scannerOperations.status });
@@ -146,6 +149,8 @@ export function ScannerSourcesPage() {
   const runningTotal = sumMetric(queueMetrics, "running");
   const staleTotal = sumMetric(queueMetrics, "stale_running");
   const failedTotal = (lifecycle?.failed ?? 0) + sumMetric(queueMetrics, "exhausted");
+  const unavailable = scanStatus.isError || scanJobList.isError || scannerWorkers.isError || systemConfig.isError || scannerHealth.isError;
+  const loading = scanStatus.isPending || scanJobList.isPending || scannerWorkers.isPending || systemConfig.isPending;
   const latestDb = lifecycle?.cvedb_version || newestWorkerDb(workers);
   const latestDbTime = lifecycle?.cvedb_create_time || newestWorkerDbTime(workers);
 
@@ -327,8 +332,8 @@ export function ScannerSourcesPage() {
       />
 
       <VerdictBanner
-        status={offlineDb ? "info" : failedTotal > 0 || staleTotal > 0 ? "degraded" : "ok"}
-        title={offlineDb ? "Air-gapped — databases loaded from a local mirror" : "Scanners fed by live Trivy + Grype databases"}
+        status={unavailable ? "degraded" : loading || workers.length === 0 ? "info" : failedTotal > 0 || staleTotal > 0 ? "degraded" : "ok"}
+        title={unavailable ? "Some scanner status could not be loaded" : loading ? "Loading scanner status" : failedTotal > 0 || staleTotal > 0 ? "Scan jobs need attention" : workers.length === 0 ? "No scanner workers reported" : "Scanner activity is available"}
         detail={[
           latestDb ? `CVE DB ${latestDb}` : "CVE DB version not reported yet",
           latestDbTime ? `exported ${formatDate(latestDbTime)}` : "",
@@ -336,190 +341,200 @@ export function ScannerSourcesPage() {
         ].filter(Boolean).join(" · ")}
       />
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6" data-testid="scanner-operator-summary">
-        <StatCard label="Scanned" value={(lifecycle?.scanned ?? 0).toLocaleString()} icon={<CheckCircle2 className="h-3.5 w-3.5" />} tone="accent" />
-        <StatCard label="Scheduled" value={(lifecycle?.scheduled ?? pendingTotal).toLocaleString()} icon={<Clock className="h-3.5 w-3.5" />} tone={pendingTotal > 0 ? "medium" : "neutral"} />
-        <StatCard label="Running" value={(lifecycle?.scanning ?? runningTotal).toLocaleString()} icon={<RefreshCw className="h-3.5 w-3.5" />} tone={runningTotal > 0 ? "low" : "neutral"} />
-        <StatCard label="Failed" value={(lifecycle?.failed ?? 0).toLocaleString()} icon={<AlertTriangle className="h-3.5 w-3.5" />} tone={failedTotal > 0 ? "high" : "neutral"} />
-        <StatCard label="Paused" value={(lifecycle?.paused ?? 0).toLocaleString()} icon={<PauseCircle className="h-3.5 w-3.5" />} tone={(lifecycle?.paused ?? 0) > 0 ? "medium" : "neutral"} />
-        <StatCard label="Scanners" value={workers.length.toLocaleString()} icon={<Database className="h-3.5 w-3.5" />} hint="last 24h" />
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" data-testid="scanner-operator-summary">
+        <StatCard label="Scanned" value={lifecycle ? lifecycle.scanned.toLocaleString() : "—"} icon={<CheckCircle2 className="h-3.5 w-3.5" />} tone="accent" />
+        <StatCard label="Scheduled" value={lifecycle ? lifecycle.scheduled.toLocaleString() : scanJobList.data ? pendingTotal.toLocaleString() : "—"} icon={<Clock className="h-3.5 w-3.5" />} tone={pendingTotal > 0 ? "medium" : "neutral"} hint={typeof lifecycle?.paused === "number" ? `${lifecycle.paused} paused` : "Paused count unavailable"} />
+        <StatCard label="Running" value={lifecycle ? lifecycle.scanning.toLocaleString() : scanJobList.data ? runningTotal.toLocaleString() : "—"} icon={<RefreshCw className="h-3.5 w-3.5" />} tone={runningTotal > 0 ? "low" : "neutral"} />
+        <StatCard label="Failed" value={lifecycle ? lifecycle.failed.toLocaleString() : "—"} icon={<AlertTriangle className="h-3.5 w-3.5" />} tone={failedTotal > 0 ? "high" : "neutral"} />
+        <StatCard label="Scanners" value={scannerWorkers.data ? workers.length.toLocaleString() : "—"} icon={<Database className="h-3.5 w-3.5" />} hint="last 24h" />
       </section>
 
-      <Card title="Scanner database and capacity" description="Live heartbeat capacity, host VulnDB bundles, and reported Trivy/Grype download and applied revisions.">
-        <ScannerDbCapacity heartbeats={scannerHealth.data?.heartbeats} unavailable={scannerHealth.isError} loading={scannerHealth.isPending} />
-      </Card>
-
-      <Card
-        title="Database refresh"
-        description="How often connected scanners pull the latest Trivy & Grype vulnerability databases."
-        action={
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => refreshNow.mutate()}
-            disabled={refreshNow.isPending || offlineDb}
-            title={offlineDb ? "Air-gapped — scanners can't pull from upstream" : "Force all scanners to pull the latest DBs now"}
+      <Tabs value={tab} onValueChange={setTab} items={[
+        { value: "jobs", label: "Scan jobs", content: (
+          <Card
+            title="Scan lifecycle and queue"
+            description="Review queue depth and recent jobs. Pause, resume, retry or cancel eligible jobs from the table."
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${refreshNow.isPending ? "animate-spin" : ""}`} />
-            Refresh now
-          </Button>
-        }
-      >
-        <div className="space-y-5">
-          <Field
-            label="Auto-refresh interval"
-            hint="Minutes between automatic database refreshes. 0 uses the deploy default (6 hours)."
-          >
-            <div className="flex items-center gap-2">
-              <TextInput
-                type="number"
-                min={0}
-                defaultValue={refreshMinutes}
-                key={`refresh-${revision}-${refreshMinutes}`}
-                disabled={systemConfig.isLoading || updateRefresh.isPending}
-                onBlur={(e) => {
-                  const n = Number.parseInt(e.target.value, 10);
-                  if (!Number.isNaN(n) && n !== refreshMinutes) updateRefresh.mutate(n);
-                }}
-                className="w-28"
-                data-testid="scanner-db-refresh-minutes"
+            <div className="space-y-4">
+              <DataTable<ScanQueueMetric>
+                rows={queueMetrics}
+                columns={QUEUE_COLUMNS}
+                rowKey={(row) => row.target_type}
+                emptyState={<div className="px-6 py-8 text-center text-xs text-muted-foreground">{scanJobList.isError ? "Queue status could not be loaded." : scanJobList.isPending ? "Loading queue status..." : "No queued scan work."}</div>}
+                defaultSort={{ id: "pending", dir: "desc" }}
+                showDensityToggle={false}
+                testId="scanner-queue-metrics"
               />
-              <span className="text-xs text-muted-foreground">minutes</span>
-            </div>
-          </Field>
 
-          <div className="flex items-center justify-between gap-4 rounded-lg border border-border bg-muted/30 px-4 py-3">
-            <div>
-              <div className="text-sm font-medium text-foreground">Air-gapped mode</div>
-              <div className="text-xs text-muted-foreground">Databases are pre-loaded; no upstream network pulls. Set at deploy time.</div>
-            </div>
-            <span
-              className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium ${
-                offlineDb ? "bg-[color:var(--color-brand)]/10 text-[color:var(--color-brand)]" : "bg-muted text-muted-foreground"
-              }`}
-              data-testid="scanner-offline-db"
-            >
-              {offlineDb ? "On" : "Off"}
-            </span>
-          </div>
-        </div>
-      </Card>
-
-      <Card
-        title="Scan lifecycle and queue"
-        description="NeuVector-style scan status plus queue depth by target type. Operators can pause, resume, retry, or cancel jobs without leaving the scanner page."
-      >
-        <div className="space-y-4">
-          <DataTable<ScanQueueMetric>
-            rows={queueMetrics}
-            columns={QUEUE_COLUMNS}
-            rowKey={(row) => row.target_type}
-            emptyState={<div className="px-6 py-8 text-center text-xs text-muted-foreground">No queued scan work.</div>}
-            defaultSort={{ id: "pending", dir: "desc" }}
-            showDensityToggle={false}
-            testId="scanner-queue-metrics"
-          />
-
-          <div className="flex flex-wrap items-center gap-1.5" data-testid="scan-job-status-filters">
-            {JOB_STATUS_FILTERS.map((status) => (
-              <button
-                key={status}
-                type="button"
-                onClick={() => setJobStatusFilter(status)}
-                className={cn(
-                  "rounded border px-2 py-1 text-xs transition-colors",
-                  jobStatusFilter === status
-                    ? "border-[color:var(--color-primary)] bg-accent text-foreground"
-                    : "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
-                )}
-              >
-                {status}
-              </button>
-            ))}
-          </div>
-
-          <DataTable<ScanJob>
-            rows={filteredJobs}
-            sourceLimit={200}
-            sourceCount={allJobs.length}
-            columns={jobColumns}
-            rowKey={(job) => job.id}
-            onRowClick={(job) => setSelectedJobID(job.id)}
-            emptyState={<div className="px-6 py-8 text-center text-xs text-muted-foreground">No scan jobs match this view.</div>}
-            defaultSort={{ id: "requested", dir: "desc" }}
-            preferencesKey="scanner-recent-jobs"
-            exportFileName="scanner-recent-jobs"
-            testId="scanner-recent-jobs"
-          />
-        </div>
-      </Card>
-
-      <Card
-        title="Scanner workers"
-        description="Live scanner workers reported by the NeuVector-compatible /scan/scanner route, with cache health inspection for each worker."
-        action={
-          <Button type="button" variant="outline" size="sm" onClick={() => void scannerWorkers.refetch()}>
-            <RefreshCw className={`h-3.5 w-3.5 ${scannerWorkers.isFetching ? "animate-spin" : ""}`} />
-            Workers
-          </Button>
-        }
-      >
-        <div className="space-y-4">
-          <DataTable<ScannerWorker>
-            rows={workers}
-            columns={workerColumns}
-            rowKey={(scanner) => scanner.id}
-            emptyState={<div className="px-6 py-8 text-center text-xs text-muted-foreground">No scanner workers have reported in the last 24 hours.</div>}
-            defaultSort={{ id: "id", dir: "asc" }}
-            showDensityToggle={false}
-            testId="scanner-workers"
-          />
-
-          {selectedScannerID && (
-            <div className="rounded-md border border-border bg-muted/20 p-4" data-testid="scanner-cache-inspector">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <div className="text-sm font-medium text-foreground">Cache inspector</div>
-                  <div className="mt-0.5 font-mono text-xs text-muted-foreground">{selectedScannerID}</div>
-                </div>
-                <Button type="button" variant="ghost" size="sm" onClick={() => setSelectedScannerID("")}>
-                  <XCircle className="h-3.5 w-3.5" />
-                  Close
-                </Button>
+              <div className="flex flex-wrap items-center gap-1.5" data-testid="scan-job-status-filters">
+                {JOB_STATUS_FILTERS.map((status) => (
+                  <button
+                    key={status}
+                    type="button"
+                    onClick={() => setJobStatusFilter(status)}
+                    className={cn(
+                      "rounded border px-2 py-1 text-xs transition-colors",
+                      jobStatusFilter === status
+                        ? "border-[color:var(--color-primary)] bg-accent text-foreground"
+                        : "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
+                    )}
+                  >
+                    {status}
+                  </button>
+                ))}
               </div>
 
-              {cacheStat.isPending ? (
-                <div className="text-xs text-muted-foreground">Loading scanner cache status...</div>
-              ) : cacheStat.isError ? (
-                <div className="text-xs text-[color:var(--color-status-error)]">Cache status unavailable for this scanner.</div>
-              ) : cacheStat.data ? (
-                <ScannerCacheSummary stat={cacheStat.data} />
-              ) : null}
+              <DataTable<ScanJob>
+                rows={filteredJobs}
+                sourceLimit={200}
+                sourceCount={allJobs.length}
+                columns={jobColumns}
+                rowKey={(job) => job.id}
+                onRowClick={(job) => setSelectedJobID(job.id)}
+                emptyState={<div className="px-6 py-8 text-center text-xs text-muted-foreground">{scanJobList.isError ? "Scan jobs could not be loaded." : scanJobList.isPending ? "Loading scan jobs..." : "No scan jobs match this view."}</div>}
+                defaultSort={{ id: "requested", dir: "desc" }}
+                preferencesKey="scanner-recent-jobs"
+                exportFileName="scanner-recent-jobs"
+                testId="scanner-recent-jobs"
+              />
             </div>
-          )}
-        </div>
-      </Card>
+          </Card>
 
-      <Card
-        title="CVE intelligence sources"
-        description="Live feeds that populate the CVE Database with descriptions, severity, and exploitation intelligence."
-        padded={false}
-      >
-        <div className="divide-y divide-border">
-          <SourceRow name="CISA KEV" desc="Known-exploited vulnerabilities catalog" live />
-          <SourceRow name="FIRST EPSS" desc="Exploit-probability scores, refreshed daily" live />
-          <SourceRow
-            name="NVD"
-            desc="Full CVE catalog — descriptions + CVSS base scores"
-            live={nvdEnabled}
+        ) },
+        { value: "workers", label: "Workers and capacity", content: <div className="space-y-4">
+          <Card title="Scanner database and capacity" description="Live heartbeat capacity, host VulnDB bundles, and reported Trivy/Grype download and applied revisions.">
+            <ScannerDbCapacity heartbeats={scannerHealth.data?.heartbeats} unavailable={scannerHealth.isError} loading={scannerHealth.isPending} />
+          </Card>
+
+          <Card
+            title="Scanner workers"
+            description="Workers reported in the last 24 hours. Inspect their database revisions, capacity and caches."
             action={
-              <Button variant="outline" size="sm" onClick={() => navigate({ href: "/settings/scanner/nvd" })}>
-                <Pencil className="h-3.5 w-3.5" /> Configure
+              <Button type="button" variant="outline" size="sm" onClick={() => void scannerWorkers.refetch()}>
+                <RefreshCw className={`h-3.5 w-3.5 ${scannerWorkers.isFetching ? "animate-spin" : ""}`} />
+                Workers
               </Button>
             }
-          />
-        </div>
-      </Card>
+          >
+            <div className="space-y-4">
+              <DataTable<ScannerWorker>
+                rows={workers}
+                columns={workerColumns}
+                rowKey={(scanner) => scanner.id}
+                emptyState={<div className="px-6 py-8 text-center text-xs text-muted-foreground">{scannerWorkers.isError ? "Scanner workers could not be loaded." : scannerWorkers.isPending ? "Loading scanner workers..." : "No scanner workers have reported in the last 24 hours."}</div>}
+                defaultSort={{ id: "id", dir: "asc" }}
+                showDensityToggle={false}
+                testId="scanner-workers"
+              />
+
+              {selectedScannerID && (
+                <div className="rounded-md border border-border bg-muted/20 p-4" data-testid="scanner-cache-inspector">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-medium text-foreground">Cache inspector</div>
+                      <div className="mt-0.5 font-mono text-xs text-muted-foreground">{selectedScannerID}</div>
+                    </div>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setSelectedScannerID("")}>
+                      <XCircle className="h-3.5 w-3.5" />
+                      Close
+                    </Button>
+                  </div>
+
+                  {cacheStat.isPending ? (
+                    <div className="text-xs text-muted-foreground">Loading scanner cache status...</div>
+                  ) : cacheStat.isError ? (
+                    <div className="text-xs text-[color:var(--color-status-error)]">Cache status unavailable for this scanner.</div>
+                  ) : cacheStat.data ? (
+                    <ScannerCacheSummary stat={cacheStat.data} />
+                  ) : null}
+                </div>
+              )}
+            </div>
+          </Card>
+
+        </div> },
+        { value: "databases", label: "Database refresh", content: (
+          <Card
+            title="Database refresh"
+            description="How often connected scanners pull the latest Trivy & Grype vulnerability databases."
+            action={
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => refreshNow.mutate()}
+                disabled={refreshNow.isPending || offlineDb || systemConfig.isPending || systemConfig.isError}
+                title={offlineDb ? "Air-gapped — scanners can't pull from upstream" : "Force all scanners to pull the latest DBs now"}
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${refreshNow.isPending ? "animate-spin" : ""}`} />
+                Refresh now
+              </Button>
+            }
+          >
+            <div className="space-y-5">
+              <Field
+                label="Auto-refresh interval"
+                hint="Minutes between automatic database refreshes. 0 uses the deploy default (6 hours)."
+              >
+                <div className="flex items-center gap-2">
+                  <TextInput
+                    type="number"
+                    min={0}
+                    defaultValue={refreshMinutes}
+                    key={`refresh-${revision}-${refreshMinutes}`}
+                    disabled={systemConfig.isPending || systemConfig.isError || updateRefresh.isPending}
+                    onBlur={(e) => {
+                      const n = Number.parseInt(e.target.value, 10);
+                      if (!Number.isNaN(n) && n !== refreshMinutes) updateRefresh.mutate(n);
+                    }}
+                    className="w-28"
+                    data-testid="scanner-db-refresh-minutes"
+                  />
+                  <span className="text-xs text-muted-foreground">minutes</span>
+                </div>
+              </Field>
+
+              <div className="flex items-center justify-between gap-4 rounded-lg border border-border bg-muted/30 px-4 py-3">
+                <div>
+                  <div className="text-sm font-medium text-foreground">Air-gapped mode</div>
+                  <div className="text-xs text-muted-foreground">Databases are pre-loaded; no upstream network pulls. Set at deploy time.</div>
+                </div>
+                <span
+                  className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium ${
+                    offlineDb ? "bg-[color:var(--color-brand)]/10 text-[color:var(--color-brand)]" : "bg-muted text-muted-foreground"
+                  }`}
+                  data-testid="scanner-offline-db"
+                >
+                  {systemConfig.isPending || systemConfig.isError ? "Unknown" : offlineDb ? "On" : "Off"}
+                </span>
+              </div>
+            </div>
+          </Card>
+
+        ) },
+        { value: "sources", label: "CVE sources", content: (
+          <Card
+            title="CVE intelligence sources"
+            description="Sources used for vulnerability intelligence. Configuration does not establish successful delivery or freshness."
+            padded={false}
+          >
+            <div className="divide-y divide-border">
+              <SourceRow name="CISA KEV" desc="Known-exploited vulnerabilities catalog" status="Delivery not verified" />
+              <SourceRow name="FIRST EPSS" desc="Exploit-probability scores" status="Delivery not verified" />
+              <SourceRow
+                name="NVD"
+                desc="Full CVE catalog — descriptions + CVSS base scores"
+                status={systemConfig.isPending || systemConfig.isError ? "Configuration unavailable" : nvdEnabled ? "Enabled" : "Disabled"}
+                action={
+                  <Button variant="outline" size="sm" onClick={() => navigate({ href: "/settings/scanner/nvd" })}>
+                    <Pencil className="h-3.5 w-3.5" /> Configure
+                  </Button>
+                }
+              />
+            </div>
+          </Card>
+
+        ) },
+      ]} />
 
       <ScanJobDrawer
         job={selectedJob}
@@ -538,24 +553,18 @@ export function ScannerSourcesPage() {
   );
 }
 
-function SourceRow({ name, desc, live, action }: { name: string; desc: string; live: boolean; action?: React.ReactNode }) {
+function SourceRow({ name, desc, status, action }: { name: string; desc: string; status: string; action?: React.ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-4 px-5 py-3.5">
       <div className="flex min-w-0 items-center gap-3">
-        {live ? (
-          <CheckCircle2 className="h-4 w-4 shrink-0 text-[color:var(--color-status-success)]" />
-        ) : (
-          <Circle className="h-4 w-4 shrink-0 text-muted-foreground/40" />
-        )}
+        <Circle className="h-4 w-4 shrink-0 text-muted-foreground" />
         <div className="min-w-0">
           <div className="text-sm font-medium text-foreground">{name}</div>
           <div className="truncate text-xs text-muted-foreground">{desc}</div>
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-3">
-        <span className={`text-[11px] font-medium ${live ? "text-[color:var(--color-status-success)]" : "text-muted-foreground"}`}>
-          {live ? "Live" : "Off"}
-        </span>
+        <span className="text-[11px] font-medium text-muted-foreground">{status}</span>
         {action}
       </div>
     </div>

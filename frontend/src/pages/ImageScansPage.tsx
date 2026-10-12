@@ -9,6 +9,9 @@ import { useCluster } from "@/hooks/useCluster";
 import { cn } from "@/lib/cn";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
+import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { Collapse } from "@/components/ui/collapse";
+import { scanEngineEvidence } from "@/lib/scan-evidence";
 import { StatCard } from "@/components/ui/stat-card";
 
 const severities = ["all", "critical", "high", "medium", "low", "info"];
@@ -88,7 +91,7 @@ export function ImageScansPage() {
         <div className="text-xs">
           <div className="font-medium">{item.scanner_profile}</div>
           <div className="mt-1 text-muted-foreground">{formatDate(item.last_scanned_at)}</div>
-          <div className="mt-1 truncate font-mono text-[10px] text-muted-foreground">{item.vulndb_bundle_version || "bundle unknown"}</div>
+          <div className="mt-1 text-[11px] text-muted-foreground">{scanEngineEvidence(item.engine_status).engines.every((engine) => engine.status === "succeeded") ? "Engines completed" : "Incomplete engine evidence"}</div>
         </div>
       ),
     },
@@ -115,10 +118,13 @@ export function ImageScansPage() {
         }
       />
 
+      <VerdictBanner status={q.isError ? "degraded" : q.isPending || summary.total === 0 ? "info" : summary.incomplete > 0 || summary.criticalHigh > 0 || summary.stale > 0 ? "degraded" : "ok"}
+        title={q.isError ? "Image scans could not be loaded" : q.isPending ? "Loading image scans" : summary.total === 0 ? "No image scans recorded" : summary.incomplete > 0 ? "Some images have incomplete scanner coverage" : summary.criticalHigh > 0 ? "Image vulnerabilities need attention" : summary.stale > 0 ? "Some image scans are stale" : "Scanned images have no critical or high findings"}
+        detail={`Metrics and filters cover the latest 500 image results for this cluster. ${summary.incomplete} results have missing or failed engine outcomes.`} />
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4" data-testid="image-scan-summary">
         <StatCard label="Images" value={summary.total.toLocaleString()} icon={<Boxes className="h-3.5 w-3.5" />} hint={`${summary.exposed} running · ${summary.local} local`} />
         <StatCard label="Critical / High" value={summary.criticalHigh.toLocaleString()} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={summary.criticalHigh > 0 ? "high" : "neutral"} hint={`${summary.findings} image findings`} />
-        <StatCard label="Packages" value={summary.packages.toLocaleString()} icon={<Database className="h-3.5 w-3.5" />} hint={`${summary.bundles} VulnDB bundles`} />
+        <StatCard label="Packages" value={summary.packages.toLocaleString()} icon={<Database className="h-3.5 w-3.5" />} hint="across loaded image results" />
         <StatCard label="Stale Scans" value={summary.stale.toLocaleString()} icon={<Clock3 className="h-3.5 w-3.5" />} tone={summary.stale > 0 ? "medium" : "neutral"} hint="older than 7 days" />
       </section>
 
@@ -129,7 +135,8 @@ export function ImageScansPage() {
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search repository, digest, platform, bundle"
+              placeholder="Search repository, digest, platform or source"
+              aria-label="Search image scans"
               className="w-full rounded-md border border-border bg-background py-2 pl-9 pr-3 text-sm"
               data-testid="image-scan-search"
             />
@@ -139,6 +146,7 @@ export function ImageScansPage() {
             onChange={(event) => setSeverity(event.target.value)}
             className="rounded-md border border-border bg-background p-2 text-sm"
             data-testid="image-scan-severity-filter"
+            aria-label="Filter image scans by severity"
           >
             {severities.map((item) => (
               <option key={item} value={item}>{item === "all" ? "All severities" : item}</option>
@@ -160,13 +168,13 @@ export function ImageScansPage() {
             showDensityToggle={false}
             emptyState={
               <div className="px-3 py-8 text-center text-xs text-muted-foreground">
-                {q.isPending ? "Loading image scans..." : "No image scans match the current filters."}
+                {q.isPending ? "Loading image scans..." : q.isError ? "Image scans are unavailable. Refresh to try again." : "No image scans match the current filters."}
               </div>
             }
           />
         </div>
 
-        <ImagePreview item={selected} clusterId={clusterId} />
+        {selected && <Collapse label="Selected image summary"><ImagePreview item={selected} clusterId={clusterId} /></Collapse>}
       </section>
     </div>
   );
@@ -177,7 +185,7 @@ function ImagePreview({ item, clusterId }: { item: ImageScanResult | null; clust
     return (
       <aside className="rounded-lg border border-border bg-card p-4" data-testid="image-scan-preview">
         <h2 className="text-sm font-semibold">Image scan inspection</h2>
-        <p className="mt-2 text-xs text-muted-foreground">Select an image to inspect scan freshness, exposure, and VulnDB provenance.</p>
+        <p className="mt-2 text-xs text-muted-foreground">Select an image to inspect scan freshness, exposure, and scan provenance.</p>
       </aside>
     );
   }
@@ -211,8 +219,8 @@ function ImagePreview({ item, clusterId }: { item: ImageScanResult | null; clust
           <Field label="Scanner Profile" value={item.scanner_profile} />
           <Field label="Source" value={sourceLabel(item)} />
           <Field label="Source Ref" value={item.source_ref || "-"} />
-          <Field label="VulnDB Bundle" value={item.vulndb_bundle_version || "-"} />
-          <Field label="Bundle Hash" value={item.vulndb_bundle_hash || "-"} />
+          {item.vulndb_bundle_version && <Field label="VulnDB Bundle" value={item.vulndb_bundle_version} />}
+          {item.vulndb_bundle_hash && <Field label="Bundle Hash" value={item.vulndb_bundle_hash} />}
         </dl>
       </div>
     </aside>
@@ -220,7 +228,6 @@ function ImagePreview({ item, clusterId }: { item: ImageScanResult | null; clust
 }
 
 function summarize(items: ImageScanResult[]) {
-  const bundles = new Set(items.map((item) => item.vulndb_bundle_hash || item.vulndb_bundle_version).filter(Boolean));
   return {
     total: items.length,
     exposed: items.filter((item) => item.impacted_count > 0).length,
@@ -229,7 +236,7 @@ function summarize(items: ImageScanResult[]) {
     findings: items.reduce((sum, item) => sum + item.finding_count, 0),
     packages: items.reduce((sum, item) => sum + item.package_count, 0),
     stale: items.filter((item) => isStale(item.last_scanned_at)).length,
-    bundles: bundles.size,
+    incomplete: items.filter((item) => scanEngineEvidence(item.engine_status).engines.some((engine) => engine.status !== "succeeded")).length,
   };
 }
 

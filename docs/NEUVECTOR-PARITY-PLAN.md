@@ -141,6 +141,22 @@ Collaborative-browser checks cover create-once, loaded edit, save, cancel withou
 changes, advanced disclosure and hard reload of the edit URL. The temporary manual
 registry was removed. UI-1 stays open pending the remaining page/form audit.
 
+The scan-console continuation is deployed at Helm revision **26** with frontend
+`scan-console-final-20261012`. Scanner operations have five metrics and URL-linked
+jobs, workers/capacity, database-refresh and CVE-source tabs. Failed requests and
+unreported paused counts are explicit; configured feeds no longer claim verified
+live delivery. The image list has a coverage-aware verdict, a collapsed selected
+image summary and no fabricated missing VulnDB provenance. Registry inventory
+shows failed or missing-registry requests instead of a false empty result.
+
+Validation: **166 frontend tests**, production build, changed-file lint and
+endpoint/plan checks pass. Shared-browser DOM checks cover tab changes, hard reload
+of `?tab=workers`, live engine revisions/capacity, image metrics and disclosure,
+and the deleted-registry error state. The existing production-browser navigation
+spec was updated for the tabs; its full runner was not rerun in this continuation.
+Matching live revision/capacity evidence on the dashboard, health and scanner
+surfaces closes that bounded REG-1 item; the broader UI gates remain open.
+
 The admission-engine continuation adds migration **172** and persists normalized
 engine outcomes atomically with image scan completion. The built-in vulnerability
 profiles now require successful Trivy and Grype results rather than retired
@@ -160,8 +176,8 @@ has zero findings. The API image is
 `sha256:8382addded7cd3d9d2e74410772f6b64342189a0f82e88ea74abe6e19ded867b`.
 These checks do not close the remaining parity or live cutover acceptance gates.
 
-**Parity is not release-complete.** The feature checklist has 55 checked
-and 98 open items. Counts describe acceptance items, not a percentage of code
+**Parity is not release-complete.** The feature checklist has 56 checked
+and 97 open items. Counts describe acceptance items, not a percentage of code
 implemented. The complete scope and remaining gates are retained below; do not
 convert partially implemented items into checked boxes.
 
@@ -791,16 +807,16 @@ Unchecked parent items remain open until **all** their acceptance requirements
 are met. Code present is not the same as verified or release-ready. The older
 deficiency ledger includes findings that already have fixes; do not use its
 historical counts as a count of currently open defects.
-Acceptance backlog: **98 open**. The lease-scoped private-registry proof closes
-one REG-1 item. The October 12 browser/FIPS CI gate closes one
+Acceptance backlog: **97 open**. Lease-scoped private-registry proof and
+live scanner revision/capacity visibility close two REG-1 items. The October 12 browser/FIPS CI gate closes one
 bounded item with local and hosted evidence. The September reconciliation reached 98;
 the October 11 fleet review adds two explicit ingestion/isolation gates.
 Since the `800b0ef` baseline of 107 open,
-**fourteen existing items closed** (four OPS-1 items, three SIEM-1 items, one
-POL-1 item, one IAM-1 item, two UI-1 items, one UI-2 item, one UI-3 item and one REG-1 item), and four new items were added: vendor interoperability, legacy
+**fifteen existing items closed** (four OPS-1 items, three SIEM-1 items, one
+POL-1 item, one IAM-1 item, two UI-1 items, one UI-2 item, one UI-3 item and two REG-1 items), and four new items were added: vendor interoperability, legacy
 DPI binding tenant validation, registration/proof of the unreachable
 group-edge HTTP workflow, and durable storage-growth controls.
-The checklist contains **55 checked bounded rows** (39 at baseline); one new
+The checklist contains **56 checked bounded rows** (39 at baseline); one new
 bounded OPS-2 database-reclaim item was added as complete. Earlier
 rounds added bounded POL-1, POL-2 and API-1 fixes without closing their parent
 acceptance item. Those rounds added an eight-object cutover fixture and opt-in
@@ -1578,8 +1594,11 @@ row saying `enforced`.
 - [x] Return an explicit client error for unsupported registry kinds on create
   and attempted kind changes on PATCH; static tests enumerate all 13 accepted
   kinds. Tag/repository selection and live cloud-token refresh remain open.
-- [ ] Show scanner database download/apply revision and worker capacity on
-  dashboard and health surfaces.
+- [x] Show scanner database download/apply revision and worker capacity on
+  dashboard and health surfaces. October 12 live DOM checks show matching Trivy
+  and Grype download/applied revisions and worker slots on the cluster dashboard,
+  platform health and scanner page. Component tests cover partial/stale reports,
+  missing fields, unavailable data and actual zero capacity.
 
 ### SIEM-1 Enterprise event delivery
 

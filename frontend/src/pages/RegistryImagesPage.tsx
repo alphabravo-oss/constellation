@@ -11,6 +11,7 @@ import { useCluster } from "@/hooks/useCluster";
 import { useDebounced } from "@/hooks/useDebounced";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
+import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { StatCard } from "@/components/ui/stat-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Pager } from "@/components/ui/pager";
@@ -64,6 +65,9 @@ export function RegistryImagesPage() {
         title={reg.data?.name || "Registry images"}
         description="Image inventory discovered in this registry, correlated with vulnerability scan results."
       />
+      <VerdictBanner status={reg.isError || imgs.isError ? "degraded" : imgs.isPending || rows.length === 0 ? "info" : totalCrit + totalHigh > 0 || scanned < rows.length ? "degraded" : "ok"}
+        title={reg.isError || imgs.isError ? "Registry inventory could not be loaded" : imgs.isPending ? "Loading registry images" : rows.length === 0 ? (q ? "No images match this search" : "No images discovered") : scanned < rows.length ? "Some images on this page need scanning" : totalCrit + totalHigh > 0 ? "Image vulnerabilities need attention" : "No critical or high findings on this page"}
+        detail="Scan and vulnerability metrics describe this page. Inspect engine coverage and findings on the Images page." />
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard label="Images" value={total} icon={<Boxes className="h-3.5 w-3.5" />} />
         <StatCard label="Scanned (page)" value={scanned} tone={scanned < rows.length ? "medium" : "low"} hint={`${rows.length - scanned} unscanned on page`} />
@@ -74,9 +78,12 @@ export function RegistryImagesPage() {
         value={search}
         onChange={(e) => { setSearch(e.target.value); setPage(0); }}
         placeholder="Search repository…"
+        aria-label="Search registry repositories"
         className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
       />
-      {imgs.isPending ? (
+      {reg.isError || imgs.isError ? (
+        <p role="alert" className="text-sm text-muted-foreground">Image inventory is unavailable. Refresh to try again.</p>
+      ) : imgs.isPending ? (
         <p className="text-sm text-muted-foreground">Loading images…</p>
       ) : rows.length === 0 ? (
         <EmptyState title={q ? "No matching images" : "No images discovered"} hint={q ? "Try a different search." : "Run a registry sync to populate the image inventory."} />
