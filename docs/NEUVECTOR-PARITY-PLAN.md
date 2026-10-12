@@ -896,6 +896,74 @@ filters stay contained. The viewport is restored to 1280px. No live policy,
 exemption, scan, migration, acceptance, capture or saved-view writes were submitted.
 All-page, larger-dataset, saved-state and accessibility acceptance remains open.
 
+The next shared-table increment adds bounded pointer/keyboard column resizing,
+column order, left/right pinning and explicit layout reset to the reusable
+DataTable. Header, body and page CSV use the same visible order; pin offsets use
+measured column widths and suspend when a narrow viewport cannot retain a usable
+center. Scoped preferences sanitize stale columns and invalid sizes. Focused
+scroll regions support Left/Right/Home/End without intercepting child controls.
+Runtime live, Integration deliveries and Network streams now use an initial
+compact density, so their visible density controls can actually change it.
+
+Assets now applies search, the existing query DSL, kind, criticality and AI-workload
+filters before server sorting/paging. Matching summaries and up to 100,000 CSV
+records share the inventory predicate and a repeatable-read snapshot per request.
+Components now exposes server filters/sort/pages and matching CSV across its
+24-hour heartbeat source. Health summaries, role counts and version capacity use
+the complete selected scope rather than the current page. Restart scoring counts
+all last-hour events by organization, cluster, component and hostname; list and
+detail use the same owned heartbeat population and report source read failures.
+Components still loads the organization heartbeat population to preserve the
+complete drift baseline, and its multiple source reads are not a single snapshot.
+
+Runtime events, runtime overview and Timeline workload evidence now carry exact
+platform-role metadata, including their relevant CSV/NDJSON exports. Ambiguous
+organization-wide rollups remain explicitly unclassified. Events NDJSON export
+uses the actual threat `at` column, bounded keyset pages and one read-only snapshot;
+a failed stream ends with a valid JSON error record instead of implying success.
+Both threat timestamps are producer-reported, not an ingestion-time guarantee.
+Session/conversation ownership resolution, capture-start role enrichment and an
+actual custom-installation live proof remain open. Containers still filters a
+bounded loaded sample and needs the next server-inventory continuation.
+
+Validation: **1,463 frontend tests across 114 files** pass, followed by **50
+Assets tests** after the final identity-column width refinement. Production
+build/typecheck, frontend lint, affected Go vet, generated OpenAPI contracts,
+107 endpoint mappings and plan checks pass. **56 focused fresh PostgreSQL
+race/shuffle executions** pass with no skips: six Assets, 24 Components and 26
+Runtime/Timeline/export cases. Fixtures exercise more than 1,000 components,
+1,205 workload assets and multi-page uncapped NDJSON, with tenant/sibling scope,
+restart evidence beyond the former 200-event sample, read failures and stream
+error frames. Shared arrangement tests cover order/CSV agreement, stale state,
+identity isolation, measured pins, pointer/keyboard bounds and reset.
+
+Helm revision **60** runs frontend `inventory-controls-fit-20261012`, API
+`inventory-controls-20261012`, migration `audit-lookup-20261012`, schema 173 and
+all seven deployments ready. Live reads reconcile **804 assets** and **357
+images** with full matching CSV, and **12 components** with **one scanner**.
+Two-row continuation reads do not overlap. Filtering Components preserves the
+full-scope summary. Runtime events, overview and Timeline return role fields;
+this live workload sample is unclassified. A one-hour NDJSON export returns
+**1,030 findings**, no threats and no error frames; positive threat-role and
+failure cases are fixture-qualified.
+
+The collaborative browser verifies populated Assets/Components header/body
+alignment at 1280px and 640px, with no document overflow or clipped actions.
+Assets identity now retains at least 280px while compact metadata yields space.
+Keyboard resizing and scroll Home/End, saved pin reload, narrow pin suspension,
+layout reset and scanner-role deep links are verified in the live console.
+Actual pointer dragging remains component-test qualified. Temporary table
+preferences and the 1280px viewport were restored. No live policy, scan,
+acceptance, capture, migration or saved-view writes were submitted.
+
+The next bounded inventory slices are Containers (3,000-row source cap before
+local filters) and Nodes (filters/sort over loaded pages, local selection and
+stale evidence on failed refresh). Further gaps include registry-image global
+sorting/export, scan-job continuation, CVE affected-evidence caps, Compliance
+raw-evidence continuation and network/runtime history exports. Named saved views
+and the full accessibility/cross-dataset matrix remain open; these checks do not
+close the parent UI-2/3/4 rows.
+
 The admission-engine continuation adds migration **172** and persists normalized
 engine outcomes atomically with image scan completion. The built-in vulnerability
 profiles now require successful Trivy and Grype results rather than retired

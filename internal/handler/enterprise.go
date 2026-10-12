@@ -11,6 +11,7 @@ import (
 
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/pkg/audit"
+	"github.com/google/uuid"
 )
 
 type Enterprise struct {
@@ -38,6 +39,8 @@ func (h *Enterprise) WithCustomRoles(customRoles *CustomRoles) *Enterprise {
 }
 
 type runtimeEventEvidenceDTO struct {
+	Namespace        string   `json:"namespace,omitempty"`
+	PlatformRole     string   `json:"platform_role"`
 	ID               string   `json:"id"`
 	At               string   `json:"at"`
 	ClusterID        string   `json:"cluster_id"`
@@ -54,6 +57,9 @@ type runtimeEventEvidenceDTO struct {
 }
 
 type runtimeWorkloadEvidenceDTO struct {
+	PlatformRole    string   `json:"platform_role"`
+	ClusterID       string   `json:"cluster_id,omitempty"`
+	Namespace       string   `json:"namespace,omitempty"`
 	WorkloadID      string   `json:"workload_id"`
 	Events          int      `json:"events"`
 	Alerts          int      `json:"alerts"`
@@ -173,7 +179,7 @@ SELECT COUNT(*)::int,
 	out["summary"] = summary
 
 	rows, err := h.db.Pool().Query(r.Context(), `
-SELECT e.id::text, e.at, e.cluster_id::text, COALESCE(c.name, ''), e.workload_id,
+SELECT e.id::text, e.at, e.cluster_id::text, COALESCE(c.name, ''), e.workload_id, COALESCE(e.namespace,''),
        COALESCE(e.payload->>'rule_id', ''), COALESCE(e.payload->>'rule_name', ''),
        e.source, e.kind,
        e.severity, e.verdict, e.attack_techniques, COALESCE(e.payload->>'message', e.payload->>'summary', '')
@@ -192,7 +198,7 @@ SELECT e.id::text, e.at, e.cluster_id::text, COALESCE(c.name, ''), e.workload_id
 	for rows.Next() {
 		var item runtimeEventEvidenceDTO
 		var at time.Time
-		if err := rows.Scan(&item.ID, &at, &item.ClusterID, &item.ClusterName, &item.WorkloadID, &item.RuleID, &item.RuleName, &item.Source, &item.Kind, &item.Severity, &item.Verdict, &item.AttackTechniques, &item.Message); err != nil {
+		if err := rows.Scan(&item.ID, &at, &item.ClusterID, &item.ClusterName, &item.WorkloadID, &item.Namespace, &item.RuleID, &item.RuleName, &item.Source, &item.Kind, &item.Severity, &item.Verdict, &item.AttackTechniques, &item.Message); err != nil {
 			return err
 		}
 		item.At = at.UTC().Format(time.RFC3339)
@@ -201,10 +207,29 @@ SELECT e.id::text, e.at, e.cluster_id::text, COALESCE(c.name, ''), e.workload_id
 	if err := rows.Err(); err != nil {
 		return err
 	}
+	rows.Close()
+	parsedOrg, err := uuid.Parse(orgID)
+	if err != nil {
+		return err
+	}
+	identities := make([]PlatformWorkloadIdentity, len(events))
+	for i, event := range events {
+		cluster, _ := uuid.Parse(event.ClusterID)
+		identities[i] = PlatformWorkloadIdentity{ClusterID: cluster, Workload: event.WorkloadID, Namespace: event.Namespace}
+	}
+	roles, err := EvidencePlatformRoles(r.Context(), h.db.Pool(), parsedOrg, identities)
+	if err != nil {
+		return err
+	}
+	for i := range events {
+		events[i].PlatformRole = roles[i]
+	}
 	out["recent_events"] = events
 
 	workloadRows, err := h.db.Pool().Query(r.Context(), `
 SELECT workload_id,
+       CASE WHEN COUNT(DISTINCT cluster_id)=1 THEN MIN(cluster_id::text) ELSE '' END,
+       CASE WHEN COUNT(DISTINCT COALESCE(namespace,''))=1 THEN MIN(COALESCE(namespace,'')) ELSE '' END,
        COUNT(DISTINCT id)::int,
        COUNT(DISTINCT id) FILTER (WHERE verdict IN ('alert','block','quarantine'))::int,
        COUNT(DISTINCT id) FILTER (WHERE verdict = 'block')::int,
@@ -229,7 +254,7 @@ SELECT workload_id,
 	for workloadRows.Next() {
 		var item runtimeWorkloadEvidenceDTO
 		var last time.Time
-		if err := workloadRows.Scan(&item.WorkloadID, &item.Events, &item.Alerts, &item.Blocks, &item.HighestSeverity, &last, &item.Sources, &item.Techniques); err != nil {
+		if err := workloadRows.Scan(&item.WorkloadID, &item.ClusterID, &item.Namespace, &item.Events, &item.Alerts, &item.Blocks, &item.HighestSeverity, &last, &item.Sources, &item.Techniques); err != nil {
 			return err
 		}
 		item.LastSeenAt = last.UTC().Format(time.RFC3339)
@@ -237,6 +262,19 @@ SELECT workload_id,
 	}
 	if err := workloadRows.Err(); err != nil {
 		return err
+	}
+	workloadRows.Close()
+	identities = make([]PlatformWorkloadIdentity, len(workloads))
+	for i, workload := range workloads {
+		cluster, _ := uuid.Parse(workload.ClusterID)
+		identities[i] = PlatformWorkloadIdentity{ClusterID: cluster, Workload: workload.WorkloadID, Namespace: workload.Namespace}
+	}
+	roles, err = EvidencePlatformRoles(r.Context(), h.db.Pool(), parsedOrg, identities)
+	if err != nil {
+		return err
+	}
+	for i := range workloads {
+		workloads[i].PlatformRole = roles[i]
 	}
 	out["workloads"] = workloads
 	if err := h.attachRuntimeRuleEvidence(r, out, orgID, windowStart, clusterArg); err != nil {

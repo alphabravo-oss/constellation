@@ -7,6 +7,8 @@ import { securityTimeline, type TimelineItem } from "@/api/client";
 import { TablePreferencesProvider } from "@/contexts/TablePreferencesContext";
 import { operatorStorageKey } from "@/lib/operator-preferences";
 import { TestRouter } from "@/test/router";
+import { downloadCsv } from "@/lib/csv";
+vi.mock("@/lib/csv",()=>({downloadCsv:vi.fn()}));
 import { TimelinePage } from "./TimelinePage";
 
 const scope = vi.hoisted(() => ({ clusterId: "cluster", cluster: { id: "cluster", name: "Primary" }, isLoading: false, error: null as Error | null }));
@@ -185,4 +187,10 @@ it("reports full matching export caps and errors, and blocks duplicate requests 
 it("does not fetch or export while the cluster registry is invalidated",async()=>{
  client.setQueryData(["clusters"],{clusters:[{id:"cluster"}]});await client.invalidateQueries({queryKey:["clusters"],refetchType:"none"});
  await render(`/clusters/cluster/timeline?tab=event&after=${encodeURIComponent(boundary)}`);expect(securityTimeline.list).not.toHaveBeenCalled();expect(securityTimeline.exportCSV).not.toHaveBeenCalled();
+});
+
+it("exports applicable runtime/threat roles and retains one precise lower-bound caption",async()=>{
+ vi.mocked(securityTimeline.list).mockResolvedValue({...exactResponse(0,2,true),items:[{...item,platform_role:"core",verdict:"alert"},{...item,id:"unknown",source:"dpi_threat",platform_role:""}]});
+ await render(`/clusters/cluster/timeline?tab=custom&type=runtime_event,dpi_threat&after=${encodeURIComponent(boundary)}&after_exclusive=true`);await settled(()=>expect(host.textContent).toContain("Process observed"));
+ expect(host.textContent?.match(/Strictly after/g)).toHaveLength(1);click("Export current page CSV");const [,headers,rows]=vi.mocked(downloadCsv).mock.calls.at(-1)!;expect(rows.map(row=>row[headers.indexOf("platform_role")])).toEqual(["core",""]);expect(new URLSearchParams(history.location.search).get("after")).toBe(boundary);
 });

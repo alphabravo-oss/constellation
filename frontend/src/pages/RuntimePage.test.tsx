@@ -5,6 +5,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { enterprise, runtimeEvents, type RuntimeEvent, type RuntimeOverview } from "@/api/client";
 import { TestRouter } from "@/test/router";
+import { downloadCsv } from "@/lib/csv";
+vi.mock("@/lib/csv",()=>({downloadCsv:vi.fn()}));
 import { RuntimePage } from "./RuntimePage";
 
 const scope = vi.hoisted(() => ({ available: true, resolvedId: "", loading: false, error: null as Error | null }));
@@ -150,4 +152,19 @@ it("links the complete alerting cohort with the source's precise lower boundary"
  const data=overview();data.summary.window_start="2026-10-11T12:34:56.123456Z";vi.mocked(enterprise.runtime).mockResolvedValue(data);
  await render("/clusters/cluster-a/runtime?tab=evidence&hours=24");await settled(()=>expect(host.querySelector('[data-testid="runtime-alert-events-link"]')).not.toBeNull());
  const url=new URL(host.querySelector<HTMLAnchorElement>('[data-testid="runtime-alert-events-link"]')!.getAttribute("href")!,"https://example.com");expect(url.pathname).toBe("/clusters/cluster-a/timeline");expect(url.searchParams.get("tab")).toBe("event");expect(url.searchParams.get("after")).toBe(data.summary.window_start);expect(url.searchParams.get("verdict")).toBe("alert,block,quarantine");expect(url.searchParams.has("hours")).toBe(false);
+});
+
+it.each(["live","evidence","workloads"])("retains server role metadata and explicit unknown values in %s CSV",async workspace=>{
+ const data=overview();data.recent_events=[{...evidenceEvent(),platform_role:"core"},{...evidenceEvent("cluster-a","unknown"),platform_role:""}];data.workloads=[{...data.workloads[0],platform_role:"core"},{...data.workloads[0],workload_id:"prod/customer",platform_role:""}];
+ vi.mocked(enterprise.runtime).mockResolvedValue(data);vi.mocked(runtimeEvents.list).mockResolvedValue({events:[{...rawEvent(),cluster_id:"cluster-a",platform_role:"core"},{...rawEvent(),id:"unknown",workload_id:"prod/customer",platform_role:""}],limit:100});
+ await render(`/clusters/cluster-a/runtime?tab=${workspace}`);await settled(()=>expect(host.textContent).toContain("core"));
+ const exportButton=[...host.querySelectorAll<HTMLButtonElement>("button")].find(button=>button.textContent==="Export CSV")!;await act(async()=>exportButton.click());
+ const [,headers,rows]=vi.mocked(downloadCsv).mock.calls.at(-1)!;const column=headers.indexOf("platform_role");expect(column).toBeGreaterThanOrEqual(0);expect(rows.map(row=>row[column])).toEqual(["core",""]);expect(rows.flat()).not.toContain("Not classified");
+});
+it("rejects foreign-cluster raw event metadata instead of exporting it",async()=>{
+ vi.mocked(runtimeEvents.list).mockResolvedValue({events:[{...rawEvent(),cluster_id:"other",platform_role:"core"}],limit:100});await render();await settled(()=>expect(host.textContent).toContain("Latest runtime events do not match the selected cluster"));expect(host.querySelector('[data-testid="runtime-live-table"]')).toBeNull();expect(host.textContent).not.toContain("raw-cluster-a");
+});
+it("lets the operator change the initially compact live-event density",async()=>{
+ await render();await settled(()=>expect(host.querySelector('[data-testid="runtime-live-table"]')).not.toBeNull());const table=host.querySelector('[data-testid="runtime-live-table"]')!;const cell=()=>table.querySelector<HTMLElement>('tbody td')!;
+ expect(cell().className).toContain("py-0.5");await act(async()=>table.querySelector<HTMLButtonElement>('[aria-label="comfy density"]')!.click());expect(cell().className).toContain("py-2");
 });

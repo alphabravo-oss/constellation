@@ -35,24 +35,25 @@ type componentInventorySummaryDTO struct {
 }
 
 type componentInventoryRollupDTO struct {
-	Component       string     `json:"component"`
-	DisplayName     string     `json:"display_name"`
-	Role            string     `json:"role"`
-	Scope           string     `json:"scope"`
-	Kind            string     `json:"kind"`
-	Expected        bool       `json:"expected"`
-	Status          string     `json:"status"`
-	Instances       int        `json:"instances"`
-	Healthy         int        `json:"healthy"`
-	Degraded        int        `json:"degraded"`
-	Stale           int        `json:"stale"`
-	Drift           int        `json:"drift"`
-	Crashlooping    int        `json:"crashlooping"`
-	Missing         int        `json:"missing"`
-	LatestVersion   string     `json:"latest_version,omitempty"`
-	LatestCommit    string     `json:"latest_commit,omitempty"`
-	LatestSeenAt    *time.Time `json:"latest_seen_at,omitempty"`
-	LastStatusCause string     `json:"last_status_cause,omitempty"`
+	Component       string           `json:"component"`
+	DisplayName     string           `json:"display_name"`
+	Role            string           `json:"role"`
+	Scope           string           `json:"scope"`
+	Kind            string           `json:"kind"`
+	Expected        bool             `json:"expected"`
+	Status          string           `json:"status"`
+	Instances       int              `json:"instances"`
+	Healthy         int              `json:"healthy"`
+	Degraded        int              `json:"degraded"`
+	Stale           int              `json:"stale"`
+	Drift           int              `json:"drift"`
+	Crashlooping    int              `json:"crashlooping"`
+	Missing         int              `json:"missing"`
+	LatestVersion   string           `json:"latest_version,omitempty"`
+	LatestCommit    string           `json:"latest_commit,omitempty"`
+	LatestSeenAt    *time.Time       `json:"latest_seen_at,omitempty"`
+	LastStatusCause string           `json:"last_status_cause,omitempty"`
+	ScannerCapacity map[string]int64 `json:"scanner_capacity,omitempty"`
 }
 
 type componentInstanceDTO struct {
@@ -170,62 +171,7 @@ var componentInventorySpecs = []componentSpec{
 }
 
 func (h *ComponentsInventory) List(w http.ResponseWriter, r *http.Request) {
-	subj, ok := SubjectFrom(r.Context())
-	if !ok {
-		jsonError(w, http.StatusUnauthorized, "subject required")
-		return
-	}
-	clusterID, ok := optionalUUIDQuery(w, r, "cluster_id")
-	if !ok {
-		return
-	}
-	componentFilter := strings.TrimSpace(r.URL.Query().Get("component"))
-	statusFilter := strings.TrimSpace(r.URL.Query().Get("status"))
-	limit := parseComponentInventoryLimit(r)
-
-	hbs, err := LoadHeartbeats(r.Context(), h.db.Pool(), subj.OrgID)
-	if err != nil {
-		jsonError(w, http.StatusInternalServerError, "heartbeats: "+err.Error())
-		return
-	}
-	clusterNames := loadClusterNames(r.Context(), h.db, hbs)
-	scored := scoreHeartbeatInstances(hbs, clusterNames, loadRecentRestarts(r.Context(), h.db.Pool(), subj.OrgID))
-	filteredInstances := make([]componentInstanceDTO, 0, len(hbs))
-	for i, hb := range hbs {
-		if clusterID != nil {
-			if hb.ClusterID == nil || *hb.ClusterID != *clusterID {
-				continue
-			}
-		}
-		if componentFilter != "" && hb.Component != componentFilter {
-			continue
-		}
-		dto := componentInstanceFromHeartbeat(hb, scored[i])
-		if statusFilter != "" && dto.Status != statusFilter {
-			continue
-		}
-		filteredInstances = append(filteredInstances, dto)
-	}
-	sort.Slice(filteredInstances, func(i, j int) bool {
-		if filteredInstances[i].Component != filteredInstances[j].Component {
-			return filteredInstances[i].Component < filteredInstances[j].Component
-		}
-		if filteredInstances[i].ClusterName != filteredInstances[j].ClusterName {
-			return filteredInstances[i].ClusterName < filteredInstances[j].ClusterName
-		}
-		return filteredInstances[i].Hostname < filteredInstances[j].Hostname
-	})
-	rollups := componentInventoryRollups(filteredInstances, clusterID != nil, componentFilter)
-	instances := filteredInstances
-	if len(instances) > limit {
-		instances = instances[:limit]
-	}
-	summary := componentInventorySummary(rollups)
-	writeJSON(w, http.StatusOK, map[string]any{
-		"summary":    summary,
-		"rollups":    rollups,
-		"components": instances,
-	})
+	h.writeInventoryList(w, r, false)
 }
 
 func (h *ComponentsInventory) Get(w http.ResponseWriter, r *http.Request) {
@@ -283,12 +229,14 @@ func (h *ComponentsInventory) Diagnostics(w http.ResponseWriter, r *http.Request
 }
 
 func (h *ComponentsInventory) componentHeartbeat(ctx context.Context, orgID uuid.UUID, id uuid.UUID) (HeartbeatRow, heartbeatDTO, bool, error) {
-	hbs, err := LoadHeartbeats(ctx, h.db.Pool(), orgID)
+	hbs, clusterNames, err := h.loadInventoryHeartbeats(ctx, orgID)
 	if err != nil {
 		return HeartbeatRow{}, heartbeatDTO{}, false, err
 	}
-	clusterNames := loadClusterNames(ctx, h.db, hbs)
-	scored := scoreHeartbeatInstances(hbs, clusterNames, loadRecentRestarts(ctx, h.db.Pool(), orgID))
+	scored, err := h.scoreInventoryHeartbeats(ctx, orgID, hbs, clusterNames)
+	if err != nil {
+		return HeartbeatRow{}, heartbeatDTO{}, false, err
+	}
 	for i, hb := range hbs {
 		if hb.ID == id {
 			return hb, scored[i], true, nil

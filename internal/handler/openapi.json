@@ -3850,23 +3850,113 @@
           {
             "name": "cluster_id",
             "in": "query",
+            "description": "Restrict to an owned cluster.",
             "schema": {
               "type": "string",
               "format": "uuid"
             }
           },
           {
+            "name": "q",
+            "in": "query",
+            "description": "Structured asset search DSL.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "description": "Literal case-insensitive name, kind, digest, image or label search.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "Exact asset kind.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "image",
+                "workload",
+                "iac-resource",
+                "ml-model",
+                "cloud-resource",
+                "host",
+                "repository",
+                "serverless"
+              ]
+            }
+          },
+          {
+            "name": "criticality",
+            "in": "query",
+            "description": "Exact criticality.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "critical",
+                "high",
+                "medium",
+                "low"
+              ]
+            }
+          },
+          {
+            "name": "ai_workload",
+            "in": "query",
+            "description": "Whether the asset is an AI workload.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "description": "Global ordering; stable asset ID ties.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "risk",
+                "asset",
+                "kind",
+                "criticality",
+                "last-seen",
+                "supply-chain"
+              ],
+              "default": "risk"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "description": "Sort direction.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
+            "description": "Page size. Existing clients may request up to1000.",
             "schema": {
               "type": "integer",
               "minimum": 1,
-              "maximum": 1000
+              "maximum": 1000,
+              "default": 100
             }
           },
           {
             "name": "offset",
             "in": "query",
+            "description": "Zero-based offset.",
             "schema": {
               "type": "integer",
               "minimum": 0
@@ -3884,7 +3974,11 @@
                     "assets",
                     "limit",
                     "offset",
-                    "has_more"
+                    "has_more",
+                    "total",
+                    "summary",
+                    "sort",
+                    "order"
                   ],
                   "properties": {
                     "assets": {
@@ -3901,8 +3995,180 @@
                     },
                     "has_more": {
                       "type": "boolean"
+                    },
+                    "total": {
+                      "type": "integer"
+                    },
+                    "summary": {
+                      "type": "object",
+                      "description": "All matching asset aggregates, independent of paging."
+                    },
+                    "sort": {
+                      "type": "string"
+                    },
+                    "order": {
+                      "type": "string"
                     }
                   }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Matching asset inventory with server filtering, deterministic ordering and continuation. Rows, total and aggregate summary share one read-only snapshot. Image vulnerability counts use latest persisted scan evidence; other kinds use generic findings. q retains the structured search DSL; search is a separate literal case-insensitive inventory search."
+      }
+    },
+    "/api/v1/assets.csv": {
+      "get": {
+        "summary": "Export matching asset inventory CSV",
+        "description": "Same filters and ordering as asset inventory; pagination does not restrict export. Explicit100000-record cap and metadata headers.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "description": "Restrict to an owned cluster.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Structured asset search DSL.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "description": "Literal case-insensitive name, kind, digest, image or label search.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "Exact asset kind.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "image",
+                "workload",
+                "iac-resource",
+                "ml-model",
+                "cloud-resource",
+                "host",
+                "repository",
+                "serverless"
+              ]
+            }
+          },
+          {
+            "name": "criticality",
+            "in": "query",
+            "description": "Exact criticality.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "critical",
+                "high",
+                "medium",
+                "low"
+              ]
+            }
+          },
+          {
+            "name": "ai_workload",
+            "in": "query",
+            "description": "Whether the asset is an AI workload.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "description": "Global ordering; stable asset ID ties.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "risk",
+                "asset",
+                "kind",
+                "criticality",
+                "last-seen",
+                "supply-chain"
+              ],
+              "default": "risk"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "description": "Sort direction.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size. Existing clients may request up to1000.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 100
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Zero-based offset.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching asset records across pages.",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Export-Total": {
+                "description": "Total matching records before the export cap",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Export-Limit": {
+                "description": "Maximum returned records: 100000",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Export-Truncated": {
+                "description": "true when matches exceed the export cap",
+                "schema": {
+                  "type": "string"
                 }
               }
             }
@@ -6261,7 +6527,327 @@
     },
     "/api/v1/components": {
       "get": {
-        "summary": "Heartbeat-backed component inventory with sanitized metadata, rollups, drift, stale, and missing status"
+        "summary": "Heartbeat-backed component inventory with sanitized metadata, rollups, drift, stale, and missing status",
+        "description": "Component instances reported within the trailing24-hour heartbeat window. Filters, ordering and continuation apply to the complete scored inventory; summary, families, role counts and scanner capacity cover the full selected scope independently of inventory filters. Drift scoring preserves the organization-wide baseline.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "description": "Owned cluster; omitted selects organization scope.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Literal case-insensitive inventory search.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "component",
+            "in": "query",
+            "description": "Exact component name.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Computed component health.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "healthy",
+                "degraded",
+                "stale",
+                "drift",
+                "crashlooping",
+                "missing",
+                "not-observed"
+              ]
+            }
+          },
+          {
+            "name": "role",
+            "in": "query",
+            "description": "Console role alias.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "controller",
+                "enforcer",
+                "scanner",
+                "admission",
+                "discoverer",
+                "other"
+              ]
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "description": "Global instance ordering with stable ID ties.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "component",
+                "build",
+                "runtime",
+                "status",
+                "hostname",
+                "restarts",
+                "heartbeat"
+              ],
+              "default": "component"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "description": "Sort direction.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "asc"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 500
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Zero-based continuation offset.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching page and full scoped component health rollups.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "components": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "total": {
+                      "type": "integer"
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    },
+                    "limit": {
+                      "type": "integer"
+                    },
+                    "offset": {
+                      "type": "integer"
+                    },
+                    "source_window_hours": {
+                      "type": "integer",
+                      "enum": [
+                        24
+                      ]
+                    },
+                    "role_counts": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "integer"
+                      }
+                    },
+                    "summary": {
+                      "type": "object"
+                    },
+                    "rollups": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/components/export.csv": {
+      "get": {
+        "summary": "Export matching component instances CSV",
+        "description": "Same scored source, matching predicates and ordering as components list; ignores pagination and reports100000-record cap. Trailing24-hour source window.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "description": "Owned cluster; omitted selects organization scope.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Literal case-insensitive inventory search.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "component",
+            "in": "query",
+            "description": "Exact component name.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Computed component health.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "healthy",
+                "degraded",
+                "stale",
+                "drift",
+                "crashlooping",
+                "missing",
+                "not-observed"
+              ]
+            }
+          },
+          {
+            "name": "role",
+            "in": "query",
+            "description": "Console role alias.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "controller",
+                "enforcer",
+                "scanner",
+                "admission",
+                "discoverer",
+                "other"
+              ]
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "description": "Global instance ordering with stable ID ties.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "component",
+                "build",
+                "runtime",
+                "status",
+                "hostname",
+                "restarts",
+                "heartbeat"
+              ],
+              "default": "component"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "description": "Sort direction.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "asc"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 500
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Zero-based continuation offset.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching component instances across pages.",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Export-Total": {
+                "description": "Total matching records before the export cap",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Export-Limit": {
+                "description": "Maximum returned records: 100000",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Export-Truncated": {
+                "description": "true when matches exceed the export cap",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/api/v1/components/{id}": {
@@ -7024,7 +7610,8 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Get events"
+        "summary": "Get events",
+        "description": " Runtime workload evidence carries platform_role using exact ownership when available; ambiguous organization rollups and records without workload identity remain unclassified."
       }
     },
     "/api/v1/events:bulk": {
@@ -7043,7 +7630,7 @@
     "/api/v1/events:export": {
       "get": {
         "summary": "Stream recent finding and threat events",
-        "description": "Organization-scoped NDJSON stream. A threat-query failure after findings have streamed is emitted as an error record, not a new HTTP status.",
+        "description": "Organization-scoped NDJSON finding and threat evidence, read in bounded pages from one repeatable-read snapshot. Threat time filtering uses at; threat rows include exact platform_role metadata. Each line remains a valid JSON object. If reading fails after streaming begins, an error record terminates the stream; clients must treat it as incomplete.",
         "parameters": [
           {
             "name": "hours",
@@ -7073,11 +7660,24 @@
             }
           },
           "500": {
-            "description": "Plain-text error when the initial findings query fails before streaming begins.",
+            "description": "Before output begins: JSON for snapshot initialization failures, or an NDJSON error record for source read failures.",
             "content": {
-              "text/plain": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "application/x-ndjson": {
                 "schema": {
                   "type": "string"
+                },
+                "x-ndjson-item-schema": {
+                  "$ref": "#/components/schemas/EventsExportRecord"
                 }
               }
             }
@@ -14048,7 +14648,7 @@
     "/api/v1/runtime/overview": {
       "get": {
         "summary": "Runtime subsystem readiness, rule overview, recent event evidence, and affected workload rollups",
-        "description": "Runtime readiness and evidence. summary.window_start is the exact inclusive lower timestamp reused by 24-hour runtime event counts; no upper timestamp is imposed. Follow security/timeline with type=runtime_event, after=window_start and verdict=alert,block,quarantine for the alert cohort.",
+        "description": "Runtime readiness and evidence. summary.window_start is the exact inclusive lower timestamp reused by 24-hour runtime event counts; no upper timestamp is imposed. Follow security/timeline with type=runtime_event, after=window_start and verdict=alert,block,quarantine for the alert cohort. Runtime workload evidence carries platform_role using exact ownership when available; ambiguous organization rollups and records without workload identity remain unclassified.",
         "responses": {
           "200": {
             "description": "Runtime overview with exact source window",
@@ -14825,6 +15425,14 @@
                           },
                           "verdict": {
                             "type": "string"
+                          },
+                          "platform_role": {
+                            "type": "string",
+                            "description": "Server classification from exact tenant/cluster/workload evidence. Empty string means unknown and suppresses legacy namespace inference.",
+                            "enum": [
+                              "core",
+                              ""
+                            ]
                           }
                         }
                       }
@@ -14870,7 +15478,7 @@
     "/api/v1/security/timeline.csv": {
       "get": {
         "summary": "Export matching security timeline records",
-        "description": "Uses the same filters and stable order as timeline reads, ignoring limit/offset; up to 10,000 matching records. Count and exported rows share a read-only repeatable-read snapshot.",
+        "description": "Uses the same filters and stable order as timeline reads, ignoring limit/offset; up to 10,000 matching records. Count and exported rows share a read-only repeatable-read snapshot. Runtime workload evidence carries platform_role using exact ownership when available; ambiguous organization rollups and records without workload identity remain unclassified.",
         "parameters": [
           {
             "name": "cluster_id",

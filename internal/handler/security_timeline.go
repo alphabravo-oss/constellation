@@ -21,6 +21,8 @@ package handler
 
 import (
 	"encoding/csv"
+	"encoding/json"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"net/http"
 	"strconv"
@@ -39,16 +41,18 @@ type SecurityTimeline struct {
 func NewSecurityTimeline(database *db.DB) *SecurityTimeline { return &SecurityTimeline{db: database} }
 
 type timelineItem struct {
-	Source     string    `json:"source"` // dpi_threat | runtime_event | network_violation | audit
-	ID         string    `json:"id"`
-	Severity   string    `json:"severity"` // info | low | medium | high | critical
-	At         time.Time `json:"at"`
-	Title      string    `json:"title"`
-	WorkloadID string    `json:"workload_id,omitempty"`
-	Namespace  string    `json:"namespace,omitempty"`
-	ClusterID  string    `json:"cluster_id,omitempty"`
-	Verdict    string    `json:"verdict,omitempty"`
-	Ref        string    `json:"ref,omitempty"` // source-specific reference (threat_id, verdict, policy, target_kind)
+	PlatformRole *string `json:"platform_role,omitempty"`
+	roleLabels   json.RawMessage
+	Source       string    `json:"source"` // dpi_threat | runtime_event | network_violation | audit
+	ID           string    `json:"id"`
+	Severity     string    `json:"severity"` // info | low | medium | high | critical
+	At           time.Time `json:"at"`
+	Title        string    `json:"title"`
+	WorkloadID   string    `json:"workload_id,omitempty"`
+	Namespace    string    `json:"namespace,omitempty"`
+	ClusterID    string    `json:"cluster_id,omitempty"`
+	Verdict      string    `json:"verdict,omitempty"`
+	Ref          string    `json:"ref,omitempty"` // source-specific reference (threat_id, verdict, policy, target_kind)
 }
 
 // validTimelineSeverities is the normalised text vocabulary the union emits.
@@ -147,7 +151,7 @@ func (t *SecurityTimeline) read(w http.ResponseWriter, r *http.Request, export b
 	// via CASE. events/violations already carry text severity; audit rows
 	// are informational.
 	const q = `
-SELECT source, id, severity, at, title, workload_id, namespace, cluster_id, verdict, ref
+SELECT source, id, severity, at, title, workload_id, namespace, cluster_id, verdict, ref, role_labels
   FROM (
     SELECT 'dpi_threat' AS source, id::text AS id,
            CASE WHEN severity >= 8 THEN 'critical'
@@ -157,7 +161,7 @@ SELECT source, id, severity, at, title, workload_id, namespace, cluster_id, verd
                 ELSE 'info' END AS severity,
            at, COALESCE(NULLIF(msg,''), 'DPI threat') AS title,
            COALESCE(workload_id,'') AS workload_id, COALESCE(namespace,'') AS namespace,
-           cluster_id::text AS cluster_id, ''::text AS verdict, threat_id::text AS ref
+           cluster_id::text AS cluster_id, ''::text AS verdict, threat_id::text AS ref, NULL::jsonb AS role_labels
       FROM runtime_threats
      WHERE $6 AND org_id = $1 AND ($2::uuid IS NULL OR cluster_id = $2)
        AND (($14 AND at > $3) OR (NOT $14 AND at >= $3)) AND (NOT $15 OR at < $4)
@@ -165,7 +169,7 @@ SELECT source, id, severity, at, title, workload_id, namespace, cluster_id, verd
     SELECT 'runtime_event', id::text,
            lower(severity), at, COALESCE(NULLIF(kind,''),'runtime event'),
            COALESCE(workload_id,''), COALESCE(namespace,''),
-           cluster_id::text, COALESCE(verdict,''), COALESCE(source,'') || CASE WHEN verdict <> '' THEN ' · '||verdict ELSE '' END
+           cluster_id::text, COALESCE(verdict,''), COALESCE(source,'') || CASE WHEN verdict <> '' THEN ' · '||verdict ELSE '' END, NULL::jsonb
       FROM events
      WHERE $7 AND org_id = $1 AND ($2::uuid IS NULL OR cluster_id = $2)
        AND (($14 AND at > $3) OR (NOT $14 AND at >= $3)) AND (NOT $15 OR at < $4)
@@ -174,7 +178,7 @@ SELECT source, id, severity, at, title, workload_id, namespace, cluster_id, verd
     SELECT 'network_violation', v.id::text,
            lower(v.severity), v.at, COALESCE(NULLIF(v.message,''), v.kind),
            COALESCE(d.name,''), COALESCE(d.namespace,''),
-           COALESCE(d.cluster_id::text,''), '', COALESCE(v.policy_name,'')
+           COALESCE(d.cluster_id::text,''), '', COALESCE(v.policy_name,''), COALESCE(d.labels,'{}'::jsonb)
       FROM violations v
       LEFT JOIN deployments d ON d.id = v.deployment_id AND d.org_id = v.org_id
      WHERE $8 AND v.org_id = $1 AND ($2::uuid IS NULL OR d.cluster_id = $2)
@@ -182,7 +186,7 @@ SELECT source, id, severity, at, title, workload_id, namespace, cluster_id, verd
     UNION ALL
     SELECT 'audit', a.id::text,
            'info', a.at, a.action,
-           '', '', '', '', COALESCE(a.target_kind,'')
+           '', '', '', '', COALESCE(a.target_kind,''), NULL::jsonb
       FROM audit_events a
      WHERE $9 AND a.org_id = $1 AND ($2::uuid IS NULL)
        AND (($14 AND a.at > $3) OR (NOT $14 AND a.at >= $3)) AND (NOT $15 OR a.at < $4)
@@ -237,7 +241,7 @@ SELECT source, id, severity, at, title, workload_id, namespace, cluster_id, verd
 	for rows.Next() {
 		var it timelineItem
 		if err := rows.Scan(&it.Source, &it.ID, &it.Severity, &it.At, &it.Title,
-			&it.WorkloadID, &it.Namespace, &it.ClusterID, &it.Verdict, &it.Ref); err != nil {
+			&it.WorkloadID, &it.Namespace, &it.ClusterID, &it.Verdict, &it.Ref, &it.roleLabels); err != nil {
 			jsonError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -254,6 +258,37 @@ SELECT source, id, severity, at, title, workload_id, namespace, cluster_id, verd
 		out = out[:limit]
 	}
 	rows.Close()
+	// Threat and runtime rows retain their actual cluster. Violations already
+	// join an exact tenant-owned deployment, so use its actual labels rather
+	// than guessing an owner from a name that can span workload kinds.
+	identities := []PlatformWorkloadIdentity{}
+	indices := []int{}
+	for i := range out {
+		if out[i].Source == "audit" {
+			continue
+		}
+		role := ""
+		if out[i].Source == "network_violation" {
+			role = PlatformRoleJSON(out[i].Namespace, out[i].roleLabels)
+			out[i].PlatformRole = &role
+			continue
+		}
+		cluster, _ := uuid.Parse(out[i].ClusterID)
+		identities = append(identities, PlatformWorkloadIdentity{ClusterID: cluster, Workload: out[i].WorkloadID, Namespace: out[i].Namespace})
+		indices = append(indices, i)
+	}
+	var roleQuery PlatformRoleQuerier = t.db.Pool()
+	if tx != nil {
+		roleQuery = tx
+	}
+	roles, err := EvidencePlatformRoles(r.Context(), roleQuery, subj.OrgID, identities)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	for i, index := range indices {
+		out[index].PlatformRole = &roles[i]
+	}
 	if tx != nil {
 		if err := tx.Commit(r.Context()); err != nil {
 			jsonError(w, http.StatusInternalServerError, err.Error())
@@ -267,9 +302,13 @@ SELECT source, id, severity, at, title, workload_id, namespace, cluster_id, verd
 		w.Header().Set("X-Export-Limit", strconv.Itoa(limit))
 		w.Header().Set("X-Export-Truncated", strconv.FormatBool(*total > limit))
 		writer := csv.NewWriter(w)
-		_ = writer.Write([]string{"id", "source", "cluster_id", "at", "severity", "verdict", "title", "namespace", "workload_id", "reference"})
+		_ = writer.Write([]string{"id", "source", "cluster_id", "at", "severity", "verdict", "title", "namespace", "workload_id", "reference", "platform_role"})
 		for _, item := range out {
-			_ = writer.Write([]string{item.ID, item.Source, item.ClusterID, item.At.UTC().Format(time.RFC3339Nano), item.Severity, item.Verdict, item.Title, item.Namespace, item.WorkloadID, item.Ref})
+			role := ""
+			if item.PlatformRole != nil {
+				role = *item.PlatformRole
+			}
+			_ = writer.Write([]string{item.ID, item.Source, item.ClusterID, item.At.UTC().Format(time.RFC3339Nano), item.Severity, item.Verdict, item.Title, item.Namespace, item.WorkloadID, item.Ref, role})
 		}
 		writer.Flush()
 		return

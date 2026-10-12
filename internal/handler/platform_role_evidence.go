@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5"
 )
 
 // PlatformWorkloadIdentity keeps evidence with its actual cluster. Names alone
@@ -18,10 +18,16 @@ type PlatformWorkloadIdentity struct {
 	Namespace string
 }
 
+// PlatformRoleQuerier lets read-only exports keep evidence and role lookup in
+// one database snapshot, without reserving a second pooled connection.
+type PlatformRoleQuerier interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}
+
 // EvidencePlatformRoles classifies an already tenant-scoped evidence batch. It
 // never resolves a missing cluster to another cluster or interprets IP/host
 // endpoints as deployments. An unresolved identity remains unclassified.
-func EvidencePlatformRoles(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, identities []PlatformWorkloadIdentity) ([]string, error) {
+func EvidencePlatformRoles(ctx context.Context, pool PlatformRoleQuerier, orgID uuid.UUID, identities []PlatformWorkloadIdentity) ([]string, error) {
 	roles := make([]string, len(identities))
 	clusters, workloads, namespaces, names := []string{}, []string{}, []string{}, []string{}
 	indices := []int{}

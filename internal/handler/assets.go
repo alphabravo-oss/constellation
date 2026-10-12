@@ -3,14 +3,12 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	"github.com/alphabravocompany/constellation/internal/db"
-	searchdsl "github.com/alphabravocompany/constellation/pkg/search/dsl"
 )
 
 type Assets struct {
@@ -40,144 +38,6 @@ type assetDTO struct {
 	SizeBytes        *int64          `json:"size_bytes,omitempty"`
 	FirstSeenAt      time.Time       `json:"first_seen_at"`
 	LastSeenAt       time.Time       `json:"last_seen_at"`
-}
-
-func (a *Assets) List(w http.ResponseWriter, r *http.Request) {
-	subj, _ := SubjectFrom(r.Context())
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 1000 {
-		limit = 100
-	}
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	if offset < 0 {
-		offset = 0
-	}
-	qstr := r.URL.Query().Get("q")
-	clusterArg, err := parseClusterIDParam(r)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-	compiled, err := searchdsl.Compile(qstr, assetsSearchSchema)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "search: " + err.Error()})
-		return
-	}
-	args := []any{subj.OrgID, clusterArg}
-	extraWhere := ""
-	if !compiled.Empty() {
-		extraWhere = " AND " + shiftPlaceholders(compiled.Where, len(args))
-		args = append(args, compiled.Args...)
-	}
-	args = append(args, limit+1, offset)
-	rows, err := a.db.Pool().Query(r.Context(),
-		`WITH generic_finding_rollup AS (
-             SELECT asset_id,
-                    count(*)::int AS finding_count,
-                    count(*) FILTER (WHERE severity = 'critical')::int AS critical_findings,
-                    count(*) FILTER (WHERE severity = 'high')::int AS high_findings,
-                    count(*) FILTER (WHERE lifecycle NOT IN ('resolved', 'suppressed'))::int AS open_findings
-               FROM findings
-              WHERE org_id = $1
-                AND ($2::uuid IS NULL OR cluster_id = $2)
-              GROUP BY asset_id
-           ), latest_image_results AS (
-             SELECT DISTINCT ON (asset_id, image_digest, platform, scanner_profile)
-                    id, org_id, asset_id
-               FROM image_scan_results
-              WHERE org_id = $1 AND asset_id IS NOT NULL
-              ORDER BY asset_id, image_digest, platform, scanner_profile, last_scanned_at DESC
-           ), image_finding_rollup AS (
-             SELECT lir.asset_id,
-                    count(*)::int AS finding_count,
-                    count(*) FILTER (WHERE f.severity = 'critical')::int AS critical_findings,
-                    count(*) FILTER (WHERE f.severity = 'high')::int AS high_findings,
-                    count(*)::int AS open_findings
-               FROM latest_image_results lir
-               JOIN image_scan_findings f ON f.image_scan_result_id = lir.id
-              GROUP BY lir.asset_id
-           ), sbom_rollup AS (
-             SELECT asset_id, count(DISTINCT format)::int AS sbom_count
-               FROM (
-                 SELECT lir.asset_id, a.format
-                   FROM latest_image_results lir
-                   JOIN image_scan_artifacts a
-                     ON a.org_id = lir.org_id
-                    AND a.image_scan_result_id = lir.id
-                    AND a.artifact_type = 'sbom'
-                 UNION ALL
-                 SELECT d.asset_id, d.format
-                   FROM sbom_documents d
-                   JOIN assets da ON da.id = d.asset_id
-                  WHERE da.org_id = $1
-                    AND ($2::uuid IS NULL OR da.cluster_id = $2)
-               ) sb
-              GROUP BY asset_id
-           )
-           SELECT a.id, a.cluster_id, a.kind, a.name, a.digest, a.labels, a.ai_workload, a.criticality,
-                  COALESCE(fr.finding_count, 0), COALESCE(fr.critical_findings, 0),
-                  COALESCE(fr.high_findings, 0), COALESCE(fr.open_findings, 0),
-                  COALESCE(sr.sbom_count, 0), i.signed, COALESCE(i.registry, ''),
-                  COALESCE(i.repository, ''), COALESCE(i.tag, ''), i.size_bytes,
-                  a.first_seen_at, a.last_seen_at
-             FROM assets a
-             LEFT JOIN generic_finding_rollup gfr ON gfr.asset_id = a.id
-             LEFT JOIN image_finding_rollup ifr ON ifr.asset_id = a.id
-             LEFT JOIN LATERAL (
-                 SELECT CASE WHEN a.kind = 'image'
-                             THEN COALESCE(ifr.finding_count, 0)
-                             ELSE COALESCE(gfr.finding_count, 0)
-                        END AS finding_count,
-                        CASE WHEN a.kind = 'image'
-                             THEN COALESCE(ifr.critical_findings, 0)
-                             ELSE COALESCE(gfr.critical_findings, 0)
-                        END AS critical_findings,
-                        CASE WHEN a.kind = 'image'
-                             THEN COALESCE(ifr.high_findings, 0)
-                             ELSE COALESCE(gfr.high_findings, 0)
-                        END AS high_findings,
-                        CASE WHEN a.kind = 'image'
-                             THEN COALESCE(ifr.open_findings, 0)
-                             ELSE COALESCE(gfr.open_findings, 0)
-                        END AS open_findings
-             ) fr ON true
-             LEFT JOIN sbom_rollup sr ON sr.asset_id = a.id
-             LEFT JOIN images i ON i.asset_id = a.id
-            WHERE a.org_id = $1
-              AND ($2::uuid IS NULL OR a.cluster_id = $2)`+extraWhere+`
-            ORDER BY COALESCE(fr.critical_findings, 0) DESC,
-                     COALESCE(fr.high_findings, 0) DESC,
-                     COALESCE(fr.finding_count, 0) DESC,
-                     a.last_seen_at DESC, a.id DESC
-            LIMIT $`+itoa(len(args)-1)+` OFFSET $`+itoa(len(args)), args...)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	defer rows.Close()
-	out := make([]assetDTO, 0, limit)
-	for rows.Next() {
-		var d assetDTO
-		var labels []byte
-		if err := rows.Scan(&d.ID, &d.ClusterID, &d.Kind, &d.Name, &d.Digest, &labels, &d.AIWorkload,
-			&d.Criticality, &d.FindingCount, &d.CriticalFindings, &d.HighFindings,
-			&d.OpenFindings, &d.SBOMCount, &d.ImageSigned, &d.Registry, &d.Repository,
-			&d.Tag, &d.SizeBytes, &d.FirstSeenAt, &d.LastSeenAt); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		d.Labels = labels
-		out = append(out, d)
-	}
-	if err := rows.Err(); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	hasMore := len(out) > limit
-	if hasMore {
-		out = out[:limit]
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"assets": out, "limit": limit, "offset": offset, "has_more": hasMore})
 }
 
 func (a *Assets) Get(w http.ResponseWriter, r *http.Request) {

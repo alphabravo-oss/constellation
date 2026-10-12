@@ -13,7 +13,7 @@ import (
 
 func TestAssetsClusterIdentityPreservesTenantAndListScope(t *testing.T) {
 	database := openTestDB(t)
-	defer database.Close()
+	t.Cleanup(database.Close)
 	pool, ctx := database.Pool(), t.Context()
 	org, foreign := uuid.New(), uuid.New()
 	cluster, sibling, foreignCluster := uuid.New(), uuid.New(), uuid.New()
@@ -76,6 +76,12 @@ func TestAssetsClusterIdentityPreservesTenantAndListScope(t *testing.T) {
 		req = req.WithContext(WithSubject(req.Context(), Subject{OrgID: org}))
 		w := httptest.NewRecorder()
 		handler.List(w, req)
+		if scope == foreignCluster {
+			if w.Code != http.StatusNotFound {
+				t.Fatalf("foreign cluster list status=%d", w.Code)
+			}
+			continue
+		}
 		if w.Code != http.StatusOK {
 			t.Fatalf("list status=%d", w.Code)
 		}

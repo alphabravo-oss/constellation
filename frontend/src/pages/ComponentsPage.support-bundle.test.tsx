@@ -6,10 +6,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, expect, it, vi } from "vitest";
 import { componentsInventory, supportBundles, type ComponentDiagnostics, type ComponentInstance } from "@/api/client";
 import { ComponentsPage } from "./ComponentsPage";
+import { componentFixture } from "./components-inventory-fixture";
 
 vi.mock("@/hooks/useCluster", () => ({ useCluster: () => ({ clusterId: "cluster-1", cluster: { id: "cluster-1" }, isLoading: false, error: null }) }));
 vi.mock("@/api/client", () => ({
-  componentsInventory: { list: vi.fn(), get: vi.fn(), diagnostics: vi.fn() },
+  componentsInventory: { list: vi.fn(), exportCSV: vi.fn(), get: vi.fn(), diagnostics: vi.fn() },
   supportBundles: { createJob: vi.fn() },
 }));
 
@@ -30,10 +31,10 @@ afterEach(() => {
 });
 
 it("queues a diagnostic bundle and links to persisted job history without downloading", async () => {
-  vi.mocked(componentsInventory.list).mockResolvedValue({
+  vi.mocked(componentsInventory.list).mockResolvedValue(componentFixture({
     summary: { generated_at: "2026-09-26T00:00:00Z", components: 1, total_instances: 1, healthy: 1, degraded: 0, stale: 0, drift: 0, crashlooping: 0, missing: 0 },
     components: [component], rollups: [],
-  });
+  },{cluster_id:"cluster-1"}));
   vi.mocked(componentsInventory.get).mockResolvedValue({ component });
   vi.mocked(componentsInventory.diagnostics).mockResolvedValue({
     component, generated_at: "2026-09-26T00:00:00Z", admin_gate: "global admin",

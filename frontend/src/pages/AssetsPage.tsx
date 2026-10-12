@@ -1,10 +1,14 @@
-import { useMemo } from "react";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { BadgeCheck, Boxes, FileJson, Search, ShieldAlert, ShieldCheck } from "lucide-react";
 
 import { assets, type Asset } from "@/api/client";
+import { useDebounced } from "@/hooks/useDebounced";
+import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
+import { Pager } from "@/components/ui/pager";
+import { LoadingState } from "@/components/ui/states";
 import { cn } from "@/lib/cn";
-import { useCluster } from "@/hooks/useCluster";
+import { useInventoryScope } from "./inventory-workspace";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { useRouteSearchParams } from "@/lib/route-search";
@@ -13,66 +17,65 @@ import { ErrorState } from "@/components/ui/states";
 import { Button } from "@/components/ui/button";
 import { StatCard, StatGrid } from "@/components/ui/stat-card";
 
-const kinds = ["all", "image", "workload", "iac-resource", "ml-model", "cloud-resource"];
+const kinds = ["all", "image", "workload", "iac-resource", "ml-model", "cloud-resource", "host", "repository", "serverless"];
 const criticalities = ["all", "critical", "high", "medium", "low"];
-const ASSET_PAGE_SIZE = 250;
+const ASSET_PAGE_SIZE = 100;
 
 export function AssetsPage() {
   // Cluster-scoped: only show assets belonging to the active cluster. Assets
   // with NULL cluster_id (org-wide registry pulls, ML models, IaC files) are
   // omitted in cluster mode by design — they live in a future org-level inventory
   // surface, not under a specific cluster's posture pane.
-  const { clusterId, cluster, isLoading: clusterLoading, error: clusterError } = useCluster();
-  const scopeReady = !!clusterId && cluster?.id === clusterId && !clusterLoading && !clusterError;
+  const inventoryScope = useInventoryScope();
+  const { clusterId, isLoading: clusterLoading, error: clusterError } = inventoryScope;
+  const scopeReady = inventoryScope.ready;
   const [params, setParams] = useRouteSearchParams();
   const kind = params.get("kind") ?? "all";
   const criticality = params.get("criticality") ?? "all";
   const search = params.get("q") ?? "";
   const selectedID = params.get("selected");
-  const setFilter = (key: string, value: string) => setParams(current => { if (value && (key === "q" || value !== "all")) current.set(key, value); else current.delete(key); current.delete("selected"); return current; });
+  const identity = useTablePreferencesIdentity();
+  const ai = params.get("ai_workload") ?? "";
+  const sort = params.get("sort") ?? "risk";
+  const order = params.get("order") === "asc" ? "asc" : "desc";
+  const rawPage = Number(params.get("page") ?? "1");
+  const page = Number.isSafeInteger(rawPage) && rawPage >= 1 && rawPage <= 10000000 ? rawPage - 1 : 0;
+  const query = useDebounced(search.trim(), 300);
+  const querySettled = query === search.trim();
+  const setFilter = (key: string, value: string) => setParams(current => { if (value && (key === "q" || value !== "all")) current.set(key, value); else current.delete(key); current.delete("page"); current.delete("selected"); return current; }, { replace: key === "q" });
   const setSelectedID = (id: string) => setParams(current => { current.set("selected", id); return current; });
-  const q = useInfiniteQuery({
-    queryKey: ["assets", clusterId],
-    enabled: scopeReady,
-    initialPageParam: 0,
-    queryFn: async ({ pageParam }) => {
-      const response = await assets.list({ limit: ASSET_PAGE_SIZE, offset: pageParam, cluster_id: clusterId });
-      if (typeof response.has_more !== "boolean" || response.offset !== pageParam || (response.has_more && response.assets.length === 0)) {
-        throw new Error("Assets pagination metadata is missing");
-      }
-      if (response.assets.some(asset => asset.cluster_id !== clusterId)) throw new Error("Asset inventory does not match the selected cluster");
+  const setPage = (next: number) => setParams(current => { if (next) current.set("page", String(next + 1)); else current.delete("page"); current.delete("selected"); return current; });
+  const filters = { cluster_id: clusterId, search: query || undefined, kind: kind === "all" ? undefined : kind, criticality: criticality === "all" ? undefined : criticality, ...(ai ? { ai_workload: ai === "true" } : {}), sort, order: order as "asc" | "desc" };
+  const q = useQuery({
+    queryKey: ["assets", identity?.org_id, identity?.user_id, filters, page], enabled: scopeReady && querySettled,
+    queryFn: async () => {
+      if ((ai && !["true", "false"].includes(ai)) || (params.has("order") && !["asc", "desc"].includes(params.get("order")!)) || !Number.isSafeInteger(rawPage) || rawPage < 1 || rawPage > 10000000) throw new Error("Invalid asset filter or page");
+      const response = await assets.list({ ...filters, limit: ASSET_PAGE_SIZE, offset: page * ASSET_PAGE_SIZE });
+      if (!Array.isArray(response.assets) || !Number.isSafeInteger(response.total) || response.total < 0 || response.limit !== ASSET_PAGE_SIZE || response.offset !== page * ASSET_PAGE_SIZE || typeof response.has_more !== "boolean" || response.has_more !== (response.offset + response.assets.length < response.total) || response.sort !== sort || response.order !== order || !response.summary || response.summary.total !== response.total || ["images", "workloads", "critical_high", "open_findings", "unsigned_images", "signed_images", "signature_unknown", "missing_sbom", "with_sbom", "ai"].some(key => !Number.isSafeInteger(response.summary[key]) || response.summary[key] < 0)) throw new Error("Assets pagination or summary metadata is missing");
+      if ((response.has_more && response.assets.length === 0) || response.assets.length > ASSET_PAGE_SIZE || new Set(response.assets.map(asset => asset.id)).size !== response.assets.length || response.assets.some(asset => asset.cluster_id !== clusterId || !asset.id || typeof asset.name !== "string" || !asset.labels || typeof asset.labels !== "object" || Array.isArray(asset.labels) || Object.values(asset.labels).some(value => typeof value !== "string"))) throw new Error("Asset inventory does not match the selected cluster or evidence schema");
       return response;
     },
-    getNextPageParam: (lastPage) => lastPage.has_more ? lastPage.offset + lastPage.assets.length : undefined,
   });
-
-  const ready = scopeReady && !!q.data && (!q.isError || q.isFetchNextPageError);
-  const inventory = useMemo(() => ready ? q.data!.pages.flatMap((page) => page.assets) : [], [q.data, ready]);
-  const incomplete = q.hasNextPage;
-  const filtered = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    return inventory.filter((asset) => {
-      if (kind !== "all" && asset.kind !== kind) return false;
-      if (criticality !== "all" && asset.criticality !== criticality) return false;
-      if (!needle) return true;
-      return [
-        asset.name,
-        asset.kind,
-        asset.digest ?? "",
-        asset.registry ?? "",
-        asset.repository ?? "",
-        asset.tag ?? "",
-        ...Object.values(asset.labels ?? {}),
-      ].some((value) => value.toLowerCase().includes(needle));
-    });
-  }, [criticality, inventory, kind, search]);
-  const selected = selectedID ? filtered.find((asset) => asset.id === selectedID) ?? null : filtered[0] ?? null;
-  const summary = useMemo(() => summarizeAssets(inventory), [inventory]);
+  const ready = scopeReady && querySettled && q.isSuccess && !q.isFetching;
+  const filtered = useMemo(() => ready ? q.data!.assets : [], [ready, q.data]);
+  const selected = selectedID ? filtered.find(asset => asset.id === selectedID) ?? null : filtered[0] ?? null;
+  const summary = ready ? q.data!.summary : undefined;
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<{ scope: string; error: unknown } | null>(null);
+  const [exportResult, setExportResult] = useState<{ scope: string; exported: number; total: number; truncated: boolean } | null>(null);
+  const exportScope = JSON.stringify([identity, filters]);
+  const exportMatching = async () => {
+    if (!ready || exporting) return;
+    setExportError(null); setExporting(true);
+    try { const result = await assets.exportCsv(filters); setExportResult({ scope: exportScope, ...result }); }
+    catch (error) { setExportError({ scope: exportScope, error }); } finally { setExporting(false); }
+  };
+  const setSort = (value: { id: string; dir: "asc" | "desc" } | null) => setParams(current => { current.set("sort", value?.id ?? "risk"); current.set("order", value?.dir ?? "desc"); current.delete("page"); current.delete("selected"); return current; });
 
   const columns: Column<Asset>[] = [
     {
       id: "asset",
-      header: "Asset", exportValue: (asset) => asset.name, kind: "name", wrap: true,
+      header: "Asset", sort: () => 0, exportValue: (asset) => asset.name, kind: "name", wrap: true, size: 360, minSize: 280,
       cell: (asset) => (
         <>
           <div className="flex flex-wrap items-center gap-2">
@@ -86,13 +89,13 @@ export function AssetsPage() {
         </>
       ),
     },
-    { id: "risk", header: "Risk", exportValue: (asset) => `critical=${asset.critical_findings}; high=${asset.high_findings}; open=${asset.open_findings}`, kind: "text", wrap: true, size: 224, minSize: 176, maxSize: 280, cell: (asset) => <RiskStack asset={asset} /> },
-    { id: "supply-chain", header: "Supply Chain", exportValue: (asset) => `signed=${asset.image_signed ?? "not reported"}; sboms=${asset.sbom_count}; registry=${asset.registry ?? ""}; digest=${asset.digest ?? ""}`, kind: "text", wrap: true, size: 240, minSize: 192, maxSize: 320, cell: (asset) => <SupplyChainStack asset={asset} /> },
-    { id: "criticality", header: "Criticality", exportValue: (asset) => asset.criticality, kind: "status", cell: (asset) => <span className="text-xs">{asset.criticality}</span> },
-    { id: "last-seen", header: "Last Seen", exportValue: (asset) => asset.last_seen_at, kind: "date", size: 224, minSize: 208, maxSize: 240, cell: (asset) => <span className="text-xs text-muted-foreground">{formatDate(asset.last_seen_at)}</span> },
+    { id: "risk", header: "Risk", sort: () => 0, exportValue: (asset) => `critical=${asset.critical_findings}; high=${asset.high_findings}; open=${asset.open_findings}`, kind: "text", wrap: true, size: 192, minSize: 176, maxSize: 280, cell: (asset) => <RiskStack asset={asset} /> },
+    { id: "supply-chain", header: "Supply Chain", sort: () => 0, exportValue: (asset) => `signed=${asset.image_signed ?? "not reported"}; sboms=${asset.sbom_count}; registry=${asset.registry ?? ""}; digest=${asset.digest ?? ""}`, kind: "text", wrap: true, size: 208, minSize: 192, maxSize: 320, cell: (asset) => <SupplyChainStack asset={asset} /> },
+    { id: "criticality", header: "Criticality", sort: () => 0, exportValue: (asset) => asset.criticality, kind: "status", cell: (asset) => <span className="text-xs">{asset.criticality}</span> },
+    { id: "last-seen", header: "Last Seen", sort: () => 0, exportValue: (asset) => asset.last_seen_at, kind: "date", size: 208, minSize: 208, maxSize: 240, cell: (asset) => <span className="text-xs text-muted-foreground">{formatDate(asset.last_seen_at)}</span> },
   ];
 
-  if (clusterLoading) {
+  if (clusterLoading || inventoryScope.fetching) {
     return <p className="text-sm text-muted-foreground" data-testid="assets-loading">Loading cluster…</p>;
   }
 
@@ -118,25 +121,15 @@ export function AssetsPage() {
         }
       />
 
-      <VerdictBanner status={!scopeReady || (q.isError && !q.isFetchNextPageError) ? "degraded" : summary.criticalHigh ? "degraded" : "info"}
-        title={!scopeReady ? "Cluster scope unavailable" : q.isError && !q.isFetchNextPageError ? "Asset inventory unavailable" : !ready ? "Loading assets" : `${inventory.length} loaded assets${summary.criticalHigh ? " include critical or high findings" : " returned"}`}
-        detail="Counts, filters and exports cover loaded rows. Load remaining server pages to inspect the complete inventory." />
-      {ready && incomplete && (
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card p-3 text-sm" data-testid="assets-incomplete-notice">
-          <span>Showing {inventory.length.toLocaleString()} loaded assets; more are available on the server. Summary, filters, and CSV cover loaded rows only.</span>
-          <button type="button" onClick={() => void q.fetchNextPage()} disabled={q.isFetchingNextPage} className="shrink-0 rounded-md border border-border px-3 py-1.5 hover:bg-accent disabled:opacity-50">
-            {q.isFetchingNextPage ? "Loading…" : q.isFetchNextPageError ? "Retry loading assets" : "Load more assets"}
-          </button>
-        </div>
-      )}
-
-      {!scopeReady ? <ErrorState title="Resolve the selected cluster before loading assets" error={clusterError} /> : q.isError ? <ErrorState title={q.isFetchNextPageError ? "Could not load more assets; earlier pages remain available" : "Could not load or refresh assets"} error={q.error} action={<Button onClick={() => void (q.isFetchNextPageError ? q.fetchNextPage() : q.refetch())}>Retry</Button>} /> : null}
-
+      <VerdictBanner status={!scopeReady || q.isError ? "degraded" : (summary?.critical_high ?? 0) > 0 ? "degraded" : "info"}
+        title={!scopeReady ? "Cluster scope unavailable" : q.isError ? "Asset inventory unavailable" : !ready ? "Loading or updating assets" : `${q.data.total.toLocaleString()} matching assets`}
+        detail="Search, filters, summary, sorting and server pages cover the complete matching inventory. Table CSV covers this page; full CSV exports up to 100,000 matching assets." />
+      {!scopeReady ? <ErrorState title="Resolve the selected cluster before loading assets" error={clusterError} action={<Button onClick={inventoryScope.retry}>Retry cluster</Button>} /> : q.isError ? <ErrorState title="Could not load or refresh assets" error={q.error} action={<Button onClick={() => void q.refetch()}>Retry</Button>} /> : !ready ? <LoadingState label="Loading or updating assets…" /> : null}
       <StatGrid data-testid="assets-summary">
-        <StatCard label={incomplete ? "Loaded Assets" : "Assets"} value={ready ? summary.total.toLocaleString() : "—"} icon={<Boxes className="h-3.5 w-3.5" />} hint={ready ? `${summary.images} images · ${summary.workloads} workloads` : undefined} />
-        <StatCard label="Critical / High" value={ready ? summary.criticalHigh.toLocaleString() : "—"} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={summary.criticalHigh > 0 ? "high" : "neutral"} hint={ready ? `${summary.openFindings} open findings` : undefined} />
-        <StatCard label="Unsigned Images" value={ready ? summary.unsignedImages.toLocaleString() : "—"} icon={<BadgeCheck className="h-3.5 w-3.5" />} tone={summary.unsignedImages > 0 ? "medium" : "neutral"} hint={ready ? `${summary.signedImages} signed` : undefined} />
-        <StatCard label="Missing SBOM" value={ready ? summary.missingSBOM.toLocaleString() : "—"} icon={<FileJson className="h-3.5 w-3.5" />} hint={ready ? `${summary.withSBOM} with SBOM evidence` : undefined} />
+        <StatCard label="Matching assets" value={summary?.total.toLocaleString() ?? "—"} icon={<Boxes className="h-3.5 w-3.5" />} hint={summary ? `${summary.images} images · ${summary.workloads} workloads · ${summary.ai} AI` : undefined} />
+        <StatCard label="Critical / High" value={summary?.critical_high.toLocaleString() ?? "—"} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={(summary?.critical_high ?? 0) > 0 ? "high" : "neutral"} hint={summary ? `${summary.open_findings} open findings` : undefined} />
+        <StatCard label="Unsigned images" value={summary?.unsigned_images.toLocaleString() ?? "—"} icon={<BadgeCheck className="h-3.5 w-3.5" />} hint={summary ? `${summary.signed_images} signed · ${summary.signature_unknown} not reported` : undefined} />
+        <StatCard label="Missing SBOM" value={summary?.missing_sbom.toLocaleString() ?? "—"} icon={<FileJson className="h-3.5 w-3.5" />} hint={summary ? `${summary.with_sbom} with SBOM evidence` : undefined} />
       </StatGrid>
 
       <section className="rounded-lg border border-border bg-card p-3">
@@ -174,26 +167,19 @@ export function AssetsPage() {
         </div>
       </section>
 
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="text-xs">AI workload <select aria-label="AI workload" value={ai} onChange={event => setFilter("ai_workload", event.target.value)} className="rounded-md border border-border bg-background p-2"><option value="">Any</option><option value="true">AI</option><option value="false">Not AI</option></select></label>
+        <Button variant="outline" disabled={!ready || !q.data?.total || exporting} onClick={() => void exportMatching()}>{exporting ? "Exporting…" : "Export matching assets CSV"}</Button>
+        <span className="text-xs text-muted-foreground">Up to 100,000 matching assets, across all pages.</span>
+      </div>
+      {exportError?.scope === exportScope && <ErrorState title="Asset export failed" error={exportError.error} />}
+      {exportResult?.scope === exportScope && <p role="status" className="text-xs text-muted-foreground">Exported {exportResult.exported} of {exportResult.total} matching assets.{exportResult.truncated ? " The 100,000-row limit was reached." : ""}</p>}
       {ready && <section className="flex flex-col gap-4">
-        <DataTable
-          rows={filtered}
-          columns={columns}
-          rowKey={(asset) => asset.id}
-          onRowClick={(asset) => setSelectedID(asset.id)}
-          selected={new Set(selected ? [selected.id] : [])}
-          preferencesKey="assets"
-          exportFileName="constellation-assets-loaded-filtered"
-          exportLabel="Export loaded matches CSV"
-          testId="assets-table"
-          rowTestId={() => "asset-row"}
-          emptyState={
-            <div className="px-3 py-8 text-center text-xs text-muted-foreground">
-              {q.isPending ? "Loading assets..." : "No assets match the current filters."}
-            </div>
-          }
-        />
-
-        {selectedID && !selected ? <p role="status" className="text-sm text-muted-foreground">The selected asset is not in the loaded matches. Load more assets or change filters to locate it.</p> : <AssetPreview asset={selected} clusterId={clusterId} />}
+        <DataTable rows={filtered} columns={columns} rowKey={asset => asset.id} onRowClick={asset => setSelectedID(asset.id)} selected={new Set(selected ? [selected.id] : [])} preferencesKey="assets" manualSorting sort={{ id: sort, dir: order }} onSortChange={setSort} pagination={false} exportFileName="constellation-assets-page" exportLabel="Export this page CSV" testId="assets-table" rowTestId={() => "asset-row"} emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">No assets match the current filters or page.</div>} />
+        <p className="text-xs text-muted-foreground" data-testid="assets-page-scope">Showing {filtered.length ? page * ASSET_PAGE_SIZE + 1 : 0}–{filtered.length ? page * ASSET_PAGE_SIZE + filtered.length : 0} of {q.data.total} matching assets. Preview and table CSV cover this page.</p>
+        {filtered.length > 0 && <Pager page={page} pageSize={ASSET_PAGE_SIZE} total={q.data.total} hasMore={q.data.has_more} rowsOnPage={filtered.length} onPage={setPage} />}
+        {page > 0 && !filtered.length && <Button onClick={() => setPage(0)}>First page</Button>}
+        {selectedID && !selected ? <p role="status" className="text-sm text-muted-foreground">The selected asset is not in the loaded matches on this page. Change pages or filters to locate it.</p> : <AssetPreview asset={selected} clusterId={clusterId} />}
       </section>}
     </div>
   );
@@ -335,24 +321,6 @@ function SupplyChainStack({ asset }: { asset: Asset }) {
       </div>
       <div className="break-all text-xs text-muted-foreground">{asset.registry || asset.repository || "-"}</div>
     </div>
-  );
-}
-
-function summarizeAssets(items: Asset[]) {
-  return items.reduce(
-    (acc, asset) => {
-      acc.total += 1;
-      if (asset.kind === "image") acc.images += 1;
-      if (asset.kind === "workload") acc.workloads += 1;
-      acc.criticalHigh += asset.critical_findings + asset.high_findings;
-      acc.openFindings += asset.open_findings;
-      if (asset.kind === "image" && asset.image_signed) acc.signedImages += 1;
-      if (asset.kind === "image" && asset.image_signed === false) acc.unsignedImages += 1;
-      if (asset.sbom_count > 0) acc.withSBOM += 1;
-      if (asset.kind === "image" && asset.sbom_count === 0) acc.missingSBOM += 1;
-      return acc;
-    },
-    { total: 0, images: 0, workloads: 0, criticalHigh: 0, openFindings: 0, signedImages: 0, unsignedImages: 0, withSBOM: 0, missingSBOM: 0 },
   );
 }
 

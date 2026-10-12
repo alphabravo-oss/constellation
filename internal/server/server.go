@@ -955,6 +955,7 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/system-health/clusters/{cluster_id}", s.requireVerb(rbac.VerbReadFindings, systemHealth.Cluster))
 			components := handler.NewComponentsInventory(s.db)
 			r.Get("/components", s.requireVerb(rbac.VerbReadFindings, components.List))
+			r.Get("/components/export.csv", s.requireVerb(rbac.VerbReadFindings, components.ExportCSV))
 			r.Get("/components/{id}", s.requireVerb(rbac.VerbReadFindings, components.Get))
 			r.Get("/components/{id}/diagnostics", s.requireVerb(rbac.VerbManageOrg, components.Diagnostics))
 			// /api/v1/version is read-only; gated by read-findings so any
@@ -1143,6 +1144,7 @@ func (s *Server) buildRouter() chi.Router {
 			assetVuln := handler.NewAssetVuln(s.db)
 			imageAcceptances := handler.NewImageAcceptances(s.db, s.auditLog)
 			r.Get("/assets", s.requireVerb(rbac.VerbReadFindings, assets.List))
+			r.Get("/assets.csv", s.requireVerb(rbac.VerbReadFindings, assets.ExportCSV))
 			r.Get("/assets/{id}", s.requireVerb(rbac.VerbReadFindings, assets.Get))
 			r.Get("/assets/{id}/vulnerabilities", s.requireVerb(rbac.VerbReadFindings, assetVuln.Get))
 			r.Get("/assets/{id}/image-acceptances", s.requireVerb(rbac.VerbReadFindings, imageAcceptances.List))

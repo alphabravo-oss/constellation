@@ -35,6 +35,15 @@ afterEach(() => {
 });
 
 describe("DataTable acceptance", () => {
+  it("allows changes from a compact default and hides ineffective controls for fixed density", () => {
+    render(<DataTable rows={rows} columns={columns} rowKey={row => row.id} defaultDensity="compact" preferencesKey="default-density" />);
+    expect(host?.querySelector('[aria-label="compact density"]')?.getAttribute("aria-pressed")).toBe("true");
+    act(() => host?.querySelector<HTMLButtonElement>('[aria-label="comfy density"]')?.click());
+    expect(JSON.parse(localStorage.getItem(storageKey("default-density"))!).density).toBe("comfy");
+    act(() => root?.render(<DataTable rows={rows} columns={columns} rowKey={row => row.id} density="compact" />));
+    expect(host?.querySelector('[aria-label="comfy density"]')).toBeNull();
+    expect(host?.querySelector("tbody tr")?.className).toContain("h-6");
+  });
   it("repairs stale and all-hidden preferences before rendering and persists the repaired state", () => {
     localStorage.setItem(storageKey("stale"), JSON.stringify({ hiddenColumnIds: ["name", "risk", "risk", "owner", "retired", 42], density: "tiny" }));
     render(<DataTable rows={rows} columns={columns} rowKey={row => row.id} preferencesKey="stale" />);

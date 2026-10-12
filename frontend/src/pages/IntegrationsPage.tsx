@@ -266,7 +266,7 @@ function ReceiverDetail({ receiver, deliveries, disabled, onRotationChange, onCl
         {rotate.isError && rotate.variables === receiver.id && <p role="alert" className="text-sm text-status-error">Could not rotate this receiver's secret. Try again.</p>}
         {secret?.receiverID === receiver.id && <SecretReveal value={secret.value} onDismiss={() => setSecret(null)} />}
       </div>
-      <div className="space-y-3"><h3 className="text-sm font-semibold">Delivery history · latest 50</h3>{deliveryQ.isError && <p role="alert" className="text-sm text-status-error">Could not refresh delivery history. Showing the last loaded deliveries.</p>}<div className="max-h-96 overflow-auto" data-testid="receiver-deliveries"><DataTable density="compact" rows={deliveryQ.data?.deliveries ?? deliveries} columns={columns} rowKey={(d) => d.id} preferencesKey="receiver-deliveries" exportFileName="receiver-deliveries.csv" emptyState={<EmptyState title="No loaded deliveries" hint="This receiver has no delivery evidence in the loaded history." />} /></div></div>
+      <div className="space-y-3"><h3 className="text-sm font-semibold">Delivery history · latest 50</h3>{deliveryQ.isError && <p role="alert" className="text-sm text-status-error">Could not refresh delivery history. Showing the last loaded deliveries.</p>}<div className="max-h-96 overflow-auto" data-testid="receiver-deliveries"><DataTable defaultDensity="compact" rows={deliveryQ.data?.deliveries ?? deliveries} columns={columns} rowKey={(d) => d.id} preferencesKey="receiver-deliveries" exportFileName="receiver-deliveries.csv" emptyState={<EmptyState title="No loaded deliveries" hint="This receiver has no delivery evidence in the loaded history." />} /></div></div>
     </div>
   </Card>;
 }

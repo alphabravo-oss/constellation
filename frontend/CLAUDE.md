@@ -58,6 +58,11 @@ When building or editing any page, conform to all of these.
   page-specific truncation or width rules that compete with these defaults.
   Narrow tables scroll inside the shared wrapper; do not clip their actions with
   a page-level `overflow-hidden` table implementation.
+- Semantic tables share column resizing, ordering and left/right pinning. The
+  shared layout menu and resize handles support keyboard input; do not add a
+  page-specific layout editor. Widths, order and pins use the same tenant/user
+  preference namespace as density/visibility. Reset table preferences resets all
+  of them. Narrow layouts temporarily suspend pins to keep every column reachable.
 - `ui/verdict-banner.tsx` — the top-line verdict (ok/degraded/critical/info).
 - `ui/collapse.tsx` — "Advanced"/detail disclosure.
 - `ui/tabs.tsx` — URL-synced tabs.

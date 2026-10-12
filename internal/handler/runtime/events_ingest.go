@@ -1586,6 +1586,8 @@ func isSensitivePath(p string) bool {
 
 // EventDTO is the read-side shape returned by GET /api/v1/events.
 type EventDTO struct {
+	ClusterID        uuid.UUID       `json:"cluster_id"`
+	PlatformRole     string          `json:"platform_role"`
 	ID               uuid.UUID       `json:"id"`
 	At               time.Time       `json:"at"`
 	Kind             string          `json:"kind"`
@@ -1646,7 +1648,7 @@ func (h *EventsIngest) List(w http.ResponseWriter, r *http.Request) {
 	}
 	args = append(args, limit)
 	sql := `
-SELECT id, at, kind, source, severity, verdict, node_id, workload_id,
+SELECT id, cluster_id, at, kind, source, severity, verdict, node_id, workload_id,
        COALESCE(namespace,''), COALESCE(container_id,''), attack_techniques, payload
   FROM events
  WHERE ` + strings.Join(where, " AND ") + `
@@ -1662,7 +1664,7 @@ SELECT id, at, kind, source, severity, verdict, node_id, workload_id,
 	for rows.Next() {
 		var d EventDTO
 		var payload []byte
-		if err := rows.Scan(&d.ID, &d.At, &d.Kind, &d.Source, &d.Severity, &d.Verdict,
+		if err := rows.Scan(&d.ID, &d.ClusterID, &d.At, &d.Kind, &d.Source, &d.Severity, &d.Verdict,
 			&d.NodeID, &d.WorkloadID, &d.Namespace, &d.ContainerID, &d.AttackTechniques, &payload); err != nil {
 			jsonError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -1672,6 +1674,23 @@ SELECT id, at, kind, source, severity, verdict, node_id, workload_id,
 			d.AttackTechniques = []string{}
 		}
 		out = append(out, d)
+	}
+	if err := rows.Err(); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	rows.Close()
+	identities := make([]handler.PlatformWorkloadIdentity, len(out))
+	for i, event := range out {
+		identities[i] = handler.PlatformWorkloadIdentity{ClusterID: event.ClusterID, Workload: event.WorkloadID, Namespace: event.Namespace}
+	}
+	roles, err := handler.EvidencePlatformRoles(r.Context(), h.db.Pool(), subj.OrgID, identities)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	for i := range out {
+		out[i].PlatformRole = roles[i]
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"events": out, "limit": limit})
 }

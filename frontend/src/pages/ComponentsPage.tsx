@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useIsFetching, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRouteSearchParams } from "@/lib/route-search";
+import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
+import { useInventoryRoute, ScanInventoryExport } from "./inventory-workspace";
+import { Pager } from "@/components/ui/pager";
 import { Activity, AlertTriangle, Clock, Gauge, Search, ServerCog, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { toast } from "sonner";
 
@@ -14,6 +16,8 @@ import {
   type ComponentDiagnostics,
   type ComponentInstance,
   type ComponentRollup,
+  type ComponentInventoryResponse,
+  type ComponentsInventoryParams,
 } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { cn } from "@/lib/cn";
@@ -38,95 +42,73 @@ export function ComponentsPage() {
   const clusterDetail = qc.getQueryState<{ id: string }>(["cluster", clusterId]);
   const cachedScopeValid = (!registry || (registry.status === "success" && registry.fetchStatus === "idle")) && (!clusterDetail || (clusterDetail.status !== "error" && clusterDetail.fetchStatus === "idle"));
   const clusterResolved = Boolean(clusterId && cluster?.id === clusterId && !clusterLoading && !clusterError && !registryFetching && !clusterFetching && cachedScopeValid && ((!registry && !clusterDetail) || (registry?.data?.clusters.find((item) => item.id === clusterId) ?? clusterDetail?.data)?.id === clusterId));
-  const [searchParams, setSearchParams] = useRouteSearchParams();
-  const query = searchParams.get("q") ?? "";
-  const status = statuses.includes(searchParams.get("status") ?? "") ? searchParams.get("status")! : "all";
+  const route = useInventoryRoute();
+  const searchParams = route.params; const query = route.query;
+  const identity = useTablePreferencesIdentity(); const owner = `${identity?.org_id}:${identity?.user_id}`;
+  const status = searchParams.get("status") || "all";
   const nvRole = normalizeNVRole(searchParams.get("role"));
   const selectedID = searchParams.get("component");
   const tab = ["inventory", "families", "versions"].find((value) => value === searchParams.get("tab")) ?? "inventory";
-  function updateURL(changes: Record<string, string | null>, replace = false) {
-    setSearchParams((current) => {
-      const next = new URLSearchParams(current);
-      for (const [key, value] of Object.entries(changes)) {
-        if (value === null || value === "") next.delete(key); else next.set(key, value);
-      }
-      return next;
-    }, { replace });
-  }
+  const sort = searchParams.get("sort") || "component";
+  const order = searchParams.get("order") || "asc";
+  const rawRole = searchParams.get("role") || "all";
+  const validFilters = statuses.includes(status) && NV_COMPONENT_ROLES.some(item => item.id === rawRole) && ["component", "build", "runtime", "status", "hostname", "restarts", "heartbeat"].includes(sort) && ["asc", "desc"].includes(order);
+  function updateURL(changes: Record<string, string | null>, replace = false) { route.update(changes, Object.keys(changes).some(key => ["q", "status", "role", "sort", "order"].includes(key)), replace); }
   function selectNVRole(role: string) { updateURL({ role: role === "all" ? null : role }); }
   function selectComponent(id: string) { updateURL({ component: id }); }
-  const q = useQuery({
-    queryKey: ["components-inventory", clusterId],
-    queryFn: () => componentsInventory.list({ cluster_id: clusterId, limit: 1000 }),
-    enabled: clusterResolved,
-    refetchInterval: 30_000,
-  });
-  const inventoryScopeValid = q.data?.components.every((item) => item.cluster_id === clusterId) ?? false;
+  const request: ComponentsInventoryParams = { cluster_id: clusterId, q: route.debouncedQuery || undefined, status: status === "all" ? undefined : status, role: nvRole === "all" ? undefined : nvRole, sort, order: order as "asc" | "desc", limit: 100, offset: route.offset };
+  const inventoryKey = ["components-inventory", clusterId, owner, request];
+  const context = JSON.stringify(inventoryKey);
+  const q = useQuery({ queryKey: inventoryKey, queryFn: () => componentsInventory.list(request), enabled: clusterResolved && validFilters && !route.debouncing, refetchInterval: 30_000 });
+  const inventoryScopeValid = !!q.data && componentInventoryMatches(q.data, request);
+  const inventoryAvailable = q.isSuccess && inventoryScopeValid && validFilters && !route.debouncing;
   const selectedQ = useQuery({
-    queryKey: ["component-instance", clusterId, selectedID],
-    queryFn: () => componentsInventory.get(selectedID!),
-    enabled: clusterResolved && tab === "inventory" && q.isSuccess && !q.isFetching && inventoryScopeValid && !!selectedID,
-    refetchInterval: 30_000,
+    queryKey: ["component-instance", clusterId, selectedID, owner], queryFn: () => componentsInventory.get(selectedID!),
+    enabled: clusterResolved && tab === "inventory" && inventoryAvailable && !q.isFetching && !!selectedID, refetchInterval: 30_000,
   });
 
-  const rollups = useMemo(() => q.data?.rollups ?? [], [q.data?.rollups]);
-  const instances = useMemo(() => q.data?.components ?? [], [q.data?.components]);
-  const nvRoleCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    counts.set("all", instances.length);
-    for (const item of instances) {
-      const alias = nvRoleAlias(item).id;
-      counts.set(alias, (counts.get(alias) ?? 0) + 1);
-    }
-    return counts;
-  }, [instances]);
-  const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return instances.filter((item) => matchesComponentFilters(item, needle, status, nvRole));
-  }, [instances, query, status, nvRole]);
+  const rollups = useMemo(() => inventoryAvailable ? q.data!.rollups : [], [inventoryAvailable, q.data]);
+  const instances = useMemo(() => inventoryAvailable ? q.data!.components : [], [inventoryAvailable, q.data]);
+  const nvRoleCounts = inventoryAvailable ? q.data!.role_counts : undefined;
+  const filtered = instances;
   const versionRows = useMemo(() => componentVersionRows(rollups, instances), [rollups, instances]);
   const detailMatches = Boolean(selectedID && selectedQ.data?.component?.id === selectedID && selectedQ.data.component.cluster_id === clusterId);
-  const selectionKey = `${clusterId}:${selectedID}`;
+  const selectionKey = `${owner}:${clusterId}:${selectedID}`;
   const [confirmedSelection, setConfirmedSelection] = useState<string | null>(null);
   const detailSettled = clusterResolved && selectedQ.isFetchedAfterMount && selectedQ.isSuccess && !selectedQ.isFetching && detailMatches;
   if (detailSettled && confirmedSelection !== selectionKey) setConfirmedSelection(selectionKey);
   const selected = selectedQ.isSuccess && detailMatches && (detailSettled || confirmedSelection === selectionKey) ? selectedQ.data!.component : null;
   const selectedFilteredOut = Boolean(selected && !matchesComponentFilters(selected, query, status, nvRole));
   const diagnosticsQ = useQuery({
-    queryKey: ["component-diagnostics", clusterId, selectedID],
+    queryKey: ["component-diagnostics", clusterId, selectedID, owner],
     queryFn: () => componentsInventory.diagnostics(selectedID!),
-    enabled: clusterResolved && tab === "inventory" && q.isSuccess && !q.isFetching && inventoryScopeValid && !selectedQ.isFetching && Boolean(selected) && !selectedFilteredOut,
+    enabled: clusterResolved && tab === "inventory" && inventoryAvailable && !q.isFetching && !selectedQ.isFetching && Boolean(selected) && !selectedFilteredOut,
     refetchInterval: 30_000,
     retry: (failureCount, error) => !isForbidden(error) && failureCount < 2,
   });
   const diagnosticsMatches = Boolean(diagnosticsQ.data?.component?.id === selectedID && diagnosticsQ.data?.component.cluster_id === clusterId);
   const bundleScopeReady = () => {
-    const inventoryState = qc.getQueryState(["components-inventory", clusterId]);
-    const detailState = qc.getQueryState<{ component: ComponentInstance }>(["component-instance", clusterId, selectedID]);
-    const diagnosticState = qc.getQueryState<ComponentDiagnostics>(["component-diagnostics", clusterId, selectedID]);
+    const inventoryState = qc.getQueryState<ComponentInventoryResponse>(inventoryKey);
+    const detailState = qc.getQueryState<{ component: ComponentInstance }>(["component-instance", clusterId, selectedID, owner]);
+    const diagnosticState = qc.getQueryState<ComponentDiagnostics>(["component-diagnostics", clusterId, selectedID, owner]);
     const currentRegistry = qc.getQueryState<{ clusters: Array<{ id: string }> }>(["clusters"]);
     const currentCluster = qc.getQueryState<{ id: string }>(["cluster", clusterId]);
     return clusterResolved && inventoryScopeValid && !selectedFilteredOut && ((!currentRegistry && !currentCluster) || (currentRegistry?.data?.clusters.find((item) => item.id === clusterId) ?? currentCluster?.data)?.id === clusterId) && (!currentRegistry || (currentRegistry.status === "success" && currentRegistry.fetchStatus === "idle")) && (!currentCluster || (currentCluster.status !== "error" && currentCluster.fetchStatus === "idle"))
-      && inventoryState?.status === "success" && inventoryState.fetchStatus === "idle"
-      && detailState?.status === "success" && detailState.fetchStatus === "idle" && detailState.data?.component.id === selectedID && detailState.data.component.cluster_id === clusterId
-      && diagnosticState?.status === "success" && diagnosticState.fetchStatus === "idle" && diagnosticState.data?.component.id === selectedID && diagnosticState.data.component.cluster_id === clusterId && diagnosticState.data.debug.support_bundle_enabled;
+      && inventoryState?.status === "success" && inventoryState.fetchStatus === "idle" && !inventoryState.isInvalidated && !!inventoryState.data && componentInventoryMatches(inventoryState.data, request)
+      && detailState?.status === "success" && detailState.fetchStatus === "idle" && !detailState.isInvalidated && detailState.data?.component.id === selectedID && detailState.data.component.cluster_id === clusterId
+      && diagnosticState?.status === "success" && diagnosticState.fetchStatus === "idle" && !diagnosticState.isInvalidated && diagnosticState.data?.component.id === selectedID && diagnosticState.data.component.cluster_id === clusterId && diagnosticState.data.debug.support_bundle_enabled;
   };
-  const summary = q.data?.summary;
+  const summary = inventoryAvailable ? q.data!.summary : undefined;
 
   if (clusterLoading || registryFetching || clusterFetching) return <LoadingState label="Loading cluster…" />;
   if (!clusterResolved) return <ErrorState title="Cluster could not be resolved." error={clusterError} />;
-  if (q.isPending) return <LoadingState label="Loading component inventory…" />;
-  if (q.isSuccess && !inventoryScopeValid) return <ErrorState title="Component inventory does not match the active cluster." action={<Button onClick={() => void q.refetch()}>Retry</Button>} />;
-  if (q.isError) return <div className="space-y-6" data-testid="components-page">
-    <PageHeader title="Components" description="Health and build inventory for this cluster." />
-    <ErrorState title="Component inventory could not be loaded." error={q.error} action={<Button onClick={() => void q.refetch()}>Retry</Button>} />
-  </div>;
+  if (!validFilters) return <ErrorState title="Choose a supported component filter or sort." action={<Button onClick={() => updateURL({ status: null, role: null, sort: null, order: null })}>Reset filters and sort</Button>} />;
 
   const attention = (summary?.degraded ?? 0) + (summary?.drift ?? 0) + (summary?.stale ?? 0) + (summary?.crashlooping ?? 0) + (summary?.missing ?? 0);
 
   const columns: Column<ComponentInstance>[] = [
     {
-      id: "component",
+      id: "component", sort: () => 0,
       header: "Component", kind: "name", wrap: true,
       exportValue: (item) => item.display_name || item.component,
       cell: (item) => (
@@ -142,7 +124,7 @@ export function ComponentsPage() {
       ),
     },
     {
-      id: "build",
+      id: "build", sort: () => 0,
       header: "Build", kind: "version", size: 184, minSize: 128, maxSize: 240, wrap: true,
       exportValue: (item) => `${item.version || "unknown"} ${item.commit_short || item.commit || ""}`.trim(),
       cell: (item) => (
@@ -153,7 +135,7 @@ export function ComponentsPage() {
       ),
     },
     {
-      id: "runtime",
+      id: "runtime", sort: () => 0,
       header: "Runtime", kind: "age", size: 152, minSize: 112, maxSize: 192, wrap: true,
       exportValue: (item) => `${formatUptime(item.uptime_seconds)}; ${item.restart_count} restarts`,
       cell: (item) => (
@@ -174,7 +156,7 @@ export function ComponentsPage() {
       ),
     },
     {
-      id: "status",
+      id: "status", sort: () => 0,
       header: "Status", kind: "text", size: 240, minSize: 208, maxSize: 320, wrap: true,
       exportValue: (item) => `${item.status}; ${item.status_reason || item.last_error || "No status reason recorded"}; last_seen=${item.last_seen_at}`,
       cell: (item) => (
@@ -184,6 +166,9 @@ export function ComponentsPage() {
         </div>
       ),
     },
+    { id: "hostname", header: "Hostname", kind: "name", wrap: true, sort: () => 0, cell: item => item.hostname },
+    { id: "restarts", header: "Restarts", kind: "count", sort: () => 0, cell: item => item.restart_count },
+    { id: "heartbeat", header: "Last heartbeat", kind: "date", size: 224, minSize: 208, maxSize: 240, sort: () => 0, cell: item => formatDate(item.last_seen_at) },
   ];
   const versionColumns: Column<ComponentVersionRow>[] = [
     {
@@ -256,25 +241,25 @@ export function ComponentsPage() {
         description="Live health and build inventory of every Constellation component — controller, scanner, importer, admission, discoverer, and runtime agents — with heartbeat and drift diagnostics."
       />
 
-      <VerdictBanner status={(summary?.crashlooping ?? 0) || (summary?.missing ?? 0) ? "critical" : attention ? "degraded" : (summary?.total_instances ?? 0) ? "ok" : "info"}
-        title={attention ? `${attention} component${attention === 1 ? " needs" : "s need"} attention` : (summary?.total_instances ?? 0) ? "Observed components are healthy" : "No component instances observed"}
-        detail="Health totals cover the active cluster. Inventory search and role/status filters apply to loaded instances." />
-      <StatGrid data-testid="component-summary">
-        <StatCard label="Instances" value={summary?.total_instances ?? 0} icon={<ServerCog className="h-3.5 w-3.5" />} />
-        <StatCard label="Healthy" value={summary?.healthy ?? 0} icon={<Activity className="h-3.5 w-3.5" />} />
-        <StatCard label="Needs attention" value={attention} tone={attention ? "medium" : "neutral"} hint="Unhealthy instances and missing expected component families." />
-        <StatCard label="Crashlooping" value={summary?.crashlooping ?? 0} tone={(summary?.crashlooping ?? 0) ? "critical" : "neutral"} />
-        <StatCard label="Missing" value={summary?.missing ?? 0} tone={(summary?.missing ?? 0) ? "critical" : "neutral"} icon={<AlertTriangle className="h-3.5 w-3.5" />} />
-      </StatGrid>
-      {q.isFetching && <LoadingState label="Refreshing component inventory…" />}
+      <VerdictBanner status={!inventoryAvailable ? "info" : (summary?.crashlooping ?? 0) || (summary?.missing ?? 0) ? "critical" : attention ? "degraded" : (summary?.total_instances ?? 0) ? "ok" : "info"}
+        title={!inventoryAvailable ? q.isError || q.isSuccess && !inventoryScopeValid ? "Component inventory is unavailable" : "Loading component inventory" : attention ? `${attention} component${attention === 1 ? " needs" : "s need"} attention` : (summary?.total_instances ?? 0) ? "Observed components are healthy" : "No component instances observed"}
+        detail="Health totals, families and versions cover all active-cluster heartbeats received within the last 24 hours. Inventory filters and matching CSV apply across every server page; older heartbeats are outside this source." />
+      {inventoryAvailable && <StatGrid data-testid="component-summary">
+        <StatCard label="Instances" value={summary?.total_instances ?? "—"} icon={<ServerCog className="h-3.5 w-3.5" />} />
+        <StatCard label="Healthy" value={summary?.healthy ?? "—"} icon={<Activity className="h-3.5 w-3.5" />} />
+        <StatCard label="Needs attention" value={summary ? attention : "—"} tone={attention ? "medium" : "neutral"} hint="Unhealthy instances and missing expected component families." />
+        <StatCard label="Crashlooping" value={summary?.crashlooping ?? "—"} tone={(summary?.crashlooping ?? 0) ? "critical" : "neutral"} />
+        <StatCard label="Missing" value={summary?.missing ?? "—"} tone={(summary?.missing ?? 0) ? "critical" : "neutral"} icon={<AlertTriangle className="h-3.5 w-3.5" />} />
+      </StatGrid>}
+      {inventoryAvailable && q.isFetching && <p role="status" className="text-sm text-muted-foreground">Refreshing component inventory…</p>}
       <Tabs value={tab} onValueChange={(value) => updateURL({ tab: value === "inventory" ? null : value })} items={[
         { value: "inventory", label: "Inventory", content: (<div className="space-y-4">
       <section className="rounded-lg border border-border bg-card p-3">
-        <p className="mb-2 text-xs text-muted-foreground">Role counts cover loaded instances.</p>
+        <p className="mb-2 text-xs text-muted-foreground">Role counts cover the full active-cluster heartbeat source, independently of inventory filters.</p>
         <div className="mb-3 flex flex-wrap gap-2" data-testid="component-nv-role-filters">
             {NV_COMPONENT_ROLES.map((item) => {
             const active = nvRole === item.id;
-            const count = nvRoleCounts.get(item.id) ?? 0;
+            const count = nvRoleCounts?.[item.id] ?? "—";
             return (
               <button
                 key={item.id}
@@ -321,17 +306,20 @@ export function ComponentsPage() {
       </section>
 
       <section className="flex flex-col gap-6">
+        {!inventoryAvailable ? q.isError || q.isSuccess && !inventoryScopeValid ? <ErrorState title={q.isError ? "Component inventory could not be loaded." : "Component inventory does not match the active cluster."} error={q.error} action={<Button onClick={() => void q.refetch()}>Retry</Button>} /> : <LoadingState label="Loading component inventory…" /> : <>
+        <ScanInventoryExport context={context} disabled={q.isFetching} download={() => componentsInventory.exportCSV(request)} />
         <DataTable<ComponentInstance>
+          defaultHiddenColumnIds={["hostname", "restarts", "heartbeat"]}
           rows={filtered}
-          sourceLimit={1000}
-          sourceCount={instances.length}
+          pagination={false}
+          manualSorting
+          sort={{ id: sort, dir: order as "asc" | "desc" }}
+          onSortChange={next => updateURL({ sort: next?.id ?? null, order: next?.dir ?? null })}
           columns={columns}
           rowKey={(item) => item.id}
           onRowClick={(item) => selectComponent(item.id)}
           selected={selected ? new Set([selected.id]) : undefined}
           preferencesKey="components.inventory"
-          exportFileName="constellation-components-loaded"
-          exportLabel="Export matching loaded instances CSV"
           testId="component-inventory-table"
           emptyState={
             <div className="px-3 py-8 text-center text-xs text-muted-foreground">
@@ -340,7 +328,9 @@ export function ComponentsPage() {
           }
         />
 
-        <p className="text-xs text-muted-foreground">{filtered.length} matching loaded instances. Search, role counts, and inventory CSV cover up to 1,000 loaded instances. Select an instance to inspect its diagnostics.</p>
+        <p className="text-xs text-muted-foreground">{q.data!.total!.toLocaleString()} instances match the server filters; {filtered.length} on this page. Matching CSV covers up to 100,000 matching instances across pages. Family health and versions cover the full 24-hour source. Select any exact instance to inspect its diagnostics.</p>
+        {route.page > 0 && !filtered.length && <Button onClick={() => route.setPage(0)}>First page</Button>}
+        <Pager page={route.page} pageSize={100} rowsOnPage={filtered.length} total={q.data!.total} onPage={route.setPage} />
         {selectedID && <div><Button size="sm" variant="outline" onClick={() => updateURL({ component: null })}>Clear inspection</Button></div>}
         {selected && (q.isFetching || selectedQ.isFetching) && <p role="status" className="text-xs text-muted-foreground">Refreshing selected component… The confirmed preview remains visible; bundle creation is paused.</p>}
         {!selectedID ? <ComponentPreview item={null} diagnostics={null} diagnosticsLoading={false} diagnosticsError={null} onRetryDiagnostics={() => void diagnosticsQ.refetch()} bundleScopeReady={bundleScopeReady} />
@@ -350,10 +340,11 @@ export function ComponentsPage() {
           : selectedFilteredOut ? <EmptyState title="Selected component is outside the active filters" hint="Clear the inventory filters to inspect this component. Your URL selection is preserved." />
           : <ComponentPreview key={`${clusterId}:${selectedID}`} item={selected} diagnostics={diagnosticsMatches ? diagnosticsQ.data ?? null : null} diagnosticsLoading={diagnosticsQ.isPending || diagnosticsQ.isFetching}
               diagnosticsError={diagnosticsQ.isError ? diagnosticsQ.error : diagnosticsQ.isSuccess && !diagnosticsMatches ? new Error("Scope mismatch") : null} onRetryDiagnostics={() => void diagnosticsQ.refetch()} bundleScopeReady={bundleScopeReady} />}
+        </>}
       </section>
       </div>) },
         { value: "families", label: "Families", content: (
-      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4" data-testid="component-rollups">
+      !inventoryAvailable ? <ErrorState title="Component family health is unavailable until inventory is confirmed." action={<Button onClick={() => void q.refetch()}>Retry inventory</Button>} /> : <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4" data-testid="component-rollups">
         {rollups.map((rollup) => (
           <RollupCard key={rollup.component} rollup={rollup} />
         ))}
@@ -361,7 +352,7 @@ export function ComponentsPage() {
 
         ) },
         { value: "versions", label: "Versions", content: (
-      <section className="space-y-3 rounded-lg border border-border bg-card p-3" data-testid="component-version-matrix">
+      !inventoryAvailable ? <ErrorState title="Component version evidence is unavailable until inventory is confirmed." action={<Button onClick={() => void q.refetch()}>Retry inventory</Button>} /> : <section className="space-y-3 rounded-lg border border-border bg-card p-3" data-testid="component-version-matrix">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="text-sm font-semibold">Version Drift & Readiness</h2>
@@ -390,6 +381,13 @@ export function ComponentsPage() {
       ]} />
     </div>
   );
+}
+
+function componentInventoryMatches(data: ComponentInventoryResponse, request: ComponentsInventoryParams) {
+ const total = data.total; const offset = request.offset || 0;
+ if (!Array.isArray(data.components) || !Array.isArray(data.rollups) || data.cluster_id !== request.cluster_id || data.source_window_hours !== 24 || data.q !== (request.q || "").trim() || data.status !== (request.status || "") || data.role !== (request.role || "") || data.component !== (request.component || "") || data.sort !== request.sort || data.order !== request.order || data.limit !== 100 || data.offset !== offset || !Number.isSafeInteger(total) || total! < 0 || data.components.length !== Math.min(100, Math.max(0, total! - offset)) || data.has_more !== (total! > offset + data.components.length) || !NV_COMPONENT_ROLES.every(role => Number.isSafeInteger(data.role_counts?.[role.id]) && data.role_counts![role.id] >= 0) || data.role_counts!.all !== data.summary.total_instances || data.role_counts!.all < total! || !["components", "total_instances", "healthy", "degraded", "stale", "drift", "crashlooping", "missing"].every(key => Number.isSafeInteger(data.summary[key as keyof typeof data.summary]) && Number(data.summary[key as keyof typeof data.summary]) >= 0)) return false;
+ const ids = new Set<string>();
+ return data.components.every(item => { if (!item.id || ids.has(item.id) || item.cluster_id !== request.cluster_id || !matchesComponentFilters(item, request.q || "", request.status || "all", request.role || "all")) return false; ids.add(item.id); return true; });
 }
 
 function matchesComponentFilters(item: ComponentInstance, query: string, status: string, role: string) {
@@ -470,7 +468,7 @@ function componentVersionRows(rollups: ComponentRollup[], instances: ComponentIn
       commit: shortCommit(rollup.latest_commit || newestInstanceValue(peers, "commit") || ""),
       readiness: readinessLabel(rollup),
       reason: rollup.last_status_cause || "No status reason recorded",
-      capacity: alias.id === "scanner" ? scannerCapacitySummary(peers) : "-",
+      capacity: alias.id === "scanner" && rollup.scanner_capacity ? scannerCapacitySummary([{ metadata: rollup.scanner_capacity }]) : "-",
       lastSeenAt: rollup.latest_seen_at || newestInstanceSeen(peers),
     };
   }).sort((a, b) => a.roleRank - b.roleRank || a.displayName.localeCompare(b.displayName));
@@ -485,7 +483,7 @@ function readinessLabel(rollup: ComponentRollup): string {
   return "ready";
 }
 
-function scannerCapacitySummary(instances: ComponentInstance[]): string {
+function scannerCapacitySummary(instances: Array<Pick<ComponentInstance, "metadata">>): string {
   let active = 0;
   let max = 0;
   let idle = 0;

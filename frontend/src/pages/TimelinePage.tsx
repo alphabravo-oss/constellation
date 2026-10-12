@@ -505,6 +505,7 @@ export function TimelinePage() {
                     "Namespace",
                     "Workload",
                     "Reference",
+                    "platform_role",
                   ],
                   items.map((it) => [
                     it.at,
@@ -515,6 +516,7 @@ export function TimelinePage() {
                     it.namespace ?? "",
                     it.workload_id ?? "",
                     it.ref ?? "",
+                    it.platform_role ?? "",
                   ]),
                 )
               }
@@ -776,12 +778,6 @@ export function TimelinePage() {
               <option value="168">7 days</option>
             </select>
           </label>
-          {after && (
-            <p className="text-xs text-muted-foreground">
-              {afterExclusive ? "Strictly after" : "Since"} <code>{after}</code>
-              ; no upper time bound.
-            </p>
-          )}
           {sources.size === 1 && sources.has("runtime_event") && (
             <label className="space-y-1 text-xs">
               <span>Runtime event verdicts</span>
@@ -1141,6 +1137,12 @@ function TimelineDetail({ item }: { item: TimelineItem }) {
         />
         <DetailField label="Namespace" value={item.namespace || "-"} mono />
         <DetailField label="Workload" value={item.workload_id || "-"} mono />
+        {item.source !== "audit" && (
+          <DetailField
+            label="Platform role"
+            value={item.platform_role || "Not classified"}
+          />
+        )}
         {item.source === "runtime_event" && (
           <DetailField label="Verdict" value={item.verdict || "Not reported"} />
         )}

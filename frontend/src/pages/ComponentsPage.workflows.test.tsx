@@ -7,16 +7,17 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { componentsInventory, supportBundles, type ComponentInstance, type ComponentDiagnostics, type ComponentInventoryResponse } from "@/api/client";
 import { TestRouter } from "@/test/router";
 import { ComponentsPage } from "./ComponentsPage";
+import { componentFixture } from "./components-inventory-fixture";
 const scope = vi.hoisted(() => ({ clusterId: "cluster" as string | undefined, cluster: { id: "cluster" } as { id: string } | undefined, loading: false, error: null as Error | null }));
 vi.mock("@/hooks/useCluster", () => ({ useCluster: () => ({ clusterId: scope.clusterId, cluster: scope.cluster, isLoading: scope.loading, error: scope.error }) }));
-vi.mock("@/api/client", () => ({ componentsInventory: { list: vi.fn(), get: vi.fn(), diagnostics: vi.fn() }, supportBundles: { createJob: vi.fn() } }));
+vi.mock("@/api/client", () => ({ componentsInventory: { list: vi.fn(), exportCSV: vi.fn(), get: vi.fn(), diagnostics: vi.fn() }, supportBundles: { createJob: vi.fn() } }));
 const component = (id = "scanner", cluster = "cluster"): ComponentInstance => ({ id, cluster_id: cluster, component: id, display_name: `Component ${id}`, role: id === "scanner" ? "scanner" : "controller", scope: "cluster", kind: "deployment", hostname: `${id}-host`, status: id === "scanner" ? "crashlooping" : "healthy", version: "1.0", uptime_seconds: 10, restart_count: 5, first_seen_at: "2026-10-12T00:00:00Z", last_seen_at: "2026-10-12T00:00:00Z", metadata: {} });
 const inventory = (cluster = "cluster"): ComponentInventoryResponse => ({ summary: { generated_at: "2026-10-12T00:00:00Z", components: 2, total_instances: 2, healthy: 1, degraded: 0, stale: 0, drift: 0, crashlooping: 1, missing: 0 }, components: [component("scanner", cluster), component("controller", cluster)], rollups: [{ component: "scanner", display_name: "Scanner family", role: "scanner", scope: "cluster", kind: "deployment", expected: true, status: "crashlooping", instances: 1, healthy: 0, degraded: 0, stale: 0, drift: 0, crashlooping: 1, missing: 0 }] });
 const diagnostic = (id = "scanner", cluster = "cluster"): ComponentDiagnostics => ({ component: component(id, cluster), generated_at: "2026-10-12T00:00:00Z", admin_gate: "global admin", status: { state: "crashlooping", stale: false, drift: false, crashlooping: true, degraded: false, uptime_seconds: 10, restart_count: 5, first_seen_at: "2026-10-12T00:00:00Z", last_seen_at: "2026-10-12T00:00:00Z" }, diagnostics: [{ key: "actual", label: "Actual diagnosis", status: "warning", evidence: `Evidence for ${id}` }], counters: [], config: [], debug: { profiling_enabled: false, live_logs_enabled: false, support_bundle_enabled: true } });
 let root: Root; let host: HTMLDivElement; let client: QueryClient; let history: RouterHistory;
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  vi.mocked(componentsInventory.list).mockImplementation(async (params) => inventory(params?.cluster_id));
+  vi.mocked(componentsInventory.list).mockImplementation(async (params) => componentFixture(inventory(params?.cluster_id), params));
   vi.mocked(componentsInventory.get).mockImplementation(async (id) => ({ component: component(id, scope.clusterId) }));
   vi.mocked(componentsInventory.diagnostics).mockImplementation(async (id) => diagnostic(id, scope.clusterId));
   vi.mocked(supportBundles.createJob).mockResolvedValue({ id: "org-job", status: "queued", created_at: "2026-10-12T00:00:00Z" });
@@ -125,7 +126,7 @@ it("waits for a cached cluster registry refresh before any scoped component requ
   await act(async () => resolve({ clusters: [{ id: "cluster" }] })); await settled(() => expect(host.textContent).toContain("Evidence for scanner"));
 });
 it("does not render foreign records returned by an inventory response", async () => {
-  vi.mocked(componentsInventory.list).mockResolvedValue(inventory("foreign")); await renderPage("component=scanner");
+  vi.mocked(componentsInventory.list).mockResolvedValue(componentFixture(inventory("foreign"))); await renderPage("component=scanner");
   await settled(() => expect(host.textContent).toContain("Component inventory does not match the active cluster")); expect(host.querySelector('[data-testid="component-inventory-table"]')).toBeNull(); expect(componentsInventory.diagnostics).not.toHaveBeenCalled();
 });
 it("labels support bundles as org-wide and surfaces queuing failure", async () => {
@@ -135,7 +136,7 @@ it("labels support bundles as org-wide and surfaces queuing failure", async () =
 });
 it("blocks an org-wide bundle if diagnostics become stale before observer notification", async () => {
   await renderPage("component=scanner"); await settled(() => expect(host.textContent).toContain("Evidence for scanner")); const bundle = button("Create org-wide bundle");
-  await act(async () => { client.setQueryData(["component-diagnostics", "cluster", "scanner"], diagnostic("scanner", "foreign")); bundle.click(); });
+  await act(async () => { client.setQueryData(["component-diagnostics", "cluster", "scanner", "undefined:undefined"], diagnostic("scanner", "foreign")); bundle.click(); });
   await settled(() => expect(host.textContent).toContain("Component diagnostics could not be loaded")); expect(supportBundles.createJob).not.toHaveBeenCalled();
 });
 it("preserves confirmed inspection and queued org job through a periodic inventory refresh", async () => {
@@ -147,7 +148,7 @@ it("preserves confirmed inspection and queued org job through a periodic invento
   await settled(() => expect(host.textContent).toContain("Refreshing selected component"));
   expect(host.querySelector('[data-testid="component-preview"]')).not.toBeNull(); expect(host.querySelector('[data-testid="component-support-bundle-feedback"]')!.textContent).toContain("org-job");
   expect(button("Create org-wide bundle").disabled).toBe(true); await act(async () => button("Create org-wide bundle").click()); expect(supportBundles.createJob).toHaveBeenCalledOnce();
-  await act(async () => resolve(inventory())); await settled(() => expect(button("Create org-wide bundle").disabled).toBe(false));
+  await act(async () => resolve(componentFixture(inventory()))); await settled(() => expect(button("Create org-wide bundle").disabled).toBe(false));
   expect(host.querySelector('[data-testid="component-support-bundle-feedback"]')!.textContent).toContain("org-job");
 });
 it("preserves confirmed inspection and queued org job through a periodic detail refresh", async () => {
@@ -164,7 +165,7 @@ it("preserves confirmed inspection and queued org job through a periodic detail 
 it("waits for an initial selected component refresh rather than exposing unconfirmed cached details", async () => {
   let resolve!: (value: { component: ComponentInstance }) => void;
   vi.mocked(componentsInventory.get).mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
-  await renderPage("component=scanner", (queryClient) => { queryClient.setQueryData(["component-instance", "cluster", "scanner"], { component: component() }); });
+  await renderPage("component=scanner", (queryClient) => { queryClient.setQueryData(["component-instance", "cluster", "scanner", "undefined:undefined"], { component: component() }); });
   await settled(() => expect(host.textContent).toContain("Refreshing selected component")); expect(host.querySelector('[data-testid="component-preview"]')).toBeNull(); expect(componentsInventory.diagnostics).not.toHaveBeenCalled();
   await act(async () => resolve({ component: component() })); await settled(() => expect(host.textContent).toContain("Evidence for scanner"));
 });

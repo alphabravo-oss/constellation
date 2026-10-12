@@ -44,7 +44,8 @@ export function RuntimePage() {
   // A read-only poll keeps successful data mounted while refreshing. Actual
   // errors or scope changes withhold it; authoring has stricter settled gates.
   const overviewReady = clusterReady && q.isSuccess && q.data.summary.window_hours === hours;
-  const liveReady = clusterReady && liveQ.isSuccess;
+  const liveScopeMismatch = Boolean(liveQ.data?.events.some(event => event.cluster_id !== undefined && event.cluster_id !== clusterId));
+  const liveReady = clusterReady && liveQ.isSuccess && !liveScopeMismatch;
   const liveEvents = liveReady ? liveQ.data.events : [];
   const subsystems = overviewReady ? q.data.subsystems : [];
   const rules = overviewReady ? q.data.rules : [];
@@ -79,6 +80,7 @@ export function RuntimePage() {
         </>
       ),
     },
+    {id:"platform_role",header:"Platform role",kind:"text",exportHeader:"platform_role",cell:event=>event.platform_role||"Not classified",exportValue:event=>event.platform_role??""},
     {
       id: "signal",
       header: "Signal",
@@ -149,9 +151,10 @@ export function RuntimePage() {
       <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground" data-testid="runtime-live-status">{liveQ.isError ? "Unavailable" : liveQ.isFetching ? "Refreshing" : "Polling"}</span>
     </div>
     {liveQ.isError ? <ErrorState title="Latest runtime events could not be loaded or refreshed." error={liveQ.error} action={<Button onClick={() => void liveQ.refetch()}>Retry latest events</Button>} />
+      : liveScopeMismatch ? <ErrorState title="Latest runtime events do not match the selected cluster." action={<Button onClick={()=>void liveQ.refetch()}>Retry latest events</Button>} />
       : !liveReady ? <LoadingState label="Loading latest runtime events…" />
       : <DataTable rows={liveEvents} sourceLimit={100} sourceCount={liveEvents.length} rowKey={(event) => event.id} columns={liveColumns}
-          defaultSort={{ id: "at", dir: "desc" }} density="compact" preferencesKey="runtime-live-events" exportFileName="runtime-latest-events" testId="runtime-live-table"
+          defaultSort={{ id: "at", dir: "desc" }} defaultDensity="compact" preferencesKey="runtime-live-events" exportFileName="runtime-latest-events" testId="runtime-live-table"
           emptyState={<p className="px-3 py-6 text-sm text-muted-foreground">No runtime events have been reported for this cluster.</p>} />}
   </section>;
   const evidenceView = withOverview(<div className="space-y-4" data-testid="runtime-event-evidence">
@@ -209,6 +212,7 @@ export function RuntimePage() {
 // DataTable's internal sort state on every parent re-render).
 type RuntimeWorkload = RuntimeOverview["workloads"][number];
 const workloadColumns: Column<RuntimeWorkload>[] = [
+  {id:"platform_role",header:"Platform role",kind:"text",exportHeader:"platform_role",cell:item=>item.platform_role||"Not classified",exportValue:item=>item.platform_role??""},
   { id: "workload", header: "Workload", kind: "name", code: true, wrap: true, cell: (item) => item.workload_id, sort: (a, b) => a.workload_id.localeCompare(b.workload_id) },
   { id: "events", header: "Events", kind: "count", cell: (item) => item.events, sort: (a, b) => a.events - b.events },
   { id: "alerts", header: "Alerts", kind: "count", cell: (item) => item.alerts, sort: (a, b) => a.alerts - b.alerts },
@@ -230,6 +234,7 @@ const ruleColumns: Column<RuntimeRule>[] = [
 ];
 
 const liveColumns: Column<RuntimeEvent>[] = [
+  {id:"platform_role",header:"Platform role",kind:"text",exportHeader:"platform_role",cell:item=>item.platform_role||"Not classified",exportValue:item=>item.platform_role??""},
   {
     id: "at",
     header: "Time",

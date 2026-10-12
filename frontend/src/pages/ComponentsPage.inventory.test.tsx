@@ -5,10 +5,11 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { componentsInventory } from "@/api/client";
 import { TestRouter } from "@/test/router";
 import { ComponentsPage } from "./ComponentsPage";
+import { componentFixture } from "./components-inventory-fixture";
 
 const scope = vi.hoisted(() => ({ clusterId: "cluster-1", cluster: { id: "cluster-1" } as { id: string } | undefined, isLoading: false, error: null }));
 vi.mock("@/hooks/useCluster", () => ({ useCluster: () => scope }));
-vi.mock("@/api/client", () => ({ componentsInventory: { list: vi.fn(), get: vi.fn(), diagnostics: vi.fn() }, supportBundles: { createJob: vi.fn() } }));
+vi.mock("@/api/client", () => ({ componentsInventory: { list: vi.fn(), exportCSV: vi.fn(), get: vi.fn(), diagnostics: vi.fn() }, supportBundles: { createJob: vi.fn() } }));
 const emptyInventory = {
   summary: { generated_at: "2026-10-12T00:00:00Z", components: 0, total_instances: 0, healthy: 0, degraded: 0, stale: 0, drift: 0, crashlooping: 0, missing: 0 },
   components: [], rollups: [],
@@ -17,7 +18,7 @@ let root: Root;
 let host: HTMLDivElement;
 let client: QueryClient;
 
-beforeEach(() => { scope.cluster = { id: "cluster-1" }; });
+beforeEach(() => { (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true; scope.cluster = { id: "cluster-1" }; });
 afterEach(() => {
   act(() => root?.unmount());
   host?.remove();
@@ -35,7 +36,7 @@ async function render() {
 }
 
 it("shows an inventory error without zero statistics or empty-state claims, and retries", async () => {
-  vi.mocked(componentsInventory.list).mockRejectedValueOnce(new Error("Request failed with status code 500")).mockResolvedValue(emptyInventory);
+  vi.mocked(componentsInventory.list).mockRejectedValueOnce(new Error("Request failed with status code 500")).mockResolvedValue(componentFixture(emptyInventory,{cluster_id:"cluster-1"}));
   await render();
   expect(host.querySelector('[role="alert"]')?.textContent).toContain("Component inventory could not be loaded");
   expect(host.querySelector('[data-testid="component-summary"]')).toBeNull();
@@ -59,7 +60,7 @@ it("shows loading until the inventory request succeeds", async () => {
 });
 
 it("surfaces refresh failure instead of presenting cached inventory as current", async () => {
-  vi.mocked(componentsInventory.list).mockResolvedValueOnce(emptyInventory).mockRejectedValue(new Error("Refresh unavailable"));
+  vi.mocked(componentsInventory.list).mockResolvedValueOnce(componentFixture(emptyInventory,{cluster_id:"cluster-1"})).mockRejectedValue(new Error("Refresh unavailable"));
   await render();
   expect(host.querySelector('[data-testid="component-summary"]')).not.toBeNull();
   await act(async () => { await client.refetchQueries({ queryKey: ["components-inventory", "cluster-1"] }); });

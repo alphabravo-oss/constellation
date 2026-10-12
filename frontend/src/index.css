@@ -307,6 +307,21 @@
   .app-data-table tr::after { content: none; }
 
   .app-table-scroll { max-width: 100%; }
+  .app-table-resize {
+    position: absolute; inset-block: 0; right: 0; width: 7px;
+    cursor: col-resize; touch-action: none; user-select: none; z-index: 2;
+    border-right: 2px solid transparent;
+  }
+  .app-table-resize:hover, .app-table-resize:focus-visible {
+    border-right-color: var(--color-primary); outline: none;
+    background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  }
+  .app-data-table .app-table-pinned {
+    background: var(--color-card); z-index: 2;
+    box-shadow: inset -1px 0 var(--color-border), inset 1px 0 var(--color-border);
+  }
+  .app-data-table thead .app-table-pinned { z-index: 3; }
+
   .app-table-header-button {
     display: flex;
     width: 100%;

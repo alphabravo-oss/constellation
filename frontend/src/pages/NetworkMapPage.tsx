@@ -2461,7 +2461,7 @@ export function StreamsTab({ flow, from: explicitFrom, to: explicitTo, clusterID
         <DataTable
           rows={entries.map((entry, index) => ({ ...entry, rowKey: index, from, to, from_platform_role: data?.from_platform_role, to_platform_role: data?.to_platform_role }))}
           rowKey={(entry) => entry.rowKey}
-          density="compact"
+          defaultDensity="compact"
           sourceLimit={200}
           sourceCount={entries.length}
           preferencesKey="network-conversation-streams"

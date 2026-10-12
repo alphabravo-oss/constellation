@@ -13,10 +13,13 @@ import { cn } from "@/lib/cn";
 import { downloadCsv, type CsvCell } from "@/lib/csv";
 import { computeColumnWidths, parsePx, resolveColumnLayout, type ColumnKind } from "./data-table-layout";
 import { TableCellContent } from "./table-cell-content";
+import { arrangeColumns, pinnedOffsets, sanitizeArrangement, type TableArrangement } from "./data-table-arrangement";
+import { ColumnResizeHandle } from "./data-table-resize";
+import { ColumnLayoutMenu } from "./data-table-layout-menu";
 
 export type Density = "compact" | "cozy" | "comfy";
 export type TableSort = { id: string; dir: "asc" | "desc" };
-interface StoredTablePreferences {
+interface StoredTablePreferences extends TableArrangement {
   density?: Density;
   hiddenColumnIds?: string[];
 }
@@ -57,6 +60,8 @@ export interface DataTableProps<T> {
   selected?: Set<Key>;
   onSelectedChange?: (s: Set<Key>) => void;
   density?: Density;
+  /** Initial density for operator-controlled tables; stored choices take precedence. */
+  defaultDensity?: Density;
   onDensityChange?: (d: Density) => void;
   /** Render under the table after selection actions; e.g. row hover quick actions. */
   emptyState?: ReactNode;
@@ -110,7 +115,7 @@ const TABLE_PAGE_SIZE = 100;
  * Powered by @tanstack/react-table (headless): TanStack owns the row model,
  * sorting, and state; this component renders the one canonical <table> markup
  * and exposes a small `Column<T>` facade so pages never hand-roll a table.
- * Sticky header · right-align numeric · accent slide-in on row hover · density.
+ * Sticky header · semantic alignment · resizing/order/pinning · scoped preferences.
  */
 export function DataTable<T>(props: DataTableProps<T>) {
   const identity = useTablePreferencesIdentity();
@@ -132,6 +137,7 @@ function DataTableView<T>({
   selected,
   onSelectedChange,
   density: densityProp,
+  defaultDensity = "cozy",
   onDensityChange,
   emptyState,
   className,
@@ -157,11 +163,15 @@ function DataTableView<T>({
 }: DataTableProps<T>) {
   const [requestedPage, setRequestedPage] = useState(0);
   const storedPreferences = useMemo(() => readStoredTablePreferences(preferencesKey), [preferencesKey]);
+  const [requestedArrangement, setArrangement] = useState<TableArrangement>(() => sanitizeArrangement(storedPreferences, columns));
+  const arrangement = useMemo(() => sanitizeArrangement(requestedArrangement, columns), [requestedArrangement, columns]);
+  const pinning = useMemo(() => arrangement.columnPinning ?? { start: columns.filter(column => column.sticky).map(column => column.id), end: [] }, [arrangement.columnPinning, columns]);
+  const orderedColumns = useMemo(() => arrangeColumns(columns, arrangement.columnOrder ?? [], pinning), [columns, arrangement.columnOrder, pinning]);
   const [internalHiddenColumnIds, setInternalHiddenColumnIds] = useState<Set<string>>(() => {
     const stored = storedPreferences.hiddenColumnIds;
     return new Set(stored ?? defaultHiddenColumnIds ?? []);
   });
-  const [internalDensity, setInternalDensity] = useState<Density>(() => densityProp ?? storedPreferences.density ?? "cozy");
+  const [internalDensity, setInternalDensity] = useState<Density>(() => densityProp ?? storedPreferences.density ?? defaultDensity);
   const [internalSorting, setSorting] = useState<SortingState>(
     defaultSort ? [{ id: defaultSort.id, desc: defaultSort.dir === "desc" }] : [],
   );
@@ -184,8 +194,8 @@ function DataTableView<T>({
     [hiddenColumnIds, internalHiddenColumnIds, columns],
   );
   const visibleColumns = useMemo(
-    () => columns.filter((c) => !hiddenIds.has(c.id) || c.hideable === false),
-    [columns, hiddenIds],
+    () => orderedColumns.filter((c) => !hiddenIds.has(c.id) || c.hideable === false),
+    [orderedColumns, hiddenIds],
   );
   const columnVisibility = useMemo(() => Object.fromEntries(columns.map(column => [column.id, !hiddenIds.has(column.id)])), [columns, hiddenIds]);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -200,19 +210,29 @@ function DataTableView<T>({
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
-  const layouts = useMemo(() => visibleColumns.map((column) => resolveColumnLayout({
+  const baseLayouts = useMemo(() => visibleColumns.map((column) => resolveColumnLayout({
     ...column,
     sortable: !!column.sort,
     align: column.align ?? (column.numeric || /(?:^|\s)text-right(?:\s|$)/.test(column.className ?? "") ? "right" : /(?:^|\s)text-center(?:\s|$)/.test(column.className ?? "") ? "center" : undefined),
   })), [visibleColumns]);
+  const layouts = useMemo(() => baseLayouts.map((layout, index) => {
+    const width = arrangement.columnWidths?.[visibleColumns[index].id];
+    return width === undefined ? layout : { ...layout, size: width, minSize: width, maxSize: width, grow: false, cssWidth: undefined };
+  }), [baseLayouts, arrangement.columnWidths, visibleColumns]);
   // Legacy CSS widths keep native layout. Semantic tables share one measured
   // colgroup, so headers and cells cannot independently choose their widths.
   const semanticLayout = layouts.length > 0 && layouts.every((layout) => layout.sized && (!layout.cssWidth || parsePx(layout.cssWidth) !== undefined));
   const selectionWidth = selectable ? 40 : 0;
   const columnWidths = semanticLayout ? computeColumnWidths(layouts, Math.max(0, containerWidth - selectionWidth)) : [];
   const tableWidth = columnWidths.reduce((sum, width) => sum + width, selectionWidth);
+  const pinned = semanticLayout ? pinnedOffsets(visibleColumns.map(column => column.id), columnWidths, pinning, containerWidth, selectionWidth) : { offsets: new Map<string, { side: "left" | "right"; offset: number }>(), suspended: false };
+  const pinnedStyle = (id: string) => { const placement = pinned.offsets.get(id); return placement ? { position: "sticky" as const, [placement.side]: placement.offset } : {}; };
 
   useEffect(() => {
+    setArrangement(previous => {
+      const next = sanitizeArrangement(previous, columns);
+      return JSON.stringify(previous) === JSON.stringify(next) ? previous : next;
+    });
     setInternalHiddenColumnIds((prev) => {
       const next = sanitizeHiddenColumns(Array.from(prev), columns);
       return setsEqual(prev, next) ? prev : next;
@@ -220,14 +240,17 @@ function DataTableView<T>({
   }, [columns]);
 
   useEffect(() => {
-    if (!preferencesKey || (hiddenColumnIds !== undefined && densityProp !== undefined)) return;
+    if (!preferencesKey) return;
     const prefs = readStoredTablePreferences(preferencesKey);
     setPreferencesUnavailable(!writeStoredTablePreferences(preferencesKey, {
       ...prefs,
+      columnWidths: arrangement.columnWidths,
+      columnOrder: arrangement.columnOrder,
+      columnPinning: arrangement.columnPinning,
       ...(hiddenColumnIds === undefined ? { hiddenColumnIds: Array.from(hiddenIds) } : {}),
       ...(densityProp === undefined ? { density: internalDensity } : {}),
     }));
-  }, [preferencesKey, hiddenColumnIds, hiddenIds, densityProp, internalDensity, preferencesWriteAttempt]);
+  }, [preferencesKey, hiddenColumnIds, hiddenIds, densityProp, internalDensity, preferencesWriteAttempt, arrangement]);
 
   useEffect(() => {
     if (densityProp) {
@@ -260,7 +283,7 @@ function DataTableView<T>({
   const table = useReactTable({
     data: rows,
     columns: columnDefs,
-    state: { sorting, columnVisibility },
+    state: { sorting, columnVisibility, columnOrder: orderedColumns.map(column => column.id) },
     onSortingChange: handleSortingChange,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
@@ -324,8 +347,32 @@ function DataTableView<T>({
   }
 
   function resetPreferences() {
+    setArrangement({});
     resetColumns();
-    setDensity("cozy");
+    setDensity(defaultDensity);
+  }
+
+  function resizeColumn(id: string, width?: number) {
+    setArrangement(current => {
+      const columnWidths = { ...current.columnWidths };
+      if (width === undefined) delete columnWidths[id]; else columnWidths[id] = width;
+      return { ...current, columnWidths };
+    });
+  }
+
+  function pinColumn(id: string, side: "start" | "end" | null) {
+    const next = { start: pinning.start.filter(key => key !== id), end: pinning.end.filter(key => key !== id) };
+    if (side) next[side].push(id);
+    setArrangement(current => ({ ...current, columnPinning: next }));
+  }
+
+  function moveColumn(id: string, direction: -1 | 1) {
+    const next = orderedColumns.map(column => column.id);
+    const slots = next.flatMap((key, index) => !pinning.start.includes(key) && !pinning.end.includes(key) ? [index] : []);
+    const slot = slots.findIndex(index => next[index] === id), target = slot + direction;
+    if (slot < 0 || target < 0 || target >= slots.length) return;
+    [next[slots[slot]], next[slots[target]]] = [next[slots[target]], next[slots[slot]]];
+    setArrangement(current => ({ ...current, columnOrder: next }));
   }
 
   function exportVisibleRows() {
@@ -338,7 +385,8 @@ function DataTableView<T>({
 
   const shouldShowColumnChooser = (showColumnChooser ?? !!preferencesKey) && columns.length > 1;
   const shouldShowExport = Boolean(exportFileName);
-  const shouldShowToolbar = showDensityToggle || shouldShowColumnChooser || shouldShowExport;
+  const canChangeDensity = densityProp === undefined || !!onDensityChange;
+  const shouldShowToolbar = (showDensityToggle && canChangeDensity) || shouldShowColumnChooser || shouldShowExport || semanticLayout;
   const tableLabel = ariaLabel ?? `Table: ${columns.slice(0, 3).map(column => headerText(column.header, column.id)).join(", ")}`;
 
   return (
@@ -369,7 +417,9 @@ function DataTableView<T>({
               testId={testId}
             />
           )}
-          {showDensityToggle && (
+          {semanticLayout && <ColumnLayoutMenu columns={orderedColumns.map(column => ({ id: column.id, label: headerText(column.header, column.id) }))}
+            pinning={pinning} onMove={moveColumn} onPin={pinColumn} onResetWidth={id => resizeColumn(id)} onReset={() => setArrangement({})} />}
+          {showDensityToggle && canChangeDensity && (
             <div className="flex items-center gap-1">
               <span className="text-[10px] uppercase tracking-wider text-muted-foreground mr-2">Density</span>
               <DensityBtn current={density} value="compact" onClick={() => setDensity("compact")} icon={Rows4} label="compact" />
@@ -379,13 +429,20 @@ function DataTableView<T>({
           )}
         </div>
       )}
+      {pinned.suspended && <p className="border-b border-border px-3 py-2 text-xs text-muted-foreground">Column pinning pauses at this width so every column remains reachable. Your saved pins are retained.</p>}
       {preferencesUnavailable && <div role="status" className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2 text-xs text-muted-foreground"><span>Table preferences could not be saved. Changes apply to this tab.</span><button type="button" className="text-primary underline underline-offset-2" onClick={() => setPreferencesWriteAttempt(attempt => attempt + 1)}>Retry saving preferences</button></div>}
       {sorting[0] && hiddenIds.has(sorting[0].id) && <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2 text-xs">
         <span>Sorted by {headerText(columns.find(column => column.id === sorting[0].id)?.header, sorting[0].id)} ({sorting[0].desc ? "descending" : "ascending"}) · hidden column</span>
         {(hiddenColumnIds === undefined || onHiddenColumnIdsChange) && <button type="button" className="text-primary underline underline-offset-2" onClick={() => setColumnVisible(sorting[0].id, true)}>Show sort column</button>}
         {!manualSorting && <button type="button" className="text-primary underline underline-offset-2" onClick={() => handleSortingChange([])}>Clear sort</button>}
       </div>}
-      <div ref={scrollRef} className="app-table-scroll overflow-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary" tabIndex={0} role="region" aria-label={`Scrollable ${tableLabel}`}>
+      <div ref={scrollRef} className="app-table-scroll overflow-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary" tabIndex={0} role="region" aria-label={`Scrollable ${tableLabel}`} onKeyDown={event => {
+        if (event.target !== event.currentTarget || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+        const element = event.currentTarget;
+        if (element.scrollWidth <= element.clientWidth || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+        event.preventDefault();
+        element.scrollLeft = event.key === "Home" ? 0 : event.key === "End" ? element.scrollWidth : element.scrollLeft + (event.key === "ArrowRight" ? 80 : -80);
+      }}>
         <table className="w-full text-sm" aria-label={tableLabel} data-layout={semanticLayout ? "semantic" : "auto"}
           style={semanticLayout ? { tableLayout: "fixed", width: tableWidth, minWidth: tableWidth } : undefined}>
           {semanticLayout && <colgroup>
@@ -395,7 +452,7 @@ function DataTableView<T>({
           <thead className="sticky top-0 z-10">
             <tr className="border-b border-border text-xs">
               {selectable && (
-                <th className="w-8 px-2 py-2 text-left">
+                <th scope="col" className={cn("w-8 px-2 py-2 text-left", pinned.offsets.size > 0 && "app-table-pinned")} style={pinned.offsets.size > 0 ? { position: "sticky", left: 0 } : undefined}>
                   <input
                     type="checkbox"
                     checked={allSelected}
@@ -419,13 +476,15 @@ function DataTableView<T>({
                     data-align={layout.align}
                     aria-sort={dir ? (dir === "asc" ? "ascending" : "descending") : undefined}
                     className={cn(
-                      "h-10 py-2 font-semibold select-none",
+                      "relative h-10 py-2 font-semibold select-none",
                       cellPad,
-                      c?.sticky && "sticky left-0 bg-card",
+                      pinned.offsets.has(h.column.id) && "app-table-pinned",
                       c?.className,
                     )}
-                    style={{ textAlign: layout.align, ...(!semanticLayout && c?.width ? { width: c.width } : {}) }}
+                    style={{ textAlign: layout.align, ...pinnedStyle(h.column.id), ...(!semanticLayout && c?.width ? { width: c.width } : {}) }}
                   >
+                    {semanticLayout && <ColumnResizeHandle label={headerText(c?.header, h.column.id)} width={columnWidths[index]} min={baseLayouts[index].minSize} max={baseLayouts[index].maxSize ?? 4096}
+                      onResize={width => resizeColumn(h.column.id, width)} onReset={() => resizeColumn(h.column.id)} />}
                     {c?.sort ? (
                       <button
                         type="button"
@@ -482,7 +541,7 @@ function DataTableView<T>({
                   } : undefined}
                 >
                   {selectable && (
-                    <td className="px-2">
+                    <td className={cn("px-2", pinned.offsets.size > 0 && "app-table-pinned")} style={pinned.offsets.size > 0 ? { position: "sticky", left: 0 } : undefined}>
                       <input
                         type="checkbox"
                         checked={!!isSel}
@@ -499,12 +558,12 @@ function DataTableView<T>({
                       data-column-id={c.id}
                       data-align={layouts[index].align}
                       data-kind={c.kind}
-                      style={{ textAlign: layouts[index].align }}
+                      style={{ textAlign: layouts[index].align, ...pinnedStyle(c.id) }}
                       className={cn(
                         cellPad,
                         (c.code || layouts[index].mono) && "app-table-code",
                         (c.numeric || layouts[index].numeric) && "app-table-numeric",
-                        c.sticky && "sticky left-0 bg-card",
+                        pinned.offsets.has(c.id) && "app-table-pinned",
                         c.className,
                       )}
                     >
@@ -672,7 +731,7 @@ function readStoredTablePreferences(key?: string): StoredTablePreferences {
     const density = parsed.density === "compact" || parsed.density === "cozy" || parsed.density === "comfy"
       ? parsed.density
       : undefined;
-    return { density, hiddenColumnIds };
+    return { ...parsed, density, hiddenColumnIds };
   } catch {
     return {};
   }

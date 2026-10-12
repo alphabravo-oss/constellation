@@ -566,8 +566,10 @@ func TestOpenAPIEventsExportContract(t *testing.T) {
 	}
 	assertOpenAPIFields(t, openAPISchemaAt(t, "components", "schemas", "EventsExportRecord"),
 		[]string{"event", "data"}, []string{"event", "data"})
-	if _, ok := openAPISchemaAt(t, "paths", path, "get", "responses", "500", "content")["text/plain"]; !ok {
-		t.Error("initial export failure should document text/plain 500")
+	for _, media := range []string{"application/json", "application/x-ndjson"} {
+		if _, ok := openAPISchemaAt(t, "paths", path, "get", "responses", "500", "content")[media]; !ok {
+			t.Errorf("initial export failure should document %s 500", media)
+		}
 	}
 }
 

@@ -303,9 +303,19 @@ export interface AssetDetail {
   image_acceptances: ImageAcceptance[];
 }
 
+export interface AssetsListParams { limit?: number; offset?: number; cluster_id?: string; q?: string; search?: string; kind?: string; criticality?: string; ai_workload?: boolean; sort?: string; order?: "asc" | "desc" }
+export interface AssetsListResponse { assets: Asset[]; limit: number; offset: number; has_more: boolean; total: number; summary: Record<string, number>; sort: string; order: "asc" | "desc" }
 export const assets = {
-  list: (params: { limit?: number; offset?: number; cluster_id?: string } = {}) =>
-    api.get<{ assets: Asset[]; limit: number; offset: number; has_more: boolean }>("/assets", { params }).then((r) => r.data),
+  list: (params: AssetsListParams = {}) =>
+    api.get<AssetsListResponse>("/assets", { params }).then((r) => r.data),
+  exportCsv: async (params: AssetsListParams = {}) => {
+    const filters = { ...params }; delete filters.limit; delete filters.offset;
+    const response = await api.get<Blob>("/assets.csv", { params: filters, responseType: "blob" });
+    const total = Number(response.headers["x-export-total"]), limit = Number(response.headers["x-export-limit"]), truncated = response.headers["x-export-truncated"];
+    if (!Number.isSafeInteger(total) || total < 0 || limit !== 100000 || !["true", "false"].includes(String(truncated)) || (truncated === "true") !== (total > limit)) throw new Error("Asset export scope could not be confirmed.");
+    const blob = response.data instanceof Blob ? response.data : new Blob([response.data]); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = "constellation-assets.csv"; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
+    return { total, exported: Math.min(total, limit), limit, truncated: truncated === "true" };
+  },
   get: (id: string) => api.get<AssetDetail>(`/assets/${id}`).then((r) => r.data),
   createImageAcceptance: (id: string, body: { rationale: string; accepted_until: string; expected_image_digest?: string; cluster_id?: string }) =>
     api.post<{ id: string; asset_id?: string; cluster_id?: string; image_digest?: string; image_acceptances: ImageAcceptance[] }>(`/assets/${id}/image-acceptances`, body).then((r) => r.data),
@@ -1832,6 +1842,7 @@ export interface ComponentRollup {
   latest_commit?: string;
   latest_seen_at?: string;
   last_status_cause?: string;
+  scanner_capacity?: { active_jobs: number; max_concurrent: number; idle_capacity: number };
 }
 
 export interface ComponentInstance {
@@ -1920,15 +1931,25 @@ export interface ComponentDiagnostics {
   debug: ComponentDiagnosticDebug;
 }
 
+export interface ComponentsInventoryParams { cluster_id?: string; component?: string; status?: string; role?: string; q?: string; sort?: string; order?: "asc" | "desc"; limit?: number; offset?: number }
 export interface ComponentInventoryResponse {
   summary: ComponentInventorySummary;
   rollups: ComponentRollup[];
   components: ComponentInstance[];
+  cluster_id?: string | null; q?: string; component?: string; status?: string; role?: string; sort?: string; order?: "asc" | "desc"; limit?: number; offset?: number; total?: number; has_more?: boolean; role_counts?: Record<string, number>; source_window_hours?: number;
 }
 
 export const componentsInventory = {
-  list: (params?: { cluster_id?: string; component?: string; status?: string; limit?: number }) =>
+  list: (params?: ComponentsInventoryParams) =>
     api.get<ComponentInventoryResponse>("/components", { params }).then((r) => r.data),
+  exportCSV: async (params: ComponentsInventoryParams = {}) => {
+    const filters = { ...params }; delete filters.limit; delete filters.offset;
+    const response = await api.get<Blob>("/components/export.csv", { params: filters, responseType: "blob" });
+    const total = Number(response.headers["x-export-total"]), limit = Number(response.headers["x-export-limit"]), truncated = response.headers["x-export-truncated"];
+    if (!/^\d+$/.test(String(response.headers["x-export-total"])) || !Number.isSafeInteger(total) || total < 0 || limit !== 100000 || !["true", "false"].includes(String(truncated)) || (truncated === "true") !== (total > limit)) throw new Error("Component export scope could not be confirmed.");
+    const blob = response.data instanceof Blob ? response.data : new Blob([response.data]); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = "constellation-components.csv"; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
+    return { total, exported: Math.min(total, limit), limit, truncated: truncated === "true" };
+  },
   get: (id: string) =>
     api.get<{ component: ComponentInstance }>(`/components/${encodeURIComponent(id)}`).then((r) => r.data),
   diagnostics: (id: string) =>
@@ -2855,6 +2876,7 @@ export interface TimelineItem {
   workload_id?: string;
   namespace?: string;
   cluster_id?: string;
+  platform_role?: string;
   ref?: string;
   verdict?: string;
 }
@@ -2991,6 +3013,8 @@ export interface RuntimeOverview {
     id: string;
     at: string;
     cluster_id: string;
+    platform_role?: string;
+    namespace?: string;
     cluster_name?: string;
     workload_id: string;
     rule_id?: string;
@@ -3004,6 +3028,9 @@ export interface RuntimeOverview {
   }>;
   workloads: Array<{
     workload_id: string;
+    cluster_id?: string;
+    namespace?: string;
+    platform_role?: string;
     events: number;
     alerts: number;
     blocks: number;
@@ -5594,6 +5621,8 @@ export const federation = {
 // page surfaces alongside the curated evidence.
 export interface RuntimeEvent {
   id: string;
+  cluster_id?: string;
+  platform_role?: string;
   at: string;
   kind: string;
   source: string;
