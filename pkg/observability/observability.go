@@ -21,7 +21,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/alphabravocompany/constellation/internal/obslog"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/otel"
@@ -39,6 +38,8 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.27.0"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/alphabravocompany/constellation/internal/obslog"
 )
 
 // Telemetry is the handle returned by Init. Callers must call Shutdown before process exit.
@@ -266,7 +267,7 @@ func (t *Telemetry) HTTPMiddleware(next http.Handler) http.Handler {
 		if t.LoggerOTel != nil {
 			rec := otellog.Record{}
 			rec.SetSeverity(otellog.SeverityInfo)
-			rec.SetBody(otellog.StringValue(fmt.Sprintf("%s %s -> %d (%.3fs)", r.Method, route, ww.status, dur)))
+			rec.SetBody(attribute.StringValue(fmt.Sprintf("%s %s -> %d (%.3fs)", r.Method, route, ww.status, dur)))
 			rec.SetTimestamp(time.Now())
 			t.LoggerOTel.Emit(ctx, rec)
 		}

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
-import { CREDS } from "./utils";
+import { CREDS, login } from "./utils";
 
 const API = process.env.VITE_API_URL ?? "http://localhost:18080";
 const credentials = {
@@ -45,12 +45,7 @@ for (const inputMethod of ["paste", "upload"] as const) {
   test(`remaining NeuVector families: ${inputMethod}, partial apply, unchanged and update previews, bundle and rollback`, async ({ page }) => {
     test.setTimeout(120_000);
     const headers = { "X-Constellation-Client": "browser", Origin: new URL(API).origin };
-    const loginResponse = await page.request.post(`${API}/api/v1/auth/login`, {
-      data: credentials,
-      headers,
-    });
-    expect(loginResponse.status()).toBe(200);
-    expect(await loginResponse.json()).not.toHaveProperty("token");
+    await login(page, { creds: credentials });
     const suffix = randomUUID();
     const profileName = `mig-remaining-profile-${suffix}`;
     const registryName = `mig-remaining-registry-${suffix}`;

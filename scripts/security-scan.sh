@@ -12,6 +12,7 @@ case "${1:-}" in
   govulncheck)
     govulncheck -json ./... > "$artifacts/govulncheck.json"
     govulncheck -mode convert -format sarif < "$artifacts/govulncheck.json" > "$artifacts/govulncheck.sarif"
+    python3 scripts/normalize-sarif.py "$artifacts/govulncheck.sarif"
     govulncheck -mode convert -format text < "$artifacts/govulncheck.json" | tee "$artifacts/govulncheck.txt"
     ;;
   gitleaks)

@@ -1,4 +1,5 @@
-import type { Page } from "@playwright/test";
+import type { APIRequestContext, Page } from "@playwright/test";
+import { setTimeout as delay } from "node:timers/promises";
 import { readAuthState, writeAuthState, type BrowserCookie } from "./auth-state";
 
 export const CREDS = {
@@ -12,6 +13,29 @@ const browserSessionCache = new Map<string, BrowserCookie[]>();
 const browserCookieNames = ["__Host-constellation-session", "__Host-constellation-refresh"];
 
 type Credentials = typeof CREDS;
+
+// Setup runs against the production limiter. Auth/security specs deliberately
+// create and revoke sessions; respect its cooldown instead of disabling it or
+// forging client IPs. Invalid credentials and other errors still fail promptly.
+export async function loginRequest(request: APIRequestContext, creds: Credentials, browser = false) {
+  const deadline = Date.now() + 65_000;
+  while (true) {
+    const response = await request.post(`${API}/api/v1/auth/login`, {
+      data: creds,
+      ...(browser ? { headers: { "X-Constellation-Client": "browser", Origin: new URL(API).origin } } : {}),
+    });
+    if (response.status() !== 429) return response;
+    const value = response.headers()["retry-after"];
+    const seconds = Number(value);
+    const wait = value && Number.isFinite(seconds)
+      ? seconds * 1000
+      : value ? Date.parse(value) - Date.now() : 6000;
+    const milliseconds = Math.max(1000, Number.isFinite(wait) ? wait : 6000);
+    if (Date.now() + milliseconds > deadline) return response;
+    await response.dispose();
+    await delay(milliseconds);
+  }
+}
 function credentialsKey(creds: Credentials) {
   return JSON.stringify([API, creds.email, creds.password]);
 }
@@ -43,9 +67,7 @@ export async function getAuthToken(page: Page, creds: Credentials = CREDS) {
   }
   tokenCache.delete(key);
 
-  const resp = await page.request.post(`${API}/api/v1/auth/login`, {
-    data: creds,
-  });
+  const resp = await loginRequest(page.request, creds);
   if (!resp.ok()) throw new Error(`login failed: ${resp.status()}`);
   const { token } = await resp.json();
   tokenCache.set(key, token);
@@ -66,10 +88,7 @@ async function ensureBrowserSession(page: Page, creds: Credentials) {
   }
   browserSessionCache.delete(key);
   await page.context().clearCookies({ name: /^__Host-constellation-(session|refresh)$/ });
-  const response = await page.request.post(`${API}/api/v1/auth/login`, {
-    data: creds,
-    headers: { "X-Constellation-Client": "browser", Origin: new URL(API).origin },
-  });
+  const response = await loginRequest(page.request, creds, true);
   if (!response.ok()) throw new Error(`browser login failed: ${response.status()}`);
   const cookies = (await page.context().cookies(API)).filter((cookie) => browserCookieNames.includes(cookie.name));
   if (cookies.length !== browserCookieNames.length) throw new Error("browser login did not set session cookies");

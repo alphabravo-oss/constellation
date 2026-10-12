@@ -28,6 +28,8 @@ if [ ! -f "$path" ]; then
   exit 0
 fi
 
+# Backticks are literal Markdown fences, not shell interpolation.
+# shellcheck disable=SC2016
 body=$(printf '### Constellation %s\n\n```\n%s\n```\n' \
   "$label" "$(head -c 60000 "$path")")
 

@@ -93,6 +93,19 @@ fi
         self.assertIn("reachable vulnerability", (self.artifacts / "govulncheck.txt").read_text())
         self.assertEqual(len(self.calls.read_text().splitlines()), 3)
 
+    def test_sarif_normalization_preserves_findings_and_distinct_stacks(self):
+        report = {"runs": [{"results": [
+            {"ruleId": "test", "stacks": [{"frames": [1]}, {"frames": [1]}, {"frames": [2]}]},
+            {"ruleId": "other", "message": {"text": "still blocks"}},
+        ]}]}
+        path = self.directory / "report.sarif"
+        path.write_text(json.dumps(report))
+        subprocess.run(["python3", "scripts/normalize-sarif.py", str(path)], cwd=ROOT, check=True)
+        result = json.loads(path.read_text())["runs"][0]["results"]
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0]["stacks"], [{"frames": [1]}, {"frames": [2]}])
+        self.assertEqual(result[1], report["runs"][0]["results"][1])
+
     def test_govulncheck_analysis_errors_do_not_convert_partial_report(self):
         self.executable("govulncheck", 'printf "%s\\n" "$*" >> "$CALLS"\nexit 9\n')
         self.assertEqual(self.run_scan("govulncheck").returncode, 9)
