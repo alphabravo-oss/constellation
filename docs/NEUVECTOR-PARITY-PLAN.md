@@ -97,6 +97,13 @@ PostgreSQL/race test executions** pass with no skips, and changed-code lint has
 zero findings (`/tmp/constellation-cli-context-seeded/`,
 `/tmp/constellation-cli-new-lint-fixed.json`). CLI live-recipe acceptance stays open.
 
+Artifact and notification endpoint DNS preflight now inherits request cancellation
+and has a five-second bound. Receiver create/patch uses the context-aware API;
+the older notification helper remains compatible. **1,176 seeded race-test
+executions** pass with no skips and zero new lint findings
+(`/tmp/constellation-dns-context-seeded/`). This bounds DNS work; it does not
+establish a serverless dial-time DNS-rebinding defense.
+
 The latest session-lifecycle increment adds migration 171, bounded leader-owned
 cleanup for expired browser/session records and five-minute network snapshots and
 kill requests. It preserves unexpired refresh reuse evidence, legacy unknown

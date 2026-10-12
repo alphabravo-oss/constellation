@@ -925,6 +925,18 @@ func isBlockedIP(ip net.IP) bool {
 // dialer Control hook above is the authoritative dial-time guard (it also defeats rebind).
 // Returns a descriptive error when the endpoint is rejected.
 func PublicURLAllowed(endpoint string) error {
+	return PublicURLAllowedContext(context.Background(), endpoint)
+}
+
+// PublicURLAllowedContext bounds DNS validation to five seconds and respects the
+// caller's cancellation. Use this variant on request paths. The dial-time guard
+// remains authoritative when DNS is unavailable or changes after validation.
+func PublicURLAllowedContext(ctx context.Context, endpoint string) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	u, err := neturl.Parse(strings.TrimSpace(endpoint))
 	if err != nil {
 		return fmt.Errorf("invalid endpoint URL: %w", err)
@@ -947,7 +959,10 @@ func PublicURLAllowed(endpoint string) error {
 	if strings.EqualFold(host, "localhost") {
 		return errors.New("endpoint host localhost is not allowed")
 	}
-	ips, err := net.LookupIP(host)
+	ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	if err == nil {
 		for _, ip := range ips {
 			if isBlockedIP(ip) {

@@ -140,7 +140,7 @@ func downloadArtifact(ctx context.Context, art ServerlessArtifact, source string
 		client = &http.Client{Timeout: 5 * time.Minute}
 	}
 	if !art.AllowPrivateTargets {
-		if err := guardServerlessTarget(source); err != nil {
+		if err := guardServerlessTarget(ctx, source); err != nil {
 			return "", false, err
 		}
 		// Copy the client so we can re-validate every redirect hop without mutating
@@ -151,7 +151,7 @@ func downloadArtifact(ctx context.Context, art ServerlessArtifact, source string
 			if len(via) >= 10 {
 				return errors.New("serverless: too many redirects")
 			}
-			return guardServerlessTarget(req.URL.String())
+			return guardServerlessTarget(req.Context(), req.URL.String())
 		}
 		client = &c
 	}
@@ -197,7 +197,12 @@ func downloadArtifact(ctx context.Context, art ServerlessArtifact, source string
 // ponytail: coarse deny-by-range with a single AllowPrivateTargets escape hatch;
 // upgrade path is an explicit CIDR allowlist on ServerlessArtifact plus a custom
 // DialContext to also close the DNS-rebinding TOCTOU window.
-func guardServerlessTarget(rawURL string) error {
+func guardServerlessTarget(ctx context.Context, rawURL string) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return fmt.Errorf("serverless: parse url: %w", err)
@@ -206,7 +211,7 @@ func guardServerlessTarget(rawURL string) error {
 	if host == "" {
 		return errors.New("serverless: empty artifact host")
 	}
-	ips, err := net.LookupIP(host)
+	ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
 	if err != nil {
 		return fmt.Errorf("serverless: resolve %q: %w", host, err)
 	}

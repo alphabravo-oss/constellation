@@ -308,7 +308,7 @@ func (h *Receivers) Create(w http.ResponseWriter, r *http.Request) {
 		// attacker-controlled internal URL would let a notify rule reach cloud metadata / internal
 		// services. Require https + a public host here; the dispatcher additionally re-checks the
 		// RESOLVED IP at dial time (defeating DNS rebind).
-		if err := notify.PublicURLAllowed(req.Endpoint); err != nil {
+		if err := notify.PublicURLAllowedContext(r.Context(), req.Endpoint); err != nil {
 			jsonError(w, http.StatusBadRequest, "invalid endpoint: "+err.Error())
 			return
 		}
@@ -393,7 +393,7 @@ func (h *Receivers) Patch(w http.ResponseWriter, r *http.Request) {
 	// email receiver's endpoint is a mailto: summary (not an HTTP target), so the guard
 	// only applies to http(s) endpoints.
 	if req.Endpoint != nil && strings.HasPrefix(*req.Endpoint, "http") {
-		if err := notify.PublicURLAllowed(*req.Endpoint); err != nil {
+		if err := notify.PublicURLAllowedContext(r.Context(), *req.Endpoint); err != nil {
 			jsonError(w, http.StatusBadRequest, "invalid endpoint: "+err.Error())
 			return
 		}
