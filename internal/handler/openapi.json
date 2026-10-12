@@ -5373,15 +5373,394 @@
     },
     "/api/v1/clusters/{id}/containers": {
       "get": {
+        "summary": "Running container inventory",
+        "description": "Includes running entries in each node runtime snapshot. Filters and sorting run before pagination; count, summary and rows share one read-only repeatable-read snapshot. row_id distinguishes payload entries even when runtime IDs are missing or duplicated. Workload posture uses advisory pod-prefix attribution; flags report risk-factor key presence, including zero/null, and are not actual per-container settings. Platform roles are resolved independently from exact tenant/cluster/namespace pod ownership, with ambiguous owners unclassified; known platform namespaces retain their classification except IP endpoints. platform_count applies all filters except hide_platform. Invalid or out-of-range numeric pagination values use defaults.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Owned cluster ID."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Literal case-insensitive match across container, pod, image, node and advisory workload identity."
+          },
+          {
+            "name": "namespace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact namespace."
+          },
+          {
+            "name": "node",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact node."
+          },
+          {
+            "name": "hide_platform",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "name": "platform_role",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "core",
+                "none"
+              ]
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "name",
+                "pod",
+                "image",
+                "node",
+                "risk",
+                "state",
+                "observed"
+              ],
+              "default": "risk"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Matching inventory page and complete matching summary.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "cluster_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "row_id": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "image": {
+                            "type": "string"
+                          },
+                          "platform_role": {
+                            "type": "string",
+                            "enum": [
+                              "core",
+                              ""
+                            ]
+                          }
+                        },
+                        "required": [
+                          "row_id",
+                          "id",
+                          "image",
+                          "platform_role"
+                        ],
+                        "additionalProperties": true
+                      }
+                    },
+                    "summary": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "running": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "privileged": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "run_as_root": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "platform_count": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "total",
+                        "running",
+                        "privileged",
+                        "run_as_root",
+                        "platform_count"
+                      ]
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "offset": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "sort": {
+                      "type": "string",
+                      "enum": [
+                        "name",
+                        "pod",
+                        "image",
+                        "node",
+                        "risk",
+                        "state",
+                        "observed"
+                      ]
+                    },
+                    "order": {
+                      "type": "string",
+                      "enum": [
+                        "asc",
+                        "desc"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "cluster_id",
+                    "items",
+                    "summary",
+                    "total",
+                    "has_more",
+                    "limit",
+                    "offset",
+                    "sort",
+                    "order"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
-        },
-        "summary": "Get containers"
+        }
+      }
+    },
+    "/api/v1/clusters/{id}/containers.csv": {
+      "get": {
+        "summary": "Export matching containers as CSV",
+        "description": "Includes running entries in each node runtime snapshot. Filters and sorting run before pagination; count, summary and rows share one read-only repeatable-read snapshot. row_id distinguishes payload entries even when runtime IDs are missing or duplicated. Workload posture uses advisory pod-prefix attribution; flags report risk-factor key presence, including zero/null, and are not actual per-container settings. Platform roles are resolved independently from exact tenant/cluster/namespace pod ownership, with ambiguous owners unclassified; known platform namespaces retain their classification except IP endpoints. platform_count applies all filters except hide_platform. Invalid or out-of-range numeric pagination values use defaults. Applies the same filters and order across all pages; ignores limit/offset and exports up to100,000 rows. X-Export metadata reports truncation.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Owned cluster ID."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Literal case-insensitive match across container, pod, image, node and advisory workload identity."
+          },
+          {
+            "name": "namespace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact namespace."
+          },
+          {
+            "name": "node",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact node."
+          },
+          {
+            "name": "hide_platform",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "name": "platform_role",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "core",
+                "none"
+              ]
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "name",
+                "pod",
+                "image",
+                "node",
+                "risk",
+                "state",
+                "observed"
+              ],
+              "default": "risk"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching CSV export.",
+            "headers": {
+              "X-Export-Total": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-Export-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-Export-Truncated": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/api/v1/clusters/{id}/cross-scan": {
@@ -5842,7 +6221,422 @@
     },
     "/api/v1/clusters/{id}/nodes": {
       "get": {
-        "summary": "List node posture with host facts, packages, containers, CIS, scan status, and host CVEs"
+        "summary": "Node inventory",
+        "description": "Counts and summaries describe all matching nodes, not the returned page. Stable sorting uses node identity as the final tie-breaker. List and CSV each use a read-only repeatable-read snapshot. Node scan and agent coverage remain distinct; an unscanned zero is not a clean host. Invalid limit or offset returns400.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Owned cluster ID."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Literal case-insensitive match across node, OS, kernel, runtime and coverage fields."
+          },
+          {
+            "name": "agent",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "healthy",
+                "stale",
+                "missing"
+              ]
+            }
+          },
+          {
+            "name": "risk",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "critical",
+                "high",
+                "open",
+                "clean",
+                "host-cves"
+              ]
+            }
+          },
+          {
+            "name": "host_cves",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "open"
+              ]
+            },
+            "description": "Exact source-cluster open host-finding cohort; ordinary inventory retains attributed host findings."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "node",
+                "agent",
+                "os",
+                "critical",
+                "high",
+                "open",
+                "packages",
+                "containers",
+                "cis",
+                "last_scan",
+                "seen"
+              ],
+              "default": "seen"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 500
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching inventory page and complete matching summary.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "cluster_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    },
+                    "summary": {
+                      "type": "object",
+                      "properties": {
+                        "nodes": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "runtime_agent_healthy": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "runtime_agent_stale": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "runtime_agent_missing": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "scan_completed": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "scan_gaps": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "critical_vulns": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "high_vulns": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "cis_failed": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "nodes",
+                        "runtime_agent_healthy",
+                        "runtime_agent_stale",
+                        "runtime_agent_missing",
+                        "scan_completed",
+                        "scan_gaps",
+                        "critical_vulns",
+                        "high_vulns",
+                        "cis_failed"
+                      ]
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "offset": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "sort": {
+                      "type": "string",
+                      "enum": [
+                        "node",
+                        "agent",
+                        "os",
+                        "critical",
+                        "high",
+                        "open",
+                        "packages",
+                        "containers",
+                        "cis",
+                        "last_scan",
+                        "seen"
+                      ]
+                    },
+                    "order": {
+                      "type": "string",
+                      "enum": [
+                        "asc",
+                        "desc"
+                      ]
+                    },
+                    "q": {
+                      "type": "string"
+                    },
+                    "agent": {
+                      "type": "string"
+                    },
+                    "risk": {
+                      "type": "string"
+                    },
+                    "host_cves": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "cluster_id",
+                    "items",
+                    "summary",
+                    "total",
+                    "has_more",
+                    "limit",
+                    "offset",
+                    "sort",
+                    "order",
+                    "q",
+                    "agent",
+                    "risk",
+                    "host_cves"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{id}/nodes.csv": {
+      "get": {
+        "summary": "Export matching nodes as CSV",
+        "description": "Counts and summaries describe all matching nodes, not the returned page. Stable sorting uses node identity as the final tie-breaker. List and CSV each use a read-only repeatable-read snapshot. Node scan and agent coverage remain distinct; an unscanned zero is not a clean host. Invalid limit or offset returns400. Applies the same filters and order across all pages; ignores limit/offset and exports up to100,000 rows. X-Export metadata reports truncation.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Owned cluster ID."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Literal case-insensitive match across node, OS, kernel, runtime and coverage fields."
+          },
+          {
+            "name": "agent",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "healthy",
+                "stale",
+                "missing"
+              ]
+            }
+          },
+          {
+            "name": "risk",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "critical",
+                "high",
+                "open",
+                "clean",
+                "host-cves"
+              ]
+            }
+          },
+          {
+            "name": "host_cves",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "open"
+              ]
+            },
+            "description": "Exact source-cluster open host-finding cohort; ordinary inventory retains attributed host findings."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "node",
+                "agent",
+                "os",
+                "critical",
+                "high",
+                "open",
+                "packages",
+                "containers",
+                "cis",
+                "last_scan",
+                "seen"
+              ],
+              "default": "seen"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching CSV export.",
+            "headers": {
+              "X-Export-Total": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-Export-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-Export-Truncated": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/api/v1/clusters/{id}/nodes/{node}": {
@@ -10941,7 +11735,8 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Get conversations"
+        "summary": "Get conversations",
+        "description": " Platform roles use exact tenant/cluster workload ownership, including pod owners; ambiguous names stay unclassified. Metadata lookup failures return an error. Capture action responses include evaluated roles, and metadata failure prevents the new capture/claim/status/upload operation."
       }
     },
     "/api/v1/network/conversations/entries": {
@@ -10954,7 +11749,8 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Get entries"
+        "summary": "Get entries",
+        "description": " Platform roles use exact tenant/cluster workload ownership, including pod owners; ambiguous names stay unclassified. Metadata lookup failures return an error. Capture action responses include evaluated roles, and metadata failure prevents the new capture/claim/status/upload operation."
       }
     },
     "/api/v1/network/enforcement": {
@@ -11082,7 +11878,8 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Get sessions"
+        "summary": "Get sessions",
+        "description": " Platform roles use exact tenant/cluster workload ownership, including pod owners; ambiguous names stay unclassified. Metadata lookup failures return an error. Capture action responses include evaluated roles, and metadata failure prevents the new capture/claim/status/upload operation."
       }
     },
     "/api/v1/network/sessions/summary": {
@@ -11095,7 +11892,8 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Get summary"
+        "summary": "Get summary",
+        "description": " Platform roles use exact tenant/cluster workload ownership, including pod owners; ambiguous names stay unclassified. Metadata lookup failures return an error. Capture action responses include evaluated roles, and metadata failure prevents the new capture/claim/status/upload operation."
       }
     },
     "/api/v1/network/sessions/{id}": {

@@ -394,10 +394,13 @@ export interface NodeListSummary {
   cis_failed: number;
 }
 
+export interface NodeInventoryParams { q?: string; agent?: string; risk?: string; host_cves?: "open"; sort?: string; order?: "asc" | "desc"; limit?: number; offset?: number }
+
 export interface NodeListResponse {
   cluster_id: string;
   items: NodeSummary[];
   summary: NodeListSummary;
+  total?: number; has_more?: boolean; limit?: number; offset?: number; q?: string; agent?: string; risk?: string; host_cves?: string; sort?: string; order?: "asc" | "desc";
 }
 
 export interface NodeDetail {
@@ -411,6 +414,7 @@ export interface NodeDetail {
 }
 
 export interface ContainerRow {
+  row_id: string;
   node: string;
   id: string;
   name: string;
@@ -427,14 +431,22 @@ export interface ContainerRow {
   high: number;
   observed_at: string;
 }
+export interface ContainerListParams { q?: string; namespace?: string; node?: string; hide_platform?: boolean; platform_role?: string; sort?: string; order?: "asc" | "desc"; limit?: number; offset?: number }
 export interface ContainerListResponse {
-  cluster_id: string;
-  items: ContainerRow[];
-  summary: { total: number; running: number; privileged: number; run_as_root: number };
+  cluster_id: string; items: ContainerRow[]; total: number; limit: number; offset: number; has_more: boolean; sort: string; order: "asc" | "desc";
+  summary: { total: number; running: number; privileged: number; run_as_root: number; platform_count: number };
 }
 export const containers = {
-  list: (clusterID: string) =>
-    api.get<ContainerListResponse>(`/clusters/${encodeURIComponent(clusterID)}/containers`).then((r) => r.data),
+  list: (clusterID: string, params: ContainerListParams = {}) =>
+    api.get<ContainerListResponse>(`/clusters/${encodeURIComponent(clusterID)}/containers`, { params }).then((r) => r.data),
+  exportCSV: async (clusterID: string, params: ContainerListParams = {}) => {
+    const filters = { ...params }; delete filters.limit; delete filters.offset;
+    const response = await api.get<Blob>(`/clusters/${encodeURIComponent(clusterID)}/containers.csv`, { params: filters, responseType: "blob" });
+    const total = Number(response.headers["x-export-total"]), limit = Number(response.headers["x-export-limit"]), truncated = response.headers["x-export-truncated"];
+    if (!/^\d+$/.test(String(response.headers["x-export-total"])) || !Number.isSafeInteger(total) || total < 0 || limit !== 100000 || !["true", "false"].includes(String(truncated)) || (truncated === "true") !== (total > limit)) throw new Error("Container export scope could not be confirmed.");
+    const blob = response.data instanceof Blob ? response.data : new Blob([response.data]); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = "constellation-running-containers.csv"; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
+    return { total, exported: Math.min(total, limit), limit, truncated: truncated === "true" };
+  },
 };
 
 export interface NetworkRule {
@@ -483,8 +495,16 @@ export const networkRules = {
 };
 
 export const nodes = {
-  list: (clusterID: string) =>
-    api.get<NodeListResponse>(`/clusters/${encodeURIComponent(clusterID)}/nodes`).then((r) => r.data),
+  list: (clusterID: string, params?: NodeInventoryParams) =>
+    api.get<NodeListResponse>(`/clusters/${encodeURIComponent(clusterID)}/nodes`, { params }).then((r) => r.data),
+  exportCSV: async (clusterID: string, params: NodeInventoryParams = {}) => {
+    const filters = { ...params }; delete filters.limit; delete filters.offset;
+    const response = await api.get<Blob>(`/clusters/${encodeURIComponent(clusterID)}/nodes.csv`, { params: filters, responseType: "blob" });
+    const total = Number(response.headers["x-export-total"]), limit = Number(response.headers["x-export-limit"]), truncated = response.headers["x-export-truncated"];
+    if (!/^\d+$/.test(String(response.headers["x-export-total"])) || !Number.isSafeInteger(total) || total < 0 || limit !== 100000 || !["true", "false"].includes(String(truncated)) || (truncated === "true") !== (total > limit)) throw new Error("Node export scope could not be confirmed.");
+    const blob = response.data instanceof Blob ? response.data : new Blob([response.data]); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = "constellation-nodes.csv"; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
+    return { total, exported: Math.min(total, limit), limit, truncated: truncated === "true" };
+  },
   get: (clusterID: string, node: string) =>
     api.get<NodeDetail>(`/clusters/${encodeURIComponent(clusterID)}/nodes/${encodeURIComponent(node)}`).then((r) => r.data),
   scan: (scanTargetID: string) =>

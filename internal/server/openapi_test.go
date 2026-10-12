@@ -869,3 +869,46 @@ func TestOpenAPIFindingsQueryContracts(t *testing.T) {
 		t.Error("CSV export must document the effective cap header and CSV content")
 	}
 }
+
+func TestOpenAPINodeAndContainerInventoryContracts(t *testing.T) {
+	for _, family := range []string{"nodes", "containers"} {
+		path := "/api/v1/clusters/{id}/" + family
+		list := openAPISchemaAt(t, "paths", path, "get")
+		export := openAPISchemaAt(t, "paths", path+".csv", "get")
+		parameters := func(op map[string]any) map[string]any {
+			out := map[string]any{}
+			for _, raw := range op["parameters"].([]any) {
+				p := raw.(map[string]any)
+				out[p["name"].(string)] = p
+			}
+			return out
+		}
+		lp, ep := parameters(list), parameters(export)
+		filters := []string{"id", "q", "sort", "order"}
+		if family == "nodes" {
+			filters = append(filters, "agent", "risk", "host_cves")
+		} else {
+			filters = append(filters, "namespace", "node", "hide_platform", "platform_role")
+		}
+		for _, name := range filters {
+			if lp[name] == nil || !reflect.DeepEqual(lp[name], ep[name]) {
+				t.Errorf("%s list/export mismatch for %s", family, name)
+			}
+		}
+		if ep["limit"] != nil || ep["offset"] != nil {
+			t.Errorf("%s export must not advertise page clipping", family)
+		}
+		schema := openAPISchemaAt(t, "paths", path, "get", "responses", "200", "content", "application/json", "schema")
+		fields := []string{"cluster_id", "items", "summary", "total", "has_more", "limit", "offset", "sort", "order"}
+		if family == "nodes" {
+			fields = append(fields, "q", "agent", "risk", "host_cves")
+		}
+		assertOpenAPIFields(t, schema, fields, fields)
+		headers := openAPISchemaAt(t, "paths", path+".csv", "get", "responses", "200", "headers")
+		for _, name := range []string{"X-Export-Limit", "X-Export-Total", "X-Export-Truncated"} {
+			if headers[name] == nil {
+				t.Errorf("%s missing %s", family, name)
+			}
+		}
+	}
+}

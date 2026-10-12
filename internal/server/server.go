@@ -802,8 +802,10 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/clusters/{id}/platform-facts", s.requireVerb(rbac.VerbReadFindings, platformFacts.Get))
 			r.Post("/clusters/{id}/platform-scan", s.requireVerb(rbac.VerbManagePolicies, platformFacts.Scan))
 			r.Get("/clusters/{id}/nodes", s.requireVerb(rbac.VerbReadFindings, nodes.List))
+			r.Get("/clusters/{id}/nodes.csv", s.requireVerb(rbac.VerbReadFindings, nodes.ExportCSV))
 			r.Get("/clusters/{id}/nodes/{node}", s.requireVerb(rbac.VerbReadFindings, nodes.Get))
 			r.Get("/clusters/{id}/containers", s.requireVerb(rbac.VerbReadFindings, nodes.Containers))
+			r.Get("/clusters/{id}/containers.csv", s.requireVerb(rbac.VerbReadFindings, nodes.ContainersCSV))
 			r.Post("/clusters/{id}/cross-scan", s.requireVerb(rbac.VerbManagePolicies, clusters.CrossScan))
 
 			// Wave N1: cluster init-bundles (StackRox-style pre-minted onboarding kits).

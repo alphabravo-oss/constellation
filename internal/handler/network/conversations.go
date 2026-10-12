@@ -2,7 +2,6 @@ package network
 
 import (
 	"context"
-	"encoding/json"
 	"net"
 	"net/http"
 	"strconv"
@@ -16,7 +15,6 @@ import (
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
-	"github.com/alphabravocompany/constellation/internal/handler/netutil"
 	"github.com/alphabravocompany/constellation/pkg/graph"
 	"github.com/alphabravocompany/constellation/pkg/livegraph"
 )
@@ -83,12 +81,15 @@ type platformConversation struct {
 	ToPlatformRole   string `json:"to_platform_role,omitempty"`
 }
 
-func (h *NetworkConversations) platformConversations(ctx context.Context, orgID uuid.UUID, clusterID *uuid.UUID, conversations []graph.Conversation) []platformConversation {
+func (h *NetworkConversations) platformConversations(ctx context.Context, orgID uuid.UUID, clusterID *uuid.UUID, conversations []graph.Conversation) ([]platformConversation, error) {
 	workloads := make([]string, 0, len(conversations)*2)
 	for _, conversation := range conversations {
 		workloads = append(workloads, conversation.From, conversation.To)
 	}
-	roles := h.conversationPlatformRoles(ctx, orgID, clusterID, workloads...)
+	roles, err := h.conversationPlatformRoles(ctx, orgID, clusterID, workloads...)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]platformConversation, 0, len(conversations))
 	for _, conversation := range conversations {
 		out = append(out, platformConversation{
@@ -97,69 +98,54 @@ func (h *NetworkConversations) platformConversations(ctx context.Context, orgID 
 			ToPlatformRole:   roles[conversation.To],
 		})
 	}
-	return out
+	return out, nil
 }
 
-func (h *NetworkConversations) conversationPlatformRoles(ctx context.Context, orgID uuid.UUID, clusterID *uuid.UUID, workloads ...string) map[string]string {
-	roles := make(map[string]string)
-	namespaces := make(map[string]struct{})
-	names := make(map[string]struct{})
-	for _, workload := range workloads {
+// Org-wide conversation folding intentionally does not infer an installation
+// when several clusters can contribute the same endpoint name.
+func (h *NetworkConversations) conversationPlatformRoles(ctx context.Context, orgID uuid.UUID, clusterID *uuid.UUID, workloads ...string) (map[string]string, error) {
+	if clusterID == nil {
+		rows, err := h.db.Pool().Query(ctx, `SELECT id FROM clusters WHERE org_id = $1 LIMIT 2`, orgID)
+		if err != nil {
+			return nil, err
+		}
+		var onlyCluster uuid.UUID
+		count := 0
+		for rows.Next() {
+			if err := rows.Scan(&onlyCluster); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			count++
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+		if count == 1 {
+			clusterID = &onlyCluster
+		}
+	}
+	identities := make([]handler.PlatformWorkloadIdentity, len(workloads))
+	for i, workload := range workloads {
 		if endpointKind(workload) != "workload" {
 			continue
 		}
-		namespace, name := netutil.SplitWorkload(workload)
-		if role := handler.PlatformRole(namespace, nil); role != "" {
-			roles[workload] = role
-		} else {
-			namespaces[namespace] = struct{}{}
-			names[name] = struct{}{}
+		identities[i].Workload = workload
+		if clusterID != nil {
+			identities[i].ClusterID = *clusterID
 		}
 	}
-	if clusterID == nil && len(namespaces) > 0 {
-		rows, err := h.db.Pool().Query(ctx, `SELECT id FROM clusters WHERE org_id = $1 LIMIT 2`, orgID)
-		if err == nil {
-			var onlyCluster uuid.UUID
-			count := 0
-			for rows.Next() {
-				var candidate uuid.UUID
-				if rows.Scan(&candidate) == nil {
-					onlyCluster = candidate
-					count++
-				}
-			}
-			rows.Close()
-			if count == 1 {
-				clusterID = &onlyCluster
-			}
-		}
+	resolved, err := handler.EvidencePlatformRoles(ctx, h.db.Pool(), orgID, identities)
+	if err != nil {
+		return nil, err
 	}
-	if clusterID != nil && len(namespaces) > 0 {
-		wanted := make([]string, 0, len(namespaces))
-		for namespace := range namespaces {
-			wanted = append(wanted, namespace)
-		}
-		wantedNames := make([]string, 0, len(names))
-		for name := range names {
-			wantedNames = append(wantedNames, name)
-		}
-		rows, err := h.db.Pool().Query(ctx, `
-SELECT namespace, name, labels FROM deployments
- WHERE org_id = $1 AND cluster_id = $2 AND namespace = ANY($3::text[]) AND name = ANY($4::text[])`, orgID, *clusterID, wanted, wantedNames)
-		if err == nil {
-			for rows.Next() {
-				var namespace, name string
-				var labels json.RawMessage
-				if rows.Scan(&namespace, &name, &labels) == nil {
-					if role := handler.PlatformRoleJSON(namespace, labels); role != "" {
-						roles[namespace+"/"+name] = role
-					}
-				}
-			}
-			rows.Close()
-		}
+	roles := make(map[string]string, len(workloads))
+	for i, workload := range workloads {
+		roles[workload] = resolved[i]
 	}
-	return roles
+	return roles, nil
 }
 
 // NetworkConversations is a slim wrapper that builds a pkg/graph.Graph from the
@@ -254,7 +240,11 @@ func (h *NetworkConversations) List(w http.ResponseWriter, r *http.Request) {
 		g := h.live.Snapshot(subj.OrgID, clusterUUID)
 		if n, _ := g.Len(); n > 0 {
 			nodes := g.Nodes()
-			conversations := h.platformConversations(r.Context(), subj.OrgID, clusterUUID, g.Conversations())
+			conversations, err := h.platformConversations(r.Context(), subj.OrgID, clusterUUID, g.Conversations())
+			if err != nil {
+				httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not classify conversations"})
+				return
+			}
 			httpx.WriteJSON(w, http.StatusOK, map[string]any{
 				"conversations": conversations,
 				"nodes":         nodes,
@@ -342,9 +332,14 @@ SELECT scoped.src_workload, scoped.dst_workload, protocol, dst_port,
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not finish reading conversations"})
 		return
 	}
+	conversations, err := h.platformConversations(r.Context(), subj.OrgID, clusterUUID, g.Conversations())
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not classify conversations"})
+		return
+	}
 	nodes := g.Nodes()
 	response := map[string]any{
-		"conversations": h.platformConversations(r.Context(), subj.OrgID, clusterUUID, g.Conversations()),
+		"conversations": conversations,
 		"nodes":         nodes,
 		"node_kinds":    nodeKinds(nodes),
 		"edges":         g.Edges(),
@@ -432,7 +427,8 @@ SELECT protocol, COALESCE(l7_protocol,''), COALESCE(dst_port,0), verdict,
 		var last time.Time
 		if err := rows.Scan(&e.Protocol, &l7, &e.Port, &e.Verdict, &e.Bytes, &e.Packets,
 			&e.ClientBytes, &e.ServerBytes, &e.Sessions, &e.Severity, &e.ThreatID, &last); err != nil {
-			continue
+			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read conversation entries"})
+			return
 		}
 		e.Protocol = strings.ToUpper(e.Protocol)
 		e.Application = strings.ToUpper(l7)
@@ -445,6 +441,11 @@ SELECT protocol, COALESCE(l7_protocol,''), COALESCE(dst_port,0), verdict,
 		tPkts += e.Packets
 		tSess += e.Sessions
 	}
+	if err := rows.Err(); err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read conversation entries"})
+		return
+	}
+	rows.Close()
 	response := map[string]any{
 		"from": from, "to": to, "window_hours": hours,
 		"entries": entries,
@@ -454,7 +455,11 @@ SELECT protocol, COALESCE(l7_protocol,''), COALESCE(dst_port,0), verdict,
 		},
 	}
 	if len(entries) > 0 {
-		roles := h.conversationPlatformRoles(r.Context(), subj.OrgID, clusterUUID, from, to)
+		roles, err := h.conversationPlatformRoles(r.Context(), subj.OrgID, clusterUUID, from, to)
+		if err != nil {
+			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not classify conversation entries"})
+			return
+		}
 		if role := roles[from]; role != "" {
 			response["from_platform_role"] = role
 		}

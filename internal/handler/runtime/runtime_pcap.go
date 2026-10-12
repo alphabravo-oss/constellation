@@ -173,23 +173,35 @@ func (h *PcapHTTP) Start(w http.ResponseWriter, r *http.Request) {
 	if ns == "" {
 		ns = namespaceOf(req.Workload)
 	}
-	var id uuid.UUID
-	err = h.db.Pool().QueryRow(r.Context(), `
+	tx, err := h.db.Pool().Begin(r.Context())
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	got, err := scanPcap(tx.QueryRow(r.Context(), `
 INSERT INTO runtime_pcap_captures
   (org_id, cluster_id, workload, namespace, requested_by, duration_s,
    src_ip, dst_ip, dst_port, protocol, bpf_filter, capture_interface, file_count, file_size_mb)
 VALUES ($1,$2,$3,$4,$5,$6,
         NULLIF($7,'')::inet, NULLIF($8,'')::inet, NULLIF($9,0), NULLIF($10,''),
         NULLIF($11,''), NULLIF($12,''), NULLIF($13,0), NULLIF($14,0))
-RETURNING id`,
+RETURNING `+pcapCols,
 		sub.OrgID, req.ClusterID, req.Workload, ns, sub.UserID, int16(req.DurationS),
 		req.SrcIP, req.DstIP, req.DstPort, req.Protocol,
-		req.BPFFilter, req.Interface, req.FileCount, req.FileSizeMB).Scan(&id)
+		req.BPFFilter, req.Interface, req.FileCount, req.FileSizeMB))
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	got, _ := h.getByID(r.Context(), sub.OrgID, id)
+	if err := capturePlatformRolesWith(r.Context(), tx, sub.OrgID, []*PcapCapture{got}); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	httpx.WriteJSON(w, http.StatusCreated, got)
 }
 
@@ -315,11 +327,15 @@ func (h *PcapHTTP) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PcapHTTP) capturePlatformRoles(ctx context.Context, orgID uuid.UUID, captures []*PcapCapture) error {
+	return capturePlatformRolesWith(ctx, h.db.Pool(), orgID, captures)
+}
+
+func capturePlatformRolesWith(ctx context.Context, query handler.PlatformRoleQuerier, orgID uuid.UUID, captures []*PcapCapture) error {
 	identities := make([]handler.PlatformWorkloadIdentity, len(captures))
 	for i, capture := range captures {
 		identities[i] = handler.PlatformWorkloadIdentity{ClusterID: capture.ClusterID, Workload: capture.Workload, Namespace: capture.Namespace}
 	}
-	roles, err := handler.EvidencePlatformRoles(ctx, h.db.Pool(), orgID, identities)
+	roles, err := handler.EvidencePlatformRoles(ctx, query, orgID, identities)
 	if err != nil {
 		return err
 	}
@@ -476,11 +492,16 @@ SELECT id FROM runtime_pcap_captures
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if _, err := tx.Exec(r.Context(), `
+	got, err := scanPcap(tx.QueryRow(r.Context(), `
 UPDATE runtime_pcap_captures
    SET status = 'running', claimed_by_node = $1, claimed_at = NOW()
- WHERE id = $2`,
-		node, id); err != nil {
+ WHERE id = $2 RETURNING `+pcapCols,
+		node, id))
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := capturePlatformRolesWith(r.Context(), tx, tok.OrgID, []*PcapCapture{got}); err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -488,7 +509,6 @@ UPDATE runtime_pcap_captures
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	got, _ := h.getByID(r.Context(), tok.OrgID, id)
 	httpx.WriteJSON(w, http.StatusOK, got)
 }
 
@@ -529,6 +549,13 @@ func (h *PcapHTTP) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve metadata before accepting bytes so lookup failure cannot occur
+	// after a successful file write solely to decorate the response.
+	if err := h.capturePlatformRoles(r.Context(), tok.OrgID, []*PcapCapture{got}); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	role := got.PlatformRole
 	if err := os.MkdirAll(pcapDataDir(), 0o755); err != nil {
 		jsonError(w, http.StatusInternalServerError, "mkdir: "+err.Error())
 		return
@@ -563,19 +590,20 @@ func (h *PcapHTTP) Upload(w http.ResponseWriter, r *http.Request) {
 	sum := hex.EncodeToString(hasher.Sum(nil))
 
 	// Stamp the row.
-	if _, err := h.db.Pool().Exec(r.Context(), `
+	got, err = scanPcap(h.db.Pool().QueryRow(r.Context(), `
 UPDATE runtime_pcap_captures
    SET status = 'completed',
        file_path = $1,
        file_size_bytes = $2,
        sha256 = $3,
        completed_at = NOW()
-	 WHERE id = $4 AND org_id = $5 AND cluster_id = $6`,
-		path, written, sum, id, tok.OrgID, boundCluster); err != nil {
+	 WHERE id = $4 AND org_id = $5 AND cluster_id = $6 RETURNING `+pcapCols,
+		path, written, sum, id, tok.OrgID, boundCluster))
+	if err != nil {
 		jsonError(w, http.StatusInternalServerError, "update: "+err.Error())
 		return
 	}
-	got, _ = h.getByID(r.Context(), tok.OrgID, id)
+	got.PlatformRole = role
 	httpx.WriteJSON(w, http.StatusOK, got)
 }
 
@@ -628,19 +656,25 @@ func (h *PcapHTTP) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "invalid status: "+string(req.Status))
 		return
 	}
+	if err := h.capturePlatformRoles(r.Context(), tok.OrgID, []*PcapCapture{got}); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	role := got.PlatformRole
 	completedAtClause := ""
 	if req.Status == PcapStatusCompleted || req.Status == PcapStatusFailed {
 		completedAtClause = ", completed_at = NOW()"
 	}
-	if _, err := h.db.Pool().Exec(r.Context(), `
+	got, err = scanPcap(h.db.Pool().QueryRow(r.Context(), `
 UPDATE runtime_pcap_captures
    SET status = $1, error_message = $2, packet_count = COALESCE(NULLIF($3,0::bigint), packet_count)`+completedAtClause+`
- WHERE id = $4 AND org_id = $5 AND cluster_id = $6`,
-		string(req.Status), req.ErrorMessage, req.PacketCount, id, tok.OrgID, boundCluster); err != nil {
+ WHERE id = $4 AND org_id = $5 AND cluster_id = $6 RETURNING `+pcapCols,
+		string(req.Status), req.ErrorMessage, req.PacketCount, id, tok.OrgID, boundCluster))
+	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	got, _ = h.getByID(r.Context(), tok.OrgID, id)
+	got.PlatformRole = role
 	httpx.WriteJSON(w, http.StatusOK, got)
 }
 

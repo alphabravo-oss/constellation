@@ -16,7 +16,6 @@ import (
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
-	"github.com/alphabravocompany/constellation/internal/handler/netutil"
 	"github.com/alphabravocompany/constellation/internal/lifecycle"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 )
@@ -532,12 +531,7 @@ SELECT COUNT(*)::int
 SELECT id, node, workload_id, application, ip_proto,
        client_ip, client_port, server_ip, server_port, client_state, server_state,
        client_bytes, server_bytes, client_pkts, server_pkts, age, idle, ingress, severity, threat_id,
-       COALESCE((SELECT d.labels FROM deployments d
-                  WHERE d.org_id = network_sessions.org_id
-                    AND d.cluster_id = network_sessions.cluster_id
-                    AND d.namespace = split_part(network_sessions.workload_id, '/', 1)
-                    AND d.name = split_part(network_sessions.workload_id, '/', 2)
-                  ORDER BY d.last_seen_at DESC LIMIT 1), '{}'::jsonb)
+       cluster_id
   FROM network_sessions
  WHERE %s
  ORDER BY (client_bytes + server_bytes) DESC, age DESC, cluster_id, node, id
@@ -548,22 +542,36 @@ SELECT id, node, workload_id, application, ip_proto,
 	}
 	defer rows.Close()
 	out := []sessionDTO{}
+	identities := []handler.PlatformWorkloadIdentity{}
 	for rows.Next() {
 		var s sessionDTO
 		var proto, cstate, sstate int
-		var labels []byte
+		var actualCluster uuid.UUID
 		if err := rows.Scan(&s.ID, &s.Node, &s.WorkloadID, new(int), &proto,
 			&s.ClientIP, &s.ClientPort, &s.ServerIP, &s.ServerPort, &cstate, &sstate,
-			&s.ClientBytes, &s.ServerBytes, &s.ClientPkts, &s.ServerPkts, &s.Age, &s.Idle, &s.Ingress, &s.Severity, &s.ThreatID, &labels); err != nil {
-			continue
+			&s.ClientBytes, &s.ServerBytes, &s.ClientPkts, &s.ServerPkts, &s.Age, &s.Idle, &s.Ingress, &s.Severity, &s.ThreatID, &actualCluster); err != nil {
+			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read sessions"})
+			return
 		}
-		namespace, _ := netutil.SplitWorkload(s.WorkloadID)
-		s.PlatformRole = handler.PlatformRoleJSON(namespace, labels)
+		identities = append(identities, handler.PlatformWorkloadIdentity{ClusterID: actualCluster, Workload: s.WorkloadID})
 		s.IPProto = ipProtoName(proto)
 		s.Application = appLabel(proto, s.ServerPort)
 		s.ClientState = tcpStateName(cstate)
 		s.ServerState = tcpStateName(sstate)
 		out = append(out, s)
+	}
+	if err := rows.Err(); err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read sessions"})
+		return
+	}
+	rows.Close()
+	roles, err := handler.EvidencePlatformRoles(r.Context(), h.db.Pool(), subj.OrgID, identities)
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not classify sessions"})
+		return
+	}
+	for i := range out {
+		out[i].PlatformRole = roles[i]
 	}
 	response := map[string]any{
 		"sessions": out,

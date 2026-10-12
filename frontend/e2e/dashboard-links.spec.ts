@@ -119,7 +119,7 @@ test("all metric tiles keep cluster scope and link to their source pages", async
     ["Compliance", "/compliance"],
     ["Runtime · 24h", "/runtime?tab=evidence&hours=24"],
     ["Image CVEs", "/findings?view=instances&kind=vulnerability&lifecycle=open"],
-    ["Host CVEs", "/nodes?risk=host-cves"],
+    ["Host CVEs", "/findings?view=instances&kind=vulnerability&lifecycle=open&target_type=host"],
     ["Fixable now", "/findings?view=instances&kind=vulnerability&lifecycle=open&fixable=true"],
     ["Privileged facts", "/deployments?hide_platform=false"],
     ["Root facts", "/deployments?hide_platform=false"],
