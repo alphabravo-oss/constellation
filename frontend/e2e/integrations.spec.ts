@@ -39,3 +39,35 @@ test("Integration test preview is read-only and does not send external traffic",
   await expect(page.getByTestId("routing-preview")).toContainText("sends: no");
   await expect(page.getByTestId("routing-preview")).toContainText("persists: no");
 });
+
+test("receiver and email settings open dedicated forms and Cancel returns without saving", async ({ page }) => {
+  const writes: string[] = [];
+  page.on("request", (request) => {
+    if (["POST", "PATCH", "DELETE"].includes(request.method()) && /\/api\/v1\/(integrations\/receivers|system\/config)/.test(request.url())) writes.push(request.url());
+  });
+  await page.goto("/settings/integrations");
+  await page.getByTestId("receiver-add").click();
+  await expect(page).toHaveURL(/\/integrations\/receivers\/new$/);
+  await page.getByTestId("create-receiver-name").fill("Unsaved receiver draft");
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(page).toHaveURL(/\/settings\/integrations$/);
+  await page.getByRole("button", { name: "Edit email server", exact: true }).click();
+  await expect(page.getByTestId("smtp-host")).toBeVisible();
+  await page.reload();
+  await expect(page.getByTestId("smtp-host")).toBeVisible();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(page).toHaveURL(/\/settings\/integrations$/);
+  expect(writes).toEqual([]);
+});
+
+test("routing editors preserve the list tab and reject unversioned child links", async ({ page }) => {
+  await page.goto("/settings/integrations?tab=routes");
+  await page.getByRole("button", { name: "Edit complete routing", exact: true }).click();
+  await expect(page).toHaveURL(/\/integrations\/routing\/edit$/);
+  await expect(page.getByRole("heading", { name: "Edit notification routing", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(page).toHaveURL(/\/settings\/integrations\?tab=routes$/);
+  await page.goto("/settings/integrations/routes/0/edit");
+  await expect(page.getByTestId("error-state")).toContainText("saved routing list");
+  await expect(page.getByRole("button", { name: "Save route", exact: true })).toHaveCount(0);
+});

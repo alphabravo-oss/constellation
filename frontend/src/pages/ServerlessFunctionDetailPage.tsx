@@ -155,30 +155,18 @@ function PermissionPanel({ fn }: { fn: ServerlessFunction }) {
 
       {findings.length > 0 ? (
         <div className="mt-4 overflow-hidden rounded-md border border-border">
-          <table className="app-semantic-table w-full text-sm">
-            <thead className="bg-muted text-xs uppercase text-muted-foreground">
-              <tr>
-                <th className="px-3 py-2 text-left">Issue</th>
-                <th className="px-3 py-2 text-left">Policy</th>
-              </tr>
-            </thead>
-            <tbody>
-              {findings.map((item, index) => (
-                <tr key={`${item.id || index}`} className="border-t border-border">
-                  <td className="px-3 py-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <SeverityBadge severity={normalizeSeverity(String(item.severity || "low")) ?? "low"} size="xs" />
-                      <span className="font-medium">{String(item.title || item.id || "permission issue")}</span>
-                    </div>
-                    <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{String(item.id || "")}</div>
-                  </td>
-                  <td className="px-3 py-2 font-mono text-xs">
-                    {String(item.policy_type || "-")} / {String(item.policy_name || item.policy_arn || "-")}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <DataTable
+            className="rounded-none border-0"
+            rows={findings.map((item, index) => ({ item, rowKey: `${item.id || "permission"}:${index}` }))}
+            rowKey={(row) => row.rowKey}
+            pagination={false}
+            showDensityToggle={false}
+            showColumnChooser={false}
+            columns={[
+              { id: "issue", header: "Issue", kind: "name", wrap: true, cell: ({ item }) => <><div className="flex flex-wrap items-center gap-2"><SeverityBadge severity={normalizeSeverity(String(item.severity || "low")) ?? "low"} size="xs" /><span className="font-medium">{String(item.title || item.id || "permission issue")}</span></div><div className="mt-1 break-all font-mono text-xs text-muted-foreground">{String(item.id || "")}</div></> },
+              { id: "policy", header: "Policy", kind: "text", code: true, size: 280, minSize: 160, maxSize: 480, grow: true, wrap: true, cell: ({ item }) => `${String(item.policy_type || "-")} / ${String(item.policy_name || item.policy_arn || "-")}` },
+            ]}
+          />
         </div>
       ) : null}
     </section>
@@ -188,7 +176,7 @@ function PermissionPanel({ fn }: { fn: ServerlessFunction }) {
 const packageColumns: Column<ScanPackage>[] = [
   {
     id: "package",
-    header: "Package",
+    header: "Package", kind: "name", code: true, wrap: true,
     cell: (pkg) => (
       <div>
         <div className="break-all font-mono text-xs">{pkg.name || "-"}</div>
@@ -199,13 +187,13 @@ const packageColumns: Column<ScanPackage>[] = [
   },
   {
     id: "version",
-    header: "Version",
+    header: "Version", kind: "version", code: true, size: 140, maxSize: 220, wrap: true,
     cell: (pkg) => <span className="font-mono text-xs">{pkg.version || "-"}</span>,
     sort: (a, b) => (a.version || "").localeCompare(b.version || ""),
   },
   {
     id: "ecosystem",
-    header: "Ecosystem",
+    header: "Ecosystem", kind: "badge", size: 128,
     cell: (pkg) => <span className="font-mono text-xs">{pkg.ecosystem || "-"}</span>,
     sort: (a, b) => (a.ecosystem || "").localeCompare(b.ecosystem || ""),
   },
@@ -233,7 +221,7 @@ function FindingsTable({ findings, clusterId }: { findings: ServerlessFinding[];
   const columns: Column<ServerlessFinding>[] = [
     {
       id: "finding",
-      header: "Finding",
+      header: "Finding", kind: "name", wrap: true,
       cell: (finding) => (
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -247,7 +235,7 @@ function FindingsTable({ findings, clusterId }: { findings: ServerlessFinding[];
     },
     {
       id: "status",
-      header: "Status",
+      header: "Status", kind: "status", size: 200, minSize: 160, maxSize: 260, wrap: true,
       cell: (finding) => (
         <div className="text-xs">
           <div className="font-medium">{finding.lifecycle}</div>

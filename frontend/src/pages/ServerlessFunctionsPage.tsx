@@ -50,7 +50,7 @@ export function ServerlessFunctionsPage() {
   const columns: Column<ServerlessFunction>[] = [
     {
       id: "function",
-      header: "Function",
+      header: "Function", kind: "name", size: 320, minSize: 240, wrap: true,
       cell: (item) => (
         <div>
           <div className="flex flex-wrap items-center gap-1.5">
@@ -68,12 +68,12 @@ export function ServerlessFunctionsPage() {
     },
     {
       id: "posture",
-      header: "Posture",
+      header: "Posture", kind: "text", size: 220, minSize: 160, maxSize: 280, wrap: true,
       cell: (item) => <PostureCell item={item} />,
     },
     {
       id: "packages",
-      header: "Packages",
+      header: "Packages", kind: "count", size: 160, minSize: 128, maxSize: 220, wrap: true,
       cell: (item) => (
         <div className="text-xs">
           <div className="font-medium">{item.package_count} packages</div>
@@ -84,7 +84,7 @@ export function ServerlessFunctionsPage() {
     },
     {
       id: "scan",
-      header: "Scan",
+      header: "Scan", kind: "text", size: 220, minSize: 180, maxSize: 300, wrap: true,
       cell: (item) => (
         <div className="text-xs">
           <div className="font-medium">{item.latest_job_status || "not queued"}</div>

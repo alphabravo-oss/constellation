@@ -344,6 +344,44 @@ preferences were restored. A readonly browser geometry regression was added and
 successfully discovered, but the full browser runner was not executed for this
 increment. Remaining compact detail matrices and broader UI-2 workflows stay open.
 
+The integration/table continuation replaces inline routing and SMTP settings with
+URL-addressable form pages and explicit Save/Cancel. Child route edits bind their
+index to the loaded revision, preserve advanced YAML and external receiver names,
+and save immediately. Complete YAML editing retains nested trees verbatim. Routing
+writes now support atomic `If-Match` revision checks, including concurrent first
+saves; stale edits return HTTP 412 without changing the document. SMTP saves use
+the existing system-config revision check and preserve redacted passwords.
+Receiver forms load an exact, settled record, retain drafts on refresh/failure,
+and patch changed fields only. Email edits merge the latest loaded configuration;
+unchanged custom event filters remain intact. Receiver detail results are bound to
+the requested receiver, pending rotations block selection changes, and clipboard
+failures never claim success. No live notifications or secret rotations were sent.
+
+All inventory tables now use the shared DataTable; the remaining raw HTML table
+is Dashboard's four-row risk summary matrix. Compact network inventories retain
+bounded scrolling through an explicit pagination opt-out. Runtime, Audit,
+repository, serverless, container, registry-image and integration tables now
+use semantic column widths. Secondary diagnostic/policy tables still need explicit
+column metadata, and broader UI-2 filtering/export/preferences acceptance is open.
+
+Validation: Helm revision **41** runs frontend
+`constellation/frontend:integration-console-final-20261012` and API
+`constellation/api:integration-revisions-20261012`; all seven deployments are ready.
+All **476 frontend tests**, production build/type-check, changed-source lint,
+OpenAPI, endpoint mapping and plan/whitespace checks pass. Fresh seeded PostgreSQL
+routing tests pass twice with race detection/shuffling and no skips, covering
+concurrent create/update, stale/invalid/cross-organization revisions and legacy
+clients. Live checks cover form navigation/reload/Cancel, required route-label
+validation, refusal of unversioned route-edit links and complete YAML editor
+loading. Configuration fingerprints confirm routing, SMTP and receivers stayed
+unchanged. Runtime's three tables and Audit have matching header/body positions
+at 1280px and 640px, without document overflow; the viewport was restored.
+Five integration browser cases were discovered, including two new readonly
+regressions; the full browser runner was not executed for this increment.
+Cluster-filtered Audit loading took tens of seconds while the unfiltered latest
+event request completed in 0.02 seconds; query diagnosis remains open alongside
+Findings server filtering/export, group scope gates and broader UI-1/2/3/4 work.
+
 The admission-engine continuation adds migration **172** and persists normalized
 engine outcomes atomically with image scan completion. The built-in vulnerability
 profiles now require successful Trivy and Grype results rather than retired

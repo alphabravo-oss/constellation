@@ -50,6 +50,9 @@ const NvdConfigPage       = lazy(() => import("./pages/NvdConfigPage").then((m) 
 const BackupDestinationPage = lazy(() => import("./pages/backup/BackupDestinationPage").then((m) => ({ default: m.BackupDestinationPage })));
 const BackupSchedulePage  = lazy(() => import("./pages/backup/BackupSchedulePage").then((m) => ({ default: m.BackupSchedulePage })));
 const BackupRestorePage   = lazy(() => import("./pages/backup/BackupRestorePage").then((m) => ({ default: m.BackupRestorePage })));
+const RoutingRuleFormPage = lazy(() => import("./pages/integrations/RoutingRuleFormPage").then((m) => ({ default: m.RoutingRuleFormPage })));
+const RoutingConfigFormPage = lazy(() => import("./pages/integrations/RoutingConfigFormPage").then((m) => ({ default: m.RoutingConfigFormPage })));
+const SmtpSettingsFormPage = lazy(() => import("./pages/integrations/SmtpSettingsFormPage").then((m) => ({ default: m.SmtpSettingsFormPage })));
 const ReceiverFormPage    = lazy(() => import("./pages/integrations/ReceiverFormPage").then((m) => ({ default: m.ReceiverFormPage })));
 const AttestationPolicyFormPage = lazy(() => import("./pages/AttestationPolicyFormPage").then((m) => ({ default: m.AttestationPolicyFormPage })));
 const ConnectorFormPage   = lazy(() => import("./pages/connectors/ConnectorFormPage").then((m) => ({ default: m.ConnectorFormPage })));
@@ -347,6 +350,10 @@ const settings_backup_destinationRoute = createRoute({ getParentRoute: () => app
 const settings_backup_scheduleRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "backup/schedule", component: () => (<SuspenseRoute><BackupSchedulePage /></SuspenseRoute>) });
 const settings_backup_restoreRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "backup/restore", component: () => (<SuspenseRoute><BackupRestorePage /></SuspenseRoute>) });
 const settings_integrationsRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "integrations", component: () => (<SuspenseRoute><IntegrationsPage /></SuspenseRoute>) });
+const settings_integrations_routes_newRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "integrations/routes/new", component: () => (<SuspenseRoute><RoutingRuleFormPage /></SuspenseRoute>) });
+const settings_integrations_routes_editRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "integrations/routes/$routeIndex/edit", component: () => (<SuspenseRoute><RoutingRuleFormPage /></SuspenseRoute>) });
+const settings_integrations_routing_editRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "integrations/routing/edit", component: () => (<SuspenseRoute><RoutingConfigFormPage /></SuspenseRoute>) });
+const settings_integrations_smtp_editRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "integrations/smtp/edit", component: () => (<SuspenseRoute><SmtpSettingsFormPage /></SuspenseRoute>) });
 const settings_integrations_receivers_newRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "integrations/receivers/new", component: () => (<SuspenseRoute><ReceiverFormPage /></SuspenseRoute>) });
 const settings_integrations_receivers_idRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "integrations/receivers/$id", component: () => (<SuspenseRoute><ReceiverFormPage /></SuspenseRoute>) });
 const settings_connectorsRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "connectors", component: () => (<SuspenseRoute><ConnectorCoveragePage /></SuspenseRoute>) });
@@ -564,6 +571,11 @@ authenticatedRoute.addChildren([
   settings_backup_scheduleRoute,
   settings_backup_restoreRoute,
   settings_integrationsRoute,
+  settings_integrations_routes_newRoute,
+  settings_integrations_routes_editRoute,
+  settings_integrations_routing_editRoute,
+  settings_integrations_smtp_editRoute,
+
   settings_integrations_receivers_newRoute,
   settings_integrations_receivers_idRoute,
   settings_connectorsRoute,

@@ -91,6 +91,8 @@ export interface DataTableProps<T> {
   /** Upper bound on the server response. Counts, filters, and exports cover loaded rows only. */
   sourceLimit?: number;
   sourceCount?: number;
+  /** Disable internal paging for bounded, scrollable detail inventories. */
+  pagination?: boolean;
 }
 
 const TABLE_PAGE_SIZE = 100;
@@ -141,6 +143,7 @@ function DataTableView<T>({
   rowAttrs,
   sourceLimit,
   sourceCount,
+  pagination = true,
 }: DataTableProps<T>) {
   const [requestedPage, setRequestedPage] = useState(0);
   const storedPreferences = useMemo(() => readStoredTablePreferences(preferencesKey), [preferencesKey]);
@@ -268,9 +271,9 @@ function DataTableView<T>({
   });
 
   const modelRows = table.getRowModel().rows;
-  const pageCount = Math.max(1, Math.ceil(modelRows.length / TABLE_PAGE_SIZE));
+  const pageCount = pagination ? Math.max(1, Math.ceil(modelRows.length / TABLE_PAGE_SIZE)) : 1;
   const page = Math.min(requestedPage, pageCount - 1);
-  const visibleRows = modelRows.slice(page * TABLE_PAGE_SIZE, (page + 1) * TABLE_PAGE_SIZE);
+  const visibleRows = pagination ? modelRows.slice(page * TABLE_PAGE_SIZE, (page + 1) * TABLE_PAGE_SIZE) : modelRows;
   const headers = table.getHeaderGroups()[0]?.headers ?? [];
 
   const allKeys = visibleRows.map((row) => rowKey(row.original));
@@ -504,7 +507,7 @@ function DataTableView<T>({
           </tbody>
         </table>
       </div>
-      {(modelRows.length > TABLE_PAGE_SIZE || sourceLimit !== undefined) && (
+      {(pageCount > 1 || sourceLimit !== undefined) && (
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-3 py-2 text-xs text-muted-foreground" data-testid={testId ? `${testId}-page-scope` : undefined}>
           <span>
             Showing {visibleRows.length ? page * TABLE_PAGE_SIZE + 1 : 0}–{page * TABLE_PAGE_SIZE + visibleRows.length} of {modelRows.length.toLocaleString()} matching loaded rows.

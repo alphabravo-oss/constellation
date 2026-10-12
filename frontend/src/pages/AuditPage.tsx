@@ -23,11 +23,11 @@ interface AuditEvent {
 }
 
 const auditColumns: Column<AuditEvent>[] = [
-  { id: "when", header: "When", cell: (e) => new Date(e.at).toLocaleString(), className: "text-xs text-muted-foreground" },
-  { id: "actor", header: "Actor", cell: (e) => e.actor_id?.slice(0, 8) ?? "—", className: "font-mono text-xs" },
-  { id: "action", header: "Action", cell: (e) => e.action, className: "font-mono text-xs" },
-  { id: "target", header: "Target", cell: (e) => <>{e.target_kind}:{e.target_id?.slice(0, 12) ?? ""}</>, className: "text-xs" },
-  { id: "chain", header: "Chain Hash", cell: (e) => <>{e.chain_hash.slice(0, 16)}…</>, className: "truncate font-mono text-xs" },
+  { id: "when", header: "When", kind: "date", size: 190, minSize: 160, maxSize: 240, cell: (e) => new Date(e.at).toLocaleString(), className: "text-xs text-muted-foreground" },
+  { id: "actor", header: "Actor", kind: "id", size: 128, minSize: 112, maxSize: 160, cell: (e) => e.actor_id?.slice(0, 8) ?? "—", className: "font-mono text-xs" },
+  { id: "action", header: "Action", kind: "text", code: true, size: 240, minSize: 160, grow: true, wrap: true, cell: (e) => e.action, className: "font-mono text-xs" },
+  { id: "target", header: "Target", kind: "id", size: 220, minSize: 160, maxSize: 320, wrap: true, cell: (e) => <>{e.target_kind}:{e.target_id?.slice(0, 12) ?? ""}</>, className: "text-xs" },
+  { id: "chain", header: "Chain Hash", kind: "id", size: 180, maxSize: 220, cell: (e) => <>{e.chain_hash.slice(0, 16)}…</>, className: "truncate font-mono text-xs" },
 ];
 
 export function AuditPage() {

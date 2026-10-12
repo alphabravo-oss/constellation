@@ -216,3 +216,15 @@ it("does not adopt legacy preferences with unknown ownership", () => {
   expect(host?.textContent).toContain("Owner");
   expect(host?.querySelector("tbody tr")?.className).not.toContain("h-6");
 });
+
+it("keeps bounded detail inventories scrollable without changing default pagination", () => {
+  const manyRows = Array.from({ length: 200 }, (_, index) => ({ ...rows[0], id: String(index), name: `Row ${index}` }));
+  render(<DataTable rows={manyRows} columns={columns} rowKey={(row) => row.id} />);
+  expect(host?.querySelectorAll("tbody tr")).toHaveLength(100);
+  expect(host?.textContent).toContain("Page 1 of 2");
+  act(() => root?.render(<DataTable rows={manyRows} columns={columns} rowKey={(row) => row.id} pagination={false} sourceLimit={200} />));
+  expect(host?.querySelectorAll("tbody tr")).toHaveLength(200);
+  expect(host?.textContent).not.toContain("Page 1 of");
+  expect(host?.textContent).toContain("Showing 1–200 of 200 matching loaded rows.");
+  expect(host?.textContent).toContain("Server fetch limit: 200 rows");
+});

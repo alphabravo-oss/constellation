@@ -39,14 +39,14 @@ export function RegistryImagesPage() {
   const totalHigh = rows.reduce((s, r) => s + (r.high ?? 0), 0);
 
   const columns: Column<RegistryImageRow>[] = [
-    { id: "repo", header: "Repository", cell: (r) => <span className="text-xs font-medium">{r.repository}</span>, sort: (a, b) => a.repository.localeCompare(b.repository) },
-    { id: "tags", header: "Tags", cell: (r) => <span className="text-mono text-[11px] text-muted-foreground max-w-[220px] truncate block" title={r.tags.join(", ")}>{r.tags.slice(0, 4).join(", ") || "—"}</span> },
-    { id: "scanned", header: "Scan", width: "96px", cell: (r) => (
+    { id: "repo", header: "Repository", kind: "name", code: true, cell: (r) => <span className="text-xs font-medium">{r.repository}</span>, sort: (a, b) => a.repository.localeCompare(b.repository) },
+    { id: "tags", header: "Tags", kind: "id", size: 220, maxSize: 280, cell: (r) => <span className="text-mono text-[11px] text-muted-foreground max-w-[220px] truncate block" title={r.tags.join(", ")}>{r.tags.slice(0, 4).join(", ") || "—"}</span> },
+    { id: "scanned", header: "Scan", kind: "status", cell: (r) => (
         r.scanned
           ? <span className="rounded px-1.5 py-0.5 text-[10px] font-medium bg-[color-mix(in_oklab,var(--color-severity-low)_16%,transparent)] text-[color:var(--color-severity-low)]">scanned</span>
           : <span className="rounded px-1.5 py-0.5 text-[10px] font-medium bg-muted text-muted-foreground">not scanned</span>
       ), sort: (a, b) => Number(a.scanned) - Number(b.scanned) },
-    { id: "vulns", header: "Vulnerabilities", numeric: true, cell: (r) => (
+    { id: "vulns", header: "Vulnerabilities", kind: "count", size: 150, minSize: 120, maxSize: 200, numeric: true, cell: (r) => (
         (r.critical ?? 0) + (r.high ?? 0) === 0
           ? <span className="text-[11px] text-muted-foreground">{r.scanned ? "no crit/high" : "—"}</span>
           : <span className="flex items-center justify-end gap-1">
@@ -54,8 +54,8 @@ export function RegistryImagesPage() {
               {r.high > 0 && <span className="rounded px-1.5 py-0.5 text-[10px] text-mono font-semibold text-white" style={{ background: "var(--color-severity-high)" }}>{r.high}H</span>}
             </span>
       ), sort: (a, b) => (b.critical * 1000 + b.high) - (a.critical * 1000 + a.high) },
-    { id: "findings", header: "Findings", numeric: true, width: "90px", cell: (r) => <span className="text-mono text-xs">{r.finding_count || "—"}</span>, sort: (a, b) => (a.finding_count ?? 0) - (b.finding_count ?? 0) },
-    { id: "pushed", header: "Last pushed", numeric: true, width: "120px", cell: (r) => <span className="text-[10px] text-muted-foreground">{r.last_pushed_at ? fmtRelative(r.last_pushed_at) : "—"}</span> },
+    { id: "findings", header: "Findings", kind: "count", numeric: true, cell: (r) => <span className="text-mono text-xs">{r.finding_count || "—"}</span>, sort: (a, b) => (a.finding_count ?? 0) - (b.finding_count ?? 0) },
+    { id: "pushed", header: "Last pushed", kind: "age", cell: (r) => <span className="text-[10px] text-muted-foreground">{r.last_pushed_at ? fmtRelative(r.last_pushed_at) : "—"}</span> },
   ];
 
   return (

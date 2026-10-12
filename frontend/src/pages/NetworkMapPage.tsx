@@ -2831,32 +2831,22 @@ function StreamsTab({ flow, clusterID, hours, active }: { flow: NetworkFlow; clu
         <Field label="Sessions" value={t.sessions.toLocaleString()} />
         <Field label="Packets" value={t.packets.toLocaleString()} />
       </div>
-      <div className="overflow-x-auto">
-        <table className="app-semantic-table w-full text-[11px]">
-          <thead>
-            <tr className="text-left text-[10px] uppercase tracking-wider text-muted-foreground">
-              <th className="py-1 pr-2 font-medium">Proto / App</th>
-              <th className="py-1 pr-2 font-medium">Port</th>
-              <th className="py-1 pr-2 text-right font-medium">Bytes</th>
-              <th className="py-1 pr-2 text-right font-medium">Sessions</th>
-              <th className="py-1 font-medium">Verdict</th>
-            </tr>
-          </thead>
-          <tbody className="text-mono">
-            {entries.map((e, i) => (
-              <tr key={i} className="border-t border-border/50">
-                <td className="py-1 pr-2">{e.protocol}{e.application ? <span className="text-muted-foreground">/{e.application}</span> : ""}</td>
-                <td className="py-1 pr-2 text-muted-foreground">{e.port || "—"}</td>
-                <td className="py-1 pr-2 text-right">{formatBytes(e.bytes)}</td>
-                <td className="py-1 pr-2 text-right">{e.sessions.toLocaleString()}</td>
-                <td className="py-1">
-                  <span className={cn("rounded px-1 text-[10px]", e.verdict === "deny" ? "text-[color:var(--color-status-error)]" : "text-muted-foreground")}>{e.verdict}</span>
-                  {e.threat_id > 0 && <span className="ml-1 text-[color:var(--color-status-error)]" title={`threat ${e.threat_id}`}>⚠</span>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="min-w-0">
+        <DataTable
+          rows={entries.map((entry, index) => ({ ...entry, rowKey: index }))}
+          rowKey={(entry) => entry.rowKey}
+          density="compact"
+          pagination={false}
+          showDensityToggle={false}
+          showColumnChooser={false}
+          columns={[
+            { id: "application", header: "Proto / App", kind: "name", code: true, size: 180, minSize: 120, cell: (entry) => <>{entry.protocol}{entry.application ? <span className="text-muted-foreground">/{entry.application}</span> : ""}</> },
+            { id: "port", header: "Port", kind: "count", cell: (entry) => entry.port || "—" },
+            { id: "bytes", header: "Bytes", kind: "bytes", cell: (entry) => formatBytes(entry.bytes) },
+            { id: "sessions", header: "Sessions", kind: "count", cell: (entry) => entry.sessions.toLocaleString() },
+            { id: "verdict", header: "Verdict", kind: "status", cell: (entry) => <><span className={cn("rounded px-1 text-xs", entry.verdict === "deny" ? "text-[color:var(--color-status-error)]" : "text-muted-foreground")}>{entry.verdict}</span>{entry.threat_id > 0 && <span className="ml-1 text-[color:var(--color-status-error)]" title={`threat ${entry.threat_id}`}>⚠</span>}</> },
+          ]}
+        />
       </div>
       <p className="text-[10px] leading-tight text-muted-foreground/80">
         Traffic {shortName(flow.src)} → {shortName(flow.dst)}, per protocol/port stream. Per-connection client/server byte split is in the Live Sessions panel.
@@ -3975,43 +3965,27 @@ function LiveSessionsCard({
               ctrl_list_session table every 15s; connections that dp is actively tracking appear here.
             </p>
           ) : (
-            <div className="max-h-[300px] overflow-auto">
+            <div className="min-w-0">
               {count > 200 && <p className="px-1 py-1 text-[10px] text-muted-foreground">Showing first 200 of {count} loaded sessions. Open the Sessions tab for the paged list.</p>}
-              <table className="app-semantic-table w-full text-[10px]">
-                <thead className="sticky top-0 bg-card">
-                  <tr className="text-left uppercase tracking-wider text-muted-foreground">
-                    <th className="py-1 pr-2 font-medium">Client</th>
-                    <th className="py-1 pr-2 font-medium">Server</th>
-                    <th className="py-1 pr-2 font-medium">App</th>
-                    <th className="py-1 pr-2 font-medium">State</th>
-                    <th className="py-1 pr-2 text-right font-medium">In</th>
-                    <th className="py-1 pr-2 text-right font-medium">Out</th>
-                    <th className="py-1 pr-2 text-right font-medium">Age</th>
-                    <th className="py-1 font-medium"></th>
-                  </tr>
-                </thead>
-                <tbody className="text-mono">
-                  {sessions.slice(0, 200).map((s) => (
-                    <tr key={s.node + s.id} className="group border-t border-border/40">
-                      <td className="py-1 pr-2">{s.client_ip}:{s.client_port}</td>
-                      <td className="py-1 pr-2">{s.server_ip}:{s.server_port}</td>
-                      <td className="py-1 pr-2 text-muted-foreground">{s.application}</td>
-                      <td className="py-1 pr-2 text-muted-foreground">{s.client_state || s.ip_proto}{s.threat_id ? <span className="ml-1 text-[color:var(--color-status-error)]" title={`threat ${s.threat_id}`}>⚠</span> : null}</td>
-                      <td className="py-1 pr-2 text-right">{formatBytes(s.client_bytes)}</td>
-                      <td className="py-1 pr-2 text-right">{formatBytes(s.server_bytes)}</td>
-                      <td className="py-1 pr-2 text-right text-muted-foreground">{s.age}s</td>
-                      <td className="py-1 text-right">
-                        <button type="button" disabled={killing}
-                          onClick={() => { if (window.confirm(`Terminate this ${s.application || s.ip_proto} session (dp ctrl_clear_session)?`)) onKill(s.id, s.node); }}
-                          title="Kill session (terminate the live connection)"
-                          className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-[color:var(--color-status-error)] group-hover:opacity-100 disabled:opacity-40">
-                          <X className="h-3 w-3" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <DataTable<NetworkSession>
+                className="[&_.app-table-scroll]:max-h-[300px]"
+                rows={sessions.slice(0, 200)}
+                rowKey={(session) => `${session.node}-${session.id}`}
+                density="compact"
+                pagination={false}
+                showDensityToggle={false}
+                showColumnChooser={false}
+                columns={[
+                  { id: "client", header: "Client", kind: "id", size: 160, minSize: 112, cell: (session) => `${session.client_ip}:${session.client_port}` },
+                  { id: "server", header: "Server", kind: "id", size: 160, minSize: 112, cell: (session) => `${session.server_ip}:${session.server_port}` },
+                  { id: "application", header: "App", kind: "text", size: 120, cell: (session) => session.application },
+                  { id: "state", header: "State", kind: "status", cell: (session) => <>{session.client_state || session.ip_proto}{session.threat_id ? <span className="ml-1 text-[color:var(--color-status-error)]" title={`threat ${session.threat_id}`}>⚠</span> : null}</> },
+                  { id: "in", header: "In", kind: "bytes", cell: (session) => formatBytes(session.client_bytes) },
+                  { id: "out", header: "Out", kind: "bytes", cell: (session) => formatBytes(session.server_bytes) },
+                  { id: "age", header: "Age", kind: "age", numeric: true, size: 80, cell: (session) => `${session.age}s` },
+                  { id: "actions", header: "", kind: "actions", size: 48, minSize: 48, maxSize: 48, cell: (session) => <button type="button" disabled={killing} onClick={() => { if (window.confirm(`Terminate this ${session.application || session.ip_proto} session (dp ctrl_clear_session)?`)) onKill(session.id, session.node); }} title="Kill session (terminate the live connection)" className="rounded p-1 text-muted-foreground hover:text-[color:var(--color-status-error)] disabled:opacity-40"><X className="h-3 w-3" aria-hidden /></button> },
+                ]}
+              />
             </div>
           )}
         </div>

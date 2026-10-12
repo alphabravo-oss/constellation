@@ -5000,7 +5000,9 @@ export const receivers = {
 
 export const routing = {
   get: () => api.get<{ yaml: string; revision: number; updated_at: string }>("/routing.yaml").then((r) => r.data),
-  put: (yaml: string) => api.post<{ status: string }>("/routing.yaml", { yaml }).then((r) => r.data),
+  put: (yaml: string, revision?: number) => api.post<{ status: string; revision: number }>("/routing.yaml", { yaml },
+    revision === undefined ? undefined : { headers: { "If-Match": `"${revision}"` } },
+  ).then((r) => r.data),
 };
 
 export const forensics = {

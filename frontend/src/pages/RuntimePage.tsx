@@ -41,6 +41,9 @@ export function RuntimePage() {
     {
       id: "workload",
       header: "Workload",
+      kind: "name",
+      code: true,
+      wrap: true,
       className: "align-top",
       cell: (event) => (
         <>
@@ -54,6 +57,9 @@ export function RuntimePage() {
     {
       id: "signal",
       header: "Signal",
+      kind: "text",
+      size: 160,
+      maxSize: 220,
       className: "align-top text-xs",
       cell: (event) => (
         <>
@@ -65,12 +71,18 @@ export function RuntimePage() {
     {
       id: "verdict",
       header: "Verdict",
+      kind: "status",
       className: "align-top",
       cell: (event) => <span className="rounded-md border border-border px-2 py-1 text-xs">{event.verdict}</span>,
     },
     {
       id: "attack",
       header: "ATT&CK",
+      kind: "badge",
+      size: 180,
+      minSize: 120,
+      maxSize: 260,
+      wrap: true,
       className: "align-top",
       cell: (event) => (
         <div className="flex flex-wrap gap-1">
@@ -85,6 +97,11 @@ export function RuntimePage() {
     {
       id: "message",
       header: "Message",
+      kind: "text",
+      size: 280,
+      maxSize: 640,
+      grow: true,
+      wrap: true,
       className: "align-top text-xs text-muted-foreground",
       cell: (event) => (
         <>
@@ -295,20 +312,26 @@ const liveColumns: Column<RuntimeEvent>[] = [
   {
     id: "at",
     header: "Time",
+    kind: "date",
+    size: 128,
+    minSize: 112,
+    maxSize: 160,
     sort: (a, b) => a.at.localeCompare(b.at),
     cell: (e) => <span className="font-mono text-[11px]">{new Date(e.at).toLocaleTimeString()}</span>,
-    width: "120px",
   },
   {
     id: "kind",
     header: "Kind",
+    kind: "status",
+    size: 140,
+    wrap: true,
     sort: (a, b) => a.kind.localeCompare(b.kind),
     cell: (e) => <span className="font-mono text-xs">{e.kind}</span>,
-    width: "140px",
   },
   {
     id: "pod",
     header: "Pod",
+    kind: "name",
     cell: (e) => {
       const pod = typeof e.payload?.pod === "string" ? (e.payload.pod as string) : "";
       return (
@@ -324,13 +347,18 @@ const liveColumns: Column<RuntimeEvent>[] = [
   {
     id: "namespace",
     header: "Namespace",
+    kind: "id",
     sort: (a, b) => (a.namespace ?? "").localeCompare(b.namespace ?? ""),
     cell: (e) => <span className="font-mono text-xs">{e.namespace || "—"}</span>,
-    width: "140px",
   },
   {
     id: "attack",
     header: "ATT&CK",
+    kind: "badge",
+    size: 180,
+    minSize: 120,
+    maxSize: 260,
+    wrap: true,
     cell: (e) => (
       <div className="flex flex-wrap gap-1">
         {e.attack_techniques.length === 0 ? (
@@ -348,6 +376,9 @@ const liveColumns: Column<RuntimeEvent>[] = [
   {
     id: "severity",
     header: "Severity",
+    kind: "status",
+    size: 112,
+    maxSize: 140,
     sort: (a, b) => severityOrder(a.severity) - severityOrder(b.severity),
     cell: (e) => (
       <span
@@ -362,7 +393,6 @@ const liveColumns: Column<RuntimeEvent>[] = [
         {e.severity}
       </span>
     ),
-    width: "100px",
   },
 ];
 
@@ -373,24 +403,37 @@ const subsystemColumns: Column<RuntimeSubsystem>[] = [
   {
     id: "name",
     header: "Subsystem",
+    kind: "name",
     cell: (s) => <span className="font-medium">{s.name}</span>,
     sort: (a, b) => a.name.localeCompare(b.name),
   },
   {
     id: "mode",
     header: "Mode",
+    kind: "status",
+    size: 160,
+    wrap: true,
     cell: (s) => <span className="font-mono text-xs">{s.mode}</span>,
     sort: (a, b) => a.mode.localeCompare(b.mode),
   },
   {
     id: "status",
     header: "Status",
+    kind: "status",
+    size: 160,
+    maxSize: 220,
+    wrap: true,
     cell: (s) => <span className="rounded-md border border-border px-2 py-1 text-xs">{s.status}</span>,
     sort: (a, b) => a.status.localeCompare(b.status),
   },
   {
     id: "evidence",
     header: "Evidence",
+    kind: "text",
+    size: 280,
+    maxSize: 640,
+    grow: true,
+    wrap: true,
     cell: (s) => <span className="text-xs text-muted-foreground">{s.evidence}</span>,
   },
 ];

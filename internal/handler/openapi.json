@@ -9492,24 +9492,58 @@
       "get": {
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "ok",
+            "headers": {
+              "ETag": {
+                "description": "Quoted routing revision; zero when no document exists.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Get routing.yaml"
+        "summary": "Get organization notification routing and its revision"
       },
       "post": {
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Saved; response includes status and the new revision.",
+            "headers": {
+              "ETag": {
+                "description": "Quoted saved revision.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "default": {
             "$ref": "#/components/responses/Error"
+          },
+          "400": {
+            "description": "Invalid body or revision precondition."
+          },
+          "412": {
+            "description": "Routing revision changed; no write occurred."
           }
         },
-        "summary": "Create routing.yaml"
+        "summary": "Save organization notification routing",
+        "description": "Replaces the complete routing YAML document. Editors should send If-Match containing the quoted revision they loaded, including \"0\" for an absent document. Stale writes fail atomically without changing routing. Legacy clients may omit the precondition.",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "description": "One strong quoted nonnegative integer revision.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       }
     },
     "/api/v1/runtime-dlp-rules": {

@@ -16,7 +16,7 @@ const scanStatuses = ["all", "pending", "running", "completed", "failed", "pause
 const repositoryColumns: Column<RepositoryScan>[] = [
   {
     id: "repository",
-    header: "Repository",
+    header: "Repository", kind: "name", size: 320, minSize: 240, wrap: true,
     cell: (item) => (
       <>
         <div className="flex flex-wrap items-center gap-1.5">
@@ -32,7 +32,7 @@ const repositoryColumns: Column<RepositoryScan>[] = [
   },
   {
     id: "source",
-    header: "Source",
+    header: "Source", kind: "text", size: 220, maxSize: 360, wrap: true,
     className: "text-xs",
     cell: (item) => (
       <>
@@ -44,7 +44,7 @@ const repositoryColumns: Column<RepositoryScan>[] = [
   },
   {
     id: "packages",
-    header: "Packages",
+    header: "Packages", kind: "count", size: 180, minSize: 140, maxSize: 240, wrap: true,
     className: "text-xs",
     cell: (item) => (
       <>
@@ -56,7 +56,7 @@ const repositoryColumns: Column<RepositoryScan>[] = [
   },
   {
     id: "scan",
-    header: "Scan",
+    header: "Scan", kind: "text", size: 220, minSize: 180, maxSize: 320, wrap: true,
     className: "text-xs",
     cell: (item) => (
       <>
