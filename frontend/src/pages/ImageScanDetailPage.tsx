@@ -19,12 +19,17 @@ import {
 } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { cn } from "@/lib/cn";
+import { artifactIssue, scanEngineEvidence } from "@/lib/scan-evidence";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
+import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { StatCard } from "@/components/ui/stat-card";
 
 export function ImageScanDetailPage() {
   const { resultId } = useParams({ strict: false });
+  const [requestedTab, setTab] = useTabParam("tab", "findings");
+  const tab = ["findings", "evidence", "workloads", "details"].includes(requestedTab) ? requestedTab : "findings";
   const { clusterId, isLoading: clusterLoading } = useCluster();
   const q = useQuery({
     queryKey: ["image-scan-result", resultId],
@@ -61,28 +66,25 @@ export function ImageScanDetailPage() {
             <SignaturePill item={result} />
           </>
         }
-        description={<span className="break-all font-mono">{result.image_digest}</span>}
+        description="Review this image’s vulnerabilities, scanner coverage, and supporting evidence."
       />
 
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-7" data-testid="image-scan-stats">
+      <EngineVerdict result={result} />
+
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-5" data-testid="image-scan-stats">
         <StatCard label="Findings" value={result.finding_count} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={result.finding_count > 0 ? "high" : "neutral"} />
         <StatCard label="Packages" value={result.package_count} icon={<Database className="h-3.5 w-3.5" />} />
-        <StatCard label="Layers" value={result.layer_count} icon={<Layers className="h-3.5 w-3.5" />} />
         <StatCard label="Secrets" value={result.secret_count} icon={<KeyRound className="h-3.5 w-3.5" />} tone={result.secret_count > 0 ? "critical" : "neutral"} />
-        <StatCard label="File Risks" value={result.file_risk_count} icon={<FileWarning className="h-3.5 w-3.5" />} tone={result.file_risk_count > 0 ? "medium" : "neutral"} />
         <StatCard label="Workloads" value={clusterWorkloads.length} icon={<Layers className="h-3.5 w-3.5" />} tone={clusterWorkloads.length > 0 ? "accent" : "neutral"} />
         <StatCard label="Risk" value={result.max_risk_score} icon={<Boxes className="h-3.5 w-3.5" />} />
       </section>
 
-      <div className="space-y-4">
-        <ScanIdentity result={result} />
-        <ArtifactEvidenceSection result={result} />
-        <FindingsTable findings={detail.findings} />
-        <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
-          <WorkloadsPanel workloads={clusterWorkloads} />
-          <BundlePanel result={result} />
-        </div>
-      </div>
+      <Tabs value={tab} onValueChange={setTab} items={[
+        { value: "findings", label: "Vulnerabilities", count: result.finding_count, content: <FindingsTable findings={detail.findings} /> },
+        { value: "evidence", label: "Scan evidence", content: <div className="space-y-4"><EngineEvidence result={result} /><ArtifactEvidenceSection result={result} /></div> },
+        { value: "workloads", label: "Affected workloads", count: clusterWorkloads.length, content: <WorkloadsPanel workloads={clusterWorkloads} /> },
+        { value: "details", label: "Identity and exports", content: <div className="space-y-4"><ScanIdentity result={result} /><BundlePanel result={result} /></div> },
+      ]} />
     </div>
   );
 }
@@ -91,7 +93,7 @@ function ArtifactEvidenceSection({ result }: { result: ImageScanResult }) {
   const layersQ = useQuery({
     queryKey: ["image-scan-layers", result.id],
     queryFn: () => imageScanResults.layers(result.id),
-    enabled: result.layer_count > 0,
+    retry: false,
   });
   const packagesQ = useQuery({
     queryKey: ["image-scan-packages", result.id],
@@ -106,7 +108,7 @@ function ArtifactEvidenceSection({ result }: { result: ImageScanResult }) {
   const fileRisksQ = useQuery({
     queryKey: ["image-scan-file-risks", result.id],
     queryFn: () => imageScanResults.fileRisks(result.id),
-    enabled: result.file_risk_count > 0,
+    retry: false,
   });
   const signatureQ = useQuery({
     queryKey: ["image-scan-signature", result.id],
@@ -126,6 +128,9 @@ function ArtifactEvidenceSection({ result }: { result: ImageScanResult }) {
   const fileRisks = fileRisksQ.data?.file_risk.findings ?? [];
   const signature = signatureQ.data?.signature_scan.signature;
   const configChecks = configChecksQ.data?.config_checks.checks ?? [];
+  const layerIssue = artifactIssue(layersQ.data?.layer_metadata, layersQ.error);
+  const fileRiskIssue = artifactIssue(fileRisksQ.data?.file_risk, fileRisksQ.error);
+  const configIssue = artifactIssue(configChecksQ.data?.config_checks, configChecksQ.error);
 
   return (
     <section className="grid gap-4 2xl:grid-cols-2" data-testid="image-scan-artifact-evidence">
@@ -142,12 +147,42 @@ function ArtifactEvidenceSection({ result }: { result: ImageScanResult }) {
         unattributedPackageCount={packagesQ.data?.unattributed_package_count ?? result.package_count}
         totalPackageCount={result.package_count}
       />
-      <LayersEvidenceCard loading={layersQ.isPending && result.layer_count > 0} layers={layers} totalSize={layersQ.data?.layer_metadata.total_size_bytes} result={result} />
+      {layerIssue ? <EvidenceIssue title="Image layers" message={layerIssue} /> : <LayersEvidenceCard loading={layersQ.isPending} layers={layers} totalSize={layersQ.data?.layer_metadata.total_size_bytes} result={result} />}
       <SecretsEvidenceCard loading={secretsQ.isPending && result.secret_count > 0} secrets={secrets} count={result.secret_count} />
-      <FileRisksEvidenceCard loading={fileRisksQ.isPending && result.file_risk_count > 0} findings={fileRisks} count={result.file_risk_count} />
-      <ConfigChecksEvidenceCard loading={configChecksQ.isPending} checks={configChecks} />
+      {fileRiskIssue ? <EvidenceIssue title="File risk evidence" message={fileRiskIssue} /> : <FileRisksEvidenceCard loading={fileRisksQ.isPending} findings={fileRisks} count={result.file_risk_count} />}
+      {configIssue ? <EvidenceIssue title="Image config checks" message={configIssue} /> : <ConfigChecksEvidenceCard loading={configChecksQ.isPending} checks={configChecks} />}
     </section>
   );
+}
+
+function EvidenceIssue({ title, message }: { title: string; message: string }) {
+  return <section className="rounded-lg border border-border bg-card p-4" role="status">
+    <h2 className="text-sm font-semibold">{title}</h2>
+    <p className="mt-2 text-sm text-status-warning">{message}</p>
+  </section>;
+}
+
+function EngineVerdict({ result }: { result: ImageScanResult }) {
+  const evidence = scanEngineEvidence(result.engine_status);
+  const incomplete = evidence.engines.some(({ status }) => status !== "succeeded");
+  const stale = isStale(result.last_scanned_at);
+  const critical = result.critical_count > 0 || result.secret_count > 0;
+  const title = critical ? "This image needs urgent review" : incomplete ? "Scanner coverage is incomplete" : stale ? "This scan needs refreshing" : result.finding_count > 0 ? "Vulnerabilities need review" : "No vulnerabilities reported by the completed scanners";
+  return <VerdictBanner status={critical ? "critical" : incomplete || stale || result.finding_count > 0 ? "degraded" : "ok"} title={title} detail={<>{evidence.message}{stale ? " The scan is older than seven days." : ""}</>} />;
+}
+
+function EngineEvidence({ result }: { result: ImageScanResult }) {
+  const evidence = scanEngineEvidence(result.engine_status);
+  return <section className="rounded-lg border border-border bg-card p-4" data-testid="scan-engine-evidence">
+    <h2 className="text-sm font-semibold">Scanner results</h2>
+    <p className="mt-2 text-sm text-muted-foreground">{evidence.message}</p>
+    <dl className="mt-3 flex flex-wrap gap-4 text-sm">
+      {evidence.engines.map(({ name, status }) => <div key={name} className="flex items-center gap-2">
+        <dt className="font-medium">{name}</dt>
+        <dd><Pill tone={status === "succeeded" ? "accent" : status === "failed" ? "danger" : "warn"}>{status}</Pill></dd>
+      </div>)}
+    </dl>
+  </section>;
 }
 
 function PackagesEvidenceCard({
@@ -548,15 +583,15 @@ function BundlePanel({ result }: { result: ImageScanResult }) {
   };
   return (
     <section className="rounded-lg border border-border bg-card p-4">
-      <h2 className="text-sm font-semibold">VulnDB provenance</h2>
-      <dl className="mt-3 grid gap-2 text-sm">
+      <h2 className="text-sm font-semibold">Scan provenance and exports</h2>
+      {metadata || result.vulndb_bundle_version || result.vulndb_bundle_hash ? <dl className="mt-3 grid gap-2 text-sm">
         <Field label="Version" value={result.vulndb_bundle_version || metadata?.bundle_version || "-"} />
         <Field label="Hash" value={result.vulndb_bundle_hash || metadata?.payload_hash || "-"} />
         <Field label="Producer" value={metadata?.producer || "-"} />
         <Field label="Exported" value={metadata?.exported_at ? formatDate(metadata.exported_at) : "-"} />
         <Field label="Records" value={metadata?.record_count != null ? `${metadata.record_count}` : "-"} />
-        <Field label="Last scanned" value={formatDate(result.last_scanned_at)} />
-      </dl>
+      </dl> : null}
+      <p className="mt-3 text-sm text-muted-foreground">Last scanned {formatDate(result.last_scanned_at)}</p>
       <div className="mt-3 grid gap-2 sm:grid-cols-3 xl:grid-cols-4">
         <ArtifactButton
           icon={ShieldAlert}

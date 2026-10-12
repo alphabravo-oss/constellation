@@ -43,6 +43,7 @@ type imageScanResultDTO struct {
 	ScannerProfile      string                  `json:"scanner_profile"`
 	VulnDBBundleVersion string                  `json:"vulndb_bundle_version,omitempty"`
 	VulnDBBundleHash    string                  `json:"vulndb_bundle_hash,omitempty"`
+	EngineStatus        map[string]string       `json:"engine_status"`
 	PackageCount        int                     `json:"package_count"`
 	LayerCount          int                     `json:"layer_count"`
 	SecretCount         int                     `json:"secret_count"`
@@ -192,7 +193,7 @@ SELECT r.id, r.asset_id, r.scan_target_id, r.last_scan_job_id,
 	       r.package_count, COALESCE(ar.layer_count, 0), COALESCE(ar.secret_count, 0), COALESCE(ar.file_risk_count, 0), COALESCE(ar.image_signed, false), COALESCE(ar.signature_status, ''),
        COALESCE(fr.finding_count, r.finding_count), COALESCE(fr.critical_count, 0),
        COALESCE(fr.high_count, 0), COALESCE(fr.medium_count, 0), COALESCE(fr.low_count, 0),
-       COALESCE(fr.info_count, 0), COALESCE(fr.max_risk_score, 0), COALESCE(ir.impacted_count, 0), r.bundle_metadata,
+       COALESCE(fr.info_count, 0), COALESCE(fr.max_risk_score, 0), COALESCE(ir.impacted_count, 0), r.bundle_metadata, r.engine_status,
        r.first_seen_at, r.last_scanned_at, r.updated_at
   FROM image_scan_results r
   LEFT JOIN scan_targets st ON st.id = r.scan_target_id
@@ -703,7 +704,7 @@ func scanImageResultRow(row imageScanResultRowScanner) (imageScanResultDTO, erro
 		&item.ImageDigest, &item.Platform, &item.ScannerProfile, &item.VulnDBBundleVersion, &item.VulnDBBundleHash,
 		&item.PackageCount, &item.LayerCount, &item.SecretCount, &item.FileRiskCount, &item.ImageSigned, &item.SignatureStatus, &item.FindingCount, &item.CriticalCount,
 		&item.HighCount, &item.MediumCount, &item.LowCount,
-		&item.InfoCount, &item.MaxRiskScore, &item.ImpactedCount, &bundleRaw,
+		&item.InfoCount, &item.MaxRiskScore, &item.ImpactedCount, &bundleRaw, &item.EngineStatus,
 		&item.FirstSeenAt, &item.LastScannedAt, &item.UpdatedAt,
 	); err != nil {
 		return imageScanResultDTO{}, err
@@ -773,7 +774,7 @@ SELECT r.id, r.asset_id, r.scan_target_id, r.last_scan_job_id,
 	       r.package_count, COALESCE(ar.layer_count, 0), COALESCE(ar.secret_count, 0), COALESCE(ar.file_risk_count, 0), COALESCE(ar.image_signed, false), COALESCE(ar.signature_status, ''),
        COALESCE(fr.finding_count, r.finding_count), COALESCE(fr.critical_count, 0),
        COALESCE(fr.high_count, 0), COALESCE(fr.medium_count, 0), COALESCE(fr.low_count, 0),
-       COALESCE(fr.info_count, 0), COALESCE(fr.max_risk_score, 0), 0, r.bundle_metadata,
+       COALESCE(fr.info_count, 0), COALESCE(fr.max_risk_score, 0), 0, r.bundle_metadata, r.engine_status,
        r.first_seen_at, r.last_scanned_at, r.updated_at
   FROM image_scan_results r
   LEFT JOIN scan_targets st ON st.id = r.scan_target_id

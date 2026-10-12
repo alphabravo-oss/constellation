@@ -113,7 +113,9 @@ func imageConfigChecksFrom(ref, platform string, parsed name.Reference, cfg *v1.
 	if t, ok := parsed.(name.Tag); ok {
 		tag = t.TagStr()
 	}
-	if tag == "" || tag == "latest" {
+	if digest, ok := parsed.(name.Digest); ok {
+		add("image-latest-tag", "Image is pinned to an immutable digest", "pass", "medium", digest.DigestStr(), "")
+	} else if tag == "" || tag == "latest" {
 		add("image-latest-tag", "Image uses a mutable tag (:latest or untagged)", "warn", "medium",
 			fmt.Sprintf("tag %q", firstNonEmptyStr(tag, "none")),
 			"Pin images to an immutable tag or digest for reproducible, auditable deploys.")

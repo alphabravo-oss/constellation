@@ -3493,6 +3493,165 @@
             "format": "uuid"
           }
         }
+      },
+      "ImageScanResult": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "asset_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scan_target_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "last_scan_job_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "source_type": {
+            "type": "string"
+          },
+          "source_ref": {
+            "type": "string"
+          },
+          "scan_target_metadata": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "image_ref": {
+            "type": "string"
+          },
+          "image_ref_normalized": {
+            "type": "string"
+          },
+          "image_repository": {
+            "type": "string"
+          },
+          "image_tag": {
+            "type": "string"
+          },
+          "image_digest": {
+            "type": "string"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "scanner_profile": {
+            "type": "string"
+          },
+          "vulndb_bundle_version": {
+            "type": "string"
+          },
+          "vulndb_bundle_hash": {
+            "type": "string"
+          },
+          "engine_status": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "enum": [
+                "succeeded",
+                "failed"
+              ]
+            },
+            "description": "Per-engine outcome from the latest completed scan. Empty for historical scans without engine evidence; a missing engine does not imply success. Raw engine errors are never included."
+          },
+          "package_count": {
+            "type": "integer"
+          },
+          "layer_count": {
+            "type": "integer"
+          },
+          "secret_count": {
+            "type": "integer"
+          },
+          "file_risk_count": {
+            "type": "integer"
+          },
+          "image_signed": {
+            "type": "boolean"
+          },
+          "signature_status": {
+            "type": "string"
+          },
+          "finding_count": {
+            "type": "integer"
+          },
+          "severity_counts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "max_risk_score": {
+            "type": "integer"
+          },
+          "critical_count": {
+            "type": "integer"
+          },
+          "high_count": {
+            "type": "integer"
+          },
+          "medium_count": {
+            "type": "integer"
+          },
+          "low_count": {
+            "type": "integer"
+          },
+          "info_count": {
+            "type": "integer"
+          },
+          "impacted_count": {
+            "type": "integer"
+          },
+          "bundle_metadata": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "first_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_scanned_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "image_ref",
+          "image_ref_normalized",
+          "image_repository",
+          "image_digest",
+          "scanner_profile",
+          "engine_status",
+          "package_count",
+          "layer_count",
+          "secret_count",
+          "file_risk_count",
+          "image_signed",
+          "finding_count",
+          "severity_counts",
+          "max_risk_score",
+          "critical_count",
+          "high_count",
+          "medium_count",
+          "low_count",
+          "info_count",
+          "impacted_count",
+          "first_seen_at",
+          "last_scanned_at",
+          "updated_at"
+        ]
       }
     },
     "responses": {
@@ -7180,12 +7339,61 @@
     },
     "/api/v1/image-scan-results": {
       "get": {
-        "summary": "List canonical image scan results by digest, platform, scanner profile, and VulnDB bundle"
+        "summary": "List canonical image scan results by digest, platform, scanner profile, and VulnDB bundle",
+        "responses": {
+          "200": {
+            "description": "Image scan evidence including the latest engine outcomes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "image_scan_results": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ImageScanResult"
+                      }
+                    }
+                  },
+                  "required": [
+                    "image_scan_results"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/api/v1/image-scan-results/{id}": {
       "get": {
-        "summary": "Get one canonical image scan result with findings and affected workloads"
+        "summary": "Get one canonical image scan result with findings and affected workloads",
+        "responses": {
+          "200": {
+            "description": "Image scan evidence including the latest engine outcomes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "image_scan_result": {
+                      "$ref": "#/components/schemas/ImageScanResult"
+                    }
+                  },
+                  "required": [
+                    "image_scan_result"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/api/v1/image-scan-results/{id}/affected-workloads": {

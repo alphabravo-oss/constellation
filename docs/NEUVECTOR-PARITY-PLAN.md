@@ -98,12 +98,34 @@ registry image with Syft, Trivy and Grype; cosign verified its public-key signat
 Pending, other-instance, expired and completed jobs could not obtain credentials.
 Successful and wrong-password scans removed their temporary credential configs;
 local tests also cover cancellation. Three redacted issuance receipts and the
-completed result `1dc64c8c-950e-4e88-ac39-86efb19f5bc0` were persisted. Authenticated
+completed result `e04bfa00-b3ff-4529-96a3-c969637913ba` were persisted. Authenticated
 result, signature, package and layer endpoints return the evidence. Temporary
 registry, token and job fixtures were removed, and both deployments are ready.
-Browser navigation succeeded but repeated collaborative snapshot calls failed;
-this increment does not claim new browser acceptance. Private cloud-provider
+Collaborative browser DOM inspection verifies the stored signature, package,
+layer and config-check evidence; screenshot capture was unavailable. Private cloud-provider
 connectors, refreshable tokens and the broader tenant-scope gates remain open.
+
+The scan-evidence continuation is deployed at Helm revision **23**. Image-result
+list/detail APIs now expose normalized `engine_status` with OpenAPI schemas.
+The image detail page follows the Astronomer-style page contract: one verdict,
+five metrics, and URL-linked vulnerability, evidence, workload and identity/export
+tabs. Missing or failed engine outcomes cannot appear as successful coverage.
+Zero-count layer, filesystem and config reports are fetched and their failures
+are visible instead of being described as missing historical evidence. Retired
+VulnDB fields only render when historical provenance is present. Digest-pinned
+images no longer receive the mutable-tag warning.
+
+Validation: **988 seeded, repeated race-test executions**, followed by two focused
+executions after test refactoring, **154 frontend tests**, scanner race tests,
+OpenAPI checks, production frontend build and changed-code Go/frontend lint pass.
+Live API results expose all three successful engines. Collaborative-browser DOM
+checks verify five metrics, the default vulnerability view, `?tab=evidence`,
+trusted signatures, digest pinning and explicit zero-count inspection failures.
+The signed private-image
+proof was rerun with the new scanner and verified layer/filesystem/config reads,
+the corrected digest control, lease denials, audit receipts and credential cleanup.
+This is a bounded P0/UI-1 truthfulness improvement; the broader page and scanner
+fleet acceptance items remain open.
 
 The admission-engine continuation adds migration **172** and persists normalized
 engine outcomes atomically with image scan completion. The built-in vulnerability

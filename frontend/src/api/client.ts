@@ -3821,6 +3821,7 @@ export interface ImageScanResult {
   image_digest: string;
   platform?: string;
   scanner_profile: string;
+  engine_status?: Record<string, "succeeded" | "failed">;
   vulndb_bundle_version?: string;
   vulndb_bundle_hash?: string;
   bundle_metadata?: VulnDBBundleMetadata;
@@ -4091,6 +4092,7 @@ export interface ImageConfigChecksResponse {
     fail_count?: number;
     warn_count?: number;
     status?: string;
+    reason?: string;
     error?: string;
   };
 }
