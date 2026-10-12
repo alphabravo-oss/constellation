@@ -150,7 +150,7 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
   const ruleColumns = useMemo<Column<AdmissionRuleRow>[]>(
     () => [
       {
-        id: "rule",
+        id: "rule", exportValue: rule => rule.name,
         header: "Rule", kind: "name",
         cell: (rule) => (
           <div className="min-w-0">
@@ -161,14 +161,14 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
         sort: (a, b) => a.name.localeCompare(b.name),
       },
       {
-        id: "status",
+        id: "status", exportValue: rule => rule.enabled ? "enabled" : "disabled",
         header: "State", kind: "status",
 
         cell: (rule) => <StatusPill label={rule.enabled ? "enabled" : "disabled"} tone={rule.enabled ? "success" : "neutral"} />,
         sort: (a, b) => Number(a.enabled) - Number(b.enabled),
       },
       {
-        id: "group",
+        id: "group", exportValue: rule => rule.group || "Any group",
         header: "Group", kind: "text", code: true, size: 176, minSize: 128, maxSize: 240,
 
         cell: (rule) => rule.group ? (
@@ -181,21 +181,21 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
         sort: (a, b) => (a.group ?? "").localeCompare(b.group ?? ""),
       },
       {
-        id: "mode",
+        id: "mode", exportValue: rule => rule.mode,
         header: "Mode", kind: "status",
 
         cell: (rule) => <RuleModePill mode={rule.mode} />,
         sort: (a, b) => a.mode.localeCompare(b.mode),
       },
       {
-        id: "action",
+        id: "action", exportValue: rule => rule.action,
         header: "Action", kind: "status",
 
         cell: (rule) => <ActionPill action={rule.action} />,
         sort: (a, b) => a.action.localeCompare(b.action),
       },
       {
-        id: "criteria",
+        id: "criteria", exportValue: rule => rule.criteria.join("; "),
         header: "Criteria", kind: "text", size: 264, minSize: 192, maxSize: 360, wrap: true,
         cell: (rule) => (
           rule.criteria.length === 0 ? (
@@ -212,7 +212,7 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
         ),
       },
       {
-        id: "actions",
+        id: "actions", exportable: false,
         header: "", kind: "actions", size: 112, minSize: 112, maxSize: 128,
 
         cell: (rule) => {
@@ -285,14 +285,14 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
   const historyColumns = useMemo<Column<DryRunHistoryEntry>[]>(
     () => [
       {
-        id: "time",
+        id: "time", exportValue: entry => entry.assessed_at,
         header: "Assessed", kind: "date", size: 224, minSize: 208, maxSize: 240,
 
         cell: (entry) => <span className="text-xs text-muted-foreground">{formatDateTime(entry.assessed_at)}</span>,
         sort: (a, b) => a.assessed_at.localeCompare(b.assessed_at),
       },
       {
-        id: "image",
+        id: "image", exportValue: entry => `${entry.image} (namespace: ${entry.namespace || "not reported"})`,
         header: "Image", kind: "name", code: true,
         cell: (entry) => (
           <div className="min-w-0">
@@ -303,28 +303,28 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
         sort: (a, b) => a.image.localeCompare(b.image),
       },
       {
-        id: "decision",
+        id: "decision", exportValue: entry => entry.decision,
         header: "Decision", kind: "status",
 
         cell: (entry) => <ActionPill action={entry.decision} />,
         sort: (a, b) => a.decision.localeCompare(b.decision),
       },
       {
-        id: "current",
+        id: "current", exportValue: entry => entry.current_outcome,
         header: "Current", kind: "status",
 
         cell: (entry) => <OutcomePill outcome={entry.current_outcome} />,
         sort: (a, b) => a.current_outcome.localeCompare(b.current_outcome),
       },
       {
-        id: "protect",
+        id: "protect", exportValue: entry => entry.protect_outcome,
         header: "Protect", kind: "status",
 
         cell: (entry) => <OutcomePill outcome={entry.protect_outcome} />,
         sort: (a, b) => a.protect_outcome.localeCompare(b.protect_outcome),
       },
       {
-        id: "matches",
+        id: "matches", exportValue: entry => entry.matches,
         header: "Matches", kind: "count",
 
         numeric: true,
@@ -352,6 +352,7 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
           columns={ruleColumns}
           rowKey={(rule) => rule.id}
           preferencesKey="admission-rules"
+          exportFileName="constellation-admission-rules" exportLabel="Export listed rules CSV"
           testId="admission-rule-table"
           emptyState={
             <div className="px-6 py-10 text-center text-xs text-muted-foreground">
@@ -517,9 +518,8 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
               rows={mergedDryRunHistory}
               columns={historyColumns}
               rowKey={(entry) => entry.id}
-              density="compact"
-              showDensityToggle={false}
-              exportFileName="admission-dry-run-history"
+              preferencesKey="admission-dry-run-history"
+              exportFileName="admission-dry-run-history" exportLabel="Export loaded history CSV"
             />
           </div>
         ) : null}

@@ -93,11 +93,11 @@ export function BackupPage() {
   );
 
   const historyColumns: Column<BackupSummary>[] = [
-    { id: "when", header: "When", kind: "date", size: 224, minSize: 208, maxSize: 240, cell: (b) => <span className="font-mono text-xs">{new Date(b.started_at).toLocaleString()}</span> },
-    { id: "mode", header: "Mode", kind: "status", cell: (b) => b.mode },
-    { id: "size", header: "Size", kind: "bytes", size: 128, minSize: 104, maxSize: 160, cell: (b) => <span className="font-mono text-xs">{b.size_bytes ? `${(b.size_bytes / 1024).toFixed(1)} KiB` : "—"}</span> },
+    { id: "when", exportValue: b => b.started_at, header: "When", kind: "date", size: 224, minSize: 208, maxSize: 240, cell: (b) => <span className="font-mono text-xs">{new Date(b.started_at).toLocaleString()}</span> },
+    { id: "mode", exportValue: b => b.mode, header: "Mode", kind: "status", cell: (b) => b.mode },
+    { id: "size", exportHeader: "Size (bytes)", exportValue: b => b.size_bytes, header: "Size", kind: "bytes", size: 128, minSize: 104, maxSize: 160, cell: (b) => <span className="font-mono text-xs">{b.size_bytes ? `${(b.size_bytes / 1024).toFixed(1)} KiB` : "—"}</span> },
     {
-      id: "status",
+      id: "status", exportValue: b => b.status,
       header: "Status", kind: "status",
       cell: (b) => (
         <>
@@ -107,9 +107,9 @@ export function BackupPage() {
         </>
       ),
     },
-    { id: "signer", header: "Signer", kind: "name", code: true, cell: (b) => <span className="inline-block font-mono text-xs align-bottom">{b.signer_identity || "—"}</span> },
+    { id: "signer", exportValue: b => b.signer_identity || "Not reported", header: "Signer", kind: "name", code: true, cell: (b) => <span className="inline-block font-mono text-xs align-bottom">{b.signer_identity || "—"}</span> },
     {
-      id: "actions",
+      id: "actions", exportable: false,
       header: "Actions", kind: "actions", size: 144, minSize: 136, maxSize: 160,
       className: "text-right",
       cell: (b) =>
@@ -178,13 +178,17 @@ export function BackupPage() {
       {/* Backup table */}
       <Card
         title={<span className="flex items-center gap-2"><Clock className="h-4 w-4" aria-hidden /> History</span>}
-        description="Every backup run on this instance, newest first."
+        description="Latest 50 backup runs returned for this organization, newest first. Metadata export covers only these loaded runs; backup-file downloads remain separate."
         padded={false}
       >
         <div data-testid="backup-history">
           <DataTable
             rows={listQ.data ?? []}
             columns={historyColumns}
+            preferencesKey="backup-run-history"
+            exportFileName={listQ.isSuccess && !listQ.isError && !listQ.isFetching ? "constellation-backup-loaded-history" : undefined}
+            exportLabel="Export loaded backup metadata CSV"
+            sourceLimit={50} sourceCount={listQ.data?.length ?? 0}
             rowKey={(b) => b.id}
             emptyState={<div className="p-6 text-sm text-muted-foreground">No backups recorded.</div>}
           />

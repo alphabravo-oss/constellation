@@ -156,6 +156,7 @@ export function SystemHealthPage() {
             rows={heartbeats}
             columns={heartbeatColumns}
             rowKey={(hb) => `${hb.cluster_id ?? "control"}-${hb.component}@${hb.hostname}`}
+            preferencesKey="system-health-heartbeats"
             exportFileName="constellation-system-health-heartbeats"
             testId="system-health-heartbeats-table"
             emptyState={

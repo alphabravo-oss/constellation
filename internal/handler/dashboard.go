@@ -62,6 +62,7 @@ type dashboardPostureDTO struct {
 }
 
 type topVulnerableWorkloadDTO struct {
+	ID        string `json:"id"`
 	Namespace string `json:"namespace"`
 	Name      string `json:"name"`
 	Critical  int    `json:"critical"`
@@ -265,7 +266,7 @@ SELECT
   COUNT(*) FILTER (WHERE target_type = 'host')::int,
   COUNT(*) FILTER (WHERE target_type = 'platform')::int,
   COUNT(*) FILTER (WHERE (detail_json->>'kev')::bool IS TRUE)::int,
-  COUNT(*) FILTER (WHERE COALESCE(detail_json->>'fixed','') NOT IN ('', 'false'))::int,
+  COUNT(*) FILTER (WHERE lower(COALESCE(NULLIF(detail_json->>'fixed',''), NULLIF(detail_json->>'fixed_version',''), detail_json->'affected_range'->>'fixed_version', '')) NOT IN ('', 'false', 'not-fixed', 'wont-fix', 'won''t-fix'))::int,
   COUNT(*) FILTER (WHERE COALESCE((detail_json->>'epss')::float8, 0) > 0.5)::int,
   COUNT(*) FILTER (WHERE canonical_engine = 'aggregate')::int,
   COUNT(*) FILTER (WHERE severity = 'critical')::int,
@@ -459,12 +460,12 @@ SELECT COUNT(*) FILTER (WHERE enabled AND engine = 'constellation-admission')::i
 	// Top vulnerable workloads (NV "Top Vulnerable Assets"): highest critical+high CVE
 	// workloads in the cluster.
 	twRows, err := h.db.Pool().Query(ctx, `
-SELECT namespace, name, COALESCE(critical_count,0)::int, COALESCE(high_count,0)::int
+SELECT id::text, namespace, name, COALESCE(critical_count,0)::int, COALESCE(high_count,0)::int
   FROM deployments
  WHERE org_id = $1
    AND ($2::uuid IS NULL OR cluster_id = $2)
    AND (COALESCE(critical_count,0) > 0 OR COALESCE(high_count,0) > 0)
- ORDER BY critical_count DESC, high_count DESC
+ ORDER BY critical_count DESC, high_count DESC, id
  LIMIT 6`, orgID, clusterArg)
 	if err != nil {
 		return fmt.Errorf("top vulnerable workloads: %w", err)
@@ -472,10 +473,14 @@ SELECT namespace, name, COALESCE(critical_count,0)::int, COALESCE(high_count,0):
 	defer twRows.Close()
 	for twRows.Next() {
 		var t topVulnerableWorkloadDTO
-		if err := twRows.Scan(&t.Namespace, &t.Name, &t.Critical, &t.High); err != nil {
+		if err := twRows.Scan(&t.ID, &t.Namespace, &t.Name, &t.Critical, &t.High); err != nil {
 			return err
 		}
 		p.TopVulnerable = append(p.TopVulnerable, t)
+	}
+
+	if err := twRows.Err(); err != nil {
+		return fmt.Errorf("read top vulnerable workloads: %w", err)
 	}
 
 	out.Posture = p

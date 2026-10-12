@@ -460,22 +460,26 @@ function ScheduleRow({
 
       {runsOpen && (
         <div className="mt-3 rounded-md border border-border bg-background p-2" data-testid={`schedule-runs-${schedule.id}`}>
+          <p className="text-xs text-muted-foreground">Latest 25 loaded runs for this schedule. CSV contains run metadata; artifact downloads remain separate.</p>
           {runs.isError && <ErrorState title="Run history could not be loaded." action={<Button onClick={() => void runs.refetch()}>Retry</Button>} />}
           {runs.isPending && <p className="text-xs text-muted-foreground">Loading runs…</p>}
-          {runs.data && runs.data.runs.length === 0 && (
+          {!runs.isError && !runs.isFetching && runs.data && runs.data.runs.length === 0 && (
             <p className="text-xs text-muted-foreground">No runs recorded yet.</p>
           )}
-          {runs.data && runs.data.runs.length > 0 && (
+          {!runs.isError && !runs.isFetching && runs.data && runs.data.runs.length > 0 && (
             <DataTable
               rows={runs.data.runs}
               rowKey={(run) => run.id}
-              showDensityToggle={false}
+              preferencesKey="compliance-schedule-run-history"
+              exportFileName={`constellation-compliance-schedule-${schedule.id}-loaded-runs`}
+              exportLabel="Export loaded run metadata CSV"
+              sourceLimit={25} sourceCount={runs.data.runs.length}
               columns={[
-                { id: "started", header: "Started", kind: "date", size: 192, minSize: 176, cell: (run) => new Date(run.started_at).toLocaleString() },
-                { id: "status", header: "Status", kind: "status", size: 144, minSize: 128, cell: (run) => <span className={`rounded-md px-1.5 py-0.5 text-[10px] ${run.status === "succeeded" ? "bg-[color:var(--color-status-success)]/15 text-[color:var(--color-status-success)]" : run.status === "failed" ? "bg-[color:var(--color-status-error)]/15 text-[color:var(--color-status-error)]" : "bg-muted text-muted-foreground"}`}>{run.status}</span> },
-                { id: "summary", header: "Pass / Fail / Manual", kind: "count", numeric: true, size: 184, minSize: 176, cell: (run) => `${run.summary.pass ?? 0} / ${run.summary.fail ?? 0} / ${run.summary.manual ?? 0}` },
-                { id: "signature", header: "Signature", kind: "status", size: 176, minSize: 160, cell: (run) => run.artifact_signature ? <span title={run.artifact_signature} className="rounded bg-[color:var(--color-status-success)]/15 px-1.5 py-0.5 text-[color:var(--color-status-success)]">Signature recorded</span> : <span className="text-muted-foreground">—</span> },
-                { id: "artifact", header: "Artifact", kind: "actions", size: 144, minSize: 136, cell: (run) => run.artifact_uri ? <button type="button" disabled={unavailable} onClick={() => compliance.downloadRunArtifact(run.id).catch(() => toast.error("Artifact download failed. Try again."))} className="inline-flex items-center gap-1 text-foreground hover:underline" data-testid={`run-download-${run.id}`}><Download className="h-3 w-3" aria-hidden /> Download</button> : <span className="text-muted-foreground">—</span> },
+                { id: "started", exportValue: run => run.started_at, header: "Started", kind: "date", size: 192, minSize: 176, cell: (run) => new Date(run.started_at).toLocaleString() },
+                { id: "status", exportValue: run => run.status, header: "Status", kind: "status", size: 144, minSize: 128, cell: (run) => <span className={`rounded-md px-1.5 py-0.5 text-[10px] ${run.status === "succeeded" ? "bg-[color:var(--color-status-success)]/15 text-[color:var(--color-status-success)]" : run.status === "failed" ? "bg-[color:var(--color-status-error)]/15 text-[color:var(--color-status-error)]" : "bg-muted text-muted-foreground"}`}>{run.status}</span> },
+                { id: "summary", exportValue: run => `${run.summary.pass ?? 0} / ${run.summary.fail ?? 0} / ${run.summary.manual ?? 0}`, header: "Pass / Fail / Manual", kind: "count", numeric: true, size: 184, minSize: 176, cell: (run) => `${run.summary.pass ?? 0} / ${run.summary.fail ?? 0} / ${run.summary.manual ?? 0}` },
+                { id: "signature", exportValue: run => run.artifact_signature || "Not recorded", header: "Signature", kind: "status", size: 176, minSize: 160, cell: (run) => run.artifact_signature ? <span title={run.artifact_signature} className="rounded bg-[color:var(--color-status-success)]/15 px-1.5 py-0.5 text-[color:var(--color-status-success)]">Signature recorded</span> : <span className="text-muted-foreground">—</span> },
+                { id: "artifact", exportable: false, header: "Artifact", kind: "actions", size: 144, minSize: 136, cell: (run) => run.artifact_uri ? <button type="button" disabled={unavailable} onClick={() => compliance.downloadRunArtifact(run.id).catch(() => toast.error("Artifact download failed. Try again."))} className="inline-flex items-center gap-1 text-foreground hover:underline" data-testid={`run-download-${run.id}`}><Download className="h-3 w-3" aria-hidden /> Download</button> : <span className="text-muted-foreground">—</span> },
               ]}
             />
           )}

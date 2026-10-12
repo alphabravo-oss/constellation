@@ -389,8 +389,10 @@ test("Effective Config exposes source, diff, and applied revision panels", async
 test("Migration Imports exposes readiness, recommended actions, and report export", async ({ page }) => {
   await page.goto("/settings/migration");
   await expect(page.getByRole("heading", { name: /^Migration Imports$/i })).toBeVisible();
+  await page.getByRole("tab", { name: "Readiness", exact: true }).click();
   await expect(page.getByTestId("migration-switch-readiness")).toBeVisible();
   await expect(page.getByTestId("migration-readiness-checklist")).toBeVisible();
+  await page.getByRole("tab", { name: "Report and follow-up", exact: true }).click();
   await expect(page.getByTestId("migration-recommended-actions")).toBeVisible();
   await expect(page.getByTestId("migration-report-panel")).toBeVisible();
   await expect(page.getByTestId("migration-report-export")).toBeVisible();

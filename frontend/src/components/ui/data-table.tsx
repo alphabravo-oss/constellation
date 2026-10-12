@@ -605,6 +605,7 @@ function DensityBtn({ current, value, onClick, icon: Icon, label }: { current: D
       type="button"
       onClick={onClick}
       aria-label={`${label} density`}
+      aria-pressed={current === value}
       title={`${label} density`}
       className={cn(
         "rounded p-1 hover:bg-accent transition-colors",

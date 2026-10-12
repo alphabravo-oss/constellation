@@ -16,6 +16,7 @@ type Preview = {
 };
 
 async function preview(page: Page): Promise<Preview> {
+  await page.getByRole("tab", { name: "Preview import", exact: true }).click();
   const responsePromise = page.waitForResponse((response) => response.url().endsWith("/migration/preview") && response.request().method() === "POST");
   await page.getByTestId("migration-preview-submit").click();
   const response = await responsePromise;
@@ -26,15 +27,18 @@ async function preview(page: Page): Promise<Preview> {
 }
 
 async function apply(page: Page, importId: string) {
+  await page.getByRole("tab", { name: "Preview import", exact: true }).click();
   const responsePromise = page.waitForResponse((response) => response.url().endsWith(`/migration/imports/${importId}:apply`));
   await page.getByTestId("migration-import-apply-active").click();
   const response = await responsePromise;
   expect(response.ok()).toBe(true);
   expect((await response.json()).status).toBe("partial_applied");
+  await page.getByRole("tab", { name: "Import history", exact: true }).click();
   await expect(page.getByTestId("migration-import-history").locator("tbody tr").filter({ hasText: importId })).toContainText("partial applied");
 }
 
 async function rollback(page: Page, importId: string) {
+  await page.getByRole("tab", { name: "Import history", exact: true }).click();
   const responsePromise = page.waitForResponse((response) => response.url().endsWith(`/migration/imports/${importId}:rollback`));
   await page.getByTestId(`migration-import-rollback-${importId}`).click();
   expect((await responsePromise).ok()).toBe(true);
@@ -65,6 +69,7 @@ for (const inputMethod of ["paste", "upload"] as const) {
       tokens: [{ name: secret, value: secret }],
     });
     const loadExport = async (content: string) => {
+      await page.getByRole("tab", { name: "Preview import", exact: true }).click();
       if (inputMethod === "upload") {
         await page.getByTestId("migration-export-upload").setInputFiles({
           name: `remaining-${suffix}.json`, mimeType: "application/json", buffer: Buffer.from(content),
@@ -94,10 +99,13 @@ for (const inputMethod of ["paste", "upload"] as const) {
       await loadExport(makeExport());
       const initial = await preview(page);
       expect(initial.summary).toMatchObject({ vulnerability_profiles: 1, registries: 1, create: 2, update: 0, unchanged: 0 });
+      await page.getByRole("tab", { name: "Vulnerability profiles", exact: true }).click();
       await expect(page.getByTestId("migration-preview-vulnerability-profile")).toHaveCount(1);
       await expect(page.getByTestId("migration-preview-vulnerability-profile")).toContainText(profileName);
+      await page.getByRole("tab", { name: "Registries", exact: true }).click();
       await expect(page.getByTestId("migration-preview-registry")).toHaveCount(1);
       await expect(page.getByTestId("migration-preview-registries")).toContainText(/reissue/i);
+      await page.getByRole("tab", { name: "Diagnostics", exact: true }).click();
       await expect(page.getByTestId("migration-preview-unsupported")).toContainText("REDACTED");
       await expect(page.getByTestId("migration-preview-result")).not.toContainText(secret);
       expect(JSON.stringify(initial)).not.toContain(secret);
@@ -110,8 +118,11 @@ for (const inputMethod of ["paste", "upload"] as const) {
       expect(repeated.summary).toMatchObject({ create: 0, update: 0, unchanged: 2 });
       expect(repeated.vulnerability_profiles[0].diff_action).toBe("unchanged");
       expect(repeated.registries[0].diff_action).toBe("unchanged");
+      await page.getByRole("tab", { name: "Vulnerability profiles", exact: true }).click();
       await expect(page.getByTestId("migration-preview-vulnerability-profiles")).toContainText("unchanged");
+      await page.getByRole("tab", { name: "Registries", exact: true }).click();
       await expect(page.getByTestId("migration-preview-registries")).toContainText("unchanged");
+      await page.getByRole("tab", { name: "Import history", exact: true }).click();
       const downloadPromise = page.waitForEvent("download");
       await page.getByTestId(`migration-import-rollback-bundle-${initial.import_id}`).click();
       const download = await downloadPromise;
@@ -137,6 +148,7 @@ for (const inputMethod of ["paste", "upload"] as const) {
       await loadExport(makeExport());
       const afterRollback = await preview(page);
       expect(afterRollback.summary).toMatchObject({ create: 2, update: 0, unchanged: 0 });
+      await page.getByRole("tab", { name: "Import history", exact: true }).click();
       await expect(page.getByTestId("migration-import-history")).not.toContainText(/undefined|NaN/);
     } finally {
       for (const importId of appliedImports.reverse()) {

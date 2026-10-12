@@ -230,3 +230,30 @@ it("links denied pairs and exposure to exact directed server-filtered conversati
   expect(exposure).toBeDefined(); const target = new URL(exposure.href, "http://localhost");
   expect(target.searchParams.get("to")).toBe("prod/api"); expect(target.searchParams.get("hours")).toBe("168");
 });
+it("links top vulnerable workload IDs exactly and labels legacy namespace/name search", async () => {
+ route.params = new URLSearchParams("tab=network");
+ vi.mocked(dashboard.summary).mockResolvedValue({ findings_by_severity: {}, open_findings: 0, accepted_risks: 0, recent_activity: [], posture: { security_score: 5, top_vulnerable: [{id:"deployment-exact",namespace:"one",name:"api",critical:2,high:3},{namespace:"two",name:"api",critical:1,high:4}] } } as unknown as Awaited<ReturnType<typeof dashboard.summary>>);
+ await renderPage(); await settled(() => expect(host.querySelector('a[href="/clusters/cluster/deployments/deployment-exact"]')).not.toBeNull());
+ expect(host.querySelector('a[href="/clusters/cluster/deployments?q=api&namespace=two&hide_platform=false"]')).not.toBeNull(); expect(host.textContent).toContain("namespace + name search"); expect(host.textContent).toContain("Up to six reported workloads");
+});
+it("uses matching finding instance cohorts and makes unsupported location/fact destinations explicit", async () => {
+ route.params = new URLSearchParams("tab=posture");
+ await renderPage(); await settled(() => expect(host.textContent).toContain("Additional posture metrics"));
+ expect(host.querySelector('[data-testid="dashboard-summary"] a[href="/clusters/cluster/findings?view=instances&lifecycle=open"]')).not.toBeNull();
+ expect(host.querySelector('a[href="/clusters/cluster/findings?view=instances&kind=vulnerability&lifecycle=open&fixable=true"]')).not.toBeNull();
+ expect(host.textContent).toContain("image-location filter unavailable"); expect(host.textContent).toContain("privileged fact filter unavailable"); expect(host.textContent).toContain("destination groups named nodes");
+});
+it("exports a source matrix with aggregate-versus-sample counts and failed sources marked unavailable", async () => {
+ vi.mocked(network.conversations).mockRejectedValue(new Error("source offline"));
+ await renderPage(); await settled(() => expect(host.querySelector('[data-testid="dashboard-source-matrix"]')?.textContent).toContain("Unavailable"));
+ const table=host.querySelector('[data-testid="dashboard-source-matrix"]')!;
+ expect(table.textContent).toContain("up to 5,000 pairs"); expect(table.textContent).toContain("up to 50 workloads per direction"); expect(table.textContent).toContain("Organization-wide latest 20"); expect(table.textContent).toContain("Not master; member inventory not requested");
+ await act(async () => button("Export source matrix").click());
+ expect(downloadCsv).toHaveBeenCalledWith("dashboard-source-matrix.csv",expect.arrayContaining(["Metric or view","Reported / loaded count","Scope and source limits"]),expect.arrayContaining([expect.arrayContaining(["critical open records",1234]),expect.arrayContaining(["Loaded blocked conversation pairs","Unavailable"])]));
+});
+it("renders the risk-by-mode matrix through canonical table headers and truthful configured counts", async () => {
+ route.params = new URLSearchParams("tab=network");
+ vi.mocked(dashboard.summary).mockResolvedValue({ findings_by_severity: {}, recent_activity: [], posture: {security_score: 5,enforcement:{groups:3,discover:1,monitor:1,protect:1},cves_by_mode:{discover:4,monitor:5,protect:6},exposed_by_mode:{discover:1,monitor:2,protect:3}} } as unknown as Awaited<ReturnType<typeof dashboard.summary>>);
+ await renderPage();await settled(()=>expect(host.querySelector('[data-testid="dashboard-risk-by-mode"]')).not.toBeNull());
+ const table=host.querySelector('[data-testid="dashboard-risk-by-mode"]')!;expect([...table.querySelectorAll("thead th")].map(th=>th.textContent?.trim())).toEqual(["Configured mode","Open CVE records","Exposure facts"]);expect(table.querySelectorAll("tbody tr")).toHaveLength(3);expect(host.textContent).toContain("not applier health");
+});

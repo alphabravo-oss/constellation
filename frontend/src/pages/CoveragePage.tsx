@@ -1,13 +1,11 @@
-// CoveragePage — Posture Maturity dashboard backed by live runtime evidence.
+// CoveragePage — scoped posture workspace backed by bounded API evidence.
 //
-// Replaces the static feature-matrix with a per-capability roll-up where each row
-// answers the same three questions: is this configured today, did it emit recent
-// signal, and where do I jump to act on it. Org-scoped rows (CVE Intelligence,
+// Lists reported records, source timestamps and navigation per capability.
+// Source availability and bounded samples stay separate from enforcement health. Org-scoped rows (CVE Intelligence,
 // Federation, audit-derived rows) ignore the cluster picker; cluster-scoped rows
 // (Network Map, Auto NetworkPolicy) thread the picker through their API calls.
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, isValidElement, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
 import {
   ArrowUpRight,
   CheckCircle2,
@@ -29,15 +27,21 @@ import {
   connectorCoverage,
   scanJobs,
 } from "@/api/client";
-import { DataTable, type Column, type Density } from "@/components/ui/data-table";
+import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { StatusPill } from "@/components/ui/status-pill";
-import { cn } from "@/lib/cn";
+import { Button } from "@/components/ui/button";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
+import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { ErrorState } from "@/components/ui/states";
+import { Tabs, useTabParam } from "@/components/ui/tabs";
+import { useRouteSearchParams } from "@/lib/route-search";
+import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
 import { sortClustersByActivity } from "@/lib/clusters";
 
 // --- types -----------------------------------------------------------------
 
-type CapStatus = "active" | "partial" | "idle" | "missing" | "pending";
+type CapStatus = "active" | "partial" | "idle" | "missing" | "pending" | "unavailable";
 
 interface CapabilityRow {
   id: string;
@@ -53,6 +57,8 @@ interface CapabilityRow {
   lastAt?: string; // ISO timestamp; undefined means unknown / no events.
   href?: string;
   loading?: boolean;
+  retry?: () => void;
+  actionLabel?: string;
 }
 
 // --- helpers ---------------------------------------------------------------
@@ -64,7 +70,7 @@ function relTime(iso?: string): string {
   const t = new Date(iso).getTime();
   if (Number.isNaN(t) || t <= 0) return "—";
   const diffMs = Date.now() - t;
-  if (diffMs < 0) return "just now";
+  if (diffMs < 0) return "Future timestamp";
   const s = Math.floor(diffMs / 1000);
   if (s < 60) return `${s}s ago`;
   const m = Math.floor(s / 60);
@@ -80,7 +86,8 @@ function withinHours(iso: string | undefined, hours: number): boolean {
   if (!iso) return false;
   const t = new Date(iso).getTime();
   if (Number.isNaN(t)) return false;
-  return Date.now() - t < hours * 3600_000;
+  const age = Date.now() - t;
+  return age >= 0 && age < hours * 3600_000;
 }
 
 function latestISO(values: Array<string | undefined>): string | undefined {
@@ -105,6 +112,8 @@ function tone(status: CapStatus): "success" | "warning" | "pending" | "neutral" 
       return "pending";
     case "missing":
       return "neutral";
+    case "unavailable":
+      return "warning";
     case "pending":
       return "info";
   }
@@ -113,13 +122,15 @@ function tone(status: CapStatus): "success" | "warning" | "pending" | "neutral" 
 function statusLabel(s: CapStatus): string {
   switch (s) {
     case "active":
-      return "Active";
+      return "Evidence reported";
     case "partial":
       return "Partial";
     case "idle":
-      return "Configured · idle";
+      return "Records reported";
     case "missing":
-      return "Not configured";
+      return "No records";
+    case "unavailable":
+      return "Unavailable";
     case "pending":
       return "Loading";
   }
@@ -136,7 +147,7 @@ interface AuditEvent {
   at: string;
 }
 
-async function fetchAudit(action: string, limit = 1): Promise<{ count: number; lastAt?: string }> {
+async function fetchAudit(action: string, limit = 100): Promise<{ count: number; lastAt?: string }> {
   const r = await api.get<{ events: AuditEvent[] }>("/audit/events", { params: { action, limit } });
   const events = r.data.events ?? [];
   return { count: events.length, lastAt: events[0]?.at };
@@ -147,85 +158,88 @@ async function fetchAudit(action: string, limit = 1): Promise<{ count: number; l
 const SEVERE_PARTIAL_THRESHOLD_HOURS = 24;
 
 export function CoveragePage() {
-  const [density, setDensity] = useState<Density>("cozy");
-  const [pillarFilter, setPillarFilter] = useState<string>("");
-  const [selectedCluster, setSelectedCluster] = useState<string | undefined>(undefined);
+  const identity = useTablePreferencesIdentity();
+  const owner = `${identity?.org_id}:${identity?.user_id}`;
+  const [params, setParams] = useRouteSearchParams();
+  const [tab, setTab] = useTabParam("tab", "all");
+  const pillarFilter = params.get("pillar") ?? "";
+  const selectedCluster = params.get("cluster") || undefined;
+  const update = (key: string, value: string) => setParams(current => { const next = new URLSearchParams(current); if (value) next.set(key, value); else next.delete(key); return next; });
+  const qClusters = useQuery({ queryKey: ["posture", owner, "clusters"], queryFn: () => clustersApi.list(), staleTime: 30_000 });
+  const clusterList = useMemo(() => !qClusters.isError && !qClusters.isFetching ? sortClustersByActivity(qClusters.data?.clusters ?? []) : [], [qClusters.data, qClusters.isError, qClusters.isFetching]);
+  const clusterId = selectedCluster;
+  const clusterName = clusterList.find(c => c.id === clusterId)?.name;
+  const clusterReady = Boolean(clusterId && qClusters.isSuccess && !qClusters.isError && !qClusters.isFetching && clusterList.some(c => c.id === clusterId));
 
-  // --- queries ---
-  const qClusters = useQuery({ queryKey: ["clusters"], queryFn: () => clustersApi.list(), staleTime: 30_000 });
-  const clusterList = useMemo(() => sortClustersByActivity(qClusters.data?.clusters ?? []), [qClusters.data?.clusters]);
-  const clusterId = selectedCluster ?? clusterList[0]?.id;
-  const clusterName = clusterList.find((c) => c.id === clusterId)?.name;
-
-  const qCveStats = useQuery({ queryKey: ["cve-stats"], queryFn: () => cve.stats() });
-  const qCveBundle = useQuery({ queryKey: ["cve-bundle"], queryFn: () => cve.bundle() });
-  const qDashboard = useQuery({ queryKey: ["dashboard-summary"], queryFn: () => dashboard.summary() });
+  const qCveStats = useQuery({ queryKey: ["posture", owner, "cve-stats"], queryFn: () => cve.stats() });
+  const qCveBundle = useQuery({ queryKey: ["posture", owner, "cve-bundle"], queryFn: () => cve.bundle() });
+  const qDashboard = useQuery({ queryKey: ["posture", owner, "dashboard-summary"], queryFn: () => dashboard.summary() });
 
   const qScanJobs = useQuery({
-    queryKey: ["scan-jobs-coverage"],
+    queryKey: ["posture", owner, "scan-jobs-coverage"],
     queryFn: () => scanJobs.list(),
   });
 
   const qFindingsLifecycle = useQuery({
-    queryKey: ["findings-lifecycle"],
+    queryKey: ["posture", owner, "findings-lifecycle"],
     queryFn: () =>
       api
         .get<{ findings: unknown[]; lifecycle_counts?: Record<string, number> }>("/findings", { params: { limit: 1 } })
         .then((r) => r.data),
   });
 
-  const qRrV2 = useQuery({ queryKey: ["rr-v2"], queryFn: () => api.get<{ rules: Array<{ id: string; enabled: boolean }> }>("/response-rules-v2").then((r) => r.data) });
-  const qVulnProfiles = useQuery({ queryKey: ["vuln-profiles"], queryFn: () => api.get<{ profiles: Array<{ id: string; active?: boolean }> }>("/vuln-profiles").then((r) => r.data) });
-  const qGroups = useQuery({ queryKey: ["groups-coverage"], queryFn: () => api.get<{ groups: Array<{ id: string }> }>("/groups").then((r) => r.data) });
-  const qFed = useQuery({ queryKey: ["fed-state"], queryFn: () => federation.state() });
-  const qFedMembers = useQuery({ queryKey: ["fed-members"], queryFn: () => federation.members() });
+  const qRrV2 = useQuery({ queryKey: ["posture", owner, "rr-v2"], queryFn: () => api.get<{ rules: Array<{ id: string; enabled: boolean }> }>("/response-rules-v2").then((r) => r.data) });
+  const qVulnProfiles = useQuery({ queryKey: ["posture", owner, "vuln-profiles"], queryFn: () => api.get<{ profiles: Array<{ id: string; active?: boolean }> }>("/vuln-profiles").then((r) => r.data) });
+  const qGroups = useQuery({ queryKey: ["posture", owner, "groups-coverage"], queryFn: () => api.get<{ groups: Array<{ id: string }> }>("/groups").then((r) => r.data) });
+  const qFed = useQuery({ queryKey: ["posture", owner, "fed-state"], queryFn: () => federation.state() });
+  const qFedMembers = useQuery({ queryKey: ["posture", owner, "fed-members"], queryFn: () => federation.members() });
   const qReceivers = useQuery({
-    queryKey: ["receivers-coverage"],
+    queryKey: ["posture", owner, "receivers-coverage"],
     queryFn: () => api.get<{ receivers: Array<{ id: string; status: string }> }>("/integrations/receivers").then((r) => r.data),
   });
-  const qCompliance = useQuery({ queryKey: ["compliance-summary"], queryFn: () => compliance.summary() });
-  const qAdmissionDeny = useQuery({ queryKey: ["audit", "admission.deny"], queryFn: () => fetchAudit("admission.deny") });
-  const qGitopsDrift = useQuery({ queryKey: ["audit", "gitops.drift.detected"], queryFn: () => fetchAudit("gitops.drift.detected") });
+  const qCompliance = useQuery({ queryKey: ["posture", owner, "compliance-summary"], queryFn: () => compliance.summary() });
+  const qAdmissionDeny = useQuery({ queryKey: ["posture", owner, "audit", "admission.deny"], queryFn: () => fetchAudit("admission.deny") });
+  const qGitopsDrift = useQuery({ queryKey: ["posture", owner, "audit", "gitops.drift.detected"], queryFn: () => fetchAudit("gitops.drift.detected") });
   const qRecentAudit = useQuery({
-    queryKey: ["recent-audit-count"],
+    queryKey: ["posture", owner, "recent-audit-count"],
     queryFn: () => api.get<{ events: AuditEvent[] }>("/audit/events", { params: { limit: 100 } }).then((r) => r.data),
   });
 
   const qRuntimeEvents = useQuery({
-    queryKey: ["runtime-events-coverage"],
+    queryKey: ["posture", owner, "runtime-events-coverage"],
     queryFn: () =>
       api.get<{ events: Array<{ id: string; at: string }> }>("/events", { params: { limit: 50 } }).then((r) => r.data),
   });
 
   const qAiAssets = useQuery({
-    queryKey: ["ai-assets-coverage"],
+    queryKey: ["posture", owner, "ai-assets-coverage"],
     queryFn: () =>
       api.get<{ assets: Array<{ id: string; ai_workload: boolean }> }>("/assets", { params: { ai_workload: true, limit: 50 } }).then((r) => r.data),
   });
 
   // cluster-scoped
   const qNetMap = useQuery({
-    queryKey: ["net-map-coverage", clusterId],
-    enabled: !!clusterId,
+    queryKey: ["posture", owner, "net-map-coverage", clusterId],
+    enabled: clusterReady,
     queryFn: () => network.map({ cluster_id: clusterId }),
   });
   const qNetLifecycle = useQuery({
-    queryKey: ["net-policies-lifecycle-coverage", clusterId],
-    enabled: !!clusterId,
+    queryKey: ["posture", owner, "net-policies-lifecycle-coverage", clusterId],
+    enabled: clusterReady,
     queryFn: () => network.lifecycle({ cluster_id: clusterId }),
   });
   const qBaselines = useQuery({
-    queryKey: ["runtime-baselines-coverage", clusterId],
-    enabled: !!clusterId,
+    queryKey: ["posture", owner, "runtime-baselines-coverage", clusterId],
+    enabled: clusterReady,
     queryFn: () => baselines.list({ cluster_id: clusterId }),
   });
   const qConnectorCoverage = useQuery({
-    queryKey: ["connector-coverage-summary"],
+    queryKey: ["posture", owner, "connector-coverage-summary"],
     queryFn: () => connectorCoverage.overview(),
   });
 
   // --- build rows ---
-  const rows = useMemo<CapabilityRow[]>(() => {
+  const rawRows = useMemo<CapabilityRow[]>(() => {
     const out: CapabilityRow[] = [];
 
     // 1) CVE Intelligence — org-scoped
@@ -286,7 +300,7 @@ export function CoveragePage() {
         : last24 > 0 ? "active" : "idle";
       out.push({
         id: "image-scan",
-        name: "Image Scanning",
+        name: "Scan jobs",
         pillar: "Vulnerabilities",
         scope: "org",
         signal: jobs.length,
@@ -295,7 +309,7 @@ export function CoveragePage() {
         evidence: jobs.length > 0
           ? (
             <>
-              <strong className="text-foreground">{completed}</strong> completed · {pending} in-flight · {last24} in last 24h
+              <strong className="text-foreground">{completed}</strong> completed in up to 200 loaded jobs · {pending} reported pending · {last24} loaded records within 24h
               {(delayed > 0 || exhausted > 0 || stale > 0) && (
                 <span className="text-muted-foreground"> · {delayed} delayed · {exhausted} exhausted · {stale} stale</span>
               )}
@@ -314,7 +328,6 @@ export function CoveragePage() {
       const d = qDashboard.data;
       const lc = qFindingsLifecycle.data?.lifecycle_counts ?? {};
       const total = d?.findings_total ?? 0;
-      const open = d?.open_findings ?? 0;
       const triaged = (lc.triaged ?? 0) + (lc.in_progress ?? 0);
       const status: CapStatus = total > 0 ? "active" : qDashboard.isPending ? "pending" : "missing";
       out.push({
@@ -327,9 +340,9 @@ export function CoveragePage() {
         lastAt: d?.generated_at,
         evidence: d ? (
           <>
-            <strong className="text-foreground">{NUM.format(total)}</strong> findings · {NUM.format(open)} open ·{" "}
+            <strong className="text-foreground">{NUM.format(total)}</strong> open findings ·{" "}
             <span className="text-[color:var(--color-severity-critical)]">{NUM.format(d.findings_by_severity?.critical ?? 0)} crit</span> ·{" "}
-            {NUM.format(d.findings_by_severity?.high ?? 0)} high · {triaged} triaged
+            {NUM.format(d.findings_by_severity?.high ?? 0)} high · {triaged} triaged / in progress (lifecycle counts)
           </>
         ) : "—",
         href: "/findings",
@@ -344,17 +357,17 @@ export function CoveragePage() {
         ? qAdmissionDeny.isPending ? "pending" : "missing"
         : (a.count ?? 0) > 0
           ? withinHours(a.lastAt, 24) ? "active" : "idle"
-          : "idle";
+          : "missing";
       out.push({
         id: "admission",
-        name: "Admission Control",
+        name: "Admission audit evidence",
         pillar: "Posture",
         scope: "org",
         signal: a?.count ?? 0,
         status,
         lastAt: a?.lastAt,
         evidence: a ? (
-          <><strong className="text-foreground">{NUM.format(a.count ?? 0)}</strong> recent admission.deny audit events</>
+          <><strong className="text-foreground">{NUM.format(a.count ?? 0)}</strong> loaded admission.deny records (up to 100; not an enforcement-health check)</>
         ) : "—",
         href: "/audit",
         loading: qAdmissionDeny.isPending,
@@ -375,15 +388,15 @@ export function CoveragePage() {
         : last24 > 0 ? "active" : "idle";
       out.push({
         id: "runtime-bpf",
-        name: "Runtime BPF Events",
+        name: "Runtime events",
         pillar: "Runtime",
         scope: "org",
         signal: events.length,
         status,
         lastAt,
         evidence: events.length > 0
-          ? <><strong className="text-foreground">{NUM.format(events.length)}</strong> events in window · {last24} in last 24h</>
-          : "No runtime events received yet",
+          ? <><strong className="text-foreground">{NUM.format(events.length)}</strong> loaded runtime records (up to 50) · {last24} within 24h</>
+          : "No records in the loaded runtime sample",
         href: "/runtime",
         loading: qRuntimeEvents.isPending,
       });
@@ -412,7 +425,7 @@ export function CoveragePage() {
         lastAt,
         evidence: m ? (
           <>
-            <strong className="text-foreground">{NUM.format(workloads)}</strong> workloads · {NUM.format(flows)} flows ·{" "}
+            <strong className="text-foreground">{NUM.format(workloads)}</strong> reported workloads · {NUM.format(flows)} reported flows (bounded map source) ·{" "}
             <span className="text-[color:var(--color-severity-high)]">{alerted} alerted</span>
             {clusterName && <span className="text-muted-foreground"> · {clusterName}</span>}
           </>
@@ -482,7 +495,7 @@ export function CoveragePage() {
         evidence: summary ? (
           <>
             <strong className="text-foreground">{summary.total}</strong> workloads · {summary.learn} learn ·{" "}
-            {summary.monitor} monitor · <span className="text-[color:var(--color-status-success)]">{summary.enforce} enforce</span>
+            {summary.monitor} configured monitor · <span className="text-[color:var(--color-status-success)]">{summary.enforce} configured enforce</span>
             {(totalAlerts > 0 || totalBlocks > 0) && <> · {totalAlerts} alerts · {totalBlocks} blocks</>}
           </>
         ) : "—",
@@ -497,7 +510,7 @@ export function CoveragePage() {
       const active = profiles.filter((p) => p.active).length;
       const status: CapStatus = profiles.length === 0
         ? qVulnProfiles.isPending ? "pending" : "missing"
-        : active > 0 ? "idle" : "missing";
+        : "idle";
       out.push({
         id: "vuln-profiles",
         name: "Vulnerability Profiles",
@@ -540,7 +553,7 @@ export function CoveragePage() {
       const enabled = rules.filter((r) => r.enabled).length;
       const status: CapStatus = rules.length === 0
         ? qRrV2.isPending ? "pending" : "missing"
-        : enabled > 0 ? "idle" : "missing";
+        : "idle";
       out.push({
         id: "response-rules",
         name: "Response Rules",
@@ -563,7 +576,7 @@ export function CoveragePage() {
         ? qGitopsDrift.isPending ? "pending" : "missing"
         : (a.count ?? 0) > 0
           ? withinHours(a.lastAt, 24) ? "active" : "idle"
-          : "idle";
+          : "missing";
       out.push({
         id: "gitops-drift",
         name: "GitOps Drift",
@@ -573,7 +586,7 @@ export function CoveragePage() {
         status,
         lastAt: a?.lastAt,
         evidence: a ? (
-          <><strong className="text-foreground">{NUM.format(a.count ?? 0)}</strong> drift events on chain</>
+          <><strong className="text-foreground">{NUM.format(a.count ?? 0)}</strong> loaded drift audit records (up to 100)</>
         ) : "—",
         href: "/audit",
         loading: qGitopsDrift.isPending,
@@ -682,8 +695,8 @@ export function CoveragePage() {
         signal: tagged,
         status,
         evidence: aiAssets.length > 0
-          ? <><strong className="text-foreground">{tagged}</strong> assets tagged ai_workload of {aiAssets.length} observed</>
-          : "No AI assets indexed",
+          ? <><strong className="text-foreground">{tagged}</strong> assets tagged ai_workload of {aiAssets.length} loaded (up to 50)</>
+          : "No records in the loaded AI asset sample",
         href: "/assets",
         loading: qAiAssets.isPending,
       });
@@ -740,53 +753,66 @@ export function CoveragePage() {
     clusterId, clusterName,
   ]);
 
+  const dependencies: Record<string, Array<{ isError: boolean; isPending: boolean; isFetching: boolean; refetch: () => unknown }>> = {
+    "cve-intel": [qCveStats, qCveBundle], "image-scan": [qScanJobs], findings: [qDashboard, qFindingsLifecycle],
+    admission: [qAdmissionDeny], "runtime-bpf": [qRuntimeEvents], "net-map": [qNetMap], "auto-netpolicy": [qNetLifecycle],
+    "proc-baseline": [qBaselines], "vuln-profiles": [qVulnProfiles], groups: [qGroups], "response-rules": [qRrV2],
+    "gitops-drift": [qGitopsDrift], federation: [qFed, qFedMembers], compliance: [qCompliance], cspm: [qConnectorCoverage],
+    "ai-workload": [qAiAssets], integrations: [qReceivers],
+  };
+  const clusterBrowse: Record<string, string> = { findings: "findings?lifecycle=open&view=instances", admission: "audit?action=admission.deny", "runtime-bpf": "runtime", "vuln-profiles": "vuln-profiles", groups: "groups", "response-rules": "response-rules", "gitops-drift": "audit?action=gitops.drift.detected", compliance: "compliance", "ai-workload": "assets" };
+  const rows = rawRows.map(original => {
+    const destination = clusterBrowse[original.id];
+    const row = destination ? { ...original, href: clusterReady ? `/clusters/${encodeURIComponent(clusterId!)}/${destination}` : "/clusters", actionLabel: clusterReady ? "Browse cluster" : "Choose cluster" } : original;
+    const sources = dependencies[row.id] ?? [];
+    const retry = () => { for (const source of sources) void source.refetch(); };
+    if (row.scope === "cluster" && !clusterReady) return { ...row, status: "unavailable" as const, evidence: selectedCluster ? "The selected cluster is unavailable or unresolved." : "Choose a cluster to load this evidence.", lastAt: undefined, signal: 0, loading: false, href: "/clusters" };
+    const scopeMismatch = row.id === "net-map" ? Boolean(qNetMap.data?.summary.selected_cluster_id && qNetMap.data.summary.selected_cluster_id !== clusterId) : row.id === "auto-netpolicy" ? Boolean(qNetLifecycle.data?.summary.selected_cluster_id && qNetLifecycle.data.summary.selected_cluster_id !== clusterId) : row.id === "proc-baseline" ? Boolean(qBaselines.data?.profiles.some(profile => profile.cluster_id && profile.cluster_id !== clusterId)) : false;
+    if (sources.some(source => source.isError) || scopeMismatch) return { ...row, status: "unavailable" as const, evidence: "Source unavailable or refresh failed.", lastAt: undefined, signal: 0, loading: false, retry };
+    if (sources.some(source => source.isPending || source.isFetching)) return { ...row, status: "pending" as const, evidence: "Loading source evidence…", lastAt: undefined, signal: 0, loading: true };
+    return { ...row, loading: false };
+  });
+  const allSources = [qClusters, qCveStats, qCveBundle, qDashboard, qScanJobs, qFindingsLifecycle, qRrV2, qVulnProfiles, qGroups, qFed, qFedMembers, qReceivers, qCompliance, qAdmissionDeny, qGitopsDrift, qRecentAudit, qRuntimeEvents, qAiAssets, qConnectorCoverage, ...(clusterReady ? [qNetMap, qNetLifecycle, qBaselines] : [])];
+  const sampleCount = (source: { isError: boolean; isPending: boolean; isFetching: boolean }, dates: Array<string | undefined>) => source.isError ? "Unavailable" : source.isPending || source.isFetching ? "Loading" : dates.filter(date => withinHours(date, 24)).length;
+  const audit24 = sampleCount(qRecentAudit, qRecentAudit.data?.events.map(event => event.at) ?? []);
+  const runtime24 = sampleCount(qRuntimeEvents, qRuntimeEvents.data?.events.map(event => event.at) ?? []);
+  const scans24 = sampleCount(qScanJobs, qScanJobs.data?.jobs.map(job => job.finished_at ?? job.requested_at) ?? []);
   const pillars = useMemo(() => Array.from(new Set(rows.map((r) => r.pillar))).sort(), [rows]);
-  const filtered = pillarFilter ? rows.filter((r) => r.pillar === pillarFilter) : rows;
-
-  // header tiles
-  const counts = useMemo(() => {
-    const active = rows.filter((r) => r.status === "active").length;
-    const watch = rows.filter((r) => r.status === "partial" || r.status === "idle").length;
-    const inactive = rows.filter((r) => r.status === "missing").length;
-    const auditCount = qRecentAudit.data?.events?.filter((e) => withinHours(e.at, 24)).length ?? 0;
-    const runtimeCount = qRuntimeEvents.data?.events?.filter((e) => withinHours(e.at, 24)).length ?? 0;
-    const scans24h = qScanJobs.data?.jobs?.filter((j) => withinHours(j.finished_at ?? j.requested_at, 24)).length ?? 0;
-    const signalEmitting = auditCount + runtimeCount + scans24h;
-    return { active, watch, inactive, signalEmitting };
-  }, [rows, qRecentAudit.data, qRuntimeEvents.data, qScanJobs.data]);
+  const scopeRows = tab === "cluster" ? rows.filter(row => row.scope === "cluster") : tab === "organization" ? rows.filter(row => row.scope === "org") : rows;
+  const filtered = pillarFilter ? scopeRows.filter(row => row.pillar === pillarFilter) : scopeRows;
 
   // table columns
   const columns: Column<CapabilityRow>[] = [
     {
       id: "name",
-      header: "Capability", kind: "name", size: 264, minSize: 200, grow: false,
+      header: "Capability", exportValue: row => `${row.name} [${row.scope === "org" ? "organization-wide" : `selected cluster: ${clusterId ?? "none"}`}]`, kind: "name", size: 264, minSize: 200, grow: false,
 
       sort: (a, b) => a.name.localeCompare(b.name),
       cell: (r) => (
         <div className="flex flex-col gap-0.5">
           <span className="font-medium text-foreground">{r.name}</span>
           <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-            {r.pillar}{r.scope === "cluster" && <> · cluster-scoped</>}
+            {r.pillar} · {r.scope === "cluster" ? "selected cluster" : "organization-wide"}
           </span>
         </div>
       ),
     },
     {
       id: "evidence",
-      header: "Live evidence", kind: "text", grow: true, minSize: 240, wrap: true,
+      header: "Source evidence", exportValue: row => evidenceText(row.evidence), kind: "text", grow: true, minSize: 240, wrap: true,
       sort: (a, b) => a.signal - b.signal,
       cell: (r) => <div className="text-sm text-muted-foreground">{r.loading ? <Skeleton /> : r.evidence}</div>,
     },
     {
       id: "status",
-      header: "Status", kind: "status", size: 144, minSize: 128, maxSize: 176,
+      header: "Status", exportValue: row => statusLabel(row.status), kind: "status", size: 192, minSize: 180, maxSize: 208,
 
       sort: (a, b) => statusOrder(a.status) - statusOrder(b.status),
       cell: (r) => <StatusPill label={statusLabel(r.status)} tone={tone(r.status)} />,
     },
     {
       id: "last",
-      header: "Last activity", kind: "age", size: 144, minSize: 120, maxSize: 176,
+      header: "Source timestamp", exportValue: row => row.lastAt ?? "Not reported", kind: "age", size: 144, minSize: 120, maxSize: 176,
 
       sort: (a, b) => (new Date(a.lastAt ?? 0).getTime()) - (new Date(b.lastAt ?? 0).getTime()),
       cell: (r) => (
@@ -797,63 +823,78 @@ export function CoveragePage() {
     },
     {
       id: "action",
-      header: "", kind: "actions", size: 96, minSize: 96, maxSize: 112,
+      header: "Open / retry", kind: "actions", size: 176, minSize: 152, maxSize: 192, exportable: false,
 
       cell: (r) =>
-        r.href ? (
-          <Link
-            to="." href={r.href}
+        r.retry ? <Button size="sm" onClick={r.retry}>Retry {r.name}</Button> : r.href ? (
+          <a
+            href={r.href}
             className="inline-flex h-7 items-center gap-1 rounded border border-border bg-card px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
-            Open <ArrowUpRight className="h-3 w-3" />
-          </Link>
+            {r.actionLabel ?? "Open"} <ArrowUpRight className="h-3 w-3" />
+          </a>
         ) : null,
     },
   ];
+
+  const workspace = (<div data-testid="coverage-table">
+        <DataTable<CapabilityRow>
+          rows={filtered}
+          columns={columns}
+          rowKey={(r) => r.id}
+          preferencesKey="posture-capability-evidence"
+          exportFileName="constellation-posture-listed-evidence"
+          exportLabel="Export listed evidence CSV"
+          defaultSort={{ id: "status", dir: "asc" }}
+          rowTestId={() => "coverage-row"}
+          rowAttrs={row => ({ "data-capability-id": row.id, "data-scope": row.scope })}
+        />
+      </div>);
 
   return (
     <div className="space-y-4" data-testid="coverage-page">
       <PageHeader
         title="Posture"
-        description="Live evidence per capability — counts pulled from runtime APIs, freshness derived from audit + event timestamps."
+        description="Reported evidence per capability, with organization sources and selected-cluster sources shown separately."
+        actions={<Button onClick={() => { for (const source of allSources) void source.refetch(); }} disabled={allSources.some(source => source.isFetching)}>Refresh evidence</Button>}
       />
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <HeaderTile icon={<CheckCircle2 className="h-3.5 w-3.5" />} label="Active capabilities" value={counts.active} tone="success" />
-        <HeaderTile icon={<Clock3 className="h-3.5 w-3.5" />} label="Watch" value={counts.watch} tone="warning" />
-        <HeaderTile icon={<MinusCircle className="h-3.5 w-3.5" />} label="Inactive" value={counts.inactive} tone="neutral" />
-        <HeaderTile
-          icon={<Radio className="h-3.5 w-3.5" />}
-          label="Signal-emitting events · 24h"
-          value={counts.signalEmitting}
-          tone="accent"
-          hint="audit + runtime + scan jobs"
-        />
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-card p-3">
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Cluster scope</span>
+      <VerdictBanner status={rows.some(row => row.status === "unavailable") ? "degraded" : "info"} title={rows.some(row => row.status === "unavailable") ? "Some posture evidence is unavailable" : "Review reported capability evidence"} detail="Records and configured modes do not prove policy delivery, enforcement or protection. Organization-wide sources remain separate from the selected cluster." />
+      <StatGrid data-testid="coverage-stats">
+        <StatCard label="Rows with evidence" value={rows.filter(row => row.status === "active" || row.status === "partial" || row.status === "idle").length} icon={<CheckCircle2 className="h-3.5 w-3.5" />} />
+        <StatCard label="Unavailable capability rows" value={rows.filter(row => row.status === "unavailable").length} icon={<MinusCircle className="h-3.5 w-3.5" />} />
+        <StatCard label="Loaded audit records · 24h" value={audit24} valueKind={typeof audit24 === "number" ? "number" : "text"} hint="Up to 100 loaded audit records" />
+        <StatCard label="Loaded runtime records · 24h" value={runtime24} valueKind={typeof runtime24 === "number" ? "number" : "text"} hint="Up to 50 loaded runtime records" icon={<Radio className="h-3.5 w-3.5" />} />
+        <StatCard label="Loaded scan jobs · 24h" value={scans24} valueKind={typeof scans24 === "number" ? "number" : "text"} hint="Up to 200 loaded scan jobs" icon={<Clock3 className="h-3.5 w-3.5" />} />
+      </StatGrid>
+      {qClusters.isError && <ErrorState title="The cluster inventory is unavailable." action={<Button onClick={() => void qClusters.refetch()}>Retry clusters</Button>} />}
+      {selectedCluster && !clusterReady && !qClusters.isFetching && !qClusters.isPending && <ErrorState title="The requested cluster is not available in the current organization." />}
+      <div className="flex min-w-0 flex-col gap-3 rounded-md border border-border bg-card p-3 lg:flex-row lg:items-start">
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <label htmlFor="coverage-cluster-select" className="text-[10px] uppercase tracking-wider text-muted-foreground">Cluster scope</label>
           <select
-            className="h-8 rounded-md border border-border bg-background px-2 text-sm"
+            id="coverage-cluster-select"
+            className="h-8 w-full min-w-0 max-w-full rounded-md border border-border bg-background px-2 text-sm"
             value={clusterId ?? ""}
-            onChange={(e) => setSelectedCluster(e.target.value || undefined)}
+            onChange={(e) => update("cluster", e.target.value)}
             aria-label="Cluster picker"
             data-testid="coverage-cluster-picker"
           >
-            {clusterList.length === 0 && <option value="">No clusters</option>}
+            <option value="">Organization sources only — choose a cluster</option>
+            {selectedCluster && !clusterList.some(cluster => cluster.id === selectedCluster) && <option value={selectedCluster}>Unavailable cluster</option>}
             {clusterList.map((c) => (
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </select>
           <span className="text-[11px] text-muted-foreground">applies to network · auto-netpolicy · process baseline</span>
         </div>
-        <div className="ml-auto flex items-center gap-2">
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Pillar</span>
+        <div className="flex min-w-0 flex-col gap-2 lg:w-48 lg:flex-none">
+          <label htmlFor="coverage-pillar-select" className="text-[10px] uppercase tracking-wider text-muted-foreground">Pillar</label>
           <select
-            className="h-8 rounded-md border border-border bg-background px-2 text-sm"
+            id="coverage-pillar-select"
+            className="h-8 w-full min-w-0 max-w-full rounded-md border border-border bg-background px-2 text-sm"
             value={pillarFilter}
-            onChange={(e) => setPillarFilter(e.target.value)}
+            onChange={(e) => update("pillar", e.target.value)}
             aria-label="Pillar filter"
           >
             <option value="">All pillars</option>
@@ -864,25 +905,16 @@ export function CoveragePage() {
         </div>
       </div>
 
-      <div data-testid="coverage-table">
-        <DataTable<CapabilityRow>
-          rows={filtered}
-          columns={columns}
-          rowKey={(r) => r.id}
-          density={density}
-          onDensityChange={setDensity}
-          defaultSort={{ id: "status", dir: "asc" }}
-          rowTestId={() => "coverage-row"}
-        />
-      </div>
-
+      {pillarFilter && !pillars.includes(pillarFilter) && <ErrorState title="The requested pillar filter is invalid." action={<Button onClick={() => update("pillar", "")}>Clear pillar filter</Button>} />}
+      <Tabs value={tab} onValueChange={setTab} items={[{ value: "all", label: "All sources", content: workspace }, { value: "organization", label: "Organization", content: workspace }, { value: "cluster", label: "Selected cluster", content: workspace }]} />
+      {!['all', 'organization', 'cluster'].includes(tab) && <ErrorState title="The requested workspace tab is invalid." action={<Button onClick={() => setTab("all")}>Show all sources</Button>} />}
       <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
         <CircleDot className="h-3 w-3" />
         <span>
-          Status: <strong>Active</strong> = configured + recent events in 24h ·{" "}
-          <strong>Partial</strong> = data present but stale &gt;{SEVERE_PARTIAL_THRESHOLD_HOURS}h ·{" "}
-          <strong>Configured · idle</strong> = configured but no event stream ·{" "}
-          <strong>Not configured</strong> = endpoint returned empty.
+          Source limits: audit 100, runtime 50, scan jobs 200, AI assets 50. These are samples, not complete 24-hour totals. Source records may overlap. Status: <strong>Evidence reported</strong> = source-specific records or activity ·{" "}
+          <strong>Partial</strong> = stale (&gt;{SEVERE_PARTIAL_THRESHOLD_HOURS}h) or incomplete source evidence ·{" "}
+          <strong>Records reported</strong> = listed records without a recent-event claim ·{" "}
+          <strong>No records</strong> = a successful source returned no applicable records. Unavailable and refreshing sources are never treated as empty or healthy.
         </span>
       </div>
     </div>
@@ -897,42 +929,9 @@ function Skeleton() {
   return <span className="inline-block h-3 w-40 animate-pulse rounded bg-muted" aria-hidden />;
 }
 
-function HeaderTile({
-  icon,
-  label,
-  value,
-  tone: t = "neutral",
-  hint,
-}: {
-  icon: ReactNode;
-  label: string;
-  value: number;
-  tone?: "success" | "warning" | "accent" | "neutral";
-  hint?: string;
-}) {
-  const c =
-    t === "success" ? "var(--color-status-success)" :
-    t === "warning" ? "var(--color-status-warning)" :
-    t === "accent"  ? "var(--color-primary)" :
-    "var(--color-muted-foreground)";
-  return (
-    <div
-      className={cn(
-        "rounded-md border border-border bg-card px-4 py-3",
-        "transition-colors hover:border-[color-mix(in_oklab,var(--color-primary)_30%,var(--color-border))]",
-      )}
-      style={{ borderColor: t !== "neutral" ? `color-mix(in oklab, ${c} 24%, var(--color-border))` : undefined }}
-    >
-      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-        <span style={{ color: c }}>{icon}</span>
-        {label}
-      </div>
-      <div className="mt-1 flex items-baseline gap-2">
-        <span className="text-display text-3xl font-semibold tabular-nums" style={{ color: c }}>
-          {NUM.format(value)}
-        </span>
-      </div>
-      {hint && <div className="mt-0.5 text-[10px] text-muted-foreground">{hint}</div>}
-    </div>
-  );
+function evidenceText(node: ReactNode): string {
+  if (node === null || node === undefined || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(evidenceText).join("");
+  return isValidElement<{ children?: ReactNode }>(node) ? evidenceText(node.props.children) : "";
 }

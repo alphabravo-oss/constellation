@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { Link, useParams } from "@tanstack/react-router";
+import { useParams } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Boxes, ChevronLeft, Database, Download, FileJson, FileWarning, KeyRound, Layers, ShieldAlert, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
@@ -17,7 +17,10 @@ import {
   type ImageSignatureResult,
   type ImpactedWorkload,
 } from "@/api/client";
-import { useCluster } from "@/hooks/useCluster";
+import { useEntityClusterScope } from "./entity-detail-scope";
+import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
+import { Button } from "@/components/ui/button";
+import { ErrorState, LoadingState } from "@/components/ui/states";
 import { cn } from "@/lib/cn";
 import { artifactIssue, scanEngineEvidence } from "@/lib/scan-evidence";
 import { DataTable, type Column } from "@/components/ui/data-table";
@@ -30,11 +33,18 @@ export function ImageScanDetailPage() {
   const { resultId } = useParams({ strict: false });
   const [requestedTab, setTab] = useTabParam("tab", "findings");
   const tab = ["findings", "evidence", "workloads", "details"].includes(requestedTab) ? requestedTab : "findings";
-  const { clusterId, isLoading: clusterLoading } = useCluster();
+  const scope = useEntityClusterScope();
+  const { clusterId } = scope;
+  const identity = useTablePreferencesIdentity();
+  const owner = `${identity?.org_id}:${identity?.user_id}`;
   const q = useQuery({
-    queryKey: ["image-scan-result", resultId],
-    queryFn: () => imageScanResults.get(resultId!),
-    enabled: !!resultId,
+    queryKey: ["image-scan-result", owner, resultId],
+    queryFn: async () => {
+      const response = await imageScanResults.get(resultId!);
+      if (response.image_scan_result.id !== resultId) throw new Error("Image scan response does not match the requested result.");
+      return response;
+    },
+    enabled: scope.ready && !!resultId,
   });
 
   const detail = q.data;
@@ -44,17 +54,17 @@ export function ImageScanDetailPage() {
     return clusterId ? workloads.filter((item) => item.cluster_id === clusterId) : workloads;
   }, [clusterId, detail?.impacted_workloads]);
 
-  if (clusterLoading || q.isPending) return <p className="text-sm text-muted-foreground">Loading image scan...</p>;
-  if (q.isError || !result) return <p className="text-sm text-status-error">Image scan not found.</p>;
+  if (scope.loading || scope.ready && q.isPending) return <LoadingState label="Loading image scan…" />;
+  if (!scope.ready || q.isError || !result || result.id !== resultId) return <ErrorState title="Image scan evidence unavailable." error={q.error ?? scope.error} action={<Button onClick={() => scope.ready ? void q.refetch() : scope.retry()}>Retry</Button>} />;
 
   return (
     <div className="space-y-4" data-testid="image-scan-detail-page" data-cluster-id={clusterId ?? ""}>
       <PageHeader
         backLink={
-          <Link to="." href={`/clusters/${clusterId}/images`} className="inline-flex items-center gap-1 hover:text-foreground">
+          <a href={`/clusters/${clusterId}/images`} className="inline-flex items-center gap-1 hover:text-foreground">
             <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
             Images
-          </Link>
+          </a>
         }
         title={displayImage(result)}
         mono
@@ -66,7 +76,8 @@ export function ImageScanDetailPage() {
             <SignaturePill item={result} />
           </>
         }
-        description="Review this image’s vulnerabilities, scanner coverage, and supporting evidence."
+        description="Scan evidence is shared across the organization. Affected workload links below are filtered to this cluster."
+        actions={<Button onClick={() => void q.refetch()} disabled={q.isFetching}>Refresh</Button>}
       />
 
       <EngineVerdict result={result} />
@@ -81,7 +92,7 @@ export function ImageScanDetailPage() {
 
       <Tabs value={tab} onValueChange={setTab} items={[
         { value: "findings", label: "Vulnerabilities", count: result.finding_count, content: <FindingsTable findings={detail.findings} /> },
-        { value: "evidence", label: "Scan evidence", content: <div className="space-y-4"><EngineEvidence result={result} /><ArtifactEvidenceSection result={result} /></div> },
+        { value: "evidence", label: "Scan evidence", content: <div className="space-y-4"><EngineEvidence result={result} /><ArtifactEvidenceSection key={`${owner}:${result.id}`} result={result} owner={owner} /></div> },
         { value: "workloads", label: "Affected workloads", count: clusterWorkloads.length, content: <WorkloadsPanel workloads={clusterWorkloads} /> },
         { value: "details", label: "Identity and exports", content: <div className="space-y-4"><ScanIdentity result={result} /><BundlePanel result={result} /></div> },
       ]} />
@@ -89,36 +100,43 @@ export function ImageScanDetailPage() {
   );
 }
 
-function ArtifactEvidenceSection({ result }: { result: ImageScanResult }) {
+async function checkedArtifact<T extends { image_scan_result_id: string }>(id: string, request: Promise<T>): Promise<T> {
+  const response = await request;
+  if (response.image_scan_result_id !== id) throw new Error("Artifact does not match the requested image scan.");
+  return response;
+}
+
+function ArtifactEvidenceSection({ result, owner }: { result: ImageScanResult; owner: string }) {
+  const [evidence, setEvidence] = useTabParam("evidence", "packages");
   const layersQ = useQuery({
-    queryKey: ["image-scan-layers", result.id],
-    queryFn: () => imageScanResults.layers(result.id),
+    queryKey: ["image-scan-layers", owner, result.id],
+    queryFn: () => checkedArtifact(result.id, imageScanResults.layers(result.id)),
     retry: false,
   });
   const packagesQ = useQuery({
-    queryKey: ["image-scan-packages", result.id],
-    queryFn: () => imageScanResults.packages(result.id),
+    queryKey: ["image-scan-packages", owner, result.id],
+    queryFn: () => checkedArtifact(result.id, imageScanResults.packages(result.id)),
     enabled: result.package_count > 0,
   });
   const secretsQ = useQuery({
-    queryKey: ["image-scan-secrets", result.id],
-    queryFn: () => imageScanResults.secrets(result.id),
+    queryKey: ["image-scan-secrets", owner, result.id],
+    queryFn: () => checkedArtifact(result.id, imageScanResults.secrets(result.id)),
     enabled: result.secret_count > 0,
   });
   const fileRisksQ = useQuery({
-    queryKey: ["image-scan-file-risks", result.id],
-    queryFn: () => imageScanResults.fileRisks(result.id),
+    queryKey: ["image-scan-file-risks", owner, result.id],
+    queryFn: () => checkedArtifact(result.id, imageScanResults.fileRisks(result.id)),
     retry: false,
   });
   const signatureQ = useQuery({
-    queryKey: ["image-scan-signature", result.id],
-    queryFn: () => imageScanResults.signature(result.id),
+    queryKey: ["image-scan-signature", owner, result.id],
+    queryFn: () => checkedArtifact(result.id, imageScanResults.signature(result.id)),
     enabled: !!result.signature_status,
   });
   // Config checks are computed for every image (no count gate); 404s on older scans.
   const configChecksQ = useQuery({
-    queryKey: ["image-scan-config-checks", result.id],
-    queryFn: () => imageScanResults.configChecks(result.id),
+    queryKey: ["image-scan-config-checks", owner, result.id],
+    queryFn: () => checkedArtifact(result.id, imageScanResults.configChecks(result.id)),
     retry: false,
   });
 
@@ -132,27 +150,22 @@ function ArtifactEvidenceSection({ result }: { result: ImageScanResult }) {
   const fileRiskIssue = artifactIssue(fileRisksQ.data?.file_risk, fileRisksQ.error);
   const configIssue = artifactIssue(configChecksQ.data?.config_checks, configChecksQ.error);
 
-  return (
-    <section className="grid gap-4 2xl:grid-cols-2" data-testid="image-scan-artifact-evidence">
-      <SignatureEvidenceCard
-        result={result}
-        loading={signatureQ.isPending && !!result.signature_status}
-        signature={signature}
-        status={signatureQ.data?.signature_scan.status || result.signature_status || ""}
-      />
-      <PackagesEvidenceCard
-        loading={packagesQ.isPending && result.package_count > 0}
-        packageLayers={packageLayers}
-        layerPackageCount={packagesQ.data?.layer_package_count ?? 0}
-        unattributedPackageCount={packagesQ.data?.unattributed_package_count ?? result.package_count}
-        totalPackageCount={result.package_count}
-      />
-      {layerIssue ? <EvidenceIssue title="Image layers" message={layerIssue} /> : <LayersEvidenceCard loading={layersQ.isPending} layers={layers} totalSize={layersQ.data?.layer_metadata.total_size_bytes} result={result} />}
-      <SecretsEvidenceCard loading={secretsQ.isPending && result.secret_count > 0} secrets={secrets} count={result.secret_count} />
-      {fileRiskIssue ? <EvidenceIssue title="File risk evidence" message={fileRiskIssue} /> : <FileRisksEvidenceCard loading={fileRisksQ.isPending} findings={fileRisks} count={result.file_risk_count} />}
-      {configIssue ? <EvidenceIssue title="Image config checks" message={configIssue} /> : <ConfigChecksEvidenceCard loading={configChecksQ.isPending} checks={configChecks} />}
-    </section>
-  );
+  const guard = (query: { isError: boolean; error: unknown; data?: { image_scan_result_id: string }; refetch: () => unknown }, title: string, content: ReactNode) =>
+    query.isError || query.data && query.data.image_scan_result_id !== result.id
+      ? <ErrorState title={`${title} unavailable.`} error={query.error} action={<Button onClick={() => void query.refetch()}>Retry evidence</Button>} /> : content;
+  const items = [
+    { value: "packages", label: "Packages", content: guard(packagesQ, "Package provenance", <PackagesEvidenceCard loading={packagesQ.isPending && result.package_count > 0} packageLayers={packageLayers} layerPackageCount={packagesQ.data?.layer_package_count ?? 0} unattributedPackageCount={packagesQ.data?.unattributed_package_count ?? result.package_count} totalPackageCount={result.package_count} />) },
+    { value: "layers", label: "Layers", content: guard(layersQ, "Image layers", layerIssue ? <EvidenceIssue title="Image layers" message={layerIssue} /> : <LayersEvidenceCard loading={layersQ.isPending} layers={layers} totalSize={layersQ.data?.layer_metadata.total_size_bytes} result={result} />) },
+    { value: "secrets", label: "Secrets", content: guard(secretsQ, "Secret evidence", <SecretsEvidenceCard loading={secretsQ.isPending && result.secret_count > 0} secrets={secrets} count={result.secret_count} />) },
+    { value: "files", label: "File risks", content: guard(fileRisksQ, "File risk evidence", fileRiskIssue ? <EvidenceIssue title="File risk evidence" message={fileRiskIssue} /> : <FileRisksEvidenceCard loading={fileRisksQ.isPending} findings={fileRisks} count={result.file_risk_count} />) },
+    { value: "config", label: "Config checks", content: guard(configChecksQ, "Image config checks", configIssue ? <EvidenceIssue title="Image config checks" message={configIssue} /> : <ConfigChecksEvidenceCard loading={configChecksQ.isPending} checks={configChecks} />) },
+    { value: "signature", label: "Signature", content: guard(signatureQ, "Signature evidence", <SignatureEvidenceCard result={result} loading={signatureQ.isPending && !!result.signature_status} signature={signature} status={signatureQ.data?.signature_scan.status || result.signature_status || ""} />) },
+  ];
+  return <section className="space-y-3" data-testid="image-scan-artifact-evidence">
+    <p className="text-sm text-muted-foreground">Tables expose all returned artifact evidence, with local pagination. Full scan artifacts are available under Identity and exports. Package provenance shows layer-linked packages; Inventory also includes unattributed packages.</p>
+    <Tabs value={evidence} onValueChange={setEvidence} items={items} />
+    {!items.some(item => item.value === evidence) && <ErrorState title="Unknown evidence view." action={<Button onClick={() => setEvidence("packages")}>Show packages</Button>} />}
+  </section>;
 }
 
 function EvidenceIssue({ title, message }: { title: string; message: string }) {
@@ -198,15 +211,15 @@ function PackagesEvidenceCard({
   unattributedPackageCount: number;
   totalPackageCount: number;
 }) {
-  const rows = packageLayers.flatMap((layer, layerIndex) => layer.packages.slice(0, 4).map((pkg, packageIndex) => ({
+  const rows = packageLayers.flatMap((layer, layerIndex) => layer.packages.map((pkg, packageIndex) => ({
     key: `${layerIndex}:${packageIndex}`,
     layer,
     pkg,
     location: (pkg.locations ?? []).find((item) => item.layer_digest === layer.layer_digest) ?? pkg.locations?.[0],
   })));
   return (
-    <section className="overflow-hidden rounded-lg border border-border bg-card">
-      <header className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
+    <section className="min-w-0 rounded-lg border border-border bg-card">
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
         <h2 className="text-sm font-semibold">Package provenance</h2>
         <span className="font-mono text-xs text-muted-foreground">
           {layerPackageCount}/{totalPackageCount} layer-linked
@@ -217,10 +230,9 @@ function PackagesEvidenceCard({
       ) : (
         <DataTable
           className="rounded-none border-0"
+          preferencesKey="image-package-provenance"
           rows={rows}
           rowKey={(row) => row.key}
-          showDensityToggle={false}
-          showColumnChooser={false}
           emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">{unattributedPackageCount > 0 ? "Package inventory is present, but no layer attribution was captured." : "No package inventory recorded."}</div>}
           columns={[
             { id: "layer", header: "Layer", kind: "id", cell: ({ layer }) => layer.layer_digest || `${layer.layer_index ?? "-"}` },
@@ -271,8 +283,8 @@ function LayersEvidenceCard({ loading, layers, totalSize, result }: { loading: b
   // created it, base-vs-app attribution, size, and package count. Mirrors NeuVector's
   // layered image view (the scanner already computes command/in_base_image/package_count).
   return (
-    <section className="overflow-hidden rounded-lg border border-border bg-card">
-      <header className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
+    <section className="min-w-0 rounded-lg border border-border bg-card">
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
         <h2 className="text-sm font-semibold">Image layers · Dockerfile</h2>
         <span className="font-mono text-xs text-muted-foreground">{result.layer_count} layers · {formatBytes(totalSize)}</span>
       </header>
@@ -318,8 +330,8 @@ function LayersEvidenceCard({ loading, layers, totalSize, result }: { loading: b
 
 function SecretsEvidenceCard({ loading, secrets, count }: { loading: boolean; secrets: ImageSecretFinding[]; count: number }) {
   return (
-    <section className="overflow-hidden rounded-lg border border-border bg-card">
-      <header className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
+    <section className="min-w-0 rounded-lg border border-border bg-card">
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
         <h2 className="text-sm font-semibold">Secret evidence</h2>
         <Pill tone={count > 0 ? "danger" : "neutral"}>{count}</Pill>
       </header>
@@ -328,10 +340,9 @@ function SecretsEvidenceCard({ loading, secrets, count }: { loading: boolean; se
       ) : (
         <DataTable
           className="rounded-none border-0"
-          rows={secrets.slice(0, 6).map((secret, index) => ({ ...secret, rowKey: `${secret.rule_id || "secret"}:${secret.path || secret.target || ""}:${index}` }))}
+          preferencesKey="image-secret-evidence"
+          rows={secrets.map((secret, index) => ({ ...secret, rowKey: `${secret.rule_id || "secret"}:${secret.path || secret.target || ""}:${index}` }))}
           rowKey={(secret) => secret.rowKey}
-          showDensityToggle={false}
-          showColumnChooser={false}
           emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">No secret evidence recorded.</div>}
           columns={[
             { id: "rule", header: "Rule", kind: "name", cell: (secret) => <><div className="font-mono">{secret.rule_id || "-"}</div><div className="mt-1 truncate text-xs text-muted-foreground" title={secret.title || secret.category}>{secret.title || secret.category || "-"}</div></> },
@@ -350,8 +361,8 @@ function ConfigChecksEvidenceCard({ loading, checks }: { loading: boolean; check
   const warns = checks.filter((c) => c.status === "warn").length;
   const tone = (s: string): "danger" | "warn" | "accent" => (s === "fail" ? "danger" : s === "warn" ? "warn" : "accent");
   return (
-    <section className="overflow-hidden rounded-lg border border-border bg-card">
-      <header className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
+    <section className="min-w-0 rounded-lg border border-border bg-card">
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
         <div>
           <h2 className="text-sm font-semibold">Image config checks</h2>
           <p className="text-[10px] text-muted-foreground">CIS-Docker best-practice controls on the image config</p>
@@ -369,10 +380,9 @@ function ConfigChecksEvidenceCard({ loading, checks }: { loading: boolean; check
       ) : (
         <DataTable<ImageConfigCheck>
           className="rounded-none border-0"
+          preferencesKey="image-config-checks"
           rows={checks}
           rowKey={(check) => check.id}
-          showDensityToggle={false}
-          showColumnChooser={false}
           columns={[
             { id: "check", header: "Check", kind: "name", wrap: true, cell: (check) => <><div className="font-medium">{check.title}</div>{check.status !== "pass" && check.remediation && <div className="mt-0.5 text-xs text-muted-foreground">{check.remediation}</div>}</> },
             { id: "status", header: "Status", kind: "status", cell: (check) => <Pill tone={tone(check.status)}>{check.status}</Pill> },
@@ -386,8 +396,8 @@ function ConfigChecksEvidenceCard({ loading, checks }: { loading: boolean; check
 
 function FileRisksEvidenceCard({ loading, findings, count }: { loading: boolean; findings: ImageFileRiskFinding[]; count: number }) {
   return (
-    <section className="overflow-hidden rounded-lg border border-border bg-card">
-      <header className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
+    <section className="min-w-0 rounded-lg border border-border bg-card">
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
         <h2 className="text-sm font-semibold">File risk evidence</h2>
         <Pill tone={count > 0 ? "warn" : "neutral"}>{count}</Pill>
       </header>
@@ -396,10 +406,9 @@ function FileRisksEvidenceCard({ loading, findings, count }: { loading: boolean;
       ) : (
         <DataTable
           className="rounded-none border-0"
-          rows={findings.slice(0, 6).map((finding, index) => ({ ...finding, rowKey: `${finding.path}:${finding.layer_digest || ""}:${index}` }))}
+          preferencesKey="image-file-risk-evidence"
+          rows={findings.map((finding, index) => ({ ...finding, rowKey: `${finding.path}:${finding.layer_digest || ""}:${index}` }))}
           rowKey={(finding) => finding.rowKey}
-          showDensityToggle={false}
-          showColumnChooser={false}
           emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">No file risk evidence recorded.</div>}
           columns={[
             { id: "path", header: "Path", kind: "name", cell: (finding) => <><div className="truncate font-mono" title={finding.path}>{finding.path}</div><div className="mt-1 text-xs text-muted-foreground">{finding.reason || finding.type || "-"}</div></> },
@@ -440,7 +449,7 @@ function FindingsTable({ findings }: { findings: ImageScanFinding[] }) {
         <>
           <span className="flex items-center gap-1.5">
             {finding.external_id ? (
-              <Link to="." href={`/cve/${finding.external_id}`} className="font-mono text-xs font-medium hover:underline">{finding.external_id}</Link>
+              <a href={`/cve/${finding.external_id}`} className="font-mono text-xs font-medium hover:underline">{finding.external_id}</a>
             ) : (
               <span className="font-mono text-xs">-</span>
             )}
@@ -461,21 +470,21 @@ function FindingsTable({ findings }: { findings: ImageScanFinding[] }) {
       ),
     },
     { id: "severity", header: "Severity", kind: "status", cell: (finding) => <SeverityPill severity={finding.severity} /> },
-    { id: "cvss", header: "CVSS", kind: "count", numeric: true, cell: (finding) => <span className="font-mono text-xs" style={{ color: (finding.cvss_base ?? 0) >= 9 ? "var(--color-severity-critical)" : (finding.cvss_base ?? 0) >= 7 ? "var(--color-severity-high)" : "var(--color-foreground)" }}>{finding.cvss_base ? finding.cvss_base.toFixed(1) : "—"}</span>, sort: (a, b) => (a.cvss_base ?? 0) - (b.cvss_base ?? 0) },
+    { id: "cvss", header: "CVSS", kind: "count", numeric: true, cell: (finding) => <span className="font-mono text-xs" style={{ color: (finding.cvss_base ?? 0) >= 9 ? "var(--color-severity-critical)" : (finding.cvss_base ?? 0) >= 7 ? "var(--color-severity-high)" : "var(--color-foreground)" }}>{finding.cvss_base != null ? finding.cvss_base.toFixed(1) : "—"}</span>, sort: (a, b) => (a.cvss_base ?? 0) - (b.cvss_base ?? 0) },
     { id: "risk", header: "Risk", kind: "count", cell: (finding) => <span className="font-semibold">{finding.risk_score}</span> },
     { id: "fix", header: "Fix", kind: "version", size: 160, minSize: 112, maxSize: 224, wrap: true, cell: (finding) => <span className="font-mono text-xs">{finding.fixed_version || "-"}</span> },
   ];
   const [fixableOnly, setFixableOnly] = useState(false);
   const shown = fixableOnly
-    ? findings.filter((f) => (f.fixed_version || "").trim() !== "" && (f.fixed_version || "").toLowerCase() !== "false")
+    ? findings.filter((f) => !["", "false", "not-fixed", "wont-fix", "won't-fix"].includes((f.fixed_version || "").trim().toLowerCase()))
     : findings;
   const hiddenCount = findings.length - shown.length;
   return (
-    <section className="overflow-hidden rounded-lg border border-border bg-card">
-      <header className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
+    <section className="min-w-0 rounded-lg border border-border bg-card">
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
         <div>
           <h2 className="text-sm font-semibold">Vulnerable packages</h2>
-          <p className="mt-1 text-xs text-muted-foreground">Vulnerability findings for this image, aggregated across the enabled scanners.</p>
+          <p className="mt-1 text-xs text-muted-foreground">All returned vulnerability findings for this image. Fixable only filters this table; the Findings CSV under Identity and exports contains the full scan.</p>
         </div>
         <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground" title="Hide vulnerabilities with no available fix (won't-fix / not-fixed)">
           <input type="checkbox" checked={fixableOnly} onChange={(e) => setFixableOnly(e.target.checked)} className="h-3.5 w-3.5 accent-[color:var(--color-primary)]" data-testid="image-scan-fixable-toggle" />
@@ -484,10 +493,10 @@ function FindingsTable({ findings }: { findings: ImageScanFinding[] }) {
       </header>
       <div data-testid="image-scan-findings">
         <DataTable
+          preferencesKey="image-scan-findings"
           rows={shown}
           columns={columns}
           rowKey={(finding) => finding.id}
-          showDensityToggle={false}
           className="rounded-none border-0"
           emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">No vulnerable packages recorded for this scan.</div>}
         />
@@ -497,29 +506,18 @@ function FindingsTable({ findings }: { findings: ImageScanFinding[] }) {
 }
 
 function WorkloadsPanel({ workloads }: { workloads: ImpactedWorkload[] }) {
-  return (
-    <section className="rounded-lg border border-border bg-card p-4" data-testid="image-scan-workloads">
-      <h2 className="text-sm font-semibold">Affected workloads</h2>
-      <div className="mt-3 space-y-2">
-        {workloads.map((workload) => (
-          <Link
-            key={`${workload.cluster_id}:${workload.deployment_id}:${workload.image_ref}`}
-            to="." href={`/clusters/${workload.cluster_id}/deployments/${workload.deployment_id}`}
-            className="block rounded-md border border-border p-3 hover:bg-accent"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <div className="break-all font-mono text-xs font-medium">{workload.namespace}/{workload.name}</div>
-              <Pill tone={workload.critical_count > 0 ? "danger" : workload.high_count > 0 ? "warn" : "neutral"}>{workload.risk_score}</Pill>
-            </div>
-            <div className="mt-1 text-xs text-muted-foreground">{workload.kind} · {workload.finding_count} finding{workload.finding_count === 1 ? "" : "s"}</div>
-          </Link>
-        ))}
-        {workloads.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No active workload exposure in this cluster.</p>
-        ) : null}
-      </div>
-    </section>
-  );
+  const columns: Column<ImpactedWorkload>[] = [
+    { id: "workload", header: "Workload", kind: "name", wrap: true, exportValue: item => `${item.namespace}/${item.name}`, cell: item => <a href={`/clusters/${item.cluster_id}/deployments/${item.deployment_id}`} className="font-medium hover:underline">{item.namespace}/{item.name}</a> },
+    { id: "kind", header: "Kind", kind: "status", cell: item => item.kind },
+    { id: "image", header: "Image", kind: "text", wrap: true, cell: item => item.image_ref },
+    { id: "findings", header: "Findings", kind: "count", cell: item => item.finding_count },
+    { id: "risk", header: "Risk", kind: "count", cell: item => item.risk_score },
+  ];
+  return <section className="space-y-3" data-testid="image-scan-workloads">
+    <h2 className="text-sm font-semibold">Affected workloads</h2>
+    <p className="text-sm text-muted-foreground">All returned workload links in this cluster. No returned links does not establish complete workload coverage.</p>
+    <DataTable rows={workloads} columns={columns} rowKey={item => `${item.cluster_id}:${item.workload_id}:${item.image_ref}`} preferencesKey="image-scan-workloads" exportFileName="image-scan-workloads" emptyState={<p className="p-6 text-sm text-muted-foreground">No workload links returned for this cluster.</p>} />
+  </section>;
 }
 
 function BundlePanel({ result }: { result: ImageScanResult }) {
@@ -545,6 +543,7 @@ function BundlePanel({ result }: { result: ImageScanResult }) {
         <Field label="Exported" value={metadata?.exported_at ? formatDate(metadata.exported_at) : "-"} />
         <Field label="Records" value={metadata?.record_count != null ? `${metadata.record_count}` : "-"} />
       </dl> : null}
+      <p className="mt-3 text-sm text-muted-foreground">Exports contain the full stored scan artifact and are independent of table filters.</p>
       <p className="mt-3 text-sm text-muted-foreground">Last scanned {formatDate(result.last_scanned_at)}</p>
       <div className="mt-3 grid gap-2 sm:grid-cols-3 xl:grid-cols-4">
         <ArtifactButton

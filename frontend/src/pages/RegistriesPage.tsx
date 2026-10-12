@@ -74,13 +74,14 @@ export function RegistriesPage() {
   const summary = useMemo(() => summarizeRegistries(rows, registryJobs), [rows, registryJobs]);
 
   const columns = useMemo<Column<RegistryDTO>[]>(() => [
-    { id: "name", header: "Name", kind: "name", hideable: false, cell: (r) => <span className="font-medium">{r.name}</span>, sort: (a, b) => a.name.localeCompare(b.name) },
-    { id: "kind", header: "Kind", kind: "text", size: 176, minSize: 136, maxSize: 216, cell: (r) => <KindBadge kind={r.kind} /> },
-    { id: "endpoint", header: "Endpoint", kind: "id", size: 224, minSize: 160, maxSize: 320, cell: (r) => <span className="text-mono text-xs text-muted-foreground">{r.endpoint}</span> },
-    { id: "cadence", header: "Cadence", kind: "age", size: 104, minSize: 88, maxSize: 128, cell: (r) => r.scan_cadence },
-    { id: "status", header: "Last sync", kind: "status", size: 224, minSize: 208, maxSize: 240, cell: (r) => <SyncPill row={r} />, sort: (a, b) => (a.last_sync_at ?? "").localeCompare(b.last_sync_at ?? "") },
+    { id: "name", exportValue: r => r.name, header: "Name", kind: "name", hideable: false, cell: (r) => <span className="font-medium">{r.name}</span>, sort: (a, b) => a.name.localeCompare(b.name) },
+    { id: "kind", exportValue: r => r.kind, header: "Kind", kind: "text", size: 176, minSize: 136, maxSize: 216, cell: (r) => <KindBadge kind={r.kind} /> },
+    { id: "endpoint", exportValue: r => r.endpoint, header: "Endpoint", kind: "id", size: 224, minSize: 160, maxSize: 320, cell: (r) => <span className="text-mono text-xs text-muted-foreground">{r.endpoint}</span> },
+    { id: "cadence", exportValue: r => r.scan_cadence, header: "Cadence", kind: "age", size: 104, minSize: 88, maxSize: 128, cell: (r) => r.scan_cadence },
+    { id: "status", exportValue: r => [r.last_sync_status || "not reported", r.last_sync_at || "", r.last_sync_error || ""].filter(Boolean).join("; "), header: "Last sync", kind: "status", size: 224, minSize: 208, maxSize: 240, cell: (r) => <SyncPill row={r} />, sort: (a, b) => (a.last_sync_at ?? "").localeCompare(b.last_sync_at ?? "") },
     {
       id: "scan-jobs",
+      exportValue: r => scanQueue.isError || scanQueue.isPending || scanQueue.isFetching ? "Unavailable" : JSON.stringify(registryJobCounts.get(r.id) ?? { active: 0, pending: 0, running: 0, paused: 0, failed: 0, completed: 0, canceled: 0 }),
       header: "Scan jobs",
       kind: "badge",
       size: 152,
@@ -90,7 +91,7 @@ export function RegistriesPage() {
       cell: (r) => <RegistryJobPills counts={registryJobCounts.get(r.id)} />,
       sort: (a, b) => (registryJobCounts.get(a.id)?.active ?? 0) - (registryJobCounts.get(b.id)?.active ?? 0),
     },
-    { id: "images", header: "Images", kind: "count", numeric: true, sort: (a, b) => a.images_seen - b.images_seen,
+    { id: "images", exportValue: r => r.images_seen, header: "Images", kind: "count", numeric: true, sort: (a, b) => a.images_seen - b.images_seen,
       cell: (r) => (
         <Link to="." href={clusterId ? `/clusters/${clusterId}/registries/${r.id}` : `/registries/${r.id}`} className="text-mono text-[color:var(--color-primary)] hover:underline" onClick={(e) => e.stopPropagation()}>
           {r.images_seen} →
@@ -155,7 +156,7 @@ export function RegistriesPage() {
         );
       },
     },
-  ], [base, navigate, clusterId, registryJobCounts, test, sync, cancelScans, remove]);
+  ], [base, navigate, clusterId, registryJobCounts, scanQueue.isError, scanQueue.isPending, scanQueue.isFetching, test, sync, cancelScans, remove]);
 
   return (
     <div className="space-y-4" data-testid="registries-page">
@@ -200,6 +201,9 @@ export function RegistriesPage() {
       <DataTable<RegistryDTO>
         rows={rows}
         columns={columns}
+        preferencesKey="registry-inventory"
+        exportFileName={q.isSuccess && !q.isError && !q.isFetching ? "constellation-registry-loaded-inventory" : undefined}
+        exportLabel="Export loaded registries CSV"
         rowKey={(r) => r.id}
         emptyState={q.isPending ? "Loading registries..." : q.isError ? "Registry inventory is unavailable. Refresh to try again." : <EmptyState onAdd={() => void navigate({ href: `${base}/new` })} />}
         defaultSort={{ id: "name", dir: "asc" }}

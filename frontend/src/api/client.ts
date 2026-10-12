@@ -2279,6 +2279,7 @@ export interface NetworkPolicyLifecycle {
   id: string;
   cluster_id?: string;
   cluster_name?: string;
+  platform_role?: string;
   workload: string;
   namespace: string;
   current_mode: NetworkPolicyMode;
@@ -4693,7 +4694,7 @@ export const policies = {
   // DPI signature toggles (weak-TLS version detection). Applied live by the runtime-agent.
   dpiThreatSettings: (params: { cluster_id?: string } = {}) =>
     api.get<{ cluster_id: string; weak_tls_enabled: boolean }>("/policies/dpi-threats", { params }).then((r) => r.data),
-  updateDpiThreatSettings: (body: { weak_tls_enabled: boolean }, params: { cluster_id?: string } = {}) =>
+  updateDpiThreatSettings: (body: { weak_tls_enabled: boolean; expected_weak_tls_enabled?: boolean }, params: { cluster_id?: string } = {}) =>
     api.patch<{ cluster_id: string; weak_tls_enabled: boolean }>("/policies/dpi-threats", body, { params }).then((r) => r.data),
   // NV NewServiceMode / NewServiceProfileMode: default mode new service groups start in.
   serviceModeDefaults: (params: { cluster_id?: string } = {}) =>
@@ -4794,7 +4795,7 @@ export interface DashboardSummary {
     exposed_by_mode: Record<string, number>;    // net-exposed workloads by group mode (discover/monitor/protect)
     new_service_policy_mode: string;            // NV NewServiceMode: mode new service groups start in (network)
     new_service_profile_mode: string;           // NV NewServiceProfileMode: process/file mode for new groups
-    top_vulnerable: Array<{ namespace: string; name: string; critical: number; high: number }>;
+    top_vulnerable: Array<{ id?: string; namespace: string; name: string; critical: number; high: number }>;
   };
 }
 

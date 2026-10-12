@@ -1,5 +1,5 @@
 import { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useIsFetching, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate, useRouter } from "@tanstack/react-router";
 import {
   Background,
@@ -49,6 +49,9 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { useNetworkRoute } from "@/hooks/useNetworkRoute";
 import { NETWORK_VIEW_PARAM, networkViewHref, networkViewSnapshotFromParams } from "@/lib/network-saved-view-route";
 import { NetworkSavedViewsControl } from "@/components/NetworkSavedViewsControl";
+import { Collapse } from "@/components/ui/collapse";
+import { clusterCacheReady } from "@/lib/cluster-evidence";
+import { policyActionAvailable } from "./network-secondary";
 import { ErrorState } from "@/components/ui/states";
 import { useCluster } from "@/hooks/useCluster";
 import { usePlatformComponentVisibility } from "@/hooks/usePlatformComponentVisibility";
@@ -201,13 +204,6 @@ const EMPTY_PCAP_FILTERS: NetworkPcapSavedFilters = {
 
 const NetworkViewContext = createContext<{ clusterID: string; snapshot: NetworkSavedViewSnapshot } | null>(null);
 
-function lifecycleIdempotencyKey(workload: string, action: string) {
-  if (typeof window !== "undefined" && "randomUUID" in window.crypto) {
-    return `network-policy:${workload}:${action}:${window.crypto.randomUUID()}`;
-  }
-  return `network-policy:${workload}:${action}:${Date.now()}`;
-}
-
 export function NetworkMapPage() {
   return (
     <ReactFlowProvider>
@@ -229,9 +225,10 @@ function NetworkMapInner() {
   // empty unscoped map). The hooks/useCluster.ts contract requires every
   // fetch on this page to thread this cluster_id.
   const { clusterId, cluster, isLoading: clusterLoading, error: clusterError } = useCluster();
-  const scopeReady = !!clusterId && cluster?.id === clusterId && !clusterLoading && !clusterError;
+  const registryFetching=useIsFetching({queryKey:["clusters"],exact:true});
+  const clusterFetching=useIsFetching({queryKey:["cluster",clusterId],exact:true});
+  const scopeReady = !!clusterId && cluster?.id === clusterId && !clusterLoading && !clusterError && !registryFetching && !clusterFetching && clusterCacheReady(queryClient,clusterId);
   const clusterID = clusterId ?? "";
-  const [actionError, setActionError] = useState("");
   const [live, setLive] = useState(true);
 
   // ───── L2 chip-filter state ─────
@@ -410,11 +407,6 @@ function NetworkMapInner() {
     queryFn: () => policies.dpiThreatSettings({ cluster_id: clusterID || undefined }),
     enabled: scopeReady,
   });
-  const dpiToggleMut = useMutation({
-    mutationFn: (weak_tls_enabled: boolean) => policies.updateDpiThreatSettings({ weak_tls_enabled }, { cluster_id: clusterID || undefined }),
-    onSuccess: (r) => { toast.success(`Weak-TLS detection ${r.weak_tls_enabled ? "enabled" : "disabled"} — applies within ~15s`); void queryClient.invalidateQueries({ queryKey: ["dpi-threat-settings", clusterID] }); },
-    onError: () => toast.error("Failed to update DPI setting"),
-  });
   // NV session-kill: queue a dp ctrl_clear_session; agent executes on its next snapshot.
   const killSessionMut = useMutation({
     mutationFn: ({ id, node }: { id: number; node: string }) =>
@@ -426,28 +418,6 @@ function NetworkMapInner() {
     },
     onError: () => toast.error("Failed to queue session kill"),
   });
-  const action = useMutation({
-    mutationFn: ({ workload, kind, reason, candidateHash }: { workload: string; kind: "approve" | "apply" | "demote"; reason?: string; candidateHash?: string }) =>
-      network.policyAction(workload, kind, { reason, candidate_hash: candidateHash, idempotency_key: lifecycleIdempotencyKey(workload, kind) }, { cluster_id: clusterID || undefined }),
-    onSuccess: () => {
-      setActionError("");
-      void queryClient.invalidateQueries({ queryKey: ["network-policy-lifecycle"] });
-      void queryClient.invalidateQueries({ queryKey: ["network-map"] });
-    },
-    onError: () => {
-      setActionError("Policy candidate changed or action failed. Refresh and review the latest candidate.");
-      void queryClient.invalidateQueries({ queryKey: ["network-policy-lifecycle"] });
-    },
-  });
-  const rollback = useMutation({
-    mutationFn: ({ workload, rollbackRef, reason }: { workload: string; rollbackRef: string; reason?: string }) =>
-      network.rollbackPolicy(workload, { rollback_ref: rollbackRef, reason, idempotency_key: lifecycleIdempotencyKey(workload, "rollback") }, { cluster_id: clusterID || undefined }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["network-policy-lifecycle"] });
-      void queryClient.invalidateQueries({ queryKey: ["network-map"] });
-    },
-  });
-
   const workloads = q.data?.workloads ?? EMPTY_WORKLOADS;
   const platformWorkloads = useMemo(() => new Map(workloads.map((workload) => [
     workload.id,
@@ -474,9 +444,10 @@ function NetworkMapInner() {
   const sessionsHasMore = sessionsQ.data?.has_more ?? false;
   // Cluster list was used by the dropped select; URL-driven now.
   // const clusters = q.data?.summary.clusters ?? [];
-  const lifecycleItemsRaw = lifecycleQ.data?.items ?? EMPTY_LIFECYCLE_ITEMS;
+  const lifecycleAvailable=scopeReady&&lifecycleQ.isSuccess&&!lifecycleQ.isError&&lifecycleQ.data?.summary.selected_cluster_id===clusterID&&lifecycleQ.data.items.every(item=>item.cluster_id===clusterID);
+  const lifecycleItemsRaw = lifecycleAvailable ? lifecycleQ.data!.items : EMPTY_LIFECYCLE_ITEMS;
   const lifecycleItems = useMemo(
-    () => hidePlatformComponents ? lifecycleItemsRaw.filter((item) => !isPlatformNamespace(item.namespace)) : lifecycleItemsRaw,
+    () => hidePlatformComponents ? lifecycleItemsRaw.filter((item) => !isPlatformResource(item.platform_role,item.namespace)) : lifecycleItemsRaw,
     [hidePlatformComponents, lifecycleItemsRaw],
   );
   const threatsRaw = threatsQ.data?.threats ?? EMPTY_THREATS;
@@ -1079,9 +1050,10 @@ function NetworkMapInner() {
         <ThreatsCard
           threats={threats}
           flows={flows}
-          weakTLS={dpiSettingsQ.data?.weak_tls_enabled ?? false}
-          onToggleWeakTLS={(v) => dpiToggleMut.mutate(v)}
-          toggling={dpiToggleMut.isPending}
+          weakTLS={scopeReady&&!dpiSettingsQ.isError&&dpiSettingsQ.data?.cluster_id===clusterID?dpiSettingsQ.data.weak_tls_enabled:undefined}
+          settingsUnavailable={dpiSettingsQ.isError}
+          settingsLoading={dpiSettingsQ.isPending}
+          settingsHref={scopeReady?`/clusters/${clusterID}/network/settings/dpi?${new URLSearchParams({back:routeParams.toString()})}`:undefined}
           onPivot={(flowID) => {
             selectFlow(flowID);
             setPopoverOpen(true);
@@ -1144,15 +1116,15 @@ function NetworkMapInner() {
         <CollapsiblePolicyLifecycle
           item={selectedLifecycle}
           items={lifecycleItems}
-          pending={action.isPending}
-          rollbackPending={rollback.isPending}
-          actionError={actionError}
+          available={lifecycleAvailable}
+          loading={lifecycleQ.isPending}
+          refreshing={lifecycleQ.isFetching}
+          onRetry={()=>void lifecycleQ.refetch()}
           onSelect={(workload) => {
             setSelectedWorkloadID(workload);
             setSelectedFlowID(null);
           }}
-          onAction={(workload, kind, reason, candidateHash) => action.mutate({ workload, kind, reason, candidateHash })}
-          onRollback={(workload, rollbackRef, reason) => rollback.mutate({ workload, rollbackRef, reason })}
+
         />
         </>
         )}
@@ -1233,11 +1205,12 @@ function NetworkMapInner() {
         <RadixTabs.Content value="rules" className="min-h-0 flex-1 overflow-auto outline-none" data-testid="network-workspace-panel-rules">
           <NetworkRulesWorkspaceTab
             items={lifecycleItems}
-            pending={action.isPending}
-            rollbackPending={rollback.isPending}
-            actionError={actionError}
-            onAction={(workload, kind, reason, candidateHash) => action.mutate({ workload, kind, reason, candidateHash })}
-            onRollback={(workload, rollbackRef, reason) => rollback.mutate({ workload, rollbackRef, reason })}
+            selectedWorkload={selectedWorkloadID}
+            onSelect={setSelectedWorkloadID}
+            available={lifecycleAvailable}
+            loading={lifecycleQ.isPending}
+            refreshing={lifecycleQ.isFetching}
+            onRetry={()=>void lifecycleQ.refetch()}
           />
         </RadixTabs.Content>
 
@@ -1247,9 +1220,10 @@ function NetworkMapInner() {
             total={threatsQ.data?.total ?? threats.length}
             page={threatPage}
             onPage={setThreatPage}
-            weakTLS={dpiSettingsQ.data?.weak_tls_enabled ?? false}
-            toggling={dpiToggleMut.isPending}
-            onToggleWeakTLS={(value) => dpiToggleMut.mutate(value)}
+            weakTLS={scopeReady&&!dpiSettingsQ.isError&&dpiSettingsQ.data?.cluster_id===clusterID?dpiSettingsQ.data.weak_tls_enabled:undefined}
+            settingsUnavailable={dpiSettingsQ.isError}
+            settingsLoading={dpiSettingsQ.isPending}
+            settingsHref={scopeReady?`/clusters/${clusterID}/network/settings/dpi?${new URLSearchParams({back:routeParams.toString()})}`:undefined}
             onPivot={(threat) => {
               const flow = flows.find(
                 (f) =>
@@ -1726,86 +1700,124 @@ function pcapCaptureFilterLabel(capture: PcapCapture) {
   return parts.join(" ") || "any";
 }
 
-function NetworkRulesWorkspaceTab({
+export function NetworkRulesWorkspaceTab({
   items,
-  pending,
-  rollbackPending,
-  actionError,
-  onAction,
-  onRollback,
+  selectedWorkload,
+  onSelect,
+  available,
+  loading,
+  refreshing,
+  onRetry,
 }: {
   items: NetworkPolicyLifecycle[];
-  pending: boolean;
-  rollbackPending: boolean;
-  actionError: string;
-  onAction: (workload: string, kind: "approve" | "apply" | "demote", reason?: string, candidateHash?: string) => void;
-  onRollback: (workload: string, rollbackRef: string, reason?: string) => void;
+  selectedWorkload: string | null;
+  onSelect: (value: string) => void;
+  available: boolean;
+  loading: boolean;
+  refreshing: boolean;
+  onRetry: () => void;
 }) {
-  const [selectedWorkload, setSelectedWorkload] = useState("");
-  useEffect(() => {
-    if (items.length > 0 && !items.some((item) => item.workload === selectedWorkload)) {
-      setSelectedWorkload(items[0].workload);
-    }
-  }, [items, selectedWorkload]);
-  const selected = items.find((item) => item.workload === selectedWorkload) ?? items[0] ?? null;
-  const counts = useMemo(
-    () => items.reduce(
-      (acc, item) => ({ ...acc, [item.current_mode]: (acc[item.current_mode] ?? 0) + 1 }),
-      { discover: 0, monitor: 0, protect: 0 } as Record<NetworkPolicyMode, number>,
-    ),
-    [items],
-  );
-  if (items.length === 0) {
-    return (
-      <div className="rounded-md border border-border bg-card px-3 py-8 text-center text-sm text-muted-foreground" data-testid="network-rules-tab">
-        No network policy lifecycle candidates in the current window.
-      </div>
-    );
-  }
+  const selected = selectedWorkload
+    ? (items.find((item) => item.workload === selectedWorkload) ?? null)
+    : null;
+  const columns: Column<NetworkPolicyLifecycle>[] = [
+    {
+      id: "workload",
+      header: "Workload",
+      kind: "name",
+      cell: (r) => (
+        <button
+          type="button"
+          onClick={() => onSelect(r.workload)}
+          className="text-primary hover:underline"
+        >
+          {r.workload}
+        </button>
+      ),
+      exportValue: (r) => r.workload,
+    },
+    {
+      id: "mode",
+      header: "Configured mode",
+      kind: "status",
+      cell: (r) => <ModeBadge mode={r.current_mode} />,
+      exportValue: (r) => r.current_mode,
+    },
+    {
+      id: "approval",
+      header: "Approval",
+      kind: "status",
+      cell: (r) => r.approval_status,
+      exportValue: (r) => r.approval_status,
+    },
+    {
+      id: "flows",
+      header: "Observed flow rows",
+      kind: "count",
+      cell: (r) => r.summary.total_flows,
+      exportValue: (r) => r.summary.total_flows,
+    },
+    {
+      id: "peers",
+      header: "Observed peers",
+      kind: "count",
+      cell: (r) => r.summary.unique_peers,
+      exportValue: (r) => r.summary.unique_peers,
+    },
+  ];
   return (
-    <section className="grid min-h-0 gap-3 lg:grid-cols-[360px_minmax(0,1fr)]" data-testid="network-rules-tab">
-      <aside className="space-y-3">
-        <div className="grid grid-cols-3 gap-2">
-          <ModeStat mode="discover" value={counts.discover} />
-          <ModeStat mode="monitor" value={counts.monitor} />
-          <ModeStat mode="protect" value={counts.protect} />
-        </div>
-        <div className="overflow-hidden rounded-md border border-border bg-card">
-          <div className="border-b border-border px-3 py-2 text-[10px] uppercase tracking-wider text-muted-foreground">Workloads</div>
-          <div className="max-h-[calc(100vh-320px)] overflow-auto p-1">
-            {items.map((item) => (
-              <button
-                key={item.workload}
-                type="button"
-                className={cn(
-                  "flex w-full items-center justify-between gap-2 rounded px-2 py-2 text-left text-xs",
-                  item.workload === selected?.workload ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-                )}
-                onClick={() => setSelectedWorkload(item.workload)}
-                data-testid="network-rules-workload-row"
-              >
-                <span className="min-w-0">
-                  <span className="block truncate font-mono">{item.workload}</span>
-                  <span className="mt-0.5 block truncate text-[10px]">{modeBridgeLabel(item.current_mode)}</span>
-                </span>
-                <ModeBadge mode={item.current_mode} />
-              </button>
-            ))}
-          </div>
-        </div>
-      </aside>
-      <div className="min-w-0 overflow-auto rounded-md border border-border bg-card px-3 pb-3">
-        <PolicyLifecyclePanel
-          item={selected}
-          items={items}
-          pending={pending}
-          rollbackPending={rollbackPending}
-          actionError={actionError}
-          onSelect={setSelectedWorkload}
-          onAction={onAction}
-          onRollback={onRollback}
-        />
-      </div>
+    <section className="space-y-5" data-testid="network-rules-tab">
+      <p className="text-sm text-muted-foreground">
+        Policy candidates use seven days of retained flow evidence. Namespace
+        and group restrict workloads; map hours and verdict filters do not
+        change the policy source.
+      </p>
+      {!available ? (
+        loading ? (
+          <p role="status">Loading lifecycle evidence…</p>
+        ) : (
+          <ErrorState
+            title="Could not load current lifecycle evidence for this cluster."
+            action={<Button onClick={onRetry}>Retry</Button>}
+          />
+        )
+      ) : (
+        <>
+          {refreshing && (
+            <p role="status" className="text-sm text-muted-foreground">
+              Refreshing policy evidence… Actions are paused.
+            </p>
+          )}
+          <DataTable
+            rows={items}
+            columns={columns}
+            rowKey={(r) => `${r.cluster_id}/${r.workload}`}
+            rowTestId={() => "network-rules-workload-row"}
+            testId="network-lifecycle-table"
+            preferencesKey="network-policy-lifecycle"
+            exportFileName="network-lifecycle.csv"
+            exportLabel="Export returned policy evidence"
+            emptyState={
+              <p>
+                No policy candidates returned for the current source window and
+                filters.
+              </p>
+            }
+          />
+          {selectedWorkload && !selected && (
+            <ErrorState title="The selected workload policy is unavailable in the current result. Select another policy explicitly." />
+          )}
+          <PolicyLifecyclePanel
+            item={selected}
+            items={items}
+            onSelect={onSelect}
+            available={available}
+            loading={loading}
+            refreshing={refreshing}
+            onRetry={onRetry}
+          />
+        </>
+      )}
     </section>
   );
 }
@@ -1816,17 +1828,19 @@ function NetworkThreatsWorkspaceTab({
   page,
   onPage,
   weakTLS,
-  toggling,
-  onToggleWeakTLS,
+  settingsUnavailable,
+  settingsLoading,
+  settingsHref,
   onPivot,
 }: {
   threats: RuntimeThreat[];
   total: number;
   page: number;
   onPage: (page: number) => void;
-  weakTLS: boolean;
-  toggling: boolean;
-  onToggleWeakTLS: (value: boolean) => void;
+  weakTLS: boolean|undefined;
+  settingsUnavailable:boolean;
+  settingsLoading:boolean;
+  settingsHref:string|undefined;
   onPivot: (threat: RuntimeThreat) => void;
 }) {
   const [drilldownID, setDrilldownID] = useState<string | null>(null);
@@ -1842,17 +1856,7 @@ function NetworkThreatsWorkspaceTab({
           <StatPill icon={<AlertTriangle className="h-3 w-3" />} label="critical" value={critical} tone={critical > 0 ? "critical" : "neutral"} />
           <StatPill icon={<Ban className="h-3 w-3" />} label="blocked" value={blocked} tone={blocked > 0 ? "critical" : "neutral"} />
         </div>
-        <label className="inline-flex items-center gap-2 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground">
-          <span>Weak TLS detection</span>
-          <input
-            type="checkbox"
-            checked={weakTLS}
-            disabled={toggling}
-            onChange={(event) => onToggleWeakTLS(event.target.checked)}
-            className="h-3.5 w-3.5 accent-[color:var(--color-primary)]"
-            data-testid="network-threats-weak-tls"
-          />
-        </label>
+        <WeakTLSStatus configured={weakTLS} unavailable={settingsUnavailable} loading={settingsLoading} href={settingsHref} testId="network-threats-weak-tls"/>
       </div>
       <div className="overflow-hidden rounded-md border border-border bg-card">
         <DataTable<RuntimeThreat>
@@ -1879,28 +1883,6 @@ function NetworkThreatsWorkspaceTab({
       {drilldownID && <ThreatDrilldownDialog id={drilldownID} onClose={() => setDrilldownID(null)} />}
     </section>
   );
-}
-
-function ModeStat({ mode, value }: { mode: NetworkPolicyMode; value: number }) {
-  return (
-    <div className="rounded-md border border-border bg-card p-2">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{modeBridgeLabel(mode)}</div>
-      <div className="mt-1 text-lg font-semibold tabular-nums">{value}</div>
-    </div>
-  );
-}
-
-function modeBridgeLabel(mode: NetworkPolicyMode): string {
-  switch (mode) {
-    case "discover":
-      return "Discover / Learn";
-    case "monitor":
-      return "Monitor";
-    case "protect":
-      return "Protect / Enforce";
-    default:
-      return mode;
-  }
 }
 
 function PcapStatusPill({ status }: { status: PcapCaptureStatus }) {
@@ -2834,325 +2816,285 @@ function WorkloadDrilldown({ workload, flows, clusterID, hours, denyCapable, onS
   );
 }
 
+export function WeakTLSStatus({
+  configured,
+  unavailable,
+  loading,
+  href,
+  testId,
+}: {
+  configured: boolean | undefined;
+  unavailable: boolean;
+  loading: boolean;
+  href?: string;
+  testId: string;
+}) {
+  return (
+    <div className="space-y-1 text-xs" data-testid={testId}>
+      <p>
+        Weak-TLS detection:{" "}
+        {unavailable
+          ? "unavailable"
+          : loading
+            ? "loading"
+            : configured == null
+              ? "unknown"
+              : `configured ${configured ? "on" : "off"}`}
+      </p>
+      <p className="text-muted-foreground">
+        Agent adoption is not reported here.
+      </p>
+      {href && (
+        <a href={href} className="text-primary hover:underline">
+          Review weak-TLS settings
+        </a>
+      )}
+    </div>
+  );
+}
 function PolicyLifecyclePanel({
   item,
   items,
-  pending,
-  rollbackPending,
-  actionError,
   onSelect,
-  onAction,
-  onRollback,
+  available,
+  loading,
+  refreshing,
+  onRetry,
 }: {
   item: NetworkPolicyLifecycle | null;
   items: NetworkPolicyLifecycle[];
-  pending: boolean;
-  rollbackPending: boolean;
-  actionError: string;
-  onSelect: (workload: string) => void;
-  onAction: (workload: string, kind: "approve" | "apply" | "demote", reason?: string, candidateHash?: string) => void;
-  onRollback: (workload: string, rollbackRef: string, reason?: string) => void;
+  onSelect: (value: string) => void;
+  available: boolean;
+  loading: boolean;
+  refreshing: boolean;
+  onRetry: () => void;
 }) {
-  const [reason, setReason] = useState("");
-  const [rollbackReason, setRollbackReason] = useState("");
-  const [rollbackPreviewOpen, setRollbackPreviewOpen] = useState(false);
-  const [manifestFlavor, setManifestFlavor] = useState("cilium");
-
-  useEffect(() => {
-    setReason("");
-    setRollbackReason("");
-    setRollbackPreviewOpen(false);
-    setManifestFlavor("cilium");
-  }, [item?.workload]);
-
-  if (!item) {
+  const context = useContext(NetworkViewContext);
+  const search = useLocation({ select: (l) => l.searchStr });
+  if (!available)
     return (
-      <section className="mt-4 border-t border-border pt-4" data-testid="network-policy-lifecycle">
-        <h2 className="text-sm font-semibold">Network policy lifecycle</h2>
-        <p className="mt-1 text-xs text-muted-foreground">No lifecycle data is available for the current traffic window.</p>
+      <ErrorState
+        title={
+          loading
+            ? "Loading policy lifecycle evidence…"
+            : "Current policy lifecycle evidence is unavailable."
+        }
+        action={<Button onClick={onRetry}>Retry</Button>}
+      />
+    );
+  if (!item)
+    return (
+      <section data-testid="network-policy-lifecycle">
+        <p className="text-sm text-muted-foreground">
+          Select a reported workload to inspect its configured policy,
+          candidate, and applier evidence.
+        </p>
+        {items.length > 0 && (
+          <select
+            aria-label="Select workload policy"
+            value=""
+            onChange={(e) => onSelect(e.target.value)}
+            className="mt-3 w-full rounded border border-border bg-background p-2"
+          >
+            <option value="">Choose a workload</option>
+            {items.map((p) => (
+              <option key={p.workload} value={p.workload}>
+                {p.workload}
+              </option>
+            ))}
+          </select>
+        )}
       </section>
     );
-  }
-  const isStale = item.candidate_stale || Boolean(item.approved_candidate_hash && item.candidate_hash && item.approved_candidate_hash !== item.candidate_hash);
-  const canApprove = (item.approval_status === "pending" || isStale) && Boolean(item.target_mode);
-  const canApply = item.approval_status === "approved" && Boolean(item.target_mode) && !isStale;
-  const canDemote = item.current_mode !== "discover";
-  const canRollback = item.rollback_available && Boolean(item.rollback_ref);
-  const persistedActions = item.audit_trail.filter((event) => ["approve", "apply", "demote", "rollback"].includes(event.action));
-  const lastIdempotencyKey = [...item.audit_trail].reverse().find((event) => event.idempotency_key)?.idempotency_key;
-  const tuplePreview = item.tuple_preview ?? [];
-  const manifests = Object.keys(item.preview.manifests ?? {}).length > 0
-    ? item.preview.manifests ?? {}
-    : { [item.preview.engine || "cilium"]: item.preview.yaml };
-  const manifestFlavors = ["native", "cilium", "calico"].filter((flavor) => Boolean(manifests[flavor]));
-  const activeManifestFlavor = manifests[manifestFlavor] ? manifestFlavor : manifestFlavors[0] ?? item.preview.engine ?? "cilium";
-  const activeManifest = manifests[activeManifestFlavor] ?? item.preview.yaml;
-  const applyStatuses = item.apply_statuses ?? [];
-  const latestApplyStatus = [...applyStatuses].sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)))[0];
-  const actionState = canApprove
-    ? `Awaiting approval for ${item.target_mode}`
-    : isStale
-      ? "Review updated candidate"
-      : canApply
-      ? `Approved, ready to apply ${item.target_mode}`
-      : canRollback
-        ? `Rollback available for ${item.current_mode}`
-        : item.approval_status;
+  const params = new URLSearchParams(search);
+  const actions = [
+    "approve-policy",
+    "apply-policy",
+    "demote-policy",
+    "rollback-policy",
+  ].filter((action) => policyActionAvailable(action, item));
+  const labels: Record<string, string> = {
+    "approve-policy": "Approve candidate",
+    "apply-policy": "Apply policy",
+    "demote-policy": "Demote policy",
+    "rollback-policy": "Roll back policy",
+  };
+  const actionURL = (action: string) =>
+    `/clusters/${encodeURIComponent(context?.clusterID ?? item.cluster_id ?? "")}/network/actions/${action}?${new URLSearchParams({ workload: item.workload, hours: params.get("hours") || "24", back: params.toString() })}`;
+  const latest = [...(item.apply_statuses ?? [])].sort((a, b) =>
+    b.updated_at.localeCompare(a.updated_at),
+  )[0];
+  const tuples = item.tuple_preview.map((r, key) => ({ ...r, key }));
+  const audit = item.audit_trail.map((r, key) => ({ ...r, key }));
+  const tupleColumns: Column<(typeof tuples)[number]>[] = [
+    {
+      id: "direction",
+      header: "Direction",
+      kind: "status",
+      cell: (r) => r.direction,
+      exportValue: (r) => r.direction,
+    },
+    {
+      id: "peer",
+      header: "Peer",
+      kind: "name",
+      cell: (r) => r.peer,
+      exportValue: (r) => r.peer,
+    },
+    {
+      id: "protocol",
+      header: "Protocol",
+      kind: "text",
+      cell: (r) => `${r.l7_protocol || ""} ${r.protocol}/${r.port}`,
+      exportValue: (r) => `${r.protocol}/${r.port}`,
+    },
+    {
+      id: "samples",
+      header: "Observations",
+      kind: "count",
+      cell: (r) => r.samples,
+      exportValue: (r) => r.samples,
+    },
+    {
+      id: "included",
+      header: "Candidate treatment",
+      kind: "status",
+      cell: (r) => (r.included ? "included" : r.exclude_reason || r.verdict),
+      exportValue: (r) =>
+        r.included ? "included" : r.exclude_reason || r.verdict,
+    },
+  ];
   return (
-    <section className="mt-4 space-y-3 border-t border-border pt-4" data-testid="network-policy-lifecycle">
-      <div>
-        <h2 className="text-sm font-semibold">Network policy lifecycle</h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Policy for <span className="font-mono">{item.workload}</span>
-          {item.cluster_name && <span> on {item.cluster_name}</span>}
-        </p>
-      </div>
-      <div className="flex flex-wrap items-center gap-2" data-testid="network-policy-action-bar">
-        <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground" data-testid="network-policy-dry-run-badge">
-          {persistedActions.length > 0 ? "state persisted" : "preview only"}
-        </span>
-        <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-          cluster apply gated
-        </span>
-        {manifestFlavors.length > 1 && (
-          <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-            {manifestFlavors.length} manifests
-          </span>
-        )}
+    <section
+      className="space-y-4 rounded border border-border bg-card p-4"
+      data-testid="network-policy-lifecycle"
+    >
+      <h2 className="text-sm font-semibold">
+        Network policy · {item.workload}
+      </h2>
+      <div
+        className="flex flex-wrap items-center gap-3"
+        data-testid="network-policy-action-bar"
+      >
         <ModeBadge mode={item.current_mode} />
-        {item.target_mode && (
-          <>
-            <span className="text-xs text-muted-foreground">to</span>
-            <ModeBadge mode={item.target_mode} />
-          </>
-        )}
-        <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">{item.approval_status}</span>
-        {item.rollback_available && <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">rollback ready</span>}
-        {isStale && <span className="rounded-md bg-muted px-2 py-1 text-xs text-status-warning" data-testid="network-policy-stale-badge">candidate changed</span>}
+        <span>{item.approval_status}</span>
+        <span className="text-sm text-muted-foreground">
+          Configured state; deployment requires separate applier evidence.
+        </span>
       </div>
-      {(isStale || actionError) && (
-        <div className="rounded-md border border-[color:var(--color-status-warning)]/40 bg-muted p-2 text-xs text-muted-foreground" data-testid="network-policy-stale-warning">
-          {actionError || item.stale_reason || "Observed traffic changed since approval. Review the updated candidate before applying."}
-        </div>
-      )}
-      {actionError && (
-        <div className="rounded-md border border-border p-2 text-xs text-status-error" data-testid="network-policy-action-error">
-          {actionError}
-        </div>
-      )}
-      <div className="rounded-md border border-border p-2 text-xs text-muted-foreground" data-testid="network-policy-action-state">
-        <div>{actionState}</div>
-        <div className="mt-1 font-mono">{lastIdempotencyKey ? `retry key ${lastIdempotencyKey}` : "retry key pending"}</div>
-      </div>
-      <div className="rounded-md border border-border p-2 text-xs text-muted-foreground" data-testid="network-policy-apply-status">
-        {latestApplyStatus ? (
-          <>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="font-medium text-foreground">Live applier</span>
-              <span className="rounded bg-muted px-1.5 py-0.5">{latestApplyStatus.flavor}</span>
-              <span className={latestApplyStatus.status === "ok" ? "text-[color:var(--color-status-success)]" : "text-[color:var(--color-status-error)]"}>
-                {latestApplyStatus.last_action} {latestApplyStatus.status}
-              </span>
-              <span>{new Date(latestApplyStatus.updated_at).toLocaleTimeString()}</span>
-            </div>
-            {latestApplyStatus.resource_ref && <div className="mt-1 break-all font-mono">{latestApplyStatus.resource_ref}</div>}
-            {latestApplyStatus.error && <div className="mt-1 text-status-error">{latestApplyStatus.error}</div>}
-          </>
-        ) : (
-          <span>Live applier has not reported for this policy.</span>
-        )}
-      </div>
-      <p className="text-xs text-muted-foreground">{item.reason}</p>
-      {item.preview.l7_protocols && item.preview.l7_protocols.length > 0 && (
-        <div className="rounded-md border border-border p-2 text-xs text-muted-foreground" data-testid="network-policy-l7-intent">
-          L7 intent preserved as manifest metadata: {item.preview.l7_protocols.join(", ")}
-        </div>
-      )}
-      <div className="rounded-md border border-border p-3 text-xs" data-testid="network-policy-candidate-card">
-        <div className="grid grid-cols-2 gap-2">
-          <div data-testid="network-policy-candidate-hash"><Field label="Candidate" value={item.candidate_hash ? item.candidate_hash.slice(0, 12) : "pending"} /></div>
-          <div data-testid="network-policy-generated-at"><Field label="Generated" value={item.generated_at ? new Date(item.generated_at).toLocaleTimeString() : "pending"} /></div>
-          <div data-testid="network-policy-approved-candidate-hash"><Field label="Approved candidate" value={item.approved_candidate_hash ? item.approved_candidate_hash.slice(0, 12) : "none"} /></div>
-          <Field label="Stale" value={isStale ? "yes" : "no"} />
-        </div>
-      </div>
-      {tuplePreview.length > 0 && (
-        <div className="rounded-md border border-border p-3" data-testid="network-policy-tuple-preview">
-          <div className="text-xs font-medium">Observed tuples</div>
-          <ul className="mt-2 max-h-44 space-y-1 overflow-auto text-xs text-muted-foreground">
-            {tuplePreview.map((tuple) => (
-              <li
-                key={`${tuple.direction}-${tuple.peer}-${tuple.protocol}-${tuple.port}-${tuple.verdict}-${tuple.l7_protocol ?? ""}`}
-                className="grid grid-cols-[64px_minmax(0,1fr)_86px_58px_90px] gap-2 rounded-sm bg-muted/60 px-2 py-1"
-                data-testid={tuple.included ? "network-policy-included-tuple" : "network-policy-held-tuple"}
-              >
-                <span className="font-mono">{tuple.direction}</span>
-                <span className="truncate">{tuple.peer}</span>
-                <span>{tuple.l7_protocol ? `${tuple.l7_protocol} ` : ""}{tuple.protocol}/{tuple.port}</span>
-                <span>{tuple.samples}x</span>
-                <span className={tuple.included ? "text-[color:var(--color-status-success)]" : "text-[color:var(--color-status-warning)]"}>
-                  {tuple.included ? "included" : tuple.exclude_reason || tuple.verdict}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      <dl className="grid grid-cols-2 gap-2 text-xs">
-        <Field label="Flows" value={`${item.summary.total_flows}`} />
-        <Field label="Peers" value={`${item.summary.unique_peers}`} />
-        <Field label="Alerts" value={`${item.summary.out_of_policy_alerts}`} />
-        <Field label="Rollback" value={item.rollback_available ? "available" : "not ready"} />
-        <Field label="Cluster" value={item.cluster_name || item.cluster_id || "default"} />
-        <Field label="Applied ref" value={item.applied_ref || "pending"} />
-        <Field label="Rollback ref" value={item.rollback_ref || "none"} />
-      </dl>
-      <div className="flex flex-wrap gap-2">
-        {canApprove && (
-          <button
-            type="button"
-            data-testid="network-policy-approve"
-            className="rounded-md border border-border px-2.5 py-1 text-xs hover:bg-accent"
-            disabled={pending}
-            onClick={() => onAction(item.workload, "approve", undefined, item.candidate_hash)}
+      <p className="text-sm">{item.reason}</p>
+      <p
+        className="text-xs text-muted-foreground"
+        data-testid="network-policy-apply-status"
+      >
+        {latest
+          ? `Last reported applier: ${latest.flavor} · ${latest.last_action} ${latest.status} · ${latest.updated_at}${latest.error ? ` · ${latest.error}` : ""}`
+          : "No applier report is available for this policy."}
+      </p>
+      <div className="flex flex-wrap gap-3">
+        {actions.map((action) => (
+          <a
+            key={action}
+            href={!refreshing ? actionURL(action) : undefined}
+            aria-disabled={refreshing}
+            className="rounded border border-border px-3 py-2 text-sm text-primary"
+            data-testid={`network-policy-${action.split("-")[0]}`}
           >
-            Approve {item.target_mode}
-          </button>
-        )}
-        {canApply && (
-          <button
-            type="button"
-            data-testid="network-policy-apply"
-            className="rounded-md border border-border px-2.5 py-1 text-xs hover:bg-accent"
-            disabled={pending}
-            onClick={() => onAction(item.workload, "apply", undefined, item.candidate_hash)}
-          >
-            Apply policy
-          </button>
-        )}
-      </div>
-      {canDemote && (
-      <div className="space-y-2">
-        <input
-          data-testid="network-policy-demote-reason"
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-          placeholder={item.current_mode === "discover" ? "Already in discover" : "Demotion reason"}
-          aria-label="Network policy demotion reason"
-          className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs"
-          disabled={item.current_mode === "discover"}
-        />
-        <button
-          type="button"
-          data-testid="network-policy-demote"
-          className="rounded-md border border-border px-2.5 py-1 text-xs hover:bg-accent disabled:opacity-50"
-          disabled={pending || item.current_mode === "discover" || reason.trim() === ""}
-          onClick={() => onAction(item.workload, "demote", reason)}
-        >
-          Demote
-        </button>
-      </div>
-      )}
-      {canRollback && item.rollback_ref && (
-        <div className="space-y-2 rounded-md border border-border p-3" data-testid="network-policy-rollback-card">
-          <div className="text-xs font-medium" data-testid="network-policy-rollback-status">Rollback ready</div>
-          <div className="break-all font-mono text-xs text-muted-foreground" data-testid="network-policy-rollback-ref">{item.rollback_ref}</div>
-          <button
-            type="button"
-            data-testid="network-policy-rollback-preview-toggle"
-            className="rounded-md border border-border px-2.5 py-1 text-xs hover:bg-accent"
-            onClick={() => setRollbackPreviewOpen((open) => !open)}
-          >
-            {rollbackPreviewOpen ? "Hide rollback preview" : "Preview rollback"}
-          </button>
-          {rollbackPreviewOpen && (
-            <>
-              <pre className="max-h-40 overflow-auto rounded-md bg-muted p-3 text-xs" data-testid="network-policy-rollback-preview">
-                {activeManifest}
-              </pre>
-              <div className="rounded-md border border-border p-3" data-testid="network-policy-rollback-diff">
-                <div className="text-xs font-medium">Rollback diff</div>
-                <p className="mt-1 text-xs text-muted-foreground">Restores the previous policy bundle and clears the current rollback window.</p>
-              </div>
-            </>
-          )}
-          <input
-            data-testid="network-policy-rollback-reason"
-            value={rollbackReason}
-            onChange={(e) => setRollbackReason(e.target.value)}
-            placeholder="Rollback reason"
-            aria-label="Network policy rollback reason"
-            className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs"
-          />
-          <button
-            type="button"
-            data-testid="network-policy-rollback"
-            className="rounded-md border border-border px-2.5 py-1 text-xs hover:bg-accent disabled:opacity-50"
-            disabled={rollbackPending}
-            onClick={() => onRollback(item.workload, item.rollback_ref ?? "", rollbackReason)}
-          >
-            Roll back
-          </button>
-        </div>
-      )}
-      <div>
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-medium">Lifecycle policy preview</h3>
-          {manifestFlavors.length > 1 && (
-            <div className="flex rounded-md border border-border p-0.5" data-testid="network-policy-manifest-tabs">
-              {manifestFlavors.map((flavor) => (
-                <button
-                  key={flavor}
-                  type="button"
-                  className={`rounded px-2 py-1 text-xs ${activeManifestFlavor === flavor ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-                  onClick={() => setManifestFlavor(flavor)}
-                  data-testid={`network-policy-manifest-${flavor}`}
-                >
-                  {flavor}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-        <pre className="max-h-52 overflow-auto rounded-md bg-muted p-3 text-xs" data-testid="network-policy-preview">
-          {activeManifest}
-        </pre>
-      </div>
-      <div className="rounded-md border border-border p-3" data-testid="network-policy-diff">
-        <div className="text-xs font-medium">Diff</div>
-        <p className="mt-1 text-xs text-muted-foreground">{item.diff.summary}</p>
-        <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
-          {[...item.diff.added, ...item.diff.changed, ...item.diff.removed].map((line) => (
-            <li key={line}>{line}</li>
-          ))}
-        </ul>
-      </div>
-      <div className="rounded-md border border-border p-3" data-testid="network-policy-audit-trail">
-        <div className="text-xs font-medium">Audit trail</div>
-        <ul className="mt-2 max-h-36 space-y-1 overflow-auto text-xs text-muted-foreground">
-          {item.audit_trail.slice(-5).map((event) => (
-            <li key={`${event.at}-${event.action}-${event.actor}`}>
-              <span className="font-mono">{event.action}</span> · {event.message}
-            </li>
-          ))}
-        </ul>
-      </div>
-      <div className="space-y-1" data-testid="network-policy-lifecycle-rail">
-        {items.map((row) => (
-          <button
-            key={row.workload}
-            type="button"
-            data-testid="network-policy-lifecycle-row"
-            className={`flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-xs ${
-              row.workload === item.workload ? "bg-accent text-foreground" : "bg-muted text-muted-foreground hover:text-foreground"
-            }`}
-            onClick={() => onSelect(row.workload)}
-          >
-            <span className="truncate font-mono">{row.workload}</span>
-            <ModeBadge mode={row.current_mode} />
-          </button>
+            {labels[action]}
+          </a>
         ))}
       </div>
+      <Collapse label="Advanced: candidate and observed tuples">
+        <p className="break-all font-mono text-xs">
+          Candidate {item.candidate_hash || "unavailable"} · approved{" "}
+          {item.approved_candidate_hash || "none"} · generated{" "}
+          {item.generated_at || "not reported"}
+        </p>
+        <DataTable
+          rows={tuples}
+          columns={tupleColumns}
+          rowKey={(r) => r.key}
+          preferencesKey="network-policy-tuples"
+          testId="network-policy-tuple-preview"
+          sourceLimit={12}
+          exportFileName="network-policy-observed-tuples.csv"
+          exportLabel="Export returned tuple preview"
+          emptyState={<p>No observed tuples returned.</p>}
+        />
+      </Collapse>
+      <Collapse label="Advanced: current manifest and differences">
+        <div data-testid="network-policy-preview">
+          {Object.entries(
+            item.preview.manifests && Object.keys(item.preview.manifests).length > 0 ? item.preview.manifests : {
+              [item.preview.engine]: item.preview.yaml,
+            },
+          ).map(([name, yaml]) => (
+            <div key={name}>
+              <p className="text-sm font-medium">{name}</p>
+              <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-all text-xs">
+                {yaml}
+              </pre>
+            </div>
+          ))}
+        </div>
+        <p className="mt-3 text-sm">{item.diff.summary}</p>
+        <ul>
+          {[...item.diff.added, ...item.diff.changed, ...item.diff.removed].map(
+            (value, index) => (
+              <li key={index} className="text-xs">
+                {value}
+              </li>
+            ),
+          )}
+        </ul>
+        {item.rollback_ref && (
+          <p className="mt-3 break-all text-sm">
+            Stored rollback reference: {item.rollback_ref}. Historical bundle
+            contents are not supplied for a preview.
+          </p>
+        )}
+      </Collapse>
+      <Collapse label="Advanced: returned policy audit">
+        <DataTable
+          rows={audit}
+          columns={[
+            {
+              id: "at",
+              header: "At",
+              kind: "date",
+              cell: (r) => r.at,
+              exportValue: (r) => r.at,
+            },
+            {
+              id: "action",
+              header: "Action",
+              kind: "status",
+              cell: (r) => r.action,
+              exportValue: (r) => r.action,
+            },
+            {
+              id: "message",
+              header: "Record",
+              kind: "name",
+              wrap: true,
+              cell: (r) => r.message,
+              exportValue: (r) => r.message,
+            },
+            {
+              id: "actor",
+              header: "Actor",
+              kind: "id",
+              cell: (r) => r.actor,
+              exportValue: (r) => r.actor,
+            },
+          ]}
+          rowKey={(r) => r.key}
+          testId="network-policy-audit-trail"
+          preferencesKey="network-policy-audit"
+          exportFileName="network-policy-audit.csv"
+          emptyState={<p>No policy audit records returned.</p>}
+        />
+      </Collapse>
     </section>
   );
 }
@@ -3626,15 +3568,17 @@ function ThreatsCard({
   threats,
   flows,
   weakTLS,
-  onToggleWeakTLS,
-  toggling,
+  settingsUnavailable,
+  settingsLoading,
+  settingsHref,
   onPivot,
 }: {
   threats: RuntimeThreat[];
   flows: NetworkFlow[];
-  weakTLS: boolean;
-  onToggleWeakTLS: (v: boolean) => void;
-  toggling: boolean;
+  weakTLS: boolean|undefined;
+  settingsUnavailable:boolean;
+  settingsLoading:boolean;
+  settingsHref:string|undefined;
   onPivot: (flowID: string) => void;
 }) {
   const [drilldownID, setDrilldownID] = useState<string | null>(null);
@@ -3750,25 +3694,15 @@ function ThreatsCard({
         </ul>
         {threats.length > recent.length && (
           <div className="mt-1 border-t border-border/60 pt-1 px-1 text-[10px] text-muted-foreground">
-            + {threats.length - recent.length} more in window
+            + {threats.length - recent.length} more in the loaded page
           </div>
         )}
         {!hot && (
-          <p className="px-1 py-1 text-[10px] text-muted-foreground">No DPI threats in the last 24h.</p>
+          <p className="px-1 py-1 text-[10px] text-muted-foreground">No DPI threats in the loaded page.</p>
         )}
         {/* DPI signature toggle (NV-style): weak-TLS version detection is off by default
             (dp reads the legacy TLS record version in tap mode → false positives on modern HTTPS). */}
-        <label className="mt-1 flex items-center justify-between gap-2 border-t border-border/60 px-1 pt-1.5 text-[10px]">
-          <span className="text-muted-foreground">Detect weak TLS <span className="text-muted-foreground/70">(SSLv3 / TLS 1.0-1.1)</span></span>
-          <input
-            type="checkbox"
-            checked={weakTLS}
-            disabled={toggling}
-            onChange={(e) => onToggleWeakTLS(e.target.checked)}
-            className="h-3.5 w-3.5 accent-[color:var(--color-primary)] disabled:opacity-50"
-            data-testid="network-weak-tls-toggle"
-          />
-        </label>
+        <WeakTLSStatus configured={weakTLS} unavailable={settingsUnavailable} loading={settingsLoading} href={settingsHref} testId="network-weak-tls-toggle"/>
         </>
         )}
       </div>
@@ -4011,11 +3945,11 @@ function CollapsiblePolicyLifecycle(props: React.ComponentProps<typeof PolicyLif
         title="Network policy lifecycle"
       >
         <Eye   className="h-3 w-3 text-muted-foreground" />
-        <span className="text-mono tabular-nums">{discover}</span>
+        <span className="text-mono tabular-nums">{props.available?discover:"—"}</span>
         <Radio className="h-3 w-3 text-[color:var(--color-status-warning)]" />
-        <span className="text-mono tabular-nums">{monitor}</span>
+        <span className="text-mono tabular-nums">{props.available?monitor:"—"}</span>
         <Lock  className="h-3 w-3 text-[color:var(--color-primary)]" />
-        <span className="text-mono tabular-nums">{protect}</span>
+        <span className="text-mono tabular-nums">{props.available?protect:"—"}</span>
         <span className="text-muted-foreground">netpol</span>
       </button>
     );

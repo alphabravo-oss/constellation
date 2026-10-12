@@ -1,8 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
   AlertTriangle,
+  ArrowLeft,
+  Save,
   CheckCircle2,
   Circle,
   Clock,
@@ -24,6 +26,7 @@ import {
   scannerOperations,
   systemHealth,
   systemConfigApi,
+  type SystemConfigResponse,
   type ScanJob,
   type ScanJobAttempt,
   type ScanQueueMetric,
@@ -31,6 +34,11 @@ import {
   type ScannerCacheStat,
   type ScannerWorker,
 } from "@/api/client";
+import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
+import { useRouteSearchParams } from "@/lib/route-search";
+import { isRevisionConflict } from "@/lib/integration-routing";
+import { ErrorState, LoadingState } from "@/components/ui/states";
+import { Collapse } from "@/components/ui/collapse";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/ui/page";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
@@ -60,13 +68,15 @@ export function ScannerSourcesPage() {
   const [requestedTab, setTab] = useTabParam("tab", "jobs");
   const tab = ["jobs", "workers", "databases", "sources"].includes(requestedTab) ? requestedTab : "jobs";
   const navigate = useNavigate();
+  const [params] = useRouteSearchParams();
+  const intervalReturn = `/settings/scanner?${params.size ? params.toString() : "tab=databases"}`;
+  const intervalHref = `/settings/scanner/databases/edit?return_to=${encodeURIComponent(intervalReturn)}`;
   const systemConfig = useQuery({ queryKey: ["system-config"], queryFn: () => systemConfigApi.get() });
   const scanStatus = useQuery({ queryKey: ["scan-status"], queryFn: scannerOperations.status });
   const scannerWorkers = useQuery({ queryKey: ["scan-scanner-workers"], queryFn: scannerOperations.workers });
   const scannerHealth = useQuery({ queryKey: ["system-health"], queryFn: systemHealth.overview, refetchInterval: 30_000 });
   const scanJobList = useQuery({ queryKey: ["scan-jobs", "scanner-sources"], queryFn: () => scanJobs.list() });
-  const config = systemConfig.data?.config ?? {};
-  const revision = systemConfig.data?.revision ?? 0;
+  const config = systemConfig.isSuccess ? systemConfig.data.config : {};
   const refreshMinutes = typeof config.scanner_db_refresh_minutes === "number" ? config.scanner_db_refresh_minutes : 0;
   const offlineDb = config.scanner_offline_db === true;
   const nvdEnabled = config.nvd_enabled === true;
@@ -76,12 +86,16 @@ export function ScannerSourcesPage() {
 
   const cacheStat = useQuery({
     queryKey: ["scanner-cache-stat", selectedScannerID],
-    queryFn: () => scannerOperations.cacheStat(selectedScannerID),
-    enabled: selectedScannerID !== "",
+    queryFn: async () => { const result = await scannerOperations.cacheStat(selectedScannerID); if (result.scanner_id !== selectedScannerID) throw new Error("Scanner cache identity does not match the selected worker."); return result; },
+    enabled: selectedScannerID !== "" && scannerWorkers.isSuccess && scannerWorkers.data.some(worker => worker.id === selectedScannerID),
   });
 
   const refreshNow = useMutation({
-    mutationFn: () => systemConfigApi.refreshScanner(),
+    mutationFn: () => {
+      const state = qc.getQueryState<SystemConfigResponse>(["system-config"]);
+      if (state?.status !== "success" || state.fetchStatus !== "idle" || state.data?.config.scanner_offline_db === true) throw new Error("Refresh is unavailable until current connected-scanner configuration is loaded.");
+      return systemConfigApi.refreshScanner();
+    },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["system-config"] });
       void qc.invalidateQueries({ queryKey: ["scan-status"] });
@@ -90,25 +104,12 @@ export function ScannerSourcesPage() {
     },
     onError: () => toast.error("Failed to request refresh"),
   });
-  const updateRefresh = useMutation({
-    mutationFn: (minutes: number) => systemConfigApi.patch({ scanner_db_refresh_minutes: minutes }),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["system-config"] });
-      toast.success("Scanner DB refresh interval updated");
-    },
-    onError: (error: unknown) => {
-      const status = (error as { response?: { status?: number } })?.response?.status;
-      if (status === 409) {
-        void qc.invalidateQueries({ queryKey: ["system-config"] });
-        toast.error("Config changed elsewhere; reloaded latest — please retry.");
-        return;
-      }
-      toast.error("Failed to update scanner DB refresh interval");
-    },
-  });
 
   const jobAction = useMutation({
     mutationFn: ({ id, action }: { id: string; action: ScanJobAction }) => {
+      const state = qc.getQueryState<Awaited<ReturnType<typeof scanJobs.list>>>(["scan-jobs", "scanner-sources"]);
+      const job = state?.data?.jobs.find(item => item.id === id);
+      if (state?.status !== "success" || state.fetchStatus !== "idle" || !job || !eligibleJobAction(job, action)) throw new Error("Job state changed or is unavailable. Refresh before continuing.");
       switch (action) {
         case "pause":
           return scanJobsAdmin.pause(id);
@@ -123,7 +124,7 @@ export function ScannerSourcesPage() {
     onSuccess: (_result, vars) => {
       void qc.invalidateQueries({ queryKey: ["scan-status"] });
       void qc.invalidateQueries({ queryKey: ["scan-jobs", "scanner-sources"] });
-      toast.success(`Scan job ${vars.action} requested`);
+      toast.success(`Scan job ${vars.id}: ${vars.action} requested`);
     },
     onError: (error: unknown) => {
       const status = (error as { response?: { status?: number } })?.response?.status;
@@ -131,20 +132,24 @@ export function ScannerSourcesPage() {
     },
   });
 
-  const lifecycle = scanStatus.data;
-  const workers = scannerWorkers.data ?? [];
-  const allJobs = useMemo(() => scanJobList.data?.jobs ?? [], [scanJobList.data?.jobs]);
+  const lifecycle = scanStatus.isSuccess ? scanStatus.data : undefined;
+  const workers = scannerWorkers.isSuccess ? scannerWorkers.data : [];
+  const allJobs = useMemo(() => scanJobList.isSuccess ? scanJobList.data.jobs : [], [scanJobList.isSuccess, scanJobList.data?.jobs]);
   const selectedJob = useMemo(() => allJobs.find((job) => job.id === selectedJobID) ?? null, [allJobs, selectedJobID]);
   const selectedJobAttempts = useQuery({
     queryKey: ["scan-job-attempts", selectedJobID],
-    queryFn: () => scanJobs.attempts(selectedJobID),
-    enabled: Boolean(selectedJobID),
+    queryFn: async () => {
+      const attempts = await scanJobs.attempts(selectedJobID);
+      if (attempts.some(attempt => attempt.job_id !== selectedJobID)) throw new Error("Attempt ledger does not match the selected job.");
+      return attempts;
+    },
+    enabled: Boolean(selectedJob),
   });
   const filteredJobs = useMemo(
     () => (jobStatusFilter === "all" ? allJobs : allJobs.filter((job) => job.status === jobStatusFilter)),
     [allJobs, jobStatusFilter],
   );
-  const queueMetrics = scanJobList.data?.queue_metrics ?? [];
+  const queueMetrics = scanJobList.isSuccess ? scanJobList.data.queue_metrics ?? [] : [];
   const pendingTotal = sumMetric(queueMetrics, "pending") + sumMetric(queueMetrics, "retry_delayed");
   const runningTotal = sumMetric(queueMetrics, "running");
   const staleTotal = sumMetric(queueMetrics, "stale_running");
@@ -158,6 +163,7 @@ export function ScannerSourcesPage() {
     () => [
       {
         id: "target",
+        exportValue: job => job.target_ref,
         header: "Target", kind: "name", code: true,
         cell: (job) => (
           <div className="min-w-0">
@@ -173,6 +179,7 @@ export function ScannerSourcesPage() {
       },
       {
         id: "status",
+        exportValue: job => job.status,
         header: "Status", kind: "status",
 
         cell: (job) => <StatusPill label={job.status} tone={scanJobStatusTone(job.status)} />,
@@ -180,6 +187,7 @@ export function ScannerSourcesPage() {
       },
       {
         id: "attempts",
+        exportValue: job => `${job.attempt_count}/${job.max_attempts}`,
         header: "Attempts", kind: "count",
 
         numeric: true,
@@ -188,6 +196,7 @@ export function ScannerSourcesPage() {
       },
       {
         id: "worker",
+        exportValue: job => job.worker_id,
         header: "Worker", kind: "id", size: 160,
 
         cell: (job) => <span className="block font-mono text-xs text-muted-foreground" title={job.worker_id}>{job.worker_id || "-"}</span>,
@@ -195,6 +204,7 @@ export function ScannerSourcesPage() {
       },
       {
         id: "error",
+        exportValue: job => job.error || job.next_attempt_at,
         header: "Error / next retry", kind: "text", size: 240, minSize: 176, maxSize: 320, wrap: true,
 
         cell: (job) => (
@@ -212,6 +222,7 @@ export function ScannerSourcesPage() {
       },
       {
         id: "requested",
+        exportValue: job => job.requested_at,
         header: "Requested", kind: "date", size: 224, minSize: 208, maxSize: 240,
 
         cell: (job) => <span className="text-xs text-muted-foreground">{formatDate(job.requested_at)}</span>,
@@ -219,6 +230,7 @@ export function ScannerSourcesPage() {
       },
       {
         id: "actions",
+        exportable: false,
         header: "", kind: "actions", size: 224, minSize: 224, maxSize: 240,
 
         className: "text-right",
@@ -234,18 +246,19 @@ export function ScannerSourcesPage() {
             >
               <Eye className="h-3.5 w-3.5" />
             </Button>
-            <ScanJobActions job={job} pending={jobAction.isPending} onAction={(action) => jobAction.mutate({ id: job.id, action })} />
+            <ScanJobActions job={job} pending={jobAction.isPending || !scanJobList.isSuccess || scanJobList.isFetching} onAction={(action) => jobAction.mutate({ id: job.id, action })} />
           </div>
         ),
       },
     ],
-    [jobAction],
+    [jobAction, scanJobList.isFetching, scanJobList.isSuccess],
   );
 
   const workerColumns = useMemo<Column<ScannerWorker>[]>(
     () => [
       {
         id: "id",
+        exportValue: scanner => `${scanner.id} · ${scanner.server || "unknown host"}`,
         header: "Scanner", kind: "name", code: true,
         cell: (scanner) => (
           <div className="min-w-0">
@@ -257,6 +270,7 @@ export function ScannerSourcesPage() {
       },
       {
         id: "joined",
+        exportValue: scanner => scanner.joined_timestamp,
         header: "Joined", kind: "date", size: 224, minSize: 208, maxSize: 240,
 
         cell: (scanner) => <span className="text-xs text-muted-foreground">{formatUnixDate(scanner.joined_timestamp)}</span>,
@@ -264,6 +278,7 @@ export function ScannerSourcesPage() {
       },
       {
         id: "db",
+        exportValue: scanner => `${scanner.cvedb_version || ""} · ${scanner.cvedb_create_time || ""}`,
         header: "CVE DB", kind: "version", size: 224, minSize: 208, maxSize: 280, wrap: true,
 
         cell: (scanner) => (
@@ -276,6 +291,7 @@ export function ScannerSourcesPage() {
       },
       {
         id: "scanned",
+        exportValue: scanner => `${scanner.scanned_images} images · ${scanner.scanned_hosts} hosts`,
         header: "Scanned", kind: "text", align: "right", size: 184, minSize: 144, maxSize: 240, wrap: true,
 
         numeric: true,
@@ -289,6 +305,7 @@ export function ScannerSourcesPage() {
       },
       {
         id: "cache",
+        exportable: false,
         header: "", kind: "actions", size: 112, minSize: 112, maxSize: 128,
 
         className: "text-right",
@@ -309,6 +326,7 @@ export function ScannerSourcesPage() {
   );
 
   function refreshOperatorState() {
+    void qc.invalidateQueries({ queryKey: ["system-config"] });
     void qc.invalidateQueries({ queryKey: ["scan-status"] });
     void qc.invalidateQueries({ queryKey: ["scan-scanner-workers"] });
     void qc.invalidateQueries({ queryKey: ["system-health"] });
@@ -337,25 +355,30 @@ export function ScannerSourcesPage() {
         detail={[
           latestDb ? `CVE DB ${latestDb}` : "CVE DB version not reported yet",
           latestDbTime ? `exported ${formatDate(latestDbTime)}` : "",
-          refreshMinutes > 0 ? `auto-refresh every ${refreshMinutes} minutes` : "auto-refresh on the deploy default",
+          !systemConfig.isSuccess ? "auto-refresh configuration unavailable" : refreshMinutes > 0 ? `auto-refresh every ${refreshMinutes} minutes` : "auto-refresh on the deploy default",
         ].filter(Boolean).join(" · ")}
       />
 
+      {unavailable && <ErrorState title="Some scanner evidence is unavailable. Failed sources are hidden." action={<Button onClick={refreshOperatorState}>Retry scanner evidence</Button>} />}
+      {[systemConfig, scanStatus, scanJobList, scannerWorkers, scannerHealth].some(query => query.isFetching && query.isSuccess) && <p role="status" className="text-sm text-muted-foreground">Refreshing scanner evidence…</p>}
+      {refreshNow.isError && <p role="alert" className="text-sm text-destructive">Could not request a database refresh. Try again after refreshing scanner configuration.</p>}
+      {jobAction.isError && <p role="alert" className="text-sm text-destructive">Could not update scan job {jobAction.variables?.id}. Refresh the job and try again.</p>}
       <StatGrid data-testid="scanner-operator-summary">
         <StatCard label="Scanned" value={lifecycle ? lifecycle.scanned.toLocaleString() : "—"} icon={<CheckCircle2 className="h-3.5 w-3.5" />} tone="accent" />
-        <StatCard label="Scheduled" value={lifecycle ? lifecycle.scheduled.toLocaleString() : scanJobList.data ? pendingTotal.toLocaleString() : "—"} icon={<Clock className="h-3.5 w-3.5" />} tone={pendingTotal > 0 ? "medium" : "neutral"} hint={typeof lifecycle?.paused === "number" ? `${lifecycle.paused} paused` : "Paused count unavailable"} />
-        <StatCard label="Running" value={lifecycle ? lifecycle.scanning.toLocaleString() : scanJobList.data ? runningTotal.toLocaleString() : "—"} icon={<RefreshCw className="h-3.5 w-3.5" />} tone={runningTotal > 0 ? "low" : "neutral"} />
+        <StatCard label="Scheduled" value={lifecycle ? lifecycle.scheduled.toLocaleString() : scanJobList.isSuccess ? pendingTotal.toLocaleString() : "—"} icon={<Clock className="h-3.5 w-3.5" />} tone={pendingTotal > 0 ? "medium" : "neutral"} hint={typeof lifecycle?.paused === "number" ? `${lifecycle.paused} paused` : "Paused count unavailable"} />
+        <StatCard label="Running" value={lifecycle ? lifecycle.scanning.toLocaleString() : scanJobList.isSuccess ? runningTotal.toLocaleString() : "—"} icon={<RefreshCw className="h-3.5 w-3.5" />} tone={runningTotal > 0 ? "low" : "neutral"} />
         <StatCard label="Failed" value={lifecycle ? lifecycle.failed.toLocaleString() : "—"} icon={<AlertTriangle className="h-3.5 w-3.5" />} tone={failedTotal > 0 ? "high" : "neutral"} />
-        <StatCard label="Scanners" value={scannerWorkers.data ? workers.length.toLocaleString() : "—"} icon={<Database className="h-3.5 w-3.5" />} hint="last 24h" />
+        <StatCard label="Scanners" value={scannerWorkers.isSuccess ? workers.length.toLocaleString() : "—"} icon={<Database className="h-3.5 w-3.5" />} hint="last 24h" />
       </StatGrid>
 
       <Tabs value={tab} onValueChange={setTab} items={[
         { value: "jobs", label: "Scan jobs", content: (
           <Card
             title="Scan lifecycle and queue"
-            description="Review queue depth and recent jobs. Pause, resume, retry or cancel eligible jobs from the table."
+            description="Organization-wide recent scan jobs, limited to the latest 200. Filters and CSV cover loaded jobs only. Pause, resume, retry or cancel eligible jobs from the table."
           >
             <div className="space-y-4">
+              <Collapse label="Queue depth by target type">
               <DataTable<ScanQueueMetric>
                 rows={queueMetrics}
                 columns={QUEUE_COLUMNS}
@@ -363,8 +386,10 @@ export function ScannerSourcesPage() {
                 emptyState={<div className="px-6 py-8 text-center text-xs text-muted-foreground">{scanJobList.isError ? "Queue status could not be loaded." : scanJobList.isPending ? "Loading queue status..." : "No queued scan work."}</div>}
                 defaultSort={{ id: "pending", dir: "desc" }}
                 showDensityToggle={false}
+                preferencesKey="scanner-queue-metrics"
                 testId="scanner-queue-metrics"
               />
+              </Collapse>
 
               <div className="flex flex-wrap items-center gap-1.5" data-testid="scan-job-status-filters">
                 {JOB_STATUS_FILTERS.map((status) => (
@@ -403,7 +428,7 @@ export function ScannerSourcesPage() {
         ) },
         { value: "workers", label: "Workers and capacity", content: <div className="space-y-4">
           <Card title="Scanner database and capacity" description="Live heartbeat capacity, host VulnDB bundles, and reported Trivy/Grype download and applied revisions.">
-            <ScannerDbCapacity heartbeats={scannerHealth.data?.heartbeats} unavailable={scannerHealth.isError} loading={scannerHealth.isPending} />
+            <ScannerDbCapacity heartbeats={scannerHealth.isSuccess ? scannerHealth.data.heartbeats : undefined} unavailable={scannerHealth.isError} loading={scannerHealth.isPending} />
           </Card>
 
           <Card
@@ -423,11 +448,13 @@ export function ScannerSourcesPage() {
                 rowKey={(scanner) => scanner.id}
                 emptyState={<div className="px-6 py-8 text-center text-xs text-muted-foreground">{scannerWorkers.isError ? "Scanner workers could not be loaded." : scannerWorkers.isPending ? "Loading scanner workers..." : "No scanner workers have reported in the last 24 hours."}</div>}
                 defaultSort={{ id: "id", dir: "asc" }}
-                showDensityToggle={false}
+                preferencesKey="scanner-workers"
+                exportFileName="scanner-workers-last-24h"
                 testId="scanner-workers"
               />
 
-              {selectedScannerID && (
+              {selectedScannerID && (!scannerWorkers.isSuccess || !workers.some(worker => worker.id === selectedScannerID)) && <p role="alert" className="text-sm text-destructive">The selected worker is unavailable. Refresh workers before inspecting its cache.</p>}
+              {selectedScannerID && scannerWorkers.isSuccess && workers.some(worker => worker.id === selectedScannerID) && (
                 <div className="rounded-md border border-border bg-muted/20 p-4" data-testid="scanner-cache-inspector">
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                     <div>
@@ -443,9 +470,9 @@ export function ScannerSourcesPage() {
                   {cacheStat.isPending ? (
                     <div className="text-xs text-muted-foreground">Loading scanner cache status...</div>
                   ) : cacheStat.isError ? (
-                    <div className="text-xs text-[color:var(--color-status-error)]">Cache status unavailable for this scanner.</div>
-                  ) : cacheStat.data ? (
-                    <ScannerCacheSummary stat={cacheStat.data} />
+                    <ErrorState title="Cache status unavailable for this scanner." action={<Button onClick={() => void cacheStat.refetch()}>Retry cache</Button>} />
+                  ) : cacheStat.isSuccess && cacheStat.data ? (
+                    <>{cacheStat.isFetching && <p role="status" className="text-xs">Refreshing scanner cache…</p>}<ScannerCacheSummary stat={cacheStat.data} /></>
                   ) : null}
                 </div>
               )}
@@ -462,7 +489,7 @@ export function ScannerSourcesPage() {
                 variant="primary"
                 size="sm"
                 onClick={() => refreshNow.mutate()}
-                disabled={refreshNow.isPending || offlineDb || systemConfig.isPending || systemConfig.isError}
+                disabled={refreshNow.isPending || offlineDb || !systemConfig.isSuccess || systemConfig.isFetching}
                 title={offlineDb ? "Air-gapped — scanners can't pull from upstream" : "Force all scanners to pull the latest DBs now"}
               >
                 <RefreshCw className={`h-3.5 w-3.5 ${refreshNow.isPending ? "animate-spin" : ""}`} />
@@ -471,27 +498,10 @@ export function ScannerSourcesPage() {
             }
           >
             <div className="space-y-5">
-              <Field
-                label="Auto-refresh interval"
-                hint="Minutes between automatic database refreshes. 0 uses the deploy default (6 hours)."
-              >
-                <div className="flex items-center gap-2">
-                  <TextInput
-                    type="number"
-                    min={0}
-                    defaultValue={refreshMinutes}
-                    key={`refresh-${revision}-${refreshMinutes}`}
-                    disabled={systemConfig.isPending || systemConfig.isError || updateRefresh.isPending}
-                    onBlur={(e) => {
-                      const n = Number.parseInt(e.target.value, 10);
-                      if (!Number.isNaN(n) && n !== refreshMinutes) updateRefresh.mutate(n);
-                    }}
-                    className="w-28"
-                    data-testid="scanner-db-refresh-minutes"
-                  />
-                  <span className="text-xs text-muted-foreground">minutes</span>
-                </div>
-              </Field>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div><div className="text-sm font-medium">Auto-refresh interval</div><p className="mt-1 text-sm text-muted-foreground" data-testid="scanner-db-refresh-value">{!systemConfig.isSuccess ? "Configuration unavailable" : refreshMinutes > 0 ? `${refreshMinutes} minutes` : "Deploy default (6 hours)"}</p></div>
+                <a href={intervalHref} className="inline-flex items-center gap-2 text-sm text-primary hover:underline" data-testid="scanner-db-refresh-edit"><Pencil className="h-4 w-4" /> Edit interval</a>
+              </div>
 
               <div className="flex items-center justify-between gap-4 rounded-lg border border-border bg-muted/30 px-4 py-3">
                 <div>
@@ -542,9 +552,12 @@ export function ScannerSourcesPage() {
         onOpenChange={(open) => {
           if (!open) setSelectedJobID("");
         }}
-        pending={jobAction.isPending}
-        attempts={selectedJobAttempts.data ?? []}
-        attemptsLoading={selectedJobAttempts.isFetching}
+        pending={jobAction.isPending || !scanJobList.isSuccess || scanJobList.isFetching}
+        attempts={selectedJobAttempts.isSuccess ? selectedJobAttempts.data : []}
+        attemptsLoading={selectedJobAttempts.isPending}
+        attemptsRefreshing={selectedJobAttempts.isSuccess && selectedJobAttempts.isFetching}
+        attemptsError={selectedJobAttempts.isError}
+        retryAttempts={() => void selectedJobAttempts.refetch()}
         onAction={(action) => {
           if (selectedJob) jobAction.mutate({ id: selectedJob.id, action });
         }}
@@ -640,6 +653,9 @@ function ScanJobDrawer({
   pending,
   attempts,
   attemptsLoading,
+  attemptsRefreshing,
+  attemptsError,
+  retryAttempts,
   onAction,
 }: {
   job: ScanJob | null;
@@ -648,6 +664,9 @@ function ScanJobDrawer({
   pending: boolean;
   attempts: ScanJobAttempt[];
   attemptsLoading: boolean;
+  attemptsRefreshing: boolean;
+  attemptsError: boolean;
+  retryAttempts: () => void;
   onAction: (action: ScanJobAction) => void;
 }) {
   const retry = job ? scanJobRetryState(job) : null;
@@ -689,7 +708,7 @@ function ScanJobDrawer({
           </section>
 
           <DetailSection title="Attempt timeline" rows={timingRows} dateValues />
-          <AttemptHistory attempts={attempts} loading={attemptsLoading} />
+          <AttemptHistory jobID={job.id} attempts={attempts} loading={attemptsLoading} refreshing={attemptsRefreshing} error={attemptsError} retry={retryAttempts} />
           <DetailSection title="Target metadata" rows={targetRows} mono />
           {bundleRows.length > 0 ? <DetailSection title="VulnDB provenance" rows={bundleRows} mono /> : null}
         </div>
@@ -698,44 +717,26 @@ function ScanJobDrawer({
   );
 }
 
-function AttemptHistory({ attempts, loading }: { attempts: ScanJobAttempt[]; loading: boolean }) {
-  return (
-    <section className="space-y-2">
-      <SectionTitle title="Attempt history" />
-      <div className="overflow-x-auto rounded-md border border-border">
-        <div className="grid min-w-[620px] grid-cols-[64px_110px_minmax(0,1fr)_150px_150px] border-b border-border bg-muted/30 px-3 py-2 text-[10px] uppercase tracking-wider text-muted-foreground">
-          <div>Try</div>
-          <div>Status</div>
-          <div>Worker</div>
-          <div>Started</div>
-          <div>Finished</div>
-        </div>
-        {loading ? (
-          <div className="px-3 py-2 text-xs text-muted-foreground">Loading attempts...</div>
-        ) : attempts.length === 0 ? (
-          <div className="px-3 py-2 text-xs text-muted-foreground">No attempt ledger recorded.</div>
-        ) : (
-          attempts.map((attempt) => (
-            <div
-              key={attempt.id}
-              className="grid min-w-[620px] grid-cols-[64px_110px_minmax(0,1fr)_150px_150px] gap-2 border-b border-border px-3 py-2 text-xs last:border-b-0"
-            >
-              <div className="font-mono text-[11px]">{attempt.attempt_number}</div>
-              <div><StatusPill label={attempt.status} tone={scanJobStatusTone(attempt.status)} /></div>
-              <div className="min-w-0 truncate font-mono text-[11px]" title={attempt.worker_id}>{attempt.worker_id || "-"}</div>
-              <div className="text-[11px] text-muted-foreground">{formatDate(attempt.started_at)}</div>
-              <div className="text-[11px] text-muted-foreground">{attempt.finished_at ? formatDate(attempt.finished_at) : formatDate(attempt.next_attempt_at)}</div>
-              {attempt.error ? (
-                <div className="col-span-5 min-w-0 whitespace-pre-wrap break-words rounded bg-[color:var(--color-status-error)]/5 px-2 py-1 font-mono text-[11px] text-[color:var(--color-status-error)]">
-                  {attempt.error}
-                </div>
-              ) : null}
-            </div>
-          ))
-        )}
-      </div>
-    </section>
-  );
+const ATTEMPT_COLUMNS: Column<ScanJobAttempt>[] = [
+  { id: "attempt", header: "Try", kind: "count", cell: item => item.attempt_number, exportValue: item => item.attempt_number, sort: (a, b) => a.attempt_number - b.attempt_number },
+  { id: "status", header: "Status", kind: "status", cell: item => <StatusPill label={item.status} tone={scanJobStatusTone(item.status)} />, exportValue: item => item.status, sort: (a, b) => a.status.localeCompare(b.status) },
+  { id: "worker", header: "Worker", kind: "id", cell: item => item.worker_id || "—", exportValue: item => item.worker_id, sort: (a, b) => (a.worker_id ?? "").localeCompare(b.worker_id ?? "") },
+  { id: "started", header: "Started", kind: "date", size: 224, minSize: 208, maxSize: 240, cell: item => formatDate(item.started_at), exportValue: item => item.started_at, sort: (a, b) => a.started_at.localeCompare(b.started_at) },
+  { id: "finished", header: "Finished", kind: "date", size: 224, minSize: 208, maxSize: 240, cell: item => item.finished_at ? formatDate(item.finished_at) : "—", exportValue: item => item.finished_at, sort: (a, b) => (a.finished_at ?? "").localeCompare(b.finished_at ?? "") },
+  { id: "retry", header: "Next retry", kind: "date", size: 224, minSize: 208, maxSize: 240, cell: item => item.next_attempt_at ? formatDate(item.next_attempt_at) : "—", exportValue: item => item.next_attempt_at },
+  { id: "lease", header: "Lease expires", kind: "date", size: 224, minSize: 208, maxSize: 240, cell: item => item.lease_expires_at ? formatDate(item.lease_expires_at) : "—", exportValue: item => item.lease_expires_at },
+  { id: "error", header: "Error", kind: "text", wrap: true, grow: true, cell: item => item.error || "—", exportValue: item => item.error },
+];
+
+function AttemptHistory({ jobID, attempts, loading, refreshing, error, retry }: { jobID: string; attempts: ScanJobAttempt[]; loading: boolean; refreshing: boolean; error: boolean; retry: () => void }) {
+  return <section className="space-y-2">
+    <SectionTitle title="Attempt history" />
+    <p className="text-xs text-muted-foreground">Persisted attempts for this exact job. CSV exports the returned ledger only; the endpoint supplies no total or truncation indicator.</p>
+    {error ? <ErrorState title="Attempt history is unavailable." action={<Button onClick={retry}>Retry attempts</Button>} /> : loading ? <LoadingState label="Loading attempts…" /> : <>
+      {refreshing && <p role="status" className="text-xs text-muted-foreground">Refreshing attempts…</p>}
+      <DataTable rows={attempts} columns={ATTEMPT_COLUMNS} rowKey={item => item.id} defaultSort={{ id: "attempt", dir: "asc" }} preferencesKey="scanner-job-attempts" exportFileName={`scanner-job-${jobID}-attempts`} testId="scanner-job-attempts" emptyState={<p className="p-6 text-sm text-muted-foreground">No attempt ledger recorded.</p>} />
+    </>}
+  </section>;
 }
 
 function DetailMetric({ label, value, hint }: { label: string; value: React.ReactNode; hint?: string }) {
@@ -947,3 +948,80 @@ function cacheHitRatio(hits: number, misses: number) {
   if (total === 0) return "-";
   return `${Math.round((hits / total) * 100)}%`;
 }
+
+
+/** This form updates organization-wide configuration; it never sends a scanner refresh. */
+export function ScannerDatabaseSettingsFormPage() {
+  const identity = useTablePreferencesIdentity();
+  const owner = identity?.org_id.trim() && identity.user_id.trim() ? `${identity.org_id}:${identity.user_id}` : "";
+  return <ScannerDatabaseSettingsScope key={owner} owner={owner} />;
+}
+
+function ScannerDatabaseSettingsScope({ owner }: { owner: string }) {
+  const q = useQuery({ queryKey: ["system-config"], queryFn: systemConfigApi.get, enabled: !!owner });
+  const [params] = useRouteSearchParams();
+  const requestedBack = params.get("return_to");
+  const backTo = requestedBack && /^\/settings\/scanner(?:\?[^#]*)?$/.test(requestedBack) ? requestedBack : "/settings/scanner?tab=databases";
+  const [initial, setInitial] = useState<SystemConfigResponse | null>(null);
+  useEffect(() => { if (owner && !initial && q.isSuccess && !q.isError && !q.isFetching && Number.isInteger(q.data.revision) && q.data.revision >= 0) setInitial(q.data); }, [owner, initial, q.isSuccess, q.isError, q.isFetching, q.data]);
+  const conflict = !!initial && q.data?.revision !== initial.revision;
+  return <div className="space-y-6" data-testid="scanner-db-settings-form">
+    <PageHeader title="Edit scanner database refresh" description="Set the organization-wide interval used by connected scanners to refresh vulnerability databases. Saving the interval does not request an immediate refresh."
+      backLink={<a href={backTo} className="inline-flex items-center gap-2 hover:text-foreground"><ArrowLeft className="h-4 w-4" /> Scanner database settings</a>} />
+    {!owner ? <ErrorState title="An available organization and user session are required to edit scanner settings." /> : !initial ? q.isPending || q.isFetching ? <LoadingState label="Loading scanner database settings…" /> : <ErrorState title="Scanner database settings are unavailable." action={<Button onClick={() => void q.refetch()}>Retry settings</Button>} /> : <>
+      {q.isError && <ErrorState title="Could not refresh scanner settings. Your draft is preserved." action={<Button onClick={() => void q.refetch()}>Retry settings</Button>} />}
+      {q.isFetching && <p role="status" className="text-sm text-muted-foreground">Refreshing scanner settings. Your draft is preserved; saving is paused.</p>}
+      {conflict && <p role="alert" className="text-sm text-destructive">System configuration changed elsewhere. Your draft is preserved. Cancel and reopen the latest settings before saving.</p>}
+      <ScannerIntervalEditor initial={initial} backTo={backTo} canSave={q.isSuccess && !q.isFetching && !conflict} />
+    </>}
+  </div>;
+}
+
+function ScannerIntervalEditor({ initial, backTo, canSave }: { initial: SystemConfigResponse; backTo: string; canSave: boolean }) {
+  const qc = useQueryClient(); const navigate = useNavigate();
+  const stored = typeof initial.config.scanner_db_refresh_minutes === "number" ? initial.config.scanner_db_refresh_minutes : 0;
+  const [minutes, setMinutes] = useState(String(stored));
+  const value = Number(minutes);
+  const valid = minutes.trim() !== "" && Number.isSafeInteger(value) && value >= 0;
+  const pending = useRef(false);
+  const active = useRef(true);
+  const currentBack = useRef(backTo); currentBack.current = backTo;
+  const unknown = useRef(false);
+  const [unconfirmed, setUnconfirmed] = useState(false);
+  useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
+  const save = useMutation({ mutationFn: async (input: { minutes: number; backTo: string }) => {
+    const state = qc.getQueryState<SystemConfigResponse>(["system-config"]);
+    if (!active.current || unknown.current || !canSave || !valid || state?.status !== "success" || state.fetchStatus !== "idle" || state.isInvalidated || state.data?.revision !== initial.revision) throw new Error("Current scanner configuration is unavailable or changed. Your draft is preserved.");
+    const result = await systemConfigApi.patch({ scanner_db_refresh_minutes: input.minutes }, initial.revision);
+    if (!result || !Number.isInteger(result.revision) || result.revision <= initial.revision || result.config?.scanner_db_refresh_minutes !== input.minutes) {
+      unknown.current = true;
+      if (active.current) setUnconfirmed(true);
+      void qc.invalidateQueries({ queryKey: ["system-config"] });
+      throw new Error("The response did not confirm the reviewed interval. Inspect current settings before another save.");
+    }
+    return result;
+  }, onSuccess: (_result, input) => { void qc.invalidateQueries({ queryKey: ["system-config"] }); if (active.current && currentBack.current === input.backTo) void navigate({ href: input.backTo }); }, onError: error => { if (scannerRevisionConflict(error)) void qc.invalidateQueries({ queryKey: ["system-config"] }); }, onSettled: () => { pending.current = false; } });
+  return <>
+    <VerdictBanner status="info" title="This interval is shared across the organization" detail={`Saving updates system configuration revision ${initial.revision}. Air-gapped deployments use preloaded databases and do not pull upstream.`} />
+    <Card title="Automatic database refresh"><form className="space-y-6" onSubmit={event => { event.preventDefault(); if (canSave && valid && !save.isPending && !pending.current && !unknown.current && !scannerRevisionConflict(save.error)) { pending.current = true; save.mutate({ minutes: value, backTo }); } }}>
+      <Field label="Auto-refresh interval" htmlFor="scanner-db-refresh-minutes" hint="Whole minutes. 0 uses the deploy default (6 hours).">
+        <TextInput id="scanner-db-refresh-minutes" type="number" min={0} step={1} value={minutes} onChange={event => setMinutes(event.target.value)} disabled={save.isPending} data-testid="scanner-db-refresh-minutes" />
+      </Field>
+      {!valid && <p role="alert" className="text-sm text-destructive">Use a nonnegative whole number of minutes.</p>}
+      {unconfirmed && <p role="alert" className="text-sm text-destructive">Save outcome is unconfirmed. Cancel and inspect current settings before saving again.</p>}
+      {save.isError && <p role="alert" className="text-sm text-destructive">{scannerRevisionConflict(save.error) ? "System configuration changed elsewhere. Your draft is preserved. Cancel and reopen the latest settings before saving." : "Could not save scanner settings. Your draft is preserved. Try again after refreshing settings."}</p>}
+      <div className="flex flex-wrap justify-end gap-3 border-t border-border pt-5"><Button type="button" variant="ghost" disabled={save.isPending} onClick={() => void navigate({ href: backTo })}>Cancel</Button><Button type="submit" variant="primary" disabled={!canSave || !valid || unconfirmed || save.isPending || scannerRevisionConflict(save.error)} data-testid="scanner-db-refresh-save"><Save className="h-4 w-4" />{save.isPending ? "Saving…" : "Save interval"}</Button></div>
+    </form></Card>
+  </>;
+}
+
+function eligibleJobAction(job: ScanJob, action: ScanJobAction) {
+  switch (action) {
+    case "pause": return job.status === "pending";
+    case "resume": return job.status === "paused";
+    case "retry": return job.status === "failed" || job.status === "canceled";
+    case "cancel": return job.status === "pending" || job.status === "running" || job.status === "paused";
+  }
+}
+
+function scannerRevisionConflict(error: unknown) { return isRevisionConflict(error) || (error as { response?: { status?: number } } | null)?.response?.status === 409; }

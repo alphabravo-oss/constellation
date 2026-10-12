@@ -687,6 +687,86 @@ for those surfaces are component-test evidence rather than live data acceptance.
 No live scans, policy mutations, acceptance changes or saved-view writes were made.
 These bounded checks do not close UI-1/2/3/4 or infrastructure/security acceptance.
 
+The workspace/evidence continuation resolves Posture's explicit cluster scope,
+owner-scoped source reads, per-source unavailable/retry states and URL workspaces.
+Its 24-hour audit/runtime/scan metrics are separate bounded samples (100/50/200),
+not a deduplicated activity total. Organization evidence remains labeled; links to
+cluster-only destinations explicitly say Browse cluster or require selection.
+
+Migration now separates import, readiness, report and history with URL-linked
+evidence families. Previews bind to the exact source/export/target draft, and
+stale or mismatched responses cannot authorize Apply. Scanner refresh intervals
+use a dedicated revision-checked Save/Cancel page, preserve drafts, verify response
+values and prevent late navigation or blind repeat writes after uncertain results.
+Scanner attempt history is a shared table with exact-job evidence, Retry and
+loaded-ledger CSV. Jobs remain a latest-200 sample and migration history loads
+25 records per server page.
+
+Image scan details expose every returned layer-linked package, secret and file-risk
+record through shared paginated tables and URL evidence tabs instead of silent
+four/six-row previews. Failed artifact reads or refreshes hide stale evidence;
+responses must identify the requested scan. Workload links use stable workload
+identity. Findings preserve zero CVSS, exclude unavailable fix versions, and explain
+that full-scan CSV is independent of the local Fixable-only filter. Package
+provenance remains layer-linked; full Inventory includes unattributed packages.
+
+Admission's assessment-history CSV now retains the displayed scalar evidence,
+and rule inventory exports omit controls. Registry and Backup inventories have
+shared preferences and metadata CSV; backup history explicitly covers the latest
+50 records. Compliance schedule-run history exposes its returned 25-record sample;
+System Health gains preferences while retaining its existing scalar CSV.
+Shared density buttons expose their selected state to assistive technology.
+
+Network policy review moves remaining lifecycle actions into dedicated forms;
+weak-TLS settings use explicit Save/Cancel and evidence-removal acknowledgment.
+The API validates owned cluster scope, requires an explicit desired boolean,
+supports an optional reviewed-value precondition, and commits the setting and
+weak-TLS evidence cleanup atomically. Concurrent stale reviews conflict; failed
+cleanup rolls back. Configuration success does not claim agent adoption.
+Dashboard fixability now matches the linked Findings predicate, and vulnerable
+workload rows carry exact deployment IDs. Unsupported cohorts have honest browse
+destinations. The source/destination matrix states differing units and scope;
+the remaining hand-written dashboard table uses the shared component.
+
+
+Network lifecycle evidence uses a fixed seven-day source window; map hours and
+verdict filters remain return context, not lifecycle evidence filters. The tuple
+preview explicitly limits its sample to twelve records. Legacy manifest previews
+fall back to the returned YAML when the manifest dictionary is empty.
+
+Workspace/evidence validation passed **1,292 frontend tests across 104 files**;
+the subsequent two Network guards passed 73 focused tests, and the Posture
+responsive filter adjustment passed 27. Final production build/typecheck and
+changed-source lint pass. Fresh schema-173 PostgreSQL passed four Dashboard
+destination executions and two DPI transaction executions with race/shuffle and
+no skips. Generated OpenAPI, 107 endpoint mappings, handler vet and plan checks
+pass. Forty-three affected browser cases were discovered across six specs;
+the full browser runner was not rerun.
+
+Helm revision **56** runs frontend `workspace-final-20261012` and API
+`workspace-evidence-20261012`, retaining migration `audit-lookup-20261012` and
+schema 173. Final narrow-screen review corrected the Posture filter groups to
+stack within their container and gave long status badges an explicit semantic
+column minimum. These changes continue to use the shared table and global CSS.
+All seven deployments are ready. At 640px both filters end at x=595 inside the
+content area, and status cells retain a 180px minimum with contained scrolling.
+
+Read-only live checks confirm Posture cluster/organization tabs and Back preserve
+context and fragments; selected scope resolves correctly, and shared density
+buttons report their selected state. Scanner rejects a negative interval and
+Cancel restores its exact return URL. Migration readiness/history tabs preserve
+URL history and explicitly describe partial evidence. Weak-TLS starts from the
+reported configuration with unchanged Save disabled; Cancel submits no mutation.
+The inspected image scan accurately reports missing layer attribution and failed
+config inspection; positive multi-page artifact cases use component fixtures.
+The Dashboard source matrix exposes its actual cohorts and limits, and following
+its fixable link shows the same **2,205** records in Findings. Its six vulnerable
+workload links contain exact deployment IDs. Posture and Dashboard populated
+tables have matching header/body geometry and no clipped actions at 1280px and
+640px, with horizontal scrolling contained within the tables. No live security,
+scan, migration, acceptance or saved-view writes were submitted. These checks do
+not close the remaining all-page, scale, accessibility or infrastructure gates.
+
 The admission-engine continuation adds migration **172** and persists normalized
 engine outcomes atomically with image scan completion. The built-in vulnerability
 profiles now require successful Trivy and Grype results rather than retired
@@ -2269,14 +2349,18 @@ progressive disclosure, while retaining Constellation's security vocabulary.
 The October 12 completion audit narrows the remaining selected console work to
 concrete page families rather than expanding it into infrastructure acceptance:
 
-1. Coverage/Posture: resolve URL cluster scope, distinguish unavailable sources
-   from absent capabilities, and label bounded signal samples honestly.
-2. Migration and scanner disclosure: URL-linked peer views; deliberate Save/Cancel
-   for scanner intervals; a shared table for the attempt ledger.
-3. Network secondary controls and the remaining dashboard destination/source-total
-   matrix still need their final workflow acceptance.
-4. Cross-page acceptance: remaining server continuation, saved-view isolation,
-   accessibility, platform-role and export contracts in UI-2/3/4 remain open.
+1. Cross-page table acceptance: qualify continuation beyond source caps, server
+   filtering/sorting and export agreement for the remaining high-volume surfaces.
+2. Saved-state acceptance: complete stale-column/reset, user/tenant isolation,
+   keyboard and accessibility coverage across the shared table adopters.
+3. Platform-role and dashboard acceptance: finish the relevant API/export matrix,
+   live custom-install proof, and destination/source-total checks across datasets.
+
+Coverage/Posture scope and sample disclosure, Migration peer workspaces, Scanner
+interval forms and attempt ledger, Network secondary forms and the Dashboard
+source/destination matrix are implemented in the workspace/evidence continuation
+above. Bounded component, database and live read-only evidence does not substitute
+for the remaining UI-2/3/4 acceptance matrix.
 
 The baseline, inventory, entity-detail, configuration/health and bounded inventory
 control implementations are recorded in the Helm-53 evidence above. Visible caps,
@@ -2340,7 +2424,9 @@ are not counted as inline authoring.
   pair and exposure drill-downs now preserve exact directed endpoints, source
   windows and visible platform context. The conversation header requests a combined
   deny/block cohort before server pagination. Top-vulnerable deployment links and
-  the complete destination/source-total matrix still need acceptance.
+  the source/destination matrix now use exact deployment IDs and explicit cohort
+  units. Fixable findings share the source predicate. Complete live matrix
+  acceptance across datasets remains open.
 - [ ] Prefer downloadable HTML/CSV/JSON evidence; add PDF only when it materially
   improves a customer workflow.
 

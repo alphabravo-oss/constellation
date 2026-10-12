@@ -130,17 +130,22 @@ test("MIG-1 imported DLP/WAF rules and group scope are visible across Migration 
   await page.getByTestId("migration-preview-submit").click();
 
   await expect(page.getByTestId("migration-import-id")).toHaveText(importId);
+  await page.getByRole("tab", { name: "DLP / WAF", exact: true }).click();
   await expect(page.getByTestId("migration-preview-dpi-rule")).toHaveCount(2);
   await expect(page.getByTestId("migration-preview-dpi-rule").filter({ hasText: dlpName })).toContainText("cutover-pii");
   await expect(page.getByTestId("migration-preview-dpi-rule").filter({ hasText: wafName })).toContainText("cutover-waf");
+  await page.getByRole("tab", { name: "Group scopes", exact: true }).click();
   await expect(page.getByTestId("migration-preview-dpi-binding")).toHaveCount(2);
   await expect(page.getByTestId("migration-preview-dpi-bindings")).toContainText("cutover.api.default");
+  await page.getByRole("tab", { name: "Import history", exact: true }).click();
   await expect(page.getByTestId("migration-import-history")).toContainText("previewed");
+  await page.getByRole("tab", { name: "Preview import", exact: true }).click();
 
   await page.getByTestId("migration-import-apply-active").click();
   await expect.poll(fixture.applied).toBe(true);
-  await expect(page.getByTestId("migration-import-history")).toContainText("applied");
   await expect(page.getByTestId("migration-import-apply-active")).toBeDisabled();
+  await page.getByRole("tab", { name: "Import history", exact: true }).click();
+  await expect(page.getByTestId("migration-import-history")).toContainText("applied");
 
   await page.goto(`/clusters/${clusterId}/policy`);
   await expect(page.getByTestId("policy-center-page")).toBeVisible();

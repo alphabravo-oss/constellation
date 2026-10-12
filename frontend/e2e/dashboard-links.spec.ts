@@ -43,7 +43,7 @@ test.beforeEach(async ({ page }) => {
             enforcement: {},
             cves_by_mode: {},
             exposed_by_mode: {},
-            top_vulnerable: [{ namespace: "default", name: "frontend", critical: 2, high: 1 }],
+            top_vulnerable: [{ id: "deployment-frontend", namespace: "default", name: "frontend", critical: 2, high: 1 }],
           },
         };
         break;
@@ -114,16 +114,16 @@ test("all metric tiles keep cluster scope and link to their source pages", async
   const destinations: Array<[string, string]> = [
     ["Critical", "/findings?severity=critical&lifecycle=open"],
     ["High", "/findings?severity=high&lifecycle=open"],
-    ["Open", "/findings?lifecycle=open"],
+    ["Open", "/findings?view=instances&lifecycle=open"],
     ["Accepted", "/findings?lifecycle=accepted"],
     ["Compliance", "/compliance"],
     ["Runtime · 24h", "/runtime?tab=evidence&hours=24"],
-    ["Image CVEs", "/findings"],
+    ["Image CVEs", "/findings?view=instances&kind=vulnerability&lifecycle=open"],
     ["Host CVEs", "/nodes?risk=host-cves"],
-    ["Fixable now", "/findings"],
-    ["Privileged", "/deployments"],
-    ["Run as root", "/deployments"],
-    ["Exposed WLs", "/network"],
+    ["Fixable now", "/findings?view=instances&kind=vulnerability&lifecycle=open&fixable=true"],
+    ["Privileged facts", "/deployments?hide_platform=false"],
+    ["Root facts", "/deployments?hide_platform=false"],
+    ["Exposure facts", "/deployments?hide_platform=false"],
   ];
   const summary = dashboard.getByTestId("dashboard-summary");
   for (const [label, destination] of destinations.slice(0, 4)) {
@@ -145,12 +145,12 @@ test("all metric tiles keep cluster scope and link to their source pages", async
 
 test("panel links preserve the source, time window, and supported filters", async ({ page }) => {
   const dashboard = page.getByTestId("dashboard-page");
-  await expect(dashboard.getByRole("link", { name: /view all/i })).toHaveAttribute("href", `${root}/findings`);
+  await expect(dashboard.getByRole("link", { name: /view all/i })).toHaveAttribute("href", `${root}/findings?view=instances&lifecycle=open`);
   await selectDashboardTab(page, "network", "Network");
   await expect(dashboard.getByRole("link", { name: /view conversations/i })).toHaveAttribute("href", `${root}/network?tab=conversations&hours=24&verdict_group=blocked&hide_platform=false`);
   await expect(dashboard.getByTestId("dashboard-network-denies").getByRole("link")).toHaveAttribute("href", `${root}/network?tab=conversations&hours=24&verdict_group=blocked&from=default%2Ffrontend&to=default%2Fdatabase&hide_platform=false`);
   await expect(dashboard.getByRole("link", { name: /default\/frontend/ }).first()).toHaveAttribute("href", `${root}/network?tab=conversations&hours=168&from=external&to=default%2Ffrontend&hide_platform=false`);
-  await expect(dashboard.getByRole("link", { name: /^frontend default 2C 1H$/ })).toHaveAttribute("href", `${root}/deployments?q=frontend`);
+  await expect(dashboard.getByRole("link", { name: /^frontend default 2C 1H$/ })).toHaveAttribute("href", `${root}/deployments/deployment-frontend`);
   await selectDashboardTab(page, "trends", "Trends");
   await expect(dashboard.getByRole("link", { name: /Open CVE DB/i })).toHaveAttribute("href", "/cve");
 });

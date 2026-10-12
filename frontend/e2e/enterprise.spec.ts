@@ -109,11 +109,14 @@ test("Settings exposes onboarding, integrations, migration, and AI controls", as
   await page.getByTestId("migration-preview-submit").click();
   await expect(page.getByTestId("migration-preview-result")).toContainText("Preview persisted");
   await expect(page.getByTestId("migration-preview-policy").filter({ hasText: "nv-1001-block-latest-tag" })).toBeVisible();
+  await page.locator("summary").filter({ hasText: /^Generated policy YAML$/ }).click();
   await expect(page.getByTestId("migration-preview-yaml")).toContainText("AdmissionRule");
+  await page.getByRole("tab", { name: "Rollback preview", exact: true }).click();
   await expect(page.getByTestId("migration-rollback-bundle")).toContainText("restore previous policy versions");
   await page.getByTestId("migration-source-select").selectOption("stackrox");
   await page.getByTestId("migration-export-input").fill(STACKROX_EXPORT);
   await page.getByTestId("migration-preview-submit").click();
+  await page.getByRole("tab", { name: "Policies", exact: true }).click();
   await expect(page.getByTestId("migration-preview-policy").filter({ hasText: "privileged-container" })).toBeVisible();
 
   await page.goto("/posture");

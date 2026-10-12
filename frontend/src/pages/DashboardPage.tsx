@@ -253,6 +253,37 @@ export function DashboardPage() {
   }, [complianceData]);
   // Runtime threats in the last 24h: alerting/blocking events from the overview.
   const runtimeThreats = runtimeData?.summary;
+  const countFrom = (query: {isError:boolean;isPending:boolean},value: number|string|undefined) => !scopeReady ? "Scope unavailable" : query.isError ? "Unavailable" : query.isPending ? "Loading" : value ?? "Not reported";
+  const evidenceSources = [
+    {id:"risk",metric:"Risk score",count:countFrom(sum,posture?.security_score),source:"Dashboard summary",population:"Cluster posture model, capped at 100; higher is worse",destination:clusterPath("/dashboard?tab=posture"),destinationLabel:"Review score factors"},
+    ...(["critical","high"] as const).map(severity=>({id:severity,metric:`${severity} open records`,count:countFrom(sum,summaryData?.findings_by_severity?.[severity]),source:"Dashboard summary",population:"Cluster open finding records; canonical vulnerability set excludes workload duplicates",destination:clusterPath(`/findings?view=instances&severity=${severity}&lifecycle=open`),destinationLabel:`Exact ${severity} open record cohort`})),
+    {id:"open",metric:"Open records",count:countFrom(sum,summaryData?.open_findings),source:"Dashboard summary",population:"All cluster open finding records; canonical vulnerability deduplication",destination:clusterPath("/findings?view=instances&lifecycle=open"),destinationLabel:"Exact open record cohort"},
+    {id:"accepted",metric:"Accepted records",count:countFrom(sum,summaryData?.accepted_risks),source:"Dashboard summary",population:"All cluster accepted finding records; canonical vulnerability deduplication",destination:clusterPath("/findings?view=instances&lifecycle=accepted"),destinationLabel:"Exact accepted record cohort"},
+    {id:"compliance",metric:"Compliance pass percentage",count:countFrom(complianceSum,compliancePosture.pct==null?undefined:`${compliancePosture.pct}%`),source:"Compliance summary",population:"Cluster pass / (pass + fail) across reported frameworks; manual and exempted controls excluded",destination:clusterPath("/compliance"),destinationLabel:"Review reported framework results"},
+    {id:"runtime",metric:"Runtime alert records · 24h",count:countFrom(runtimeToday,runtimeThreats?.alerts),source:"Runtime overview · hours=24",population:"Cluster server alert count; destination also includes other runtime evidence kinds",destination:clusterPath("/runtime?tab=evidence&hours=24"),destinationLabel:"Browse runtime evidence in the same 24-hour window"},
+    {id:"image",metric:"Open image CVE records",count:countFrom(sum,posture?.vulns_by_location?.image),source:"Dashboard summary",population:"Cluster open vulnerability records with image-workload target; image-location filter unavailable",destination:clusterPath("/findings?view=instances&kind=vulnerability&lifecycle=open"),destinationLabel:"Browse all open vulnerabilities (broader cohort)"},
+    {id:"host",metric:"Open host CVE records",count:countFrom(sum,posture?.vulns_by_location?.host),source:"Dashboard summary",population:"Cluster open host vulnerability records; destination groups named nodes and may omit unnamed records",destination:clusterPath("/nodes?risk=host-cves"),destinationLabel:"Review affected named nodes (distinct node count)"},
+    {id:"fixable",metric:"Fixable open CVE records",count:countFrom(sum,posture?.vuln_signals?.fixable),source:"Dashboard summary",population:"Cluster canonical open vulnerabilities with supported fixed-version metadata",destination:clusterPath("/findings?view=instances&kind=vulnerability&lifecycle=open&fixable=true"),destinationLabel:"Exact fixable open vulnerability cohort"},
+    ...(["privileged","run_as_root","exposed"] as const).map(fact=>({id:fact,metric:`${fact} risk facts`,count:countFrom(sum,posture?.hardening?.[fact]),source:"Dashboard summary",population:`Cluster deployments reporting the ${fact === "exposed" ? "net_exposure" : fact} risk-factor key; numeric value is not tested by this counter`,destination:clusterPath("/deployments?hide_platform=false"),destinationLabel:"Browse all workloads (fact cohort filter unavailable)"})),
+    {id:"deny",metric:"Loaded blocked conversation pairs",count:countFrom(conversationsQ,conversationData?.conversations.length),source:"Network conversations · blocked · 24h",population:`Cluster loaded sample, up to 5,000 pairs; matching server total ${conversationData?.total ?? "not reported"}; panel ranks up to five`,destination:clusterPath("/network?tab=conversations&hours=24&verdict_group=blocked&hide_platform=false"),destinationLabel:"Exact blocked-pair cohort with server pages"},
+    {id:"exposure",metric:"Returned exposure rows",count:countFrom(exposureQ,exposureQ.data ? exposureQ.data.ingress.length+exposureQ.data.egress.length : undefined),source:"Network exposure · 168h",population:"Cluster observed external traffic; up to 50 workloads per direction. A workload may appear in both directions; CSV covers returned rows",destination:clusterPath("/dashboard?tab=network"),destinationLabel:"Review returned exposure evidence and exact directed links"},
+    {id:"findings-sample",metric:"Loaded open finding sample",count:countFrom(open,openData?.findings?.length),source:"Findings list · open · limit=250",population:"Cluster top 250 by risk; action items and 14-day first-seen charts describe this loaded sample",destination:clusterPath("/findings?view=instances&lifecycle=open"),destinationLabel:"Browse full open record cohort with server pages"},
+    {id:"top-workloads",metric:"Top vulnerable workload rows",count:countFrom(sum,posture?.top_vulnerable?.length),source:"Dashboard summary",population:"Cluster top six inventory rows by critical/high counts; per-row links resolve exact deployment ID, or labeled search for legacy responses",destination:clusterPath("/dashboard?tab=network"),destinationLabel:"Review returned top-workload evidence"},
+    {id:"components",metric:"Returned component reports",count:countFrom(clusterHealth,healthData?.heartbeats?.length),source:"Cluster system health",population:"Cluster component heartbeat reports; role health uses declared role expectations",destination:clusterPath("/components"),destinationLabel:"Review component reports and roles"},
+    {id:"scanner",metric:"Returned scanner workers",count:countFrom(scannerWorkers,scannerUnavailable?undefined:scannerWorkers.data?.length),source:"Scanner worker inventory",population:"Organization-wide worker reports; capacity is broader than the selected cluster",destination:"/settings/scanner",destinationLabel:"Review organization scanner capacity"},
+    {id:"federation",metric:"Returned federation members",count:federationUnavailable?"Unavailable":federationState.data?.state!=="master"?countFrom(federationState,"Not master; member inventory not requested"):countFrom(federationMembers,federationMembers.data?.members.length),source:"Federation state / members",population:"Organization-wide membership; member inventory is requested only on the master",destination:"/federation",destinationLabel:"Review organization federation state"},
+    {id:"platform",metric:"Returned platform package records",count:countFrom(platform,platformData?.evidence?.packages?.length),source:"Cluster platform facts",population:"Current cluster's returned platform evidence; package count and returned rows can differ",destination:clusterPath("/dashboard?tab=operations"),destinationLabel:"Review platform evidence, source status and scan job"},
+    {id:"events-14d",metric:"Security event records · 14d",count:countFrom(eventsTimelineQ,eventsTimelineQ.data?.events_timeline?.reduce((total,row)=>total+row.total,0)),source:"Dashboard event timeline",population:"Cluster aggregate of high/critical events over fourteen days, distinct from the loaded finding first-seen chart",destination:clusterPath("/dashboard?tab=overview"),destinationLabel:"Review daily security event counts"},
+    {id:"activity",metric:"Returned organization audit records",count:countFrom(sum,summaryData?.recent_activity?.length),source:"Dashboard summary · recent activity",population:"Organization-wide latest 20 audit rows; landing panel displays up to eight. Cluster Audit is a narrower source",destination:clusterPath("/audit"),destinationLabel:"Browse selected-cluster Audit (narrower scope)"},
+  ];
+  const sourceColumns: Column<typeof evidenceSources[number]>[] = [
+    {id:"metric",header:"Metric or view",kind:"name",wrap:true,cell:row=>row.metric,exportValue:row=>row.metric},
+    {id:"count",header:"Reported / loaded count",kind:"count",cell:row=>row.count,exportValue:row=>row.count},
+    {id:"source",header:"Source",kind:"text",wrap:true,cell:row=>row.source,exportValue:row=>row.source},
+    {id:"population",header:"Scope and source limits",kind:"text",wrap:true,cell:row=>row.population,exportValue:row=>row.population},
+    {id:"destination",header:"Destination contract",kind:"text",wrap:true,cell:row=><a href={row.destination} className="text-primary hover:underline">{row.destinationLabel}</a>,exportValue:row=>`${row.destinationLabel} · ${row.destination}`},
+  ];
+
 
   const navigate = useNavigate();
 
@@ -264,7 +295,7 @@ export function DashboardPage() {
           title="Action Items"
           subtitle="Top 10 critical/high findings from 250 open findings ranked by risk"
           icon={<ShieldAlert className="h-3.5 w-3.5" />}
-          rightSlot={<a href={clusterPath("/findings")} className="text-[11px] text-muted-foreground hover:text-foreground">view all <ArrowUpRight className="inline h-3 w-3" /></a>}
+          rightSlot={<a href={clusterPath("/findings?view=instances&lifecycle=open")} className="text-[11px] text-muted-foreground hover:text-foreground">view all <ArrowUpRight className="inline h-3 w-3" /></a>}
         >
           {open.isError ? <ErrorState title="Could not load action items." action={<Button onClick={() => void open.refetch()}>Retry</Button>} /> : open.isPending ? <p className="p-3 text-sm text-muted-foreground">Loading action items…</p> : topActions.length === 0 ? (
             <EmptyState
@@ -322,7 +353,8 @@ export function DashboardPage() {
         </Panel>
 
         <Panel
-          title="Recent Activity"
+          title="Organization Recent Activity"
+          subtitle="Latest 20 organization audit records; showing up to eight"
           icon={<Activity className="h-3.5 w-3.5" />}
         >
           {sum.isError ? <ErrorState title="Could not load recent activity." /> : sum.isPending ? <p className="p-3 text-xs text-muted-foreground">Loading activity…</p> : recent.length === 0 ? (
@@ -363,7 +395,7 @@ export function DashboardPage() {
           <StatGrid>
             <StatCard label="Critical" value={summaryData ? counts.critical : "—"} tone="critical" icon={<AlertOctagon className="h-3 w-3" />} href={clusterPath("/findings?severity=critical&lifecycle=open")} trend={trends.critical} />
             <StatCard label="High" value={summaryData ? counts.high : "—"} tone="high" icon={<AlertTriangle className="h-3 w-3" />} href={clusterPath("/findings?severity=high&lifecycle=open")} trend={trends.high} />
-            <StatCard label="Open" value={summaryData ? counts.open : "—"} tone="accent" icon={<Activity className="h-3 w-3" />} href={clusterPath("/findings")} trend={trends.open} />
+            <StatCard label="Open" value={summaryData ? counts.open : "—"} tone="accent" icon={<Activity className="h-3 w-3" />} href={clusterPath("/findings?view=instances&lifecycle=open")} trend={trends.open} />
             <StatCard label="Accepted" value={summaryData ? counts.accepted : "—"} tone="neutral" icon={<ShieldCheck className="h-3 w-3" />} href={clusterPath("/findings?lifecycle=accepted")} />
           </StatGrid>
           {/* Risk factors — NV's 6 weighted contributors (bar = share of its cap). */}
@@ -398,12 +430,12 @@ export function DashboardPage() {
         <StatCard label="Runtime · 24h" value={runtimeToday.isPending ? "…" : (runtimeThreats?.alerts ?? "—")}
           tone={(runtimeThreats?.alerts ?? 0) > 0 ? "critical" : "neutral"} icon={<ShieldAlert className="h-3 w-3" />} href={clusterPath("/runtime?tab=evidence&hours=24")}
           hint={runtimeThreats ? `${runtimeThreats.blocks} blocked` : "Unavailable"} />
-        <StatCard label="Image CVEs" value={posture?.vulns_by_location?.image ?? "—"} tone="accent" icon={<AlertTriangle className="h-3 w-3" />} href={clusterPath("/findings")} hint="in container images" />
-        <StatCard label="Host CVEs" value={posture?.vulns_by_location?.host ?? "—"} tone={(posture?.vulns_by_location?.host ?? 0) > 0 ? "high" : "neutral"} icon={<AlertTriangle className="h-3 w-3" />} href={clusterPath("/nodes?risk=host-cves")} hint="on cluster nodes" />
-        <StatCard label="Fixable now" value={posture?.vuln_signals?.fixable ?? "—"} tone="low" icon={<ShieldCheck className="h-3 w-3" />} href={clusterPath("/findings")} hint="patched version exists" />
-        <StatCard label="Privileged" value={posture?.hardening?.privileged ?? "—"} tone={(posture?.hardening?.privileged ?? 0) > 0 ? "critical" : "low"} icon={<ShieldAlert className="h-3 w-3" />} href={clusterPath("/deployments")} hint="privileged workloads" />
-        <StatCard label="Run as root" value={posture?.hardening?.run_as_root ?? "—"} tone={(posture?.hardening?.run_as_root ?? 0) > 0 ? "high" : "low"} icon={<ShieldAlert className="h-3 w-3" />} href={clusterPath("/deployments")} hint="no non-root enforce" />
-        <StatCard label="Exposed WLs" value={posture?.hardening?.exposed ?? "—"} tone={(posture?.hardening?.exposed ?? 0) > 0 ? "medium" : "low"} icon={<Activity className="h-3 w-3" />} href={clusterPath("/network")} hint="externally reachable" />
+        <StatCard label="Image CVEs" value={posture?.vulns_by_location?.image ?? "—"} tone="accent" icon={<AlertTriangle className="h-3 w-3" />} href={clusterPath("/findings?view=instances&kind=vulnerability&lifecycle=open")} hint="Browse open CVEs · image-location filter unavailable" />
+        <StatCard label="Host CVEs" value={posture?.vulns_by_location?.host ?? "—"} tone={(posture?.vulns_by_location?.host ?? 0) > 0 ? "high" : "neutral"} icon={<AlertTriangle className="h-3 w-3" />} href={clusterPath("/nodes?risk=host-cves")} hint="Host CVE records · destination groups named nodes" />
+        <StatCard label="Fixable now" value={posture?.vuln_signals?.fixable ?? "—"} tone="low" icon={<ShieldCheck className="h-3 w-3" />} href={clusterPath("/findings?view=instances&kind=vulnerability&lifecycle=open&fixable=true")} hint="patched version exists" />
+        <StatCard label="Privileged facts" value={posture?.hardening?.privileged ?? "—"} tone={(posture?.hardening?.privileged ?? 0) > 0 ? "critical" : "low"} icon={<ShieldAlert className="h-3 w-3" />} href={clusterPath("/deployments?hide_platform=false")} hint="Browse workloads · privileged fact filter unavailable" />
+        <StatCard label="Root facts" value={posture?.hardening?.run_as_root ?? "—"} tone={(posture?.hardening?.run_as_root ?? 0) > 0 ? "high" : "low"} icon={<ShieldAlert className="h-3 w-3" />} href={clusterPath("/deployments?hide_platform=false")} hint="Browse workloads · root fact filter unavailable" />
+        <StatCard label="Exposure facts" value={posture?.hardening?.exposed ?? "—"} tone={(posture?.hardening?.exposed ?? 0) > 0 ? "medium" : "low"} icon={<Activity className="h-3 w-3" />} href={clusterPath("/deployments?hide_platform=false")} hint="Browse workloads · exposure fact filter unavailable" />
       </StatGrid>
 
       </Collapse>
@@ -413,10 +445,10 @@ export function DashboardPage() {
       {/* Exposed services (ingress/egress) + enforcement coverage — NV signature panels */}
       <section className="c-rise c-rise-2 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="space-y-4">
-          <Panel title="Exposed Services" rightSlot={<Button size="sm" disabled={!exposureQ.data || exposureQ.isError || exposureQ.isFetching} onClick={() => downloadCsv("constellation-exposure", ["Direction", "Workload", "Namespace", "Platform role", "External peers", "Sessions", "Policy mode"], [
+          <Panel title="Exposed Services" subtitle="Observed over seven days · up to 50 workloads per direction; CSV covers returned rows" rightSlot={<Button size="sm" disabled={!exposureQ.data || exposureQ.isError || exposureQ.isFetching} onClick={() => downloadCsv("constellation-exposure", ["Direction", "Workload", "Namespace", "Platform role", "External peers", "Sessions", "Policy mode"], [
             ...(exposureQ.data?.ingress ?? []).map((service) => ["ingress", service.workload, service.namespace, service.platform_role ?? "", service.external_peers, service.sessions, service.policy_mode]),
             ...(exposureQ.data?.egress ?? []).map((service) => ["egress", service.workload, service.namespace, service.platform_role ?? "", service.external_peers, service.sessions, service.policy_mode]),
-          ])}>Export CSV</Button>} subtitle="Workloads talking to the outside world — correlated with their vulnerabilities" icon={<Activity className="h-3.5 w-3.5" />}>
+          ])}>Export CSV</Button>} icon={<Activity className="h-3.5 w-3.5" />}>
             {exposureQ.isError ? <ErrorState title="Could not load exposure." action={<Button onClick={() => void exposureQ.refetch()}>Retry</Button>} /> : exposureQ.isPending ? (
               <p className="p-3 text-xs text-muted-foreground">Loading exposure…</p>
             ) : ((exposureQ.data?.ingress.length ?? 0) + (exposureQ.data?.egress.length ?? 0)) === 0 ? (
@@ -473,8 +505,9 @@ export function DashboardPage() {
           <div className="p-3 space-y-4">
             {(() => {
               if (!posture) return <p className="text-sm text-muted-foreground">Enforcement summary unavailable.</p>;
-              const e = posture.enforcement ?? {};
-              const groups = e.groups ?? 0;
+              const e = posture.enforcement;
+              if (!e || typeof e.groups !== "number") return <div className="space-y-3"><p className="text-sm text-muted-foreground">Configured group modes not reported.</p><div className="flex flex-wrap gap-4 text-xs"><a href={clusterPath("/groups")} className="text-primary hover:underline">Manage group modes</a><a href={clusterPath("/groups/settings")} className="text-primary hover:underline">Edit new-service defaults</a></div></div>;
+              const groups = e.groups;
               return (
                 <>
                   <ModeMaturity label="Network mode" groups={groups} discover={e.discover ?? 0} monitor={e.monitor ?? 0} protect={e.protect ?? 0} />
@@ -482,20 +515,12 @@ export function DashboardPage() {
                   {(() => {
                     const cm = posture?.cves_by_mode ?? {};
                     const em = posture?.exposed_by_mode ?? {};
-                    const cell = (v: number, warn?: boolean) => <span className={warn && v > 0 ? "font-medium text-[color:var(--color-severity-high)]" : "text-foreground"}>{v}</span>;
-                    return (
-                      <div className="border-t border-border pt-2 space-y-1 text-xs">
-                        <div className="text-muted-foreground">Risk by mode <span className="text-muted-foreground/70">(CVEs · exposed workloads)</span></div>
-                        <table className="app-semantic-table w-full">
-                          <tbody>
-                            <tr className="text-muted-foreground"><td>Discover <span className="text-muted-foreground/70">(unprotected)</span></td><td className="text-right">{cell(cm.discover ?? 0, true)} CVEs</td><td className="text-right">{cell(em.discover ?? 0, true)} exp.</td></tr>
-                            <tr className="text-muted-foreground"><td>Monitor</td><td className="text-right">{cell(cm.monitor ?? 0)} CVEs</td><td className="text-right">{cell(em.monitor ?? 0)} exp.</td></tr>
-                            <tr className="text-muted-foreground"><td>Protect</td><td className="text-right">{cell(cm.protect ?? 0)} CVEs</td><td className="text-right">{cell(em.protect ?? 0)} exp.</td></tr>
-                            <tr className="text-muted-foreground/80"><td>Platform / Host</td><td className="text-right" colSpan={2}>{cell(cm.platform ?? 0)} / {cell(cm.host ?? 0)} CVEs</td></tr>
-                          </tbody>
-                        </table>
-                      </div>
-                    );
+                    const modeRows = ["discover", "monitor", "protect"].map(mode => ({ mode, cves: cm[mode], exposed: em[mode] }));
+                    return <div className="border-t border-border pt-3 space-y-2"><p className="text-xs text-muted-foreground">Reported risk by configured group mode · these counters are not applier health.</p><DataTable rows={modeRows} columns={[
+                      { id: "mode", header: "Configured mode", kind: "name", cell: row => row.mode },
+                      { id: "cves", header: "Open CVE records", kind: "count", cell: row => row.cves ?? "Not reported" },
+                      { id: "exposed", header: "Exposure facts", kind: "count", cell: row => row.exposed ?? "Not reported" },
+                    ]} rowKey={row => row.mode} showDensityToggle={false} showColumnChooser={false} pagination={false} testId="dashboard-risk-by-mode"/><p className="text-xs text-muted-foreground">Platform / Host CVE records: {cm.platform ?? "Not reported"} / {cm.host ?? "Not reported"}.</p></div>;
                   })()}
                   <div className="flex flex-wrap gap-4 border-t border-border pt-3 text-xs">
                     <a href={clusterPath("/groups")} className="text-primary hover:underline">Manage group modes</a>
@@ -504,11 +529,11 @@ export function DashboardPage() {
                   <div className="flex items-center justify-between border-t border-border pt-2 text-xs">
                     <span className="text-muted-foreground">Admission control</span>
                     {(e.admission_enforcing ?? 0) > 0 ? (
-                      <span className="flex items-center gap-1.5 text-[color:var(--color-severity-low)]"><span className="inline-block h-2 w-2 rounded-full" style={{ background: "var(--color-severity-low)" }} />enforcing · {e.admission_enforcing} rule{(e.admission_enforcing ?? 0) === 1 ? "" : "s"}</span>
+                      <span className="flex items-center gap-1.5 text-[color:var(--color-severity-low)]"><span className="inline-block h-2 w-2 rounded-full" style={{ background: "var(--color-severity-low)" }} />configured enforce · {e.admission_enforcing} rule{(e.admission_enforcing ?? 0) === 1 ? "" : "s"}</span>
                     ) : (e.admission_policies ?? 0) > 0 ? (
-                      <span className="text-[color:var(--color-severity-medium)]">monitor only</span>
+                      <span className="text-[color:var(--color-severity-medium)]">configured monitor</span>
                     ) : (
-                      <span className="text-[color:var(--color-severity-high)]">not enforcing</span>
+                      <span className="text-[color:var(--color-severity-high)]">no enforce setting reported</span>
                     )}
                   </div>
                 </>
@@ -516,7 +541,7 @@ export function DashboardPage() {
             })()}
           </div>
         </Panel>
-        <Panel title="Top Vulnerable Assets" subtitle="Workloads with the most critical + high CVEs" icon={<AlertOctagon className="h-3.5 w-3.5" />}
+        <Panel title="Top Vulnerable Assets" subtitle="Up to six reported workloads ranked by critical/high inventory counts" icon={<AlertOctagon className="h-3.5 w-3.5" />}
           rightSlot={(posture?.top_vulnerable?.length ?? 0) > 0 ? (
             <button type="button"
               onClick={() => downloadCsv("constellation-vulnerable-workloads", ["Namespace", "Workload", "Critical", "High"],
@@ -532,10 +557,10 @@ export function DashboardPage() {
             <ul className="divide-y divide-border">
               {(posture?.top_vulnerable ?? []).map((t) => (
                 <li key={`${t.namespace}/${t.name}`}>
-                  <a href={clusterPath(`/deployments?q=${encodeURIComponent(t.name)}`)} className="flex items-center gap-2 px-3 py-2 hover:bg-muted/40 transition-colors">
+                  <a href={t.id ? clusterPath(`/deployments/${encodeURIComponent(t.id)}`) : clusterPath(`/deployments?q=${encodeURIComponent(t.name)}&namespace=${encodeURIComponent(t.namespace)}&hide_platform=false`)} className="flex items-center gap-2 px-3 py-2 hover:bg-muted/40 transition-colors">
                     <div className="min-w-0 flex-1">
                       <div className="text-xs font-medium truncate">{t.name}</div>
-                      <div className="text-[10px] text-muted-foreground truncate">{t.namespace}</div>
+                      <div className="text-[10px] text-muted-foreground truncate">{t.namespace}{!t.id && " · namespace + name search"}</div>
                     </div>
                     {t.critical > 0 && <span className="rounded px-1.5 py-0.5 text-[10px] text-mono font-semibold text-white" style={{ background: "var(--color-severity-critical)" }}>{t.critical}C</span>}
                     {t.high > 0 && <span className="rounded px-1.5 py-0.5 text-[10px] text-mono font-semibold text-white" style={{ background: "var(--color-severity-high)" }}>{t.high}H</span>}
@@ -773,7 +798,7 @@ export function DashboardPage() {
               <span>today</span>
             </div>
             <div className="mt-2 text-mono text-[11px]">
-              <span className="text-foreground">Total this window: </span>
+              <span className="text-foreground">Records in loaded sample with first-seen dates in this window: </span>
               <span className="text-foreground">{trends.openSeries.reduce((a, b) => a + b, 0)}</span>
               <span className="text-muted-foreground"> · peak {Math.max(0, ...trends.openSeries)}</span>
             </div>
@@ -807,10 +832,10 @@ export function DashboardPage() {
         title={clusterError ? "Cluster context unavailable" : !scopeReady ? clusterLoading ? "Resolving cluster" : "Select a resolved cluster" : sum.isError ? "Security summary unavailable" : !posture ? sum.isPending ? "Loading security posture" : "Security posture not reported" : `Security risk: ${risk}/100`}
         detail={`Higher scores indicate more risk. Summary counts cover ${clusterId ? "this cluster" : "the organization"}; action items and finding trends use a bounded sample.`} />
       <StatGrid data-testid="dashboard-summary">
-        <StatCard label="Risk score" value={posture?.security_score ?? "—"} />
+        <StatCard label="Risk score" value={posture?.security_score ?? "—"} href={scopeReady ? clusterPath("/dashboard?tab=posture") : undefined} />
         <StatCard label="Critical" value={summaryData ? counts.critical : "—"} tone="critical" href={scopeReady ? clusterPath("/findings?severity=critical&lifecycle=open") : undefined} />
         <StatCard label="High" value={summaryData ? counts.high : "—"} tone="high" href={scopeReady ? clusterPath("/findings?severity=high&lifecycle=open") : undefined} />
-        <StatCard label="Open" value={summaryData?.open_findings ?? "—"} href={scopeReady ? clusterPath("/findings?lifecycle=open") : undefined} />
+        <StatCard label="Open" value={summaryData?.open_findings ?? "—"} href={scopeReady ? clusterPath("/findings?view=instances&lifecycle=open") : undefined} />
         <StatCard label="Accepted" value={summaryData?.accepted_risks ?? "—"} href={scopeReady ? clusterPath("/findings?lifecycle=accepted") : undefined} />
       </StatGrid>
       {scopeReady && sum.isError && <ErrorState title="Could not refresh dashboard totals." action={<Button onClick={() => void sum.refetch()}>Retry</Button>} />}
@@ -821,6 +846,7 @@ export function DashboardPage() {
         { value: "operations", label: "Operations", content: operationsView },
         { value: "trends", label: "Trends", content: trendsView },
       ]} />}
+      {scopeReady && <Collapse label="Advanced: metric sources and destination scope"><DataTable rows={evidenceSources} columns={sourceColumns} rowKey={row=>row.id} preferencesKey="dashboard-evidence-sources" exportFileName="dashboard-source-matrix.csv" exportLabel="Export source matrix" testId="dashboard-source-matrix"/></Collapse>}
 
     </div>
   );

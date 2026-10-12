@@ -6194,13 +6194,71 @@
       "get": {
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Summary including exact deployment identities for the six highest critical/high workload counts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "posture": {
+                      "type": "object",
+                      "properties": {
+                        "top_vulnerable": {
+                          "type": "array",
+                          "maxItems": 6,
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "id",
+                              "namespace",
+                              "name",
+                              "critical",
+                              "high"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "namespace": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "critical": {
+                                "type": "integer"
+                              },
+                              "high": {
+                                "type": "integer"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Get summary"
+        "summary": "Get scoped dashboard summary and posture",
+        "description": "Counts cover the requested cluster or organization. Open vulnerability fixability matches Findings fixable=true, including fixed/fixed_version/affected_range fallback and excluding false/not-fixed/wont-fix values. Top vulnerable workloads carry exact deployment IDs; counts are not enforcement acknowledgements.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Optional exact cluster scope."
+          }
+        ]
       }
     },
     "/api/v1/deployments": {
@@ -9858,24 +9916,127 @@
       "get": {
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Stored cluster configuration; does not acknowledge agent adoption or enforcement. Missing settings default off for an owned cluster.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "cluster_id",
+                    "weak_tls_enabled"
+                  ],
+                  "properties": {
+                    "cluster_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "weak_tls_enabled": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
           },
           "default": {
             "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "description": "Cluster missing or outside the authenticated organization."
+          },
+          "500": {
+            "description": "Scope/configuration read or write failed; never represented as default off."
           }
         },
-        "summary": "Get dpi-threats"
+        "summary": "Read cluster weak-TLS detection configuration",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Exact cluster owned by the authenticated organization. Omit only when the existing cluster resolver can resolve scope."
+          }
+        ]
       },
       "patch": {
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Stored cluster configuration; does not acknowledge agent adoption or enforcement. Missing settings default off for an owned cluster.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "cluster_id",
+                    "weak_tls_enabled"
+                  ],
+                  "properties": {
+                    "cluster_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "weak_tls_enabled": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
           },
           "default": {
             "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "description": "Cluster missing or outside the authenticated organization."
+          },
+          "500": {
+            "description": "Scope/configuration read or write failed; never represented as default off."
+          },
+          "409": {
+            "description": "Configured value changed since review; no setting or evidence changes committed."
+          },
+          "400": {
+            "description": "Invalid body or missing explicit weak_tls_enabled boolean."
           }
         },
-        "summary": "Update dpi-threats"
+        "summary": "Update cluster weak-TLS detection configuration",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Exact cluster owned by the authenticated organization. Omit only when the existing cluster resolver can resolve scope."
+          }
+        ],
+        "description": "Serializes updates on the owned cluster. The setting and evidence cleanup commit atomically. Disabling removes signature 2011/2012/2027 runtime threat rows and clears weak-TLS references from flow rows and rollups. This does not confirm agent adoption.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "weak_tls_enabled": {
+                    "type": "boolean"
+                  },
+                  "expected_weak_tls_enabled": {
+                    "type": "boolean",
+                    "description": "Optional reviewed value; mismatch returns 409 without changes. Missing stored configuration is compared as false. Legacy callers can omit."
+                  }
+                },
+                "required": [
+                  "weak_tls_enabled"
+                ]
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/policies/service-mode-defaults": {
