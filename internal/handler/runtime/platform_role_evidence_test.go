@@ -66,6 +66,18 @@ func TestEvidencePlatformRolesExactScopeAndInventories(t *testing.T) {
 			t.Fatalf("identity %d role=%q want=%q", i, roles[i], want)
 		}
 	}
+
+	// The inventory predicate must classify before paging exactly as the batch path.
+	for i, identity := range identities {
+		var role string
+		sql := "SELECT " + handler.EvidencePlatformRoleSQL("$1::uuid", "$2::uuid", "$3::text", "$4::text")
+		if err := pool.QueryRow(ctx, sql, org, identity.ClusterID, identity.Workload, identity.Namespace).Scan(&role); err != nil {
+			t.Fatal(err)
+		}
+		if role != roles[i] {
+			t.Fatalf("SQL role %d=%q Go=%q", i, role, roles[i])
+		}
+	}
 	type record struct {
 		id       uuid.UUID
 		identity handler.PlatformWorkloadIdentity

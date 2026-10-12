@@ -672,6 +672,7 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/network/exposure", s.requireVerb(rbac.VerbReadFindings, networkMap.Exposure))
 			r.Get("/network/peers", s.requireVerb(rbac.VerbReadFindings, networkMap.Peers))
 			r.Get("/network/sessions", s.requireVerb(rbac.VerbReadFindings, networkMap.Sessions))
+			r.Get("/network/sessions.csv", s.requireVerb(rbac.VerbReadFindings, networkMap.SessionsCSV))
 			r.Get("/network/sessions/summary", s.requireVerb(rbac.VerbReadFindings, networkMap.SessionsSummary))
 			r.Delete("/network/sessions/{id}", s.requireVerb(rbac.VerbManagePolicies, networkMap.KillSession))
 			r.Get("/network/enforcement", s.requireVerb(rbac.VerbReadFindings, networkMap.EnforcementList))
@@ -688,6 +689,7 @@ func (s *Server) buildRouter() chi.Router {
 			// Wave 5: user-facing list of DPI threats. Same auth as findings.
 			runtimeThreats := runtime.NewRuntimeThreats(s.db)
 			r.Get("/runtime-threats", s.requireVerb(rbac.VerbReadFindings, runtimeThreats.List))
+			r.Get("/runtime-threats.csv", s.requireVerb(rbac.VerbReadFindings, runtimeThreats.ListCSV))
 			// Wave 5b: per-id drilldown — returns the captured packet bytes
 			// (base64-encoded) plus a parsed L7 preview (HTTP/DNS/TLS).
 			r.Get("/runtime-threats/{id}", s.requireVerb(rbac.VerbReadFindings, runtimeThreats.Get))
@@ -943,6 +945,7 @@ func (s *Server) buildRouter() chi.Router {
 
 			netConv := network.NewNetworkConversations(s.db).WithLiveGraph(s.live)
 			r.Get("/network/conversations", s.requireVerb(rbac.VerbReadFindings, netConv.List))
+			r.Get("/network/conversations.csv", s.requireVerb(rbac.VerbReadFindings, netConv.ListCSV))
 			r.Get("/network/conversations/entries", s.requireVerb(rbac.VerbReadFindings, netConv.Detail))
 			// Plan B5: StreamFlows SSE fallback, only when the hot graph is on.
 			if s.live != nil {
@@ -1218,6 +1221,7 @@ func (s *Server) buildRouter() chi.Router {
 			// agent token can't read findings, etc.
 			eventsRead := runtime.NewEventsIngest(s.db, s.auditLog, baselines.BaselineMode)
 			r.Get("/events", s.requireVerb(rbac.VerbReadFindings, eventsRead.List))
+			r.Get("/events.csv", s.requireVerb(rbac.VerbReadFindings, eventsRead.ListCSV))
 
 			// Host-facts read path. Write path is in the runtime-agent token
 			// group below (POST /host-facts:report). One row per (cluster, node);

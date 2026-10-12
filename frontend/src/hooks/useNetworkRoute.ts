@@ -1,3 +1,4 @@
+import { INVENTORY_MAX_PAGE } from "@/lib/inventory-pagination";
 import { useCallback } from "react";
 import { useRouteSearchParams } from "@/lib/route-search";
 import { NETWORK_SAVED_WORKSPACE_TABS, type NetworkSavedWorkspaceTab } from "@/lib/network-saved-views";
@@ -10,7 +11,7 @@ export function useNetworkRoute() {
       for (const [key, value] of Object.entries(changes)) {
         if (value === null || value === "") next.delete(key); else next.set(key, value);
       }
-      if (resetPage) { next.delete("conversation_page"); next.delete("inspect_from"); next.delete("inspect_to"); }
+      if (resetPage) { next.delete("session_page"); next.delete("threat_page"); next.delete("conversation_page"); next.delete("inspect_from"); next.delete("inspect_to"); }
       return next;
     }, { replace });
   }, [setParams]);
@@ -19,7 +20,7 @@ export function useNetworkRoute() {
   const tabValue = params.get("tab");
   const workspaceTab = NETWORK_SAVED_WORKSPACE_TABS.includes(tabValue as NetworkSavedWorkspaceTab) ? tabValue as NetworkSavedWorkspaceTab : "map";
   const pageValue = Number(params.get("conversation_page"));
-  const conversationPage = Number.isInteger(pageValue) && pageValue > 0 && pageValue <= 10000 ? pageValue - 1 : 0;
+  const conversationPage = Number.isInteger(pageValue) && pageValue > 0 && pageValue <= INVENTORY_MAX_PAGE ? pageValue - 1 : 0;
   return {
     params, update, hours, workspaceTab, conversationPage,
     namespace: params.get("namespace") ?? "", groupFilter: params.get("group") ?? "", verdict: params.get("verdict") ?? "",

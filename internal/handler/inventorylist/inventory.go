@@ -19,6 +19,9 @@ import (
 
 const ExportLimit = 100000
 
+// MaxOffset supports deep retained-history pages without exceeding int32 clients.
+const MaxOffset = 2147483647
+
 type Options struct {
 	Limit, Offset         int
 	Sort, Order, OrderSQL string

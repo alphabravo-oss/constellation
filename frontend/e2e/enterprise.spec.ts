@@ -65,13 +65,14 @@ test("Runtime keeps live events primary and deep-links secondary evidence", asyn
     const url = new URL(route.request().url());
     expect(url.searchParams.get("cluster_id")).toBe(clusterID);
     expect(url.searchParams.has("hours")).toBe(false);
-    await route.fulfill({ json: { limit: 100, events: [{ id: "raw-1", at, source: "runtime-agent", kind: "network", severity: "critical", verdict: "block", workload_id: "default/api-service", node_id: "node-1", namespace: "default", attack_techniques: ["T1190"], payload: {} }] } });
+    await route.fulfill({ json: { cluster_id: clusterID, limit: 100, offset: 0, total: 1, has_more: false, sort: "at", order: "desc", summary: { total: 1, alerting: 1, blocks: 1, quarantines: 0, affected_workloads: 1, observed: 0 }, events: [{ id: "raw-1", row_id: `raw-1@${at}`, cluster_id: clusterID, platform_role: "", at, source: "runtime-agent", kind: "network", severity: "critical", verdict: "block", workload_id: "default/api-service", node_id: "node-1", namespace: "default", attack_techniques: ["T1190"], payload: {} }] } });
   });
   await page.goto(`/clusters/${clusterID}/runtime`);
   await expect(page.getByRole("heading", { name: "Runtime", exact: true })).toBeVisible();
   await expect(page.getByTestId("runtime-summary").locator(":scope > *")).toHaveCount(5);
   await expect(page.getByTestId("runtime-live-table")).toContainText("default/api-service");
-  await expect(page.getByTestId("runtime-live-events")).toContainText("not filtered by the evidence time window");
+  await expect(page.getByTestId("runtime-live-events")).toContainText("1 event records match these filters");
+  await expect(page.getByTestId("runtime-summary")).toContainText("Events1");
   await expect(page.getByTestId("runtime-subsystems")).toBeHidden();
   await page.getByRole("tab", { name: "Subsystems", exact: true }).click();
   await expect(page).toHaveURL(/tab=subsystems/);

@@ -518,8 +518,8 @@ it("includes policy installation roles in returned lifecycle evidence exports", 
 it("exports the loaded threat page and real workload role without action controls", async () => {
  const threat = { id: "threat", workload_id: "operations/houston", platform_role: "core", threat_id: 2022, severity: 8, action: 2, at: "2026-10-12T00:00:00Z" } as RuntimeThreat;
  await render(<NetworkThreatsWorkspaceTab threats={[threat]} total={301} page={2} onPage={vi.fn()} weakTLS={true} settingsUnavailable={false} settingsLoading={false} settingsHref={undefined} onPivot={vi.fn()} />);
- expect(host.textContent).toContain("loaded page");
- await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Export loaded threat page")!.click());
+ expect(host.textContent).toContain("Metrics cover all matching threats.");
+ await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Export this page CSV")!.click());
  const [,headers,rows]=vi.mocked(downloadCsv).mock.calls.at(-1)!;
  expect(rows).toHaveLength(1); expect(rows[0][headers.indexOf("platform_role")]).toBe("core"); expect(rows[0][headers.indexOf("Workload")]).toBe("operations/houston"); expect(headers).not.toContain("Actions"); expect(headers).not.toContain(""); expect(rows.flat()).not.toContain("Pivot");
 });

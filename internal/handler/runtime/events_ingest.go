@@ -27,7 +27,6 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -36,9 +35,7 @@ import (
 
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler"
-	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
-	"github.com/alphabravocompany/constellation/internal/handler/sqlx"
 	"github.com/alphabravocompany/constellation/internal/telemetryingest"
 	"github.com/alphabravocompany/constellation/pkg/attack"
 	"github.com/alphabravocompany/constellation/pkg/audit"
@@ -1582,117 +1579,6 @@ func isSensitivePath(p string) bool {
 		}
 	}
 	return false
-}
-
-// EventDTO is the read-side shape returned by GET /api/v1/events.
-type EventDTO struct {
-	ClusterID        uuid.UUID       `json:"cluster_id"`
-	PlatformRole     string          `json:"platform_role"`
-	ID               uuid.UUID       `json:"id"`
-	At               time.Time       `json:"at"`
-	Kind             string          `json:"kind"`
-	Source           string          `json:"source"`
-	Severity         string          `json:"severity"`
-	Verdict          string          `json:"verdict"`
-	NodeID           string          `json:"node_id"`
-	WorkloadID       string          `json:"workload_id"`
-	Namespace        string          `json:"namespace,omitempty"`
-	ContainerID      string          `json:"container_id,omitempty"`
-	AttackTechniques []string        `json:"attack_techniques"`
-	Payload          json.RawMessage `json:"payload"`
-}
-
-// List handles GET /api/v1/events. Returns the most recent N events for the calling user's
-// org, ordered newest-first. Query params:
-//
-//	limit       1..1000   default 100
-//	kind        comma-separated list of kinds to filter
-//	severity    "info" | "low" | "medium" | "high" | "critical" — minimum
-//	workload    workload_id substring filter
-func (h *EventsIngest) List(w http.ResponseWriter, r *http.Request) {
-	subj, ok := authctx.SubjectFrom(r.Context())
-	if !ok {
-		jsonError(w, http.StatusUnauthorized, "no subject")
-		return
-	}
-	q := r.URL.Query()
-	limit, _ := strconv.Atoi(q.Get("limit"))
-	if limit <= 0 || limit > 1000 {
-		limit = 100
-	}
-	clusterArg, err := sqlx.ParseClusterIDParam(r)
-	if err != nil {
-		jsonError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	args := []any{subj.OrgID}
-	where := []string{"org_id = $1"}
-	if clusterArg != nil {
-		args = append(args, clusterArg)
-		where = append(where, "cluster_id = $"+strconv.Itoa(len(args)))
-	}
-	if kindList := q.Get("kind"); kindList != "" {
-		args = append(args, splitCSV(kindList))
-		where = append(where, "kind = ANY($"+strconv.Itoa(len(args))+")")
-	}
-	if wl := q.Get("workload"); wl != "" {
-		args = append(args, "%"+wl+"%")
-		where = append(where, "workload_id ILIKE $"+strconv.Itoa(len(args)))
-	}
-	if sev := q.Get("severity"); sev != "" {
-		// Treat severity as a tier filter rather than equality so the UI can ask
-		// for "show me high+".
-		tier := severityTier(sev)
-		args = append(args, tier)
-		where = append(where, "(CASE severity WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END) >= $"+strconv.Itoa(len(args)))
-	}
-	args = append(args, limit)
-	sql := `
-SELECT id, cluster_id, at, kind, source, severity, verdict, node_id, workload_id,
-       COALESCE(namespace,''), COALESCE(container_id,''), attack_techniques, payload
-  FROM events
- WHERE ` + strings.Join(where, " AND ") + `
- ORDER BY at DESC
- LIMIT $` + strconv.Itoa(len(args))
-	rows, err := h.db.Pool().Query(r.Context(), sql, args...)
-	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	defer rows.Close()
-	out := make([]EventDTO, 0, limit)
-	for rows.Next() {
-		var d EventDTO
-		var payload []byte
-		if err := rows.Scan(&d.ID, &d.ClusterID, &d.At, &d.Kind, &d.Source, &d.Severity, &d.Verdict,
-			&d.NodeID, &d.WorkloadID, &d.Namespace, &d.ContainerID, &d.AttackTechniques, &payload); err != nil {
-			jsonError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		d.Payload = payload
-		if d.AttackTechniques == nil {
-			d.AttackTechniques = []string{}
-		}
-		out = append(out, d)
-	}
-	if err := rows.Err(); err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	rows.Close()
-	identities := make([]handler.PlatformWorkloadIdentity, len(out))
-	for i, event := range out {
-		identities[i] = handler.PlatformWorkloadIdentity{ClusterID: event.ClusterID, Workload: event.WorkloadID, Namespace: event.Namespace}
-	}
-	roles, err := handler.EvidencePlatformRoles(r.Context(), h.db.Pool(), subj.OrgID, identities)
-	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	for i := range out {
-		out[i].PlatformRole = roles[i]
-	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"events": out, "limit": limit})
 }
 
 func splitCSV(s string) []string {

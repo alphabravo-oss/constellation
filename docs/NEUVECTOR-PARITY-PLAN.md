@@ -1180,14 +1180,88 @@ short source-evidence caption, Controls-only metrics, title fallback, expanded
 image-name width and hidden Last seen sort indicator. Saved column preferences
 remain honored; Reset table preferences restores the new defaults.
 
+The network/history continuation gives Conversations, Sessions, DPI Threats and
+Runtime event history full matching summaries, stable server sorting, URL paging
+and matching CSV independent of the displayed page. Platform filtering is applied
+before network counts, pages and exports; roles use exact tenant/cluster ownership
+and keep ambiguous endpoints unclassified. Conversation inventories and CSV use
+durable hourly rollups; legacy unpaged hot-graph responses explicitly identify a
+bounded live snapshot. Sessions retain the five-minute agent snapshot cohort.
+Runtime history covers retained matching records independently of its separate
+window dashboard. These cohorts do not establish collection or enforcement coverage.
+
+Each inventory checks returned scope, filters, ordering, counts and row identities
+before showing totals or enabling exports. Sessions use cluster/node/session IDs;
+partitioned runtime events use UUID/timestamp pairs. History selection preserves
+that physical identity. A queued session action cannot proceed after its scope or
+fresh inventory changes. Matching CSV is capped at 100,000 with explicit total,
+limit and truncation headers. Page CSV retains exact numeric values, all application
+labels and source timestamps. The network toolbar now shows only controls applicable
+to the active workspace, and each table reports its own update time. Shared table
+preferences, semantic column widths and compact status disclosures remain in use.
+
+Backend validation for this increment passes **98 fresh PostgreSQL race/shuffle
+executions**, without skips: Conversations 30, Sessions 30, runtime threat and
+role regressions 30, Runtime event inventory/export 8. These are executions across
+four focused runs, with some shared network tests exercised in both runs. Fixtures
+include 6,007 conversation pairs, 657 live sessions, 1,206 matching threats,
+partitioned event UUID/timestamp collisions, exact ownership/tenant isolation and
+100,000-row CSV caps. Threat regression coverage includes existing ingestion and
+category/group filtering. Separate affected-domain results do not establish a full
+server-suite pass against the obsolete default schema161 database.
+
+Frontend validation passes **1,816 tests across 134 files**, followed by the final
+**25-case** Network integration run that adds named-group restoration coverage.
+The full run included the preceding 24-case version of that file. The 51 inventory
+validator cases cover malformed rows, mismatched filter echoes, unknown roles and
+scope metadata. Production build/typecheck, full frontend lint, affected Go vet,
+OpenAPI regeneration, **29 server contract checks**, 107 endpoint mappings and
+parity-plan counts pass. Two enterprise browser cases were discovered, not run;
+that discovery is not live browser acceptance.
+
+Live verification at Helm **68** reconciles **296** conversation pairs (**13**
+with platform traffic hidden), **168** sessions and empty DPI threat cohorts with
+matching CSV. A bounded Runtime history read before 22:00 UTC reconciles
+**2,025,049** events with a correctly reported **100,000-row** truncated export.
+These are point-in-time counts; live ingestion and retention change later totals.
+The browser verifies conversation page 2, sort reset and Back restoration, session
+page 2, matching downloads, explicit empty threat state and desktop/640px alignment
+without document overflow or clipped actions. Status disclosures remain 32px.
+
+That live volume exposed the old one-million-offset ceiling. The follow-up uses a
+shared signed-32-bit offset bound across the four inventories and matching UI page
+limits. Other inventory-route callers retain their existing bound. Blank workload
+identities are excluded from Runtime history's renamed **Identified workloads**
+KPI. Session endpoint and byte columns have distinct labels. Follow-up fresh DB
+qualification passes **22 executions**: network 14, threat 2, Runtime 6; existing
+CSV-cap behavior is unchanged. The high-page fixtures verify offsets beyond two
+million, invalid boundary rejection and full summaries on empty deep pages.
+
+Final verification passes **1,824 frontend tests across 134 files**, production
+build/typecheck, full lint and the updated server contracts. Helm **69** runs
+API/frontend `network-history-depth-20261012`, retaining migration
+`audit-lookup-20261012` and schema173; all seven deployments are ready. The live API
+returns 100 records at offset **2,000,000** from a **2,045,875-record** cohort, with
+zero identified workloads when identities are absent. The browser independently
+loads page **20,001**, advances to 20,002 and restores 20,001 with Back, preserving
+aligned tables at desktop/640px widths. Counts vary between these reads. Deep
+history requests measured approximately **8–10 seconds** on this development
+cluster; this does not qualify fleet-scale latency. No live policy, scan, session
+termination, capture or acceptance writes were submitted.
+
 The remaining UI-3 matrix includes baseline/file-profile workload inventories
-and CSVs, plus applicable workload asset/finding exports. Image/repository/cloud/
+and CSVs, plus applicable workload asset/finding exports. Read-only source audit
+finds profile lists are uncapped, but currently perform lazy state writes and
+per-workload reads; duplicate deployment kinds can duplicate a shared namespace/name
+profile identity. FileMonitor's retained-event summaries and stale export/action
+paths need explicit scope and freshness acceptance. These are concrete next UI
+workflow tasks, not evidence of a hidden profile-list cap. Image/repository/cloud/
 node records must not invent workload roles. Dormant SSE remains unqualified
 and disabled. The live cluster has no discovered custom-namespace installation
 candidate; a real isolated chart installation and discovery proof remains
-outstanding. Network conversation/session sorting and matching CSV, threat
-matching export, runtime history continuation, named saved views and the full
-accessibility/cross-dataset acceptance matrix remain open. The legacy bounded
+outstanding. Named saved views and the full accessibility/cross-dataset acceptance matrix
+remain open; the qualified network/history contracts above replace the earlier
+page-only continuation and export gaps. The legacy bounded
 detail payloads are compatibility surfaces; primary Asset/Node/CVE/raw Compliance
 inventories now have independent full-cohort contracts as qualified above.
 

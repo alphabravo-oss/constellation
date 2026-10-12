@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler"
@@ -77,16 +76,21 @@ func nodeKinds(nodes []string) map[string]string {
 
 type platformConversation struct {
 	graph.Conversation
+	RowID            string `json:"row_id"`
 	FromPlatformRole string `json:"from_platform_role,omitempty"`
 	ToPlatformRole   string `json:"to_platform_role,omitempty"`
 }
 
 func (h *NetworkConversations) platformConversations(ctx context.Context, orgID uuid.UUID, clusterID *uuid.UUID, conversations []graph.Conversation) ([]platformConversation, error) {
+	return h.platformConversationsWithQuerier(ctx, h.db.Pool(), orgID, clusterID, conversations)
+}
+
+func (h *NetworkConversations) platformConversationsWithQuerier(ctx context.Context, q handler.PlatformRoleQuerier, orgID uuid.UUID, clusterID *uuid.UUID, conversations []graph.Conversation) ([]platformConversation, error) {
 	workloads := make([]string, 0, len(conversations)*2)
 	for _, conversation := range conversations {
 		workloads = append(workloads, conversation.From, conversation.To)
 	}
-	roles, err := h.conversationPlatformRoles(ctx, orgID, clusterID, workloads...)
+	roles, err := h.conversationPlatformRolesWithQuerier(ctx, q, orgID, clusterID, workloads...)
 	if err != nil {
 		return nil, err
 	}
@@ -94,6 +98,7 @@ func (h *NetworkConversations) platformConversations(ctx context.Context, orgID 
 	for _, conversation := range conversations {
 		out = append(out, platformConversation{
 			Conversation:     conversation,
+			RowID:            conversationRowID(conversation.From, conversation.To),
 			FromPlatformRole: roles[conversation.From],
 			ToPlatformRole:   roles[conversation.To],
 		})
@@ -104,8 +109,12 @@ func (h *NetworkConversations) platformConversations(ctx context.Context, orgID 
 // Org-wide conversation folding intentionally does not infer an installation
 // when several clusters can contribute the same endpoint name.
 func (h *NetworkConversations) conversationPlatformRoles(ctx context.Context, orgID uuid.UUID, clusterID *uuid.UUID, workloads ...string) (map[string]string, error) {
+	return h.conversationPlatformRolesWithQuerier(ctx, h.db.Pool(), orgID, clusterID, workloads...)
+}
+
+func (h *NetworkConversations) conversationPlatformRolesWithQuerier(ctx context.Context, q handler.PlatformRoleQuerier, orgID uuid.UUID, clusterID *uuid.UUID, workloads ...string) (map[string]string, error) {
 	if clusterID == nil {
-		rows, err := h.db.Pool().Query(ctx, `SELECT id FROM clusters WHERE org_id = $1 LIMIT 2`, orgID)
+		rows, err := q.Query(ctx, `SELECT id FROM clusters WHERE org_id = $1 LIMIT 2`, orgID)
 		if err != nil {
 			return nil, err
 		}
@@ -137,7 +146,7 @@ func (h *NetworkConversations) conversationPlatformRoles(ctx context.Context, or
 			identities[i].ClusterID = *clusterID
 		}
 	}
-	resolved, err := handler.EvidencePlatformRoles(ctx, h.db.Pool(), orgID, identities)
+	resolved, err := handler.EvidencePlatformRoles(ctx, q, orgID, identities)
 	if err != nil {
 		return nil, err
 	}
@@ -159,201 +168,20 @@ type NetworkConversations struct {
 func NewNetworkConversations(d *db.DB) *NetworkConversations { return &NetworkConversations{db: d} }
 
 // WithLiveGraph wires the in-memory hot graph. When set, List serves the
-// conversation graph from the cache for low latency, falling back to the
-// Postgres query only when the cache is empty for the org.
+// bounded graph snapshot for legacy requests. Sorted/paged inventory and CSV
+// always use the durable rollups for complete matching summaries.
 func (h *NetworkConversations) WithLiveGraph(s *livegraph.Store) *NetworkConversations {
 	h.live = s
 	return h
 }
 
 func (h *NetworkConversations) List(w http.ResponseWriter, r *http.Request) {
-	subj, _ := authctx.SubjectFrom(r.Context())
-	hours, _ := strconv.Atoi(r.URL.Query().Get("hours"))
-	if hours <= 0 || hours > 24*30 {
-		hours = 24
-	}
-	// Wave D2: optional cluster_id scoping. Without it the conversation
-	// graph aggregates across every cluster the user can see — that's
-	// useful for the org-level overview but a UI passing cluster_id
-	// gets a per-cluster view. Same shape as /network/map.
-	clusterID := strings.TrimSpace(r.URL.Query().Get("cluster_id"))
-	// Namespace + verdict filters (previously accepted by the UI but silently ignored).
-	namespace := strings.TrimSpace(r.URL.Query().Get("namespace"))
-	verdict := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("verdict")))
-	from := strings.TrimSpace(r.URL.Query().Get("from"))
-	to := strings.TrimSpace(r.URL.Query().Get("to"))
-	verdictGroup := strings.TrimSpace(r.URL.Query().Get("verdict_group"))
-	if verdictGroup != "" && verdictGroup != "blocked" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid verdict_group"})
-		return
-	}
-	limit := 5000
-	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
-		parsed, err := strconv.Atoi(raw)
-		if err != nil || parsed < 1 || parsed > 5000 {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid limit"})
-			return
-		}
-		limit = parsed
-	}
-	offset := 0
-	if raw := strings.TrimSpace(r.URL.Query().Get("offset")); raw != "" {
-		parsed, err := strconv.Atoi(raw)
-		if err != nil || parsed < 0 || parsed > 1000000 {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid offset"})
-			return
-		}
-		offset = parsed
-	}
-	port := 0
-	if raw := strings.TrimSpace(r.URL.Query().Get("port")); raw != "" {
-		parsed, err := strconv.Atoi(raw)
-		if err != nil || parsed < 1 || parsed > 65535 {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid port"})
-			return
-		}
-		port = parsed
-	}
-	peer := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("peer")))
-	application := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("application")))
-	var clusterUUID *uuid.UUID
-	if clusterID != "" {
-		u, err := uuid.Parse(clusterID)
-		if err != nil {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster_id"})
-			return
-		}
-		clusterUUID = &u
-	}
-	groupMembers, groupName, groupActive, err := handler.ResolveGroupFilterMembers(r.Context(), h.db.Pool(), subj.OrgID, clusterUUID, r.URL.Query().Get("group"))
-	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
+	h.listConversations(w, r, false)
+}
 
-	// Plan B5: serve from the hot in-memory graph when enabled. The cache only
-	// holds the recent TTL window, so it's used as a low-latency accelerator;
-	// when it has nothing for this org we fall through to the durable SQL path.
-	// The in-memory graph can't apply namespace/verdict filters, so skip it when
-	// either is set and serve the filterable SQL path instead.
-	if h.live != nil && namespace == "" && verdict == "" && !groupActive && port == 0 && peer == "" && application == "" && from == "" && to == "" && verdictGroup == "" && offset == 0 && r.URL.Query().Get("limit") == "" {
-		g := h.live.Snapshot(subj.OrgID, clusterUUID)
-		if n, _ := g.Len(); n > 0 {
-			nodes := g.Nodes()
-			conversations, err := h.platformConversations(r.Context(), subj.OrgID, clusterUUID, g.Conversations())
-			if err != nil {
-				httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not classify conversations"})
-				return
-			}
-			httpx.WriteJSON(w, http.StatusOK, map[string]any{
-				"conversations": conversations,
-				"nodes":         nodes,
-				"node_kinds":    nodeKinds(nodes),
-				"edges":         g.Edges(),
-				"window_hours":  hours,
-				"source":        "live",
-				"total":         len(conversations),
-				"limit":         limit,
-				"offset":        0,
-				"has_more":      false,
-			})
-			return
-		}
-	}
-	// Fold conversations in SQL so the 5000 cap bounds distinct edges, not raw
-	// observations — otherwise busy clusters truncate before aggregation and the
-	// byte/packet SUMs undercount. Mirrors Network.Map's GROUP BY.
-	// NET perf: fold from the network_flow_rollups pre-aggregate (migration 115)
-	// rather than the raw network_flows day-window GROUP BY. Same shape; the
-	// 5000 cap still bounds distinct edges.
-	const where = `
- WHERE org_id = $1
-   AND ($2::text = '' OR cluster_id::text = $2)
-   AND bucket >= date_trunc('hour', NOW() - ($3::int * INTERVAL '1 hour'))
-   AND ($4::text = '' OR verdict = $4)
-   AND ($5::text = '' OR src_workload LIKE $5 || '/%' OR dst_workload LIKE $5 || '/%')
-   AND (NOT $6::boolean OR src_workload = ANY($7::text[]) OR dst_workload = ANY($7::text[]))
-   AND ($8::int = 0 OR dst_port = $8 OR min_src_port = $8)
-   AND ($9::text = '' OR strpos(lower(src_workload), $9) > 0 OR strpos(lower(dst_workload), $9) > 0 OR strpos(lower(min_src_addr), $9) > 0 OR strpos(lower(min_dst_addr), $9) > 0)
-   AND ($10::text = '' OR lower(l7_protocol) = $10 OR max_application::text = $10)
-   AND ($11::text = '' OR src_workload = $11)
-   AND ($12::text = '' OR dst_workload = $12)
-   AND ($13::text = '' OR lower(verdict) IN ('deny', 'denied', 'block', 'blocked'))`
-	args := []any{subj.OrgID, clusterID, hours, verdict, namespace, groupActive, groupMembers, port, peer, application, from, to, verdictGroup}
-	tx, err := h.db.Pool().BeginTx(r.Context(), pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
-	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read conversations"})
-		return
-	}
-	defer func() { _ = tx.Rollback(r.Context()) }()
-	var total int
-	if err := tx.QueryRow(r.Context(), `SELECT COUNT(DISTINCT (src_workload, dst_workload))::int FROM network_flow_rollups`+where, args...).Scan(&total); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	rows, err := tx.Query(r.Context(), `
-WITH scoped AS (SELECT * FROM network_flow_rollups`+where+`),
-pairs AS (
-  SELECT src_workload, dst_workload, SUM(sum_bytes) AS volume
-    FROM scoped GROUP BY src_workload, dst_workload
-   ORDER BY volume DESC, src_workload, dst_workload LIMIT $14 OFFSET $15)
-SELECT scoped.src_workload, scoped.dst_workload, protocol, dst_port,
-       l7_protocol, verdict, COALESCE(MAX(max_severity),0)::int,
-       SUM(sum_bytes)::bigint, SUM(sum_packets)::bigint, MAX(max_at)
-  FROM scoped JOIN pairs USING (src_workload, dst_workload)
- GROUP BY scoped.src_workload, scoped.dst_workload, protocol, dst_port, l7_protocol, verdict
- ORDER BY MAX(pairs.volume) DESC, scoped.src_workload, scoped.dst_workload`, append(args, limit, offset)...)
-	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	defer rows.Close()
-	g := graph.New()
-	for rows.Next() {
-		var src, dst, proto, l7, verdict string
-		var port, severity int
-		var bytes, pkts int64
-		var lastSeen time.Time
-		if err := rows.Scan(&src, &dst, &proto, &port, &l7, &verdict, &severity, &bytes, &pkts, &lastSeen); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read conversations"})
-			return
-		}
-		g.AddEdge(src, dst, graph.Attrs{
-			Bytes: bytes, Packets: pkts, Protocol: proto, Port: port, LastSeen: lastSeen,
-			L7: strings.ToLower(l7), Verdict: strings.ToLower(verdict), Severity: severity,
-		})
-	}
-	if err := rows.Err(); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read conversations"})
-		return
-	}
-	rows.Close()
-	if err := tx.Commit(r.Context()); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not finish reading conversations"})
-		return
-	}
-	conversations, err := h.platformConversations(r.Context(), subj.OrgID, clusterUUID, g.Conversations())
-	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not classify conversations"})
-		return
-	}
-	nodes := g.Nodes()
-	response := map[string]any{
-		"conversations": conversations,
-		"nodes":         nodes,
-		"node_kinds":    nodeKinds(nodes),
-		"edges":         g.Edges(),
-		"window_hours":  hours,
-		"total":         total,
-		"limit":         limit,
-		"offset":        offset,
-		"has_more":      offset+len(g.Conversations()) < total,
-	}
-	if groupActive {
-		response["selected_group"] = groupName
-		response["selected_group_members"] = len(groupMembers)
-	}
-	httpx.WriteJSON(w, http.StatusOK, response)
+// ListCSV exports the same complete matching rollup cohort, up to 100,000 pairs.
+func (h *NetworkConversations) ListCSV(w http.ResponseWriter, r *http.Request) {
+	h.listConversations(w, r, true)
 }
 
 // conversationEntryDTO is one protocol/port/app stream between a from→to pair — NV's

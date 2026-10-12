@@ -4617,6 +4617,1203 @@
             "type": "string"
           }
         }
+      },
+      "NetworkConversationSummary": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Directed pair count."
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Sum of matching retained stream bytes."
+          },
+          "packets": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Sum of matching retained stream packets."
+          },
+          "edges": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Protocol/destination-port stream count across matching pairs."
+          },
+          "nodes": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Distinct endpoint identities across matching pairs."
+          },
+          "blocked": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Pairs whose worst verdict is deny, denied, block or blocked."
+          },
+          "violating": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Pairs whose worst verdict is violate or alert."
+          },
+          "max_severity": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Maximum recorded stream severity, zero for an empty cohort."
+          },
+          "source_clusters": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Distinct non-null source clusters in matching durable rollups; absent on a legacy live snapshot."
+          }
+        },
+        "required": [
+          "total",
+          "bytes",
+          "packets",
+          "edges",
+          "nodes",
+          "blocked",
+          "violating",
+          "max_severity"
+        ]
+      },
+      "NetworkConversationRecord": {
+        "type": "object",
+        "properties": {
+          "row_id": {
+            "type": "string",
+            "description": "Opaque JSON directed from/to pair identity."
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "packets": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "edges": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "last_seen": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "severity": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "verdict": {
+            "type": "string"
+          },
+          "apps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "from_platform_role": {
+            "type": "string",
+            "description": "Exact organization/cluster/workload ownership classification, including exact pod owners. Unknown or ambiguous identity remains unclassified; classification does not alter collection or enforcement."
+          },
+          "to_platform_role": {
+            "type": "string",
+            "description": "Exact organization/cluster/workload ownership classification, including exact pod owners. Unknown or ambiguous identity remains unclassified; classification does not alter collection or enforcement."
+          }
+        },
+        "required": [
+          "row_id",
+          "from",
+          "to",
+          "bytes",
+          "packets",
+          "edges",
+          "last_seen"
+        ]
+      },
+      "NetworkConversationInventory": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Full matching count, independent of returned page."
+          },
+          "summary": {
+            "$ref": "#/components/schemas/NetworkConversationSummary"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5000
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "sort": {
+            "type": "string"
+          },
+          "order": {
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ]
+          },
+          "conversations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NetworkConversationRecord"
+            }
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "window_hours": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 720
+          },
+          "filters": {
+            "type": "object",
+            "properties": {
+              "hours": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 720,
+                "default": 24
+              },
+              "hide_platform": {
+                "type": "boolean",
+                "default": false
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "verdict": {
+                "type": "string"
+              },
+              "group": {
+                "type": "string"
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 65535
+              },
+              "peer": {
+                "type": "string"
+              },
+              "application": {
+                "type": "string"
+              },
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              },
+              "verdict_group": {
+                "type": "string",
+                "enum": [
+                  "",
+                  "blocked"
+                ]
+              }
+            },
+            "required": [
+              "hours",
+              "hide_platform",
+              "namespace",
+              "verdict",
+              "group",
+              "port",
+              "peer",
+              "application",
+              "from",
+              "to",
+              "verdict_group"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "rollups",
+              "live"
+            ]
+          },
+          "source_complete": {
+            "type": "boolean"
+          },
+          "summary_scope": {
+            "type": "string",
+            "enum": [
+              "matching_rollups",
+              "live_snapshot"
+            ]
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "node_kinds": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "edges": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "selected_group": {
+            "type": "string"
+          },
+          "selected_group_members": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "total",
+          "summary",
+          "limit",
+          "offset",
+          "has_more",
+          "sort",
+          "order",
+          "conversations",
+          "cluster_id",
+          "window_hours",
+          "filters",
+          "source",
+          "source_complete",
+          "summary_scope",
+          "nodes",
+          "node_kinds",
+          "edges"
+        ]
+      },
+      "NetworkSessionSummary": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "tcp": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "udp": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "icmp": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "other": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "client_bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "server_bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "packets": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "threats": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          }
+        },
+        "required": [
+          "total",
+          "tcp",
+          "udp",
+          "icmp",
+          "other",
+          "client_bytes",
+          "server_bytes",
+          "bytes",
+          "packets",
+          "threats"
+        ]
+      },
+      "NetworkSessionRecord": {
+        "type": "object",
+        "properties": {
+          "row_id": {
+            "type": "string",
+            "description": "Opaque JSON instance key [cluster_id,node,id]."
+          },
+          "id": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "node": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "workload_id": {
+            "type": "string"
+          },
+          "platform_role": {
+            "type": "string",
+            "description": "Exact organization/cluster/workload ownership classification, including exact pod owners. Unknown or ambiguous identity remains unclassified; classification does not alter collection or enforcement."
+          },
+          "application": {
+            "type": "string"
+          },
+          "ip_proto": {
+            "type": "string"
+          },
+          "client_ip": {
+            "type": "string"
+          },
+          "client_port": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "server_ip": {
+            "type": "string"
+          },
+          "server_port": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "client_state": {
+            "type": "string"
+          },
+          "server_state": {
+            "type": "string"
+          },
+          "client_bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "server_bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "client_pkts": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "server_pkts": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "age": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "idle": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "ingress": {
+            "type": "boolean"
+          },
+          "severity": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "threat_id": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          }
+        },
+        "required": [
+          "row_id",
+          "id",
+          "cluster_id",
+          "node",
+          "updated_at",
+          "platform_role",
+          "application",
+          "ip_proto",
+          "client_ip",
+          "client_port",
+          "server_ip",
+          "server_port",
+          "client_state",
+          "server_state",
+          "client_bytes",
+          "server_bytes",
+          "client_pkts",
+          "server_pkts",
+          "age",
+          "idle",
+          "ingress",
+          "severity"
+        ]
+      },
+      "NetworkSessionInventory": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Full matching count, independent of returned page."
+          },
+          "summary": {
+            "$ref": "#/components/schemas/NetworkSessionSummary"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2000
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "sort": {
+            "type": "string"
+          },
+          "order": {
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ]
+          },
+          "sessions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NetworkSessionRecord"
+            }
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stale_after_seconds": {
+            "type": "integer",
+            "minimum": 0,
+            "enum": [
+              300
+            ]
+          },
+          "filters": {
+            "type": "object",
+            "properties": {
+              "cluster_id": {
+                "type": "string",
+                "format": "uuid",
+                "nullable": true
+              },
+              "q": {
+                "type": "string"
+              },
+              "protocol": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 255,
+                "nullable": true
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535,
+                "nullable": true
+              },
+              "application": {
+                "type": "string"
+              },
+              "peer": {
+                "type": "string"
+              },
+              "workload": {
+                "type": "string"
+              },
+              "node": {
+                "type": "string"
+              },
+              "group": {
+                "type": "string"
+              },
+              "hours": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 720
+              },
+              "hide_platform": {
+                "type": "boolean",
+                "default": false
+              }
+            },
+            "required": [
+              "cluster_id",
+              "q",
+              "protocol",
+              "port",
+              "application",
+              "peer",
+              "workload",
+              "node",
+              "group",
+              "hours",
+              "hide_platform"
+            ]
+          },
+          "selected_group": {
+            "type": "string"
+          },
+          "selected_group_members": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "q": {
+            "type": "string"
+          },
+          "protocol": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 255,
+            "nullable": true
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "nullable": true
+          },
+          "application": {
+            "type": "string"
+          },
+          "peer": {
+            "type": "string"
+          },
+          "workload": {
+            "type": "string"
+          },
+          "node": {
+            "type": "string"
+          },
+          "group": {
+            "type": "string"
+          },
+          "hours": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 720
+          },
+          "hide_platform": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "total",
+          "summary",
+          "limit",
+          "offset",
+          "has_more",
+          "sort",
+          "order",
+          "sessions",
+          "stale_after_seconds",
+          "filters"
+        ]
+      },
+      "RuntimeThreatSummary": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "critical": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "blocked": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "ips": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "dlp": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "waf": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "workloads": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "total",
+          "critical",
+          "blocked",
+          "ips",
+          "dlp",
+          "waf",
+          "workloads"
+        ]
+      },
+      "RuntimeThreatRecord": {
+        "type": "object",
+        "properties": {
+          "node": {
+            "type": "string"
+          },
+          "ep_mac": {
+            "type": "string"
+          },
+          "workload_id": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "pod_name": {
+            "type": "string"
+          },
+          "msg": {
+            "type": "string"
+          },
+          "src_ip": {
+            "type": "string"
+          },
+          "dst_ip": {
+            "type": "string"
+          },
+          "threat_name": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "org_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "platform_role": {
+            "type": "string",
+            "description": "Exact organization/cluster/workload ownership classification, including exact pod owners. Unknown or ambiguous identity remains unclassified; classification does not alter collection or enforcement."
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "ips",
+              "dlp",
+              "waf"
+            ]
+          },
+          "severity": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "action": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "threat_id": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "application": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "ip_proto": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "src_port": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "dst_port": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "pkt_len": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "cap_len": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "pkt_ingress": {
+            "type": "boolean"
+          },
+          "sess_ingress": {
+            "type": "boolean"
+          },
+          "reported_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "org_id",
+          "cluster_id",
+          "platform_role",
+          "category",
+          "severity",
+          "action",
+          "threat_id",
+          "pkt_ingress",
+          "sess_ingress",
+          "reported_at",
+          "at"
+        ]
+      },
+      "RuntimeThreatInventory": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Full matching count, independent of returned page."
+          },
+          "summary": {
+            "$ref": "#/components/schemas/RuntimeThreatSummary"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2000
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "sort": {
+            "type": "string"
+          },
+          "order": {
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ]
+          },
+          "threats": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RuntimeThreatRecord"
+            }
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "window_hours": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 720
+          },
+          "filters": {
+            "type": "object",
+            "properties": {
+              "severity_min": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9,
+                "default": 0
+              },
+              "workload_id": {
+                "type": "string"
+              },
+              "category": {
+                "type": "string",
+                "enum": [
+                  "",
+                  "ips",
+                  "dlp",
+                  "waf"
+                ]
+              },
+              "group": {
+                "type": "string"
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 65535
+              },
+              "peer": {
+                "type": "string"
+              },
+              "application": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "node": {
+                "type": "string"
+              },
+              "hide_platform": {
+                "type": "boolean",
+                "default": false
+              },
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "severity_min",
+              "workload_id",
+              "category",
+              "group",
+              "port",
+              "peer",
+              "application",
+              "namespace",
+              "node",
+              "hide_platform",
+              "q"
+            ]
+          },
+          "selected_group": {
+            "type": "string"
+          },
+          "selected_group_members": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "total",
+          "summary",
+          "limit",
+          "offset",
+          "has_more",
+          "sort",
+          "order",
+          "threats",
+          "cluster_id",
+          "window_hours",
+          "filters"
+        ]
+      },
+      "RuntimeEventSummary": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "alerting": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "blocks": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "quarantines": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "affected_workloads": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Distinct identified cluster/workload pairs among matching events; blank and whitespace-only workload IDs are excluded."
+          },
+          "observed": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "total",
+          "alerting",
+          "blocks",
+          "quarantines",
+          "affected_workloads",
+          "observed"
+        ]
+      },
+      "RuntimeEventRecord": {
+        "type": "object",
+        "properties": {
+          "row_id": {
+            "type": "string",
+            "description": "Opaque physical instance identity id@UTC at, preserving the complete timestamp."
+          },
+          "kind": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "verdict": {
+            "type": "string"
+          },
+          "node_id": {
+            "type": "string"
+          },
+          "workload_id": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "container_id": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "platform_role": {
+            "type": "string",
+            "description": "Exact organization/cluster/workload ownership classification, including exact pod owners. Unknown or ambiguous identity remains unclassified; classification does not alter collection or enforcement."
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "attack_techniques": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Persisted redacted event payload."
+          }
+        },
+        "required": [
+          "row_id",
+          "kind",
+          "source",
+          "severity",
+          "verdict",
+          "node_id",
+          "workload_id",
+          "id",
+          "cluster_id",
+          "platform_role",
+          "at",
+          "attack_techniques",
+          "payload"
+        ]
+      },
+      "RuntimeEventInventory": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Full matching count, independent of returned page."
+          },
+          "summary": {
+            "$ref": "#/components/schemas/RuntimeEventSummary"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "sort": {
+            "type": "string"
+          },
+          "order": {
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ]
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RuntimeEventRecord"
+            }
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "q": {
+            "type": "string"
+          },
+          "workload": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "",
+              "info",
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ]
+          },
+          "verdict": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "node": {
+            "type": "string"
+          },
+          "after": {
+            "type": "string",
+            "oneOf": [
+              {
+                "format": "date-time"
+              },
+              {
+                "enum": [
+                  ""
+                ]
+              }
+            ],
+            "description": "Canonical UTC RFC3339 boundary preserving fractional precision, or empty string when absent."
+          },
+          "before": {
+            "type": "string",
+            "oneOf": [
+              {
+                "format": "date-time"
+              },
+              {
+                "enum": [
+                  ""
+                ]
+              }
+            ],
+            "description": "Canonical UTC RFC3339 boundary preserving fractional precision, or empty string when absent."
+          }
+        },
+        "required": [
+          "total",
+          "summary",
+          "limit",
+          "offset",
+          "has_more",
+          "sort",
+          "order",
+          "events",
+          "q",
+          "workload",
+          "kind",
+          "source",
+          "severity",
+          "verdict",
+          "namespace",
+          "node",
+          "after",
+          "before"
+        ]
       }
     },
     "responses": {
@@ -11131,16 +12328,473 @@
     },
     "/api/v1/events": {
       "get": {
-        "responses": {
-          "200": {
-            "description": "ok"
+        "summary": "List runtime event history",
+        "description": "Requires read-findings. Missing cluster_id is organization-wide across owned clusters. There is no default time bound. Literal search, existing minimum-severity semantics, exact/CSV filters and precise inclusive after/exclusive before bounds apply before full matching summaries, stable sorting and page selection. Counts, rows and exact platform-role enrichment share one read-only snapshot. Row identity includes the partitioned events primary key (id,at); a repeated producer UUID at another timestamp is a separate record. alerting includes alert, block and quarantine; blocks/quarantines are their verdict subsets; affected_workloads counts distinct identified cluster/workload pairs across all matching events, including observed events; blank or whitespace-only workload IDs are excluded. Matching CSV is independent of page selection, contains redacted payload and exact platform metadata, and is separate from the curated enterprise runtime-window evidence and the legacy multi-source NDJSON export. Event timestamps are observation evidence, not proof of agent coverage or policy enforcement.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Exact owned cluster. Omitted cluster scope is explained by each inventory operation."
           },
-          "default": {
-            "$ref": "#/components/responses/Error"
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Literal case-insensitive search of workload, kind, source, severity, verdict, node, namespace, container and redacted payload JSON."
+          },
+          {
+            "name": "workload",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Literal case-insensitive workload substring; % and _ are text, not wildcards."
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated exact event kinds, normalized by trimming/sorting."
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated exact source names; case-sensitive."
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "info",
+                "low",
+                "medium",
+                "high",
+                "critical"
+              ]
+            },
+            "description": "Minimum severity tier, retaining the existing high-and-above contract."
+          },
+          {
+            "name": "verdict",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated exact observed, alert, block or quarantine verdicts."
+          },
+          {
+            "name": "namespace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact recorded namespace."
+          },
+          {
+            "name": "node",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact recorded node_id."
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Inclusive event at >= this RFC3339 timestamp, preserving fractional precision through nanoseconds; no implicit lower bound."
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Exclusive event at < this RFC3339 timestamp; must be later than after; no implicit upper bound."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "at",
+                "workload",
+                "kind",
+                "source",
+                "severity",
+                "verdict",
+                "namespace",
+                "node"
+              ],
+              "default": "at"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 100
+            },
+            "description": "Maximum records on this server page."
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483647,
+              "default": 0
+            },
+            "description": "Matching-record offset; filters and full summary apply before page selection."
           }
-        },
-        "summary": "Get events",
-        "description": " Runtime workload evidence carries platform_role using exact ownership when available; ambiguous organization rollups and records without workload identity remain unclassified."
+        ],
+        "responses": {
+          "400": {
+            "description": "Malformed query encoding or invalid filter, sort, page or group scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authenticated user subject required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "read-findings permission required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Scope, evidence or metadata could not be read; not an empty-success inventory or a downloadable export.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Cluster not found in the authenticated organization.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Matching inventory page and full matching summary.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeEventInventory"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/events.csv": {
+      "get": {
+        "summary": "Export matching runtime event records",
+        "description": "Requires read-findings. Missing cluster_id is organization-wide across owned clusters. There is no default time bound. Literal search, existing minimum-severity semantics, exact/CSV filters and precise inclusive after/exclusive before bounds apply before full matching summaries, stable sorting and page selection. Counts, rows and exact platform-role enrichment share one read-only snapshot. Row identity includes the partitioned events primary key (id,at); a repeated producer UUID at another timestamp is a separate record. alerting includes alert, block and quarantine; blocks/quarantines are their verdict subsets; affected_workloads counts distinct identified cluster/workload pairs across all matching events, including observed events; blank or whitespace-only workload IDs are excluded. Matching CSV is independent of page selection, contains redacted payload and exact platform metadata, and is separate from the curated enterprise runtime-window evidence and the legacy multi-source NDJSON export. Event timestamps are observation evidence, not proof of agent coverage or policy enforcement. CSV ignores page selection and exports the matching cohort in the requested server order, independently of visible table columns. Columns: row_id, id, cluster_id, platform_role, at, kind, source, severity, verdict, node_id, workload_id, namespace, container_id, attack_techniques, payload.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Exact owned cluster. Omitted cluster scope is explained by each inventory operation."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Literal case-insensitive search of workload, kind, source, severity, verdict, node, namespace, container and redacted payload JSON."
+          },
+          {
+            "name": "workload",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Literal case-insensitive workload substring; % and _ are text, not wildcards."
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated exact event kinds, normalized by trimming/sorting."
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated exact source names; case-sensitive."
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "info",
+                "low",
+                "medium",
+                "high",
+                "critical"
+              ]
+            },
+            "description": "Minimum severity tier, retaining the existing high-and-above contract."
+          },
+          {
+            "name": "verdict",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated exact observed, alert, block or quarantine verdicts."
+          },
+          {
+            "name": "namespace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact recorded namespace."
+          },
+          {
+            "name": "node",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact recorded node_id."
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Inclusive event at >= this RFC3339 timestamp, preserving fractional precision through nanoseconds; no implicit lower bound."
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Exclusive event at < this RFC3339 timestamp; must be later than after; no implicit upper bound."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "at",
+                "workload",
+                "kind",
+                "source",
+                "severity",
+                "verdict",
+                "namespace",
+                "node"
+              ],
+              "default": "at"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Malformed query encoding or invalid filter, sort, page or group scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authenticated user subject required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "read-findings permission required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Scope, evidence or metadata could not be read; not an empty-success inventory or a downloadable export.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Cluster not found in the authenticated organization.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Matching CSV across pages, capped at 100,000 records with explicit scope and truncation metadata.",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Export-Total": {
+                "description": "Total matching records before the CSV cap.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-Export-Limit": {
+                "description": "Maximum exported matching records.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "enum": [
+                    100000
+                  ]
+                }
+              },
+              "X-Export-Truncated": {
+                "description": "True exactly when matching total exceeds 100,000. Narrow filters for an uncapped matching export.",
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/events:bulk": {
@@ -14432,45 +16086,514 @@
     },
     "/api/v1/network/conversations": {
       "get": {
+        "summary": "List network conversation pairs",
+        "description": "Requires read-findings. Missing cluster_id selects the authenticated organization across owned source clusters; identical directed workload names are folded across that scope. Filters, actual-source-cluster platform exclusion, stream/pair aggregation, full summaries, stable sorting and page selection use one read-only snapshot. A pair is directed from/to; streams are protocol/destination-port edges, not raw event counts. Graph nodes and edges describe the returned page while summary nodes and edges cover all matches. Requests with explicit limit, offset, sort, order or any cohort filter use durable rollups and return source=rollups, source_complete=true, summary_scope=matching_rollups. A legacy request without inventory controls may use the TTL/edge-bounded hot graph: source=live, source_complete=false, summary_scope=live_snapshot; its counts describe that snapshot, not the full requested history. CSV always uses retained durable rollups. Platform role metadata may be omitted for unclassified endpoints; ambiguous names never borrow a custom installation.",
         "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Exact owned cluster. Omitted cluster scope is explained by each inventory operation."
+          },
+          {
+            "name": "hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 720,
+              "default": 24
+            },
+            "description": "Durable retained hourly buckets beginning at date_trunc(hour, NOW()-hours). Omitted, malformed or out-of-range hours normalize to 24. This is not an exact raw-event time window."
+          },
+          {
+            "name": "hide_platform",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Exclude records classified as core before summaries, pagination and matching export. Collection remains intact."
+          },
+          {
+            "name": "namespace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact namespace of either directed endpoint."
+          },
+          {
+            "name": "verdict",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact normalized verdict before stream/pair aggregation."
+          },
+          {
+            "name": "group",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Owned group UUID or name; current resolved workload membership is applied before count, page and export. Unavailable or invalid group resolution does not broaden the cohort."
+          },
+          {
+            "name": "port",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "description": "Destination port or recorded minimum source port."
+          },
+          {
+            "name": "peer",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Literal case-insensitive substring of endpoint workload or retained minimum address."
+          },
+          {
+            "name": "application",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact lowercase L7 protocol or recorded numeric application ID; no port-hint expansion on this endpoint."
+          },
           {
             "name": "from",
             "in": "query",
-            "description": "Exact directed source workload identity, applied before pagination.",
+            "required": false,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "Exact directed source workload identity."
           },
           {
             "name": "to",
             "in": "query",
-            "description": "Exact directed destination workload identity, applied before pagination.",
+            "required": false,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "Exact directed destination workload identity."
           },
           {
             "name": "verdict_group",
             "in": "query",
-            "description": "Include deny, denied, block and blocked records.",
+            "required": false,
             "schema": {
               "type": "string",
               "enum": [
                 "blocked"
               ]
+            },
+            "description": "Include deny, denied, block and blocked records before aggregation."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "from",
+                "to",
+                "bytes",
+                "packets",
+                "edges",
+                "severity",
+                "verdict",
+                "last_seen",
+                "apps"
+              ],
+              "default": "bytes"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5000,
+              "default": 5000
+            },
+            "description": "Maximum records on this server page."
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483647,
+              "default": 0
+            },
+            "description": "Matching-record offset; filters and full summary apply before page selection."
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Malformed query encoding or invalid filter, sort, page or group scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authenticated user subject required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "read-findings permission required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Scope, evidence or metadata could not be read; not an empty-success inventory or a downloadable export.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Cluster not found in the authenticated organization.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Matching inventory page and full matching summary.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkConversationInventory"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/network/conversations.csv": {
+      "get": {
+        "summary": "Export matching network conversation pairs",
+        "description": "Requires read-findings. Missing cluster_id selects the authenticated organization across owned source clusters; identical directed workload names are folded across that scope. Filters, actual-source-cluster platform exclusion, stream/pair aggregation, full summaries, stable sorting and page selection use one read-only snapshot. A pair is directed from/to; streams are protocol/destination-port edges, not raw event counts. Graph nodes and edges describe the returned page while summary nodes and edges cover all matches. Requests with explicit limit, offset, sort, order or any cohort filter use durable rollups and return source=rollups, source_complete=true, summary_scope=matching_rollups. A legacy request without inventory controls may use the TTL/edge-bounded hot graph: source=live, source_complete=false, summary_scope=live_snapshot; its counts describe that snapshot, not the full requested history. CSV always uses retained durable rollups. Platform role metadata may be omitted for unclassified endpoints; ambiguous names never borrow a custom installation. CSV ignores page selection and exports the matching cohort in the requested server order, independently of visible table columns. Columns: Conversation ID, From, To, Bytes, Packets, Streams, Last seen, Max severity, Verdict, Applications (JSON), From platform role, To platform role.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Exact owned cluster. Omitted cluster scope is explained by each inventory operation."
+          },
+          {
+            "name": "hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 720,
+              "default": 24
+            },
+            "description": "Durable retained hourly buckets beginning at date_trunc(hour, NOW()-hours). Omitted, malformed or out-of-range hours normalize to 24. This is not an exact raw-event time window."
+          },
+          {
+            "name": "hide_platform",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Exclude records classified as core before summaries, pagination and matching export. Collection remains intact."
+          },
+          {
+            "name": "namespace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact namespace of either directed endpoint."
+          },
+          {
+            "name": "verdict",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact normalized verdict before stream/pair aggregation."
+          },
+          {
+            "name": "group",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Owned group UUID or name; current resolved workload membership is applied before count, page and export. Unavailable or invalid group resolution does not broaden the cohort."
+          },
+          {
+            "name": "port",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "description": "Destination port or recorded minimum source port."
+          },
+          {
+            "name": "peer",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Literal case-insensitive substring of endpoint workload or retained minimum address."
+          },
+          {
+            "name": "application",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact lowercase L7 protocol or recorded numeric application ID; no port-hint expansion on this endpoint."
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact directed source workload identity."
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact directed destination workload identity."
+          },
+          {
+            "name": "verdict_group",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "blocked"
+              ]
+            },
+            "description": "Include deny, denied, block and blocked records before aggregation."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "from",
+                "to",
+                "bytes",
+                "packets",
+                "edges",
+                "severity",
+                "verdict",
+                "last_seen",
+                "apps"
+              ],
+              "default": "bytes"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
             }
           }
         ],
         "responses": {
-          "200": {
-            "description": "ok"
+          "400": {
+            "description": "Malformed query encoding or invalid filter, sort, page or group scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
-          "default": {
-            "$ref": "#/components/responses/Error"
+          "401": {
+            "description": "Authenticated user subject required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "read-findings permission required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Scope, evidence or metadata could not be read; not an empty-success inventory or a downloadable export.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Cluster not found in the authenticated organization.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Matching CSV across pages, capped at 100,000 records with explicit scope and truncation metadata.",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Export-Total": {
+                "description": "Total matching records before the CSV cap.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-Export-Limit": {
+                "description": "Maximum exported matching records.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "enum": [
+                    100000
+                  ]
+                }
+              },
+              "X-Export-Truncated": {
+                "description": "True exactly when matching total exceeds 100,000. Narrow filters for an uncapped matching export.",
+                "schema": {
+                  "type": "boolean"
+                }
+              },
+              "X-Conversation-Source": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "rollups"
+                  ]
+                }
+              },
+              "X-Conversation-Window-Hours": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 720
+                }
+              },
+              "X-Conversation-Cluster": {
+                "description": "Exact requested cluster UUID or organization for an organization-wide export.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           }
-        },
-        "summary": "Get conversations",
-        "description": " Platform roles use exact tenant/cluster workload ownership, including pod owners; ambiguous names stay unclassified. Metadata lookup failures return an error. Capture action responses include evaluated roles, and metadata failure prevents the new capture/claim/status/upload operation."
+        }
       }
     },
     "/api/v1/network/conversations/entries": {
@@ -14605,30 +16728,663 @@
     },
     "/api/v1/network/sessions": {
       "get": {
-        "responses": {
-          "200": {
-            "description": "ok"
+        "summary": "List current live network sessions",
+        "description": "Requires read-findings. Every read selects only session instances updated within the last five minutes. Missing cluster_id retains the preferred owned-cluster fallback (connected, latest heartbeat, oldest creation, UUID tie-break); an explicit unavailable/foreign cluster is a 400 and lookup failures never broaden scope. Session id is node-local; row_id identifies cluster/node/session_id. Filters and exact platform-role exclusion run before complete matching protocol/traffic/threat summaries, server sort and paging in one read-only snapshot. Default bytes order preserves age-descending secondary order; final ties use the complete instance key. CSV retains every matching instance across pages with numeric IDs and exact platform metadata. Session/application labels are port/protocol hints, not verified L7 attribution. Numeric summary units are session instances, byte/packet totals and instances with nonzero threat_id.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Exact owned cluster. Omitted cluster scope is explained by each inventory operation."
           },
-          "default": {
-            "$ref": "#/components/responses/Error"
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Literal case-insensitive search of session instance, workload/node, application/protocol labels, endpoint addresses/ports and connection-state labels."
+          },
+          {
+            "name": "protocol",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "tcp/6, udp/17, icmp/1, icmpv6/58, or proto-N for protocol numbers 1..255."
+          },
+          {
+            "name": "port",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "description": "Either client or server port."
+          },
+          {
+            "name": "application",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Named application port hint applied to server port, or exact numeric application ID. Unknown nonnumeric names produce no matches; names do not confirm verified L7 application evidence."
+          },
+          {
+            "name": "peer",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Case-insensitive client/server IP substring using legacy SQL LIKE semantics (% and _ remain wildcards)."
+          },
+          {
+            "name": "workload",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Case-insensitive workload substring using legacy SQL LIKE semantics."
+          },
+          {
+            "name": "node",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Case-insensitive node substring using legacy SQL LIKE semantics."
+          },
+          {
+            "name": "group",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Owned group UUID or name; current resolved workload membership is applied before count, page and export. Unavailable or invalid group resolution does not broaden the cohort."
+          },
+          {
+            "name": "hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 720
+            },
+            "description": "Optional updated_at lookback, in addition to the fixed five-minute freshness gate; cannot restore stale historical sessions."
+          },
+          {
+            "name": "hide_platform",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Exclude records classified as core before summaries, pagination and matching export. Collection remains intact."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "workload",
+                "node",
+                "application",
+                "protocol",
+                "client",
+                "server",
+                "bytes",
+                "packets",
+                "client_bytes",
+                "server_bytes",
+                "age",
+                "idle",
+                "severity",
+                "observed",
+                "state"
+              ],
+              "default": "bytes"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2000,
+              "default": 500
+            },
+            "description": "Maximum records on this server page."
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483647,
+              "default": 0
+            },
+            "description": "Matching-record offset; filters and full summary apply before page selection."
           }
-        },
-        "summary": "Get sessions",
-        "description": " Platform roles use exact tenant/cluster workload ownership, including pod owners; ambiguous names stay unclassified. Metadata lookup failures return an error. Capture action responses include evaluated roles, and metadata failure prevents the new capture/claim/status/upload operation."
+        ],
+        "responses": {
+          "400": {
+            "description": "Malformed query encoding or invalid filter, sort, page or group scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authenticated user subject required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "read-findings permission required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Scope, evidence or metadata could not be read; not an empty-success inventory or a downloadable export.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Matching inventory page and full matching summary.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkSessionInventory"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/network/sessions.csv": {
+      "get": {
+        "summary": "Export matching current live network sessions",
+        "description": "Requires read-findings. Every read selects only session instances updated within the last five minutes. Missing cluster_id retains the preferred owned-cluster fallback (connected, latest heartbeat, oldest creation, UUID tie-break); an explicit unavailable/foreign cluster is a 400 and lookup failures never broaden scope. Session id is node-local; row_id identifies cluster/node/session_id. Filters and exact platform-role exclusion run before complete matching protocol/traffic/threat summaries, server sort and paging in one read-only snapshot. Default bytes order preserves age-descending secondary order; final ties use the complete instance key. CSV retains every matching instance across pages with numeric IDs and exact platform metadata. Session/application labels are port/protocol hints, not verified L7 attribution. Numeric summary units are session instances, byte/packet totals and instances with nonzero threat_id. CSV ignores page selection and exports the matching cohort in the requested server order, independently of visible table columns. Columns: row_id, cluster_id, session_id, node, workload_id, platform_role, application, ip_proto, client_ip, client_port, server_ip, server_port, client_state, server_state, client_bytes, server_bytes, client_pkts, server_pkts, age, idle, ingress, severity, threat_id, updated_at.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Exact owned cluster. Omitted cluster scope is explained by each inventory operation."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Literal case-insensitive search of session instance, workload/node, application/protocol labels, endpoint addresses/ports and connection-state labels."
+          },
+          {
+            "name": "protocol",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "tcp/6, udp/17, icmp/1, icmpv6/58, or proto-N for protocol numbers 1..255."
+          },
+          {
+            "name": "port",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "description": "Either client or server port."
+          },
+          {
+            "name": "application",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Named application port hint applied to server port, or exact numeric application ID. Unknown nonnumeric names produce no matches; names do not confirm verified L7 application evidence."
+          },
+          {
+            "name": "peer",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Case-insensitive client/server IP substring using legacy SQL LIKE semantics (% and _ remain wildcards)."
+          },
+          {
+            "name": "workload",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Case-insensitive workload substring using legacy SQL LIKE semantics."
+          },
+          {
+            "name": "node",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Case-insensitive node substring using legacy SQL LIKE semantics."
+          },
+          {
+            "name": "group",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Owned group UUID or name; current resolved workload membership is applied before count, page and export. Unavailable or invalid group resolution does not broaden the cohort."
+          },
+          {
+            "name": "hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 720
+            },
+            "description": "Optional updated_at lookback, in addition to the fixed five-minute freshness gate; cannot restore stale historical sessions."
+          },
+          {
+            "name": "hide_platform",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Exclude records classified as core before summaries, pagination and matching export. Collection remains intact."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "workload",
+                "node",
+                "application",
+                "protocol",
+                "client",
+                "server",
+                "bytes",
+                "packets",
+                "client_bytes",
+                "server_bytes",
+                "age",
+                "idle",
+                "severity",
+                "observed",
+                "state"
+              ],
+              "default": "bytes"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Malformed query encoding or invalid filter, sort, page or group scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authenticated user subject required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "read-findings permission required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Scope, evidence or metadata could not be read; not an empty-success inventory or a downloadable export.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Matching CSV across pages, capped at 100,000 records with explicit scope and truncation metadata.",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Export-Total": {
+                "description": "Total matching records before the CSV cap.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-Export-Limit": {
+                "description": "Maximum exported matching records.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "enum": [
+                    100000
+                  ]
+                }
+              },
+              "X-Export-Truncated": {
+                "description": "True exactly when matching total exceeds 100,000. Narrow filters for an uncapped matching export.",
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/network/sessions/summary": {
       "get": {
-        "responses": {
-          "200": {
-            "description": "ok"
+        "summary": "Summarize matching current live sessions",
+        "description": "Requires read-findings. Every read selects only session instances updated within the last five minutes. Missing cluster_id retains the preferred owned-cluster fallback (connected, latest heartbeat, oldest creation, UUID tie-break); an explicit unavailable/foreign cluster is a 400 and lookup failures never broaden scope. Session id is node-local; row_id identifies cluster/node/session_id. Filters and exact platform-role exclusion run before complete matching protocol/traffic/threat summaries, server sort and paging in one read-only snapshot. Default bytes order preserves age-descending secondary order; final ties use the complete instance key. CSV retains every matching instance across pages with numeric IDs and exact platform metadata. Session/application labels are port/protocol hints, not verified L7 attribution. Numeric summary units are session instances, byte/packet totals and instances with nonzero threat_id. This legacy endpoint retains its flat count shape; pagination does not clip its summary.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Exact owned cluster. Omitted cluster scope is explained by each inventory operation."
           },
-          "default": {
-            "$ref": "#/components/responses/Error"
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Literal case-insensitive search of session instance, workload/node, application/protocol labels, endpoint addresses/ports and connection-state labels."
+          },
+          {
+            "name": "protocol",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "tcp/6, udp/17, icmp/1, icmpv6/58, or proto-N for protocol numbers 1..255."
+          },
+          {
+            "name": "port",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "description": "Either client or server port."
+          },
+          {
+            "name": "application",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Named application port hint applied to server port, or exact numeric application ID. Unknown nonnumeric names produce no matches; names do not confirm verified L7 application evidence."
+          },
+          {
+            "name": "peer",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Case-insensitive client/server IP substring using legacy SQL LIKE semantics (% and _ remain wildcards)."
+          },
+          {
+            "name": "workload",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Case-insensitive workload substring using legacy SQL LIKE semantics."
+          },
+          {
+            "name": "node",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Case-insensitive node substring using legacy SQL LIKE semantics."
+          },
+          {
+            "name": "group",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Owned group UUID or name; current resolved workload membership is applied before count, page and export. Unavailable or invalid group resolution does not broaden the cohort."
+          },
+          {
+            "name": "hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 720
+            },
+            "description": "Optional updated_at lookback, in addition to the fixed five-minute freshness gate; cannot restore stale historical sessions."
+          },
+          {
+            "name": "hide_platform",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Exclude records classified as core before summaries, pagination and matching export. Collection remains intact."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "workload",
+                "node",
+                "application",
+                "protocol",
+                "client",
+                "server",
+                "bytes",
+                "packets",
+                "client_bytes",
+                "server_bytes",
+                "age",
+                "idle",
+                "severity",
+                "observed",
+                "state"
+              ],
+              "default": "bytes"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
           }
-        },
-        "summary": "Get summary",
-        "description": " Platform roles use exact tenant/cluster workload ownership, including pod owners; ambiguous names stay unclassified. Metadata lookup failures return an error. Capture action responses include evaluated roles, and metadata failure prevents the new capture/claim/status/upload operation."
+        ],
+        "responses": {
+          "400": {
+            "description": "Malformed query encoding or invalid filter, sort, page or group scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authenticated user subject required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "read-findings permission required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Scope, evidence or metadata could not be read; not an empty-success inventory or a downloadable export.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Flat full matching live-session summary over the same scope and filters as list and CSV.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkSessionSummary"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/network/sessions/{id}": {
@@ -17609,16 +20365,519 @@
     },
     "/api/v1/runtime-threats": {
       "get": {
-        "responses": {
-          "200": {
-            "description": "ok"
+        "summary": "List runtime DPI threat records",
+        "description": "Requires read-findings. Missing cluster_id is organization-wide across owned clusters. Stored threat records are filtered before full matching summaries, stable server ordering, pagination and CSV in a read-only snapshot. Every summary count is a threat-record instance; workloads count distinct nonempty cluster/workload pairs. critical means severity>=8; blocked means action in 2,3,4; category is derived from signature range. at is the reporter-supplied event timestamp or server default when omitted; reported_at is a separate reporter timestamp defaulting to at. Neither field is guaranteed to be a server ingestion timestamp. Classification does not change sensor detection or collection. CSV exports the inventory fields, not captured packet bytes; the existing individual threat detail and PCAP capabilities remain separate.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Exact owned cluster. Omitted cluster scope is explained by each inventory operation."
           },
-          "default": {
-            "$ref": "#/components/responses/Error"
+          {
+            "name": "hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 720,
+              "default": 24
+            },
+            "description": "Lookback uses stored at >= NOW()-hours. This is the reporter-provided event time or server default, not a guaranteed ingestion clock."
+          },
+          {
+            "name": "severity_min",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9,
+              "default": 0
+            },
+            "description": "Minimum numeric dataplane severity."
+          },
+          {
+            "name": "workload_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact recorded workload identity."
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ips",
+                "dlp",
+                "waf"
+              ]
+            },
+            "description": "Derived from threat ID ranges: waf40000..49999, dlp20000..39999, otherwise ips."
+          },
+          {
+            "name": "group",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Owned group UUID or name; current resolved workload membership is applied before count, page and export. Unavailable or invalid group resolution does not broaden the cohort."
+          },
+          {
+            "name": "port",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "description": "Either source or destination port."
+          },
+          {
+            "name": "peer",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Literal case-insensitive substring of source or destination IP."
+          },
+          {
+            "name": "application",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Supported named application hint matches either endpoint port; otherwise a positive numeric application ID <=2147483647 matches the recorded application field. Port hints do not establish verified L7 evidence."
+          },
+          {
+            "name": "namespace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact recorded namespace."
+          },
+          {
+            "name": "node",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact recorded node."
+          },
+          {
+            "name": "hide_platform",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Exclude records classified as core before summaries, pagination and matching export. Collection remains intact."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Literal case-insensitive search across threat record/signature IDs, message, node, workload, namespace and endpoint addresses."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "at",
+                "reported",
+                "severity",
+                "action",
+                "workload",
+                "category",
+                "node",
+                "signature"
+              ],
+              "default": "at"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2000,
+              "default": 500
+            },
+            "description": "Maximum records on this server page."
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483647,
+              "default": 0
+            },
+            "description": "Matching-record offset; filters and full summary apply before page selection."
           }
-        },
-        "summary": "Get runtime-threats",
-        "description": " Read responses carry platform-role metadata resolved from exact organization/cluster/workload identity. Network map flows and recent entries use src_platform_role/dst_platform_role; threats and captures use platform_role. Unknown or ambiguous identities return an empty role string; older APIs may omit role fields. Classification does not change collection, detection or enforcement."
+        ],
+        "responses": {
+          "400": {
+            "description": "Malformed query encoding or invalid filter, sort, page or group scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authenticated user subject required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "read-findings permission required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Scope, evidence or metadata could not be read; not an empty-success inventory or a downloadable export.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Cluster not found in the authenticated organization.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Matching inventory page and full matching summary.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeThreatInventory"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/runtime-threats.csv": {
+      "get": {
+        "summary": "Export matching runtime DPI threat records",
+        "description": "Requires read-findings. Missing cluster_id is organization-wide across owned clusters. Stored threat records are filtered before full matching summaries, stable server ordering, pagination and CSV in a read-only snapshot. Every summary count is a threat-record instance; workloads count distinct nonempty cluster/workload pairs. critical means severity>=8; blocked means action in 2,3,4; category is derived from signature range. at is the reporter-supplied event timestamp or server default when omitted; reported_at is a separate reporter timestamp defaulting to at. Neither field is guaranteed to be a server ingestion timestamp. Classification does not change sensor detection or collection. CSV exports the inventory fields, not captured packet bytes; the existing individual threat detail and PCAP capabilities remain separate. CSV ignores page selection and exports the matching cohort in the requested server order, independently of visible table columns. Columns: id, cluster_id, node, workload_id, namespace, pod_name, platform_role, threat_id, threat_name, category, severity, action, application, message, protocol, source_ip, source_port, destination_ip, destination_port, reported_at, at.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Exact owned cluster. Omitted cluster scope is explained by each inventory operation."
+          },
+          {
+            "name": "hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 720,
+              "default": 24
+            },
+            "description": "Lookback uses stored at >= NOW()-hours. This is the reporter-provided event time or server default, not a guaranteed ingestion clock."
+          },
+          {
+            "name": "severity_min",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9,
+              "default": 0
+            },
+            "description": "Minimum numeric dataplane severity."
+          },
+          {
+            "name": "workload_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact recorded workload identity."
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ips",
+                "dlp",
+                "waf"
+              ]
+            },
+            "description": "Derived from threat ID ranges: waf40000..49999, dlp20000..39999, otherwise ips."
+          },
+          {
+            "name": "group",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Owned group UUID or name; current resolved workload membership is applied before count, page and export. Unavailable or invalid group resolution does not broaden the cohort."
+          },
+          {
+            "name": "port",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "description": "Either source or destination port."
+          },
+          {
+            "name": "peer",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Literal case-insensitive substring of source or destination IP."
+          },
+          {
+            "name": "application",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Supported named application hint matches either endpoint port; otherwise a positive numeric application ID <=2147483647 matches the recorded application field. Port hints do not establish verified L7 evidence."
+          },
+          {
+            "name": "namespace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact recorded namespace."
+          },
+          {
+            "name": "node",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact recorded node."
+          },
+          {
+            "name": "hide_platform",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Exclude records classified as core before summaries, pagination and matching export. Collection remains intact."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Literal case-insensitive search across threat record/signature IDs, message, node, workload, namespace and endpoint addresses."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "at",
+                "reported",
+                "severity",
+                "action",
+                "workload",
+                "category",
+                "node",
+                "signature"
+              ],
+              "default": "at"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Malformed query encoding or invalid filter, sort, page or group scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authenticated user subject required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "read-findings permission required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Scope, evidence or metadata could not be read; not an empty-success inventory or a downloadable export.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Cluster not found in the authenticated organization.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Matching CSV across pages, capped at 100,000 records with explicit scope and truncation metadata.",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Export-Total": {
+                "description": "Total matching records before the CSV cap.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-Export-Limit": {
+                "description": "Maximum exported matching records.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "enum": [
+                    100000
+                  ]
+                }
+              },
+              "X-Export-Truncated": {
+                "description": "True exactly when matching total exceeds 100,000. Narrow filters for an uncapped matching export.",
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/runtime-threats/{id}": {

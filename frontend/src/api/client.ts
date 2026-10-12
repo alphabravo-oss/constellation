@@ -2094,6 +2094,7 @@ export interface ConversationEntries {
 
 // NV RESTSession — one live connection from the runtime-agent's dp session table.
 export interface NetworkSession {
+  row_id?: string; cluster_id?: string; updated_at?: string;
   id: number;
   node: string;
   workload_id?: string;
@@ -2143,6 +2144,7 @@ export interface NetworkSessionKillResponse {
 }
 
 export interface NetworkSessionsResponse {
+  sort?: string; order?: "asc" | "desc"; summary?: Record<string, number>; filters?: Record<string, unknown>;
   sessions: NetworkSession[];
   total: number;
   limit: number;
@@ -2154,6 +2156,7 @@ export interface NetworkSessionsResponse {
 }
 
 export interface NetworkSessionFilters {
+  sort?: string; order?: "asc" | "desc"; hide_platform?: boolean; q?: string;
   cluster_id?: string;
   limit?: number;
   offset?: number;
@@ -2331,6 +2334,7 @@ export interface NetworkConversationEdge {
 }
 
 export interface NetworkConversation {
+  row_id?: string;
   from: string;
   to: string;
   from_platform_role?: string;
@@ -2345,6 +2349,7 @@ export interface NetworkConversation {
 }
 
 export interface NetworkConversations {
+  cluster_id?: string | null; sort?: string; order?: "asc" | "desc"; summary?: Record<string, number>; filters?: Record<string, unknown>; source_complete?: boolean; summary_scope?: string;
   conversations: NetworkConversation[];
   total?: number;
   limit?: number;
@@ -2354,7 +2359,7 @@ export interface NetworkConversations {
   node_kinds: Record<string, NetworkNodeKind>;
   edges: NetworkConversationEdge[];
   window_hours: number;
-  source?: "live";
+  source?: "live" | "rollups";
   selected_group?: string;
   selected_group_members?: number;
 }
@@ -2476,12 +2481,16 @@ export interface NetworkPolicyLifecycleResponse {
   };
 }
 
+export interface NetworkConversationFilters { from?: string; to?: string; verdict_group?: "blocked"; hours?: number; cluster_id?: string; namespace?: string; verdict?: string; group?: string; port?: number; peer?: string; application?: string; limit?: number; offset?: number; sort?: string; order?: "asc" | "desc"; hide_platform?: boolean }
+
 export const network = {
+  conversationsCSV: (params: NetworkConversationFilters) => downloadScanInventoryCSV("/network/conversations.csv", params, "network-conversations.csv"),
+  sessionsCSV: (params: NetworkSessionFilters) => downloadScanInventoryCSV("/network/sessions.csv", params, "network-sessions.csv"),
   map: (params: { hours?: number; namespace?: string; group?: string; verdict?: string; cluster_id?: string; port?: number; peer?: string; application?: string; offset?: number; recent_offset?: number } = {}) =>
     api.get<NetworkMap>("/network/map", { params }).then((r) => r.data),
   exposure: (params: { hours?: number; cluster_id?: string } = {}) =>
     api.get<ExposureResponse>("/network/exposure", { params }).then((r) => r.data),
-  conversations: (params: { from?: string; to?: string; verdict_group?: "blocked"; hours?: number; cluster_id?: string; namespace?: string; verdict?: string; group?: string; port?: number; peer?: string; application?: string; limit?: number; offset?: number } = {}) =>
+  conversations: (params: NetworkConversationFilters = {}) =>
     api.get<NetworkConversations>("/network/conversations", { params }).then((r) => r.data),
   // NV per-conversation drill-down: every protocol/port/app stream between from→to,
   // with directional (in/out) bytes + session counts.
@@ -2492,16 +2501,7 @@ export const network = {
     api.get<ConversationEntries>("/network/conversations/entries", { params }).then((r) => r.data),
   // NV RESTSession: the live per-connection table (dp ctrl_list_session snapshot).
   sessions: (params: NetworkSessionFilters = {}) =>
-    api.get<Partial<NetworkSessionsResponse> & { sessions: NetworkSession[] }>("/network/sessions", { params }).then((r) => ({
-      sessions: r.data.sessions ?? [],
-      total: r.data.total ?? r.data.sessions?.length ?? 0,
-      limit: r.data.limit ?? params.limit ?? r.data.sessions?.length ?? 0,
-      offset: r.data.offset ?? params.offset ?? 0,
-      has_more: r.data.has_more ?? false,
-      cluster_id: r.data.cluster_id,
-      selected_group: r.data.selected_group,
-      selected_group_members: r.data.selected_group_members,
-    })),
+    api.get<NetworkSessionsResponse>("/network/sessions", { params }).then(r => r.data),
   sessionsSummary: (params: { cluster_id?: string } = {}) =>
     api.get<Record<string, number>>("/network/sessions/summary", { params }).then((r) => r.data),
   // NV session-kill: queue a dp ctrl_clear_session for one live connection.
@@ -2914,11 +2914,14 @@ export interface GeneratePolicyResponse {
 }
 
 /** Wave 5: DPI threats from the NeuVector dp data-plane. */
+export interface RuntimeThreatFilters { hours?: number; severity_min?: number; cluster_id?: string; workload_id?: string; group?: string; category?: "dlp" | "waf" | "ips"; port?: number; peer?: string; application?: number | string; limit?: number; offset?: number; namespace?: string; node?: string; q?: string; hide_platform?: boolean; sort?: string; order?: "asc" | "desc" }
+export interface RuntimeThreatPage { threats: RuntimeThreat[]; total: number; limit: number; offset: number; has_more: boolean; cluster_id?: string | null; window_hours?: number; sort?: string; order?: "asc" | "desc"; summary?: Record<string, number>; filters?: Record<string, unknown> }
 export const runtimeThreats = {
-  list: (params: { hours?: number; severity_min?: number; cluster_id?: string; workload_id?: string; group?: string; category?: "dlp" | "waf" | "ips"; port?: number; peer?: string; application?: number; limit?: number; offset?: number } = {}) =>
+  exportCSV: (params: RuntimeThreatFilters) => downloadScanInventoryCSV("/runtime-threats.csv", params, "runtime-threats.csv"),
+  list: (params: RuntimeThreatFilters = {}) =>
     api.get<{ threats: RuntimeThreat[] }>("/runtime-threats", { params }).then((r) => r.data.threats),
-  page: (params: { hours?: number; severity_min?: number; cluster_id?: string; workload_id?: string; group?: string; category?: "dlp" | "waf" | "ips"; port?: number; peer?: string; application?: number; limit?: number; offset?: number } = {}) =>
-    api.get<{ threats: RuntimeThreat[]; total: number; limit: number; offset: number; has_more: boolean }>("/runtime-threats", { params }).then((r) => r.data),
+  page: (params: RuntimeThreatFilters = {}) =>
+    api.get<RuntimeThreatPage>("/runtime-threats", { params }).then((r) => r.data),
   get: (id: string) =>
     api.get<RuntimeThreatDetail>(`/runtime-threats/${encodeURIComponent(id)}`).then((r) => r.data),
 };
@@ -5697,6 +5700,7 @@ export const federation = {
 // page surfaces alongside the curated evidence.
 export interface RuntimeEvent {
   id: string;
+  row_id?: string;
   cluster_id?: string;
   platform_role?: string;
   at: string;
@@ -5712,9 +5716,16 @@ export interface RuntimeEvent {
   payload: Record<string, unknown>;
 }
 
+export interface RuntimeEventsParams { limit?: number; offset?: number; cluster_id?: string; kind?: string; severity?: Severity | "info"; workload?: string; q?: string; source?: string; verdict?: string; namespace?: string; node?: string; after?: string; before?: string; sort?: string; order?: "asc" | "desc" }
+export interface RuntimeEventsResponse {
+  events: RuntimeEvent[]; limit: number;
+  total?: number; offset?: number; sort?: string; order?: "asc" | "desc"; has_more?: boolean;
+  cluster_id?: string; q?: string; workload?: string; kind?: string; source?: string; severity?: string; verdict?: string; namespace?: string; node?: string; after?: string; before?: string;
+  summary?: { total: number; alerting: number; blocks: number; quarantines: number; affected_workloads: number; observed: number };
+}
 export const runtimeEvents = {
-  list: (params: { limit?: number; kind?: string; severity?: Severity; workload?: string; cluster_id?: string } = {}) =>
-    api.get<{ events: RuntimeEvent[]; limit: number }>("/events", { params }).then((r) => r.data),
+  list: (params: RuntimeEventsParams = {}) => api.get<RuntimeEventsResponse>("/events", { params }).then((r) => r.data),
+  exportCSV: (params: RuntimeEventsParams = {}) => downloadScanInventoryCSV("/events.csv", params, "constellation-runtime-events.csv"),
 };
 
 export const auth = {

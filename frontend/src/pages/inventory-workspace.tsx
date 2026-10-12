@@ -24,12 +24,12 @@ export function useInventoryScope() {
   return { ...scope, owner: `${identity?.org_id}:${identity?.user_id}`, ready, fetching, retry: () => { void qc.invalidateQueries({ queryKey: ["clusters"], exact: true }); void qc.invalidateQueries({ queryKey: ["cluster", scope.clusterId], exact: true }); } };
 }
 // eslint-disable-next-line react-refresh/only-export-components
-export function useInventoryRoute() {
+export function useInventoryRoute(maxPage = 10000) {
   const [params, setParams] = useRouteSearchParams();
   const query = params.get("q") ?? "";
   const debouncedQuery = useDebounced(query, 250);
   const rawPage = Number(params.get("page"));
-  const page = Number.isSafeInteger(rawPage) && rawPage > 0 && rawPage <= 10000 ? rawPage - 1 : 0;
+  const page = Number.isSafeInteger(rawPage) && rawPage > 0 && rawPage <= maxPage ? rawPage - 1 : 0;
   const update = (changes: Record<string, string | null>, reset = true, replace = false) => setParams(current => {
     const next = new URLSearchParams(current);
     for (const [key, value] of Object.entries(changes)) { if (value === null || value === "") next.delete(key); else next.set(key, value); }

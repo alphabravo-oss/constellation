@@ -1,3 +1,4 @@
+import { INVENTORY_MAX_PAGE } from "@/lib/inventory-pagination";
 import { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useIsFetching, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate, useRouter } from "@tanstack/react-router";
@@ -66,6 +67,11 @@ import {
 } from "@/lib/network-saved-views";
 import { toast } from "sonner";
 import { DataTable, type Column } from "@/components/ui/data-table";
+import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
+import { ScanInventoryExport } from "./inventory-workspace";
+import { conversationsValid, sessionsValid, threatsValid, conversationSorts, sessionSorts, threatSorts } from "@/lib/network-inventory";
+import type { TableSort } from "@/components/ui/data-table";
+import type { ReactNode } from "react";
 import { Pager } from "@/components/ui/pager";
 
 import {
@@ -82,6 +88,7 @@ import {
   type NetworkPolicyMode,
   type NetworkRecentFlow,
   type NetworkSession,
+  type NetworkSessionsResponse,
   type NetworkSessionKillResponse,
   type NetworkWorkload,
   type PcapCapture,
@@ -229,6 +236,9 @@ function NetworkMapInner() {
   const clusterFetching=useIsFetching({queryKey:["cluster",clusterId],exact:true});
   const scopeReady = !!clusterId && cluster?.id === clusterId && !clusterLoading && !clusterError && !registryFetching && !clusterFetching && clusterCacheReady(queryClient,clusterId);
   const clusterID = clusterId ?? "";
+  const identity = useTablePreferencesIdentity();
+  const owner = identity?.org_id && identity.user_id ? `${identity.org_id}:${identity.user_id}` : "";
+  const currentOwner = useRef(owner); currentOwner.current = owner;
   const [live, setLive] = useState(true);
 
   // ───── L2 chip-filter state ─────
@@ -245,14 +255,20 @@ function NetworkMapInner() {
   const hidePlatformComponents = routeParams.has("hide_platform") ? routeParams.get("hide_platform") !== "false" : platformPreference;
   const setHidePlatformComponents = useCallback((value: boolean) => {
     setPlatformPreference(value);
-    updateRoute({ hide_platform: String(value) });
+    updateRoute({ hide_platform: String(value) }, false, true);
   }, [setPlatformPreference, updateRoute]);
   const [hiddenKinds, setHiddenKinds] = useState<Set<NetworkNodeKind>>(() => new Set<NetworkNodeKind>(["unmanaged"]));
   const [scopeMode, setScopeMode] = useState<ScopeMode>("both");
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [sessionFilters, setSessionFilters] = useState<NetworkSessionSavedFilters>(() => ({ ...EMPTY_SESSION_FILTERS }));
-  const [sessionPage, setSessionPage] = useState(0);
-  const [threatPage, setThreatPage] = useState(0);
+  const pageFor = (name: string) => Math.max(0, Number(routeParams.get(name) || "1") - 1);
+  const sessionPage = pageFor("session_page"), threatPage = pageFor("threat_page");
+  const setSessionPage = (page: number) => updateRoute({ session_page: page ? String(page + 1) : null });
+  const setThreatPage = (page: number) => updateRoute({ threat_page: page ? String(page + 1) : null });
+  const sortFor = (name: string, fallback: string): TableSort => ({ id: routeParams.get(`${name}_sort`) || fallback, dir: (routeParams.get(`${name}_order`) || "desc") as "asc" | "desc" });
+  const conversationSort = sortFor("conversation", "last_seen"), sessionSort = sortFor("session", "bytes"), threatSort = sortFor("threat", "at");
+  const changeSort = (name: string) => (next: TableSort | null) => updateRoute({ [`${name}_sort`]: next?.id ?? null, [`${name}_order`]: next?.dir ?? null, [`${name}_page`]: null });
+  const routeValid = (name: string, sort: TableSort, allowed: string[]) => allowed.includes(sort.id) && ["asc", "desc"].includes(sort.dir) && (!routeParams.has(`${name}_page`) || /^\d+$/.test(routeParams.get(`${name}_page`)!) && Number(routeParams.get(`${name}_page`)) >= 1 && Number(routeParams.get(`${name}_page`)) <= INVENTORY_MAX_PAGE);
   const [pcapFilters, setPcapFilters] = useState<NetworkPcapSavedFilters>(() => ({ ...EMPTY_PCAP_FILTERS }));
   const groupsQ = useQuery({
     queryKey: ["groups", clusterID],
@@ -284,11 +300,9 @@ function NetworkMapInner() {
     peer: sessionQueryParams.peer,
     application: sessionQueryParams.application,
   }), [sessionQueryParams.port, sessionQueryParams.peer, sessionQueryParams.application]);
-  useEffect(() => {
-    setSessionPage(0);
-    setThreatPage(0);
-  }, [clusterID, hours, namespace, effectiveGroupFilter, verdict, sessionQueryParams]);
-  const trafficSignature = JSON.stringify(sharedTrafficFilters);
+  // URL-backed group changes already reset pages through useNetworkRoute.
+  // Track only local traffic inputs here so Back can restore a group's page.
+  const trafficSignature = JSON.stringify({ ...sessionQueryParams, group: undefined });
   const previousTrafficSignature = useRef(trafficSignature);
   useEffect(() => {
     if (previousTrafficSignature.current !== trafficSignature) {
@@ -302,7 +316,7 @@ function NetworkMapInner() {
       workspaceTab,
       hours,
       namespace,
-      group: effectiveGroupFilter,
+      group: groupFilter,
       verdict,
       verdictsVisible,
       protocolFilter,
@@ -314,7 +328,7 @@ function NetworkMapInner() {
       pcapFilters,
       conversationFilters: conversationScope,
     }),
-    [workspaceTab, hours, namespace, effectiveGroupFilter, verdict, verdictsVisible, protocolFilter, namespaceFilter, hidePlatformComponents, hiddenKinds, scopeMode, sessionFilters, pcapFilters, conversationScope],
+    [workspaceTab, hours, namespace, groupFilter, verdict, verdictsVisible, protocolFilter, namespaceFilter, hidePlatformComponents, hiddenKinds, scopeMode, sessionFilters, pcapFilters, conversationScope],
   );
 
   const restoredContext = useRef<string | null>(null);
@@ -324,7 +338,7 @@ function NetworkMapInner() {
     restoredContext.current = serialized;
     pendingRestore.current = serialized;
     updateRoute({ tab: snapshot.workspace_tab === "map" ? null : snapshot.workspace_tab, hours: snapshot.hours === 24 ? null : String(snapshot.hours), namespace: snapshot.namespace, group: snapshot.group, verdict: snapshot.verdict, ...(!restoring ? { flow: null, workload: null } : {}), [NETWORK_VIEW_PARAM]: serialized, hide_platform: String(snapshot.hide_platform_components), from: snapshot.conversation_filters?.from ?? null, to: snapshot.conversation_filters?.to ?? null, verdict_group: snapshot.conversation_filters?.verdict_group ?? null }, restoring, !restoring);
-    if (restoring) { const port = Number(snapshot.session_filters.port); previousTrafficSignature.current = JSON.stringify({ port: Number.isInteger(port) && port > 0 ? port : undefined, peer: snapshot.session_filters.peer || undefined, application: snapshot.session_filters.application || undefined }); }
+    if (restoring) { const port = Number(snapshot.session_filters.port); previousTrafficSignature.current = JSON.stringify({ protocol: snapshot.session_filters.protocol || undefined, application: snapshot.session_filters.application || undefined, port: Number.isInteger(port) && port > 0 ? port : undefined, peer: snapshot.session_filters.peer || undefined, workload: snapshot.session_filters.workload || undefined, node: snapshot.session_filters.node || undefined }); }
     setVerdictsVisible(snapshot.verdicts_visible);
     setProtocolFilter(new Set(snapshot.protocols));
     setNamespaceFilter(new Set(snapshot.namespaces));
@@ -369,12 +383,16 @@ function NetworkMapInner() {
   // flow rows) — it carries node_kinds (workload|host|unmanaged|external) so we
   // can badge off-cluster endpoints the raw map can't classify. Cluster-scoped
   // via useCluster() like every other query on this page.
+  const conversationRequest = { hours, cluster_id: clusterID, namespace: namespace || undefined, group: effectiveGroupFilter || undefined, verdict: verdict || undefined, ...sharedTrafficFilters, ...conversationScope, limit: 100, offset: conversationPage * 100, sort: conversationSort.id, order: conversationSort.dir, hide_platform: hidePlatformComponents };
+  const conversationKey = ["network-conversations", owner, conversationRequest];
+  const conversationRouteValid = routeValid("conversation", conversationSort, conversationSorts);
   const conversationsQ = useQuery({
-    queryKey: ["network-conversations", hours, clusterID, namespace, effectiveGroupFilter, verdict, sharedTrafficFilters, conversationScope, conversationPage],
-    queryFn: () => network.conversations({ hours, cluster_id: clusterID || undefined, namespace: namespace || undefined, group: effectiveGroupFilter || undefined, verdict: verdict || undefined, ...sharedTrafficFilters, ...conversationScope, limit: 100, offset: conversationPage * 100 }),
-    enabled: scopeReady,
+    queryKey: conversationKey,
+    queryFn: async () => { const data = await network.conversations(conversationRequest); if (!conversationsValid(data, conversationRequest)) throw new Error("Conversation scope or totals could not be confirmed."); return data; },
+    enabled: scopeReady && !!owner && conversationRouteValid,
     refetchInterval: live ? 10_000 : false,
   });
+  const conversationsAvailable = scopeReady && !!owner && conversationRouteValid && conversationsQ.isSuccess && !conversationsQ.isFetching && conversationsValid(conversationsQ.data, conversationRequest);
   const nodeKinds = conversationsQ.data?.node_kinds ?? EMPTY_NODE_KINDS;
   const lifecycleQ = useQuery({
     queryKey: ["network-policy-lifecycle", hours, clusterID, namespace, effectiveGroupFilter, verdict],
@@ -387,19 +405,28 @@ function NetworkMapInner() {
   // same window as the flow query so the two views stay coherent, and use a
   // longer refetch interval (15s) since threats are append-only and don't
   // need the 10s flow cadence.
+  const threatRequest = { hours, cluster_id: clusterID, namespace: namespace || undefined, group: effectiveGroupFilter || undefined, port: sharedTrafficFilters.port, peer: sharedTrafficFilters.peer, application: sharedTrafficFilters.application, limit: 100, offset: threatPage * 100, sort: threatSort.id, order: threatSort.dir, hide_platform: hidePlatformComponents };
+  const threatKey = ["runtime-threats", owner, threatRequest];
+  const threatRouteValid = routeValid("threat", threatSort, threatSorts);
   const threatsQ = useQuery({
-    queryKey: ["runtime-threats", hours, clusterID, effectiveGroupFilter, sharedTrafficFilters, threatPage],
-    queryFn: () => runtimeThreats.page({ hours, cluster_id: clusterID || undefined, group: effectiveGroupFilter || undefined, port: sharedTrafficFilters.port, peer: sharedTrafficFilters.peer, application: /^\d+$/.test(sharedTrafficFilters.application ?? "") ? Number(sharedTrafficFilters.application) : undefined, limit: 100, offset: threatPage * 100 }),
-    enabled: scopeReady,
-    refetchInterval: live ? 15_000 : false,
+    queryKey: threatKey,
+    queryFn: async () => { const data = await runtimeThreats.page(threatRequest); if (!threatsValid(data, threatRequest)) throw new Error("Threat scope or totals could not be confirmed."); return data; },
+    enabled: scopeReady && !!owner && threatRouteValid,
+    refetchInterval: live ? 10_000 : false,
   });
-  // NV RESTSession: live per-connection table from the runtime-agent's dp session snapshot.
+  const sessionRequest = { cluster_id: clusterID, ...sessionQueryParams, limit: 100, offset: sessionPage * 100, sort: sessionSort.id, order: sessionSort.dir, hide_platform: hidePlatformComponents };
+  const sessionKey = ["network-sessions", owner, sessionRequest];
+  const sessionRouteValid = routeValid("session", sessionSort, sessionSorts);
   const sessionsQ = useQuery({
-    queryKey: ["network-sessions", clusterID, sessionQueryParams, sessionPage],
-    queryFn: () => network.sessions({ cluster_id: clusterID || undefined, ...sessionQueryParams, limit: 100, offset: sessionPage * 100 }),
-    enabled: scopeReady,
-    refetchInterval: live ? 15_000 : false,
+    queryKey: sessionKey,
+    queryFn: async () => { const data = await network.sessions(sessionRequest); if (!sessionsValid(data, sessionRequest)) throw new Error("Session scope or totals could not be confirmed."); return data; },
+    enabled: scopeReady && !!owner && sessionRouteValid,
+    refetchInterval: live ? 5_000 : false,
   });
+  const sessionsAvailable = scopeReady && !!owner && sessionRouteValid && sessionsQ.isSuccess && !sessionsQ.isFetching && sessionsValid(sessionsQ.data, sessionRequest);
+  const exportReady = (key: unknown[]) => { const state = queryClient.getQueryState(key); if (!scopeReady || currentOwner.current !== owner || !clusterCacheReady(queryClient, clusterID) || state?.status !== "success" || state.fetchStatus !== "idle" || state.isInvalidated) throw new Error("Refresh the inventory before exporting."); };
+  const sessionContext = JSON.stringify(sessionKey);
+  const currentSessionContext = useRef(sessionContext); currentSessionContext.current = sessionContext;
   const [lastSessionKill, setLastSessionKill] = useState<NetworkSessionKillResponse | null>(null);
   // DPI toggle: weak-TLS version detection (SSLv3/TLS1.0/1.1). Applied live by the agent.
   const dpiSettingsQ = useQuery({
@@ -409,9 +436,13 @@ function NetworkMapInner() {
   });
   // NV session-kill: queue a dp ctrl_clear_session; agent executes on its next snapshot.
   const killSessionMut = useMutation({
-    mutationFn: ({ id, node }: { id: number; node: string }) =>
-      network.killSession(id, { cluster_id: clusterID || undefined, node }),
-    onSuccess: (result) => {
+    mutationFn: async ({ id, node, context, cluster, key }: { id: number; node: string; context: string; cluster: string; key: unknown[] }) => {
+      const state = queryClient.getQueryState<NetworkSessionsResponse>(key);
+      if (currentSessionContext.current !== context || !clusterCacheReady(queryClient, cluster) || state?.status !== "success" || state.fetchStatus !== "idle" || state.isInvalidated || !sessionsValid(state.data, sessionRequest) || !state.data?.sessions.some(row => row.id === id && row.node === node && row.cluster_id === cluster)) throw new Error("Refresh sessions before terminating this connection.");
+      return network.killSession(id, { cluster_id: cluster, node });
+    },
+    onSuccess: (result, request) => {
+      if (request.context !== currentSessionContext.current) return;
       setLastSessionKill(result);
       const audit = result.audit_id ? ` Audit #${result.audit_id}.` : "";
       toast.success(`Session ${result.session_id} kill queued on ${result.node || "node"}.${audit}`);
@@ -435,13 +466,9 @@ function NetworkMapInner() {
   );
   const flowsRaw = q.data?.flows ?? EMPTY_FLOWS;
   const liveFlows = q.data?.recent_flows ?? [];
-  const sessionsRaw = sessionsQ.data?.sessions ?? EMPTY_SESSIONS;
-  const sessions = useMemo(
-    () => hidePlatformComponents ? sessionsRaw.filter((item) => !isPlatformEndpoint(item.workload_id, item.platform_role)) : sessionsRaw,
-    [hidePlatformComponents, isPlatformEndpoint, sessionsRaw],
-  );
-  const sessionsTotal = sessionsQ.data?.total ?? sessions.length;
-  const sessionsHasMore = sessionsQ.data?.has_more ?? false;
+  const sessions = sessionsAvailable ? sessionsQ.data!.sessions : EMPTY_SESSIONS;
+  const sessionsTotal = sessionsAvailable ? sessionsQ.data!.total : 0;
+  const sessionsHasMore = sessionsAvailable ? sessionsQ.data!.has_more : false;
   // Cluster list was used by the dropped select; URL-driven now.
   // const clusters = q.data?.summary.clusters ?? [];
   const lifecycleAvailable=scopeReady&&lifecycleQ.isSuccess&&!lifecycleQ.isError&&lifecycleQ.data?.summary.selected_cluster_id===clusterID&&lifecycleQ.data.items.every(item=>item.cluster_id===clusterID);
@@ -450,19 +477,9 @@ function NetworkMapInner() {
     () => hidePlatformComponents ? lifecycleItemsRaw.filter((item) => !isPlatformResource(item.platform_role,item.namespace)) : lifecycleItemsRaw,
     [hidePlatformComponents, lifecycleItemsRaw],
   );
-  const threatsAvailable = scopeReady && threatsQ.isSuccess && !threatsQ.isError && threatsQ.data.threats.every(threat => threat.cluster_id === clusterID);
-  const threatsRaw = threatsAvailable ? threatsQ.data!.threats : EMPTY_THREATS;
-  const threats = useMemo(
-    () => hidePlatformComponents ? threatsRaw.filter((item) => !isPlatformResource(item.platform_role, item.namespace)) : threatsRaw,
-    [hidePlatformComponents, threatsRaw],
-  );
-  const conversationsRaw = conversationsQ.data?.conversations ?? EMPTY_CONVERSATIONS;
-  const conversations = useMemo(
-    () => hidePlatformComponents
-      ? conversationsRaw.filter((item) => !isPlatformEndpoint(item.from, item.from_platform_role) && !isPlatformEndpoint(item.to, item.to_platform_role))
-      : conversationsRaw,
-    [conversationsRaw, hidePlatformComponents, isPlatformEndpoint],
-  );
+  const threatsAvailable = scopeReady && !!owner && threatRouteValid && threatsQ.isSuccess && !threatsQ.isFetching && threatsValid(threatsQ.data, threatRequest);
+  const threats = threatsAvailable ? threatsQ.data!.threats : EMPTY_THREATS;
+  const conversations = conversationsAvailable ? conversationsQ.data!.conversations : EMPTY_CONVERSATIONS;
   const platformWorkloadCount = useMemo(
     () => workloads.filter((item) => isPlatformResource(item.platform_role, item.namespace)).length,
     [workloads],
@@ -615,7 +632,8 @@ function NetworkMapInner() {
     };
   }, [live, clusterID, queryClient]);
 
-  const lastUpdated = q.dataUpdatedAt ? new Date(q.dataUpdatedAt).toLocaleTimeString() : "not loaded";
+  const activeInventory = workspaceTab === "conversations" ? conversationsQ : workspaceTab === "sessions" ? sessionsQ : workspaceTab === "threats" ? threatsQ : q;
+  const lastUpdated = activeInventory.isSuccess && activeInventory.dataUpdatedAt ? `Updated ${new Date(activeInventory.dataUpdatedAt).toLocaleTimeString()}` : "not loaded";
 
   const selectFlow = useCallback(
     (flowID: string) => {
@@ -701,19 +719,25 @@ function NetworkMapInner() {
     <div className="flex min-h-[calc(100vh-72px)] flex-col gap-4" data-testid="network-activity-page">
       <PageHeader
         title="Network Activity"
-        description="Map, conversations, live sessions, PCAP capture, rules, and DPI threats. The map loads up to 300 rolled-up flows and 50 recent flow events; narrow filters to inspect more."
+        description="Inspect traffic, live connections and network security evidence."
         actions={
           <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-mono">
-            <StatusPill label={live ? "Auto refresh · 10–15s" : "paused"} tone={live ? "success" : "neutral"} />
+            <StatusPill label={live ? "Auto refresh" : "paused"} tone={live ? "success" : "neutral"} />
             <Button size="sm" variant="outline" onClick={() => setLive((c) => !c)}>{live ? "Pause" : "Resume"}</Button>
             <Button size="sm" variant="outline" onClick={() => { void q.refetch(); void conversationsQ.refetch(); void lifecycleQ.refetch(); void threatsQ.refetch(); void sessionsQ.refetch(); }}>Refresh</Button>
           </div>
         }
       />
       {restoreContext && !networkViewSnapshotFromParams(routeParams) && <ErrorState title="The saved network context is invalid. URL filters remain active." action={<Button onClick={() => updateRoute({ [NETWORK_VIEW_PARAM]: null }, true)}>Discard invalid context</Button>} />}
-      <VerdictBanner status={q.isError || conversationsQ.isError ? "degraded" : "info"}
-        title={workspaceTab === "conversations" ? conversationsQ.isError ? "Conversation evidence unavailable" : conversationsQ.isPending ? "Loading conversations" : `${conversationsQ.data?.total ?? conversations.length} matching directed pairs` : q.isError ? "Network map evidence unavailable" : "Inspect observed network activity"}
-        detail="Observed traffic is bounded by the selected time window and source limits. Missing traffic does not prove a workload is protected." />
+      <VerdictBanner status={activeInventory.isError ? "degraded" : "info"}
+        title={workspaceTab === "conversations" ? !conversationsAvailable ? conversationsQ.isFetching ? "Loading conversations" : "Conversation evidence unavailable" : `${conversationsQ.data!.total} matching directed pairs`
+          : workspaceTab === "sessions" ? !sessionsAvailable ? sessionsQ.isFetching ? "Loading sessions" : "Session evidence unavailable" : `${sessionsTotal} matching live sessions`
+          : workspaceTab === "threats" ? !threatsAvailable ? threatsQ.isFetching ? "Loading threats" : "Threat evidence unavailable" : `${threatsQ.data!.total} matching threats`
+          : q.isError ? "Network map evidence unavailable" : "Inspect observed network activity"}
+        detail={workspaceTab === "map" ? "The map loads up to 300 rolled-up flows and 50 recent flow events. Narrow filters to inspect more. Missing traffic does not prove a workload is protected."
+          : workspaceTab === "sessions" ? "Totals cover all matching sessions reported in the last five minutes. Missing sessions do not establish agent coverage or protection."
+          : workspaceTab === "conversations" ? "Totals cover all matching directed pairs in retained hourly rollups for this window. Missing traffic does not prove a workload is protected."
+          : "Reported evidence is limited by its source coverage. Missing activity does not prove a workload is protected."} />
       {workspaceTab === "map" && <StatGrid data-testid="network-map-summary">
         <StatCard label="Visible workloads" value={q.isSuccess ? workloadCount : "—"} />
         <StatCard label="Visible map flows" value={q.isSuccess ? flowCount : "—"} />
@@ -759,8 +783,9 @@ function NetworkMapInner() {
           /clusters/:id/network). Verdict + namespace are chips, not selects.
           Power-user controls collapse into the "More" dropdown. */}
       <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1.5" data-testid="network-filter-bar">
+        {["map", "conversations", "sessions", "threats"].includes(workspaceTab) && <>
         <Filter className="h-3 w-3 text-muted-foreground" aria-hidden />
-        <select
+        {workspaceTab !== "sessions" && <select
           className="h-6 rounded border border-input bg-card px-1.5 text-[11px] text-mono outline-none focus:border-[color:var(--color-primary)]"
           value={hours}
           onChange={(e) => setHours(Number(e.target.value))}
@@ -770,7 +795,7 @@ function NetworkMapInner() {
           <option value={1}>1h</option>
           <option value={24}>24h</option>
           <option value={168}>7d</option>
-        </select>
+        </select>}
         <input
           className="h-6 w-16 rounded border border-input bg-card px-1.5 text-[11px] text-mono"
           aria-label="Traffic port"
@@ -792,7 +817,7 @@ function NetworkMapInner() {
           className="h-6 w-24 rounded border border-input bg-card px-1.5 text-[11px]"
           aria-label="Traffic application"
           data-testid="network-traffic-application"
-          title="Application names filter flows and sessions; numeric application IDs also filter DPI threats"
+          title="Application names use source-specific protocol or port hints; numeric IDs filter DPI threats"
           placeholder="App / ID"
           value={sessionFilters.application}
           onChange={(event) => setSessionFilters((current) => ({ ...current, application: event.target.value }))}
@@ -800,7 +825,7 @@ function NetworkMapInner() {
         {/* Server-side verdict / namespace filters — these thread into the
             network.map / lifecycle queries (distinct from the client-side
             verdict + namespace chips that only re-filter the in-memory graph). */}
-        <select
+        {(workspaceTab === "map" || workspaceTab === "conversations") && <select
           className="h-6 rounded border border-input bg-card px-1.5 text-[11px] text-mono outline-none focus:border-[color:var(--color-primary)]"
           value={verdict}
           onChange={(e) => setVerdict(e.target.value)}
@@ -812,8 +837,8 @@ function NetworkMapInner() {
           <option value="alert">Alert</option>
           <option value="deny">Deny</option>
           <option value="block">Block</option>
-        </select>
-        <select
+        </select>}
+        {workspaceTab !== "sessions" && <select
           className="h-6 max-w-[10rem] rounded border border-input bg-card px-1.5 text-[11px] text-mono outline-none focus:border-[color:var(--color-primary)]"
           value={namespace}
           onChange={(e) => setNamespace(e.target.value)}
@@ -827,7 +852,7 @@ function NetworkMapInner() {
           {namespace && !namespaces.includes(namespace) && (
             <option value={namespace}>{namespace}</option>
           )}
-        </select>
+        </select>}
         <select
           className="h-6 max-w-[12rem] rounded border border-input bg-card px-1.5 text-[11px] text-mono outline-none focus:border-[color:var(--color-primary)]"
           value={selectedGroup?.id ?? groupFilter}
@@ -845,6 +870,7 @@ function NetworkMapInner() {
             <option value={groupFilter}>{groupFilter}</option>
           )}
         </select>
+        {workspaceTab === "map" && <>
         <Chip
           active={verdictsVisible.allow && verdictsVisible.alert && verdictsVisible.block}
           onClick={() => setVerdictsVisible({ allow: true, alert: true, block: true })}
@@ -868,13 +894,14 @@ function NetworkMapInner() {
           onToggle={toggleNamespace}
           onClear={() => setNamespaceFilter(new Set())}
         />
+        </>}
         <PlatformVisibilityToggle
           hidden={hidePlatformComponents}
           onHiddenChange={setHidePlatformComponents}
-          hiddenCount={platformWorkloadCount}
+          hiddenCount={workspaceTab === "map" ? platformWorkloadCount : undefined}
           compact
         />
-        <div className="inline-flex overflow-hidden rounded-md border border-border" data-testid="netchip-scope">
+        {workspaceTab === "map" && <div className="inline-flex overflow-hidden rounded-md border border-border" data-testid="netchip-scope">
           {(["both", "internal", "external"] as ScopeMode[]).map((m) => (
             <button
               key={m}
@@ -891,14 +918,15 @@ function NetworkMapInner() {
               {m === "external" ? "Ext" : m === "internal" ? "Int" : "Both"}
             </button>
           ))}
-        </div>
+        </div>}
+        </>}
         <NetworkSavedViewsControl
           clusterID={clusterID}
           snapshot={savedViewSnapshot}
           groupLabel={selectedGroupLabel}
           onApply={applySavedViewSnapshot}
         />
-        <span className="ml-auto text-[10px] text-mono text-muted-foreground" data-testid="network-last-updated">{lastUpdated}</span>
+        {["map", "conversations", "sessions", "threats"].includes(workspaceTab) && <span className="ml-auto text-[10px] text-mono text-muted-foreground" data-testid="network-last-updated">{lastUpdated}</span>}
       </div>
 
         <RadixTabs.Content value="map" className="flex min-h-0 flex-1 flex-col outline-none" data-testid="network-workspace-panel-map">
@@ -1066,7 +1094,7 @@ function NetworkMapInner() {
         <div className="absolute bottom-14 left-3 z-10 space-y-2">
           <EnforcementCard clusterID={clusterID} />
           <LiveSessionsCard sessions={sessions} total={sessionsTotal} hasMore={sessionsHasMore} loading={sessionsQ.isPending}
-            onKill={(id, node) => killSessionMut.mutate({ id, node })} killing={killSessionMut.isPending} lastKill={lastSessionKill} />
+            onKill={(id, node) => killSessionMut.mutate({ id, node, context: sessionContext, cluster: clusterID, key: sessionKey })} killing={killSessionMut.isPending} lastKill={lastSessionKill} />
         </div>
         {/* Selected-workload mini panel — bottom-right floating, only when a
             workload (not an edge) is selected. Edge selection opens the
@@ -1161,9 +1189,12 @@ function NetworkMapInner() {
               <Button onClick={() => updateRoute({ from: null, to: null, verdict_group: null }, false, true)}>Clear conversation filters</Button>
             </div>
           </div>
-          {conversationsQ.isError ? <ErrorState title="Conversations could not be loaded or refreshed." error={conversationsQ.error} action={<Button onClick={() => void conversationsQ.refetch()}>Retry conversations</Button>} /> : <NetworkConversationsWorkspaceTab
+          {!conversationRouteValid ? <ErrorState title="Choose supported conversation sorting and page values." action={<Button onClick={() => changeSort("conversation")(null)}>Reset sorting and page</Button>} /> : !conversationsAvailable ? conversationsQ.isFetching ? <p role="status">Loading conversations…</p> : <ErrorState title="Conversations could not be loaded or refreshed." error={conversationsQ.error} action={<Button onClick={() => void conversationsQ.refetch()}>Retry conversations</Button>} /> : <NetworkConversationsWorkspaceTab
             conversations={conversations}
-            total={conversationsQ.data?.total ?? conversations.length}
+            total={conversationsQ.data!.total!}
+            summary={conversationsQ.data!.summary!}
+            sort={conversationSort} onSort={changeSort("conversation")}
+            matchingExport={<ScanInventoryExport context={JSON.stringify(conversationKey)} disabled={!conversationsAvailable} download={() => { exportReady(conversationKey); return network.conversationsCSV(conversationRequest); }} />}
             page={conversationPage}
             onPage={setConversationPage}
             loading={conversationsQ.isPending}
@@ -1178,8 +1209,11 @@ function NetworkMapInner() {
         </RadixTabs.Content>
 
         <RadixTabs.Content value="sessions" className="min-h-0 flex-1 overflow-auto outline-none" data-testid="network-workspace-panel-sessions">
-          <NetworkSessionsWorkspaceTab
+          {!sessionRouteValid ? <ErrorState title="Choose supported session sorting and page values." action={<Button onClick={() => changeSort("session")(null)}>Reset sorting and page</Button>} /> : !sessionsAvailable ? sessionsQ.isFetching ? <p role="status">Loading sessions…</p> : <ErrorState title="Sessions could not be loaded or refreshed for this scope." error={sessionsQ.error} action={<Button onClick={() => void sessionsQ.refetch()}>Retry sessions</Button>} /> : <NetworkSessionsWorkspaceTab
             sessions={sessions}
+            summary={sessionsQ.data!.summary!}
+            sort={sessionSort} onSort={changeSort("session")}
+            matchingExport={<ScanInventoryExport context={JSON.stringify(sessionKey)} disabled={!sessionsAvailable} download={() => { exportReady(sessionKey); return network.sessionsCSV(sessionRequest); }} />}
             total={sessionsTotal}
             hasMore={sessionsHasMore}
             page={sessionPage}
@@ -1189,8 +1223,8 @@ function NetworkMapInner() {
             killing={killSessionMut.isPending}
             lastKill={lastSessionKill}
             onFiltersChange={setSessionFilters}
-            onKill={(id, node) => killSessionMut.mutate({ id, node })}
-          />
+            onKill={(id, node) => killSessionMut.mutate({ id, node, context: sessionContext, cluster: clusterID, key: sessionKey })}
+          />}
         </RadixTabs.Content>
 
         <RadixTabs.Content value="pcap" className="min-h-0 flex-1 overflow-auto outline-none" data-testid="network-workspace-panel-pcap">
@@ -1216,9 +1250,12 @@ function NetworkMapInner() {
         </RadixTabs.Content>
 
         <RadixTabs.Content value="threats" className="min-h-0 flex-1 overflow-auto outline-none" data-testid="network-workspace-panel-threats">
-          {!threatsAvailable ? threatsQ.isPending ? <p role="status">Loading threat evidence…</p> : <ErrorState title="Threat evidence could not be loaded or refreshed for the selected cluster." error={threatsQ.error} action={<Button onClick={() => void threatsQ.refetch()}>Retry threats</Button>} /> : <NetworkThreatsWorkspaceTab
+          {!threatRouteValid ? <ErrorState title="Choose supported threat sorting and page values." action={<Button onClick={() => changeSort("threat")(null)}>Reset sorting and page</Button>} /> : !threatsAvailable ? threatsQ.isFetching ? <p role="status">Loading threat evidence…</p> : <ErrorState title="Threat evidence could not be loaded or refreshed for the selected cluster." error={threatsQ.error} action={<Button onClick={() => void threatsQ.refetch()}>Retry threats</Button>} /> : <NetworkThreatsWorkspaceTab
             threats={threats}
-            total={threatsQ.data?.total ?? threats.length}
+            total={threatsQ.data!.total}
+            summary={threatsQ.data!.summary!}
+            sort={threatSort} onSort={changeSort("threat")}
+            matchingExport={<ScanInventoryExport context={JSON.stringify(threatKey)} disabled={!threatsAvailable} download={() => { exportReady(threatKey); return runtimeThreats.exportCSV(threatRequest); }} />}
             page={threatPage}
             onPage={setThreatPage}
             weakTLS={scopeReady&&!dpiSettingsQ.isError&&dpiSettingsQ.data?.cluster_id===clusterID?dpiSettingsQ.data.weak_tls_enabled:undefined}
@@ -1247,7 +1284,7 @@ function NetworkMapInner() {
 }
 
 function NetworkConversationsWorkspaceTab({
-  conversations,
+  conversations, summary, sort, onSort, matchingExport,
   total,
   page,
   onPage,
@@ -1256,6 +1293,7 @@ function NetworkConversationsWorkspaceTab({
   onSelect,
 }: {
   conversations: NetworkConversation[];
+  summary: Record<string, number>; sort: TableSort; onSort: (sort: TableSort | null) => void; matchingExport: ReactNode;
   total: number;
   page: number;
   onPage: (page: number) => void;
@@ -1263,33 +1301,20 @@ function NetworkConversationsWorkspaceTab({
   hours: number;
   onSelect: (conversation: NetworkConversation) => void;
 }) {
-  const rows = useMemo(
-    () => [...conversations].sort((a, b) => Date.parse(b.last_seen) - Date.parse(a.last_seen)),
-    [conversations],
-  );
-  const totals = useMemo(
-    () => rows.reduce(
-      (acc, row) => ({
-        bytes: acc.bytes + row.bytes,
-        packets: acc.packets + row.packets,
-        edges: acc.edges + row.edges,
-        blocked: acc.blocked + (["deny", "denied", "block", "blocked"].includes(row.verdict ?? "") ? 1 : 0),
-      }),
-      { bytes: 0, packets: 0, edges: 0, blocked: 0 },
-    ),
-    [rows],
-  );
+  const rows = conversations;
+  const totals = summary;
   const columns = useMemo<Column<NetworkConversation>[]>(() => [
+    { id: "severity", header: "Severity", kind: "count", sort: () => 0, cell: row => row.severity ?? 0 },
     { id: "from", header: "From", kind: "name", wrap: true, code: true, minSize: 192, cell: (row) => <span className="font-mono">{row.from}</span>, exportValue: (row) => row.from, sort: (a, b) => a.from.localeCompare(b.from) },
     { id: "from_platform_role", header: "From role", kind: "text", wrap: true, size: 144, minSize: 120, maxSize: 184, exportHeader: "from_platform_role", cell: (row) => row.from_platform_role ?? "", exportValue: (row) => row.from_platform_role ?? "" },
     { id: "to", header: "To", kind: "text", code: true, wrap: true, size: 224, minSize: 192, maxSize: 320, cell: (row) => <span className="font-mono">{row.to}</span>, exportValue: (row) => row.to, sort: (a, b) => a.to.localeCompare(b.to) },
     { id: "to_platform_role", header: "To role", kind: "text", wrap: true, size: 144, minSize: 120, maxSize: 184, exportHeader: "to_platform_role", cell: (row) => row.to_platform_role ?? "", exportValue: (row) => row.to_platform_role ?? "" },
-    { id: "apps", header: "Apps", kind: "text", wrap: true, size: 176, minSize: 144, maxSize: 240, cell: (row) => <span className="text-muted-foreground">{(row.apps ?? []).slice(0, 4).join(", ") || "-"}</span>, sort: (a, b) => (a.apps ?? []).join(",").localeCompare((b.apps ?? []).join(",")) },
-    { id: "volume", header: "Volume", kind: "bytes", size: 128, minSize: 112, maxSize: 160, cell: (row) => <span className="font-mono">{formatBytes(row.bytes)}</span>, sort: (a, b) => a.bytes - b.bytes, numeric: true },
-    { id: "packets", header: "Packets", kind: "count", cell: (row) => <span className="font-mono">{row.packets.toLocaleString()}</span>, sort: (a, b) => a.packets - b.packets, numeric: true },
-    { id: "streams", header: "Streams", kind: "count", cell: (row) => <span className="font-mono">{row.edges.toLocaleString()}</span>, sort: (a, b) => a.edges - b.edges, numeric: true },
-    { id: "verdict", header: "Verdict", kind: "status", cell: (row) => <span className={cn("rounded px-1.5 py-0.5 text-[10px] uppercase", ["deny", "denied", "block", "blocked"].includes(row.verdict ?? "") ? "bg-[color:var(--color-status-error)]/15 text-[color:var(--color-status-error)]" : "bg-muted text-muted-foreground")}>{row.verdict || "allow"}</span>, sort: (a, b) => (a.verdict ?? "allow").localeCompare(b.verdict ?? "allow") },
-    { id: "last_seen", header: "Last seen", kind: "date", size: 224, minSize: 208, maxSize: 240, cell: (row) => <button type="button" className="text-left text-muted-foreground hover:text-foreground" onClick={() => onSelect(row)} data-testid="network-conversation-open">{formatDateTime(row.last_seen)}</button>, sort: (a, b) => Date.parse(a.last_seen) - Date.parse(b.last_seen) },
+    { id: "apps", exportValue: row => JSON.stringify(row.apps ?? []), header: "Apps", kind: "text", wrap: true, size: 176, minSize: 144, maxSize: 240, cell: (row) => <span className="text-muted-foreground">{(row.apps ?? []).slice(0, 4).join(", ") || "-"}</span>, sort: (a, b) => (a.apps ?? []).join(",").localeCompare((b.apps ?? []).join(",")) },
+    { id: "bytes", exportValue: row => row.bytes, header: "Volume", kind: "bytes", size: 128, minSize: 112, maxSize: 160, cell: (row) => <span className="font-mono">{formatBytes(row.bytes)}</span>, sort: (a, b) => a.bytes - b.bytes, numeric: true },
+    { id: "packets", exportValue: row => row.packets, header: "Packets", kind: "count", cell: (row) => <span className="font-mono">{row.packets.toLocaleString()}</span>, sort: (a, b) => a.packets - b.packets, numeric: true },
+    { id: "edges", exportValue: row => row.edges, header: "Streams", kind: "count", cell: (row) => <span className="font-mono">{row.edges.toLocaleString()}</span>, sort: (a, b) => a.edges - b.edges, numeric: true },
+    { id: "verdict", exportValue: row => row.verdict ?? "", header: "Verdict", kind: "status", cell: (row) => <span className={cn("rounded px-1.5 py-0.5 text-[10px] uppercase", ["deny", "denied", "block", "blocked"].includes(row.verdict ?? "") ? "bg-[color:var(--color-status-error)]/15 text-[color:var(--color-status-error)]" : "bg-muted text-muted-foreground")}>{row.verdict || "allow"}</span>, sort: (a, b) => (a.verdict ?? "allow").localeCompare(b.verdict ?? "allow") },
+    { id: "last_seen", exportValue: row => row.last_seen, header: "Last seen", kind: "date", size: 224, minSize: 208, maxSize: 240, cell: (row) => <button type="button" className="text-left text-muted-foreground hover:text-foreground" onClick={() => onSelect(row)} data-testid="network-conversation-open">{formatDateTime(row.last_seen)}</button>, sort: (a, b) => Date.parse(a.last_seen) - Date.parse(b.last_seen) },
   ], [onSelect]);
   return (
     <section className="space-y-3" data-testid="network-conversations-tab">
@@ -1300,41 +1325,18 @@ function NetworkConversationsWorkspaceTab({
           <StatPill icon={<Activity className="h-3 w-3" />} label="volume" value={formatBytes(totals.bytes)} />
           <StatPill icon={<Ban className="h-3 w-3" />} label="blocked" value={totals.blocked} tone={totals.blocked > 0 ? "critical" : "neutral"} />
         </div>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => downloadCsv(
-            `network-conversations-${hours}h.csv`,
-            ["from", "from_platform_role", "to", "to_platform_role", "bytes", "packets", "streams", "verdict", "apps", "last_seen"],
-            rows.map((row) => [
-              row.from,
-              row.from_platform_role ?? "",
-              row.to,
-              row.to_platform_role ?? "",
-              String(row.bytes),
-              String(row.packets),
-              String(row.edges),
-              row.verdict ?? "",
-              (row.apps ?? []).join("|"),
-              row.last_seen,
-            ]),
-          )}
-          disabled={rows.length === 0}
-          data-testid="network-conversations-export"
-        >
-          <Download className="h-3.5 w-3.5" aria-hidden />
-          CSV
-        </Button>
+        {matchingExport}
       </div>
-      <DataTable rows={loading ? [] : rows} sourceLimit={100} sourceCount={rows.length} columns={columns} onRowClick={onSelect} rowKey={(row) => `${row.from}-${row.to}`} defaultSort={{ id: "last_seen", dir: "desc" }} preferencesKey="network-conversations" exportFileName={`network-conversations-${hours}h`} testId="network-conversations-table" emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">{loading ? "Loading conversations..." : "No conversations in this window."}</div>} />
-      <p className="text-xs text-muted-foreground">Metrics and CSV cover this page of conversations.</p>
+      <DataTable rows={loading ? [] : rows} columns={columns} onRowClick={onSelect} rowKey={(row) => row.row_id!} manualSorting sort={sort} onSortChange={onSort} pagination={false} preferencesKey="network-conversations" defaultHiddenColumnIds={["severity"]} exportFileName={`network-conversations-${hours}h-page`} exportLabel="Export this page CSV" testId="network-conversations-table" emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">{loading ? "Loading conversations..." : "No conversations in this window."}</div>} />
+      <p className="text-xs text-muted-foreground">Metrics cover all matching conversations.</p>
+      {!rows.length && page > 0 && <Button onClick={() => onPage(0)}>First page</Button>}
       <Pager page={page} pageSize={100} total={total} rowsOnPage={rows.length} onPage={onPage} />
     </section>
   );
 }
 
 function NetworkSessionsWorkspaceTab({
-  sessions,
+  sessions, summary, sort, onSort, matchingExport,
   total,
   hasMore,
   page,
@@ -1347,6 +1349,7 @@ function NetworkSessionsWorkspaceTab({
   onKill,
 }: {
   sessions: NetworkSession[];
+  summary: Record<string, number>; sort: TableSort; onSort: (sort: TableSort | null) => void; matchingExport: ReactNode;
   total: number;
   hasMore: boolean;
   page: number;
@@ -1359,17 +1362,7 @@ function NetworkSessionsWorkspaceTab({
   onKill: (id: number, node: string) => void;
 }) {
   const rows = sessions;
-  const totals = useMemo(
-    () => rows.reduce(
-      (acc, row) => ({
-        inBytes: acc.inBytes + row.client_bytes,
-        outBytes: acc.outBytes + row.server_bytes,
-        threats: acc.threats + (row.threat_id ? 1 : 0),
-      }),
-      { inBytes: 0, outBytes: 0, threats: 0 },
-    ),
-    [rows],
-  );
+  const totals = { inBytes: summary.client_bytes, outBytes: summary.server_bytes, threats: summary.threats };
   const hasFilters = Object.values(filters).some(Boolean);
   const visibleRows = rows;
   const updateFilter = (key: keyof NetworkSessionSavedFilters, value: string) => {
@@ -1384,35 +1377,7 @@ function NetworkSessionsWorkspaceTab({
           <StatPill icon={<Activity className="h-3 w-3" />} label="server" value={formatBytes(totals.outBytes)} />
           <StatPill icon={<ShieldAlert className="h-3 w-3" />} label="threats" value={totals.threats} tone={totals.threats > 0 ? "critical" : "neutral"} />
         </div>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => downloadCsv(
-            "network-sessions.csv",
-            ["node", "id", "workload", "platform_role", "application", "protocol", "client", "server", "client_bytes", "server_bytes", "age_s", "idle_s", "state", "threat_id"],
-            rows.map((row) => [
-              row.node,
-              String(row.id),
-              row.workload_id ?? "",
-              row.platform_role ?? "",
-              row.application,
-              row.ip_proto,
-              `${row.client_ip}:${row.client_port}`,
-              `${row.server_ip}:${row.server_port}`,
-              String(row.client_bytes),
-              String(row.server_bytes),
-              String(row.age),
-              String(row.idle),
-              row.client_state || row.server_state,
-              row.threat_id ? String(row.threat_id) : "",
-            ]),
-          )}
-          disabled={rows.length === 0}
-          data-testid="network-sessions-export"
-        >
-          <Download className="h-3.5 w-3.5" aria-hidden />
-          CSV
-        </Button>
+        {matchingExport}
       </div>
       <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-border bg-card px-3 py-2" data-testid="network-session-filters">
         <Filter className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
@@ -1483,8 +1448,8 @@ function NetworkSessionsWorkspaceTab({
         </Button>
       </div>
       {(hasMore || page > 0) && (
-        <div className="rounded-md border border-[color:var(--color-status-warning)]/40 bg-[color-mix(in_oklab,var(--color-status-warning)_10%,transparent)] px-3 py-2 text-xs text-muted-foreground" data-testid="network-sessions-truncated">
-          Showing page {page + 1} of {Math.ceil(total / 100)} live sessions. Metrics and CSV cover this page only.
+        <div className="text-xs text-muted-foreground" data-testid="network-sessions-truncated">
+          Page {page + 1} of {Math.ceil(total / 100)} · Totals cover all matching live sessions.
         </div>
       )}
       {lastKill && (
@@ -1514,23 +1479,33 @@ function NetworkSessionsWorkspaceTab({
           testId="network-sessions-table"
           className="rounded-none border-0"
           rows={loading ? [] : visibleRows}
-          rowKey={(row) => `${row.node}-${row.id}`}
-          showDensityToggle={false}
-          showColumnChooser={false}
+          rowKey={(row) => row.row_id!}
+          pagination={false} manualSorting sort={sort} onSortChange={onSort}
+          preferencesKey="network-sessions" exportFileName="network-sessions-page" exportLabel="Export this page CSV"
           emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">{loading ? "Loading sessions..." : "No live sessions reported."}</div>}
+          defaultHiddenColumnIds={["bytes", "packets", "idle", "severity", "observed", "node", "protocol"]}
           columns={[
-            { id: "client", header: "Client", kind: "id", size: 180, cell: (row) => `${row.client_ip}:${row.client_port}` },
-            { id: "server", header: "Server", kind: "id", size: 180, cell: (row) => `${row.server_ip}:${row.server_port}` },
-            { id: "workload", header: "Workload", kind: "name", code: true, cell: (row) => row.workload_id || "-" },
-            { id: "application", header: "App", kind: "text", size: 120, cell: (row) => row.application || row.ip_proto },
-            { id: "state", header: "State", kind: "status", cell: (row) => <>{row.client_state || row.server_state || row.ip_proto}{row.threat_id ? <span className="ml-1 text-[color:var(--color-status-error)]" title={`threat ${row.threat_id}`}>!</span> : null}</> },
-            { id: "clientBytes", header: "Client", kind: "bytes", cell: (row) => formatBytes(row.client_bytes) },
-            { id: "serverBytes", header: "Server", kind: "bytes", cell: (row) => formatBytes(row.server_bytes) },
-            { id: "age", header: "Age", kind: "age", numeric: true, cell: (row) => `${row.age}s` },
+            { id: "bytes", header: "Total bytes", kind: "bytes", sort: () => 0, cell: row => fmtBytes(row.client_bytes + row.server_bytes), exportValue: row => row.client_bytes + row.server_bytes },
+            { id: "packets", header: "Packets", kind: "count", sort: () => 0, cell: row => row.client_pkts + row.server_pkts },
+            { id: "idle", header: "Idle", kind: "age", sort: () => 0, cell: row => row.idle },
+            { id: "severity", header: "Severity", kind: "count", sort: () => 0, cell: row => row.severity },
+            { id: "observed", header: "Observed", kind: "date", sort: () => 0, cell: row => formatDateTime(row.updated_at ?? ""), exportValue: row => row.updated_at },
+            { id: "node", header: "Node", kind: "name", sort: () => 0, cell: row => row.node },
+            { id: "protocol", header: "Protocol", kind: "text", sort: () => 0, cell: row => row.ip_proto },
+            { id: "platform_role", header: "Platform role", kind: "text", cell: row => row.platform_role || "Not classified", exportValue: row => row.platform_role },
+            { id: "client", sort: () => 0, header: "Client", kind: "id", size: 180, cell: (row) => `${row.client_ip}:${row.client_port}` },
+            { id: "server", sort: () => 0, header: "Server", kind: "id", size: 180, cell: (row) => `${row.server_ip}:${row.server_port}` },
+            { id: "workload", sort: () => 0, header: "Workload", kind: "name", code: true, cell: (row) => row.workload_id || "-" },
+            { id: "application", sort: () => 0, header: "App", kind: "text", size: 120, cell: (row) => row.application || row.ip_proto },
+            { id: "state", sort: () => 0, header: "State", kind: "status", cell: (row) => <>{row.client_state || row.server_state || row.ip_proto}{row.threat_id ? <span className="ml-1 text-[color:var(--color-status-error)]" title={`threat ${row.threat_id}`}>!</span> : null}</> },
+            { id: "client_bytes", exportValue: row => row.client_bytes, sort: () => 0, header: "Client bytes", kind: "bytes", cell: (row) => formatBytes(row.client_bytes) },
+            { id: "server_bytes", exportValue: row => row.server_bytes, sort: () => 0, header: "Server bytes", kind: "bytes", cell: (row) => formatBytes(row.server_bytes) },
+            { id: "age", exportValue: row => row.age, sort: () => 0, header: "Age", kind: "age", numeric: true, cell: (row) => `${row.age}s` },
             { id: "actions", header: "", kind: "actions", size: 48, minSize: 48, maxSize: 48, cell: (row) => <Button size="icon" variant="ghost" disabled={killing} onClick={() => { if (window.confirm(`Terminate session ${row.id} on ${row.node}?`)) onKill(row.id, row.node); }} title="Kill session" data-testid="network-session-kill"><X className="h-3.5 w-3.5" aria-hidden /></Button> },
           ]}
         />
       </div>
+      {!rows.length && page > 0 && <Button onClick={() => onPage(0)}>First page</Button>}
       <Pager page={page} pageSize={100} total={total} rowsOnPage={visibleRows.length} onPage={onPage} />
     </section>
   );
@@ -1834,7 +1809,7 @@ export function NetworkRulesWorkspaceTab({
 }
 
 export function NetworkThreatsWorkspaceTab({
-  threats,
+  threats, summary, sort, onSort, matchingExport,
   total,
   page,
   onPage,
@@ -1845,6 +1820,7 @@ export function NetworkThreatsWorkspaceTab({
   onPivot,
 }: {
   threats: RuntimeThreat[];
+  summary?: Record<string, number>; sort?: TableSort; onSort?: (sort: TableSort | null) => void; matchingExport?: ReactNode;
   total: number;
   page: number;
   onPage: (page: number) => void;
@@ -1856,8 +1832,8 @@ export function NetworkThreatsWorkspaceTab({
 }) {
   const [drilldownID, setDrilldownID] = useState<string | null>(null);
   const rows = threats;
-  const critical = rows.filter((row) => row.severity >= 8).length;
-  const blocked = rows.filter((row) => row.action === 2 || row.action === 3 || row.action === 4).length;
+  const critical = summary?.critical ?? 0;
+  const blocked = summary?.blocked ?? 0;
   const visibleThreats = rows;
   return (
     <section className="space-y-3" data-testid="network-threats-tab">
@@ -1869,33 +1845,37 @@ export function NetworkThreatsWorkspaceTab({
         </div>
         <WeakTLSStatus configured={weakTLS} unavailable={settingsUnavailable} loading={settingsLoading} href={settingsHref} testId="network-threats-weak-tls"/>
       </div>
+      {matchingExport}
       <div className="overflow-hidden rounded-md border border-border bg-card">
         <DataTable<RuntimeThreat>
           testId="network-threats-table"
           className="rounded-none border-0"
           rows={visibleThreats}
           rowKey={(row) => row.id}
-          pagination={false}
+          pagination={false} manualSorting sort={sort} onSortChange={onSort}
           preferencesKey="network-threats"
           exportFileName="network-loaded-threat-page"
-          exportLabel="Export loaded threat page"
-          sourceCount={visibleThreats.length}
-          sourceLimit={100}
+          exportLabel="Export this page CSV"
           emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">No DPI threats in this window.</div>}
+          defaultHiddenColumnIds={["at", "node", "signature"]}
           columns={[
+            { id: "at", header: "Observed", kind: "date", sort: () => 0, cell: row => formatDateTime(row.at), exportValue: row => row.at },
+            { id: "node", header: "Node", kind: "name", sort: () => 0, cell: row => row.node || "Not reported" },
+            { id: "signature", header: "Signature ID", kind: "count", sort: () => 0, cell: row => row.threat_id },
             { id: "threat", header: "Threat", kind: "name", exportValue: (row) => row.threat_name || row.msg || `signature ${row.threat_id}`, cell: (row) => <><button type="button" className="block max-w-full truncate text-left font-medium hover:text-[color:var(--color-primary)]" onClick={() => setDrilldownID(row.id)} data-testid="network-threats-open" title={row.threat_name || row.msg || `signature ${row.threat_id}`}>{row.threat_name || row.msg || `signature ${row.threat_id}`}</button>{row.msg && <div className="truncate text-xs text-muted-foreground" title={row.msg}>{row.msg}</div>}</> },
-            { id: "workload", header: "Workload", kind: "name", code: true, cell: (row) => row.workload_id || row.namespace || "Not reported", exportValue: (row) => row.workload_id ?? "" },
+            { id: "workload", sort: () => 0, header: "Workload", kind: "name", code: true, cell: (row) => row.workload_id || row.namespace || "Not reported", exportValue: (row) => row.workload_id ?? "" },
             { id: "platform_role", header: "Platform role", kind: "text", exportHeader: "platform_role", cell: (row) => row.platform_role || "Not classified", exportValue: (row) => row.platform_role ?? "" },
-            { id: "category", header: "Category", kind: "text", size: 140, cell: (row) => threatCategoryLabel(row.threat_id) },
+            { id: "category", sort: () => 0, header: "Category", kind: "text", size: 140, cell: (row) => threatCategoryLabel(row.threat_id) },
             { id: "flow", header: "Flow", kind: "id", size: 260, maxSize: 360, cell: (row) => `${row.src_ip}:${row.src_port} -> ${row.dst_ip}:${row.dst_port}` },
-            { id: "severity", header: "Severity", kind: "status", cell: (row) => severityLabel(row.severity) },
-            { id: "action", header: "Action", kind: "status", cell: (row) => threatActionLabel(row.action) },
-            { id: "reported", header: "Reported", kind: "date", cell: (row) => formatDateTime(row.reported_at || row.at) },
+            { id: "severity", sort: () => 0, header: "Severity", kind: "status", cell: (row) => severityLabel(row.severity) },
+            { id: "action", sort: () => 0, header: "Action", kind: "status", cell: (row) => threatActionLabel(row.action) },
+            { id: "reported", exportValue: row => row.reported_at, sort: () => 0, header: "Reported", kind: "date", cell: (row) => formatDateTime(row.reported_at || row.at) },
             { id: "actions", header: "", kind: "actions", exportable: false, cell: (row) => <Button size="sm" variant="outline" onClick={() => onPivot(row)} data-testid="network-threats-pivot">Pivot</Button> },
           ]}
         />
       </div>
-      <p className="text-xs text-muted-foreground">Critical and blocked metrics and CSV cover this loaded page of threats; platform visibility may hide rows from the server page. CSV includes the selected table columns.</p>
+      <p className="text-xs text-muted-foreground">Metrics cover all matching threats.</p>
+      {!rows.length && page > 0 && <Button onClick={() => onPage(0)}>First page</Button>}
       <Pager page={page} pageSize={100} total={total} rowsOnPage={visibleThreats.length} onPage={onPage} />
       {drilldownID && <ThreatDrilldownDialog id={drilldownID} onClose={() => setDrilldownID(null)} />}
     </section>
