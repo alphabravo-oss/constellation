@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
+import { useLocation, useNavigate, useRouter } from "@tanstack/react-router";
 import {
   Background,
   Controls,
@@ -32,10 +32,7 @@ import {
   ChevronUp,
   ChevronDown,
   Download,
-  Save,
   Trash2,
-  Upload,
-  Play,
   RefreshCw,
   Table2,
 } from "lucide-react";
@@ -49,26 +46,18 @@ import { PlatformVisibilityToggle } from "@/components/ui/platform-visibility-to
 import { StatusPill } from "@/components/ui/status-pill";
 import { Sparkline } from "@/components/ui/sparkline";
 import { EmptyState } from "@/components/ui/empty-state";
-import { useAuth } from "@/contexts/AuthContext";
 import { useNetworkRoute } from "@/hooks/useNetworkRoute";
+import { NETWORK_VIEW_PARAM, networkViewHref, networkViewSnapshotFromParams } from "@/lib/network-saved-view-route";
+import { NetworkSavedViewsControl } from "@/components/NetworkSavedViewsControl";
 import { ErrorState } from "@/components/ui/states";
 import { useCluster } from "@/hooks/useCluster";
-import { useSavedViews } from "@/hooks/useSavedViews";
 import { usePlatformComponentVisibility } from "@/hooks/usePlatformComponentVisibility";
 import { cn } from "@/lib/cn";
-import { downloadJson } from "@/lib/download";
 import { fmtBytes } from "@/lib/format";
 import { isPlatformNamespace, isPlatformResource, namespaceFromWorkloadID } from "@/lib/platform-components";
 import {
   buildNetworkSavedViewSnapshot,
-  buildNetworkSavedViewsExport,
-  mergeNetworkSavedViews,
-  networkActivitySavedViewsStorageKey,
-  normalizeNetworkSavedView,
-  parseNetworkSavedViewsImport,
-  suggestNetworkSavedViewName,
   type NetworkPcapSavedFilters,
-  type NetworkSavedView,
   type NetworkSessionSavedFilters,
   type NetworkSavedViewSnapshot,
 } from "@/lib/network-saved-views";
@@ -210,6 +199,8 @@ const EMPTY_PCAP_FILTERS: NetworkPcapSavedFilters = {
   file_size_mb: "",
 };
 
+const NetworkViewContext = createContext<{ clusterID: string; snapshot: NetworkSavedViewSnapshot } | null>(null);
+
 function lifecycleIdempotencyKey(workload: string, action: string) {
   if (typeof window !== "undefined" && "randomUUID" in window.crypto) {
     return `network-policy:${workload}:${action}:${window.crypto.randomUUID()}`;
@@ -226,6 +217,8 @@ export function NetworkMapPage() {
 }
 
 function NetworkMapInner() {
+  const router = useRouter();
+  const pathname = useLocation({ select: location => location.pathname });
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { params: routeParams, update: updateRoute, hours, setHours, namespace, setNamespace, groupFilter, setGroupFilter, verdict, setVerdict, selectedFlowID, setSelectedFlowID, selectedWorkloadID, setSelectedWorkloadID, workspaceTab, setWorkspaceTab, conversationPage, setConversationPage } = useNetworkRoute();
@@ -327,8 +320,14 @@ function NetworkMapInner() {
     [workspaceTab, hours, namespace, effectiveGroupFilter, verdict, verdictsVisible, protocolFilter, namespaceFilter, hidePlatformComponents, hiddenKinds, scopeMode, sessionFilters, pcapFilters, conversationScope],
   );
 
-  const applySavedViewSnapshot = useCallback((snapshot: NetworkSavedViewSnapshot) => {
-    updateRoute({ tab: snapshot.workspace_tab === "map" ? null : snapshot.workspace_tab, hours: snapshot.hours === 24 ? null : String(snapshot.hours), namespace: snapshot.namespace, group: snapshot.group, verdict: snapshot.verdict, flow: null, workload: null, hide_platform: String(snapshot.hide_platform_components), from: snapshot.conversation_filters?.from ?? null, to: snapshot.conversation_filters?.to ?? null, verdict_group: snapshot.conversation_filters?.verdict_group ?? null }, false, true);
+  const restoredContext = useRef<string | null>(null);
+  const pendingRestore = useRef<string | null>(null);
+  const applySavedViewSnapshot = useCallback((snapshot: NetworkSavedViewSnapshot, restoring = false) => {
+    const serialized = JSON.stringify(snapshot);
+    restoredContext.current = serialized;
+    pendingRestore.current = serialized;
+    updateRoute({ tab: snapshot.workspace_tab === "map" ? null : snapshot.workspace_tab, hours: snapshot.hours === 24 ? null : String(snapshot.hours), namespace: snapshot.namespace, group: snapshot.group, verdict: snapshot.verdict, ...(!restoring ? { flow: null, workload: null } : {}), [NETWORK_VIEW_PARAM]: serialized, hide_platform: String(snapshot.hide_platform_components), from: snapshot.conversation_filters?.from ?? null, to: snapshot.conversation_filters?.to ?? null, verdict_group: snapshot.conversation_filters?.verdict_group ?? null }, restoring, !restoring);
+    if (restoring) { const port = Number(snapshot.session_filters.port); previousTrafficSignature.current = JSON.stringify({ port: Number.isInteger(port) && port > 0 ? port : undefined, peer: snapshot.session_filters.peer || undefined, application: snapshot.session_filters.application || undefined }); }
     setVerdictsVisible(snapshot.verdicts_visible);
     setProtocolFilter(new Set(snapshot.protocols));
     setNamespaceFilter(new Set(snapshot.namespaces));
@@ -339,6 +338,29 @@ function NetworkMapInner() {
     setPcapFilters(snapshot.pcap_filters);
     setPopoverOpen(false);
   }, [updateRoute, setPlatformPreference]);
+  const restoreContext = routeParams.get(NETWORK_VIEW_PARAM);
+  useEffect(() => {
+    // Router search updates can arrive before the outgoing workspace unmounts.
+    // Consume carried filters only on the workspace, never on its form routes.
+    if (router.latestLocation.pathname.replace(/\/$/, "") !== `/clusters/${encodeURIComponent(clusterID)}/network`) return;
+    if (!restoreContext) { restoredContext.current = null; return; }
+    if (restoredContext.current === restoreContext) return;
+    const snapshot = networkViewSnapshotFromParams(new URLSearchParams({ [NETWORK_VIEW_PARAM]: restoreContext }));
+    if (!snapshot) return;
+    applySavedViewSnapshot(snapshot, true);
+  }, [restoreContext, applySavedViewSnapshot, pathname, clusterID, router]);
+  useEffect(() => {
+    if (router.latestLocation.pathname.replace(/\/$/, "") !== `/clusters/${encodeURIComponent(clusterID)}/network`) return;
+    if (restoreContext && !networkViewSnapshotFromParams(new URLSearchParams({ [NETWORK_VIEW_PARAM]: restoreContext }))) return;
+    const serialized = JSON.stringify(savedViewSnapshot);
+    // Wait for the incoming snapshot to reach local state before writing it.
+    // Otherwise the outgoing render's defaults could overwrite restored filters.
+    if (pendingRestore.current && pendingRestore.current !== serialized) return;
+    pendingRestore.current = null;
+    if (restoreContext === serialized) return;
+    restoredContext.current = serialized;
+    updateRoute({ [NETWORK_VIEW_PARAM]: serialized }, true, false);
+  }, [savedViewSnapshot, restoreContext, updateRoute, pathname, clusterID, router]);
 
   const q = useQuery({
     queryKey: ["network-map", hours, clusterID, namespace, effectiveGroupFilter, verdict, sharedTrafficFilters],
@@ -703,6 +725,7 @@ function NetworkMapInner() {
   if (!scopeReady) return <div className="space-y-4"><PageHeader title="Network Activity" description="Inspect observed traffic for the selected cluster." />{clusterLoading ? <p role="status">Resolving cluster…</p> : <ErrorState title="The selected cluster could not be resolved." error={clusterError} action={<Button onClick={() => { void queryClient.invalidateQueries({ queryKey: ["clusters"] }); void queryClient.invalidateQueries({ queryKey: ["cluster", clusterId] }); }}>Retry cluster</Button>} />}</div>;
 
   return (
+    <NetworkViewContext.Provider value={{ clusterID, snapshot: savedViewSnapshot }}>
     <div className="flex min-h-[calc(100vh-72px)] flex-col gap-4" data-testid="network-activity-page">
       <PageHeader
         title="Network Activity"
@@ -715,6 +738,7 @@ function NetworkMapInner() {
           </div>
         }
       />
+      {restoreContext && !networkViewSnapshotFromParams(routeParams) && <ErrorState title="The saved network context is invalid. URL filters remain active." action={<Button onClick={() => updateRoute({ [NETWORK_VIEW_PARAM]: null }, true)}>Discard invalid context</Button>} />}
       <VerdictBanner status={q.isError || conversationsQ.isError ? "degraded" : "info"}
         title={workspaceTab === "conversations" ? conversationsQ.isError ? "Conversation evidence unavailable" : conversationsQ.isPending ? "Loading conversations" : `${conversationsQ.data?.total ?? conversations.length} matching directed pairs` : q.isError ? "Network map evidence unavailable" : "Inspect observed network activity"}
         detail="Observed traffic is bounded by the selected time window and source limits. Missing traffic does not prove a workload is protected." />
@@ -1201,6 +1225,7 @@ function NetworkMapInner() {
             clusterID={clusterID}
             groupFilter={effectiveGroupFilter}
             filters={pcapFilters}
+            snapshot={savedViewSnapshot}
             onFiltersChange={setPcapFilters}
           />
         </RadixTabs.Content>
@@ -1242,189 +1267,7 @@ function NetworkMapInner() {
         </RadixTabs.Content>
       </RadixTabs.Root>
     </div>
-  );
-}
-
-function NetworkSavedViewsControl({
-  clusterID,
-  snapshot,
-  groupLabel,
-  onApply,
-}: {
-  clusterID: string;
-  snapshot: NetworkSavedViewSnapshot;
-  groupLabel?: string;
-  onApply: (snapshot: NetworkSavedViewSnapshot) => void;
-}) {
-  const fileRef = useRef<HTMLInputElement>(null);
-  const { me } = useAuth();
-  const [name, setName] = useState("");
-  const [selectedID, setSelectedID] = useState("");
-  const storageKey = useMemo(() => networkActivitySavedViewsStorageKey(clusterID, me?.user_id), [clusterID, me?.user_id]);
-  const { views, setViews, saveView, deleteView, persistenceError, canPersist } = useSavedViews<NetworkSavedView>(storageKey, { legacyUserScopedKey: me?.user_id ? storageKey : undefined });
-  const validViews = useMemo(
-    () => views
-      .map((view) => normalizeNetworkSavedView(view, clusterID))
-      .filter((view): view is NetworkSavedView => Boolean(view)),
-    [views, clusterID],
-  );
-  const selectedView = validViews.find((view) => view.id === selectedID) ?? null;
-  const defaultName = useMemo(() => suggestNetworkSavedViewName(snapshot, groupLabel), [snapshot, groupLabel]);
-
-  useEffect(() => {
-    if (selectedID && !validViews.some((view) => view.id === selectedID)) setSelectedID("");
-  }, [selectedID, validViews]);
-
-  const handleSave = () => {
-    const viewName = name.trim() || defaultName;
-    const result = saveView(viewName, {
-      cluster_id: clusterID,
-      saved_at: new Date().toISOString(),
-      filters: snapshot,
-    });
-    if (!result.ok) { toast.error(result.error); return; }
-    setName("");
-    toast.success(`Saved network view "${viewName}"`);
-  };
-
-  const handleApply = () => {
-    if (!selectedView) return;
-    onApply(selectedView.filters);
-    toast.success(`Applied network view "${selectedView.name}"`);
-  };
-
-  const handleDelete = () => {
-    if (!selectedView) return;
-    const result = deleteView(selectedView.id);
-    if (!result.ok) { toast.error(result.error); return; }
-    setSelectedID("");
-    toast.success(`Deleted network view "${selectedView.name}"`);
-  };
-
-  const handleExport = () => {
-    downloadJson(
-      `constellation-network-activity-views-${clusterID || "unscoped"}.json`,
-      buildNetworkSavedViewsExport(clusterID, validViews),
-    );
-  };
-
-  const handleImport = async (file: File) => {
-    try {
-      const imported = parseNetworkSavedViewsImport(await file.text(), clusterID);
-      if (imported.length === 0) {
-        toast.error("No valid network views found in import");
-        return;
-      }
-      const result = setViews((current) => {
-        const currentValid = current
-          .map((view) => normalizeNetworkSavedView(view, clusterID))
-          .filter((view): view is NetworkSavedView => Boolean(view));
-        return mergeNetworkSavedViews(currentValid, imported);
-      });
-      if (!result.ok) { toast.error(result.error); return; }
-      toast.success(`Imported ${imported.length} network ${imported.length === 1 ? "view" : "views"}`);
-    } catch {
-      toast.error("Failed to import network views");
-    }
-  };
-
-  return (
-    <div className="flex min-w-0 flex-wrap items-center gap-1" data-testid="network-saved-views">
-      {persistenceError && <p role="alert" className="w-full text-xs text-destructive">{persistenceError}</p>}
-      <span className="mx-1 h-4 w-px bg-border" aria-hidden />
-      <select
-        className="h-6 max-w-[11rem] rounded border border-input bg-card px-1.5 text-[11px] text-mono outline-none focus:border-[color:var(--color-primary)]"
-        value={selectedID}
-        onChange={(event) => setSelectedID(event.target.value)}
-        aria-label="Saved network view"
-        data-testid="network-saved-view-select"
-      >
-        <option value="">Saved views</option>
-        {validViews.map((view) => (
-          <option key={view.id} value={view.id}>{view.name}</option>
-        ))}
-      </select>
-      <input
-        value={name}
-        onChange={(event) => setName(event.target.value)}
-        placeholder={defaultName}
-        className="h-6 w-[12rem] min-w-[8rem] rounded border border-input bg-card px-1.5 text-[11px] outline-none placeholder:text-muted-foreground focus:border-[color:var(--color-primary)]"
-        aria-label="Saved network view name"
-        data-testid="network-saved-view-name"
-      />
-      <Button
-        type="button"
-        size="icon"
-        variant="outline"
-        onClick={handleSave}
-        disabled={!clusterID || !canPersist}
-        title="Save current network view"
-        aria-label="Save current network view"
-        data-testid="network-saved-view-save"
-      >
-        <Save className="h-3.5 w-3.5" aria-hidden />
-      </Button>
-      <Button
-        type="button"
-        size="icon"
-        variant="outline"
-        onClick={handleApply}
-        disabled={!selectedView}
-        title="Apply selected network view"
-        aria-label="Apply selected network view"
-        data-testid="network-saved-view-apply"
-      >
-        <Play className="h-3.5 w-3.5" aria-hidden />
-      </Button>
-      <Button
-        type="button"
-        size="icon"
-        variant="outline"
-        onClick={handleDelete}
-        disabled={!selectedView}
-        title="Delete selected network view"
-        aria-label="Delete selected network view"
-        data-testid="network-saved-view-delete"
-      >
-        <Trash2 className="h-3.5 w-3.5" aria-hidden />
-      </Button>
-      <input
-        ref={fileRef}
-        type="file"
-        accept=".json,application/json"
-        className="hidden"
-        data-testid="network-saved-view-import-file"
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          if (file) void handleImport(file);
-          event.target.value = "";
-        }}
-      />
-      <Button
-        type="button"
-        size="icon"
-        variant="outline"
-        onClick={() => fileRef.current?.click()}
-        disabled={!clusterID}
-        title="Import network views"
-        aria-label="Import network views"
-        data-testid="network-saved-view-import"
-      >
-        <Upload className="h-3.5 w-3.5" aria-hidden />
-      </Button>
-      <Button
-        type="button"
-        size="icon"
-        variant="outline"
-        onClick={handleExport}
-        disabled={validViews.length === 0}
-        title="Export network views"
-        aria-label="Export network views"
-        data-testid="network-saved-view-export"
-      >
-        <Download className="h-3.5 w-3.5" aria-hidden />
-      </Button>
-    </div>
+    </NetworkViewContext.Provider>
   );
 }
 
@@ -1735,18 +1578,22 @@ function formatKillRequestedAt(value?: string) {
   return d.toLocaleTimeString();
 }
 
-function PcapWorkspaceTab({
+export function PcapWorkspaceTab({
   clusterID,
   groupFilter,
   filters,
+  snapshot,
   onFiltersChange,
 }: {
   clusterID: string;
   groupFilter: string;
   filters: NetworkPcapSavedFilters;
+  snapshot: NetworkSavedViewSnapshot;
   onFiltersChange: (filters: NetworkPcapSavedFilters) => void;
 }) {
   const queryClient = useQueryClient();
+  const location = useLocation();
+  const createHref = networkViewHref(clusterID, new URLSearchParams(location.searchStr), location.hash, "pcap", snapshot);
   const updateFilter = <K extends keyof NetworkPcapSavedFilters>(key: K, value: NetworkPcapSavedFilters[K]) => {
     onFiltersChange({ ...filters, [key]: value });
   };
@@ -1777,44 +1624,21 @@ function PcapWorkspaceTab({
     filters.file_size_mb ||
     filters.duration_s !== EMPTY_PCAP_FILTERS.duration_s,
   );
+  const portInvalid = !!filters.dst_port && (!/^\d+$/.test(filters.dst_port) || Number(filters.dst_port) < 1 || Number(filters.dst_port) > 65535);
   const capturesQ = useQuery({
     queryKey: ["pcap-captures", clusterID, listParams],
     queryFn: () => runtimePcap.list(listParams),
-    enabled: !!clusterID,
+    enabled: !!clusterID && !portInvalid,
     refetchInterval: 5_000,
   });
-  const captures = capturesQ.data ?? [];
-  const [requestedCapturePage, setRequestedCapturePage] = useState(0);
-  const capturePage = Math.min(requestedCapturePage, Math.max(0, Math.ceil(captures.length / 100) - 1));
-  const visibleCaptures = captures.slice(capturePage * 100, (capturePage + 1) * 100);
-  const start = useMutation({
-    mutationFn: () => {
-      const port = Number(filters.dst_port);
-      const fileCount = Number(filters.file_count);
-      const fileSizeMB = Number(filters.file_size_mb);
-      const rolling = Number.isInteger(fileCount) && fileCount > 1;
-      return runtimePcap.start({
-        cluster_id: clusterID,
-        workload: filters.workload.trim(),
-        duration_s: Math.min(300, Math.max(5, Number(filters.duration_s) || 30)),
-        src_ip: filters.src_ip.trim() || undefined,
-        dst_ip: filters.dst_ip.trim() || undefined,
-        dst_port: Number.isInteger(port) && port > 0 ? port : undefined,
-        protocol: filters.protocol || undefined,
-        bpf_filter: filters.bpf_filter.trim() || undefined,
-        interface: filters.interface.trim() || undefined,
-        file_count: rolling ? fileCount : undefined,
-        file_size_mb: rolling && Number.isInteger(fileSizeMB) && fileSizeMB > 0 ? fileSizeMB : undefined,
-      });
-    },
-    onSuccess: () => {
-      toast.success("PCAP capture requested");
-      void queryClient.invalidateQueries({ queryKey: ["pcap-captures", clusterID] });
-    },
-    onError: (err) => toast.error((err as Error).message || "Failed to request PCAP capture"),
-  });
+  const scopeMismatch = capturesQ.isSuccess && capturesQ.data.some(capture => capture.cluster_id !== clusterID);
+  const captures = capturesQ.isSuccess && !scopeMismatch && !portInvalid ? capturesQ.data : [];
   const remove = useMutation({
-    mutationFn: (id: string) => runtimePcap.remove(id),
+    mutationFn: (id: string) => {
+      const current = queryClient.getQueryState<PcapCapture[]>(["pcap-captures", clusterID, listParams]);
+      if (current?.status !== "success" || current.fetchStatus !== "idle" || !current.data?.some(capture => capture.id === id && capture.cluster_id === clusterID)) throw new Error("Capture scope changed. Refresh and review before removing it.");
+      return runtimePcap.remove(id);
+    },
     onSuccess: () => {
       toast.success("PCAP capture removed");
       void queryClient.invalidateQueries({ queryKey: ["pcap-captures", clusterID] });
@@ -1830,144 +1654,11 @@ function PcapWorkspaceTab({
   }
   return (
     <section className="space-y-3" data-testid="network-pcap-tab">
-      <div className="rounded-md border border-border bg-card p-3">
-        <div className="grid gap-2 xl:grid-cols-[minmax(220px,1.2fr)_100px_110px_minmax(150px,1fr)_minmax(150px,1fr)_100px_auto]">
-          <label className="space-y-1 text-xs">
-            <span className="text-muted-foreground">Workload</span>
-            <input
-              value={filters.workload}
-              onChange={(event) => updateFilter("workload", event.target.value)}
-              placeholder="namespace/deployment"
-              className="h-8 w-full rounded border border-input bg-background px-2 text-xs outline-none focus:border-[color:var(--color-primary)]"
-              data-testid="network-pcap-workload"
-            />
-          </label>
-          <label className="space-y-1 text-xs">
-            <span className="text-muted-foreground">Seconds</span>
-            <input
-              type="number"
-              min={5}
-              max={300}
-              value={filters.duration_s}
-              onChange={(event) => updateFilter("duration_s", Number(event.target.value) || 0)}
-              className="h-8 w-full rounded border border-input bg-background px-2 text-xs outline-none focus:border-[color:var(--color-primary)]"
-              data-testid="network-pcap-duration"
-            />
-          </label>
-          <label className="space-y-1 text-xs">
-            <span className="text-muted-foreground">Protocol</span>
-            <select
-              value={filters.protocol}
-              onChange={(event) => updateFilter("protocol", event.target.value)}
-              className="h-8 w-full rounded border border-input bg-background px-2 text-xs outline-none focus:border-[color:var(--color-primary)]"
-              data-testid="network-pcap-protocol"
-            >
-              <option value="">Any</option>
-              <option value="tcp">TCP</option>
-              <option value="udp">UDP</option>
-              <option value="icmp">ICMP</option>
-            </select>
-          </label>
-          <label className="space-y-1 text-xs">
-            <span className="text-muted-foreground">Source IP</span>
-            <input
-              value={filters.src_ip}
-              onChange={(event) => updateFilter("src_ip", event.target.value)}
-              placeholder="optional"
-              className="h-8 w-full rounded border border-input bg-background px-2 text-xs outline-none focus:border-[color:var(--color-primary)]"
-              data-testid="network-pcap-src-ip"
-            />
-          </label>
-          <label className="space-y-1 text-xs">
-            <span className="text-muted-foreground">Destination IP</span>
-            <input
-              value={filters.dst_ip}
-              onChange={(event) => updateFilter("dst_ip", event.target.value)}
-              placeholder="optional"
-              className="h-8 w-full rounded border border-input bg-background px-2 text-xs outline-none focus:border-[color:var(--color-primary)]"
-              data-testid="network-pcap-dst-ip"
-            />
-          </label>
-          <label className="space-y-1 text-xs">
-            <span className="text-muted-foreground">Port</span>
-            <input
-              value={filters.dst_port}
-              onChange={(event) => updateFilter("dst_port", event.target.value.replace(/[^\d]/g, "").slice(0, 5))}
-              inputMode="numeric"
-              placeholder="any"
-              className="h-8 w-full rounded border border-input bg-background px-2 text-xs outline-none focus:border-[color:var(--color-primary)]"
-              data-testid="network-pcap-dst-port"
-            />
-          </label>
-          <div className="flex items-end">
-            <Button
-              size="sm"
-              variant="primary"
-              disabled={start.isPending || filters.workload.trim() === ""}
-              onClick={() => start.mutate()}
-              data-testid="network-pcap-start"
-            >
-              <Play className="h-3.5 w-3.5" aria-hidden />
-              Capture
-            </Button>
-          </div>
-        </div>
-        <div className="mt-2 grid gap-2 xl:grid-cols-[minmax(260px,2fr)_140px_100px_110px_auto]">
-          <label className="space-y-1 text-xs">
-            <span className="text-muted-foreground">BPF filter</span>
-            <input
-              value={filters.bpf_filter}
-              onChange={(event) => updateFilter("bpf_filter", event.target.value.slice(0, 1024))}
-              placeholder="host 10.0.0.5 and tcp"
-              className="h-8 w-full rounded border border-input bg-background px-2 text-xs font-mono outline-none focus:border-[color:var(--color-primary)]"
-              data-testid="network-pcap-bpf"
-            />
-          </label>
-          <label className="space-y-1 text-xs">
-            <span className="text-muted-foreground">Interface</span>
-            <input
-              value={filters.interface}
-              onChange={(event) => updateFilter("interface", event.target.value.slice(0, 15))}
-              placeholder="any"
-              className="h-8 w-full rounded border border-input bg-background px-2 text-xs font-mono outline-none focus:border-[color:var(--color-primary)]"
-              data-testid="network-pcap-interface"
-            />
-          </label>
-          <label className="space-y-1 text-xs">
-            <span className="text-muted-foreground">Files</span>
-            <input
-              value={filters.file_count}
-              onChange={(event) => updateFilter("file_count", event.target.value.replace(/[^\d]/g, "").slice(0, 2))}
-              inputMode="numeric"
-              placeholder="1"
-              className="h-8 w-full rounded border border-input bg-background px-2 text-xs outline-none focus:border-[color:var(--color-primary)]"
-              data-testid="network-pcap-file-count"
-            />
-          </label>
-          <label className="space-y-1 text-xs">
-            <span className="text-muted-foreground">MB/file</span>
-            <input
-              value={filters.file_size_mb}
-              onChange={(event) => updateFilter("file_size_mb", event.target.value.replace(/[^\d]/g, "").slice(0, 3))}
-              inputMode="numeric"
-              placeholder="10"
-              className="h-8 w-full rounded border border-input bg-background px-2 text-xs outline-none focus:border-[color:var(--color-primary)]"
-              data-testid="network-pcap-file-size"
-            />
-          </label>
-          <div className="flex items-end">
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={!hasPcapFilters}
-              onClick={() => onFiltersChange({ ...EMPTY_PCAP_FILTERS })}
-              data-testid="network-pcap-clear"
-            >
-              <X className="h-3.5 w-3.5" aria-hidden />
-              Clear
-            </Button>
-          </div>
-        </div>
+      <div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-muted-foreground">Latest 200 matching capture requests. Filters apply on the server before the cap. A recorded request is not a completed capture.</p><Button asChild variant="primary"><a href={createHref} data-testid="network-pcap-new">+ Request capture</a></Button></div>
+      <div className="flex flex-wrap items-end gap-3 rounded-md border border-border bg-card p-3">
+        {([['workload', 'Workload'], ['src_ip', 'Source IP'], ['dst_ip', 'Destination IP'], ['dst_port', 'Destination port']] as const).map(([key, label]) => <label key={key} className="space-y-1 text-xs"><span>{label}</span><input aria-label={`Capture ${label.toLowerCase()} filter`} className="block h-8 max-w-full rounded border border-input bg-background px-2" value={filters[key]} onChange={event => updateFilter(key, event.target.value)} /></label>)}
+        <label className="space-y-1 text-xs"><span>Protocol</span><select aria-label="Capture protocol filter" className="block h-8 rounded border border-input bg-background px-2" value={filters.protocol} onChange={event => updateFilter('protocol', event.target.value)}><option value="">Any</option><option value="tcp">TCP</option><option value="udp">UDP</option><option value="icmp">ICMP</option></select></label>
+        <Button variant="outline" disabled={!hasPcapFilters} onClick={() => onFiltersChange({ ...EMPTY_PCAP_FILTERS })}>Clear filters</Button>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <select
@@ -1983,27 +1674,29 @@ function PcapWorkspaceTab({
           <option value="failed">Failed</option>
           <option value="expired">Expired</option>
         </select>
-        <Button size="sm" variant="outline" onClick={() => void capturesQ.refetch()} data-testid="network-pcap-refresh">
+        <Button size="sm" variant="outline" disabled={portInvalid} onClick={() => void capturesQ.refetch()} data-testid="network-pcap-refresh">
           <RefreshCw className="h-3.5 w-3.5" aria-hidden />
           Refresh
         </Button>
       </div>
-      <div className="overflow-hidden rounded-md border border-border bg-card">
+      {portInvalid ? <ErrorState title="Destination port must be a whole number from 1 to 65535." /> : scopeMismatch ? <ErrorState title="Capture evidence does not match the selected cluster." /> : capturesQ.isError ? <ErrorState title="Packet captures could not be loaded or refreshed." error={capturesQ.error} action={<Button onClick={() => void capturesQ.refetch()}>Retry captures</Button>} /> : <div className="overflow-hidden rounded-md border border-border bg-card">
         <DataTable<PcapCapture>
           testId="network-pcap-table"
           className="rounded-none border-0"
-          rows={capturesQ.isPending ? [] : visibleCaptures}
+          rows={captures}
           rowKey={(capture) => capture.id}
-          showDensityToggle={false}
-          showColumnChooser={false}
+          preferencesKey="network-pcap-captures"
+          exportFileName="loaded-capture-requests"
+          sourceLimit={200}
+          sourceCount={captures.length}
           emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">{capturesQ.isPending ? "Loading captures..." : "No packet captures match this filter."}</div>}
           columns={[
             { id: "workload", header: "Workload", kind: "name", code: true, cell: (capture) => capture.workload },
             { id: "filter", header: "Filter", kind: "text", wrap: true, size: 220, cell: pcapCaptureFilterLabel },
             { id: "status", header: "Status", kind: "status", cell: (capture) => <PcapStatusPill status={capture.status} /> },
             { id: "node", header: "Node", kind: "id", cell: (capture) => capture.claimed_by_node || "-" },
-            { id: "packets", header: "Packets", kind: "count", cell: (capture) => (capture.packet_count ?? 0).toLocaleString() },
-            { id: "size", header: "Size", kind: "bytes", cell: (capture) => formatBytes(capture.file_size_bytes ?? 0) },
+            { id: "packets", header: "Packets", kind: "count", cell: (capture) => capture.packet_count == null ? "Not reported" : capture.packet_count.toLocaleString() },
+            { id: "size", header: "Size", kind: "bytes", cell: (capture) => capture.file_size_bytes == null ? "Not reported" : formatBytes(capture.file_size_bytes) },
             { id: "requested", header: "Requested", kind: "date", cell: (capture) => formatDateTime(capture.requested_at) },
             { id: "actions", header: "", kind: "actions", size: 160, minSize: 160, maxSize: 240, wrap: true, cell: (capture) => <div className="flex flex-wrap items-center justify-end gap-1">
               {capture.status === "completed" && <Button size="sm" variant="outline" onClick={() => void runtimePcap.download(capture.id).catch((err: Error) => toast.error(`PCAP download failed: ${err.message}`))} data-testid="network-pcap-download"><Download className="h-3.5 w-3.5" aria-hidden />Download</Button>}
@@ -2012,9 +1705,8 @@ function PcapWorkspaceTab({
             </div> },
           ]}
         />
-      </div>
-      <p className="text-xs text-muted-foreground">Showing {visibleCaptures.length ? capturePage * 100 + 1 : 0}–{capturePage * 100 + visibleCaptures.length} of {captures.length} loaded captures. Server fetch is capped at 200; filters apply to loaded captures.</p>
-      <Pager page={capturePage} pageSize={100} total={captures.length} rowsOnPage={visibleCaptures.length} onPage={setRequestedCapturePage} />
+      </div>}
+      {capturesQ.isSuccess && !scopeMismatch && !portInvalid && <p className="text-xs text-muted-foreground">{captures.length} returned capture requests. Server fetch is capped at 200; table sort and CSV cover all returned captures.</p>}
     </section>
   );
 }
@@ -4093,11 +3785,14 @@ function ThreatsCard({
 // preview — and renders a tcpdump-style hex+ASCII dump alongside the L7
 // summary. The base64→Uint8Array decode is browser-native.
 function ThreatDrilldownDialog({ id, onClose }: { id: string; onClose: () => void }) {
+  const context = useContext(NetworkViewContext);
   const q = useQuery({
-    queryKey: ["runtime-threat", id],
+    queryKey: ["runtime-threat", context?.clusterID, id],
     queryFn: () => runtimeThreats.get(id),
+    enabled: !!context?.clusterID,
   });
-  const detail: RuntimeThreatDetail | undefined = q.data;
+  const mismatch = q.isSuccess && (q.data.id !== id || q.data.cluster_id !== context?.clusterID);
+  const detail: RuntimeThreatDetail | undefined = q.isSuccess && !mismatch ? q.data : undefined;
   const bytes = useMemo(() => decodeBase64(detail?.packet ?? ""), [detail?.packet]);
   return (
     <Dialog.Root open onOpenChange={(o) => { if (!o) onClose(); }}>
@@ -4107,7 +3802,7 @@ function ThreatDrilldownDialog({ id, onClose }: { id: string; onClose: () => voi
           data-testid="network-threat-dialog-overlay"
         />
         <Dialog.Content
-          className="fixed left-1/2 top-1/2 z-50 flex h-[640px] w-[720px] -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg border border-border bg-card shadow-[var(--elev-3)] focus:outline-none"
+          className="fixed left-1/2 top-1/2 z-50 flex h-[min(640px,calc(100dvh-2rem))] w-[min(720px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg border border-border bg-card shadow-[var(--elev-3)] focus:outline-none"
           data-testid="network-threat-dialog"
           aria-describedby={undefined}
         >
@@ -4142,12 +3837,13 @@ function ThreatDrilldownDialog({ id, onClose }: { id: string; onClose: () => voi
                 Failed to load threat: {String((q.error as Error)?.message ?? "")}
               </div>
             )}
+            {mismatch && <ErrorState title="Threat evidence does not match the selected cluster and threat." />}
             {detail && (
               <div className="space-y-4">
                 <ThreatMetaGrid t={detail} />
                 {detail.l7 && <ThreatL7Pane l7={detail.l7} />}
                 <ThreatPacketDump bytes={bytes} capLen={detail.cap_len ?? 0} />
-                <ThreatPcapCapturePane threat={detail} />
+                {context && <ThreatPcapCapturePane threat={detail} clusterID={context.clusterID} snapshot={context.snapshot} />}
               </div>
             )}
           </div>
@@ -4157,138 +3853,13 @@ function ThreatDrilldownDialog({ id, onClose }: { id: string; onClose: () => voi
   );
 }
 
-// ThreatPcapCapturePane — Wave C3. Operator can request a 30s pcap on the
-// workload that tripped the threat, then download the .pcap when the agent
-// finishes. The control plane creates the row immediately; status is
-// polled while we're in the dialog so the button transitions inline.
-function ThreatPcapCapturePane({ threat }: { threat: RuntimeThreatDetail }) {
-  // We deliberately key on `threat.id` so navigating between threats in
-  // the dialog resets the local capture state.
-  const [activeCapture, setActiveCapture] = useState<PcapCapture | null>(null);
-  const [duration, setDuration] = useState(30);
-  // Default to the server-side runtime threat attribution and keep the field
-  // editable for older rows that only carried ep_mac.
-  const [workload, setWorkload] = useState(threat.workload_id ?? "");
-
-  const start = useMutation({
-    mutationFn: async (): Promise<PcapCapture> => {
-      if (!workload) throw new Error("workload is required");
-      return runtimePcap.start({
-        cluster_id: threat.cluster_id,
-        workload,
-        duration_s: Math.min(60, Math.max(5, duration)),
-        // Stamp the 5-tuple from the threat onto the request so the
-        // agent's tcpdump filter narrows to this specific conversation.
-        src_ip:    threat.src_ip,
-        dst_ip:    threat.dst_ip,
-        dst_port:  threat.dst_port,
-        protocol:  threat.ip_proto === 6 ? "tcp" : threat.ip_proto === 17 ? "udp" : undefined,
-      });
-    },
-    onSuccess: setActiveCapture,
-  });
-
-  // Poll the capture row while it's pending/running so the UI updates
-  // when the agent picks it up + finishes.
-  const refresh = useQuery({
-    queryKey: ["pcap-capture", activeCapture?.id],
-    queryFn: () => runtimePcap.get(activeCapture!.id),
-    enabled: !!activeCapture &&
-             (activeCapture.status === "pending" || activeCapture.status === "running"),
-    refetchInterval: 2000,
-  });
-  // Replace the cached row when the refetch comes back with a state change.
-  useEffect(() => {
-    if (refresh.data && refresh.data.status !== activeCapture?.status) {
-      setActiveCapture(refresh.data);
-    }
-  }, [refresh.data, activeCapture?.status]);
-
-  const cap = activeCapture;
-  return (
-    <div className="rounded border border-border bg-card/50 p-3" data-testid="threat-pcap-pane">
-      <div className="mb-2 flex items-center justify-between text-[10px] uppercase tracking-wider text-muted-foreground">
-        <span>Live capture</span>
-        {cap && (
-          <span className="rounded bg-accent px-1.5 py-0.5 font-mono text-foreground">
-            {cap.status}
-          </span>
-        )}
-      </div>
-      {!cap && (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 text-[11px]">
-            <span className="text-muted-foreground">Workload</span>
-            <input
-              type="text"
-              value={workload}
-              onChange={(e) => setWorkload(e.target.value)}
-              placeholder="namespace/deployment"
-              className="flex-1 rounded border border-input bg-background px-2 py-1 text-xs outline-none focus:border-[color:var(--color-primary)]"
-              data-testid="threat-pcap-workload"
-            />
-            <span className="text-muted-foreground">for</span>
-            <input
-              type="number"
-              min={5}
-              max={60}
-              value={duration}
-              onChange={(e) => setDuration(Number(e.target.value))}
-              className="w-16 rounded border border-input bg-background px-2 py-1 text-xs outline-none focus:border-[color:var(--color-primary)]"
-              data-testid="threat-pcap-duration"
-            />
-            <span className="text-muted-foreground">seconds</span>
-          </div>
-          <Button
-            size="sm"
-            onClick={() => start.mutate()}
-            disabled={start.isPending || !workload}
-            data-testid="threat-pcap-start"
-          >
-            {start.isPending ? "Requesting…" : `Capture next ${Math.min(60, Math.max(5, duration))}s`}
-          </Button>
-          {start.error && (
-            <div className="text-[11px] text-[color:var(--color-status-error)]">
-              {(start.error as Error).message}
-            </div>
-          )}
-        </div>
-      )}
-      {cap && cap.status === "pending" && (
-        <div className="text-[11px] text-muted-foreground">
-          Waiting for a runtime-agent on cluster <span className="text-mono">{cap.cluster_id.slice(0, 8)}</span>{" "}
-          to pick this up…
-        </div>
-      )}
-      {cap && cap.status === "running" && (
-        <div className="text-[11px] text-muted-foreground">
-          Capturing on node <span className="text-mono">{cap.claimed_by_node}</span> for {cap.duration_s}s…
-        </div>
-      )}
-      {cap && cap.status === "completed" && (
-        <div className="space-y-1 text-[11px]">
-          <div className="text-muted-foreground">
-            {((cap.file_size_bytes ?? 0) / 1024).toFixed(1)} KB ·{" "}
-            {cap.packet_count ?? 0} packets ·{" "}
-            sha256 <span className="text-mono">{(cap.sha256 ?? "").slice(0, 12)}…</span>
-          </div>
-          <button
-            type="button"
-            onClick={() => runtimePcap.download(cap.id).catch((e: Error) => toast.error(`PCAP download failed: ${e.message}`))}
-            className="inline-block rounded border border-border bg-card px-2 py-1 text-foreground hover:bg-accent"
-            data-testid="threat-pcap-download"
-          >
-            Download .pcap
-          </button>
-        </div>
-      )}
-      {cap && cap.status === "failed" && (
-        <div className="text-[11px] text-[color:var(--color-status-error)]">
-          Capture failed: {cap.error_message || "no detail"}
-        </div>
-      )}
-    </div>
-  );
+// Threat details share the canonical capture form; no second editor or request path.
+export function ThreatPcapCapturePane({ threat, clusterID, snapshot }: { threat: RuntimeThreatDetail; clusterID: string; snapshot: NetworkSavedViewSnapshot }) {
+  const location = useLocation();
+  if (threat.cluster_id !== clusterID) return <ErrorState title="Threat capture scope does not match the selected cluster." />;
+  const captureSnapshot: NetworkSavedViewSnapshot = { ...snapshot, workspace_tab: "pcap", pcap_filters: { ...EMPTY_PCAP_FILTERS, workload: threat.workload_id ?? "", src_ip: threat.src_ip ?? "", dst_ip: threat.dst_ip ?? "", dst_port: threat.dst_port ? String(threat.dst_port) : "", protocol: threat.ip_proto === 6 ? "tcp" : threat.ip_proto === 17 ? "udp" : threat.ip_proto === 1 ? "icmp" : "" } };
+  const href = networkViewHref(clusterID, new URLSearchParams(location.searchStr), location.hash, "pcap", captureSnapshot);
+  return <div className="space-y-3 rounded border border-border bg-card/50 p-3" data-testid="threat-pcap-pane"><h3 className="text-sm font-semibold">Packet capture</h3><p className="text-xs text-muted-foreground">Review this threat’s workload and traffic filters on the capture request page. The agent must complete the request before a file is available.</p><Button asChild size="sm"><a href={href} data-testid="threat-pcap-new">+ Request capture</a></Button></div>;
 }
 
 function ThreatMetaGrid({ t }: { t: RuntimeThreatDetail }) {

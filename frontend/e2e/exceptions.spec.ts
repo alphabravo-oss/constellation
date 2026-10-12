@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { login } from "./utils";
+import { assetEvidenceCluster, assetEvidencePath, installAssetEvidenceFixture } from "./fixtures/asset-evidence";
 
 test.beforeEach(async ({ page }) => {
   await login(page);
@@ -18,22 +19,28 @@ test("Vulnerability exceptions page shows workflow, guardrails, and status filte
   await expect(page.getByRole("heading", { name: "Vulnerability Exceptions" })).toBeVisible();
 });
 
-test("Vulnerability exceptions inventory includes revoked image acceptances", async ({ page }) => {
-  await page.goto("/assets");
-  await page.getByTestId("asset-row").filter({ hasText: "ghcr.io/demo/api" }).getByRole("link").click();
-
+test("Vulnerability exceptions inventory includes mocked dedicated image acceptances and revocation", async ({ page }) => {
+  const writes = await installAssetEvidenceFixture(page);
+  await page.goto(`${assetEvidencePath}?tab=acceptance`);
+  await page.getByRole("link", { name: "Accept image risk", exact: true }).click();
   const until = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  await page.getByTestId("image-accept-rationale").fill("Temporary image exception for inventory evidence");
-  await page.getByTestId("image-accept-until").fill(until);
-  await page.getByTestId("image-accept-submit").click();
+  await page.getByLabel(/^Rationale/).fill("Temporary image exception for inventory evidence");
+  await page.getByLabel(/^Accepted until/).fill(until);
+  await page.getByRole("button", { name: "Save acceptance", exact: true }).click();
+  await expect(page.getByTestId("image-acceptance-result")).toContainText("recorded");
+  await page.getByRole("link", { name: "Back to asset", exact: true }).click();
   await expect(page.getByTestId("image-acceptance-card")).toContainText("active");
-  await page.getByTestId("image-accept-revoke").click();
+  await page.getByRole("link", { name: "Revoke", exact: true }).click();
+  await expect(page).toHaveURL(/\/image-acceptance\/[^/]+\/revoke$/);
+  await expect(page.getByRole("heading", { name: "Revoke image risk acceptance", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Revoke acceptance", exact: true }).click();
+  await expect(page.getByTestId("image-acceptance-result")).toContainText("revoked");
+  await page.getByRole("link", { name: "Back to asset", exact: true }).click();
   await expect(page.getByTestId("image-acceptance-card")).toContainText("revoked");
-
-  await page.goto("/exceptions");
-  await page.getByTestId("exception-status-filters").getByRole("button", { name: "revoked" }).click();
+  await page.goto(`/clusters/${assetEvidenceCluster}/exceptions?status=revoked&target=image`);
   await expect(page.getByTestId("exceptions-inventory-table")).toContainText("Temporary image exception for inventory evidence");
   await expect(page.getByTestId("exceptions-inventory-table")).toContainText("image.accept-risk.revoke");
+  expect(writes).toHaveLength(2);
 });
 
 test("Vulnerability exceptions inventory includes suppressed findings with detail audit", async ({ page }) => {

@@ -307,10 +307,10 @@ export const assets = {
   list: (params: { limit?: number; offset?: number; cluster_id?: string } = {}) =>
     api.get<{ assets: Asset[]; limit: number; offset: number; has_more: boolean }>("/assets", { params }).then((r) => r.data),
   get: (id: string) => api.get<AssetDetail>(`/assets/${id}`).then((r) => r.data),
-  createImageAcceptance: (id: string, body: { rationale: string; accepted_until: string }) =>
-    api.post<{ id: string; image_acceptances: ImageAcceptance[] }>(`/assets/${id}/image-acceptances`, body).then((r) => r.data),
-  revokeImageAcceptance: (assetID: string, acceptanceID: string) =>
-    api.post<{ status: string; image_acceptances: ImageAcceptance[] }>(`/assets/${assetID}/image-acceptances/${acceptanceID}/revoke`).then((r) => r.data),
+  createImageAcceptance: (id: string, body: { rationale: string; accepted_until: string; expected_image_digest?: string; cluster_id?: string }) =>
+    api.post<{ id: string; asset_id?: string; cluster_id?: string; image_digest?: string; image_acceptances: ImageAcceptance[] }>(`/assets/${id}/image-acceptances`, body).then((r) => r.data),
+  revokeImageAcceptance: (assetID: string, acceptanceID: string, body?: { expected_image_digest: string; cluster_id: string }) =>
+    api.post<{ status: string; asset_id?: string; cluster_id?: string; image_digest?: string; image_acceptances: ImageAcceptance[] }>(`/assets/${assetID}/image-acceptances/${acceptanceID}/revoke`, body).then((r) => r.data),
 };
 
 export interface HostVulnerability {

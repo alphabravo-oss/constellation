@@ -523,7 +523,7 @@ asset findings use exact server predicates, stable pagination and matching count
 canonical image evidence stays separately labeled. Fabricated factors and
 substring-related activity are removed. Unsupported workload mappings are explicit.
 Source limits remain visible: deployment findings 100, runtime events 50, network
-flows 100, node vulnerabilities 2,000 and generic asset CSV up to 10,000.
+flows 50, node vulnerabilities 2,000 and generic asset CSV up to 10,000.
 
 Findings and Timeline saved views now have dedicated `/views/new` pages with
 Save/Cancel, Advanced filter details and preserved return URLs/fragments. Writes
@@ -531,7 +531,7 @@ complete before navigation, remain scoped to organization/user, and report brows
 storage failures or rejected malformed records. Held callbacks cannot write after
 identity/inventory changes. Timeline timestamps retain offsets and milliseconds.
 Network saved-view payloads preserve exact conversation endpoints and honor write
-outcomes; its inline authoring still needs migration to a dedicated page.
+outcomes. The later detail-workflow continuation migrates its authoring to dedicated pages.
 
 Dashboard network links now request exact directed pairs and their original 24h
 or 168h window. A server-side blocked cohort includes deny/denied/block/blocked
@@ -568,6 +568,56 @@ acceptance. No live security actions or saved-view writes were submitted.
 UI-1/2/3/4 remain open for the remaining canonical-page, form, table/export,
 platform-role and destination-matrix acceptance; broader infrastructure/security
 gates stay separate.
+
+The detail-workflow continuation gives Asset and Deployment pages verdicts,
+bounded primary metrics and URL-linked evidence workspaces. Shared semantic tables
+expose all returned rows, explicit source caps, preferences and loaded-evidence
+CSV. Asset generic findings remain capped at 100 plus returned digest-scan findings;
+deployment network/runtime samples are 50, findings 100, compliance controls 50,
+package reports 20 and combined threat pivots 60. Missing selected evidence is
+explicit instead of silently substituting another record.
+
+Asset image acceptance and revocation now use dedicated review pages. Each sends
+the reviewed digest and cluster; the API locks asset/image identity through the
+write, rejects changed scope, and confirms the committed identity in its response.
+Legacy callers may omit both preconditions. Deployment policy transitions,
+quarantine lifting, process/file modes, file exceptions, deletions and bundle import
+also have dedicated forms, while approval/quarantine and file-rule authoring reuse
+existing canonical forms. Forms preserve drafts on failures, recheck current
+evidence and distinguish configuration or queued actions from deployed enforcement.
+
+Network Save/Import views and packet capture now use dedicated pages with preserved
+scope/filter/return context. Imports preview accepted/rejected records before the
+browser write. Threat detail links to the same capture form with its exact traffic
+tuple; no second inline capture editor remains. Capture requests validate limits
+without silent clamping, recheck exact workload scope and block repeat submission.
+The capture list exposes all 200 returned rows through the shared table; invalid
+filters, mismatched scope and failed refreshes cannot appear as broader or current
+evidence. Missing packet/size measurements remain explicit.
+
+Validation: Helm revision **51** runs frontend `detail-metrics-20261012` and
+API `detail-workflows-20261012`, retaining migration `audit-lookup-20261012` and
+schema 173. All seven deployments are ready. The full frontend run passed **1,039
+tests across 94 files**; final shared metadata typography changes passed 77
+focused deployment/risk tests, production build/typecheck and changed-file lint.
+Generated OpenAPI/endpoint mapping, handler vet and parity-plan checks pass.
+Fresh migrated PostgreSQL runs passed **26 image-acceptance test executions**
+with race/shuffle and no skips, including scope changes, tenant isolation,
+confirmed response identity and concurrent asset/image updates. Eight affected
+browser cases were discovered; the full browser runner was not rerun.
+
+Live read-only browser checks verify Asset findings/acceptance review and
+Deployment network/files evidence, exact form scope and Cancel destinations.
+Network Save-view/Cancel/Back/Forward retains local filters, exact conversation
+pairs, page, inspection and fragments; packet-capture review retains its workload
+and traffic tuple and rejects invalid duration without submitting. Desktop and
+640px checks show matching table header/body geometry, contained horizontal
+scrolling and no clipped actions. A screenshot exposed oversized timestamp
+metrics; the shared `StatCard` now has explicit compact text-value typography,
+verified at 88px card height on desktop and without narrow-card overflow.
+No live security actions, captures, acceptance changes or saved-view writes were
+submitted. The eight remaining selected-console families below stay open;
+these checks do not close UI-1/2/3/4 or broader infrastructure/security gates.
 
 The admission-engine continuation adds migration **172** and persists normalized
 engine outcomes atomically with image scan completion. The built-in vulnerability
@@ -2147,6 +2197,32 @@ progressive disclosure, while retaining Constellation's security vocabulary.
   pages with Save/Cancel/back navigation, and Advanced disclosure for expert-only
   fields. This follows the established user directive in `frontend/CLAUDE.md`;
   editing drawers are not the target interaction.
+
+The October 12 completion audit narrows the remaining selected console work to
+concrete page families rather than expanding it into infrastructure acceptance:
+
+1. Process baseline inventory/detail: remove inline rule authoring, preserve exact
+   cluster scope, disclose evidence through URL tabs and show read/write failures.
+2. Container, connector, federation and scan inventories: replace failed-read
+   empty/healthy states with explicit unavailable/retry states. Scan inventories
+   must expose continuation beyond their current 500-row read and URL filters.
+3. Coverage/Posture: resolve URL cluster scope, distinguish unavailable sources
+   from absent capabilities, and label bounded signal samples honestly.
+4. Node, serverless and CVE detail: exact entity gates, URL workspaces, related-read
+   failures and canonical evidence tables with visible source limits.
+5. Effective configuration and cluster health: full-width workspaces, URL
+   disclosure, and all returned component reports instead of a silent 12-row slice.
+6. Remaining inventory controls: Assets, Access Control, API Tokens, Attestation
+   Trust, Registry Images and Audit need bounded export/preferences/paging review.
+7. Migration and scanner disclosure: URL-linked peer views; deliberate Save/Cancel
+   for scanner intervals; a shared table for the attempt ledger.
+8. Network secondary controls and the remaining dashboard destination/source-total
+   matrix still need their final workflow acceptance.
+
+This audit found no additional confirmed duplicate feature-home renderer or
+primary KPI row above five. Those findings do not close the all-page contract or
+replace browser acceptance. Legitimate dedicated settings forms and filter inputs
+are not counted as inline authoring.
 
 ### UI-2 Shared enterprise tables
 

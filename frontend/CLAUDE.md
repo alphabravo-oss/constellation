@@ -62,7 +62,7 @@ When building or editing any page, conform to all of these.
 - `ui/collapse.tsx` — "Advanced"/detail disclosure.
 - `ui/tabs.tsx` — URL-synced tabs.
 - `ui/drawer.tsx` — DEPRECATED for forms; do not use for add/edit (see Forms above).
-- `ui/stat-card.tsx` — use `StatGrid` with `StatCard` for metric rows. Global CSS fits columns to available content width, including beside the sidebar; avoid fixed viewport-based column counts that squeeze labels.
+- `ui/stat-card.tsx` — use `StatGrid` with `StatCard` for metric rows. Use `valueKind="text"` for timestamps and other metadata so shared typography keeps text readable without inflating numeric KPI rows. Global CSS fits columns to available content width, including beside the sidebar; avoid fixed viewport-based column counts that squeeze labels.
 - `components/SettingsShell.tsx` — the grouped settings surface.
 - Match the Astronomer-cloned design system (Inter, cool-gray, blue→violet, 8px,
   CSS-var tokens `var(--color-*)`).

@@ -79,3 +79,36 @@ it("uses dedicated scoped create/edit links and requires a delete confirmation",
   await act(async () => button("Delete rule").click()); await settled(() => expect(fileProfiles.deleteRule).toHaveBeenCalledWith("workload", "rule", expect.anything(), { cluster_id: "cluster" }));
   expect(host.textContent).toContain("Enabled rules alone do not confirm"); expect(host.querySelector('[aria-label="Export CSV"]')).not.toBeNull();
 });
+
+
+it("preserves applications and custom reason in the canonical rule form", async () => {
+  route.ruleId = "rule"; await renderPage(); await settled(() => expect(host.querySelector("form")).not.toBeNull());
+  const inputFor = (text: string) => [...host.querySelectorAll("label")].find(item => item.querySelector("span")?.textContent === text)!.querySelector("input")!;
+  expect(inputFor("Applications, comma separated").value).toBe("app");
+  await act(async () => {
+    for (const [text, value] of [["Applications, comma separated", "shell, api, shell"], ["Reason", "ticket 321"]]) {
+      const input = inputFor(text); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  });
+  await submit(); await settled(() => expect(fileProfiles.updateRule).toHaveBeenCalledWith("workload", "rule", expect.objectContaining({ applications: ["api", "shell"], reason: "ticket 321" }), { cluster_id: "cluster" }));
+});
+
+it("returns canonical rule cancellation to the requesting deployment files tab", async () => {
+  const backTo = "/clusters/cluster/deployments/deployment?tab=files";
+  route.search = new URLSearchParams({ workload: "workload", return_to: backTo }).toString(); await renderPage(); await settled(() => expect(host.querySelector("form")).not.toBeNull());
+  await act(async () => button("Cancel").click()); expect(route.navigate).toHaveBeenCalledWith({ href: backTo }); expect(fileProfiles.createRule).not.toHaveBeenCalled();
+});
+
+it("rejects a foreign deployment return URL", async () => {
+  route.search = new URLSearchParams({ workload: "workload", return_to: "/clusters/other/deployments/foreign?tab=files" }).toString(); await renderPage(); await settled(() => expect(host.querySelector("form")).not.toBeNull());
+  await act(async () => button("Cancel").click()); expect(route.navigate).toHaveBeenCalledWith({ href: "/clusters/cluster/file-monitor?workload=workload" });
+});
+
+it("blocks canonical rule save if the cached profile is invalidated before rerender", async () => {
+  await renderPage(); await settled(() => expect(host.querySelector("form")).not.toBeNull());
+  await act(async () => {
+    client.getQueryCache().find({ queryKey: ["file-monitor-detail", "cluster", "workload"], exact: true })!.setState({ isInvalidated: true });
+    host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  });
+  await settled(() => expect(host.textContent).toContain("Could not save this rule. Your draft is preserved")); expect(fileProfiles.createRule).not.toHaveBeenCalled();
+});

@@ -3919,12 +3919,167 @@
         "summary": "List digest-scoped image risk acceptances for an asset"
       },
       "post": {
-        "summary": "Create a digest-scoped image risk acceptance for an asset"
+        "summary": "Create a digest-scoped image risk acceptance for an asset",
+        "description": "The console sends both reviewed scope fields. The server locks the asset and image through the write and returns 409 if their identity changed. Legacy callers may omit both fields.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expected_image_digest": {
+                    "type": "string",
+                    "description": "Reviewed image digest. Send together with cluster_id to reject a changed image or cluster atomically."
+                  },
+                  "cluster_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Reviewed asset cluster. Required when expected_image_digest is supplied."
+                  },
+                  "rationale": {
+                    "type": "string",
+                    "minLength": 12
+                  },
+                  "accepted_until": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "Future expiry, at most 30 days from submission."
+                  }
+                },
+                "required": [
+                  "rationale",
+                  "accepted_until"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Mutation committed for the returned asset, cluster and digest. The acceptance history is scoped to that digest.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "asset_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "cluster_id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "nullable": true
+                    },
+                    "image_digest": {
+                      "type": "string"
+                    },
+                    "image_acceptances": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input or incomplete reviewed scope."
+          },
+          "404": {
+            "description": "Image or acceptance not found in the current organization."
+          },
+          "409": {
+            "description": "Reviewed image or cluster changed, or an active acceptance already uses this expiry."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/api/v1/assets/{id}/image-acceptances/{acceptanceID}/revoke": {
       "post": {
-        "summary": "Revoke a digest-scoped image risk acceptance"
+        "summary": "Revoke a digest-scoped image risk acceptance",
+        "description": "The console sends both reviewed scope fields. The server locks the asset and image through the write and returns 409 if their identity changed. Legacy callers may omit both fields.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expected_image_digest": {
+                    "type": "string",
+                    "description": "Reviewed image digest. Send together with cluster_id to reject a changed image or cluster atomically."
+                  },
+                  "cluster_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Reviewed asset cluster. Required when expected_image_digest is supplied."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Mutation committed for the returned asset, cluster and digest. The acceptance history is scoped to that digest.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "asset_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "cluster_id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "nullable": true
+                    },
+                    "image_digest": {
+                      "type": "string"
+                    },
+                    "image_acceptances": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "revoked"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input or incomplete reviewed scope."
+          },
+          "404": {
+            "description": "Image or acceptance not found in the current organization."
+          },
+          "409": {
+            "description": "Reviewed image or cluster changed, or an active acceptance already uses this expiry."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/api/v1/assets/{id}/vulnerabilities": {

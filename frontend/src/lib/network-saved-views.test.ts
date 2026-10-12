@@ -6,6 +6,8 @@ import {
   mergeNetworkSavedViews,
   networkActivitySavedViewsStorageKey,
   parseNetworkSavedViewsImport,
+  previewNetworkSavedViewsImport,
+  normalizeNetworkSavedViewSnapshot,
   suggestNetworkSavedViewName,
   type NetworkSavedView,
 } from "./network-saved-views";
@@ -188,6 +190,19 @@ describe("network activity saved views", () => {
     expect(suggestNetworkSavedViewName(view.filters)).toBe("Map 24h all namespaces all verdicts");
   });
 });
+
+it.each([
+  { hours: 0 }, { workspace_tab: "unknown" }, { schema_version: 99 }, { protocols: {} }, { verdicts_visible: { allow: "false" } },
+  { session_filters: { port: "invalid" } }, { pcap_filters: { dst_port: "70000" } }, { conversation_filters: { from: "prod/api", to: "prod/ui", verdict_group: "invented" } },
+])("rejects a malformed snapshot instead of silently broadening filters: %j", invalid => {
+  expect(normalizeNetworkSavedViewSnapshot({ ...makeView("id", "Named").filters, ...invalid })).toBeNull();
+});
+it("previews rejected records and a different source cluster before explicit rebinding", () => {
+  const preview = previewNetworkSavedViewsImport(JSON.stringify({ ...buildNetworkSavedViewsExport("old-cluster", [makeView("id", "Named")]), views: [makeView("id", "Named"), { id: "bad", name: "Broken", filters: {} }] }), "new-cluster");
+  expect(preview.rejected).toBe(1); expect(preview.sourceCluster).toBe("old-cluster"); expect(preview.views[0].cluster_id).toBe("new-cluster");
+});
+it.each(["{}", "{broken", JSON.stringify({ schema_version: 3, views: [] }), JSON.stringify({ kind: "other", views: [] })])("rejects invalid import envelopes with a meaningful error", text => { expect(() => previewNetworkSavedViewsImport(text, "cluster")).toThrow(); });
+it("preserves long exact workload filters instead of truncating them", () => { const view = makeView("id", "Named"); const workload = `prod/${"api".repeat(100)}`; view.filters.session_filters.workload = workload; view.filters.pcap_filters.workload = workload; expect(normalizeNetworkSavedViewSnapshot(view.filters)?.session_filters.workload).toBe(workload); expect(parseNetworkSavedViewsImport(JSON.stringify([view]), "cluster")[0].filters.pcap_filters.workload).toBe(workload); });
 
 function makeView(id: string, name: string): NetworkSavedView {
   return {

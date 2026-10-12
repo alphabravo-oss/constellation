@@ -110,7 +110,7 @@ export function buildNetworkSavedViewSnapshot(input: {
 }
 
 export function normalizeNetworkSavedViewSnapshot(value: unknown): NetworkSavedViewSnapshot | null {
-  if (!isRecord(value)) return null;
+  if (!isValidNetworkSnapshotInput(value)) return null;
   return {
     conversation_filters: normalizeConversationFilters(value.conversation_filters),
     schema_version: NETWORK_SAVED_VIEW_SCHEMA_VERSION,
@@ -136,7 +136,7 @@ export function normalizeNetworkSavedViewSnapshot(value: unknown): NetworkSavedV
 }
 
 export function normalizeNetworkSavedView(value: unknown, clusterID?: string): NetworkSavedView | null {
-  if (!isRecord(value) || typeof value.id !== "string" || typeof value.name !== "string") return null;
+  if (!isRecord(value) || typeof value.id !== "string" || !value.id.trim() || typeof value.name !== "string" || !value.name.trim() || value.name.trim().length > 120) return null;
   const filters = normalizeNetworkSavedViewSnapshot(value.filters);
   if (!filters) return null;
   return {
@@ -148,16 +148,23 @@ export function normalizeNetworkSavedView(value: unknown, clusterID?: string): N
   };
 }
 
+export interface NetworkSavedViewsImportPreview { views: NetworkSavedView[]; rejected: number; sourceCluster: string | null }
+export function previewNetworkSavedViewsImport(text: string, clusterID: string): NetworkSavedViewsImportPreview {
+  if (text.length > 2_000_000) throw new Error("Import files must be at most 2 MB.");
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { throw new Error("Choose a valid JSON saved-view file."); }
+  if (!Array.isArray(parsed) && (!isRecord(parsed) || !Array.isArray(parsed.views))) throw new Error("The file must contain an array of network saved views or a saved-view export bundle.");
+  if (isRecord(parsed) && ((parsed.schema_version !== undefined && parsed.schema_version !== NETWORK_SAVED_VIEW_SCHEMA_VERSION) || (parsed.kind !== undefined && parsed.kind !== NETWORK_SAVED_VIEW_KIND))) throw new Error("The saved-view bundle kind or schema version is unsupported.");
+  const entries = Array.isArray(parsed) ? parsed : (parsed as { views: unknown[] }).views;
+  if (entries.length > 1000) throw new Error("Import at most 1,000 saved views at a time.");
+  const views = entries.map(view => normalizeNetworkSavedView(view, clusterID)).filter((view): view is NetworkSavedView => Boolean(view));
+  return { views, rejected: entries.length - views.length, sourceCluster: isRecord(parsed) && typeof parsed.cluster_id === "string" ? parsed.cluster_id : null };
+}
 export function parseNetworkSavedViewsImport(text: string, clusterID: string): NetworkSavedView[] {
-  const parsed = JSON.parse(text) as unknown;
-  const views = Array.isArray(parsed)
-    ? parsed
-    : isRecord(parsed) && Array.isArray(parsed.views)
-      ? parsed.views
-      : [];
-  return views
-    .map((view) => normalizeNetworkSavedView(view, clusterID))
-    .filter((view): view is NetworkSavedView => Boolean(view));
+  return previewNetworkSavedViewsImport(text, clusterID).views;
+}
+export function isNetworkSavedView(value: unknown, clusterID: string): value is NetworkSavedView {
+  return isRecord(value) && value.cluster_id === clusterID && Boolean(normalizeNetworkSavedView(value));
 }
 
 export function mergeNetworkSavedViews(
@@ -314,8 +321,10 @@ function normalizePortFilter(value: unknown) {
   return Number.isInteger(n) && n > 0 && n <= 65535 ? String(n) : "";
 }
 
-function normalizeTextFilter(value: unknown, maxLen = 128) {
-  return typeof value === "string" ? value.trim().slice(0, maxLen) : "";
+function normalizeTextFilter(value: unknown, maxLen?: number) {
+  if (typeof value !== "string") return "";
+  const text = value.trim();
+  return maxLen === undefined ? text : text.slice(0, maxLen);
 }
 
 function normalizeNodeKinds(values: unknown[]): NetworkSavedNodeKind[] {
@@ -342,4 +351,42 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function normalizeConversationFilters(value: unknown): { from: string; to: string; verdict_group: "" | "blocked" } {
   const input = isRecord(value) ? value : {};
   return { from: typeof input.from === "string" ? input.from.trim() : "", to: typeof input.to === "string" ? input.to.trim() : "", verdict_group: input.verdict_group === "blocked" ? "blocked" : "" };
+}
+
+// Legacy snapshots may omit fields introduced in schema 2. Provided filters
+// must still be valid: importing must never silently erase a restrictive filter.
+function isValidNetworkSnapshotInput(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value) || (value.schema_version !== undefined && value.schema_version !== 2)) return false;
+  if (!NETWORK_SAVED_WORKSPACE_TABS.includes(value.workspace_tab as NetworkSavedWorkspaceTab) || typeof value.hours !== "number" || !Number.isInteger(value.hours) || value.hours < 1 || value.hours > 720) return false;
+  if (typeof value.namespace !== "string" || !NETWORK_SAVED_VERDICTS.includes(value.verdict as NetworkSavedVerdict) || !NETWORK_SAVED_SCOPE_MODES.includes(value.scope_mode as NetworkSavedScopeMode)) return false;
+  if (!isRecord(value.verdicts_visible) || !NETWORK_SAVED_VERDICT_GROUPS.every(key => typeof (value.verdicts_visible as Record<string, unknown>)[key] === "boolean")) return false;
+  if (![value.protocols, value.namespaces].every(list => Array.isArray(list) && list.every(item => typeof item === "string"))) return false;
+  if (!Array.isArray(value.hidden_kinds) || !value.hidden_kinds.every(kind => NETWORK_SAVED_NODE_KINDS.includes(kind))) return false;
+  if (value.hide_platform_components !== undefined && typeof value.hide_platform_components !== "boolean") return false;
+  if (value.hide_kube_system !== undefined && typeof value.hide_kube_system !== "boolean") return false;
+  if (value.group !== undefined && typeof value.group !== "string") return false;
+  if (value.conversation_filters !== undefined) {
+    const pair = value.conversation_filters;
+    if (!isRecord(pair) || typeof pair.from !== "string" || typeof pair.to !== "string" || !["", "blocked"].includes(pair.verdict_group as string)) return false;
+  }
+  if (value.session_filters !== undefined) {
+    if (!isRecord(value.session_filters)) return false;
+    const input = value.session_filters;
+    if (!Object.values(input).every(item => typeof item === "string")) return false;
+    if (input.protocol !== undefined && normalizeSessionProtocol(input.protocol) !== input.protocol) return false;
+    if (input.port !== undefined && normalizePortFilter(input.port) !== input.port) return false;
+  }
+  if (value.pcap_filters !== undefined) {
+    if (!isRecord(value.pcap_filters)) return false;
+    const input = value.pcap_filters;
+    if (!Object.entries(input).every(([key, item]) => key === "duration_s" ? typeof item === "number" && Number.isInteger(item) && item >= 5 && item <= 300 : typeof item === "string")) return false;
+    if (typeof input.bpf_filter === "string" && input.bpf_filter.length > 1024) return false;
+    if (typeof input.interface === "string" && input.interface.length > 15) return false;
+    if (input.status !== undefined && normalizePcapStatus(input.status) !== input.status) return false;
+    if (input.protocol !== undefined && normalizePcapProtocol(input.protocol) !== input.protocol) return false;
+    if (input.dst_port !== undefined && normalizePortFilter(input.dst_port) !== input.dst_port) return false;
+    if (input.file_count !== undefined && normalizePcapFileCount(input.file_count) !== input.file_count) return false;
+    if (input.file_size_mb !== undefined && normalizePcapFileSizeMB(input.file_size_mb) !== input.file_size_mb) return false;
+  }
+  return true;
 }

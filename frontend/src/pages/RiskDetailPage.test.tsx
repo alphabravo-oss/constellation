@@ -109,7 +109,7 @@ it.each(["network", "process", "files", "compliance"])("does not invent an asset
 
 it("uses embedded deployment evidence with source limits and exact directed network links", async () => {
   await render("deployment", "deployment", "?tab=network"); await settled(() => expect(host.textContent).toContain("payments/db"));
-  expect(deployments.get).toHaveBeenCalledWith("deployment"); expect(findings.list).not.toHaveBeenCalled(); expect(host.textContent).toContain("At most 100 network flows");
+  expect(deployments.get).toHaveBeenCalledWith("deployment"); expect(findings.list).not.toHaveBeenCalled(); expect(host.textContent).toContain("At most 50 network flows");
   expect(host.querySelector('a[href="/clusters/cluster/network?tab=conversations&hours=24&from=payments%2Fapp&to=payments%2Fdb&hide_platform=false"]')).not.toBeNull();
   await tab("Process"); await settled(() => expect(host.textContent).toContain("actual-process")); expect(host.textContent).toContain("Latest 50 events"); expect(host.textContent).toContain("No 24-hour time bound");
   await tab("Compliance"); await settled(() => expect(host.textContent).toContain("actual deployment evidence")); expect(compliance.summary).not.toHaveBeenCalled();

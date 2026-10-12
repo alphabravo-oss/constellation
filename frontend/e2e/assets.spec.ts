@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { getAuthToken, login } from "./utils";
+import { assetEvidencePath, installAssetEvidenceFixture } from "./fixtures/asset-evidence";
 
 test.beforeEach(async ({ page }) => {
   await login(page);
@@ -38,27 +39,28 @@ test("Assets inventory exposes risk rollups, filters, and inspection preview", a
   await expect(page.getByTestId("asset-preview")).toContainText("SBOMs");
 });
 
-test("Asset detail exposes image, findings, and SBOM context", async ({ page }) => {
-  await page.goto("/assets");
-  await expect(page.getByTestId("assets-table")).toBeVisible();
-  await page.getByTestId("asset-row").filter({ hasText: "ghcr.io/demo/api" }).getByRole("link").click();
+test("Asset detail deep-links evidence and uses a dedicated risk form with Cancel", async ({ page }) => {
+  const writes = await installAssetEvidenceFixture(page);
+  await page.goto(assetEvidencePath);
   await expect(page.getByRole("heading", { name: "ghcr.io/demo/api" })).toBeVisible();
-  await expect(page.getByTestId("asset-image-card")).toContainText("ghcr.io");
+  await expect(page.getByTestId("asset-stats").locator(":scope > *")).toHaveCount(4);
   await expect(page.getByTestId("asset-findings")).toContainText("glibc heap overflow");
+  await expect(page.getByTestId("asset-image-card")).toBeHidden();
+  await page.getByRole("tab", { name: "Image metadata", exact: true }).click();
+  await expect(page).toHaveURL(/tab=image/);
+  await expect(page.getByTestId("asset-image-card")).toContainText("ghcr.io");
+  await page.getByRole("tab", { name: "Software inventories", exact: true }).click();
   await expect(page.getByTestId("asset-sbom-card")).toContainText("spdx-2.3");
-  await expect(page.getByTestId("image-acceptance-card")).toContainText("none");
-
-  const until = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  await page.getByTestId("image-accept-rationale").fill("Compensating runtime controls are active");
-  await page.getByTestId("image-accept-until").fill(until);
-  const created = page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname.endsWith("/image-acceptances"));
-  await page.getByTestId("image-accept-submit").click();
-  expect((await created).status()).toBe(201);
-  await expect(page.getByTestId("image-acceptance-card")).toContainText("active");
-  await expect(page.getByTestId("image-acceptance-card")).toContainText("Compensating runtime controls are active");
-
-  const revoked = page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname.endsWith("/revoke"));
-  await page.getByTestId("image-accept-revoke").click();
-  expect((await revoked).status()).toBe(200);
-  await expect(page.getByTestId("image-acceptance-card")).toContainText("revoked");
+  await expect(page.getByTestId("asset-sbom-card")).toContainText("latest inventory per format");
+  await page.getByRole("tab", { name: "Risk acceptance", exact: true }).click();
+  await expect(page.getByTestId("image-acceptance-card")).toContainText("No image acceptance history returned");
+  await expect(page.locator("textarea")).toHaveCount(0);
+  await page.getByRole("link", { name: "Accept image risk", exact: true }).click();
+  await expect(page).toHaveURL(/\/image-acceptance\/new$/);
+  await expect(page.getByRole("heading", { name: "Accept image risk", exact: true })).toBeVisible();
+  await page.getByLabel(/^Rationale/).fill("Reviewing the current digest without saving");
+  await page.getByRole("link", { name: "Cancel", exact: true }).click();
+  await expect(page).toHaveURL(/tab=acceptance/);
+  await expect(page.getByTestId("image-acceptance-card")).toBeVisible();
+  expect(writes).toHaveLength(0);
 });

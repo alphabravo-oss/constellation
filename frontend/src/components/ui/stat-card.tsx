@@ -17,6 +17,7 @@ export function StatGrid({ className, ...props }: HTMLAttributes<HTMLElement>) {
 export function StatCard({
   label,
   value,
+  valueKind = "number",
   delta,
   trend,
   href,
@@ -27,6 +28,8 @@ export function StatCard({
 }: {
   label: string;
   value: ReactNode;
+  /** Text metadata uses the shared compact value typography. */
+  valueKind?: "number" | "text";
   delta?: { value: string; positive?: boolean };
   trend?: number[];
   href?: string;
@@ -61,7 +64,8 @@ export function StatCard({
           </div>
           <div className="mt-1 flex flex-wrap items-baseline gap-2">
             <span
-              className="[overflow-wrap:anywhere] min-w-0 text-display text-3xl font-semibold tabular-nums"
+              className="app-stat-value [overflow-wrap:anywhere] min-w-0 text-display font-semibold tabular-nums"
+              data-kind={valueKind}
               style={{ color: tone === "neutral" ? "var(--color-foreground)" : toneColor }}
             >
               {value}

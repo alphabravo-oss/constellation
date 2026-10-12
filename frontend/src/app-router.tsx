@@ -68,6 +68,11 @@ const DashboardPage         = lazy(() => import("./pages/DashboardPage").then((m
 const FindingsPage          = lazy(() => import("./pages/FindingsPage").then((m) => ({ default: m.FindingsPage })));
 const FindingSavedViewFormPage = lazy(() => import("./pages/InventorySavedViewFormPage").then(m => ({ default: m.FindingSavedViewFormPage })));
 const TimelineSavedViewFormPage = lazy(() => import("./pages/InventorySavedViewFormPage").then(m => ({ default: m.TimelineSavedViewFormPage })));
+const NetworkSavedViewFormPage = lazy(() => import("./pages/NetworkSavedViewFormPage").then(m => ({ default: m.NetworkSavedViewFormPage })));
+const NetworkSavedViewImportPage = lazy(() => import("./pages/NetworkSavedViewFormPage").then(m => ({ default: m.NetworkSavedViewImportPage })));
+const NetworkPcapFormPage = lazy(() => import("./pages/NetworkPcapFormPage").then(m => ({ default: m.NetworkPcapFormPage })));
+const AssetImageAcceptanceFormPage = lazy(() => import("./pages/AssetImageAcceptanceFormPage").then(m => ({ default: m.AssetImageAcceptanceFormPage })));
+const DeploymentActionFormPage = lazy(() => import("./pages/DeploymentActionFormPage").then(m => ({ default: m.DeploymentActionFormPage })));
 const FindingDetailPage     = lazy(() => import("./pages/FindingDetailPage").then((m) => ({ default: m.FindingDetailPage })));
 const FindingAcceptRiskFormPage = lazy(() => import("./pages/FindingActionFormPage").then(m => ({default:m.FindingAcceptRiskFormPage})));
 const FindingSuppressFormPage = lazy(() => import("./pages/FindingActionFormPage").then(m => ({default:m.FindingSuppressFormPage})));
@@ -213,6 +218,12 @@ const cluster_network_actionRoute = createRoute({getParentRoute:()=>app_clusters
 const cluster_findingsRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "findings", component: () => (<SuspenseRoute><FindingsPage /></SuspenseRoute>) });
 const cluster_findings_savedViewRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "findings/views/new", component: () => <SuspenseRoute><FindingSavedViewFormPage /></SuspenseRoute> });
 const cluster_timeline_savedViewRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "timeline/views/new", component: () => <SuspenseRoute><TimelineSavedViewFormPage /></SuspenseRoute> });
+const cluster_network_savedViewRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "network/views/new", component: () => <SuspenseRoute><NetworkSavedViewFormPage /></SuspenseRoute> });
+const cluster_network_importViewsRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "network/views/import", component: () => <SuspenseRoute><NetworkSavedViewImportPage /></SuspenseRoute> });
+const cluster_network_pcap_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "network/pcap/new", component: () => <SuspenseRoute><NetworkPcapFormPage /></SuspenseRoute> });
+const cluster_asset_acceptance_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "assets/$aid/image-acceptance/new", component: () => <SuspenseRoute><AssetImageAcceptanceFormPage action="create" /></SuspenseRoute> });
+const cluster_asset_acceptance_revokeRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "assets/$aid/image-acceptance/$acceptanceId/revoke", component: () => <SuspenseRoute><AssetImageAcceptanceFormPage action="revoke" /></SuspenseRoute> });
+const cluster_deployment_actionRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "deployments/$did/actions/$action", component: () => <SuspenseRoute><DeploymentActionFormPage /></SuspenseRoute> });
 const cluster_findings_fidRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "findings/$fid", component: () => (<SuspenseRoute><FindingDetailPage /></SuspenseRoute>) });
 const cluster_finding_acceptRoute = createRoute({getParentRoute:()=>app_clusters_idRoute,path:"findings/$fid/accept-risk",component:()=><SuspenseRoute><FindingAcceptRiskFormPage /></SuspenseRoute>});
 const cluster_finding_suppressRoute = createRoute({getParentRoute:()=>app_clusters_idRoute,path:"findings/$fid/suppress",component:()=><SuspenseRoute><FindingSuppressFormPage /></SuspenseRoute>});
@@ -439,6 +450,12 @@ authenticatedRoute.addChildren([
   cluster_network_actionRoute,
   cluster_findings_savedViewRoute,
   cluster_timeline_savedViewRoute,
+  cluster_network_savedViewRoute,
+  cluster_network_importViewsRoute,
+  cluster_network_pcap_newRoute,
+  cluster_asset_acceptance_newRoute,
+  cluster_asset_acceptance_revokeRoute,
+  cluster_deployment_actionRoute,
   cluster_findings_fidRoute,
   cluster_finding_acceptRoute,
   cluster_finding_suppressRoute,
