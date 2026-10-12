@@ -122,6 +122,8 @@ const AuditPage             = lazy(() => import("./pages/AuditPage").then((m) =>
 const ClusterHealthPage     = lazy(() => import("./pages/ClusterHealthPage").then((m) => ({ default: m.ClusterHealthPage })));
 const BaselinesPage         = lazy(() => import("./pages/BaselinesPage").then((m) => ({ default: m.BaselinesPage })));
 const BaselineDetailPage    = lazy(() => import("./pages/baselines/BaselineDetailPage").then((m) => ({ default: m.BaselineDetailPage })));
+const BaselineRuleFormPage = lazy(() => import("./pages/baselines/BaselineRuleFormPage").then((m) => ({ default: m.BaselineRuleFormPage })));
+const BaselineActionFormPage = lazy(() => import("./pages/baselines/BaselineActionFormPage").then((m) => ({ default: m.BaselineActionFormPage })));
 const PolicyFormPage        = lazy(() => import("./pages/PolicyFormPage").then((m) => ({ default: m.PolicyFormPage })));
 const ResponseRuleFormPage  = lazy(() => import("./pages/ResponseRuleFormPage").then((m) => ({ default: m.ResponseRuleFormPage })));
 const RuntimePolicyFormPage = lazy(() => import("./pages/RuntimePolicyFormPage").then((m) => ({ default: m.RuntimePolicyFormPage })));
@@ -254,6 +256,9 @@ const cluster_exceptionsRoute = createRoute({ getParentRoute: () => app_clusters
 const cluster_runtimeRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "runtime", component: () => (<SuspenseRoute><RuntimePage /></SuspenseRoute>) });
 const cluster_runtime_baselinesRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "runtime/baselines", component: () => (<SuspenseRoute><BaselinesPage /></SuspenseRoute>) });
 const cluster_runtime_baselines_baselineIdRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "runtime/baselines/$baselineId", component: () => (<SuspenseRoute><BaselineDetailPage /></SuspenseRoute>) });
+const cluster_runtime_baseline_rule_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "runtime/baselines/$baselineId/rules/new", component: () => (<SuspenseRoute><BaselineRuleFormPage /></SuspenseRoute>) });
+const cluster_runtime_baseline_rule_editRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "runtime/baselines/$baselineId/rules/$ruleId/edit", component: () => (<SuspenseRoute><BaselineRuleFormPage /></SuspenseRoute>) });
+const cluster_runtime_baseline_actionRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "runtime/baselines/$baselineId/actions/$action", component: () => (<SuspenseRoute><BaselineActionFormPage /></SuspenseRoute>) });
 const cluster_responseRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "response", component: () => (<SuspenseRoute><ResponsePage /></SuspenseRoute>) });
 const cluster_response_rulesRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "response-rules", component: () => (<SuspenseRoute><ResponseRulesPage /></SuspenseRoute>) });
 const cluster_response_rules_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "response-rules/new", component: () => (<SuspenseRoute><ResponseRuleFormPage /></SuspenseRoute>) });
@@ -486,6 +491,9 @@ authenticatedRoute.addChildren([
   cluster_runtimeRoute,
   cluster_runtime_baselinesRoute,
   cluster_runtime_baselines_baselineIdRoute,
+  cluster_runtime_baseline_rule_newRoute,
+  cluster_runtime_baseline_rule_editRoute,
+  cluster_runtime_baseline_actionRoute,
   cluster_responseRoute,
   cluster_response_rulesRoute,
   cluster_response_rules_newRoute,

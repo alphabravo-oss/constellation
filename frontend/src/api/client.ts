@@ -1016,6 +1016,8 @@ export interface ProcessRule {
   rule_id: string;
   name: string;
   path: string;
+  sha256?: string;
+  parent_name?: string;
   action: "allow" | "deny";
   user: string;
   allow_update: boolean;
@@ -1026,6 +1028,10 @@ export interface ProcessRule {
 export interface ProcessRuleInput {
   name: string;
   path?: string;
+  sha256?: string;
+  parent_name?: string;
+  expected_updated_at?: string;
+  require_absent?: boolean;
   action?: "allow" | "deny";
   user?: string;
   allow_update?: boolean;
@@ -1051,16 +1057,16 @@ export const baselines = {
     api
       .get<BaselineDetail>(`/runtime/baselines/${encodeURIComponent(workloadID)}`, { params })
       .then((r) => r.data),
-  setMode: (workloadID: string, body: { mode: BaselineMode; reason?: string }, params: { cluster_id?: string } = {}) =>
+  setMode: (workloadID: string, body: { mode: BaselineMode; reason?: string; expected_mode?: BaselineMode }, params: { cluster_id?: string } = {}) =>
     api
       .post<BaselineSummary>(`/runtime/baselines/${encodeURIComponent(workloadID)}/mode`, body, { params })
       .then((r) => r.data),
-  createRule: (workloadID: string, body: ProcessRuleInput) =>
-    api.post<ProcessRule>(`/runtime/baselines/${encodeURIComponent(workloadID)}/rules`, body).then((r) => r.data),
-  updateRule: (workloadID: string, ruleID: string, body: ProcessRuleInput) =>
-    api.put<ProcessRule>(`/runtime/baselines/${encodeURIComponent(workloadID)}/rules/${encodeURIComponent(ruleID)}`, body).then((r) => r.data),
-  deleteRule: (workloadID: string, ruleID: string) =>
-    api.delete(`/runtime/baselines/${encodeURIComponent(workloadID)}/rules/${encodeURIComponent(ruleID)}`).then((r) => r.data),
+  createRule: (workloadID: string, body: ProcessRuleInput, params: { cluster_id?: string } = {}) =>
+    api.post<ProcessRule>(`/runtime/baselines/${encodeURIComponent(workloadID)}/rules`, body, { params }).then((r) => r.data),
+  updateRule: (workloadID: string, ruleID: string, body: ProcessRuleInput, params: { cluster_id?: string } = {}) =>
+    api.put<ProcessRule>(`/runtime/baselines/${encodeURIComponent(workloadID)}/rules/${encodeURIComponent(ruleID)}`, body, { params }).then((r) => r.data),
+  deleteRule: (workloadID: string, ruleID: string, params: { cluster_id?: string; expected_updated_at?: string } = {}) =>
+    api.delete<{ deleted: string }>(`/runtime/baselines/${encodeURIComponent(workloadID)}/rules/${encodeURIComponent(ruleID)}`, { params }).then((r) => r.data),
 };
 
 export interface FileProfileSummary {

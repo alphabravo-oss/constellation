@@ -1,40 +1,34 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link, useLocation, useParams } from "@tanstack/react-router";
-import { Activity, Boxes, KeyRound, PackageCheck, ShieldCheck, UploadCloud } from "lucide-react";
-
+import { useLocation, useParams } from "@tanstack/react-router";
+import { Activity, Boxes, KeyRound, ShieldCheck, UploadCloud } from "lucide-react";
 import { clusters } from "@/api/client";
 import { PageHeader, PageContainer } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { StatCard, StatGrid } from "@/components/ui/stat-card";
+import { Tabs, useTabParam } from "@/components/ui/tabs";
+import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { ErrorState, LoadingState } from "@/components/ui/states";
+import { Button } from "@/components/ui/button";
 import { sortClustersByActivity } from "@/lib/clusters";
 import { componentDiagnosticsHref, nvRoleAlias } from "@/lib/component-roles";
-
 type HealthComponent = Awaited<ReturnType<typeof clusters.health>>["components"][number];
-
 export function ClusterHealthPage() {
   const { id: clusterID } = useParams({ strict: false });
   const location = useLocation();
+  const [requestedTab, setTab] = useTabParam("tab", "components");
+  const tab = ["components", "gates", "platform", "registration", "clusters"].includes(requestedTab) ? requestedTab : "components";
   const list = useQuery({ queryKey: ["clusters"], queryFn: () => clusters.list() });
-  const clusterList = useMemo(() => sortClustersByActivity(list.data?.clusters ?? []), [list.data?.clusters]);
-  const selected = useMemo(
-    () => clusterList.find((cluster) => cluster.id === clusterID),
-    [clusterList, clusterID],
-  );
-  const health = useQuery({
-    queryKey: ["cluster-health", selected?.id],
-    queryFn: () => clusters.health(selected!.id),
-    enabled: !!selected?.id,
-  });
-  const platform = useQuery({
-    queryKey: ["cluster-platform", selected?.id],
-    queryFn: () => clusters.platformFacts(selected!.id),
-    enabled: !!selected?.id,
-    refetchInterval: 30_000,
-  });
-
-  if (list.isPending) return <p className="text-sm text-muted-foreground">Loading clusters...</p>;
-
+  const clusterList = useMemo(() => list.isSuccess ? sortClustersByActivity(list.data.clusters) : [], [list.data, list.isSuccess]);
+  const selected = clusterList.find(cluster => cluster.id === clusterID);
+  const health = useQuery({ queryKey: ["cluster-health", selected?.id], enabled: !!selected,
+    queryFn: async () => { const data = await clusters.health(selected!.id); if (data.cluster_id !== selected!.id) throw new Error("Health evidence does not match the selected cluster"); return data; } });
+  const platform = useQuery({ queryKey: ["cluster-platform", selected?.id], enabled: !!selected, refetchInterval: 30_000,
+    queryFn: async () => { const data = await clusters.platformFacts(selected!.id); if (data.cluster_id !== selected!.id || (data.facts && data.facts.cluster_id !== selected!.id)) throw new Error("Platform evidence does not match the selected cluster"); return data; } });
+  const h = selected && health.isSuccess && health.data.cluster_id === selected.id ? health.data : undefined;
+  const p = selected && platform.isSuccess && platform.data.cluster_id === selected.id && (!platform.data.facts || platform.data.facts.cluster_id === selected.id) ? platform.data : undefined;
+  const retryHealth = <Button onClick={() => void health.refetch()}>Retry health</Button>;
+  const healthUnavailable = health.isError || (health.isSuccess && !h);
   const componentColumns: Column<HealthComponent>[] = [
     {
       id: "name",
@@ -43,14 +37,14 @@ export function ClusterHealthPage() {
       cell: (c) => {
         const role = nvRoleAlias({ name: c.name, kind: c.kind });
         return (
-          <Link
-            to="." href={componentDiagnosticsHref({ clusterId: selected?.id, component: c.name, role: role.id })}
+          <a
+            href={componentDiagnosticsHref({ clusterId: selected?.id, component: c.name, role: role.id })}
             className="font-medium hover:text-[color:var(--color-primary)]"
             data-testid={`cluster-health-component-link-${safeTestID(c.name)}`}
             title={`Open ${role.label.toLowerCase()} diagnostics`}
           >
             {c.name}
-          </Link>
+          </a>
         );
       },
     },
@@ -60,134 +54,52 @@ export function ClusterHealthPage() {
     { id: "status", header: "Status", kind: "status", cell: (c) => <Status value={c.status} />, exportValue: (c) => c.status },
   ];
 
-  return (
-    <PageContainer className="space-y-4">
-      <PageHeader
-        title="Cluster Health"
-        description="Sensor readiness, registration bundles, upgrade posture, and health gates for the selected cluster."
-      />
-
-      <StatGrid data-testid="clusters-stats">
-        <StatCard label="Clusters" value={clusterList.length} icon={<Boxes className="h-3.5 w-3.5" />} />
-        <StatCard label="Sensors" value={health.data?.summary.connected_sensors ?? 0} icon={<Activity className="h-3.5 w-3.5" />} />
-        <StatCard label="Gates" value={health.data?.gates.length ?? 0} icon={<ShieldCheck className="h-3.5 w-3.5" />} />
-      </StatGrid>
-
-      <section className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
-        <div className="space-y-3" data-testid="clusters-list">
-          {clusterList.map((cluster) => (
-            <Link
-              key={cluster.id}
-              to="." href={`/clusters/${cluster.id}/health${location.searchStr}${location.hash ? `#${location.hash}` : ""}`}
-              className={`w-full rounded-lg border p-4 text-left transition-colors ${
-                selected?.id === cluster.id ? "border-foreground bg-accent" : "border-border bg-card hover:bg-accent/50"
-              }`}
-              data-testid="cluster-card"
-              data-cluster-id={cluster.id}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-sm font-semibold" data-testid="cluster-health-card-name">{cluster.name}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    {cluster.distro} · {cluster.cloud_provider || "onprem"} · {cluster.region || "unknown"}
-                  </div>
-                </div>
-                <Status value={cluster.state} />
-              </div>
-              <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-                <MiniStat label="Deployments" value={cluster.deployments} />
-                <MiniStat label="Max risk" value={cluster.max_risk} />
-                <MiniStat label="Sensors" value={`${cluster.sensor_health?.ready ?? 0}/${cluster.sensor_health?.total ?? 0}`} />
-              </div>
-              {cluster.upgrade?.available && (
-                <div className="mt-3 rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-                  Upgrade {cluster.upgrade.target_version} · {cluster.upgrade.rollout_status}
-                </div>
-              )}
-            </Link>
-          ))}
-        </div>
-
-        <main className="space-y-4" data-testid="cluster-health-panel">
-          {!selected && <p className="text-sm text-muted-foreground">{clusterList.length ? "Cluster not found." : "No clusters registered yet."}</p>}
-          {selected && (
-            <>
-              <section className="rounded-lg border border-border bg-card p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-lg font-semibold">{selected.name}</h2>
-                    <p className="text-xs text-muted-foreground">
-                      Last check-in {formatDate(health.data?.summary.last_check_in ?? selected.last_heartbeat_at)}
-                    </p>
-                  </div>
-                  <Status value={health.data?.summary.status ?? selected.state} />
-                </div>
-                <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  <CommandBlock icon={UploadCloud} label="Install / upgrade" value={health.data?.registration.helm_command} />
-                  <CommandBlock icon={KeyRound} label="Rotate token" value={health.data?.registration.rotate_command} />
-                </div>
-              </section>
-
-              <section className="rounded-lg border border-border bg-card p-4" data-testid="cluster-platform-panel">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <PackageCheck className="h-4 w-4 text-muted-foreground" aria-hidden />
-                    <div>
-                      <h2 className="text-sm font-semibold">Platform posture</h2>
-                      <p className="text-xs text-muted-foreground">
-                        {platform.data?.facts?.observed_at ? `Observed ${formatDate(platform.data.facts.observed_at)}` : "No platform facts reported"}
-                      </p>
-                    </div>
-                  </div>
-                  <Status value={platform.data?.status ?? "missing"} />
-                </div>
-                <div className="mt-4 grid grid-cols-2 gap-3 text-xs md:grid-cols-5">
-                  <MiniStat label="Kubernetes" value={platform.data?.facts?.kubernetes_git_version || "unknown"} />
-                  <MiniStat label="Distro" value={platform.data?.facts?.distro || selected.distro || "unknown"} />
-                  <MiniStat label="Nodes" value={platform.data?.facts?.node_count ?? 0} />
-                  <MiniStat label="Packages" value={platform.data?.evidence?.package_count ?? 0} />
-                  <MiniStat label="Open vulns" value={platform.data?.findings_summary.open ?? 0} />
-                </div>
-              </section>
-
-              <section className="space-y-4">
-                <div data-testid="cluster-components-table">
-                  <DataTable
-                    rows={health.data?.components ?? []}
-                    columns={componentColumns}
-                    rowKey={(c) => c.name}
-                    exportFileName={`constellation-${selected.id}-components`}
-                    testId="cluster-components-data-table"
-                  />
-                </div>
-
-                {(health.data?.gates ?? []).length > 0 && (
-                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                    {(health.data?.gates ?? []).map((gate) => (
-                      <article key={gate.name} className="rounded-lg border border-border bg-card p-3" data-testid="cluster-health-gate">
-                        <div className="flex items-center justify-between gap-2">
-                          <h3 className="text-sm font-medium">{gate.name}</h3>
-                          <Status value={gate.status} />
-                        </div>
-                        <p className="mt-2 text-xs text-muted-foreground">{gate.evidence}</p>
-                      </article>
-                    ))}
-                  </div>
-                )}
-              </section>
-            </>
-          )}
-        </main>
-      </section>
-    </PageContainer>
-  );
+  return <PageContainer className="space-y-4">
+    <PageHeader title="Cluster Health" description="Reported sensor readiness, platform facts and registration for the selected cluster."
+      actions={<Button variant="outline" disabled={list.isFetching || health.isFetching || platform.isFetching} onClick={() => { void list.refetch(); if (selected) { void health.refetch(); void platform.refetch(); } }}>Refresh</Button>} />
+    <VerdictBanner status={list.isError || healthUnavailable ? "degraded" : h?.summary.status === "healthy" ? "ok" : h ? "degraded" : "info"}
+      title={list.isError ? "Cluster inventory unavailable" : list.isPending ? "Loading cluster scope" : !selected ? "Cluster not found" : healthUnavailable ? "Cluster health unavailable" : !h ? "Loading cluster health" : `${selected.name}: ${h.summary.status}`}
+      detail="Health reflects returned sensor and gate reports. Platform facts and registration details are separate workspaces." />
+    <StatGrid data-testid="clusters-stats">
+      <StatCard label="Reported components" value={h ? h.components.length : "—"} icon={<Boxes className="h-3.5 w-3.5" />} />
+      <StatCard label="Connected sensors" value={h ? h.summary.connected_sensors : "—"} hint={h ? `${h.summary.expected_sensors} expected` : undefined} icon={<Activity className="h-3.5 w-3.5" />} />
+      <StatCard label="Reported gates" value={h ? h.gates.length : "—"} icon={<ShieldCheck className="h-3.5 w-3.5" />} />
+    </StatGrid>
+    <div className="space-y-4" data-testid="cluster-health-panel">
+      {list.isPending ? <LoadingState label="Loading clusters…" /> : list.isError ? <ErrorState title="Cluster inventory unavailable" error={list.error} action={<Button onClick={() => void list.refetch()}>Retry clusters</Button>} /> : !selected ? <ErrorState title="Cluster not found" /> : <>
+      <h2 className="text-lg font-semibold">{selected.name}</h2>
+      <Tabs value={tab} onValueChange={setTab} items={[
+        { value: "components", label: "Components", content: healthUnavailable ? <ErrorState title="Cluster health unavailable" error={health.error} action={retryHealth} /> : !h ? <LoadingState label="Loading health reports…" /> : <div data-testid="cluster-components-table"><DataTable rows={h.components} columns={componentColumns} rowKey={c => c.name} preferencesKey="cluster-health-components" exportFileName={`constellation-${selected.id}-components`} testId="cluster-components-data-table" /></div> },
+        { value: "gates", label: "Health gates", content: healthUnavailable ? <ErrorState title="Cluster health unavailable" error={health.error} action={retryHealth} /> : !h ? <LoadingState /> : <DataTable rows={h.gates} rowKey={g => g.name} rowTestId={() => "cluster-health-gate"} preferencesKey="cluster-health-gates" exportFileName={`constellation-${selected.id}-gates`} columns={[
+          { id: "name", header: "Gate", kind: "name", cell: g => g.name, exportValue: g => g.name },
+          { id: "status", header: "Status", kind: "status", cell: g => <Status value={g.status} />, exportValue: g => g.status },
+          { id: "evidence", header: "Evidence", kind: "text", wrap: true, grow: true, cell: g => g.evidence, exportValue: g => g.evidence },
+        ]} /> },
+        { value: "platform", label: "Platform facts", content: platform.isError || (platform.isSuccess && !p) ? <ErrorState title="Platform facts unavailable" error={platform.error} action={<Button onClick={() => void platform.refetch()}>Retry platform</Button>} /> : !p ? <LoadingState label="Loading platform facts…" /> : <section className="rounded-md border border-border bg-card p-4" data-testid="cluster-platform-panel">
+          <div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-semibold">Platform posture</h3><Status value={p.status} /></div>
+          <p className="mt-2 text-xs text-muted-foreground">{p.facts?.observed_at ? `Observed ${formatDate(p.facts.observed_at)}` : "No platform facts reported"}</p>
+          <dl className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            <MiniStat label="Kubernetes" value={p.facts?.kubernetes_git_version || "Not reported"} />
+            <MiniStat label="Distro" value={p.facts?.distro || "Not reported"} />
+            <MiniStat label="Nodes" value={p.facts?.node_count ?? "Not reported"} />
+            <MiniStat label="Packages" value={p.evidence?.package_count ?? "Not reported"} />
+            <MiniStat label="Open findings" value={p.findings_summary?.open ?? "Not reported"} />
+          </dl>
+          <a href={`/clusters/${selected.id}/dashboard?tab=operations`} className="mt-4 inline-block text-sm text-primary hover:underline">Inspect platform package evidence</a>
+        </section> },
+        { value: "registration", label: "Registration", content: healthUnavailable ? <ErrorState title="Registration evidence unavailable" error={health.error} action={retryHealth} /> : !h ? <LoadingState /> : <section className="space-y-4"><p className="text-sm text-muted-foreground">Last check-in {formatDate(h.summary.last_check_in)} · {h.summary.registration_state}</p><CommandBlock icon={UploadCloud} label="Install / upgrade" value={h.registration.helm_command} /><CommandBlock icon={KeyRound} label="Rotate token" value={h.registration.rotate_command} /></section> },
+        { value: "clusters", label: "Other clusters", content: <div className="grid gap-4 md:grid-cols-2" data-testid="clusters-list">{clusterList.map(cluster => <a key={cluster.id} href={`/clusters/${cluster.id}/health${location.searchStr}${location.hash ? `#${location.hash}` : ""}`} className="rounded-md border border-border bg-card p-4 hover:bg-accent" data-testid="cluster-card" data-cluster-id={cluster.id}><span className="font-medium" data-testid="cluster-health-card-name">{cluster.name}</span><p className="mt-2 text-xs text-muted-foreground">{cluster.distro} · {cluster.cloud_provider || "onprem"}</p></a>)}</div> },
+      ]} />
+      </>}
+    </div>
+  </PageContainer>;
 }
 
 function MiniStat({ label, value }: { label: string; value: number | string }) {
   return (
     <div>
-      <div className="text-[10px] uppercase text-muted-foreground">{label}</div>
-      <div className="font-semibold">{value}</div>
+      <dt className="text-[10px] uppercase text-muted-foreground">{label}</dt>
+      <dd className="font-semibold">{value}</dd>
     </div>
   );
 }
@@ -199,7 +111,7 @@ function CommandBlock({ icon: Icon, label, value }: { icon: typeof UploadCloud; 
         <Icon className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
         {label}
       </div>
-      <code className="block overflow-x-auto rounded bg-muted p-2 text-xs">{value ?? "pending health data"}</code>
+      <code className="block overflow-x-auto rounded bg-muted p-2 text-xs">{value ?? "Not reported"}</code>
     </div>
   );
 }

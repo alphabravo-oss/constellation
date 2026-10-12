@@ -1,146 +1,60 @@
-// BaselinesPage — Wave L4. Process Baseline lifecycle kanban (NeuVector parity).
-//
-// Three columns: Learn (gray) | Monitor (amber) | Enforce (green/red).
-// Each card represents one workload's process baseline. Click → navigates to the
-// dedicated detail page (runtime/baselines/:baselineId) with the full process
-// table + audit timeline + promote/rollback actions (Astronomer detail-as-a-page).
-//
-// Cluster-scoped: every fetch threads cluster_id (derived from useCluster()).
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Activity, AlertTriangle, GitMerge, ShieldCheck, Sparkles, Clock3 } from "lucide-react";
-
-import {
-  baselines as baselinesApi,
-  type BaselineSummary,
-  type BaselineMode,
-} from "@/api/client";
-import { EntityHeader } from "@/components/EntityHeader";
-import { useCluster } from "@/hooks/useCluster";
+import { Activity, AlertTriangle, ShieldCheck, Sparkles, Clock3 } from "lucide-react";
+import { baselines as baselinesApi, type BaselineSummary, type BaselineMode } from "@/api/client";
+import { PageHeader } from "@/components/ui/page";
 import { StatusPill, ModePill } from "@/components/ui/status-pill";
+import { DataTable, type Column as TableColumn } from "@/components/ui/data-table";
+import { StatGrid, StatCard } from "@/components/ui/stat-card";
+import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { Tabs, useTabParam } from "@/components/ui/tabs";
+import { Collapse } from "@/components/ui/collapse";
+import { ErrorState, LoadingState } from "@/components/ui/states";
+import { Button } from "@/components/ui/button";
+import { useRouteSearchParams } from "@/lib/route-search";
 import { cn } from "@/lib/cn";
+import { useBaselineScope, baselinePath, SOURCE_NOTE } from "./baselines/context";
 
-const COLUMNS: Array<{
-  mode: BaselineMode;
-  title: string;
-  tagline: string;
-  tone: "info" | "warning" | "success";
-  icon: typeof Activity;
-}> = [
-  { mode: "learn",   title: "Learn",   tagline: "Observing processes — no alerts emitted.",  tone: "info",    icon: Activity },
-  { mode: "monitor", title: "Monitor", tagline: "Baseline frozen — alerts on deviation.",     tone: "warning", icon: AlertTriangle },
-  { mode: "enforce", title: "Enforce", tagline: "Block + alert on out-of-baseline exec.",     tone: "success", icon: ShieldCheck },
+const COLUMNS: Array<{ mode: BaselineMode; title: string; tagline: string; tone: "info" | "warning" | "success"; icon: typeof Activity }> = [
+ { mode: "learn", title: "Learn", tagline: "Configured to learn observed processes.", tone: "info", icon: Activity },
+ { mode: "monitor", title: "Monitor", tagline: "Configured to report baseline deviations.", tone: "warning", icon: AlertTriangle },
+ { mode: "enforce", title: "Enforce", tagline: "Configured to block deviations; check agent evidence.", tone: "success", icon: ShieldCheck },
 ];
-
 export function BaselinesPage() {
-  const { clusterId, cluster, isLoading: clusterLoading } = useCluster();
-  const navigate = useNavigate();
-  const [autoPromote, setAutoPromote] = useState(false);
-
-  const listQ = useQuery({
-    queryKey: ["baselines", clusterId],
-    queryFn: () => baselinesApi.list({ cluster_id: clusterId }),
-    enabled: !!clusterId,
-  });
-
-  const profiles = useMemo(() => listQ.data?.profiles ?? [], [listQ.data?.profiles]);
-  const summary = listQ.data?.summary;
-  const byMode = useMemo(() => {
-    const groups: Record<BaselineMode, BaselineSummary[]> = { learn: [], monitor: [], enforce: [] };
-    profiles.forEach((p) => groups[p.mode].push(p));
-    return groups;
-  }, [profiles]);
-
-  const autoPromoteCandidates = useMemo(
-    () => profiles.filter((p) => p.mode === "learn" && qualifiesForAutoPromote(p)).map((p) => p.workload_id),
-    [profiles],
-  );
-
-  if (clusterLoading) {
-    return (
-      <p className="text-sm text-muted-foreground" data-testid="baselines-loading">
-        Loading cluster…
-      </p>
-    );
-  }
-
-  const clusterName = cluster?.name ?? "—";
-
-  return (
-    <div className="space-y-5" data-testid="baselines-page" data-cluster-id={clusterId ?? ""}>
-      <EntityHeader
-        breadcrumbs={[
-          { label: "Clusters", to: "/clusters" },
-          { label: clusterName, to: clusterId ? `/clusters/${clusterId}/dashboard` : "/clusters" },
-          { label: "Runtime", to: clusterId ? `/clusters/${clusterId}/runtime` : "/clusters" },
-          { label: "Process Baselines" },
-        ]}
-        title={
-          <span className="inline-flex items-center gap-2">
-            <GitMerge className="h-5 w-5 text-primary" aria-hidden />
-            Process Baselines · {clusterName}
-          </span>
-        }
-        subtitle="Learn → Monitor → Enforce lifecycle per workload, mirroring NeuVector's process-profile model."
-        stats={[
-          { label: "Workloads", value: profiles.length },
-          { label: "Learning",  value: summary?.learn   ?? 0, tone: "neutral" },
-          { label: "Monitoring",value: summary?.monitor ?? 0, tone: "high" },
-          { label: "Enforcing", value: summary?.enforce ?? 0, tone: "accent" },
-        ]}
-        actions={
-          <label className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-xs">
-            <input
-              type="checkbox"
-              className="h-3.5 w-3.5"
-              checked={autoPromote}
-              onChange={(e) => setAutoPromote(e.target.checked)}
-              data-testid="baselines-auto-promote-toggle"
-            />
-            <Sparkles className="h-3.5 w-3.5 text-primary" aria-hidden />
-            <span className="font-medium">Auto-promote hint</span>
-            <span className="text-muted-foreground">
-              {autoPromote ? `${autoPromoteCandidates.length} ready` : "off"}
-            </span>
-          </label>
-        }
-      />
-
-      {autoPromote && (
-        <p className="rounded-md border border-border bg-status-warning/5 px-3 py-2 text-xs text-muted-foreground">
-          Auto-promote is a UI hint only. Workloads with a learn-start &gt; 14d ago AND no new process seen in 24h are
-          highlighted below — promotion still requires a click on the workload card.
-        </p>
-      )}
-
-      <section
-        className="grid gap-4 lg:grid-cols-3"
-        data-testid="baselines-columns"
-      >
-        {COLUMNS.map((col) => (
-          <Column
-            key={col.mode}
-            mode={col.mode}
-            title={col.title}
-            tagline={col.tagline}
-            tone={col.tone}
-            Icon={col.icon}
-            profiles={byMode[col.mode]}
-            onSelect={(id) =>
-              navigate({ href: clusterId
-                  ? `/clusters/${clusterId}/runtime/baselines/${encodeURIComponent(id)}`
-                  : "/clusters" })
-            }
-            highlightIDs={autoPromote ? autoPromoteCandidates : []}
-            loading={listQ.isPending}
-          />
-        ))}
-      </section>
-    </div>
-  );
+ const scope = useBaselineScope(); const { clusterId, scopeReady } = scope;
+ const navigate = useNavigate(); const [highlight, setHighlight] = useState(false);
+ const [tab, setTab] = useTabParam("tab", "inventory"); const [params, setParams] = useRouteSearchParams();
+ const q = useQuery({ queryKey: ["baselines", clusterId], enabled: scopeReady, queryFn: () => baselinesApi.list({ cluster_id: clusterId }) });
+ const valid = scopeReady && q.isSuccess && !q.isError && q.data?.profiles.every(p => p.cluster_id === clusterId && ["learn", "monitor", "enforce"].includes(p.mode));
+ const profiles = valid ? q.data!.profiles : undefined;
+ const search = params.get("q") ?? ""; const namespace = params.get("namespace") ?? "";
+ const filtered = profiles?.filter(p => (!namespace || p.namespace === namespace) && (!search || `${p.namespace}/${p.name}`.toLowerCase().includes(search.toLowerCase()))) ?? [];
+ const update = (key: string, value: string) => setParams(current => { if (value) current.set(key, value); else current.delete(key); return current; }, { replace: key === "q" });
+ const columns: TableColumn<BaselineSummary>[] = [
+  { id: "workload", header: "Workload", kind: "name", wrap: true, sort: (a,b) => a.workload_id.localeCompare(b.workload_id), cell: p => <a href={baselinePath(clusterId!,p.workload_id)} className="text-primary hover:underline">{p.workload_id}</a>, exportValue: p => p.workload_id },
+  { id: "mode", header: "Mode", kind: "status", cell: p => <ModePill mode={p.mode} />, exportValue: p => p.mode },
+  { id: "processes", header: "Processes", kind: "count", cell: p => p.learned_processes_count, exportValue: p => p.learned_processes_count },
+  { id: "alerts", header: "Alerts (24h)", kind: "count", cell: p => p.monitored_alerts_24h, exportValue: p => p.monitored_alerts_24h },
+  { id: "blocks", header: "Blocks (24h)", kind: "count", cell: p => p.enforced_blocks_24h, exportValue: p => p.enforced_blocks_24h },
+  { id: "last", header: "Last new process", kind: "date", cell: p => p.last_new_process_at ? new Date(p.last_new_process_at).toLocaleString() : "Not reported", exportValue: p => p.last_new_process_at ?? "" },
+ ];
+ const retry = () => scopeReady ? void q.refetch() : scope.retryScope();
+ return <div className="space-y-5" data-testid="baselines-page" data-cluster-id={clusterId ?? ""}>
+  <PageHeader title="Process Baselines" description="Review configured process profiles and observed execution evidence for this cluster." actions={<Button disabled={!scopeReady || q.isFetching} onClick={retry}>Refresh</Button>} />
+  <VerdictBanner status={profiles ? "info" : "degraded"} title={profiles ? `${profiles.length} workload profiles reported` : "Process profile evidence unavailable"} detail={profiles ? "Profiles describe configured behavior. Agent activity and protection must be verified separately." : "Resolve this cluster and load its profiles before assessing configured coverage."} />
+  <StatGrid><StatCard label="Workloads" value={profiles?.length ?? "—"} />{COLUMNS.map(c => <StatCard key={c.mode} label={c.title} value={profiles ? profiles.filter(p => p.mode === c.mode).length : "—"} />)}</StatGrid>
+  {!scopeReady ? scope.error ? <ErrorState title="Could not resolve this cluster." action={<Button onClick={retry}>Retry</Button>} /> : <LoadingState label="Resolving cluster…" /> : q.isPending ? <LoadingState label="Loading profiles…" /> : q.isError ? <ErrorState title="Could not load or refresh process profiles." error={q.error} action={<Button onClick={retry}>Retry</Button>} /> : !profiles ? <ErrorState title="Returned profile scope does not match this cluster." action={<Button onClick={retry}>Retry</Button>} /> : <>
+   {q.isFetching && <p role="status" className="text-sm text-muted-foreground">Refreshing profiles…</p>}
+   <div className="flex flex-wrap gap-3"><label className="text-sm">Search workloads<input aria-label="Search workloads" value={search} onChange={e => update("q",e.target.value)} className="ml-2 rounded border border-border bg-background px-3 py-2" /></label><label className="text-sm">Namespace<select aria-label="Namespace" value={namespace} onChange={e => update("namespace",e.target.value)} className="ml-2 rounded border border-border bg-background px-3 py-2"><option value="">All namespaces</option>{Array.from(new Set(profiles.map(p => p.namespace))).sort().map(ns => <option key={ns}>{ns}</option>)}{namespace && !profiles.some(p => p.namespace === namespace) && <option>{namespace}</option>}</select></label></div>
+   <p className="text-xs text-muted-foreground">{SOURCE_NOTE}</p>
+   <Tabs value={["inventory","lifecycle"].includes(tab) ? tab : "inventory"} onValueChange={setTab} items={[
+    { value: "inventory", label: "Inventory", content: <DataTable rows={filtered} columns={columns} rowKey={p => `${p.cluster_id}/${p.workload_id}`} rowTestId={p => `baselines-card-${p.workload_id}`} testId="baselines-table" preferencesKey="process-baselines" exportFileName="process-baselines.csv" exportLabel="Export matching profiles" emptyState={<p>No profiles match these filters.</p>} /> },
+    { value: "lifecycle", label: "Lifecycle", content: <div className="space-y-4"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={highlight} onChange={e => setHighlight(e.target.checked)} /> Highlight learning profiles observed for at least 14 days with no new process in the last 24 hours</label><p className="text-xs text-muted-foreground">A review hint based on retained observations. Nothing is promoted automatically.</p><section className="grid gap-4 lg:grid-cols-3" data-testid="baselines-columns">{COLUMNS.map(c => <Column key={c.mode} {...c} Icon={c.icon} profiles={filtered.filter(p => p.mode === c.mode)} highlightIDs={highlight ? filtered.filter(qualifiesForAutoPromote).map(p => p.workload_id) : []} loading={false} onSelect={id => void navigate({ href: baselinePath(clusterId!,id) })} />)}</section></div> },
+   ]} /><Collapse label="Advanced: source coverage"><p className="text-sm text-muted-foreground">{SOURCE_NOTE} Inventory, authored rules, and transitions have no response cap. Lifecycle cards preview up to five process names.</p></Collapse>
+  </>}
+ </div>;
 }
-
 // ----- Column ---------------------------------------------------------------
 
 function Column({
@@ -233,8 +147,8 @@ function ProfileCard({
 
       <dl className="mt-3 grid grid-cols-3 gap-2 text-[11px]">
         <Stat label="Procs" value={profile.learned_processes_count} />
-        <Stat label="Alerts 24h" value={profile.monitored_alerts_24h} tone={profile.monitored_alerts_24h > 0 ? "warning" : "muted"} />
-        <Stat label="Blocks 24h" value={profile.enforced_blocks_24h} tone={profile.enforced_blocks_24h > 0 ? "error" : "muted"} />
+        <Stat label="Alerts · retained 24h" value={profile.monitored_alerts_24h} tone={profile.monitored_alerts_24h > 0 ? "warning" : "muted"} />
+        <Stat label="Blocks · retained 24h" value={profile.enforced_blocks_24h} tone={profile.enforced_blocks_24h > 0 ? "error" : "muted"} />
       </dl>
 
       <div className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
@@ -288,12 +202,12 @@ function Stat({
 
 function qualifiesForAutoPromote(p: BaselineSummary): boolean {
   if (p.mode !== "learn") return false;
-  if (!p.learn_started_at) return false;
+  if (!p.learn_started_at || !p.last_new_process_at || p.learned_processes_count === 0) return false;
   const learnAgeDays = (Date.now() - new Date(p.learn_started_at).getTime()) / (24 * 3600 * 1000);
-  if (learnAgeDays < 14) return false;
+  if (!Number.isFinite(learnAgeDays) || learnAgeDays < 14) return false;
   if (p.last_new_process_at) {
     const lastNewHours = (Date.now() - new Date(p.last_new_process_at).getTime()) / (3600 * 1000);
-    if (lastNewHours < 24) return false;
+    if (!Number.isFinite(lastNewHours) || lastNewHours < 24) return false;
   }
   return true;
 }

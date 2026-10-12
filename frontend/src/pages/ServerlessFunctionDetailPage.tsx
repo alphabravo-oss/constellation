@@ -1,6 +1,5 @@
-import { useMemo } from "react";
 import type { ReactNode } from "react";
-import { Link, useParams } from "@tanstack/react-router";
+import { useParams } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, Database, KeyRound, Layers, ShieldAlert } from "lucide-react";
 
@@ -16,68 +15,62 @@ import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { SeverityBadge } from "@/components/ui/severity-badge";
-import { useCluster } from "@/hooks/useCluster";
 import { cn } from "@/lib/cn";
+import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { Tabs, useTabParam } from "@/components/ui/tabs";
+import { Collapse } from "@/components/ui/collapse";
+import { Button } from "@/components/ui/button";
+import { ErrorState, LoadingState } from "@/components/ui/states";
+import { entityDetailError, useEntityClusterScope } from "./entity-detail-scope";
 
 export function ServerlessFunctionDetailPage() {
   const { functionId } = useParams({ strict: false });
-  const { clusterId, isLoading: clusterLoading } = useCluster();
+  const scope = useEntityClusterScope();
+  const { clusterId } = scope;
+  const [requestedTab, setTab] = useTabParam("tab", "findings");
+  const tab = ["findings", "packages", "permissions", "jobs", "details"].includes(requestedTab) ? requestedTab : "findings";
   const q = useQuery({
-    queryKey: ["serverless-function", functionId],
-    queryFn: () => serverlessFunctions.get(functionId!),
-    enabled: !!functionId,
+    queryKey: ["serverless-function", clusterId, functionId],
+    queryFn: async () => {
+      const data = await serverlessFunctions.get(functionId!);
+      if (data.serverless_function.id !== functionId) throw new Error("The returned serverless function does not match the requested function ID.");
+      return data;
+    },
+    enabled: scope.ready && !!functionId,
   });
-
+  const backPath = clusterId ? `/clusters/${encodeURIComponent(clusterId)}/serverless` : "/clusters";
+  const header = <PageHeader title="Serverless function evidence" description="Inspect organization-wide cloud inventory and scan evidence for an exact function. The selected cluster provides navigation context only." backLink={<a href={backPath}>Serverless</a>} />;
+  if (!scope.ready) return <div className="space-y-4">{header}{scope.loading ? <LoadingState label="Resolving serverless navigation cluster…" /> : <ErrorState title="The requested navigation cluster could not be resolved." error={scope.error} action={<Button onClick={scope.retry}>Retry cluster</Button>} />}</div>;
+  if (!functionId) return <div className="space-y-4">{header}<ErrorState title="An exact serverless function ID is required." /></div>;
+  if (q.isError) return <div className="space-y-4">{header}<VerdictBanner status="degraded" title="Serverless evidence is unavailable" detail="Previously loaded evidence is hidden after a failed refresh." /><ErrorState title="Serverless function evidence could not be loaded or refreshed." error={entityDetailError(q.error)} action={<Button onClick={() => void q.refetch()}>Retry function</Button>} /></div>;
+  if (q.data && q.data.serverless_function.id !== functionId) return <div className="space-y-4">{header}<ErrorState title="The returned serverless function does not match the requested function ID." action={<Button onClick={() => void q.refetch()}>Retry function</Button>} /></div>;
+  if (!q.isSuccess || !q.data) return <div className="space-y-4">{header}<LoadingState label="Loading serverless function evidence…" /></div>;
   const detail = q.data;
-  const fn = detail?.serverless_function;
-  const evidence = detail?.latest_evidence;
-  const packages = useMemo(() => evidence?.packages ?? [], [evidence?.packages]);
-
-  if (clusterLoading || q.isPending) return <p className="text-sm text-muted-foreground">Loading serverless function...</p>;
-  if (q.isError || !fn) return <p className="text-sm text-status-error">Serverless function not found.</p>;
-
-  return (
-    <div className="space-y-4" data-testid="serverless-function-detail-page" data-cluster-id={clusterId ?? ""}>
-      <PageHeader
-        backLink={
-          <Link to="." href={`/clusters/${clusterId}/serverless`} className="inline-flex items-center gap-1 hover:text-foreground">
-            <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
-            Serverless
-          </Link>
-        }
-        title={fn.function_name || fn.function_ref}
-        mono
-        badges={
-          <>
-            <Pill tone="neutral">{fn.provider || "serverless"}</Pill>
-            {fn.region ? <Pill tone="accent">{fn.region}</Pill> : null}
-            <PostureBadge level={fn.permission_level} />
-          </>
-        }
-        description={<span className="break-all font-mono">{fn.function_ref}</span>}
-      />
-
-      <StatGrid data-testid="serverless-function-stats">
-        <StatCard label="Open Findings" value={fn.open_findings} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={fn.open_findings > 0 ? "high" : "neutral"} />
-        <StatCard label="Packages" value={fn.package_count} icon={<Database className="h-3.5 w-3.5" />} />
-        <StatCard label="Layers" value={fn.layers?.length ?? 0} icon={<Layers className="h-3.5 w-3.5" />} />
-        <StatCard label="Role Risk" value={fn.critical_findings + fn.high_findings} icon={<KeyRound className="h-3.5 w-3.5" />} tone={fn.critical_findings + fn.high_findings > 0 ? "critical" : "neutral"} />
-      </StatGrid>
-
-      <div className="space-y-4">
-        <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
-          <FunctionIdentity fn={fn} />
-          <EvidencePanel evidence={evidence ?? null} fn={fn} />
-        </div>
-        <PermissionPanel fn={fn} />
-        <PackagesPanel evidence={evidence ?? null} packages={packages} />
-        <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
-          <FindingsTable findings={detail?.findings ?? []} clusterId={clusterId} />
-          <JobHistory jobs={detail?.jobs ?? []} />
-        </div>
-      </div>
-    </div>
-  );
+  const fn = detail.serverless_function;
+  const evidence = detail.latest_evidence;
+  const packages = evidence?.packages ?? [];
+  const exportScope = `organization-function-${encodeURIComponent(fn.id)}`;
+  return <div className="space-y-5" data-testid="serverless-function-detail-page" data-cluster-id={clusterId}>
+    <PageHeader title={fn.function_name || fn.function_ref} mono backLink={<a href={backPath} className="inline-flex items-center gap-1"><ChevronLeft className="h-3.5 w-3.5" />Serverless</a>}
+      description="Organization-wide cloud evidence; the selected cluster provides navigation context only. This API does not establish a cluster association for the function."
+      badges={<><Pill tone="neutral">{fn.provider || "serverless"}</Pill>{fn.region && <Pill tone="accent">{fn.region}</Pill>}<PostureBadge level={fn.permission_level} /></>}
+      actions={<Button onClick={() => void q.refetch()} disabled={q.isFetching}>{q.isFetching ? "Refreshing…" : "Refresh evidence"}</Button>} />
+    <VerdictBanner status={fn.open_findings > 0 ? "degraded" : "info"} title={!evidence ? "No collected package evidence returned" : fn.open_findings > 0 ? `${fn.open_findings} open findings reported for this function` : "No open findings reported for this function"} detail="Reported counts are organization-wide. Finding detail is capped at 100 rows and recent jobs at 25; missing evidence does not establish a clean scan or safe execution role." />
+    <StatGrid data-testid="serverless-function-stats">
+      <StatCard label="Open findings reported" value={fn.open_findings} tone={fn.open_findings > 0 ? "high" : "neutral"} icon={<ShieldAlert className="h-3.5 w-3.5" />} />
+      <StatCard label="Packages reported" value={evidence ? evidence.package_count : "Not collected"} valueKind={evidence ? "number" : "text"} icon={<Database className="h-3.5 w-3.5" />} />
+      <StatCard label="Layers reported" value={fn.layers?.length ?? "Not reported"} valueKind={fn.layers ? "number" : "text"} icon={<Layers className="h-3.5 w-3.5" />} />
+      <StatCard label="High / critical findings" value={fn.critical_findings + fn.high_findings} tone={fn.critical_findings + fn.high_findings > 0 ? "high" : "neutral"} icon={<KeyRound className="h-3.5 w-3.5" />} />
+    </StatGrid>
+    {q.isFetching && <p role="status" className="text-sm text-muted-foreground">Refreshing serverless evidence; previously loaded evidence remains visible until the request settles.</p>}
+    <Tabs value={tab} onValueChange={setTab} items={[
+      { value: "findings", label: "Findings", content: <FindingsTable findings={detail.findings} exportScope={exportScope} /> },
+      { value: "packages", label: "Packages", content: <PackagesPanel evidence={evidence ?? null} packages={packages} exportScope={exportScope} /> },
+      { value: "permissions", label: "Execution role", content: <PermissionPanel fn={fn} exportScope={exportScope} /> },
+      { value: "jobs", label: "Scan jobs", content: <JobHistory jobs={detail.jobs} exportScope={exportScope} /> },
+      { value: "details", label: "Function details", content: <div className="space-y-4"><FunctionIdentity fn={fn} /><EvidencePanel evidence={evidence ?? null} fn={fn} /><Collapse label="Raw function metadata"><pre className="max-h-96 overflow-auto rounded-md bg-muted p-3 text-xs">{JSON.stringify(fn.metadata ?? {}, null, 2)}</pre></Collapse></div> },
+    ]} />
+  </div>;
 }
 
 function FunctionIdentity({ fn }: { fn: ServerlessFunction }) {
@@ -110,7 +103,7 @@ function FunctionIdentity({ fn }: { fn: ServerlessFunction }) {
   );
 }
 
-function PermissionPanel({ fn }: { fn: ServerlessFunction }) {
+function PermissionPanel({ fn, exportScope }: { fn: ServerlessFunction; exportScope: string }) {
   const analysis = (fn.permission_analysis ?? {}) as Record<string, unknown>;
   const findings = Array.isArray(analysis.findings) ? analysis.findings as Array<Record<string, unknown>> : [];
   const attached = Array.isArray(analysis.attached_policies) ? analysis.attached_policies as Array<Record<string, unknown>> : [];
@@ -125,33 +118,20 @@ function PermissionPanel({ fn }: { fn: ServerlessFunction }) {
       <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
         <Field label="Analysis Status" value={fn.permission_status || "-"} />
         <Field label="Role" value={String(analysis.role_name || fn.role || "-")} />
-        <Field label="Sensitive Actions" value={String((analysis.sensitive_actions as string[] | undefined)?.length ?? 0)} />
+        <Field label="Sensitive Actions" value={Array.isArray(analysis.sensitive_actions) ? String(analysis.sensitive_actions.length) : "Not reported"} />
         <Field label="Action Count" value={String(analysis.action_count ?? "-")} />
       </dl>
       {analysis.error ? <p className="mt-3 rounded-md border border-border bg-muted p-2 text-xs text-muted-foreground">{String(analysis.error)}</p> : null}
 
-      <div className="mt-4 grid gap-3 lg:grid-cols-2">
-        <div>
-          <h3 className="text-xs font-semibold text-muted-foreground">Managed policies</h3>
-          <ul className="mt-2 space-y-1">
-            {attached.slice(0, 6).map((policy, index) => (
-              <li key={`${policy.arn || policy.name || index}`} className="break-all rounded-md border border-border px-2 py-1 font-mono text-xs">
-                {String(policy.name || policy.arn || "-")}
-              </li>
-            ))}
-            {attached.length === 0 ? <li className="text-xs text-muted-foreground">No managed policies reported.</li> : null}
-          </ul>
+      <Collapse label="Attached policy evidence">
+        <div className="space-y-4">
+          <DataTable rows={attached.map((item, index) => ({ item, rowId: index }))} rowKey={(row) => row.rowId} preferencesKey="serverless-managed-policies" exportFileName={`${exportScope}-managed-policies-loaded`} columns={[
+            { id: "name", header: "Managed policy", kind: "name", code: true, wrap: true, cell: ({ item }) => String(item.name || item.arn || "Not reported") },
+            { id: "arn", header: "Policy ARN", kind: "id", size: 320, grow: true, maxSize: 640, wrap: true, cell: ({ item }) => String(item.arn || "Not reported") },
+          ]} emptyState={<p className="p-6 text-sm text-muted-foreground">No managed policy rows returned.</p>} />
+          <DataTable rows={inline.map((name, index) => ({ name, rowId: index }))} rowKey={(row) => row.rowId} preferencesKey="serverless-inline-policies" exportFileName={`${exportScope}-inline-policies-loaded`} columns={[{ id: "name", header: "Inline policy", kind: "name", code: true, wrap: true, cell: (row) => row.name }]} emptyState={<p className="p-6 text-sm text-muted-foreground">No inline policy rows returned.</p>} />
         </div>
-        <div>
-          <h3 className="text-xs font-semibold text-muted-foreground">Inline policies</h3>
-          <ul className="mt-2 space-y-1">
-            {inline.slice(0, 6).map((policy) => (
-              <li key={policy} className="break-all rounded-md border border-border px-2 py-1 font-mono text-xs">{policy}</li>
-            ))}
-            {inline.length === 0 ? <li className="text-xs text-muted-foreground">No inline policies reported.</li> : null}
-          </ul>
-        </div>
-      </div>
+      </Collapse>
 
       {findings.length > 0 ? (
         <div className="mt-4 overflow-hidden rounded-md border border-border">
@@ -159,9 +139,8 @@ function PermissionPanel({ fn }: { fn: ServerlessFunction }) {
             className="rounded-none border-0"
             rows={findings.map((item, index) => ({ item, rowKey: `${item.id || "permission"}:${index}` }))}
             rowKey={(row) => row.rowKey}
-            pagination={false}
-            showDensityToggle={false}
-            showColumnChooser={false}
+            preferencesKey="serverless-role-issues"
+            exportFileName={`${exportScope}-role-issues-loaded`}
             columns={[
               { id: "issue", header: "Issue", kind: "name", wrap: true, cell: ({ item }) => <><div className="flex flex-wrap items-center gap-2"><SeverityBadge severity={normalizeSeverity(String(item.severity || "low")) ?? "low"} size="xs" /><span className="font-medium">{String(item.title || item.id || "permission issue")}</span></div><div className="mt-1 break-all font-mono text-xs text-muted-foreground">{String(item.id || "")}</div></> },
               { id: "policy", header: "Policy", kind: "text", code: true, size: 280, minSize: 160, maxSize: 480, grow: true, wrap: true, cell: ({ item }) => `${String(item.policy_type || "-")} / ${String(item.policy_name || item.policy_arn || "-")}` },
@@ -199,7 +178,7 @@ const packageColumns: Column<ScanPackage>[] = [
   },
 ];
 
-function PackagesPanel({ evidence, packages }: { evidence: ServerlessEvidence | null; packages: ScanPackage[] }) {
+function PackagesPanel({ evidence, packages, exportScope }: { evidence: ServerlessEvidence | null; packages: ScanPackage[]; exportScope: string }) {
   return (
     <section className="overflow-hidden rounded-lg border border-border bg-card">
       <header className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
@@ -208,16 +187,17 @@ function PackagesPanel({ evidence, packages }: { evidence: ServerlessEvidence | 
       </header>
       <DataTable
         rows={packages}
+        preferencesKey="serverless-function-packages"
+        exportFileName={`${exportScope}-packages-loaded`}
         columns={packageColumns}
         rowKey={(pkg) => `${pkg.ecosystem}:${pkg.name}:${pkg.version}:${pkg.purl}`}
-        showDensityToggle={false}
-        emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">No package evidence recorded.</div>}
+        emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">No package rows returned in the latest evidence.</div>}
       />
     </section>
   );
 }
 
-function FindingsTable({ findings, clusterId }: { findings: ServerlessFinding[]; clusterId?: string }) {
+function FindingsTable({ findings, exportScope }: { findings: ServerlessFinding[]; exportScope: string }) {
   const columns: Column<ServerlessFinding>[] = [
     {
       id: "finding",
@@ -226,9 +206,9 @@ function FindingsTable({ findings, clusterId }: { findings: ServerlessFinding[];
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <SeverityBadge severity={finding.severity} size="xs" />
-            <Link to="." href={`/clusters/${clusterId}/findings/${finding.id}`} className="font-medium hover:underline">{finding.title}</Link>
+            <span className="font-medium">{finding.title}</span>
           </div>
-          <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{finding.external_id || finding.kind}</div>
+          <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{finding.external_id || finding.kind} · {finding.id}</div>
         </div>
       ),
       sort: (a, b) => a.title.localeCompare(b.title),
@@ -252,10 +232,13 @@ function FindingsTable({ findings, clusterId }: { findings: ServerlessFinding[];
       </header>
       <DataTable
         rows={findings}
+        sourceLimit={100}
+        sourceCount={findings.length}
+        preferencesKey="serverless-function-findings"
+        exportFileName={`${exportScope}-findings-loaded`}
         columns={columns}
         rowKey={(finding) => finding.id}
-        showDensityToggle={false}
-        emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">No findings recorded for this function.</div>}
+        emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">No finding rows returned for this function. This does not establish complete scan coverage.</div>}
       />
     </section>
   );
@@ -276,30 +259,22 @@ function EvidencePanel({ evidence, fn }: { evidence: ServerlessEvidence | null; 
   );
 }
 
-function JobHistory({ jobs }: { jobs: ServerlessJob[] }) {
+function JobHistory({ jobs, exportScope }: { jobs: ServerlessJob[]; exportScope: string }) {
   return (
     <section className="overflow-hidden rounded-lg border border-border bg-card">
       <header className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
         <h2 className="text-sm font-semibold">Scan jobs</h2>
         <span className="font-mono text-xs text-muted-foreground">{jobs.length}</span>
       </header>
-      <div className="divide-y divide-border">
-        {jobs.map((job) => (
-          <div key={job.id} className="p-3 text-sm">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="font-medium">{job.status}</span>
-              <span className="font-mono text-xs text-muted-foreground">{job.package_count} packages · {job.finding_count} findings</span>
-            </div>
-            <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{job.id}</div>
-            <div className="mt-2 grid gap-1 text-xs text-muted-foreground">
-              <span>Requested {formatDate(job.requested_at)}</span>
-              {job.finished_at ? <span>Finished {formatDate(job.finished_at)}</span> : null}
-              {job.error ? <span className="text-status-error">{job.error}</span> : null}
-            </div>
-          </div>
-        ))}
-        {jobs.length === 0 ? <p className="p-4 text-xs text-muted-foreground">No scan jobs recorded.</p> : null}
-      </div>
+      <DataTable rows={jobs} sourceLimit={25} sourceCount={jobs.length} rowKey={(job) => job.id} preferencesKey="serverless-function-jobs" exportFileName={`${exportScope}-recent-jobs`} columns={[
+        { id: "id", header: "Job", kind: "name", code: true, wrap: true, cell: (job) => job.id },
+        { id: "status", header: "Status", kind: "status", cell: (job) => job.status },
+        { id: "packages", header: "Packages", kind: "count", cell: (job) => job.package_count },
+        { id: "findings", header: "Findings", kind: "count", cell: (job) => job.finding_count },
+        { id: "requested", header: "Requested", kind: "date", size: 224, minSize: 208, maxSize: 240, cell: (job) => formatDate(job.requested_at), exportValue: (job) => job.requested_at, sort: (a, b) => a.requested_at.localeCompare(b.requested_at) },
+        { id: "finished", header: "Finished", kind: "date", size: 224, minSize: 208, maxSize: 240, cell: (job) => formatDate(job.finished_at), exportValue: (job) => job.finished_at || "" },
+        { id: "error", header: "Error", kind: "text", size: 260, grow: true, maxSize: 560, wrap: true, cell: (job) => job.error || "None reported" },
+      ]} emptyState={<p className="p-6 text-sm text-muted-foreground">No recent scan jobs returned.</p>} />
     </section>
   );
 }

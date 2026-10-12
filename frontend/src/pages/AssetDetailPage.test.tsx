@@ -33,7 +33,7 @@ async function render(url = "/clusters/cluster-a/assets/asset-a", seed?: (client
   await act(async () => root.render(<QueryClientProvider client={client}><TestRouter path="/clusters/$id/assets/$aid" history={history}><AssetDetailPage /></TestRouter></QueryClientProvider>));
 }
 async function tab(label: string) { const trigger = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((item) => item.textContent === label)!; await act(async () => trigger.focus()); await settled(() => expect(trigger.getAttribute('aria-selected')).toBe("true")); }
-const stats = () => [...host.querySelectorAll('[data-testid="asset-stats"] .text-3xl')].map((item) => item.textContent);
+const stats = () => [...host.querySelectorAll('[data-testid="asset-stats"] .app-stat-value')].map((item) => item.textContent);
 const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent === label)!;
 
 it("shows a bounded evidence verdict, four loaded KPIs and findings as the sole primary workspace", async () => {

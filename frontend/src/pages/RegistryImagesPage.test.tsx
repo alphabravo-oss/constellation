@@ -1,29 +1,27 @@
-import { act, type ReactNode } from "react";
+import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { createMemoryHistory, type RouterHistory } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { afterEach, expect, it, vi } from "vitest";
-import { registries, type RegistryDTO } from "@/api/client";
+import { beforeEach, afterEach, expect, it, vi } from "vitest";
+import { registries, type RegistryDTO, type RegistryImageRow } from "@/api/client";
+import { TestRouter } from "@/test/router";
+import { downloadCsv } from "@/lib/csv";
 import { RegistryImagesPage } from "./RegistryImagesPage";
-
 vi.mock("@/api/client", () => ({ registries: { get: vi.fn(), images: vi.fn() } }));
 vi.mock("@/hooks/useCluster", () => ({ useCluster: () => ({ clusterId: "cluster" }) }));
-vi.mock("@tanstack/react-router", () => ({ useParams: () => ({ regId: "registry" }), Link: ({ children }: { children: ReactNode }) => <span>{children}</span> }));
-let root: Root;
-let host: HTMLDivElement;
-let client: QueryClient;
-afterEach(() => { act(() => root?.unmount()); client?.clear(); host?.remove(); vi.resetAllMocks(); });
+vi.mock("@/lib/csv", () => ({ downloadCsv: vi.fn() }));
+let root: Root | undefined; let host: HTMLDivElement; let client: QueryClient; let history: RouterHistory;
+const row = (id = "image"): RegistryImageRow => ({ id, repository: `repo-${id}`, tags: ["one", "two", "three", "four", "fifth"], digests: {}, scanned: true, finding_count: 0, critical: 0, high: 0, first_seen_at: "", last_seen_at: "" });
+beforeEach(() => { (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true; vi.mocked(registries.get).mockResolvedValue({ id: "registry", name: "Registry" } as RegistryDTO); vi.mocked(registries.images).mockResolvedValue({ images: [row()], total: 1, limit: 100, offset: 0 }); });
+afterEach(() => { act(() => root?.unmount()); root = undefined; client?.clear(); host?.remove(); vi.resetAllMocks(); });
+async function render(search = "") { host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host); client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); history = createMemoryHistory({ initialEntries: [`/clusters/cluster/registries/registry/images${search}`] }); await act(async () => root!.render(<QueryClientProvider client={client}><TestRouter path="/clusters/$id/registries/$regId/images" history={history}><RegistryImagesPage /></TestRouter></QueryClientProvider>)); }
+async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }, { timeout: 3000 }); }
+const button = (text: string) => [...host.querySelectorAll("button")].find(b => b.textContent?.trim() === text)!;
+it.each(["registry", "images", "wrong-registry", "wrong-page"])("does not describe a failed %s request as empty inventory", async failed => { if (failed === "registry") vi.mocked(registries.get).mockRejectedValue(new Error("not found")); if (failed === "images") vi.mocked(registries.images).mockRejectedValue(new Error("unavailable")); if (failed === "wrong-registry") vi.mocked(registries.get).mockResolvedValue({ id: "other", name: "Foreign" } as RegistryDTO); if (failed === "wrong-page") vi.mocked(registries.images).mockResolvedValue({ images: [row()], total: 1, limit: 100, offset: 100 }); await render(); await settled(() => expect(host.textContent).toContain("Image inventory is unavailable")); expect(host.textContent).not.toContain("No images discovered"); expect(host.querySelector("table")).toBeNull(); if (failed.includes("registry")) expect(registries.images).not.toHaveBeenCalled(); });
+it("retains all tags, exports this page, and restores server pagination through history", async () => { vi.mocked(registries.images).mockImplementation(async (_id, p) => ({ images: [row(p?.offset ? "later" : "first")], total: 101, limit: 100, offset: p?.offset ?? 0 })); await render("?q=repo&context=kept#proof"); await settled(() => expect(host.textContent).toContain("repo-first")); expect(host.textContent).toContain("fifth"); await act(async () => button("Next").click()); await settled(() => expect(host.textContent).toContain("repo-later")); expect(history.location.search).toContain("page=2"); expect(history.location.hash).toBe("#proof"); expect(registries.images).toHaveBeenLastCalledWith("registry", { q: "repo", limit: 100, offset: 100 }); await act(async () => button("Export this page CSV").click()); expect(vi.mocked(downloadCsv).mock.calls.at(-1)?.[2][0]).toContain("one; two; three; four; fifth"); expect(vi.mocked(downloadCsv).mock.calls.at(-1)?.[0]).toBe("registry-images-page-2"); await act(async () => history.back()); await settled(() => expect(host.textContent).toContain("repo-first")); });
+it("hides cached metrics and rows after a failed refresh", async () => { await render(); await settled(() => expect(host.textContent).toContain("repo-image")); vi.mocked(registries.images).mockRejectedValue(new Error("offline")); await act(async () => { await client.invalidateQueries({ queryKey: ["registry-images"] }); }); await settled(() => expect(host.textContent).toContain("Image inventory is unavailable")); expect(host.textContent).not.toContain("repo-image"); expect(host.querySelector('.app-stat-grid')?.textContent?.match(/—/g)).toHaveLength(4); });
+it("keeps a way back from a now-empty later page", async () => { vi.mocked(registries.images).mockResolvedValue({ images: [], total: 1, limit: 100, offset: 100 }); await render("?page=2"); await settled(() => expect(host.textContent).toContain("No images on this page")); expect(button("Prev").disabled).toBe(false); });
 
-it.each(["registry", "images"])("does not describe a failed %s request as empty inventory", async (failed) => {
-  vi.mocked(registries.get).mockResolvedValue({ name: "Registry" } as RegistryDTO);
-  vi.mocked(registries.images).mockResolvedValue({ images: [], total: 0, limit: 100, offset: 0 });
-  if (failed === "registry") vi.mocked(registries.get).mockRejectedValue(new Error("not found"));
-  else vi.mocked(registries.images).mockRejectedValue(new Error("unavailable"));
-  host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
-  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  await act(async () => root.render(<QueryClientProvider client={client}><RegistryImagesPage /></QueryClientProvider>));
-  await vi.waitFor(async () => {
-    await act(async () => {});
-    expect(host.textContent).toContain("Image inventory is unavailable");
-  });
-  expect(host.textContent).not.toContain("No images discovered");
+it("sorts vulnerability scores in the advertised ascending direction", async () => {
+ vi.mocked(registries.images).mockResolvedValue({ images: [{...row("higher"),critical:3}, {...row("lower"),critical:1}], total:2, limit:100, offset:0 }); await render(); await settled(() => expect(host.querySelectorAll("tbody tr")).toHaveLength(2)); await act(async () => button("Vulnerabilities").click()); expect(host.querySelector('th[data-column-id="vulns"]')?.getAttribute("aria-sort")).toBe("descending"); expect(host.querySelector("tbody tr")?.textContent).toContain("repo-higher"); await act(async () => button("Vulnerabilities").click()); expect(host.querySelector('th[data-column-id="vulns"]')?.getAttribute("aria-sort")).toBe("ascending"); expect(host.querySelector("tbody tr")?.textContent).toContain("repo-lower");
 });

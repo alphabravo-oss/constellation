@@ -50,7 +50,7 @@ async function tab(label: string) {
 async function windowHours(hours: number) {
   await act(async () => { const select = host.querySelector('select')!; select.value = String(hours); select.dispatchEvent(new Event("change", { bubbles: true })); });
 }
-const summaryValues = () => [...host.querySelectorAll('[data-testid="runtime-summary"] .text-3xl')].map((item) => item.textContent);
+const summaryValues = () => [...host.querySelectorAll('[data-testid="runtime-summary"] .app-stat-value')].map((item) => item.textContent);
 
 it("shows five authoritative window KPIs and the latest feed as the sole default workspace", async () => {
   await render(); await settled(() => expect(host.querySelector('[data-testid="runtime-live-table"]')).not.toBeNull());

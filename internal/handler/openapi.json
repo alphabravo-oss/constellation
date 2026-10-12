@@ -11928,9 +11928,74 @@
           },
           "default": {
             "$ref": "#/components/responses/Error"
+          },
+          "400": {
+            "description": "Malformed identity or precondition."
+          },
+          "404": {
+            "description": "Workload or rule not found in the caller organization and selected cluster."
+          },
+          "409": {
+            "description": "Ambiguous unscoped workload or reviewed state changed; refresh and review."
           }
         },
-        "summary": "Create mode"
+        "summary": "Change the configured process baseline mode",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workload_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "URL-encoded namespace/name workload identity."
+          },
+          {
+            "in": "query",
+            "name": "cluster_id",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Exact cluster containing the workload. Ambiguous unscoped names return 409."
+          }
+        ],
+        "description": "Transitions one adjacent configured mode. expected_mode protects reviewed state. Saving does not confirm agent enforcement.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "mode"
+                ],
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "learn",
+                      "monitor",
+                      "enforce"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "expected_mode": {
+                    "type": "string",
+                    "enum": [
+                      "learn",
+                      "monitor",
+                      "enforce"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/runtime/baselines/{workload_id}/rules": {
@@ -11941,44 +12006,467 @@
           },
           "default": {
             "$ref": "#/components/responses/Error"
+          },
+          "400": {
+            "description": "Malformed identity or precondition."
+          },
+          "404": {
+            "description": "Workload or rule not found in the caller organization and selected cluster."
+          },
+          "409": {
+            "description": "Ambiguous unscoped workload or reviewed state changed; refresh and review."
           }
         },
-        "summary": "Get rules"
+        "summary": "Get rules",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workload_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "URL-encoded namespace/name workload identity."
+          },
+          {
+            "in": "query",
+            "name": "cluster_id",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Exact cluster containing the workload. Ambiguous unscoped names return 409."
+          }
+        ]
       },
       "post": {
         "responses": {
-          "200": {
-            "description": "ok"
-          },
           "default": {
             "$ref": "#/components/responses/Error"
+          },
+          "400": {
+            "description": "Malformed identity or precondition."
+          },
+          "404": {
+            "description": "Workload or rule not found in the caller organization and selected cluster."
+          },
+          "409": {
+            "description": "Ambiguous unscoped workload or reviewed state changed; refresh and review."
+          },
+          "201": {
+            "description": "Confirmed configured rule; this does not acknowledge agent receipt or enforcement.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "sha256": {
+                      "type": "string"
+                    },
+                    "parent_name": {
+                      "type": "string"
+                    },
+                    "user": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "action": {
+                      "type": "string",
+                      "enum": [
+                        "allow",
+                        "deny"
+                      ]
+                    },
+                    "enabled": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "allow_update": {
+                      "type": "boolean"
+                    },
+                    "rule_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "updated_at": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "Exact reported timestamp, including fractional seconds when present."
+                    }
+                  },
+                  "required": [
+                    "rule_id",
+                    "name",
+                    "path",
+                    "action",
+                    "updated_at"
+                  ]
+                }
+              }
+            }
           }
         },
-        "summary": "Create rules"
+        "summary": "Create a process rule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workload_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "URL-encoded namespace/name workload identity."
+          },
+          {
+            "in": "query",
+            "name": "cluster_id",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Exact cluster containing the workload. Ambiguous unscoped names return 409."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "sha256": {
+                    "type": "string"
+                  },
+                  "parent_name": {
+                    "type": "string"
+                  },
+                  "user": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "allow",
+                      "deny"
+                    ]
+                  },
+                  "enabled": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "allow_update": {
+                    "type": "boolean"
+                  },
+                  "require_absent": {
+                    "type": "boolean",
+                    "description": "Create rejects an existing name/path match instead of replacing it."
+                  }
+                },
+                "anyOf": [
+                  {
+                    "required": [
+                      "name"
+                    ],
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  {
+                    "required": [
+                      "path"
+                    ],
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/runtime/baselines/{workload_id}/rules/{rule_id}": {
       "delete": {
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Confirmed removed rule.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "deleted"
+                  ],
+                  "properties": {
+                    "deleted": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  }
+                }
+              }
+            }
           },
           "default": {
             "$ref": "#/components/responses/Error"
+          },
+          "400": {
+            "description": "Malformed identity or precondition."
+          },
+          "404": {
+            "description": "Workload or rule not found in the caller organization and selected cluster."
+          },
+          "409": {
+            "description": "Ambiguous unscoped workload or reviewed state changed; refresh and review."
           }
         },
-        "summary": "Delete rules"
+        "summary": "Delete rules",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workload_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "URL-encoded namespace/name workload identity."
+          },
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cluster_id",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Exact cluster containing the workload. Ambiguous unscoped names return 409."
+          },
+          {
+            "in": "query",
+            "name": "expected_updated_at",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Exact reviewed rule timestamp; changed or missing rows return 409."
+          }
+        ]
       },
       "put": {
         "responses": {
-          "200": {
-            "description": "ok"
-          },
           "default": {
             "$ref": "#/components/responses/Error"
+          },
+          "400": {
+            "description": "Malformed identity or precondition."
+          },
+          "404": {
+            "description": "Workload or rule not found in the caller organization and selected cluster."
+          },
+          "409": {
+            "description": "Ambiguous unscoped workload or reviewed state changed; refresh and review."
+          },
+          "200": {
+            "description": "Confirmed configured rule; this does not acknowledge agent receipt or enforcement.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "sha256": {
+                      "type": "string"
+                    },
+                    "parent_name": {
+                      "type": "string"
+                    },
+                    "user": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "action": {
+                      "type": "string",
+                      "enum": [
+                        "allow",
+                        "deny"
+                      ]
+                    },
+                    "enabled": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "allow_update": {
+                      "type": "boolean"
+                    },
+                    "rule_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "updated_at": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "Exact reported timestamp, including fractional seconds when present."
+                    }
+                  },
+                  "required": [
+                    "rule_id",
+                    "name",
+                    "path",
+                    "action",
+                    "updated_at"
+                  ]
+                }
+              }
+            }
           }
         },
-        "summary": "Replace rules"
+        "summary": "Update a reviewed process rule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workload_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "URL-encoded namespace/name workload identity."
+          },
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cluster_id",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Exact cluster containing the workload. Ambiguous unscoped names return 409."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "sha256": {
+                    "type": "string"
+                  },
+                  "parent_name": {
+                    "type": "string"
+                  },
+                  "user": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "allow",
+                      "deny"
+                    ]
+                  },
+                  "enabled": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "allow_update": {
+                    "type": "boolean"
+                  },
+                  "expected_updated_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "Exact updated_at from the reviewed rule. Changed or missing rules return 409."
+                  }
+                },
+                "anyOf": [
+                  {
+                    "required": [
+                      "name"
+                    ],
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  {
+                    "required": [
+                      "path"
+                    ],
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/runtime/dlp-rules:bundle": {

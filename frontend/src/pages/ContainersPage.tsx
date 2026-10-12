@@ -2,13 +2,14 @@
 // Constellation previously only aggregated to the deployment level; this lists every
 // live container across all nodes with its pod, image, node, state, and workload
 // security posture (privileged/root/risk). Closes the #1 structural NV-parity gap.
-import { useMemo, useState } from "react";
-import { Link } from "@tanstack/react-router";
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Boxes, ShieldAlert } from "lucide-react";
 
 import { containers, type ContainerRow } from "@/api/client";
-import { useCluster } from "@/hooks/useCluster";
+import { useInventoryScope, useInventoryRoute, InventoryScopeState, InventoryLoadState } from "./inventory-workspace";
+import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { Button } from "@/components/ui/button";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { StatCard, StatGrid } from "@/components/ui/stat-card";
@@ -20,15 +21,22 @@ import { isPlatformResource } from "@/lib/platform-components";
 import { usePlatformComponentVisibility } from "@/hooks/usePlatformComponentVisibility";
 
 export function ContainersPage() {
-  const { clusterId } = useCluster();
-  const [search, setSearch] = useState("");
-  const [hidePlatformComponents, setHidePlatformComponents] = usePlatformComponentVisibility();
+  const scope = useInventoryScope();
+  const { clusterId } = scope;
+  const route = useInventoryRoute();
+  const search = route.query;
+  const setSearch = route.setQuery;
+  const [platformPreference, setPlatformPreference] = usePlatformComponentVisibility();
+  const hidePlatformComponents = route.params.has("hide_platform") ? route.params.get("hide_platform") !== "false" : platformPreference;
+  const setHidePlatformComponents = (hidden: boolean) => { setPlatformPreference(hidden); route.update({ hide_platform: String(hidden) }); };
   const q = useQuery({
-    queryKey: ["containers", clusterId],
+    queryKey: ["containers", scope.owner, clusterId],
     queryFn: () => containers.list(clusterId!),
-    enabled: !!clusterId,
+    enabled: scope.ready,
   });
-  const items = useMemo(() => q.data?.items ?? [], [q.data?.items]);
+  const invalid = Boolean(q.data && q.data.cluster_id !== clusterId);
+  const available = scope.ready && !q.isPending && !q.isFetching && !q.isError && !invalid;
+  const items = useMemo(() => available ? q.data?.items ?? [] : [], [available, q.data?.items]);
   const platformCount = useMemo(() => items.filter((item) => isPlatformResource(item.platform_role, item.namespace)).length, [items]);
   const visibleItems = useMemo(
     () => hidePlatformComponents ? items.filter((item) => !isPlatformResource(item.platform_role, item.namespace)) : items,
@@ -63,11 +71,11 @@ export function ContainersPage() {
       ), sort: (a, b) => a.name.localeCompare(b.name) },
     { id: "pod", header: "Pod", kind: "id", size: 240, maxSize: 360, cell: (c) => (
         c.workload && clusterId
-          ? <Link to="." href={`/clusters/${clusterId}/deployments?q=${encodeURIComponent(c.workload)}`} className="text-mono text-[11px] text-[color:var(--color-primary)] hover:underline" title={`${c.namespace}/${c.pod_name}`}>{c.namespace}/{c.pod_name}</Link>
+          ? <a href={`/clusters/${clusterId}/deployments?q=${encodeURIComponent(c.workload)}`} className="text-mono text-[11px] text-[color:var(--color-primary)] hover:underline" title={`${c.namespace}/${c.pod_name}`}>{c.namespace}/{c.pod_name}</a>
           : <span className="text-mono text-[11px] text-muted-foreground">{c.namespace}/{c.pod_name}</span>
       ), sort: (a, b) => (a.namespace + a.pod_name).localeCompare(b.namespace + b.pod_name) },
     { id: "image", header: "Image", kind: "id", size: 280, maxSize: 400, grow: true, cell: (c) => <span className="text-mono text-[11px] truncate block" title={c.image}>{displayImage(c.image)}</span>, sort: (a, b) => a.image.localeCompare(b.image) },
-    { id: "node", header: "Node", kind: "id", size: 160, cell: (c) => clusterId ? <Link to="." href={`/clusters/${clusterId}/nodes/${encodeURIComponent(c.node)}`} className="text-mono text-[11px] text-[color:var(--color-primary)] hover:underline">{c.node}</Link> : <span className="text-mono text-[11px]">{c.node || "Not reported"}</span>, sort: (a, b) => a.node.localeCompare(b.node) },
+    { id: "node", header: "Node", kind: "id", size: 160, cell: (c) => clusterId ? <a href={`/clusters/${clusterId}/nodes/${encodeURIComponent(c.node)}`} className="text-mono text-[11px] text-[color:var(--color-primary)] hover:underline">{c.node}</a> : <span className="text-mono text-[11px]">{c.node || "Not reported"}</span>, sort: (a, b) => a.node.localeCompare(b.node) },
     { id: "risk", header: "Vulns", kind: "count", size: 112, minSize: 96, maxSize: 140, numeric: true, cell: (c) => (
         (c.critical + c.high) === 0
           ? <span className="text-[11px] text-muted-foreground">—</span>
@@ -82,11 +90,12 @@ export function ContainersPage() {
       }, sort: (a, b) => a.state.localeCompare(b.state) },
   ];
 
+  if (!scope.ready) return <div className="space-y-4"><PageHeader title="Containers" /><InventoryScopeState scope={scope} /></div>;
   return (
     <div className="space-y-4" data-cluster-id={clusterId ?? ""}>
       <PageHeader
         title="Containers"
-        description="Every running container across the cluster's nodes, with its pod, image, node, and workload security posture."
+        description="Runtime-agent container evidence for this cluster. The API returns up to 3,000 containers and does not support continuation."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <PlatformVisibilityToggle
@@ -95,28 +104,30 @@ export function ContainersPage() {
               hiddenCount={platformCount}
             />
             <button
-              type="button"
+              type="button" disabled={!available}
               onClick={() => downloadCsv("constellation-containers", ["Container", "Namespace", "Platform Role", "Pod", "Image", "Node", "State", "Privileged", "RunAsRoot", "Critical", "High"],
                 rows.map((c) => [c.name, c.namespace, c.platform_role ?? "", c.pod_name, c.image, c.node, c.state, c.privileged ? "yes" : "", c.run_as_root ? "yes" : "", c.critical, c.high]))}
               className="rounded-md border border-border bg-card px-3 py-2 text-sm hover:bg-accent"
-            >Export CSV</button>
+            >Export loaded matches CSV</button>
           </div>
         }
       />
-      <StatGrid>
-        <StatCard label="Containers" value={summary.total} icon={<Boxes className="h-3.5 w-3.5" />} hint={`${summary.running} running`} />
+      <VerdictBanner status={q.isError || invalid ? "degraded" : !available ? "info" : summary.privileged || summary.run_as_root ? "degraded" : "info"} title={q.isError || invalid ? "Container evidence is unavailable" : !available ? "Loading container evidence" : `${items.length} loaded containers`} detail="Metrics and exports cover only returned containers. Missing evidence does not establish protection." />
+      {available && <StatGrid>
+        <StatCard label="Loaded containers" value={summary.total} icon={<Boxes className="h-3.5 w-3.5" />} hint={`${summary.running} running`} />
         <StatCard label="Running" value={summary.running} tone="low" />
         <StatCard label="In privileged workloads" value={summary.privileged} tone={summary.privileged > 0 ? "critical" : "neutral"} icon={<ShieldAlert className="h-3.5 w-3.5" />} />
         <StatCard label="In root workloads" value={summary.run_as_root} tone={summary.run_as_root > 0 ? "high" : "neutral"} />
-      </StatGrid>
+      </StatGrid>}
+      <Button onClick={() => void q.refetch()} disabled={!scope.ready || q.isFetching}>Refresh</Button>
       <input
         value={search}
         onChange={(e) => setSearch(e.target.value)}
-        placeholder="Search container, pod, image, node…"
+        aria-label="Search loaded containers" placeholder="Search loaded container, pod, image, node…"
         className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
       />
-      {q.isPending ? (
-        <p className="text-sm text-muted-foreground">Loading containers…</p>
+      {!available ? (
+        <InventoryLoadState label="Containers" query={q} invalid={invalid} />
       ) : rows.length === 0 ? (
         <EmptyState
           title="No containers"
@@ -129,7 +140,7 @@ export function ContainersPage() {
           }
         />
       ) : (
-        <DataTable rows={rows} sourceLimit={3000} sourceCount={items.length} columns={columns} rowKey={(c) => `${c.node}-${c.id || c.pod_name + c.name}`} defaultSort={{ id: "risk", dir: "desc" }} />
+        <DataTable rows={rows} sourceLimit={3000} sourceCount={items.length} columns={columns} rowKey={(c) => `${c.node}-${c.id || c.pod_name + c.name}`} preferencesKey="containers-inventory" defaultSort={{ id: "risk", dir: "desc" }} />
       )}
     </div>
   );

@@ -1,59 +1,47 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
 import { Boxes, Clock3, Database, PackageSearch, Search, ShieldAlert } from "lucide-react";
 
 import { imageScanResults, type ImageScanResult } from "@/api/client";
-import { useCluster } from "@/hooks/useCluster";
+import { INVENTORY_FETCH_SIZE, INVENTORY_PAGE_SIZE, useInventoryScope, useInventoryRoute, InventoryScopeState, InventoryLoadState, ScanInventoryContinuation } from "./inventory-workspace";
+import { Button } from "@/components/ui/button";
+import { ErrorState } from "@/components/ui/states";
+import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { Collapse } from "@/components/ui/collapse";
 import { cn } from "@/lib/cn";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
-import { VerdictBanner } from "@/components/ui/verdict-banner";
-import { Collapse } from "@/components/ui/collapse";
 import { scanEngineEvidence } from "@/lib/scan-evidence";
 import { StatCard, StatGrid } from "@/components/ui/stat-card";
 
 const severities = ["all", "critical", "high", "medium", "low", "info"];
 
 export function ImageScansPage() {
-  const { clusterId, isLoading: clusterLoading } = useCluster();
-  const [query, setQuery] = useState("");
-  const [severity, setSeverity] = useState("all");
-  const [selectedID, setSelectedID] = useState<string | null>(null);
-
+  const scope = useInventoryScope();
+  const { clusterId } = scope;
+  const route = useInventoryRoute();
+  const { query, setQuery, selectedID, setSelectedID } = route;
+  const severity = route.params.get("severity") || "all";
+  const setSeverity = (value: string) => route.update({ severity: value === "all" ? null : value });
   const q = useQuery({
-    queryKey: ["image-scan-results", clusterId],
-    queryFn: () => imageScanResults.list({ cluster_id: clusterId, limit: 500 }),
-    enabled: !!clusterId,
+    queryKey: ["image-scan-results", scope.owner, clusterId, route.debouncedQuery, route.offset],
+    queryFn: () => imageScanResults.list({ cluster_id: clusterId, q: route.debouncedQuery || undefined,  limit: INVENTORY_FETCH_SIZE, offset: route.offset }),
+    enabled: scope.ready && !route.debouncing,
   });
-
-  const results = useMemo(() => q.data?.image_scan_results ?? [], [q.data?.image_scan_results]);
+  const invalid = Boolean(q.data && (q.data.offset !== route.offset || q.data?.image_scan_results.some(item => item.impacted_count <= 0)));
+  const available = scope.ready && !q.isError && !q.isPending && !q.isFetching && !route.debouncing && !invalid;
+  const results = useMemo(() => available ? q.data?.image_scan_results.slice(0, INVENTORY_PAGE_SIZE) ?? [] : [], [available, q.data]);
+  const hasMore = available && (q.data?.image_scan_results.length ?? 0) > INVENTORY_PAGE_SIZE;
   const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return results.filter((item) => {
-      if (severity !== "all" && (item.severity_counts?.[severity] ?? 0) === 0) return false;
-      if (!needle) return true;
-      return [
-        item.image_ref,
-        item.image_ref_normalized,
-        item.image_repository,
-        item.image_tag ?? "",
-        item.image_digest,
-        item.platform ?? "",
-        item.scanner_profile,
-        item.source_type ?? "",
-        item.source_ref ?? "",
-        item.vulndb_bundle_version ?? "",
-      ].some((value) => value.toLowerCase().includes(needle));
-    });
-  }, [query, results, severity]);
-  const selected = filtered.find((item) => item.id === selectedID) ?? filtered[0] ?? null;
+    return results.filter(item => severity === "all" || (item.severity_counts?.[severity] ?? 0) > 0);
+  }, [results, severity]);
+  const selected = filtered.find((item) => item.id === selectedID) ?? null;
   const summary = useMemo(() => summarize(results), [results]);
 
   const columns: Column<ImageScanResult>[] = [
     {
-      id: "image", kind: "name", grow: true, minSize: 280, wrap: true,
+      id: "image", exportValue: item => [item.image_ref, item.image_digest].join(" · "), kind: "name", grow: true, minSize: 280, wrap: true,
       header: "Image",
       cell: (item) => (
         <>
@@ -62,20 +50,20 @@ export function ImageScansPage() {
             {item.impacted_count > 0 ? <Pill tone="accent">running workload</Pill> : null}
             {isStale(item.last_scanned_at) ? <Pill tone="warn">stale scan</Pill> : null}
           </div>
-          <Link to="." href={`/clusters/${clusterId}/images/${item.id}`} className="mt-2 block break-all font-mono text-xs font-medium hover:underline">
+          <a href={`/clusters/${clusterId}/images/${item.id}`} className="mt-2 block break-all font-mono text-xs font-medium hover:underline">
             {displayImage(item)}
-          </Link>
+          </a>
           <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{item.image_digest}</div>
         </>
       ),
     },
     {
-      id: "risk", kind: "count", size: 152, minSize: 136, maxSize: 176, wrap: true,
+      id: "risk", exportValue: item => `${item.max_risk_score} risk; ${item.critical_count} critical; ${item.high_count} high; ${item.medium_count} medium`, kind: "count", size: 152, minSize: 136, maxSize: 176, wrap: true,
       header: "Risk",
       cell: (item) => <RiskStack item={item} />,
     },
     {
-      id: "exposure", kind: "count", size: 144, minSize: 128, maxSize: 160, wrap: true,
+      id: "exposure", exportValue: item => `${item.impacted_count} workloads; ${item.package_count} packages`, kind: "count", size: 144, minSize: 128, maxSize: 160, wrap: true,
       header: "Exposure",
       cell: (item) => (
         <div className="text-xs">
@@ -85,7 +73,7 @@ export function ImageScansPage() {
       ),
     },
     {
-      id: "scan", kind: "text", size: 232, minSize: 200, wrap: true,
+      id: "scan", exportValue: item => [item.scanner_profile, item.last_scanned_at, JSON.stringify(item.engine_status ?? {})].join(" · "), kind: "text", size: 232, minSize: 200, wrap: true,
       header: "Scan",
       cell: (item) => (
         <div className="text-xs">
@@ -97,7 +85,7 @@ export function ImageScansPage() {
     },
   ];
 
-  if (clusterLoading) return <p className="text-sm text-muted-foreground">Loading cluster...</p>;
+  if (!scope.ready) return <div className="space-y-4"><PageHeader title="Images" description="Shared image scan evidence for images linked to workloads in this cluster." /><InventoryScopeState scope={scope} /></div>;
 
   return (
     <div className="space-y-4" data-testid="image-scans-page" data-cluster-id={clusterId ?? ""}>
@@ -105,8 +93,8 @@ export function ImageScansPage() {
         title="Images"
         description="Every scanned container image and the running workloads exposed to its vulnerabilities."
         actions={
-          <Link
-            to="." href={selected ? `/clusters/${clusterId}/images/${selected.id}` : `/clusters/${clusterId}/images`}
+          <a
+            href={selected ? `/clusters/${clusterId}/images/${selected.id}` : `/clusters/${clusterId}/images`}
             className={cn(
               "inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm hover:bg-accent",
               !selected && "pointer-events-none opacity-50",
@@ -114,20 +102,21 @@ export function ImageScansPage() {
           >
             <PackageSearch className="h-4 w-4" aria-hidden />
             Open Image Scan
-          </Link>
+          </a>
         }
       />
 
-      <VerdictBanner status={q.isError ? "degraded" : q.isPending || summary.total === 0 ? "info" : summary.incomplete > 0 || summary.criticalHigh > 0 || summary.stale > 0 ? "degraded" : "ok"}
-        title={q.isError ? "Image scans could not be loaded" : q.isPending ? "Loading image scans" : summary.total === 0 ? "No image scans recorded" : summary.incomplete > 0 ? "Some images have incomplete scanner coverage" : summary.criticalHigh > 0 ? "Image vulnerabilities need attention" : summary.stale > 0 ? "Some image scans are stale" : "Scanned images have no critical or high findings"}
-        detail={`Metrics and filters cover the latest 500 image results for this cluster. ${summary.incomplete} results have missing or failed engine outcomes.`} />
-      <StatGrid data-testid="image-scan-summary">
-        <StatCard label="Images" value={summary.total.toLocaleString()} icon={<Boxes className="h-3.5 w-3.5" />} hint={`${summary.exposed} running · ${summary.local} local`} />
+      <VerdictBanner status={q.isError || invalid ? "degraded" : !available ? "info" : summary.incomplete > 0 || summary.criticalHigh > 0 || summary.stale > 0 ? "degraded" : "info"}
+        title={q.isError || invalid ? "Image scans are unavailable" : !available ? "Loading image scans" : summary.total === 0 ? "No image scans on this page" : summary.incomplete > 0 ? "Some loaded scans have incomplete engine evidence" : "Review loaded image scan evidence"}
+        detail="Metrics describe up to 100 loaded image scans on this server page. Image scan results are shared evidence; exposure is scoped to this cluster." />
+      {available && <StatGrid data-testid="image-scan-summary">
+        <StatCard label="Loaded images" value={summary.total.toLocaleString()} icon={<Boxes className="h-3.5 w-3.5" />} hint={`${summary.exposed} running · ${summary.local} local`} />
         <StatCard label="Critical / High" value={summary.criticalHigh.toLocaleString()} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={summary.criticalHigh > 0 ? "high" : "neutral"} hint={`${summary.findings} image findings`} />
         <StatCard label="Packages" value={summary.packages.toLocaleString()} icon={<Database className="h-3.5 w-3.5" />} hint="across loaded image results" />
         <StatCard label="Stale Scans" value={summary.stale.toLocaleString()} icon={<Clock3 className="h-3.5 w-3.5" />} tone={summary.stale > 0 ? "medium" : "neutral"} hint="older than 7 days" />
-      </StatGrid>
+      </StatGrid>}
 
+      <Button disabled={q.isFetching || route.debouncing || !scope.ready} onClick={() => void q.refetch()}>Refresh</Button>
       <section className="rounded-lg border border-border bg-card p-3">
         <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_170px]">
           <label className="relative block">
@@ -135,7 +124,7 @@ export function ImageScansPage() {
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search repository, digest, platform or source"
+              placeholder="Search repository, image, digest or source reference"
               aria-label="Search image scans"
               className="w-full rounded-md border border-border bg-background py-2 pl-9 pr-3 text-sm"
               data-testid="image-scan-search"
@@ -149,29 +138,34 @@ export function ImageScansPage() {
             aria-label="Filter image scans by severity"
           >
             {severities.map((item) => (
-              <option key={item} value={item}>{item === "all" ? "All severities" : item}</option>
+              <option key={item} value={item}>{item === "all" ? "All severities on this page" : item}</option>
             ))}
           </select>
         </div>
       </section>
 
+      <p className="text-xs text-muted-foreground">Shared image scan evidence for images linked to workloads in this cluster. Search runs on the server. Severity and table sorting apply to this server page only.</p>
+      {!severities.includes(severity) && <ErrorState title="The requested page filter is invalid. Choose a listed value to recover." />}
+      {available && <ScanInventoryContinuation page={route.page} rows={results.length} matching={filtered.length} hasMore={hasMore} onPage={route.setPage} />}
+      {available && selectedID && !selected && <ErrorState title="The selected record is unavailable on this page or hidden by its filters." action={<Button onClick={() => setSelectedID(null)}>Clear selection</Button>} />}
       <section className="flex flex-col gap-4">
         <div data-testid="image-scans-table">
-          <DataTable
+          {!available ? <InventoryLoadState label="Image scans" query={q} invalid={invalid} debouncing={route.debouncing} /> : <DataTable
             rows={filtered}
-            sourceLimit={500}
-            sourceCount={results.length}
+            pagination={false}
+            preferencesKey="image-scan-results-inventory"
+            exportFileName="constellation-image-scan-results-server-page"
+            exportLabel="Export this page CSV"
             columns={columns}
             rowKey={(item) => item.id}
             onRowClick={(item) => setSelectedID(item.id)}
             selected={new Set(selected ? [selected.id] : [])}
-            showDensityToggle={false}
             emptyState={
               <div className="px-3 py-8 text-center text-xs text-muted-foreground">
                 {q.isPending ? "Loading image scans..." : q.isError ? "Image scans are unavailable. Refresh to try again." : "No image scans match the current filters."}
               </div>
             }
-          />
+          />}
         </div>
 
         {selected && <Collapse label="Selected image summary"><ImagePreview item={selected} clusterId={clusterId} /></Collapse>}
@@ -198,9 +192,9 @@ function ImagePreview({ item, clusterId }: { item: ImageScanResult | null; clust
             <h2 className="mt-2 break-all font-mono text-sm font-semibold">{displayImage(item)}</h2>
             <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{item.image_digest}</p>
           </div>
-          <Link to="." href={`/clusters/${clusterId}/images/${item.id}`} className="rounded-md border border-border px-2 py-1 text-xs hover:bg-accent">
+          <a href={`/clusters/${clusterId}/images/${item.id}`} className="rounded-md border border-border px-2 py-1 text-xs hover:bg-accent">
             Full Details
-          </Link>
+          </a>
         </div>
 
         <div className="mt-4 grid grid-cols-3 gap-2">

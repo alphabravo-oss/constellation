@@ -619,6 +619,74 @@ No live security actions, captures, acceptance changes or saved-view writes were
 submitted. The eight remaining selected-console families below stay open;
 these checks do not close UI-1/2/3/4 or broader infrastructure/security gates.
 
+The inventory/workspace continuation moves process baseline rule and mode authoring
+to dedicated review pages. Inventory and detail workspaces retain URL context,
+configured rules and mode history use shared tables, and failed reads no longer
+look like empty profiles. Rule APIs resolve exact cluster/workload identity,
+reject ambiguous unscoped names, and offer atomic create/update/delete and mode
+preconditions. Responses are checked before navigation; uncertain writes cannot
+be blindly repeated. New audit records include resolved cluster identity. These
+changes configure policy and do not claim agent receipt or enforcement.
+
+Repository, image and serverless scan inventories now expose server continuation
+using 100 displayed rows plus a one-row continuation probe. Supported search
+predicates run on the server; local severity/status/posture filters, sorting and
+CSV are explicitly page-scoped. URL state preserves filters, page and exact
+selection. Containers, connector coverage and federation expose read/refresh
+errors instead of healthy/empty/zero fallbacks. Organization-wide repository,
+serverless, connector and federation evidence is labeled accordingly.
+
+Node, serverless and CVE details use exact entity/scope gates, URL workspaces and
+shared evidence tables with preferences and bounded exports. Node scan requests
+recheck their exact current scan target. Asset inventory, Audit, Registry Images,
+Access Control, API Tokens and Attestation Trust adopt shared table preferences
+and accurate CSV values. Asset links follow the actual selection, unknown
+signatures remain unknown, and exports retain full audit identities and account
+lock/reset state. Audit and registry pagination live in the URL without a second
+internal pager. Attestation trust uses one responsive table and distinguishes
+verification configuration from admission enforcement.
+
+Effective Config and Cluster Health now use full-width URL workspaces.
+Configuration values, provenance, component revision reports and JSON are
+separate views; all returned revision reports are reachable through the shared
+table instead of a silent 12-row slice. Cluster components, gates, platform
+facts and registration are separately linked, with missing evidence kept
+distinct from zero. Shared text-value metric typography is used for metadata.
+
+Source limits remain explicit: container inventory 3,000; node CVEs 2,000;
+serverless findings 100 and jobs 25; CVE affected images 500 and workload links
+1,000; component inventory 1,000; baseline observations/counts derive from the
+latest 1,000 retained events. These bounds do not establish full-fleet totals.
+Scan list APIs expose offset/limit without total counts. Cloud function evidence
+has no cluster association. Baseline inventory/rules/history are uncapped, but
+per-workload inventory reads still require scale qualification.
+
+
+Validation: Helm revision **53** runs frontend `inventory-layout-20261012`
+and API `inventory-console-20261012`, retaining migration
+`audit-lookup-20261012` and schema 173; all seven deployments are ready.
+The full frontend suite passed **1,194 tests across 100 files**. Final baseline
+column/header refinement passed 33 focused tests, production build/typecheck and
+changed-source lint. Generated OpenAPI, 107 endpoint mappings and runtime handler
+vet pass. Fresh schema-173 PostgreSQL passed **506 runtime test executions**
+with race/shuffle and no skips, including baseline scope and atomic write conflicts.
+The default local test database was stale at schema 161; the fresh migrated run
+also passes the unrelated foreign-key test that failed against that old schema.
+Four affected browser cases were discovered; the full browser runner was not rerun.
+
+Live read-only checks cover exact baseline rule form scope, closed Advanced fields
+and Cancel; Effective Config report/provenance tabs and Back context; Cluster Health
+gates/platform/registration workspaces; changed asset selection and its actual
+native detail navigation; Audit empty-page recovery; image scan empty-page recovery;
+and CVE metadata with explicitly empty bounded affected evidence. Baseline workload
+width increased from 169px to 375px at 1280px while numeric columns remain compact.
+Desktop and 640px checks show matching table header/body geometry, contained
+horizontal scrolling and no clipped actions in the tested populated tables.
+The live environment has no node/serverless/registry inventory, so positive paths
+for those surfaces are component-test evidence rather than live data acceptance.
+No live scans, policy mutations, acceptance changes or saved-view writes were made.
+These bounded checks do not close UI-1/2/3/4 or infrastructure/security acceptance.
+
 The admission-engine continuation adds migration **172** and persists normalized
 engine outcomes atomically with image scan completion. The built-in vulnerability
 profiles now require successful Trivy and Grype results rather than retired
@@ -2201,23 +2269,19 @@ progressive disclosure, while retaining Constellation's security vocabulary.
 The October 12 completion audit narrows the remaining selected console work to
 concrete page families rather than expanding it into infrastructure acceptance:
 
-1. Process baseline inventory/detail: remove inline rule authoring, preserve exact
-   cluster scope, disclose evidence through URL tabs and show read/write failures.
-2. Container, connector, federation and scan inventories: replace failed-read
-   empty/healthy states with explicit unavailable/retry states. Scan inventories
-   must expose continuation beyond their current 500-row read and URL filters.
-3. Coverage/Posture: resolve URL cluster scope, distinguish unavailable sources
+1. Coverage/Posture: resolve URL cluster scope, distinguish unavailable sources
    from absent capabilities, and label bounded signal samples honestly.
-4. Node, serverless and CVE detail: exact entity gates, URL workspaces, related-read
-   failures and canonical evidence tables with visible source limits.
-5. Effective configuration and cluster health: full-width workspaces, URL
-   disclosure, and all returned component reports instead of a silent 12-row slice.
-6. Remaining inventory controls: Assets, Access Control, API Tokens, Attestation
-   Trust, Registry Images and Audit need bounded export/preferences/paging review.
-7. Migration and scanner disclosure: URL-linked peer views; deliberate Save/Cancel
+2. Migration and scanner disclosure: URL-linked peer views; deliberate Save/Cancel
    for scanner intervals; a shared table for the attempt ledger.
-8. Network secondary controls and the remaining dashboard destination/source-total
+3. Network secondary controls and the remaining dashboard destination/source-total
    matrix still need their final workflow acceptance.
+4. Cross-page acceptance: remaining server continuation, saved-view isolation,
+   accessibility, platform-role and export contracts in UI-2/3/4 remain open.
+
+The baseline, inventory, entity-detail, configuration/health and bounded inventory
+control implementations are recorded in the Helm-53 evidence above. Visible caps,
+page-scoped scan filters/exports and fixture-only positive paths are limitations,
+not full-fleet or all-page acceptance.
 
 This audit found no additional confirmed duplicate feature-home renderer or
 primary KPI row above five. Those findings do not close the all-page contract or

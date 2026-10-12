@@ -1,4 +1,4 @@
-import { useState } from "react";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
@@ -13,12 +13,16 @@ import { DataTable, type Column } from "@/components/ui/data-table";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { VerdictBanner, type VerdictStatus } from "@/components/ui/verdict-banner";
 import { Collapse } from "@/components/ui/collapse";
+import { Button } from "@/components/ui/button";
+import { ErrorState, LoadingState } from "@/components/ui/states";
+import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
+import { useRouteSearchParams } from "@/lib/route-search";
 
 type CloudConnector = ConnectorCoverageOverview["cloud_connectors"][number];
 
 const cloudColumns: Column<CloudConnector>[] = [
   {
-    id: "connector",
+    id: "connector", exportValue: c => c.name,
     header: "Connector", kind: "name", wrap: true,
     cell: (c) => (
       <>
@@ -27,11 +31,11 @@ const cloudColumns: Column<CloudConnector>[] = [
       </>
     ),
   },
-  { id: "account", header: "Account", kind: "text", code: true, wrap: true, size: 192, minSize: 144, maxSize: 280, cell: (c) => <span className="font-mono text-xs">{c.account}</span> },
-  { id: "regions", header: "Regions", kind: "text", wrap: true, size: 192, minSize: 144, maxSize: 280, cell: (c) => <span className="text-xs">{c.regions.join(", ")}</span> },
-  { id: "coverage", header: "Coverage", kind: "count", size: 128, minSize: 112, maxSize: 160, cell: (c) => <span className="text-xs">{c.resources_assessed}/{c.resources_observed}</span> },
-  { id: "findings", header: "Findings", kind: "count", cell: (c) => <span className="text-xs">{c.findings_open}</span> },
-  { id: "status", header: "Status", kind: "status", cell: (c) => <Status value={c.status} /> },
+  { id: "account", exportValue: c => c.account, header: "Account", kind: "text", code: true, wrap: true, size: 192, minSize: 144, maxSize: 280, cell: (c) => <span className="font-mono text-xs">{c.account}</span> },
+  { id: "regions", exportValue: c => c.regions.join(", "), header: "Regions", kind: "text", wrap: true, size: 192, minSize: 144, maxSize: 280, cell: (c) => <span className="text-xs">{c.regions.join(", ")}</span> },
+  { id: "coverage", exportValue: c => `${c.resources_assessed}/${c.resources_observed}`, header: "Coverage", kind: "count", size: 128, minSize: 112, maxSize: 160, cell: (c) => <span className="text-xs">{c.resources_assessed}/{c.resources_observed}</span> },
+  { id: "findings", exportValue: c => c.findings_open, header: "Findings", kind: "count", cell: (c) => <span className="text-xs">{c.findings_open}</span> },
+  { id: "status", exportValue: c => c.status, header: "Status", kind: "status", cell: (c) => <Status value={c.status} /> },
 ];
 
 type ScanJobAction = "pause" | "resume" | "retry" | "cancel";
@@ -39,23 +43,29 @@ type ScanJobAction = "pause" | "resume" | "retry" | "cancel";
 export function ConnectorCoveragePage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const q = useQuery({ queryKey: ["connector-coverage"], queryFn: connectorCoverage.overview });
-  const jobs = useQuery({ queryKey: ["scan-jobs"], queryFn: () => scanJobs.list() });
+  const identity = useTablePreferencesIdentity();
+  const owner = `${identity?.org_id}:${identity?.user_id}`;
+  const q = useQuery({ queryKey: ["connector-coverage", owner], queryFn: connectorCoverage.overview });
+  const jobs = useQuery({ queryKey: ["scan-jobs", owner], queryFn: () => scanJobs.list() });
   const [tab, setTab] = useTabParam("tab", "registries");
-  const [cacheScannerID, setCacheScannerID] = useState("");
+  const [params, setParams] = useRouteSearchParams();
+  const cacheScannerID = params.get("scanner") ?? "";
+  const setCacheScannerID = (id: string) => setParams(current => { const next = new URLSearchParams(current); if (id) next.set("scanner", id); else next.delete("scanner"); return next; });
+  const scannerKnown = !q.isError && !q.isFetching && Boolean(q.data?.scanner_pools.some(pool => pool.scanners?.some(scanner => (scanner.instance_id || scanner.hostname) === cacheScannerID)));
   const cacheData = useQuery({
-    queryKey: ["scanner-cache-data", cacheScannerID],
+    queryKey: ["scanner-cache-data", owner, cacheScannerID],
     queryFn: () => connectorCoverage.cacheData(cacheScannerID),
-    enabled: Boolean(cacheScannerID),
+    enabled: Boolean(cacheScannerID) && scannerKnown,
   });
   const cacheStat = useQuery({
-    queryKey: ["scanner-cache-stat", cacheScannerID],
+    queryKey: ["scanner-cache-stat", owner, cacheScannerID],
     queryFn: () => connectorCoverage.cacheStat(cacheScannerID),
-    enabled: Boolean(cacheScannerID),
+    enabled: Boolean(cacheScannerID) && scannerKnown,
   });
 
-  const invalidateCoverage = () => queryClient.invalidateQueries({ queryKey: ["connector-coverage"] });
-  const invalidateJobs = () => queryClient.invalidateQueries({ queryKey: ["scan-jobs"] });
+  const cacheRecords = !cacheData.isError && !cacheData.isFetching && cacheData.data?.scanner_id === cacheScannerID ? cacheData.data : undefined;
+  const invalidateCoverage = () => queryClient.invalidateQueries({ queryKey: ["connector-coverage", owner] });
+  const invalidateJobs = () => queryClient.invalidateQueries({ queryKey: ["scan-jobs", owner] });
 
   const preview = useMutation({ mutationFn: ({ id, type }: { id: string; type: string }) => connectorCoverage.testPreview(id, type) });
   const testConfig = useMutation({
@@ -76,14 +86,14 @@ export function ConnectorCoveragePage() {
     onError: (_error, variables) => toast.error(`Unable to ${variables.action} scan job`),
   });
 
-  if (q.isPending) return <p className="text-sm text-muted-foreground">Loading connector coverage...</p>;
+  if (q.isPending || q.isError || q.isFetching || !q.data) return <PageContainer><PageHeader title="Registry & Cloud Connectors" description="Organization-wide connector coverage and scan evidence." />{q.isError ? <ErrorState title="Connector coverage is unavailable or could not be refreshed." action={<Button onClick={() => void q.refetch()}>Retry coverage</Button>} /> : <LoadingState label="Loading connector coverage…" />}</PageContainer>;
 
   const data = q.data;
   const summary = data?.summary;
   const registryConnectors = data?.registry_connectors ?? [];
   const cloudConnectors = data?.cloud_connectors ?? [];
   const configs = data?.configs ?? [];
-  const jobList = jobs.data?.jobs ?? [];
+  const jobList = jobs.isError || jobs.isFetching || jobs.isPending ? [] : jobs.data?.jobs ?? [];
 
   // Verdict: is every connector ready and everything scanned?
   const registriesReady = (summary?.registry_connectors_ready ?? 0) >= (summary?.registry_connectors_total ?? 0);
@@ -91,8 +101,9 @@ export function ConnectorCoveragePage() {
   const unscanned = summary?.images_unscanned ?? 0;
   const rotationsDue = summary?.credential_rotations_due ?? 0;
   const connectorsDegraded = !registriesReady || !cloudsReady;
-  const verdictStatus: VerdictStatus = connectorsDegraded ? "degraded" : unscanned > 0 || rotationsDue > 0 ? "info" : "ok";
-  const verdictTitle = connectorsDegraded
+  const noConnectors = (summary?.registry_connectors_total ?? 0) + (summary?.cloud_connectors_total ?? 0) === 0;
+  const verdictStatus: VerdictStatus = noConnectors ? "info" : connectorsDegraded ? "degraded" : unscanned > 0 || rotationsDue > 0 ? "info" : "ok";
+  const verdictTitle = noConnectors ? "No connectors configured" : connectorsDegraded
     ? "Some connectors need attention"
     : unscanned > 0
       ? "All connectors ready — images still awaiting scan"
@@ -169,7 +180,7 @@ export function ConnectorCoveragePage() {
             <p className="mt-1 text-xs text-muted-foreground">
               Test connection actions are read-only before credentials are saved or scans are started.
             </p>
-            {preview.data ? (
+            {preview.isPending ? <LoadingState label="Loading connector preview…" /> : preview.isError ? <ErrorState title="The connector preview is unavailable." /> : preview.data ? (
               <div className="mt-3 rounded-md bg-muted p-3 text-xs">
                 <div className="font-medium">{preview.data.connector_id}</div>
                 <p className="mt-1 text-muted-foreground">{preview.data.message}</p>
@@ -247,6 +258,7 @@ export function ConnectorCoveragePage() {
               rows={cloudConnectors}
               columns={cloudColumns}
               rowKey={(connector) => connector.id}
+              preferencesKey="connector-cloud-accounts" exportFileName="constellation-cloud-connectors" exportLabel="Export loaded accounts CSV"
               emptyState={<div className="p-6 text-sm text-muted-foreground">No cloud accounts connected yet.</div>}
             />
           </div>
@@ -265,25 +277,16 @@ export function ConnectorCoveragePage() {
           </div>
 
           <section className="space-y-2" data-testid="recent-scan-jobs">
+            {jobs.isError ? <ErrorState title="Scan jobs are unavailable or could not be refreshed." action={<Button onClick={() => void jobs.refetch()}>Retry scan jobs</Button>} /> : jobs.isPending || jobs.isFetching ? <LoadingState label="Loading scan jobs…" /> : null}
             {jobList.map((job) => (
               <ScanJobCard
                 key={job.id}
                 job={job}
                 busy={lifecycle.isPending}
-                onAction={(action) => lifecycle.mutate({ action, id: job.id })}
+                onAction={(action) => { const current = queryClient.getQueryState<{ jobs: ScanJob[] }>(["scan-jobs", owner]); const latest = current?.data?.jobs.find(item => item.id === job.id); if (current?.status === "success" && current.fetchStatus === "idle" && latest && scanJobActions(latest.status).includes(action)) lifecycle.mutate({ action, id: job.id }); }}
               />
             ))}
-            {jobList.length === 0 && (data?.recent_jobs ?? []).map((job) => (
-              <article key={job.id} className="rounded-md bg-muted p-3 text-xs">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="truncate font-mono">{job.target_ref}</span>
-                  <Status value={job.status} />
-                </div>
-              </article>
-            ))}
-            {jobList.length === 0 && (data?.recent_jobs ?? []).length === 0 && (
-              <p className="text-xs text-muted-foreground">No scan jobs. Use “Queue scan” to enqueue one.</p>
-            )}
+            {!jobs.isError && !jobs.isPending && !jobs.isFetching && jobList.length === 0 && <p className="text-xs text-muted-foreground">No scan jobs. Use “Queue scan” to enqueue one.</p>}
           </section>
 
           <Collapse label="Coverage gaps by scope">
@@ -354,9 +357,9 @@ export function ConnectorCoveragePage() {
                     <div>
                       <div className="font-medium">Cache records</div>
                       <div className="text-muted-foreground">
-                        {cacheData.data?.hostname ?? cacheScannerID}
-                        {cacheData.data?.record_size_bytes ? ` · ${formatBytes(cacheData.data.record_size_bytes)}` : ""}
-                        {cacheData.data ? ` · ${cacheData.data.cache_hits} hits / ${cacheData.data.cache_misses} misses` : ""}
+                        {cacheRecords?.hostname ?? cacheScannerID}
+                        {cacheRecords?.record_size_bytes ? ` · ${formatBytes(cacheRecords.record_size_bytes)}` : ""}
+                        {cacheRecords ? ` · ${cacheRecords.cache_hits} hits / ${cacheRecords.cache_misses} misses` : ""}
                       </div>
                     </div>
                     <button
@@ -367,13 +370,13 @@ export function ConnectorCoveragePage() {
                       Close
                     </button>
                   </div>
-                  {cacheData.isFetching ? (
+                  {!scannerKnown ? <ErrorState title="The selected scanner is unavailable in the loaded organization inventory." /> : cacheData.isFetching || cacheData.isPending ? (
                     <div className="mt-3 text-muted-foreground">Loading cache records...</div>
-                  ) : cacheData.isError ? (
-                    <div className="mt-3 text-[color:var(--color-status-error)]">Unable to load scanner cache records.</div>
+                  ) : cacheData.isError || cacheRecords?.scanner_id !== cacheScannerID ? (
+                    <ErrorState title="Scanner cache records are unavailable." action={<Button onClick={() => void cacheData.refetch()}>Retry cache records</Button>} />
                   ) : (
                     <>
-                      {cacheStat.data?.caches && cacheStat.data.caches.length > 0 ? (
+                      {cacheStat.isError || (!cacheStat.isPending && cacheStat.data?.scanner_id !== cacheScannerID) ? <ErrorState title="Scanner cache statistics are unavailable." action={<Button onClick={() => void cacheStat.refetch()}>Retry cache statistics</Button>} /> : !cacheStat.isFetching && cacheStat.data?.caches && cacheStat.data.caches.length > 0 ? (
                         <div className="mt-3 grid gap-2 sm:grid-cols-2">
                           {cacheStat.data.caches.map((cache) => (
                             <div key={cache.name} className="rounded-md bg-muted p-2">
@@ -391,13 +394,13 @@ export function ConnectorCoveragePage() {
                       ) : cacheStat.isFetching ? (
                         <div className="mt-3 text-muted-foreground">Loading cache statistics...</div>
                       ) : null}
-                      {(cacheData.data?.cache_records ?? []).length === 0 ? (
+                      {(cacheRecords?.cache_records ?? []).length === 0 ? (
                         <div className="mt-3 text-muted-foreground">No cache records reported by this scanner.</div>
                       ) : (
                         <div className="mt-3 max-h-56 overflow-y-auto rounded-md border border-border">
                           <DataTable
                             className="rounded-none border-0"
-                            rows={cacheData.data?.cache_records ?? []}
+                            rows={cacheRecords?.cache_records ?? []}
                             rowKey={(record) => `${record.cache}-${record.layer}`}
                             showDensityToggle={false}
                             showColumnChooser={false}
@@ -452,6 +455,10 @@ export function ConnectorCoveragePage() {
         description="Connect Constellation to your container registries and cloud accounts so it can discover and scan the images and resources running there."
       />
 
+      <p className="text-xs text-muted-foreground">Organization-wide connector coverage. Registry and cloud evidence is shared across cluster navigation.</p>
+      {preview.isError && <ErrorState title="The connector preview failed. Try Test connection again." />}
+      {testConfig.isError && <ErrorState title="The saved connector test failed. Retry after reviewing the configuration." />}
+      {lifecycle.isError && <ErrorState title="The scan job action failed. Refresh jobs and retry." />}
       <VerdictBanner status={verdictStatus} title={verdictTitle} detail={verdictDetail} />
 
       <StatGrid>
@@ -461,6 +468,7 @@ export function ConnectorCoveragePage() {
         <StatCard label="Queued scans" value={summary?.queued_scans ?? 0} />
       </StatGrid>
 
+      {cacheScannerID && !scannerKnown && <ErrorState title="The selected scanner is unavailable in the loaded organization inventory." action={<Button onClick={() => setCacheScannerID("")}>Clear scanner selection</Button>} />}
       <Tabs value={tab} onValueChange={setTab} items={tabs} />
     </PageContainer>
   );

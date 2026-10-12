@@ -1,19 +1,17 @@
-// CVEDetailPage — single-CVE drill-down with entity breadcrumbs + KEV / EPSS
-// banner + entity tile rail + fix advisor.
-import { useMemo } from "react";
+import { useParams } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import { Link, useParams } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, ExternalLink, Wrench, BookOpen, Bug } from "lucide-react";
-
-import { api, cve as cveApi, type CVEAffectedImage, type CVEAffectedResponse, type Severity } from "@/api/client";
-import { useCluster } from "@/hooks/useCluster";
-import { EntityHeader } from "@/components/EntityHeader";
+import { ExternalLink } from "lucide-react";
+import { api, cve as cveApi, type CVEAffectedImage, type CVEAffectedWorkload, type CVEAffectedCluster, type CVEAffectedPackage } from "@/api/client";
+import { PageHeader } from "@/components/ui/page";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
+import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { Tabs, useTabParam } from "@/components/ui/tabs";
+import { DataTable, type Column } from "@/components/ui/data-table";
 import { KevBadge, EpssBadge } from "@/components/ui/kev-badge";
-import { SeverityBadge } from "@/components/ui/severity-badge";
 import { Button } from "@/components/ui/button";
-import { EmptyState } from "@/components/ui/empty-state";
-import { cn } from "@/lib/cn";
+import { ErrorState, LoadingState } from "@/components/ui/states";
+import { entityDetailError, useEntityClusterScope } from "./entity-detail-scope";
 
 interface CVEDetail {
   cve_id: string;
@@ -24,289 +22,109 @@ interface CVEDetail {
   epss_probability?: number;
   aliases: string[];
 }
+const WORKSPACES = ["images", "workloads", "clusters", "packages", "details", "remediation"];
 
 export function CVEDetailPage() {
-  // Two routes render this page:
-  //   global   /cve/:id                       → params.id = CVE, no cluster
-  //   cluster  /clusters/:id/cve/:cveId        → params.id = CLUSTER, params.cveId = CVE
-  // The distinct `:cveId` param name is REQUIRED: if the nested route reused `:id` it
-  // would shadow the cluster's `:id`, so useCluster() (which reads params.id) would get
-  // the CVE id, "not find" the cluster, and ClusterRouter would bounce to /clusters.
+  // Global /cve/$id and cluster /clusters/$id/cve/$cveId intentionally expose
+  // different affected-evidence scopes; $cveId never shadows the cluster ID.
   const { id, cveId } = useParams({ strict: false });
-  const clusterScoped = !!cveId;
-  const cveKey = cveId ?? id;
-  // useCluster reads params.id — correct (the cluster) only on the nested route.
-  const { cluster } = useCluster();
-  const clusterId = clusterScoped ? id : undefined;
+  const scoped = cveId !== undefined;
+  const scope = useEntityClusterScope(scoped);
+  const clusterId = scoped ? scope.clusterId : undefined;
+  const cveKey = (cveId ?? id ?? "").trim().toUpperCase();
+  const [requestedTab, setTab] = useTabParam("tab", "images");
+  const tab = WORKSPACES.includes(requestedTab) ? requestedTab : "images";
   const cveQ = useQuery({
-    queryKey: ["cve", cveKey],
-    queryFn: () => api.get<CVEDetail>(`/cve/${cveKey}`).then((r) => r.data),
-    enabled: !!cveKey,
+    queryKey: ["cve-detail", clusterId ?? "organization", cveKey],
+    queryFn: async () => {
+      const { data } = await api.get<CVEDetail>(`/cve/${encodeURIComponent(cveKey)}`);
+      if (data.cve_id.toUpperCase() !== cveKey) throw new Error("CVE metadata does not match the requested CVE ID.");
+      return data;
+    },
+    enabled: scope.ready && !!cveKey,
   });
   const relatedQ = useQuery({
-    queryKey: ["cve-affected", cveKey, clusterId ?? "all"],
-    queryFn: () => cveApi.affected(cveKey!, clusterId),
-    enabled: !!cveKey,
+    queryKey: ["cve-affected", cveKey, clusterId ?? "organization"],
+    queryFn: async () => {
+      const data = await cveApi.affected(cveKey, clusterId);
+      if (data.cve_id.toUpperCase() !== cveKey || clusterId && (data.workloads.some((item) => item.cluster_id !== clusterId) || data.clusters.some((item) => item.cluster_id !== clusterId))) throw new Error("Affected evidence does not match the requested CVE and cluster scope.");
+      return data;
+    },
+    enabled: scope.ready && !!cveKey,
   });
-
-  const affected = relatedQ.data;
-  const grouped = useMemo(() => groupByAffected(affected), [affected]);
-  const topSev = useMemo<Severity>(() => {
-    const order: Severity[] = ["critical", "high", "medium", "low", "info"];
-    const images = affected?.images ?? [];
-    for (const s of order) if (images.some((img) => (img.severity_counts?.[s] ?? 0) > 0)) return s;
-    if ((affected?.summary.max_risk_score ?? 0) >= 90) return "critical";
-    if ((affected?.summary.max_risk_score ?? 0) >= 70) return "high";
-    if ((affected?.summary.max_risk_score ?? 0) >= 40) return "medium";
-    return "medium";
-  }, [affected]);
-
-  if (cveQ.isPending) return <p className="text-xs text-muted-foreground">Loading CVE…</p>;
-  if (cveQ.isError)   return <p className="text-xs text-destructive">CVE not found.</p>;
-  const cve = cveQ.data!;
-
-  return (
-    <div className="space-y-5" data-testid="cve-detail-page">
-      <EntityHeader
-        breadcrumbs={
-          clusterId
-            ? [
-                { label: "Clusters", to: "/clusters" },
-                { label: cluster?.name || clusterId.slice(0, 14), to: `/clusters/${clusterId}/dashboard` },
-                { label: "Findings", to: `/clusters/${clusterId}/findings` },
-                { label: cve.cve_id },
-              ]
-            : [
-                { label: "CVE DB", to: "/cve" },
-                { label: cve.cve_id },
-              ]
-        }
-        title={<span className="text-mono">{cve.cve_id}</span>}
-        subtitle={clusterId ? `${cve.title} · scoped to ${cluster?.name || "this cluster"}` : cve.title}
-        badges={
-          <>
-            {cve.cvss_base != null && (
-              <span className="rounded bg-muted px-2 py-0.5 text-[10px] text-mono">CVSS {cve.cvss_base}</span>
-            )}
-            {cve.kev_listed && <KevBadge />}
-            {cve.epss_probability != null && <EpssBadge probability={cve.epss_probability} />}
-            <SeverityBadge severity={topSev} />
-          </>
-        }
-        stats={[
-          { label: "Affected Images",      value: grouped.images.length,      tone: grouped.images.length > 0 ? "high" : "neutral" },
-          { label: "Affected Deployments", value: grouped.deployments.length, tone: grouped.deployments.length > 0 ? "high" : "neutral" },
-          { label: "Affected Clusters",    value: grouped.clusters.length,    tone: grouped.clusters.length > 0 ? "accent" : "neutral" },
-          { label: "Image Findings",       value: affected?.summary.finding_count ?? 0, tone: "accent" },
-        ]}
-        actions={
-          <>
-            <Button size="sm" variant="outline" asChild>
-              <a href={`https://nvd.nist.gov/vuln/detail/${cve.cve_id}`} target="_blank" rel="noopener noreferrer">
-                NVD <ExternalLink className="h-3 w-3" />
-              </a>
-            </Button>
-            <Button size="sm" variant="primary" asChild>
-              <a href="#affected-images">
-                View {grouped.images.length} image{grouped.images.length === 1 ? "" : "s"}
-              </a>
-            </Button>
-          </>
-        }
-      />
-
-      {/* KEV alert banner */}
-      {cve.kev_listed && (
-        <div className="rounded-md border border-[color-mix(in_oklab,var(--color-severity-critical)_36%,var(--color-border))] bg-[color-mix(in_oklab,var(--color-severity-critical)_8%,transparent)] p-3 flex items-start gap-3">
-          <Bug className="h-4 w-4 text-[color:var(--color-severity-critical)] flex-shrink-0 mt-0.5" />
-          <div className="flex-1">
-            <div className="text-sm font-semibold text-[color:var(--color-severity-critical)]">CISA Known-Exploited Vulnerability</div>
-            <p className="text-xs text-foreground/80 mt-0.5">
-              This CVE is on CISA's KEV catalog. Active exploitation has been observed in the wild — prioritize remediation immediately.
-            </p>
-          </div>
-          <Button size="sm" variant="primary" asChild>
-            <a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog" target="_blank" rel="noopener noreferrer">
-              CISA catalog
-            </a>
-          </Button>
-        </div>
-      )}
-
-      {/* EPSS probability bar */}
-      {cve.epss_probability != null && (
-        <section className="rounded-md border border-border bg-card p-3">
-          <div className="flex items-baseline justify-between gap-2">
-            <h2 className="text-display text-sm font-semibold tracking-tight">EPSS Exploit Probability</h2>
-            <span className="text-mono text-2xl font-semibold" style={{ color: cve.epss_probability >= 0.7 ? "var(--color-severity-critical)" : cve.epss_probability >= 0.3 ? "var(--color-severity-high)" : "var(--color-severity-medium)" }}>
-              {(cve.epss_probability * 100).toFixed(2)}%
-            </span>
-          </div>
-          <div className="mt-2 h-2 w-full rounded-full bg-muted overflow-hidden">
-            <div
-              className="h-full rounded-full transition-all duration-300"
-              style={{
-                width: `${cve.epss_probability * 100}%`,
-                background: cve.epss_probability >= 0.7 ? "var(--color-severity-critical)" : cve.epss_probability >= 0.3 ? "var(--color-severity-high)" : "var(--color-severity-medium)",
-              }}
-            />
-          </div>
-          <p className="mt-2 text-[10px] text-muted-foreground">Probability that this CVE is exploited in the wild within 30 days. Source: FIRST.org EPSS.</p>
-        </section>
-      )}
-
-      {/* Description */}
-      {cve.description && (
-        <section className="rounded-md border border-border bg-card p-3">
-          <h2 className="text-display text-sm font-semibold tracking-tight mb-1.5 flex items-center gap-1.5">
-            <BookOpen className="h-3.5 w-3.5 text-muted-foreground" />
-            Description
-          </h2>
-          <p className="text-xs text-foreground/85 leading-relaxed">{cve.description}</p>
-          {cve.aliases.length > 0 && (
-            <div className="mt-2 flex flex-wrap items-center gap-1.5">
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Aliases</span>
-              {cve.aliases.map((a) => (
-                <span key={a} className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-mono">{a}</span>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
-
-      {/* Fix advisor */}
-      <section className="rounded-md border border-border bg-card p-3 flex items-start gap-3">
-        <Wrench className="h-4 w-4 text-[color:var(--color-primary)] flex-shrink-0 mt-0.5" />
-        <div className="flex-1 space-y-1">
-          <h2 className="text-display text-sm font-semibold tracking-tight">Fix Advisor</h2>
-          <p className="text-xs text-foreground/85">
-            <span className="font-medium">Highest-impact action: </span>
-            Upgrade affected images to a fixed version. {grouped.images.length > 0 && (
-              <>
-                Currently observed across <span className="text-mono">{grouped.images.length} image{grouped.images.length === 1 ? "" : "s"}</span>.
-              </>
-            )}
-          </p>
-          <p className="text-[11px] text-muted-foreground">
-            Alternatives: apply a NetworkPolicy to restrict exposure · accept-risk with expiry · suppress with rationale.
-          </p>
-        </div>
-        <Button size="sm" variant="primary" asChild>
-          <a href="#affected-images">Review affected images</a>
-        </Button>
-      </section>
-
-      {/* Entity breadcrumb pivots */}
-      <nav className="flex flex-wrap items-center gap-1.5 rounded-md border border-border bg-card p-3 text-xs" data-testid="cve-breadcrumbs">
-        <Crumb label="CVE" count={1} active />
-        <Sep />
-        <Crumb label="Image"      count={grouped.images.length}      href="#affected-images" />
-        <Sep />
-        <Crumb label="Deployment" count={grouped.deployments.length} href="#affected-workloads" />
-        <Sep />
-        <Crumb label="Cluster"    count={grouped.clusters.length}    href="#affected-clusters" />
-      </nav>
-
-      {/* Tile rail */}
-      <section className="grid grid-cols-1 gap-3 md:grid-cols-3" data-testid="cve-tile-lists">
-        <TileList id="affected-images" title="Affected Images" items={grouped.images} emptyHint="No images observed with this CVE." />
-        <TileList id="affected-workloads" title="Affected Deployments" items={grouped.deployments} emptyHint="No deployments observed with this CVE." />
-        <TileList id="affected-clusters" title="Affected Clusters" items={grouped.clusters} emptyHint="No clusters observed with this CVE." />
-      </section>
-    </div>
-  );
+  const backPath = clusterId ? `/clusters/${encodeURIComponent(clusterId)}/findings` : "/cve";
+  const header = <PageHeader title="CVE evidence" description="Review vulnerability intelligence and the returned images and workloads associated with an exact CVE." backLink={<a href={backPath}>{clusterId ? "Findings" : "CVE database"}</a>} />;
+  if (!scope.ready) return <div className="space-y-4">{header}{scope.loading ? <LoadingState label="Resolving CVE evidence cluster…" /> : <ErrorState title="The requested CVE cluster could not be resolved." error={scope.error} action={<Button onClick={scope.retry}>Retry cluster</Button>} />}</div>;
+  if (!cveKey) return <div className="space-y-4">{header}<ErrorState title="An exact CVE ID is required." /></div>;
+  if (cveQ.isError) return <div className="space-y-4">{header}<VerdictBanner status="degraded" title="CVE intelligence is unavailable" detail="Previously loaded intelligence is hidden after a failed refresh." /><ErrorState title="CVE metadata could not be loaded or refreshed." error={entityDetailError(cveQ.error)} action={<Button onClick={() => void cveQ.refetch()}>Retry CVE</Button>} /></div>;
+  if (cveQ.data && cveQ.data.cve_id.toUpperCase() !== cveKey) return <div className="space-y-4">{header}<ErrorState title="CVE metadata does not match the requested CVE ID." action={<Button onClick={() => void cveQ.refetch()}>Retry CVE</Button>} /></div>;
+  if (!cveQ.isSuccess || !cveQ.data) return <div className="space-y-4">{header}<LoadingState label="Loading CVE intelligence…" /></div>;
+  const cve = cveQ.data;
+  const affectedMismatch = !!relatedQ.data && (relatedQ.data.cve_id.toUpperCase() !== cveKey || !!clusterId && (relatedQ.data.workloads.some((item) => item.cluster_id !== clusterId) || relatedQ.data.clusters.some((item) => item.cluster_id !== clusterId)));
+  const affectedError = relatedQ.isError || affectedMismatch;
+  const affected = relatedQ.isSuccess && !affectedMismatch ? relatedQ.data : undefined;
+  const images = affected?.images ?? [];
+  const workloads = affected?.workloads ?? [];
+  const clusters = affected?.clusters ?? [];
+  const findings = affected ? images.reduce((sum, image) => sum + image.finding_count, 0) : undefined;
+  const sourceState = affectedError ? <ErrorState title="Affected evidence could not be loaded or refreshed. Previous affected rows are hidden." error={affectedMismatch ? "Affected evidence does not match the requested CVE and cluster scope." : entityDetailError(relatedQ.error)} action={<Button onClick={() => void relatedQ.refetch()}>Retry affected evidence</Button>} /> : !affected ? <LoadingState label="Loading affected evidence…" /> : null;
+  const withAffected = (content: ReactNode) => sourceState ?? content;
+  const imageCluster = (image: CVEAffectedImage) => clusterId ?? workloads.find((workload) => imageMatchesWorkload(image, workload))?.cluster_id;
+  const imageColumns: Column<CVEAffectedImage>[] = [
+    { id: "image", header: "Image", kind: "name", code: true, wrap: true, cell: (image) => { const cluster = imageCluster(image); return <div>{cluster ? <a href={`/clusters/${encodeURIComponent(cluster)}/images/${encodeURIComponent(image.image_scan_result_id)}`} className="font-medium hover:underline">{imageName(image)}</a> : <span>{imageName(image)}</span>}<div className="text-xs text-muted-foreground">{image.image_digest}</div></div>; }, exportValue: imageName, sort: (a, b) => imageName(a).localeCompare(imageName(b)) },
+    { id: "platform", header: "Platform", kind: "text", size: 144, minSize: 112, maxSize: 192, cell: (image) => image.platform || "Not reported" },
+    { id: "scanner", header: "Scanner profile", kind: "text", size: 176, maxSize: 240, wrap: true, cell: (image) => image.scanner_profile },
+    { id: "findings", header: "Finding instances", kind: "count", cell: (image) => image.finding_count, sort: (a, b) => a.finding_count - b.finding_count },
+    { id: "risk", header: "Max risk", kind: "count", cell: (image) => image.max_risk_score, sort: (a, b) => a.max_risk_score - b.max_risk_score },
+    { id: "scanned", header: "Last scanned", kind: "date", size: 224, minSize: 208, maxSize: 240, cell: (image) => date(image.last_scanned_at), exportValue: (image) => image.last_scanned_at, sort: (a, b) => a.last_scanned_at.localeCompare(b.last_scanned_at) },
+  ];
+  const packages = images.flatMap((image) => image.packages.map((item, index) => ({ ...item, image: imageName(image), imageID: image.image_scan_result_id, rowID: `${image.image_scan_result_id}:${item.finding_id}:${index}` })));
+  const exportScope = `${cveKey}-${clusterId ?? "organization"}`;
+  const scopeLabel = clusterId ? `Affected evidence requested for cluster ${scope.cluster?.name || clusterId}.` : "Affected evidence requested across the organization.";
+  return <div className="space-y-5" data-testid="cve-detail-page" data-cluster-id={clusterId ?? ""}>
+    <PageHeader title={cve.cve_id} mono description={`${cve.title} · ${scopeLabel} Intelligence metadata is global; image scan evidence may be shared by digest.`} backLink={<a href={backPath}>{clusterId ? "Findings" : "CVE database"}</a>}
+      badges={<>{cve.kev_listed && <KevBadge />}{cve.epss_probability != null && <EpssBadge probability={cve.epss_probability} />}</>}
+      actions={<div className="flex flex-wrap gap-2"><Button onClick={() => { void cveQ.refetch(); void relatedQ.refetch(); }} disabled={cveQ.isFetching || relatedQ.isFetching}>{cveQ.isFetching || relatedQ.isFetching ? "Refreshing…" : "Refresh evidence"}</Button><Button asChild variant="outline"><a href={`https://nvd.nist.gov/vuln/detail/${encodeURIComponent(cve.cve_id)}`} target="_blank" rel="noopener noreferrer">NVD<ExternalLink className="h-3.5 w-3.5" /></a></Button></div>} />
+    <VerdictBanner status={affectedError ? "degraded" : cve.kev_listed ? "critical" : images.length ? "degraded" : "info"}
+      title={affectedError ? "Affected evidence is unavailable" : !affected ? "Affected evidence is loading" : cve.kev_listed ? "This CVE is listed as known exploited" : images.length ? `${images.length} affected image scans in returned evidence` : "No affected image scans returned in this scope"}
+      detail="The affected endpoint returns at most 500 image scans and 1,000 workload associations. Its summary covers those bounded rows; absence does not establish complete coverage." />
+    <StatGrid data-testid="cve-detail-stats"><StatCard label="Image scans returned" value={affected ? images.length : "—"} /><StatCard label="Workloads returned" value={affected ? workloads.length : "—"} /><StatCard label="Clusters represented" value={affected ? clusters.length : "—"} /><StatCard label="Image finding instances" value={findings ?? "—"} /></StatGrid>
+    {(cveQ.isFetching || relatedQ.isFetching) && <p role="status" className="text-sm text-muted-foreground">Refreshing CVE evidence; previously loaded successful reads remain visible until their requests settle.</p>}
+    <Tabs value={tab} onValueChange={setTab} items={[
+      { value: "images", label: "Affected images", content: withAffected(<section className="space-y-3" data-testid="cve-affected-images"><p className="text-xs text-muted-foreground">Up to 500 matching image scans. CSV covers matching loaded rows, including digest-shared scan evidence.</p><DataTable rows={images} columns={imageColumns} rowKey={(image) => image.image_scan_result_id} preferencesKey="cve-affected-images" sourceLimit={500} sourceCount={images.length} exportFileName={`${exportScope}-affected-images-loaded`} defaultSort={{ id: "risk", dir: "desc" }} emptyState={<p className="p-6 text-sm text-muted-foreground">No affected image scans returned. Scan coverage may be incomplete.</p>} /></section>) },
+      { value: "workloads", label: "Affected workloads", content: withAffected(<section className="space-y-3" data-testid="cve-affected-workloads"><p className="text-xs text-muted-foreground">Up to 1,000 matching workload associations; findings may appear in multiple workloads sharing an image.</p><DataTable rows={workloads} columns={workloadColumns} rowKey={(workload) => `${workload.cluster_id}:${workload.deployment_id}`} preferencesKey="cve-affected-workloads" sourceLimit={1000} sourceCount={workloads.length} exportFileName={`${exportScope}-affected-workloads-loaded`} emptyState={<p className="p-6 text-sm text-muted-foreground">No affected workload associations returned.</p>} /></section>) },
+      { value: "clusters", label: "Affected clusters", content: withAffected(<section className="space-y-3" data-testid="cve-affected-clusters"><p className="text-xs text-muted-foreground">Clusters represented by the returned workload associations; this is not a separate full-fleet total.</p><DataTable rows={clusters} columns={clusterColumns} rowKey={(cluster) => cluster.cluster_id} preferencesKey="cve-affected-clusters" exportFileName={`${exportScope}-affected-clusters-loaded`} emptyState={<p className="p-6 text-sm text-muted-foreground">No clusters represented by returned workload evidence.</p>} /></section>) },
+      { value: "packages", label: "Package evidence", content: withAffected(<section className="space-y-3" data-testid="cve-package-evidence"><p className="text-xs text-muted-foreground">Package finding instances from the loaded image scans. These scan-finding IDs are not generic finding-detail IDs.</p><DataTable rows={packages} columns={packageColumns} rowKey={(item) => item.rowID} preferencesKey="cve-affected-packages" exportFileName={`${exportScope}-loaded-package-instances`} emptyState={<p className="p-6 text-sm text-muted-foreground">No package instances returned with the loaded images.</p>} /></section>) },
+      { value: "details", label: "Intelligence", content: <div className="space-y-4">{sourceState}<section className="space-y-3" data-testid="cve-intelligence"><h2 className="text-sm font-semibold">Vulnerability intelligence</h2><p className="text-sm">{cve.description || "No description reported."}</p><dl className="grid gap-3 text-sm sm:grid-cols-2"><Metadata label="CVSS base" value={cve.cvss_base == null ? "Not reported" : String(cve.cvss_base)} /><Metadata label="Known exploited" value={cve.kev_listed ? "Listed in the CISA KEV catalog" : "Not listed in the returned metadata"} /><Metadata label="EPSS probability" value={cve.epss_probability == null ? "Not reported" : `${(cve.epss_probability * 100).toFixed(2)}%`} /><Metadata label="Aliases" value={cve.aliases.join(", ") || "None returned"} /></dl><p className="text-xs text-muted-foreground">EPSS describes the estimated probability of exploitation in the wild within 30 days. It does not describe observed activity in this cluster.</p>{cve.kev_listed && <a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog" target="_blank" rel="noopener noreferrer" className="text-sm underline">CISA known exploited catalog</a>}</section></div> },
+      { value: "remediation", label: "Remediation guidance", content: <div className="space-y-4">{sourceState}<section className="space-y-3"><h2 className="text-sm font-semibold">Review remediation evidence</h2><p className="text-sm">Review reported fixed versions in Package evidence, then inspect the exact image or workload before choosing an update. A missing fixed version means the loaded scan has no fix version to report.</p><p className="text-sm text-muted-foreground">Network exposure controls, digest-scoped image risk acceptance and finding suppressions remain distinct actions in their canonical pages. This CVE page does not apply any of those changes.</p><Button onClick={() => setTab("packages")}>Review package evidence</Button></section></div> },
+    ]} />
+  </div>;
 }
 
-function Crumb({ label, count, href, active }: { label: string; count: number; href?: string; active?: boolean }) {
-  const inner = (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded h-6 px-2 text-[11px] transition-colors",
-        active
-          ? "bg-[color-mix(in_oklab,var(--color-primary)_18%,transparent)] text-[color:var(--color-primary)] ring-1 ring-inset ring-[color-mix(in_oklab,var(--color-primary)_36%,transparent)]"
-          : "bg-card border border-border text-foreground hover:bg-accent",
-      )}
-    >
-      <span className="font-medium">{label}</span>
-      <span className="text-mono text-[10px] opacity-80">({count})</span>
-    </span>
-  );
-  return href ? <Link to="." href={href}>{inner}</Link> : inner;
-}
-
-function Sep() {
-  return <ChevronRight className="h-3 w-3 text-muted-foreground/60" aria-hidden />;
-}
-
-function TileList({ id, title, items, emptyHint }: { id: string; title: string; items: TileEntry[]; emptyHint: string }) {
-  return (
-    <div id={id} className="rounded-md border border-border bg-card">
-      <header className="border-b border-border px-3 py-2">
-        <h3 className="text-display text-sm font-semibold tracking-tight">{title}</h3>
-        <p className="text-[10px] text-muted-foreground text-mono">{items.length} observed</p>
-      </header>
-      {items.length === 0 ? (
-        <EmptyState title="None observed" hint={emptyHint} />
-      ) : (
-        <ul className="divide-y divide-border">
-          {items.map((it) => (
-            <li key={it.id}>
-              <TileLink href={it.href}>
-                <div className="text-xs text-mono truncate">{it.label}</div>
-                {it.sub && <div className="text-[10px] text-muted-foreground truncate">{it.sub}</div>}
-              </TileLink>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-function TileLink({ href, children }: { href?: string; children: ReactNode }) {
-  const className = "accent-slide block px-3 py-1.5 hover:bg-muted/40 transition-colors";
-  return href ? <Link to="." href={href} className={className}>{children}</Link> : <div className={className}>{children}</div>;
-}
-
-interface TileEntry { id: string; label: string; sub?: string; href?: string }
-
-function groupByAffected(affected?: CVEAffectedResponse): { images: TileEntry[]; deployments: TileEntry[]; clusters: TileEntry[] } {
-  const firstWorkloadByImage = new Map<string, string>();
-  for (const workload of affected?.workloads ?? []) {
-    if (workload.image_digest) firstWorkloadByImage.set(workload.image_digest, workload.cluster_id);
-    if (workload.image_ref_normalized) firstWorkloadByImage.set(workload.image_ref_normalized, workload.cluster_id);
-    if (workload.image_ref) firstWorkloadByImage.set(workload.image_ref, workload.cluster_id);
-  }
-  const images = (affected?.images ?? []).map((image) => imageTile(image, firstWorkloadByImage));
-  const deployments = (affected?.workloads ?? []).map((workload) => ({
-    id: `${workload.cluster_id}:${workload.deployment_id}`,
-    label: `${workload.namespace}/${workload.name}`,
-    sub: `${workload.kind} · ${workload.finding_count} finding${workload.finding_count === 1 ? "" : "s"}`,
-    href: `/clusters/${workload.cluster_id}/deployments/${workload.deployment_id}`,
-  }));
-  const clusters = (affected?.clusters ?? []).map((cluster) => ({
-    id: cluster.cluster_id,
-    label: cluster.name || cluster.cluster_id.slice(0, 14),
-    sub: `${cluster.workload_count} workload${cluster.workload_count === 1 ? "" : "s"} · ${cluster.finding_count} finding${cluster.finding_count === 1 ? "" : "s"}`,
-    href: `/clusters/${cluster.cluster_id}/dashboard`,
-  }));
-  return {
-    images,
-    deployments,
-    clusters,
-  };
-}
-
-function imageTile(image: CVEAffectedImage, firstWorkloadByImage: Map<string, string>): TileEntry {
-  const label = image.image_tag ? `${image.image_repository}:${image.image_tag}` : image.image_repository || image.image_digest.slice(0, 19);
-  const clusterID =
-    firstWorkloadByImage.get(image.image_digest) ??
-    firstWorkloadByImage.get(image.image_ref_normalized) ??
-    firstWorkloadByImage.get(image.image_ref);
-  return {
-    id: image.image_scan_result_id,
-    label,
-    sub: `${image.platform || "platform"} · ${image.finding_count} package${image.finding_count === 1 ? "" : "s"}`,
-    href: clusterID ? `/clusters/${clusterID}/images/${image.image_scan_result_id}` : undefined,
-  };
-}
+const workloadColumns: Column<CVEAffectedWorkload>[] = [
+  { id: "name", header: "Workload", kind: "name", code: true, wrap: true, cell: (item) => <a href={`/clusters/${encodeURIComponent(item.cluster_id)}/deployments/${encodeURIComponent(item.deployment_id)}`} className="hover:underline">{item.namespace}/{item.name}</a>, exportValue: (item) => `${item.namespace}/${item.name}`, sort: (a, b) => a.name.localeCompare(b.name) },
+  { id: "cluster", header: "Cluster", kind: "text", size: 184, maxSize: 260, wrap: true, cell: (item) => item.cluster_name || item.cluster_id },
+  { id: "kind", header: "Kind", kind: "status", cell: (item) => item.kind },
+  { id: "image", header: "Image evidence", kind: "text", code: true, size: 280, grow: true, maxSize: 560, wrap: true, cell: (item) => item.image_digest || item.image_ref },
+  { id: "findings", header: "Finding instances", kind: "count", cell: (item) => item.finding_count },
+  { id: "risk", header: "Max risk", kind: "count", cell: (item) => item.max_risk_score },
+];
+const clusterColumns: Column<CVEAffectedCluster>[] = [
+  { id: "name", header: "Cluster", kind: "name", wrap: true, cell: (item) => <a href={`/clusters/${encodeURIComponent(item.cluster_id)}/dashboard`} className="hover:underline">{item.name || item.cluster_id}</a>, exportValue: (item) => item.name || item.cluster_id },
+  { id: "workloads", header: "Workloads represented", kind: "count", cell: (item) => item.workload_count },
+  { id: "findings", header: "Finding instances", kind: "count", cell: (item) => item.finding_count },
+  { id: "risk", header: "Max risk", kind: "count", cell: (item) => item.max_risk_score },
+];
+const packageColumns: Column<CVEAffectedPackage & { image: string; imageID: string }>[] = [
+  { id: "package", header: "Package", kind: "name", code: true, wrap: true, cell: (item) => item.package_name || "Not reported" },
+  { id: "image", header: "Image scan", kind: "text", code: true, wrap: true, size: 240, grow: true, maxSize: 480, cell: (item) => item.image },
+  { id: "version", header: "Version", kind: "version", wrap: true, cell: (item) => item.package_version || "Not reported" },
+  { id: "fixed", header: "Fixed version", kind: "version", wrap: true, cell: (item) => item.fixed_version || "No fix reported" },
+  { id: "severity", header: "Severity", kind: "status", cell: (item) => item.severity },
+  { id: "risk", header: "Risk", kind: "count", cell: (item) => item.risk_score },
+  { id: "finding", header: "Scan finding ID", kind: "id", wrap: true, size: 224, maxSize: 320, cell: (item) => item.finding_id },
+];
+function imageMatchesWorkload(image: CVEAffectedImage, workload: CVEAffectedWorkload) { if (image.image_digest && workload.image_digest) return image.image_digest === workload.image_digest; return !!image.image_digest && image.image_digest === workload.image_digest || !!image.image_ref_normalized && image.image_ref_normalized === workload.image_ref_normalized || !!image.image_ref && image.image_ref === workload.image_ref; }
+function imageName(image: CVEAffectedImage) { return image.image_tag ? `${image.image_repository}:${image.image_tag}` : image.image_repository || image.image_ref || image.image_digest; }
+function Metadata({ label, value }: { label: string; value: string }) { return <div><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-1 break-words">{value}</dd></div>; }
+function date(value: string) { const parsed = new Date(value); return Number.isNaN(parsed.getTime()) ? "Not reported" : parsed.toLocaleString(); }
