@@ -986,6 +986,77 @@ image inventory view, and reveals the exact digest when Show digest is opened.
 Containers/Nodes and network/capture role work remains uncommitted and is not
 included in this image-identity release.
 
+The node/container continuation removes the container 3,000-entry pre-filter
+cap and loaded-page node filtering. Both inventories now apply server filters,
+stable sorting, pagination, complete matching summaries and matching CSV through
+the shared inventory contract. Each request reads count/summary/rows in one
+repeatable-read snapshot; successive pages remain current-state reads. CSV is
+explicitly bounded at 100,000 records. URL filters/sort/history and exact cluster
+scope are preserved; missing node selections never substitute another node,
+failed refreshes hide stale evidence, and unknown timestamps say Not collected.
+Container image SHA values use the shared closed-by-default Show digest control.
+
+Containers include only running entries in latest per-node snapshots. Workload
+risk/facts retain advisory pod-prefix attribution and can repeat per container;
+they are not per-container settings. Platform classification is independent:
+exact tenant/cluster/namespace pod ownership must resolve unambiguously, while
+known platform namespaces retain classification except IP endpoints. Prefix-only,
+conflicting, foreign and sibling owners cannot borrow custom-installation labels.
+Session/conversation roles now use the same exact ownership rules. Multi-cluster
+organization conversations remain unclassified when their merged endpoint has no
+unique cluster. Capture action responses include roles; lookup failure rolls
+back Start/Claim or rejects Upload/Status before their mutation.
+
+The inventory source passes **1,520 frontend tests /119 files**, followed by **89
+focused tests** for container width refinement; build/typecheck, lint, affected
+vet, generated OpenAPI/contracts, 107 endpoint mappings and plan checks pass.
+**78 fresh PostgreSQL race/shuffle executions** pass without skips: Nodes14,
+Containers4, network/capture60. Fixtures cover inventories beyond the old caps,
+literal filters, exact ownership, tenant/sibling isolation, export agreement,
+malformed responses and real role-lookup failure rollback. Six affected browser
+cases are discovered across two specs; the standalone runner was not executed.
+
+The user-requested status cleanup changes the shared VerdictBanner across its
+68 page/workflow consumers: the colored box and default explanatory paragraph
+become a compact status row. A keyboard-accessible Details button controls the
+supporting context. Status titles and actions stay visible; essential action
+consequences, TLS-off warnings and stale-edit instructions opt into inline detail.
+Normal inventory caveats remain available without dominating the page. This
+continuation passes **1,523 frontend tests /120 files**, including disclosure,
+independent actions and inline consequences, plus full lint and production build.
+
+Helm revision **63** runs frontend `compact-status-20261012`, API
+`node-container-inventory-20261012`, migration `audit-lookup-20261012` and
+schema173; all seven deployments are ready. Revision62 first deployed the
+inventory/role batch; revision63 adds compact summaries and container width
+refinement. Final live reads reconcile **22 containers**, **16 platform rows**,
+**six visible when platform is hidden**, and **one node** with full matching CSV.
+One-row container continuation does not overlap; node source-cluster host-CVE
+filter returns the same one node. Search/CSV agree. Large continuations and
+custom ownership positives remain fixture-qualified. Network session and
+conversation reads succeed; no live capture or security mutations were submitted.
+
+The collaborative browser verifies Nodes/Containers alignment at 1280px and
+640px, with contained scrolling and no clipped actions. Container search retains
+332px at desktop and 318px at the narrow viewport; identity columns keep useful
+minimum widths. SHA is hidden until Show digest is clicked. Missing node
+selection survives sort and browser Back without substitution. The quoted Nodes
+status is **32px instead of80px** on desktop, and40px on the narrow viewport;
+its paragraph is hidden by default and mouse/Enter toggles work. Viewport was
+restored to1280px, with Nodes open and Details closed.
+
+A read-only follow-up audit keeps the complete UI-3 matrix open. Flow-only map
+nodes and Exposure still need exact ownership/ambiguity/IP handling. Deployment
+detail embedded runtime events need actual cluster/role fields; embedded network
+and Deployment/Risk CSVs need endpoint roles. Baseline/file-profile workload
+inventories and CSVs, plus applicable workload asset/finding exports, also need
+role coverage. Image/repository/cloud/node records must not invent workload roles.
+Dormant SSE remains unqualified and disabled. The live cluster has no discovered
+custom-namespace installation candidate; a real isolated chart installation and
+discovery proof remains outstanding. Registry-image full sorting/export, scan-job
+continuation, CVE/Compliance evidence caps, named saved views and the full
+accessibility/cross-dataset acceptance matrix remain open.
+
 The admission-engine continuation adds migration **172** and persists normalized
 engine outcomes atomically with image scan completion. The built-in vulnerability
 profiles now require successful Trivy and Grype results rather than retired
