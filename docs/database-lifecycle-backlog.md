@@ -29,9 +29,28 @@ DB-05 has chart plugin/recovery support and a local RustFS/CNPG rehearsal
 ([runbook](cnpg-recovery.md)). An independent full restore of the existing
 database also passed migration 168 with unchanged raw-flow, rollup, event and
 audit counts. The live StatefulSet remains unchanged; off-host copies, HA,
-failure alerts, audit-chain and encrypted-credential recovery remain unproved.
+failure alerts and existing-history integrity remain unproved. The later local
+rehearsal proves encrypted-credential recovery and the fresh fixture audit chain;
+the existing database has the pre-existing row-53 discontinuity recorded below.
 The table below retains the original failure/acceptance definitions so the
 remaining deployment gates are not mistaken for new implementation work.
+
+## October 12 recovery continuation
+
+The owner deferred off-host recovery and real node-failure testing. CNPG cutover
+and local recovery work remain authorized. The PostgreSQL 16.14 CNPG/RustFS
+rehearsal now verifies an encrypted registry credential through the scanner API,
+wrong-KEK rejection and recovery after the correct key returns, source audit-anchor
+preservation, full fixture-chain verification and a database-pod restart. Local
+pod deletion through authenticated recovery took 315 seconds. The
+[recovery runbook](cnpg-recovery.md#october-12-credential-and-process-recovery-qualification)
+records exact images and limits.
+
+The existing-data restore fails chain verification at audit row 53. Read-only
+inspection confirms the same June 14 `scan-job.complete` link mismatch on the live
+source; it was not introduced by restoration. Historical hashes were preserved.
+This is an additional concrete DB-07/08 acceptance blocker, not permission to
+rewrite the evidence chain. The fresh fixture's passing chain does not clear it.
 
 ## October 12 session lifecycle implementation
 

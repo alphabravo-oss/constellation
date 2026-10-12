@@ -35,11 +35,12 @@ k+=(-n "$namespace")
 python3 - "$work" <<'PY'
 import pathlib, secrets, sys
 p = pathlib.Path(sys.argv[1])
-for name, length in [('ACCESS_KEY_ID', 16), ('SECRET_ACCESS_KEY', 32), ('kek', 32)]:
+for name, length in [('ACCESS_KEY_ID', 16), ('SECRET_ACCESS_KEY', 32), ('kek', 32), ('wrong-kek', 32)]:
     (p / name).write_text(secrets.token_hex(length))
 PY
 "${k[@]}" create secret generic rustfs-credentials --from-file="$work/ACCESS_KEY_ID" --from-file="$work/SECRET_ACCESS_KEY" >/dev/null
 "${k[@]}" create secret generic recovery-application-keys --from-file="$work/kek" >/dev/null
+"${k[@]}" create secret generic recovery-wrong-keys --from-file="kek=$work/wrong-kek" >/dev/null
 fixtures=deploy/dev/cnpg-rustfs
 "${k[@]}" apply -f "$fixtures/rustfs.yaml" >/dev/null
 "${k[@]}" rollout status statefulset/rustfs --timeout=300s
@@ -63,6 +64,8 @@ DATABASE_URL="$("${k[@]}" get secret recovery-source-database-url -o json | pyth
 goose -dir db/migrations postgres "$DATABASE_URL" up >"$work/migrations.log" 2>&1
 goose -dir db/migrations postgres "$DATABASE_URL" up >>"$work/migrations.log" 2>&1
 go run ./cmd/constellation-seed >"$work/seed.log" 2>&1
+python3 "$fixtures/check_api.py" prepare "$api_port" "$work"
+"${k[@]}" exec -i recovery-source-postgres-1 -c postgres -- psql -U postgres -d constellation -v ON_ERROR_STOP=1 <"$work/scanner.sql" >"$work/scanner-seed.log"
 sql recovery-source-postgres "CREATE TABLE recovery_proof(id int PRIMARY KEY, evidence text NOT NULL); INSERT INTO recovery_proof VALUES (1,'base-backup');" >/dev/null
 # Delay schedule creation until migrations/fixtures are committed.
 helm template recovery-source "$chart" -n "$namespace" -f "$fixtures/source-values.yaml" \
@@ -89,7 +92,7 @@ forward_api() {
   "${k[@]}" port-forward svc/recovery-api "$api_port:8080" >"$work/api-forward.log" 2>&1 &
   api_forward=$!
   for ((n=0;n<30;n++)); do
-    if curl --fail --silent "http://127.0.0.1:$api_port/readyz" >/dev/null; then return; fi
+    if curl --max-time 5 --fail --silent "http://127.0.0.1:$api_port/readyz" >/dev/null; then return; fi
     kill -0 "$api_forward"; sleep 1
   done
   return 1
@@ -126,5 +129,33 @@ sed 's/recovery-source-database-url/recovery-target-database-url/' "$work/api-so
 "${k[@]}" rollout status deployment/recovery-api --timeout=300s
 forward_api
 python3 "$fixtures/check_api.py" restored "$api_port" "$work"
+# A pod restart is a local process/PVC recovery check, not node-loss or HA proof.
+restart_started=$(date +%s)
+"${k[@]}" delete pod recovery-target-postgres-1 --wait=true --timeout=600s >/dev/null
+for ((n=0;n<120;n++)); do
+  if "${k[@]}" get pod recovery-target-postgres-1 >/dev/null 2>&1; then break; fi
+  sleep 1
+done
+"${k[@]}" wait --for=condition=Ready pod/recovery-target-postgres-1 --timeout=300s
+for ((n=0;n<60;n++)); do
+  if curl --max-time 5 --fail --silent "http://127.0.0.1:$api_port/readyz" >/dev/null; then break; fi
+  sleep 1
+done
+python3 "$fixtures/check_api.py" restored "$api_port" "$work"
+echo "Target pod restart and authenticated recovery: $(($(date +%s) - restart_started)) seconds" >"$work/restart-result.txt"
+cat "$work/restart-result.txt"
+# The recovered DB alone must not decrypt integration secrets with a different KEK.
+kill "$api_forward"; wait "$api_forward" 2>/dev/null || true; api_forward=""
+sed 's/recovery-application-keys/recovery-wrong-keys/' "$work/api-target.yaml" >"$work/api-wrong-key.yaml"
+"${k[@]}" apply -f "$work/api-wrong-key.yaml" >/dev/null
+"${k[@]}" rollout status deployment/recovery-api --timeout=300s
+forward_api
+python3 "$fixtures/check_api.py" wrong-key "$api_port" "$work"
+# Restore the retained key and prove decryption resumes after another restart.
+kill "$api_forward"; wait "$api_forward" 2>/dev/null || true; api_forward=""
+"${k[@]}" apply -f "$work/api-target.yaml" >/dev/null
+"${k[@]}" rollout status deployment/recovery-api --timeout=300s
+forward_api
+python3 "$fixtures/check_api.py" restored "$api_port" "$work"
 "${k[@]}" get backups,clusters -o wide >"$work/result.txt"
-echo 'PASS: scheduled RustFS backup, WAL/PITR boundary, extensions, existing session, config and fresh login'
+echo 'PASS: scheduled RustFS backup, WAL/PITR boundary, extensions, existing session, config, encrypted credentials, wrong-key rejection, audit chain and fresh login'

@@ -65,6 +65,18 @@ and 99 open items. Counts describe acceptance items, not a percentage of code
 implemented. The complete scope and remaining gates are retained below; do not
 convert partially implemented items into checked boxes.
 
+The owner subsequently authorized main-cluster migration/CNPG cutover and
+**deferred off-host recovery and real node-failure testing**. Those external
+acceptance requirements remain deferred, not checked. The stronger local
+PostgreSQL 16.14 rehearsal passes encrypted-credential recovery, wrong-key
+rejection, audit-anchor/chain verification and pod restart (315 seconds through
+authenticated recovery). It qualifies the recorded schema-171 image, not later
+source changes. The [runbook](cnpg-recovery.md#october-12-credential-and-process-recovery-qualification)
+records the proof and a newly confirmed pre-existing row-53 audit-chain break in
+both the live source and independent existing-data restore. Do not label that
+history clean or rewrite it to satisfy verification. Main image qualification and
+consistent cutover/application checks remain required.
+
 The subsequent security/recovery increment confines serverless ZIP extraction
 with `os.Root`, private permissions, exclusive file creation and entry/byte
 budgets; fixes wrapped-error handling; and removes unused implementations and

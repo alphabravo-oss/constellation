@@ -119,9 +119,9 @@ kubectl --kubeconfig "$CNPG_TEST_KUBECONFIG" -n cnpg-system rollout status deplo
 kubectl --kubeconfig "$CNPG_TEST_KUBECONFIG" apply -f \
   https://github.com/cloudnative-pg/plugin-barman-cloud/releases/download/v0.15.1/manifest.yaml
 kubectl --kubeconfig "$CNPG_TEST_KUBECONFIG" -n cnpg-system rollout status deployment --timeout=300s
-docker build -f deploy/docker/Dockerfile.postgres -t constellation/postgres:16.10-convergence-20261011 .
+docker build -f deploy/docker/Dockerfile.postgres -t constellation/postgres:16.14-convergence-20261012 .
 docker build -f deploy/docker/Dockerfile.api -t constellation/api:convergence-20261011 .
-k3d image import -c constellation-recovery constellation/postgres:16.10-convergence-20261011 constellation/api:convergence-20261011
+k3d image import -c constellation-recovery constellation/postgres:16.14-convergence-20261012 constellation/api:convergence-20261011
 CNPG_TEST_API_IMAGE=constellation/api:convergence-20261011 scripts/test-cnpg-rustfs.sh
 ```
 
@@ -140,8 +140,14 @@ archive before creating a separate recovery cluster. The restored database must
 contain exactly markers 1 and 2, exclude marker 3, and contain all three required
 extensions. Only the disposable API's DSN is switched. An existing signed
 session, saved configuration and fresh authenticated login must all work after
-the switch. The same application KEK Secret is retained; this test does not yet
-assert decryption of an encrypted integration credential or audit-chain validity.
+the switch. The current script also creates a random encrypted registry credential
+through the production API, retrieves it through scanner-token authentication,
+and verifies its issuance receipt and the audit chain. The restored API must
+return the original credential and retain the source audit anchor. A restart with
+a different KEK must reject decryption; restoring the original key must restore
+access. A recovered database-pod deletion must also recover authenticated access.
+These checks use disposable identities and retain credential material only in the
+restricted evidence directory. They do not invoke an external registry.
 
 The manual run restored exactly markers 1 and 2. Its first recovery attempt
 correctly refused to promote because the final transaction's commit WAL was not
@@ -193,3 +199,43 @@ and group-edge error-handler cleanup, whose later image has separate browser
 evidence; do not conflate the image digests. The successful run is recorded in
 `/tmp/constellation-cnpg-current-rehearsal.log`; protected credentials/evidence
 remain in `/tmp/constellation-cnpg-test.TEXvXJ` and must not be committed.
+
+## October 12 credential and process-recovery qualification
+
+The stronger check passed first in namespace `recovery-224164bc` at schema 171,
+with scheduled backup `recovery-source-postgres-20261012042414`. The API created
+and recovered a randomly generated encrypted credential, rejected a wrong KEK,
+resumed after restoring the correct key, and verified the audit chain and original
+audit anchor. The log is `/tmp/constellation-cnpg-key-recovery.log`; protected
+material is in `/tmp/constellation-cnpg-test.2I2GjA` (never commit).
+
+The repeat in `recovery-09b1d9ba` passed on **PostgreSQL 16.14**, with backup
+`recovery-source-postgres-20261012042922`. It additionally deleted the recovered
+primary pod and passed session/config/credential/audit checks after recreation
+on its existing PVC. Deletion through authenticated recovery took **315 seconds**.
+This is a single-host, single-instance process/PVC recovery measurement, not HA,
+node-loss or off-host recovery. The API image was
+`constellation-browser-dd0f7f69b304-api:latest`, index
+`sha256:3a6569c2c020c40fff1e5d143863c1ea3faa299a0df50341f4aa7d1a60b70d48`
+(schema 171, before the later admission-engine evidence increment). The new
+PostgreSQL image `constellation/postgres:16.14-convergence-20261012` has index
+`sha256:98087f2e517416edda6e3649154c3be4a5a7b0ce2228c4fab3f4e2bed430d92a`.
+Its upstream base is pinned by digest in `Dockerfile.postgres`.
+Evidence: `/tmp/constellation-cnpg-pg1614-recovery.log`; protected material:
+`/tmp/constellation-cnpg-test.PVcuhQ`. Both disposable namespaces were removed.
+
+The owner explicitly **deferred off-host recovery and real node-failure testing**
+on October 12. Those acceptance requirements remain deferred, not satisfied by
+the local rehearsal. Main-cluster cutover is authorized, but image qualification,
+consistent transfer and application checks still precede switching its DSN.
+
+### Existing database audit baseline
+
+Read-only verification of the independent existing-data restore fails at audit
+row **53** with `prev_hash mismatch`. The live source has the same broken link:
+`scan-job.complete`, **2026-06-14 13:37:16.545671 UTC**. Adjacent rows 48–52 and
+54–56 link to their predecessors. This establishes a pre-existing discontinuity;
+it does not identify its cause or prove the remaining chain intact. No historical
+rows or hashes were rewritten. Preserve this baseline in any transfer and resolve
+historical integrity/archival acceptance separately; successful verification of
+the new disposable fixture does not certify the existing database's history.
