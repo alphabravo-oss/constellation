@@ -278,6 +278,40 @@ imported/applied during verification. These bounded checks do not close UI-1/2/3
 remaining legacy forms, separately stored saved views, source pagination/exact
 links, and the complete API/export/live-install matrix remain open.
 
+The vulnerability-profile/response-catalog/compliance continuation adds dedicated
+create/edit pages with scoped loading, explicit failures and preserved drafts.
+Vulnerability profiles retain ordered rules and unknown saved scope fields, default
+to inactive, and pause saves when the selected cluster becomes unavailable. The
+response catalog explicitly describes organization-wide overrides and requires a
+preview matching the current inputs. Compliance separates controls, evidence and
+schedules into URL-linked workspaces; exemptions validate reason and future expiry.
+A control exemption covers all matching evidence for that control in the selected
+cluster, including multiple workload targets. Scheduled delivery remains intent
+until run history confirms an outcome.
+
+CVE search now uses server pagination with a one-row lookahead, URL-linked filters,
+sort and page, keyboard-accessible filter chips and explicitly page-scoped CSV.
+Saved views and Findings density now follow organization/user identity; ownerless
+legacy preferences are not adopted, while the previously user-owned Network Map
+views migrate once. Empty saved group criteria remain empty when edited. Removed
+the orphan generic CRUD component and corrected configured-protection and sampled
+risk labels. Publication-window vulnerability rules still require publication dates
+that current scan-completion findings do not provide; this remains a backend gap.
+
+Validation: the continuation is deployed at Helm revision **36** using
+`constellation/frontend:console-workflows-verified-20261012`. All **391 frontend
+tests**, production type-check/build, changed-source lint, endpoint mapping and
+plan/whitespace checks pass. Live browser checks confirm CVE page 2 requests
+`offset=50` and survives reload; response override Save becomes available after
+its matching preview; compliance schedule Cancel returns to its tab; and singleton
+and five-evidence-row exemption forms validate without creating exemptions.
+An inactive vulnerability profile passed create/edit/reload/Cancel, stayed inactive
+with its saved description, and was deleted after verification. Final rollout
+rechecked profile hydration and the corrected multi-evidence exemption form.
+Updated browser specs were discovered but the full browser runner was not rerun.
+Remaining table geometry, integration forms, Findings server filtering/export and
+other UI-1/2/3/4 acceptance remain open; these checks do not imply full parity.
+
 The admission-engine continuation adds migration **172** and persists normalized
 engine outcomes atomically with image scan completion. The built-in vulnerability
 profiles now require successful Trivy and Grype results rather than retired

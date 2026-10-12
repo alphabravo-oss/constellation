@@ -1,0 +1,87 @@
+/* global HTMLSelectElement */
+import { act, type ReactNode } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { responseRules, responseRulesV2, type ResponseRule, type ResponseRulePreview } from "@/api/client";
+import { ResponsePage } from "./ResponsePage";
+import { ResponseRulesPage } from "./ResponseRulesPage";
+import { ResponseCatalogOverrideFormPage } from "./ResponseCatalogOverrideFormPage";
+const route = vi.hoisted(() => ({ clusterId: "cluster" as string | undefined, cluster: { id: "cluster" } as { id: string } | undefined, loading: false, ruleId: "rule" as string | undefined, search: "", navigate: vi.fn(), setParams: vi.fn() }));
+vi.mock("@/api/client", () => ({ responseRules: { list: vi.fn(), preview: vi.fn(), update: vi.fn() }, responseRulesV2: { list: vi.fn(), delete: vi.fn(), reorder: vi.fn(), exportYaml: vi.fn(), importYaml: vi.fn() } }));
+vi.mock("@/hooks/useCluster", () => ({ useCluster: () => ({ clusterId: route.clusterId, cluster: route.cluster, isLoading: route.loading }) }));
+vi.mock("@/lib/route-search", () => ({ useRouteSearchParams: () => [new URLSearchParams(route.search), route.setParams] }));
+vi.mock("@tanstack/react-router", () => ({ useParams: () => ({ ruleId: route.ruleId }), useNavigate: () => route.navigate, Link: ({ children, href }: { children: ReactNode; href?: string }) => <a href={href}>{children}</a> }));
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+const rule: ResponseRule = { id: "rule", name: "Shell started", description: "Watch for shells", event_type: "process", match: "process.name=shell", actions: ["alert"], mode: "monitor", enabled: false, default_mode: "monitor", default_enabled: true, severity: "high", source: "Built-in", override_reason: "Approved audit reason", managed: true, drifted: true };
+const preview: ResponseRulePreview = { rule_id: "rule", current_mode: "monitor", next_mode: "monitor", current_enabled: false, next_enabled: false, actions: ["alert"], persists: false, requires_privileged_agent: true, impact: "No runtime behavior change.", warnings: ["Agent required"] };
+const catalog = { rules: [rule], summary: { total: 1, enabled: 0, monitor: 1, enforce: 0, disabled: 1, managed: 1 } };
+let root: Root; let host: HTMLDivElement; let client: QueryClient;
+beforeEach(() => { route.clusterId = "cluster"; route.cluster = { id: "cluster" }; route.loading = false; route.ruleId = "rule"; route.search = ""; vi.mocked(responseRules.list).mockResolvedValue(catalog); vi.mocked(responseRulesV2.list).mockResolvedValue({ rules: [] }); vi.mocked(responseRules.preview).mockResolvedValue({ preview }); });
+afterEach(() => { act(() => root?.unmount()); client?.clear(); host?.remove(); vi.resetAllMocks(); localStorage.clear(); });
+async function renderPage(page = "form") {
+  host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host); client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  await act(async () => root.render(<QueryClientProvider client={client}>{page === "form" ? <ResponseCatalogOverrideFormPage /> : page === "v2" ? <ResponseRulesPage /> : <ResponsePage />}</QueryClientProvider>));
+}
+async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
+function button(label: string) { return [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === label)!; }
+async function click(label: string) { await act(async () => button(label).click()); }
+async function change(selector: string, value: string) { await act(async () => { const input = host.querySelector<HTMLSelectElement | HTMLTextAreaElement | HTMLInputElement>(selector)!; const proto = input instanceof HTMLSelectElement ? HTMLSelectElement.prototype : input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(input, value); input.dispatchEvent(new Event(input instanceof HTMLSelectElement ? "change" : "input", { bubbles: true })); }); }
+async function ready() { await settled(() => expect(button("Preview")?.disabled).toBe(false)); }
+async function runPreview() { await click("Preview"); await settled(() => expect(button("Save").disabled).toBe(false)); }
+
+it.each(["form", "catalog", "v2"])("does not query %s until the cluster resolves", async (page) => {
+  route.loading = true; await renderPage(page); expect(responseRules.list).not.toHaveBeenCalled(); expect(responseRulesV2.list).not.toHaveBeenCalled();
+});
+it.each(["form", "catalog", "v2"])("blocks %s when the cluster cannot be resolved", async (page) => {
+  route.cluster = undefined; await renderPage(page); expect(host.textContent).toContain("selected cluster could not be loaded"); expect(responseRules.list).not.toHaveBeenCalled(); expect(responseRulesV2.list).not.toHaveBeenCalled(); expect(host.querySelector("form")).toBeNull();
+});
+it.each(["failed", "missing"])("does not hydrate a %s built-in rule", async (scenario) => {
+  if (scenario === "failed") vi.mocked(responseRules.list).mockRejectedValue(new Error("private transport")); else route.ruleId = "unknown";
+  await renderPage(); await settled(() => expect(host.textContent).toContain("could not be loaded from the organization catalog")); expect(host.querySelector("form")).toBeNull(); expect(host.textContent).not.toContain("private transport"); expect(responseRules.update).not.toHaveBeenCalled();
+});
+it("hydrates the saved rule and requires a matching organization preview", async () => {
+  await renderPage(); await ready(); expect(host.querySelector<HTMLSelectElement>("#response-override-mode")?.value).toBe("monitor"); expect(host.querySelector('[role="switch"]')?.getAttribute("aria-checked")).toBe("false"); expect(button("Save").disabled).toBe(true); expect(host.textContent).toContain("changes organization-wide settings"); expect(host.querySelector("details")?.open).toBe(false);
+  await runPreview(); expect(responseRules.preview).toHaveBeenCalledWith("rule", { mode: "monitor", enabled: false, reason: "Approved audit reason" }); expect(host.textContent).toContain("Agent required");
+});
+it.each(["mode", "enabled", "reason"])("requires a fresh preview when %s changes", async (field) => {
+  await renderPage(); await ready(); await runPreview();
+  if (field === "enabled") await act(async () => host.querySelector<HTMLButtonElement>('[role="switch"]')!.click()); else await change(field === "mode" ? "#response-override-mode" : "textarea", field === "mode" ? "learn" : "Changed audit reason");
+  expect(button("Save").disabled).toBe(true); expect(responseRules.update).not.toHaveBeenCalled();
+});
+it.each(["wrong-rule", "wrong-mode", "wrong-enabled", "persisted"])("rejects a %s preview response", async (scenario) => {
+  vi.mocked(responseRules.preview).mockResolvedValue({ preview: { ...preview, ...(scenario === "wrong-rule" ? { rule_id: "other" } : scenario === "wrong-mode" ? { next_mode: "enforce" } : scenario === "wrong-enabled" ? { next_enabled: true } : { persists: true }) } });
+  await renderPage(); await ready(); await click("Preview"); await settled(() => expect(host.textContent).toContain("Could not preview this override. Your draft is preserved")); expect(button("Save").disabled).toBe(true);
+});
+it("retains the draft but invalidates preview when saved catalog data changes", async () => {
+  await renderPage(); await ready(); await change("textarea", "Unsaved audit draft"); await runPreview();
+  await act(async () => { client.setQueryData(["response-rules"], { ...catalog, rules: [{ ...rule, mode: "enforce", enabled: true, override_reason: "Remote reason" }] }); });
+  await settled(() => expect(button("Save").disabled).toBe(true)); expect(host.querySelector("textarea")?.value).toBe("Unsaved audit draft"); expect(host.querySelector<HTMLSelectElement>("#response-override-mode")?.value).toBe("monitor");
+});
+it("preserves failed-save drafts and sends the previewed saved-rule settings", async () => {
+  vi.mocked(responseRules.update).mockRejectedValue(new Error("private transport")); await renderPage(); await ready(); await change("textarea", "Current audit draft"); await runPreview(); await click("Save"); await settled(() => expect(host.textContent).toContain("Could not save this override. Your draft is preserved"));
+  expect(responseRules.update).toHaveBeenCalledWith("rule", { mode: "monitor", enabled: false, reason: "Current audit draft" }); expect(host.querySelector("textarea")?.value).toBe("Current audit draft"); expect(route.navigate).not.toHaveBeenCalled(); expect(host.textContent).not.toContain("private transport");
+});
+it("keeps a draft when catalog refresh fails and blocks writes until refresh succeeds", async () => {
+  await renderPage(); await ready(); await change("textarea", "Draft awaiting refresh"); await runPreview(); vi.mocked(responseRules.list).mockRejectedValue(new Error("private"));
+  await act(async () => { await client.invalidateQueries({ queryKey: ["response-rules"] }); }); await settled(() => expect(host.textContent).toContain("Refresh before previewing or saving")); expect(button("Save").disabled).toBe(true); expect(button("Preview").disabled).toBe(true); expect(host.querySelector("textarea")?.value).toBe("Draft awaiting refresh");
+});
+it("returns to the filtered catalog after saving or cancelling", async () => {
+  route.search = "event=process&q=shell"; vi.mocked(responseRules.update).mockResolvedValue({ rule, preview: { ...preview, persists: true } }); await renderPage(); await ready(); await click("Cancel"); expect(responseRules.update).not.toHaveBeenCalled(); expect(route.navigate).toHaveBeenCalledWith({ href: "/clusters/cluster/response?event=process&q=shell" });
+  route.navigate.mockClear(); await runPreview(); await click("Save"); await settled(() => expect(route.navigate).toHaveBeenCalledWith({ href: "/clusters/cluster/response?event=process&q=shell" }));
+});
+it("requires a nonblank audit reason before previewing or saving", async () => {
+  await renderPage(); await ready(); await change("textarea", "   "); expect(button("Preview").disabled).toBe(true); expect(button("Save").disabled).toBe(true); await act(async () => host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }))); expect(responseRules.update).not.toHaveBeenCalled();
+});
+it("uses URL filters and dedicated catalog edit links, separate from V2 authoring", async () => {
+  route.search = "event=process&q=shell&context=keep"; vi.mocked(responseRules.list).mockResolvedValue({ ...catalog, rules: [rule, { ...rule, id: "network-rule", name: "Network rule", event_type: "network" }] });
+  await renderPage("catalog"); await settled(() => expect(host.querySelectorAll("tbody tr")).toHaveLength(1)); expect(host.querySelector("form")).toBeNull(); expect(host.textContent).not.toContain("Network rule"); expect(responseRules.list).toHaveBeenCalledWith();
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Edit override for Shell started"]')!.click()); expect(route.navigate).toHaveBeenCalledWith({ href: "/clusters/cluster/response/rule/edit?event=process&q=shell&context=keep" });
+  await click("Authored response rules"); expect(route.navigate).toHaveBeenCalledWith({ href: "/clusters/cluster/response-rules" }); await change("input", "new search"); const updater = route.setParams.mock.calls[0][0] as (current: URLSearchParams) => URLSearchParams; expect(updater(new URLSearchParams(route.search)).get("q")).toBe("new search"); expect(updater(new URLSearchParams(route.search)).get("context")).toBe("keep"); expect(responseRules.update).not.toHaveBeenCalled();
+});
+it("does not treat a failed catalog load as an empty successful list", async () => {
+  vi.mocked(responseRules.list).mockRejectedValue(new Error("private transport")); await renderPage("catalog"); await settled(() => expect(host.textContent).toContain("Could not load the organization response catalog")); expect(host.textContent).not.toContain("No built-in response rules"); expect(host.textContent).not.toContain("private transport");
+});
+it("disables V2 authoring and import actions after a list failure", async () => {
+  vi.mocked(responseRulesV2.list).mockRejectedValue(new Error("private transport")); await renderPage("v2"); await settled(() => expect(host.textContent).toContain("Could not load response rules")); expect(responseRulesV2.list).toHaveBeenCalledWith({ cluster_id: "cluster" }); expect(button("New rule").disabled).toBe(true); expect(button("Import").closest("fieldset")?.disabled).toBe(true); expect(host.textContent).not.toContain("private transport");
+});

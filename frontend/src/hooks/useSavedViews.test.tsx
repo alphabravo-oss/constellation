@@ -2,6 +2,8 @@ import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { TablePreferencesProvider } from "@/contexts/TablePreferencesContext";
+import { operatorStorageKey } from "@/lib/operator-preferences";
 import {
   appendSavedView,
   readSavedViews,
@@ -15,6 +17,8 @@ interface TestView extends SavedViewBase {
   severity: string;
 }
 
+const identity = { org_id: "org", user_id: "user" };
+const scoped = (key: string, org = "org", user = "user") => operatorStorageKey(key, { org_id: org, user_id: user })!;
 let root: Root | undefined;
 let host: HTMLDivElement | undefined;
 
@@ -56,7 +60,7 @@ describe("saved view persistence", () => {
   });
 
   it("persists saves and deletes through the hook", () => {
-    writeSavedViews<TestView>("hook-views", [
+    writeSavedViews<TestView>(scoped("hook-views"), [
       { id: "existing", name: "Existing", query: "status:open", severity: "medium" },
     ]);
 
@@ -65,18 +69,18 @@ describe("saved view persistence", () => {
     expect(screenText()).toContain("Existing");
     act(() => click("save"));
     expect(screenText()).toContain("Saved");
-    expect(readSavedViews<TestView>("hook-views")).toHaveLength(2);
+    expect(readSavedViews<TestView>(scoped("hook-views"))).toHaveLength(2);
 
     act(() => click("delete-existing"));
     expect(screenText()).not.toContain("Existing");
-    expect(readSavedViews<TestView>("hook-views").map((view) => view.name)).toEqual(["Saved"]);
+    expect(readSavedViews<TestView>(scoped("hook-views")).map((view) => view.name)).toEqual(["Saved"]);
   });
 
   it("reloads when the storage key changes without overwriting the target key", () => {
-    writeSavedViews<TestView>("views-a", [
+    writeSavedViews<TestView>(scoped("views-a"), [
       { id: "a", name: "First", query: "namespace:a", severity: "low" },
     ]);
-    writeSavedViews<TestView>("views-b", [
+    writeSavedViews<TestView>(scoped("views-b"), [
       { id: "b", name: "Second", query: "namespace:b", severity: "high" },
     ]);
 
@@ -84,22 +88,55 @@ describe("saved view persistence", () => {
     expect(screenText()).toContain("First");
 
     act(() => {
-      root?.render(<SavedViewHarness storageKey="views-b" />);
+      root?.render(<TablePreferencesProvider identity={identity}><SavedViewHarness storageKey="views-b" /></TablePreferencesProvider>);
     });
 
     expect(screenText()).toContain("Second");
     expect(screenText()).not.toContain("First");
-    expect(readSavedViews<TestView>("views-a")).toEqual([
+    expect(readSavedViews<TestView>(scoped("views-a"))).toEqual([
       { id: "a", name: "First", query: "namespace:a", severity: "low" },
     ]);
-    expect(readSavedViews<TestView>("views-b")).toEqual([
+    expect(readSavedViews<TestView>(scoped("views-b"))).toEqual([
       { id: "b", name: "Second", query: "namespace:b", severity: "high" },
     ]);
   });
+  it("isolates organization and user changes without adopting ownerless views", () => {
+    writeSavedViews<TestView>("private", [{ id: "legacy", name: "Ownerless", query: "secret", severity: "high" }]);
+    render(<SavedViewHarness storageKey="private" />);
+    expect(screenText()).not.toContain("Ownerless");
+    act(() => click("save"));
+    expect(screenText()).toContain("Saved");
+    act(() => root?.render(<TablePreferencesProvider identity={{ org_id: "other", user_id: "user" }}><SavedViewHarness storageKey="private" /></TablePreferencesProvider>));
+    expect(screenText()).not.toContain("Saved");
+    expect(readSavedViews(scoped("private", "other"))).toEqual([]);
+    act(() => root?.render(<TablePreferencesProvider identity={{ org_id: "org", user_id: "other" }}><SavedViewHarness storageKey="private" /></TablePreferencesProvider>));
+    expect(screenText()).not.toContain("Saved");
+    expect(readSavedViews(scoped("private", "org", "other"))).toEqual([]);
+    expect(readSavedViews(scoped("private"))).toHaveLength(1);
+    act(() => root?.render(<TablePreferencesProvider identity={identity}><SavedViewHarness storageKey="private" /></TablePreferencesProvider>));
+    expect(screenText()).toContain("Saved");
+  });
+  it("migrates an explicitly owned legacy key once without replacing current views", () => {
+    const legacyKey = "network:cluster:user";
+    writeSavedViews<TestView>(legacyKey, [{ id: "existing", name: "Owned", query: "namespace:app", severity: "high" }]);
+    render(<SavedViewHarness storageKey="network" legacyKey={legacyKey} />);
+    expect(screenText()).toContain("Owned");
+    act(() => click("delete-existing"));
+    expect(readSavedViews(scoped("network"))).toEqual([]);
+    act(() => root?.render(<TablePreferencesProvider identity={identity}><SavedViewHarness storageKey="network" legacyKey={legacyKey} /></TablePreferencesProvider>));
+    expect(screenText()).not.toContain("Owned");
+  });
+  it("keeps unauthenticated drafts in memory without writing shared storage", () => {
+    render(<TablePreferencesProvider identity={null}><SavedViewHarness storageKey="private" /></TablePreferencesProvider>);
+    act(() => click("save"));
+    expect(screenText()).toContain("Saved");
+    expect(localStorage.length).toBe(0);
+  });
+
 });
 
-function SavedViewHarness({ storageKey }: { storageKey: string }) {
-  const { views, saveView, deleteView } = useSavedViews<TestView>(storageKey);
+function SavedViewHarness({ storageKey, legacyKey }: { storageKey: string; legacyKey?: string }) {
+  const { views, saveView, deleteView } = useSavedViews<TestView>(storageKey, { legacyUserScopedKey: legacyKey });
   return (
     <div>
       <ul>
@@ -120,7 +157,7 @@ function render(ui: ReactNode) {
   document.body.appendChild(host);
   root = createRoot(host);
   act(() => {
-    root?.render(ui);
+    root?.render(<TablePreferencesProvider identity={identity}>{ui}</TablePreferencesProvider>);
   });
 }
 

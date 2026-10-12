@@ -73,7 +73,7 @@ function GroupEditor({ clusterId, initial, initialModes, listPath, unavailable }
   const [learnedFrom, setLearnedFrom] = useState(initial?.learned_from ?? "");
   const [policyMode, setPolicyMode] = useState<GroupMode>(initial?.policy_mode ?? initialModes?.policy_mode ?? "monitor");
   const [profileMode, setProfileMode] = useState<GroupMode>(initial?.profile_mode ?? initialModes?.profile_mode ?? "monitor");
-  const [criteria, setCriteria] = useState<GroupCriterion[]>(() => initial?.criteria?.map((criterion) => ({ ...criterion })) ?? [{ key: "namespace", op: "eq", value: "" }]);
+  const [criteria, setCriteria] = useState<GroupCriterion[]>(() => initial ? (initial.criteria ?? []).map((criterion) => ({ ...criterion })) : [{ key: "namespace", op: "eq", value: "" }]);
   const valid = Boolean(name.trim()) && criteria.every((criterion) => Boolean(criterion.key.trim()));
   const save = useMutation({
     mutationFn: () => {

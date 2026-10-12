@@ -75,6 +75,10 @@ const AssetsPage            = lazy(() => import("./pages/AssetsPage").then((m) =
 const AssetDetailPage       = lazy(() => import("./pages/AssetDetailPage").then((m) => ({ default: m.AssetDetailPage })));
 const PolicyCenterPage      = lazy(() => import("./pages/PolicyCenterPage").then((m) => ({ default: m.PolicyCenterPage })));
 const PoliciesPage          = lazy(() => import("./pages/PoliciesPage").then((m) => ({ default: m.PoliciesPage })));
+const VulnProfileFormPage = lazy(() => import("./pages/VulnProfileFormPage").then((m) => ({ default: m.VulnProfileFormPage })));
+const ResponseCatalogOverrideFormPage = lazy(() => import("./pages/ResponseCatalogOverrideFormPage").then((m) => ({ default: m.ResponseCatalogOverrideFormPage })));
+const ComplianceExemptionFormPage = lazy(() => import("./pages/ComplianceExemptionFormPage").then((m) => ({ default: m.ComplianceExemptionFormPage })));
+const ComplianceScheduleFormPage = lazy(() => import("./pages/ComplianceScheduleFormPage").then((m) => ({ default: m.ComplianceScheduleFormPage })));
 const AdmissionProfileImportPage = lazy(() => import("./pages/AdmissionProfileImportPage").then((m) => ({ default: m.AdmissionProfileImportPage })));
 const GroupSettingsPage = lazy(() => import("./pages/GroupSettingsPage").then((m) => ({ default: m.GroupSettingsPage })));
 const AdmissionPage         = lazy(() => import("./pages/AdmissionPage").then((m) => ({ default: m.AdmissionPage })));
@@ -230,6 +234,11 @@ const cluster_response_rules_newRoute = createRoute({ getParentRoute: () => app_
 const cluster_response_rules_ruleIdRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "response-rules/$ruleId", component: () => (<SuspenseRoute><ResponseRuleFormPage /></SuspenseRoute>) });
 const cluster_vuln_profilesRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "vuln-profiles", component: () => (<SuspenseRoute><VulnProfilePage /></SuspenseRoute>) });
 const cluster_vulnerability_profilesRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "vulnerability-profiles", beforeLoad: aliasRedirect({ to: "vuln-profiles", cluster: true }) });
+const cluster_vuln_profile_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "vuln-profiles/new", component: () => (<SuspenseRoute><VulnProfileFormPage /></SuspenseRoute>) });
+const cluster_vuln_profile_editRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "vuln-profiles/$profileId/edit", component: () => (<SuspenseRoute><VulnProfileFormPage /></SuspenseRoute>) });
+const cluster_response_catalog_editRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "response/$ruleId/edit", component: () => (<SuspenseRoute><ResponseCatalogOverrideFormPage /></SuspenseRoute>) });
+const cluster_compliance_exemption_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "compliance/exemptions/new", component: () => (<SuspenseRoute><ComplianceExemptionFormPage /></SuspenseRoute>) });
+const cluster_compliance_schedule_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "compliance/schedules/new", component: () => (<SuspenseRoute><ComplianceScheduleFormPage /></SuspenseRoute>) });
 const cluster_groupsRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "groups", component: () => (<SuspenseRoute><GroupsPage /></SuspenseRoute>) });
 const cluster_groups_settingsRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "groups/settings", component: () => (<SuspenseRoute><GroupSettingsPage /></SuspenseRoute>) });
 const cluster_groups_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "groups/new", component: () => (<SuspenseRoute><GroupFormPage /></SuspenseRoute>) });
@@ -441,6 +450,11 @@ authenticatedRoute.addChildren([
   cluster_response_rules_ruleIdRoute,
   cluster_vuln_profilesRoute,
   cluster_vulnerability_profilesRoute,
+  cluster_vuln_profile_newRoute,
+  cluster_vuln_profile_editRoute,
+  cluster_response_catalog_editRoute,
+  cluster_compliance_exemption_newRoute,
+  cluster_compliance_schedule_newRoute,
   cluster_groupsRoute,
   cluster_groups_settingsRoute,
   cluster_groups_newRoute,

@@ -1,11 +1,15 @@
 // CVEPage — browse the live cve_records table (332k+ rows). Shows aggregate
 // stat tiles, filter chip bar, and a default list of recent CVEs that the user
 // can search/filter without typing a query first.
-import { useMemo, useState, useEffect, useDeferredValue } from "react";
-import { useQuery, keepPreviousData } from "@tanstack/react-query";
+import { useMemo, useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Search, Database, Crown, Activity, AlertTriangle } from "lucide-react";
 
+import { useRouteSearchParams } from "@/lib/route-search";
+import { Pager } from "@/components/ui/pager";
+import { Button } from "@/components/ui/button";
+import { ErrorState, LoadingState } from "@/components/ui/states";
 import { cve, type CVEResult, type Severity } from "@/api/client";
 import { StatCard } from "@/components/ui/stat-card";
 import { FilterChip } from "@/components/ui/filter-chip";
@@ -40,28 +44,38 @@ function useDebounced<T>(value: T, ms = 200): T {
 export function CVEPage() {
   const navigate = useNavigate();
 
-  const [q, setQ] = useState("");
+  const [params, setParams] = useRouteSearchParams();
+  const q = params.get("q") ?? "";
   const debouncedQ = useDebounced(q, 200);
-  const deferredQ = useDeferredValue(debouncedQ);
-
-  const [kevOnly, setKevOnly] = useState(false);
-  const [epssHigh, setEpssHigh] = useState(false);
-  const [cvssHigh, setCvssHigh] = useState(false);
-  const [severity, setSeverity] = useState<Severity | "">("");
-  const [source, setSource] = useState<string>("");
-  // Sort is applied SERVER-SIDE — the catalog is far larger than one page, so a
-  // client-side sort would only reorder the visible 50 rows. Header clicks update this
-  // and refetch in the new global order. Default matches the DataTable's defaultSort.
-  const [sort, setSort] = useState<{ id: string; dir: "asc" | "desc" }>({ id: "cvss", dir: "desc" });
+  const kevOnly = params.get("kev") === "true";
+  const epssHigh = params.get("epss_gt") === "0.5";
+  const cvssHigh = params.get("cvss_gt") === "7";
+  const severity = SEVERITIES.includes(params.get("severity") as Severity) ? params.get("severity") as Severity : "";
+  const source = SOURCES.includes(params.get("source") as typeof SOURCES[number]) ? params.get("source")! : "";
+  const sortID = params.get("sort") ?? "cvss";
+  const sort = { id: ["cve_id", "cvss", "severity", "epss", "kev", "published"].includes(sortID) ? sortID : "cvss", dir: params.get("dir") === "asc" ? "asc" as const : "desc" as const };
+  const requestedPage = Number(params.get("page") ?? "1");
+  const page = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage - 1 : 0;
+  const pageSize = 50;
+  const changeFilters = (values: Record<string, string>, replace = false) => setParams((current) => {
+    current.delete("page");
+    for (const [key, value] of Object.entries(values)) { if (value) current.set(key, value); else current.delete(key); }
+    return current;
+  }, { replace });
+  const setQ = (value: string) => changeFilters({ q: value }, true);
+  const setSeverity = (value: string) => changeFilters({ severity: value });
+  const setSource = (value: string) => changeFilters({ source: value });
+  const setSort = (value: typeof sort) => changeFilters({ sort: value.id, dir: value.dir });
+  const clearFilters = () => changeFilters({ q: "", kev: "", epss_gt: "", cvss_gt: "", severity: "", source: "" });
 
   const stats = useQuery({ queryKey: ["cve", "stats"], queryFn: () => cve.stats(), staleTime: 60_000 });
   const bundle = useQuery({ queryKey: ["cve", "bundle"], queryFn: () => cve.bundle(), staleTime: 60_000 });
 
   const search = useQuery({
-    queryKey: ["cve", "search", deferredQ, kevOnly, epssHigh, cvssHigh, severity, source, sort.id, sort.dir],
+    queryKey: ["cve", "search", debouncedQ, kevOnly, epssHigh, cvssHigh, severity, source, sort.id, sort.dir, page],
     queryFn: () =>
       cve.search({
-        q: deferredQ,
+        q: debouncedQ,
         kev: kevOnly || undefined,
         epss_gt: epssHigh ? 0.5 : undefined,
         cvss_gt: cvssHigh ? 7.0 : undefined,
@@ -69,12 +83,14 @@ export function CVEPage() {
         source: source || undefined,
         sort: sort.id,
         dir: sort.dir,
-        limit: 50,
+        limit: pageSize + 1,
+        offset: page * pageSize,
       }),
-    placeholderData: keepPreviousData,
+    enabled: q === debouncedQ,
   });
 
-  const rows = search.data?.results ?? [];
+  const rows = search.data?.results.slice(0, pageSize) ?? [];
+  const hasMore = (search.data?.results.length ?? 0) > pageSize;
 
   const columns = useMemo<Column<CVEResult>[]>(
     () => [
@@ -171,6 +187,7 @@ export function CVEPage() {
     <PageContainer>
       <PageHeader
         title="CVE Database"
+        actions={<Button disabled={search.isFetching || q !== debouncedQ} onClick={() => { void search.refetch(); void stats.refetch(); void bundle.refetch(); }}>Refresh</Button>}
         description={
           <>
             {stats.data ? (
@@ -191,7 +208,7 @@ export function CVEPage() {
       />
 
       {/* Verdict — honest state of the catalog (populated vs not yet synced). */}
-      {stats.data && (
+      {stats.isError ? <VerdictBanner status="degraded" title="CVE catalog summary unavailable" detail="Retry before relying on the catalog totals." /> : stats.isPending ? <VerdictBanner status="info" title="Loading CVE catalog" detail="Fetching current catalog totals." /> : stats.data && (
         stats.data.total > 0 ? (
           <VerdictBanner
             status="ok"
@@ -280,9 +297,9 @@ export function CVEPage() {
       {/* Filter chip bar */}
       <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-card px-3 py-2">
         <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Filters</span>
-        <FilterChip label="KEV-only" active={kevOnly} onClick={() => setKevOnly((v) => !v)} />
-        <FilterChip label="EPSS > 0.5" active={epssHigh} onClick={() => setEpssHigh((v) => !v)} />
-        <FilterChip label="CVSS ≥ 7" active={cvssHigh} onClick={() => setCvssHigh((v) => !v)} />
+        <FilterChip label="KEV-only" active={kevOnly} onClick={() => changeFilters({ kev: kevOnly ? "" : "true" })} />
+        <FilterChip label="EPSS > 0.5" active={epssHigh} onClick={() => changeFilters({ epss_gt: epssHigh ? "" : "0.5" })} />
+        <FilterChip label="CVSS ≥ 7" active={cvssHigh} onClick={() => changeFilters({ cvss_gt: cvssHigh ? "" : "7" })} />
         <div className="ml-1 flex items-center gap-1">
           <label className="text-[10px] uppercase tracking-wider text-muted-foreground">Severity</label>
           <select
@@ -316,14 +333,7 @@ export function CVEPage() {
         {(kevOnly || epssHigh || cvssHigh || severity || source || q) && (
           <button
             type="button"
-            onClick={() => {
-              setKevOnly(false);
-              setEpssHigh(false);
-              setCvssHigh(false);
-              setSeverity("");
-              setSource("");
-              setQ("");
-            }}
+            onClick={clearFilters}
             className="ml-auto text-[11px] text-muted-foreground hover:text-foreground"
           >
             Clear all
@@ -333,14 +343,16 @@ export function CVEPage() {
 
       {/* Results */}
       <div data-testid="cve-results-table">
-        <DataTable<CVEResult>
+        {search.isError ? <ErrorState title="Could not load CVE results." action={<Button onClick={() => void search.refetch()}>Retry</Button>} /> : search.isPending || q !== debouncedQ ? <LoadingState label="Loading CVE results…" /> : <DataTable<CVEResult>
           rows={rows}
-          sourceLimit={50}
-          sourceCount={rows.length}
+          key={`${sort.id}:${sort.dir}`}
+          preferencesKey="cve-catalog"
+          exportFileName="constellation-cve-page.csv"
+          exportLabel="Export this page"
           columns={columns}
           rowKey={(r) => r.cve_id}
           onRowClick={(r) => navigate({ href: `/cve/${r.cve_id}` })}
-          defaultSort={{ id: "cvss", dir: "desc" }}
+          defaultSort={sort}
           onSortChange={(s) => setSort(s ?? { id: "cvss", dir: "desc" })}
           rowTestId={(r) => `cve-row-${r.cve_id}`}
           emptyState={
@@ -354,12 +366,10 @@ export function CVEPage() {
               />
             )
           }
-        />
+        />}
+        <fieldset disabled={search.isFetching || q !== debouncedQ}><Pager page={page} pageSize={pageSize} hasMore={!search.isError && hasMore} rowsOnPage={rows.length} onPage={(next) => setParams((current) => { if (next) current.set("page", String(next + 1)); else current.delete("page"); return current; })} /></fieldset>
       </div>
-
-      <div className="text-[10px] text-muted-foreground">
-        Showing up to {rows.length} fetched CVEs from {stats.data ? stats.data.total.toLocaleString() : "—"} catalog records; filter and sort run on the server. This view is capped at 50 results.
-      </div>
+      <p className="text-xs text-muted-foreground">Filters and sorting apply across the catalog. CSV includes the current page and visible columns. Catalog summary metrics cover all records.</p>
     </PageContainer>
   );
 }

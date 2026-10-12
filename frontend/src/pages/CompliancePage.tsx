@@ -1,26 +1,18 @@
-// Compliance page — framework list + drill-down with per-control table.
-//
-// Layout mirrors StackRox's Compliance pattern: a left rail of frameworks (categorized) +
-// a main pane with summary tiles per status and a check table you can filter to a single
-// framework.
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { CalendarClock, Download, FileText, PlayCircle, Send, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
-import {
-  compliance,
-  type ComplianceCheck,
-  type ComplianceEvidenceItem,
-  type ComplianceEvidenceResponse,
-  type ComplianceExemption,
-  type ComplianceScheduleDB,
-  type ComplianceScheduleDelivery,
-  type ComplianceSummary,
-} from "@/api/client";
+import { Download, PlayCircle, Plus, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
+import { compliance, type ComplianceCheck, type ComplianceEvidenceItem, type ComplianceEvidenceResponse, type ComplianceExemption, type ComplianceScheduleDB } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
+import { useRouteSearchParams } from "@/lib/route-search";
 import { LoadingState, ErrorState, EmptyState } from "@/components/ui/states";
 import { PageHeader } from "@/components/ui/page";
 import { StatCard } from "@/components/ui/stat-card";
+import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { Collapse } from "@/components/ui/collapse";
+import { Button } from "@/components/ui/button";
+import { Field, Select } from "@/components/ui/form";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { downloadCsv } from "@/lib/csv";
@@ -41,98 +33,53 @@ function regLabel(std: string): string {
 }
 
 export function CompliancePage() {
-  // Cluster-scoped per the cluster-first IA: every fetch threads cluster_id so we
-  // never display compliance evidence from a sibling cluster.
-  const { clusterId, isLoading: clusterLoading } = useCluster();
-  const [tab, setTab] = useTabParam("tab", "frameworks");
-  const fws = useQuery({ queryKey: ["compliance", "frameworks"], queryFn: () => compliance.frameworks() });
-  const summary = useQuery({
-    queryKey: ["compliance", "summary", clusterId],
-    queryFn: () => compliance.summary(clusterId),
-  });
-  const [active, setActive] = useState<string | null>(null);
-  const [exempting, setExempting] = useState<ComplianceCheck | null>(null);
-  const [exemptionReason, setExemptionReason] = useState("");
-  const [exemptionExpiresAt, setExemptionExpiresAt] = useState(defaultExemptionExpiresAt());
-  const [exemptionError, setExemptionError] = useState<string | null>(null);
-  const schedules = useQuery({
-    queryKey: ["compliance", "db-schedules", clusterId],
-    queryFn: () => compliance.listDBSchedules(clusterId),
-  });
-  const evidence = useQuery({
-    queryKey: ["compliance", "evidence", clusterId],
-    queryFn: () => compliance.evidence({ cluster_id: clusterId, limit: 500 }),
-  });
-  const queryClient = useQueryClient();
-  const invalidateComplianceEvidence = () => {
-    void queryClient.invalidateQueries({ queryKey: ["compliance", "summary"] });
-    void queryClient.invalidateQueries({ queryKey: ["compliance", "checks"] });
-    void queryClient.invalidateQueries({ queryKey: ["compliance", "evidence"] });
-    void queryClient.invalidateQueries({ queryKey: ["compliance", "exemptions"] });
+  const { clusterId, cluster, isLoading: clusterLoading, error: clusterError } = useCluster();
+  const resolvedScope = !!clusterId && cluster?.id === clusterId;
+  const scopeReady = resolvedScope && !clusterLoading && !clusterError;
+  const navigate = useNavigate();
+  const [search, setSearch] = useRouteSearchParams();
+  const [requestedTab, setTab] = useTabParam("tab", "frameworks");
+  const tab = ["frameworks", "evidence", "schedules"].includes(requestedTab) ? requestedTab : "frameworks";
+  const listPath = `/clusters/${encodeURIComponent(clusterId ?? "")}/compliance`;
+  const fws = useQuery({ queryKey: ["compliance", "frameworks"], queryFn: () => compliance.frameworks(), enabled: scopeReady });
+  const summary = useQuery({ queryKey: ["compliance", "summary", clusterId], queryFn: () => compliance.summary(clusterId!), enabled: scopeReady });
+  const active = search.get("framework") ?? fws.data?.frameworks[0]?.id ?? null;
+  const validFramework = !!active && !!fws.data?.frameworks.some((framework) => framework.id === active);
+  const checks = useQuery({ queryKey: ["compliance", "checks", active, clusterId], queryFn: () => compliance.checks(active!, clusterId!), enabled: scopeReady && validFramework && tab === "frameworks" });
+  const checkRows = useMemo(() => {
+    const occurrences = new Map<string, number>();
+    return (checks.data?.checks ?? []).map((check) => {
+      // The checks endpoint returns evidence rows without a server row ID;
+      // several rows can legitimately share the same framework/control tuple.
+      const identity = JSON.stringify([check.framework, check.control_id, check.title, check.evidence, check.evaluated_at]);
+      const occurrence = occurrences.get(identity) ?? 0;
+      occurrences.set(identity, occurrence + 1);
+      return { ...check, evidenceRowKey: JSON.stringify([identity, occurrence]) };
+    });
+  }, [checks.data]);
+  const exemptions = useQuery({ queryKey: ["compliance", "exemptions", active, clusterId], queryFn: () => compliance.listExemptions({ framework: active!, cluster_id: clusterId! }), enabled: scopeReady && validFramework && tab === "frameworks" });
+  const evidence = useQuery({ queryKey: ["compliance", "evidence", clusterId], queryFn: () => compliance.evidence({ cluster_id: clusterId!, limit: 500 }), enabled: scopeReady && tab === "evidence" });
+  const schedules = useQuery({ queryKey: ["compliance", "db-schedules", clusterId], queryFn: () => compliance.listDBSchedules(clusterId!), enabled: scopeReady && tab === "schedules" });
+  const qc = useQueryClient();
+  const retryScope = () => { void qc.invalidateQueries({ queryKey: ["clusters"] }); void qc.invalidateQueries({ queryKey: ["cluster", clusterId] }); };
+  const totals = useMemo(() => (summary.data?.frameworks ?? []).reduce((acc, item) => ({ total: acc.total + item.total, pass: acc.pass + item.pass, fail: acc.fail + item.fail, manual: acc.manual + item.manual, exempted: acc.exempted + (item.exempted ?? 0) }), { total: 0, pass: 0, fail: 0, manual: 0, exempted: 0 }), [summary.data]);
+  const invalidate = () => {
+    for (const family of ["summary", "checks", "evidence", "exemptions"]) void qc.invalidateQueries({ queryKey: ["compliance", family] });
   };
-  const runNow = useMutation({
-    mutationFn: (id: string) => compliance.runScheduleNow(id),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["compliance", "db-schedules"] });
-    },
-  });
-  const checks = useQuery({
-    queryKey: ["compliance", "checks", active, clusterId],
-    queryFn: () => compliance.checks(active ?? undefined, clusterId),
-    enabled: active != null,
-  });
-  const exemptions = useQuery({
-    queryKey: ["compliance", "exemptions", active, clusterId],
-    queryFn: () => compliance.listExemptions({ framework: active ?? undefined, cluster_id: clusterId }),
-    enabled: active != null,
-  });
-  const createExemption = useMutation({
-    mutationFn: () => {
-      if (!exempting) throw new Error("No compliance control selected");
-      return compliance.createExemption({
-        cluster_id: clusterId,
-        framework: exempting.framework,
-        control_id: exempting.control_id,
-        reason: exemptionReason,
-        expires_at: new Date(exemptionExpiresAt).toISOString(),
-      });
-    },
-    onSuccess: () => {
-      setExempting(null);
-      setExemptionReason("");
-      setExemptionExpiresAt(defaultExemptionExpiresAt());
-      setExemptionError(null);
-      invalidateComplianceEvidence();
-    },
-    onError: (err: unknown) => setExemptionError(err instanceof Error ? err.message : "Failed to create exemption"),
-  });
-  const revokeExemption = useMutation({
-    mutationFn: (id: string) => compliance.revokeExemption(id),
-    onSuccess: () => invalidateComplianceEvidence(),
-  });
-
-  const summaryByFramework = useMemo(() => {
-    const map: Record<string, ComplianceSummary> = {};
-    for (const s of summary.data?.frameworks ?? []) map[s.framework] = s;
-    return map;
-  }, [summary.data]);
-
-  if (clusterLoading) return <LoadingState label="Loading cluster…" />;
-  if (fws.isPending) return <LoadingState label="Loading frameworks…" />;
-  if (fws.isError) return <ErrorState error={fws.error} />;
-  if ((fws.data?.frameworks ?? []).length === 0)
-    return <EmptyState title="No compliance frameworks" hint="No frameworks are configured for this cluster yet." />;
-
-  const categories = groupBy(fws.data?.frameworks ?? [], (f) => f.category);
-
+  const revokeExemption = useMutation({ mutationFn: (id: string) => compliance.revokeExemption(id), onSuccess: invalidate });
+  const selectFramework = (value: string) => { const next = new URLSearchParams(search); next.set("framework", value); setSearch(next); };
+  const selectedSummary = summary.data?.frameworks.find((item) => item.framework === active);
+  const workspaceFailed = !scopeReady || summary.isError || fws.isError || (tab === "frameworks" && checks.isError) || (tab === "evidence" && evidence.isError) || (tab === "schedules" && schedules.isError);
   const checkColumns: Column<ComplianceCheck>[] = [
     {
       id: "control",
+      hideable: false, exportValue: (c) => c.control_id,
       header: "Control",
       cell: (c) => <span className="font-mono text-xs">{c.control_id}</span>,
     },
     {
       id: "title",
+      exportValue: (c) => c.title,
       header: "Title",
       cell: (c) => (
         <div>
@@ -169,6 +116,7 @@ export function CompliancePage() {
     },
     {
       id: "status",
+      exportValue: (c) => c.effective_status ?? c.status,
       header: "Status",
       cell: (c) => {
         const effectiveStatus = c.effective_status ?? c.status;
@@ -181,11 +129,13 @@ export function CompliancePage() {
     },
     {
       id: "severity",
+      exportValue: (c) => c.severity,
       header: "Severity",
       cell: (c) => <span className="text-xs text-muted-foreground">{c.severity}</span>,
     },
     {
       id: "action",
+      hideable: false, exportable: false,
       header: "Action",
       cell: (c) => {
         const effectiveStatus = c.effective_status ?? c.status;
@@ -193,7 +143,7 @@ export function CompliancePage() {
           <button
             type="button"
             onClick={() => revokeExemption.mutate(c.exemption!.id)}
-            disabled={revokeExemption.isPending}
+            disabled={!scopeReady || revokeExemption.isPending || checks.isError || checks.isFetching || exemptions.isError || exemptions.isFetching}
             className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-accent disabled:opacity-50"
           >
             <Trash2 className="h-3 w-3" aria-hidden />
@@ -203,11 +153,10 @@ export function CompliancePage() {
           <button
             type="button"
             onClick={() => {
-              setExempting(c);
-              setExemptionReason("");
-              setExemptionExpiresAt(defaultExemptionExpiresAt());
-              setExemptionError(null);
+              const next = new URLSearchParams(search); next.set("framework", c.framework); next.set("control_id", c.control_id); next.set("tab", "frameworks");
+              navigate({ href: `${listPath}/exemptions/new?${next}` });
             }}
+            disabled={!scopeReady || checks.isError || checks.isFetching}
             className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-accent"
           >
             <ShieldAlert className="h-3 w-3" aria-hidden />
@@ -220,188 +169,64 @@ export function CompliancePage() {
     },
   ];
 
-  return (
-    <div className="space-y-6" data-testid="compliance-page" data-cluster-id={clusterId ?? ""}>
-      <PageHeader
-        title="Compliance"
-        description={
-          <>
-            Measure this cluster against {fws.data?.frameworks.length ?? 0} security and regulatory frameworks. Pick a
-            framework to see how each control scored, review collected evidence, or schedule signed evidence reports for
-            your auditors.
-          </>
-        }
-      />
-
-      <Tabs
-        value={tab}
-        onValueChange={setTab}
-        items={[
-          {
-            value: "frameworks",
-            label: "Frameworks",
-            count: fws.data?.frameworks.length,
-            content: (
-              <div className="space-y-6">
-
-      <section className="grid grid-cols-2 gap-3 md:grid-cols-4" data-testid="compliance-schedule-metrics">
-        <StatCard label="Schedules" value={schedules.data?.summary.total ?? 0} icon={<CalendarClock className="h-3.5 w-3.5" />} />
-        <StatCard label="Enabled" value={schedules.data?.summary.enabled ?? 0} icon={<PlayCircle className="h-3.5 w-3.5" />} />
-        <StatCard label="Formats" value={schedules.data?.report_formats.length ?? 0} icon={<FileText className="h-3.5 w-3.5" />} />
-        <StatCard label="Deliveries" value={(schedules.data?.schedules ?? []).reduce((sum, item) => sum + item.delivery.length, 0)} icon={<Send className="h-3.5 w-3.5" />} />
+  return <div className="space-y-6" data-testid="compliance-page" data-cluster-id={clusterId ?? ""}>
+    <PageHeader title="Compliance" description="Review evaluated security controls, inspect supporting evidence, and configure recurring reports for this cluster." />
+    {clusterLoading && !resolvedScope ? <LoadingState label="Loading cluster…" /> : !clusterId ? <ErrorState title="Select a cluster to review compliance." /> : !resolvedScope ? <ErrorState title="The selected cluster could not be resolved. Review its registration and retry." action={<Button onClick={retryScope}>Retry cluster</Button>} /> : <>
+      {!scopeReady && <ErrorState title="Current cluster scope is unavailable. Showing the last loaded results; actions are paused." action={<Button onClick={retryScope}>Retry cluster</Button>} />}
+      <VerdictBanner status={workspaceFailed ? "degraded" : !summary.data || totals.total === 0 ? "info" : totals.fail > 0 ? "degraded" : "ok"}
+        title={workspaceFailed ? "Compliance data could not be refreshed" : !summary.data ? "Loading evaluated compliance checks" : totals.total === 0 ? "No compliance checks evaluated" : totals.fail > 0 ? `${totals.fail} compliance checks need review` : "Evaluated checks have no active failures"}
+        detail="Results describe collected evidence. Exemptions are time-bound acceptances; schedules describe report configuration and do not confirm execution or delivery." />
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-5" data-testid="compliance-summary">
+        <StatCard label="Evaluated checks" value={summary.data ? totals.total : "—"} />
+        <StatCard label="Passing" value={summary.data ? totals.pass : "—"} icon={<ShieldCheck className="h-3.5 w-3.5" />} />
+        <StatCard label="Failing" value={summary.data ? totals.fail : "—"} tone={summary.data && totals.fail > 0 ? "high" : "neutral"} />
+        <StatCard label="Manual review" value={summary.data ? totals.manual : "—"} />
+        <StatCard label="Exempted" value={summary.data ? totals.exempted : "—"} />
       </section>
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[260px_1fr]" data-testid="compliance-layout">
-        <aside className="space-y-3 rounded-lg border border-border bg-card p-3" data-testid="frameworks-rail">
-          {Object.entries(categories).map(([cat, list]) => (
-            <section key={cat}>
-              <h2 className="mb-1 text-xs font-semibold uppercase text-muted-foreground">{cat}</h2>
-              <ul className="space-y-0.5">
-                {list.map((f) => {
-                  const s = summaryByFramework[f.id];
-                  const pct = s?.effective_pass_pct ?? s?.pass_pct ?? null;
-                  return (
-                    <li key={f.id}>
-                      <button
-                        type="button"
-                        onClick={() => setActive(f.id)}
-                        data-testid={`framework-${f.id}`}
-                        className={`flex w-full items-center justify-between gap-2 rounded-md px-2 py-1 text-left text-sm transition-colors ${
-                          active === f.id
-                            ? "bg-accent text-foreground"
-                            : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-                        }`}
-                      >
-                        <span className="truncate">{f.name}</span>
-                        {pct !== null && (
-                          <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
-                            {pct}%
-                          </span>
-                        )}
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
-          ))}
-        </aside>
-
-        <main className="rounded-lg border border-border bg-card p-4" data-testid="framework-detail">
-          {!active && (
-            <p className="text-sm text-muted-foreground">
-              Select a framework from the left to see control-level evidence.
-            </p>
-          )}
-          {active && (
-            <>
-              <h2 className="text-lg font-medium">{fws.data?.frameworks.find((f) => f.id === active)?.name}</h2>
-              <p className="mb-3 text-xs text-muted-foreground">{active}</p>
-              {summaryByFramework[active] && (
-                <div className="mb-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-5" data-testid="framework-status-summary">
-                  <StatusMetric label="Pass" value={summaryByFramework[active].pass} status="pass" />
-                  <StatusMetric label="Fail" value={summaryByFramework[active].fail} status="fail" />
-                  <StatusMetric label="Manual" value={summaryByFramework[active].manual} status="manual" />
-                  <StatusMetric label="Exempted" value={summaryByFramework[active].exempted ?? 0} status="exempted" />
-                  <StatusMetric label="Total" value={summaryByFramework[active].total} status="not_applicable" />
-                </div>
-              )}
-              {checks.isPending && <p className="text-xs text-muted-foreground">Loading controls…</p>}
-              {checks.data && checks.data.checks.length === 0 && (
-                <p className="text-xs text-muted-foreground">
-                  No controls evaluated yet for this framework. Run <code>kubectl exec</code> on the
-                  operator pod to trigger a kube-bench sweep, or POST kube-bench JSON to
-                  <code> /api/v1/compliance/ingest</code>.
-                </p>
-              )}
-              {checks.data && checks.data.checks.length > 0 && (
-                <>
-                  <div className="mb-2 flex justify-end">
-                    <button
-                      type="button"
-                      onClick={() => downloadCsv(`constellation-compliance-${active ?? "all"}`, ["Framework", "Control", "Title", "Status", "Severity", "Standards", "Evidence"],
-                        checks.data!.checks.map((c) => [c.framework, c.control_id, c.title, c.effective_status, c.severity, Object.keys(c.tags_v2 ?? {}).map((s) => regLabel(s)).join(" "), c.evidence]))}
-                      className="rounded h-7 px-2.5 text-[11px] border border-border bg-card hover:bg-accent transition-colors"
-                    >Export CSV</button>
-                  </div>
-                  <DataTable<ComplianceCheck>
-                    rows={checks.data.checks}
-                    columns={checkColumns}
-                    rowKey={(c) => `${c.framework}-${c.control_id}`}
-                  />
-                </>
-              )}
-              {exemptions.data && exemptions.data.exemptions.length > 0 && (
-                <ComplianceExemptionsList
-                  exemptions={exemptions.data.exemptions}
-                  onRevoke={(id) => revokeExemption.mutate(id)}
-                  pending={revokeExemption.isPending}
-                />
-              )}
-            </>
-          )}
-        </main>
-      </div>
-
-      <section className="space-y-3" data-testid="compliance-schedules">
-        <div>
-          <h2 className="text-lg font-semibold">Scheduled Evidence</h2>
-          <p className="text-sm text-muted-foreground">
-            Report jobs with scoped frameworks, delivery targets, run history, and signed artifacts.
-          </p>
-        </div>
-        <div className="grid gap-3 xl:grid-cols-3">
-          {(schedules.data?.schedules ?? []).map((schedule) => (
-            <ScheduleSummaryCard
-              key={schedule.id}
-              schedule={schedule}
-              onRunNow={() => runNow.mutate(schedule.id)}
-              activeMessage={runNow.data?.schedule.id === schedule.id ? runNow.data.message : undefined}
-              pending={runNow.isPending}
-            />
-          ))}
-        </div>
-      </section>
-              </div>
-            ),
-          },
-          {
-            value: "evidence",
-            label: "Evidence",
-            content: <EvidencePanel data={evidence.data} isPending={evidence.isPending} />,
-          },
-          {
-            value: "schedules",
-            label: "Schedules",
-            content: <SchedulesManager clusterId={clusterId} frameworks={fws.data?.frameworks ?? []} />,
-          },
-        ]}
-      />
-      {exempting && (
-        <ComplianceExemptionDialog
-          check={exempting}
-          reason={exemptionReason}
-          expiresAt={exemptionExpiresAt}
-          error={exemptionError}
-          pending={createExemption.isPending}
-          onReasonChange={setExemptionReason}
-          onExpiresAtChange={setExemptionExpiresAt}
-          onClose={() => setExempting(null)}
-          onSubmit={() => createExemption.mutate()}
-        />
-      )}
-    </div>
-  );
+      {summary.isError && <ErrorState title={summary.data ? "Could not refresh totals. Showing the last loaded summary." : "Compliance totals are unavailable."} action={<Button onClick={() => void summary.refetch()}>Retry</Button>} />}
+      <Tabs value={tab} onValueChange={setTab} items={[
+        { value: "frameworks", label: "Frameworks", count: fws.data?.frameworks.length, content: <div className="space-y-5">
+          {fws.isPending && <LoadingState label="Loading frameworks…" />}
+          {fws.isError && <ErrorState title="Current compliance frameworks could not be loaded." action={<Button onClick={() => void fws.refetch()}>Retry</Button>} />}
+          {fws.data && fws.data.frameworks.length === 0 && <EmptyState title="No compliance frameworks" hint="No frameworks are available for this cluster." />}
+          {fws.data && fws.data.frameworks.length > 0 && <>
+            <Field label="Framework" htmlFor="compliance-framework">
+              <Select id="compliance-framework" value={active ?? ""} onChange={(event) => selectFramework(event.target.value)}>{!validFramework && <option value={active ?? ""}>Unknown framework</option>}{Object.entries(groupBy(fws.data.frameworks, (framework) => framework.category)).map(([category, items]) => <optgroup key={category} label={category}>{items!.map((framework) => <option key={framework.id} value={framework.id}>{framework.name}</option>)}</optgroup>)}</Select>
+            </Field>
+            {!validFramework ? <ErrorState title="This framework is unavailable. Select an available framework." /> : <section className="space-y-4 rounded-lg border border-border bg-card p-4" data-testid="framework-detail">
+              <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-medium">{fws.data.frameworks.find((framework) => framework.id === active)?.name}</h2><p className="text-xs text-muted-foreground">{selectedSummary ? `${selectedSummary.fail} failing · ${selectedSummary.total} evaluated · ${selectedSummary.effective_pass_pct ?? selectedSummary.pass_pct}% effective pass` : "Framework summary unavailable"}</p></div><Button variant="outline" size="sm" disabled={!scopeReady || checks.isFetching} onClick={() => { void checks.refetch(); void exemptions.refetch(); }}>Refresh controls</Button></div>
+              {checks.isPending && <LoadingState label="Loading controls…" />}
+              {checks.isError && <ErrorState title={checks.data ? "Could not refresh controls. Showing the last loaded results." : "Controls could not be loaded."} action={<Button onClick={() => void checks.refetch()}>Retry</Button>} />}
+              {revokeExemption.isError && <p role="alert" className="text-sm text-status-error">Could not revoke this exemption. Refresh the controls and try again.</p>}
+              {checks.data && <>
+                <div className="flex justify-end"><Button variant="outline" size="sm" onClick={() => downloadCsv(`constellation-compliance-${active}`, ["Framework", "Control", "Title", "Status", "Severity", "Standards", "Evidence"], checks.data!.checks.map((check) => [check.framework, check.control_id, check.title, check.effective_status ?? check.status, check.severity, Object.keys(check.tags_v2 ?? {}).map(regLabel).join(" "), check.evidence]))}>Export controls CSV</Button></div>
+                <DataTable<ComplianceCheck & { evidenceRowKey: string }> rows={checkRows} columns={checkColumns} rowKey={(check) => check.evidenceRowKey} preferencesKey="compliance-controls" testId="compliance-controls-table" emptyState={<EmptyState title="No evaluated controls" hint="Collected results will appear here after this framework runs." />} />
+              </>}
+              <Collapse label="Advanced: exemption history">
+                {exemptions.isPending && <LoadingState label="Loading exemptions…" />}
+                {exemptions.isError && <ErrorState title="Exemption history could not be refreshed." action={<Button onClick={() => void exemptions.refetch()}>Retry</Button>} />}
+                {exemptions.data && (exemptions.data.exemptions.length > 0 ? <ComplianceExemptionsList exemptions={exemptions.data.exemptions.filter((item) => !item.cluster_id || item.cluster_id === clusterId)} onRevoke={(id) => revokeExemption.mutate(id)} pending={!scopeReady || revokeExemption.isPending || exemptions.isError} /> : <EmptyState title="No exemption history" />)}
+              </Collapse>
+            </section>}
+          </>}
+        </div> },
+        { value: "evidence", label: "Evidence", content: <EvidencePanel data={evidence.data} isPending={evidence.isPending} isError={evidence.isError} onRetry={() => void evidence.refetch()} /> },
+        { value: "schedules", label: "Schedules", content: <SchedulesManager clusterId={clusterId} listPath={listPath} scopeReady={scopeReady} /> },
+      ]} />
+    </>}
+  </div>;
 }
 
 const evidenceColumns: Column<ComplianceEvidenceItem>[] = [
   {
     id: "scope",
+    exportValue: (item) => item.scope,
     header: "Scope",
     cell: (item) => <span className="text-xs text-muted-foreground">{item.scope}</span>,
   },
   {
     id: "target",
+    exportValue: (item) => item.target,
     header: "Target",
     cell: (item) => (
       <>
@@ -412,6 +237,7 @@ const evidenceColumns: Column<ComplianceEvidenceItem>[] = [
   },
   {
     id: "control",
+    exportValue: (item) => `${item.framework} · ${item.control_id}`,
     header: "Control",
     cell: (item) => (
       <>
@@ -422,6 +248,7 @@ const evidenceColumns: Column<ComplianceEvidenceItem>[] = [
   },
   {
     id: "status",
+    exportValue: (item) => item.effective_status ?? item.status,
     header: "Status",
     cell: (item) => {
       const status = item.effective_status ?? item.status;
@@ -434,6 +261,7 @@ const evidenceColumns: Column<ComplianceEvidenceItem>[] = [
   },
   {
     id: "evidence",
+    exportValue: (item) => item.evidence ?? "",
     header: "Evidence",
     cell: (item) => (
       <>
@@ -450,110 +278,18 @@ const evidenceColumns: Column<ComplianceEvidenceItem>[] = [
   },
 ];
 
-function EvidencePanel({ data, isPending }: { data?: ComplianceEvidenceResponse; isPending: boolean }) {
-  const items = data?.items ?? [];
-  return (
-    <section className="space-y-3" data-testid="compliance-evidence-panel">
-      <div className="grid gap-2 text-xs md:grid-cols-5" data-testid="compliance-evidence-summary">
-        <StatusMetric label="Pass" value={data?.summary.pass ?? 0} status="pass" />
-        <StatusMetric label="Fail" value={data?.summary.fail ?? 0} status="fail" />
-        <StatusMetric label="Manual" value={data?.summary.manual ?? 0} status="manual" />
-        <StatusMetric label="Exempted" value={data?.summary.exempted ?? 0} status="exempted" />
-        <StatusMetric label="N/A" value={data?.summary.not_applicable ?? 0} status="not_applicable" />
-      </div>
-      <div className="rounded-lg border border-border bg-card p-4">
-        {isPending && <p className="text-xs text-muted-foreground">Loading evidence…</p>}
-        {!isPending && items.length === 0 && (
-          <p className="text-xs text-muted-foreground">No compliance evidence has been collected for this cluster yet.</p>
-        )}
-        {items.length > 0 && (
-          <DataTable<ComplianceEvidenceItem>
-            rows={items}
-            sourceLimit={500}
-            sourceCount={items.length}
-            columns={evidenceColumns}
-            rowKey={(item) => item.id}
-          />
-        )}
-      </div>
-    </section>
-  );
-}
 
-function ComplianceExemptionDialog({
-  check,
-  reason,
-  expiresAt,
-  error,
-  pending,
-  onReasonChange,
-  onExpiresAtChange,
-  onClose,
-  onSubmit,
-}: {
-  check: ComplianceCheck;
-  reason: string;
-  expiresAt: string;
-  error: string | null;
-  pending: boolean;
-  onReasonChange: (value: string) => void;
-  onExpiresAtChange: (value: string) => void;
-  onClose: () => void;
-  onSubmit: () => void;
-}) {
-  const canSubmit = reason.trim().length >= 12 && Boolean(expiresAt);
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" data-testid="compliance-exemption-dialog">
-      <div className="w-full max-w-md rounded-lg border border-border bg-card p-4 shadow-xl">
-        <header className="mb-3 flex items-start justify-between gap-3">
-          <div>
-            <h3 className="text-sm font-semibold">Exempt compliance control</h3>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {check.framework} · {check.control_id}
-            </p>
-          </div>
-          <button type="button" onClick={onClose} className="text-xs text-muted-foreground hover:text-foreground">
-            Cancel
-          </button>
-        </header>
-        <div className="space-y-2">
-          <div>
-            <div className="text-xs font-medium">{check.title}</div>
-            {check.evidence && <div className="mt-1 text-xs text-muted-foreground">{check.evidence}</div>}
-          </div>
-          <label className="block text-xs text-muted-foreground">Reason</label>
-          <textarea
-            value={reason}
-            onChange={(e) => onReasonChange(e.target.value)}
-            rows={4}
-            className="w-full resize-none rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-            placeholder="Compensating control, owner, ticket, or auditor-approved exception"
-          />
-          <label className="block text-xs text-muted-foreground">Expires</label>
-          <input
-            type="datetime-local"
-            value={expiresAt}
-            onChange={(e) => onExpiresAtChange(e.target.value)}
-            className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-          />
-        </div>
-        {error && <p className="mt-2 text-xs text-[color:var(--color-status-error)]">{error}</p>}
-        <footer className="mt-3 flex items-center justify-end gap-2">
-          <button type="button" onClick={onClose} className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent">
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={onSubmit}
-            disabled={!canSubmit || pending}
-            className="rounded-md bg-foreground px-3 py-1.5 text-xs text-background hover:opacity-90 disabled:opacity-50"
-          >
-            {pending ? "Saving…" : "Create exemption"}
-          </button>
-        </footer>
-      </div>
-    </div>
-  );
+function EvidencePanel({ data, isPending, isError, onRetry }: { data?: ComplianceEvidenceResponse; isPending: boolean; isError: boolean; onRetry: () => void }) {
+  const items = data?.items ?? [];
+  return <section className="space-y-4" data-testid="compliance-evidence-panel">
+    <p className="text-sm text-muted-foreground">Collected evidence across node, workload, Kubernetes, and cloud scopes. This view loads up to 500 records.</p>
+    {isPending && <LoadingState label="Loading evidence…" />}
+    {isError && <ErrorState title={data ? "Could not refresh evidence. Showing the last loaded records." : "Compliance evidence could not be loaded."} action={<Button onClick={onRetry}>Retry</Button>} />}
+    {data && <>
+      <Collapse label="Evidence status details"><div className="grid gap-2 text-xs md:grid-cols-5" data-testid="compliance-evidence-summary"><StatusMetric label="Pass" value={data.summary.pass} status="pass" /><StatusMetric label="Fail" value={data.summary.fail} status="fail" /><StatusMetric label="Manual" value={data.summary.manual} status="manual" /><StatusMetric label="Exempted" value={data.summary.exempted} status="exempted" /><StatusMetric label="N/A" value={data.summary.not_applicable} status="not_applicable" /></div></Collapse>
+      <DataTable rows={items} sourceLimit={500} sourceCount={items.length} columns={evidenceColumns} rowKey={(item) => item.id} preferencesKey="compliance-evidence" exportFileName="compliance-evidence.csv" emptyState={<EmptyState title="No collected compliance evidence" hint="Evidence will appear here after controls are evaluated." />} />
+    </>}
+  </section>;
 }
 
 function ComplianceExemptionsList({
@@ -610,99 +346,31 @@ function StatusMetric({ label, value, status }: { label: string; value: number; 
   );
 }
 
-// SchedulesManager is the Wave N8 Schedules tab — DB-backed list + create
-// wizard + run history with download links.
-function SchedulesManager({
-  clusterId,
-  frameworks,
-}: {
-  clusterId?: string;
-  frameworks: { id: string; name: string }[];
-}) {
-  const queryClient = useQueryClient();
-  const list = useQuery({
-    queryKey: ["compliance", "db-schedules", clusterId],
-    queryFn: () => compliance.listDBSchedules(clusterId),
-  });
-  const [showWizard, setShowWizard] = useState(false);
+function SchedulesManager({ clusterId, listPath, scopeReady }: { clusterId: string; listPath: string; scopeReady: boolean }) {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const [search] = useRouteSearchParams();
   const [activeRunsFor, setActiveRunsFor] = useState<string | null>(null);
-
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["compliance", "db-schedules"] });
-
-  const runNow = useMutation({
-    mutationFn: (id: string) => compliance.runScheduleNow(id),
-    onSuccess: () => invalidate(),
-  });
-  const remove = useMutation({
-    mutationFn: (id: string) => compliance.deleteSchedule(id),
-    onSuccess: () => invalidate(),
-  });
-
-  return (
-    <section className="space-y-3" data-testid="compliance-schedules-manager">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold">Scheduled compliance runs</h2>
-          <p className="text-sm text-muted-foreground">
-            Cron-driven framework runs. Each run is rendered, cosign-signed, and delivered to
-            the configured targets.
-          </p>
-        </div>
-        <button
-          type="button"
-          data-testid="schedule-create-open"
-          onClick={() => setShowWizard(true)}
-          className="rounded-md bg-foreground px-3 py-1.5 text-sm text-background hover:opacity-90"
-        >
-          New schedule
-        </button>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatCard label="Total" value={list.data?.summary.total ?? 0} icon={<CalendarClock className="h-3.5 w-3.5" />} />
-        <StatCard label="Enabled" value={list.data?.summary.enabled ?? 0} icon={<PlayCircle className="h-3.5 w-3.5" />} />
-        <StatCard label="Disabled" value={list.data?.summary.disabled ?? 0} icon={<FileText className="h-3.5 w-3.5" />} />
-        <StatCard label="Formats" value={list.data?.report_formats.length ?? 0} icon={<ShieldCheck className="h-3.5 w-3.5" />} />
-      </div>
-
-      {showWizard && (
-        <CreateScheduleWizard
-          clusterId={clusterId}
-          frameworks={frameworks}
-          onClose={() => setShowWizard(false)}
-          onCreated={() => {
-            setShowWizard(false);
-            invalidate();
-          }}
-        />
-      )}
-
-      <div className="space-y-2" data-testid="schedule-list">
-        {list.isPending && <p className="text-sm text-muted-foreground">Loading schedules…</p>}
-        {list.data && list.data.schedules.length === 0 && (
-          <p className="text-sm text-muted-foreground">
-            No schedules yet. Create one to start emailing cosign-signed evidence to your auditors.
-          </p>
-        )}
-        {list.data?.schedules.map((s) => (
-          <ScheduleRow
-            key={s.id}
-            schedule={s}
-            running={runNow.isPending && runNow.variables === s.id}
-            onRunNow={() => runNow.mutate(s.id)}
-            onDelete={() => remove.mutate(s.id)}
-            onToggleRuns={() => setActiveRunsFor(activeRunsFor === s.id ? null : s.id)}
-            runsOpen={activeRunsFor === s.id}
-          />
-        ))}
-      </div>
-    </section>
-  );
+  const list = useQuery({ queryKey: ["compliance", "db-schedules", clusterId], queryFn: () => compliance.listDBSchedules(clusterId), enabled: scopeReady });
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["compliance", "db-schedules", clusterId] });
+  const runNow = useMutation({ mutationFn: (id: string) => compliance.runScheduleNow(id), onSuccess: () => { void invalidate(); void qc.invalidateQueries({ queryKey: ["compliance", "schedule-runs"] }); } });
+  const remove = useMutation({ mutationFn: (id: string) => compliance.deleteSchedule(id), onSuccess: () => void invalidate() });
+  const rows = (list.data?.schedules ?? []).filter((schedule) => !schedule.cluster_id || schedule.cluster_id === clusterId);
+  const busy = !scopeReady || list.isError || list.isFetching || runNow.isPending || remove.isPending;
+  return <section className="space-y-4" data-testid="compliance-schedules-manager">
+    <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-semibold">Scheduled compliance runs</h2><p className="text-sm text-muted-foreground">Includes schedules configured for this cluster and inherited organization schedules. Review run history to confirm execution, signatures, and artifact delivery.</p><p className="mt-1 text-xs text-muted-foreground">{list.data ? `${rows.length} configured · ${rows.filter((schedule) => schedule.enabled).length} enabled · ${rows.filter((schedule) => !schedule.enabled).length} disabled` : "Schedule counts unavailable"}</p></div><div className="flex gap-2"><Button variant="outline" onClick={() => void list.refetch()} disabled={!scopeReady || list.isFetching}>Refresh</Button><Button disabled={!scopeReady} data-testid="schedule-create-open" onClick={() => { const next = new URLSearchParams(search); next.set("tab", "schedules"); navigate({ href: `${listPath}/schedules/new?${next}` }); }}><Plus className="mr-1 h-4 w-4" /> New schedule</Button></div></div>
+    {list.isPending && <LoadingState label="Loading schedules…" />}
+    {list.isError && <ErrorState title={list.data ? "Could not refresh schedules. Showing the last loaded configuration." : "Schedules could not be loaded."} action={<Button onClick={() => void list.refetch()}>Retry</Button>} />}
+    {(runNow.isError || remove.isError) && <p role="alert" className="text-sm text-status-error">Could not update the schedule. Refresh and try again.</p>}
+    {runNow.data && <p role="status" className="text-sm">{runNow.data.queued ? "Compliance run queued. Review History for its result." : "The service did not queue a new run. Review History before retrying."}</p>}
+    <div className="space-y-3" data-testid="schedule-list">{list.data && rows.length === 0 && <EmptyState title="No compliance schedules" hint="Create a schedule to configure recurring evidence reports." />}{rows.map((schedule) => <ScheduleRow key={schedule.id} schedule={schedule} running={runNow.isPending && runNow.variables === schedule.id} unavailable={busy} onRunNow={() => { runNow.reset(); remove.reset(); runNow.mutate(schedule.id); }} onDelete={() => { runNow.reset(); remove.reset(); remove.mutate(schedule.id); }} onToggleRuns={() => setActiveRunsFor(activeRunsFor === schedule.id ? null : schedule.id)} runsOpen={activeRunsFor === schedule.id} />)}</div>
+  </section>;
 }
 
 function ScheduleRow({
   schedule,
   running,
+  unavailable,
   onRunNow,
   onDelete,
   onToggleRuns,
@@ -710,6 +378,7 @@ function ScheduleRow({
 }: {
   schedule: ComplianceScheduleDB;
   running: boolean;
+  unavailable: boolean;
   onRunNow: () => void;
   onDelete: () => void;
   onToggleRuns: () => void;
@@ -718,7 +387,7 @@ function ScheduleRow({
   const runs = useQuery({
     queryKey: ["compliance", "schedule-runs", schedule.id],
     queryFn: () => compliance.scheduleRuns(schedule.id, 25),
-    enabled: runsOpen,
+    enabled: runsOpen && !unavailable,
   });
   return (
     <article className="rounded-lg border border-border bg-card p-3" data-testid={`schedule-${schedule.id}`}>
@@ -729,6 +398,7 @@ function ScheduleRow({
             {schedule.framework} · <code>{schedule.cron_expression}</code> {schedule.timezone} ·{" "}
             {schedule.report_format}
           </p>
+          <p className="text-xs font-medium">{schedule.cluster_id ? "Cluster schedule" : "Organization schedule · applies across clusters"}</p>
           {schedule.description && (
             <p className="text-xs text-muted-foreground">{schedule.description}</p>
           )}
@@ -743,12 +413,12 @@ function ScheduleRow({
                   : "bg-muted text-muted-foreground"
             }`}
           >
-            {schedule.last_status ?? "pending"}
+            {schedule.last_status || "No runs yet"}
           </span>
           <button
             type="button"
             onClick={onRunNow}
-            disabled={running}
+            disabled={running || unavailable}
             data-testid={`schedule-run-${schedule.id}`}
             className="rounded-md border border-border px-2.5 py-1 text-xs hover:bg-accent disabled:opacity-50"
           >
@@ -760,6 +430,7 @@ function ScheduleRow({
           <button
             type="button"
             onClick={onToggleRuns}
+            disabled={unavailable}
             data-testid={`schedule-runs-toggle-${schedule.id}`}
             className="rounded-md border border-border px-2.5 py-1 text-xs hover:bg-accent"
           >
@@ -767,8 +438,9 @@ function ScheduleRow({
           </button>
           <button
             type="button"
+            disabled={running || unavailable}
             onClick={() => {
-              if (confirm(`Delete schedule "${schedule.name}"?`)) onDelete();
+              if (window.confirm(`Delete schedule "${schedule.name}"?`)) onDelete();
             }}
             data-testid={`schedule-delete-${schedule.id}`}
             className="rounded-md border border-border px-2 py-1 text-xs hover:bg-accent"
@@ -788,6 +460,7 @@ function ScheduleRow({
 
       {runsOpen && (
         <div className="mt-3 rounded-md border border-border bg-background p-2" data-testid={`schedule-runs-${schedule.id}`}>
+          {runs.isError && <ErrorState title="Run history could not be loaded." action={<Button onClick={() => void runs.refetch()}>Retry</Button>} />}
           {runs.isPending && <p className="text-xs text-muted-foreground">Loading runs…</p>}
           {runs.data && runs.data.runs.length === 0 && (
             <p className="text-xs text-muted-foreground">No runs recorded yet.</p>
@@ -826,7 +499,7 @@ function ScheduleRow({
                     <td className="px-1.5 py-1 font-mono text-[10px]" title={r.artifact_signature ?? ""}>
                       {r.artifact_signature ? (
                         <span className="rounded bg-[color:var(--color-status-success)]/15 px-1.5 py-0.5 text-[color:var(--color-status-success)]">
-                          cosign ✓
+                          Signature recorded
                         </span>
                       ) : (
                         <span className="text-muted-foreground">—</span>
@@ -836,7 +509,8 @@ function ScheduleRow({
                       {r.artifact_uri ? (
                         <button
                           type="button"
-                          onClick={() => compliance.downloadRunArtifact(r.id).catch((e: Error) => toast.error(`Artifact download failed: ${e.message}`))}
+                          disabled={unavailable}
+                          onClick={() => compliance.downloadRunArtifact(r.id).catch(() => toast.error("Artifact download failed. Try again."))}
                           className="inline-flex items-center gap-1 text-foreground hover:underline"
                           data-testid={`run-download-${r.id}`}
                         >
@@ -858,365 +532,6 @@ function ScheduleRow({
   );
 }
 
-// CreateScheduleWizard is a 4-step (framework, cadence, delivery, format) modal
-// that posts /api/v1/compliance/schedules on submit.
-function CreateScheduleWizard({
-  clusterId,
-  frameworks,
-  onClose,
-  onCreated,
-}: {
-  clusterId?: string;
-  frameworks: { id: string; name: string }[];
-  onClose: () => void;
-  onCreated: () => void;
-}) {
-  const [step, setStep] = useState(1);
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [framework, setFramework] = useState(frameworks[0]?.id ?? "cis-k8s-1.9");
-  const [cron, setCron] = useState("0 2 * * *");
-  const [tz, setTz] = useState("UTC");
-  const [delivery, setDelivery] = useState<ComplianceScheduleDelivery[]>([
-    { kind: "file", target: "file:///tmp/compliance-out/" },
-  ]);
-  const [reportFormat, setReportFormat] = useState("pdf");
-  const [reportTemplate, setReportTemplate] = useState("compliance-detailed");
-  const [err, setErr] = useState<string | null>(null);
-
-  const create = useMutation({
-    mutationFn: () =>
-      compliance.createSchedule({
-        name,
-        description,
-        cluster_id: clusterId,
-        framework,
-        cron_expression: cron,
-        timezone: tz,
-        delivery,
-        report_format: reportFormat,
-        report_template: reportTemplate,
-      }),
-    onSuccess: () => onCreated(),
-    onError: (e: Error) => setErr(e.message),
-  });
-
-  const presetCadences: Array<{ label: string; cron: string }> = [
-    { label: "Daily 02:00", cron: "0 2 * * *" },
-    { label: "Weekly Mon 02:00", cron: "0 2 * * 1" },
-    { label: "Monthly 1st 02:00", cron: "0 2 1 * *" },
-    { label: "Every 5 minutes (test)", cron: "*/5 * * * *" },
-  ];
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" data-testid="schedule-wizard">
-      <div className="w-full max-w-lg rounded-lg border border-border bg-card p-4 shadow-xl">
-        <header className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold">
-            New compliance schedule <span className="text-muted-foreground">· step {step} of 4</span>
-          </h3>
-          <button type="button" onClick={onClose} className="text-xs text-muted-foreground hover:text-foreground">
-            Cancel
-          </button>
-        </header>
-
-        {step === 1 && (
-          <div className="space-y-2" data-testid="wizard-step-framework">
-            <label className="block text-xs text-muted-foreground">Name</label>
-            <input
-              data-testid="wizard-name"
-              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="cis-k8s-monthly"
-            />
-            <label className="block text-xs text-muted-foreground">Description</label>
-            <input
-              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Monthly evidence package for the audit team"
-            />
-            <label className="block text-xs text-muted-foreground">Framework</label>
-            <select
-              data-testid="wizard-framework"
-              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-              value={framework}
-              onChange={(e) => setFramework(e.target.value)}
-            >
-              {frameworks.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.name} ({f.id})
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        {step === 2 && (
-          <div className="space-y-2" data-testid="wizard-step-cadence">
-            <p className="text-xs text-muted-foreground">Pick a preset or enter a 5-field cron expression.</p>
-            <div className="grid grid-cols-2 gap-1.5">
-              {presetCadences.map((p) => (
-                <button
-                  key={p.cron}
-                  type="button"
-                  onClick={() => setCron(p.cron)}
-                  className={`rounded-md border px-2 py-1.5 text-xs ${
-                    cron === p.cron ? "border-foreground bg-accent" : "border-border hover:bg-accent"
-                  }`}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-            <label className="block text-xs text-muted-foreground">Cron expression</label>
-            <input
-              data-testid="wizard-cron"
-              className="w-full rounded-md border border-border bg-background px-2 py-1.5 font-mono text-sm"
-              value={cron}
-              onChange={(e) => setCron(e.target.value)}
-            />
-            <label className="block text-xs text-muted-foreground">Timezone</label>
-            <input
-              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-              value={tz}
-              onChange={(e) => setTz(e.target.value)}
-            />
-          </div>
-        )}
-
-        {step === 3 && (
-          <div className="space-y-2" data-testid="wizard-step-delivery">
-            <p className="text-xs text-muted-foreground">Where should signed reports be delivered?</p>
-            {delivery.map((d, i) => (
-              <div key={i} className="space-y-1 rounded-md border border-border p-2">
-                <div className="flex items-center gap-1.5">
-                  <select
-                    className="rounded-md border border-border bg-background px-2 py-1 text-xs"
-                    value={d.kind}
-                    onChange={(e) => {
-                      const next = [...delivery];
-                      next[i] = { ...next[i], kind: e.target.value as ComplianceScheduleDelivery["kind"] };
-                      setDelivery(next);
-                    }}
-                  >
-                    <option value="email">email</option>
-                    <option value="s3">s3</option>
-                    <option value="webhook">webhook</option>
-                    <option value="file">file (local)</option>
-                  </select>
-                  <button
-                    type="button"
-                    onClick={() => setDelivery(delivery.filter((_, j) => j !== i))}
-                    className="ml-auto text-xs text-muted-foreground hover:text-foreground"
-                  >
-                    Remove
-                  </button>
-                </div>
-                {d.kind === "email" && (
-                  <input
-                    placeholder="auditor@example.com"
-                    className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs"
-                    value={d.target ?? ""}
-                    onChange={(e) => {
-                      const next = [...delivery];
-                      next[i] = { ...next[i], target: e.target.value };
-                      setDelivery(next);
-                    }}
-                  />
-                )}
-                {d.kind === "s3" && (
-                  <>
-                    <input
-                      placeholder="bucket"
-                      className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs"
-                      value={d.bucket ?? ""}
-                      onChange={(e) => {
-                        const next = [...delivery];
-                        next[i] = { ...next[i], bucket: e.target.value };
-                        setDelivery(next);
-                      }}
-                    />
-                    <input
-                      placeholder="prefix/"
-                      className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs"
-                      value={d.prefix ?? ""}
-                      onChange={(e) => {
-                        const next = [...delivery];
-                        next[i] = { ...next[i], prefix: e.target.value };
-                        setDelivery(next);
-                      }}
-                    />
-                  </>
-                )}
-                {d.kind === "webhook" && (
-                  <input
-                    placeholder="https://example.com/webhook"
-                    className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs"
-                    value={d.url ?? ""}
-                    onChange={(e) => {
-                      const next = [...delivery];
-                      next[i] = { ...next[i], url: e.target.value };
-                      setDelivery(next);
-                    }}
-                  />
-                )}
-                {d.kind === "file" && (
-                  <input
-                    placeholder="file:///tmp/compliance-out/"
-                    className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs"
-                    value={d.target ?? ""}
-                    onChange={(e) => {
-                      const next = [...delivery];
-                      next[i] = { ...next[i], target: e.target.value };
-                      setDelivery(next);
-                    }}
-                  />
-                )}
-              </div>
-            ))}
-            <button
-              type="button"
-              onClick={() => setDelivery([...delivery, { kind: "email", target: "" }])}
-              className="rounded-md border border-dashed border-border px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
-            >
-              + Add target
-            </button>
-          </div>
-        )}
-
-        {step === 4 && (
-          <div className="space-y-2" data-testid="wizard-step-format">
-            <label className="block text-xs text-muted-foreground">Report format</label>
-            <select
-              data-testid="wizard-format"
-              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-              value={reportFormat}
-              onChange={(e) => setReportFormat(e.target.value)}
-            >
-              <option value="pdf">PDF (cosign-signed)</option>
-              <option value="json">JSON</option>
-              <option value="csv">CSV</option>
-              <option value="sarif">SARIF 2.1</option>
-            </select>
-            <label className="block text-xs text-muted-foreground">Template</label>
-            <select
-              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-              value={reportTemplate}
-              onChange={(e) => setReportTemplate(e.target.value)}
-            >
-              <option value="compliance-detailed">compliance-detailed (cover + TOC + per-control + executive summary)</option>
-            </select>
-          </div>
-        )}
-
-        {err && <p className="mt-2 text-xs text-[color:var(--color-status-error)]">{err}</p>}
-
-        <footer className="mt-3 flex items-center justify-between">
-          <button
-            type="button"
-            onClick={() => setStep(Math.max(1, step - 1))}
-            disabled={step === 1}
-            className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent disabled:opacity-50"
-          >
-            Back
-          </button>
-          {step < 4 ? (
-            <button
-              type="button"
-              onClick={() => setStep(step + 1)}
-              disabled={step === 1 && (!name.trim() || !framework)}
-              className="rounded-md bg-foreground px-3 py-1.5 text-xs text-background hover:opacity-90 disabled:opacity-50"
-            >
-              Next
-            </button>
-          ) : (
-            <button
-              type="button"
-              data-testid="wizard-submit"
-              onClick={() => create.mutate()}
-              disabled={create.isPending}
-              className="rounded-md bg-foreground px-3 py-1.5 text-xs text-background hover:opacity-90 disabled:opacity-50"
-            >
-              {create.isPending ? "Creating…" : "Create schedule"}
-            </button>
-          )}
-        </footer>
-      </div>
-    </div>
-  );
-}
-
-function ScheduleSummaryCard({
-  schedule,
-  onRunNow,
-  activeMessage,
-  pending,
-}: {
-  schedule: ComplianceScheduleDB;
-  onRunNow: () => void;
-  activeMessage?: string;
-  pending: boolean;
-}) {
-  const delivery = schedule.delivery.map(deliveryTargetLabel).join(", ") || "No delivery target";
-  return (
-    <article className="rounded-lg border border-border bg-card p-4" data-testid="compliance-schedule-card">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-semibold">{schedule.name}</h3>
-          <p className="mt-1 text-xs text-muted-foreground">{schedule.description}</p>
-        </div>
-        <span className={`rounded-md px-2 py-1 text-xs ${schedule.enabled ? statusClass("pass") : statusClass("manual")}`}>
-          {schedule.enabled ? "enabled" : "disabled"}
-        </span>
-      </div>
-      <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-        <Info label="Framework" value={schedule.framework} />
-        <Info label="Cadence" value={schedule.cron_expression} />
-        <Info label="Scope" value={schedule.cluster_id ? "cluster" : "organization"} />
-        <Info label="Next run" value={schedule.next_run_at ? new Date(schedule.next_run_at).toLocaleDateString() : "manual"} />
-      </div>
-      <div className="mt-3 flex flex-wrap gap-1">
-        <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{schedule.report_format}</span>
-        {schedule.delivery.map((target, index) => (
-          <span key={`${target.kind}-${index}`} className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{target.kind}</span>
-        ))}
-      </div>
-      <div className="mt-3 rounded-md bg-muted p-3 text-xs text-muted-foreground">
-        <div className="font-medium text-foreground">Last run</div>
-        <div className="mt-1">{schedule.last_status || "No runs yet"}</div>
-        <div className="mt-1 truncate">{delivery}</div>
-      </div>
-      <button
-        type="button"
-        onClick={onRunNow}
-        className="mt-3 inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent"
-        disabled={pending}
-      >
-        <PlayCircle className="h-3.5 w-3.5" aria-hidden />
-        Run now
-      </button>
-      {activeMessage && <p className="mt-2 text-xs text-muted-foreground">{activeMessage}</p>}
-    </article>
-  );
-}
-
-function deliveryTargetLabel(target: ComplianceScheduleDelivery) {
-  switch (target.kind) {
-    case "email":
-      return target.target || "email";
-    case "s3":
-      return target.bucket ? `s3://${target.bucket}/${target.prefix ?? ""}` : "s3";
-    case "webhook":
-      return target.receiver_id || target.url || "webhook";
-    case "file":
-      return target.target || "file";
-    default:
-      return target.kind;
-  }
-}
-
 function Info({ label, value }: { label: string; value: string }) {
   return (
     <div>
@@ -1224,11 +539,6 @@ function Info({ label, value }: { label: string; value: string }) {
       <div className="mt-1">{value}</div>
     </div>
   );
-}
-
-function defaultExemptionExpiresAt() {
-  const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-  return expires.toISOString().slice(0, 16);
 }
 
 function formatDateTime(value: string) {
@@ -1245,11 +555,9 @@ function statusClass(status: string) {
   }
 }
 
-function groupBy<T>(items: T[], key: (t: T) => string): Record<string, T[]> {
+
+function groupBy<T>(items: T[], key: (item: T) => string): Record<string, T[]> {
   const out: Record<string, T[]> = {};
-  for (const item of items) {
-    const k = key(item);
-    (out[k] ||= []).push(item);
-  }
+  for (const item of items) { const category = key(item); (out[category] ||= []).push(item); }
   return out;
 }

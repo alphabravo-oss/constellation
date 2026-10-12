@@ -1307,7 +1307,7 @@ function NetworkSavedViewsControl({
   const [name, setName] = useState("");
   const [selectedID, setSelectedID] = useState("");
   const storageKey = useMemo(() => networkActivitySavedViewsStorageKey(clusterID, me?.user_id), [clusterID, me?.user_id]);
-  const { views, setViews, saveView, deleteView } = useSavedViews<NetworkSavedView>(storageKey);
+  const { views, setViews, saveView, deleteView } = useSavedViews<NetworkSavedView>(storageKey, { legacyUserScopedKey: me?.user_id ? storageKey : undefined });
   const validViews = useMemo(
     () => views
       .map((view) => normalizeNetworkSavedView(view, clusterID))

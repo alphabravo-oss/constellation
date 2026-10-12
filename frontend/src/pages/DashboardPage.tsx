@@ -224,7 +224,7 @@ export function DashboardPage() {
         <Panel
           className="min-w-0"
           title="Action Items"
-          subtitle="Top 10 critical/high findings from the latest 250 open findings, sorted by risk"
+          subtitle="Top 10 critical/high findings from 250 open findings ranked by risk"
           icon={<ShieldAlert className="h-3.5 w-3.5" />}
           rightSlot={<Link to="." href={clusterPath("/findings")} className="text-[11px] text-muted-foreground hover:text-foreground">view all <ArrowUpRight className="inline h-3 w-3" /></Link>}
         >
@@ -720,7 +720,7 @@ export function DashboardPage() {
           <div className="px-2">
             <Sparkline data={trends.openSeries} width={300} height={80} color="var(--color-primary)" />
             <div className="mt-2 flex items-center justify-between text-[10px] text-muted-foreground">
-              <span>Latest 250 open findings · 14d ago</span>
+              <span>250 open findings ranked by risk · 14d ago</span>
               <span>today</span>
             </div>
             <div className="mt-2 text-mono text-[11px]">

@@ -240,3 +240,13 @@ it("keeps settings draft visible if the response loses cluster scope and blocks 
   await submit();
   expect(policies.updateServiceModeDefaults).not.toHaveBeenCalled();
 });
+it("preserves no selectors when a saved group has a null criteria array", async () => {
+  vi.mocked(groupsApi.list).mockResolvedValue({ groups: [{ ...group, criteria: null } as unknown as Group] });
+  vi.mocked(groupsApi.update).mockResolvedValue({ id: "group" });
+  await renderPage(<GroupFormPage />);
+  await settled(() => expect(host.querySelector("form")).not.toBeNull());
+  expect(host.querySelector("#group-key-0")).toBeNull();
+  expect(host.textContent).toContain("Without selectors this group will have no matching members");
+  await submit();
+  await settled(() => expect(groupsApi.update).toHaveBeenCalledWith("group", expect.objectContaining({ criteria: [] }), { cluster_id: "cluster" }));
+});

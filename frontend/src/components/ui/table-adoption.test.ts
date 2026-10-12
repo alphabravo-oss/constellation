@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const operationalGrids = [
   "src/pages/NodesPage.tsx",
-  "src/components/CrudPage.tsx",
+  "src/pages/VulnProfilePage.tsx",
   "src/pages/IntegrationsPage.tsx",
   "src/pages/baselines/BaselineDetailPage.tsx",
 ];

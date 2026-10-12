@@ -13,12 +13,18 @@ import { ErrorState, LoadingState } from "@/components/ui/states";
 import { ImportExportButtons } from "@/components/ImportExportButtons";
 
 export function ResponseRulesPage() {
+  const { clusterId, cluster, isLoading } = useCluster();
+  if (isLoading) return <LoadingState label="Loading cluster…" />;
+  if (!clusterId || !cluster) return <ErrorState title="The selected cluster could not be loaded. Return to the cluster list and try again." />;
+  return <ResponseRulesWorkspace key={clusterId} clusterId={clusterId} />;
+}
+
+function ResponseRulesWorkspace({ clusterId }: { clusterId: string }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
   // Cluster-scoped config: rules created in cluster mode are tagged with the
   // cluster_id on the server; the list query filters to "matches this cluster
   // OR org-wide (NULL)" so the user sees what actually applies here.
-  const { clusterId, isLoading: clusterLoading } = useCluster();
   const rulesBase = `/clusters/${clusterId ?? ""}/response-rules`;
   const q = useQuery({
     queryKey: ["response-rules-v2", clusterId],
@@ -35,7 +41,7 @@ export function ResponseRulesPage() {
     mutationFn: (orderedIds: string[]) => responseRulesV2.reorder(orderedIds, { cluster_id: clusterId }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["response-rules-v2", clusterId] }),
   });
-  const busy = delMut.isPending || reorderMut.isPending || q.isError;
+  const busy = delMut.isPending || reorderMut.isPending || q.isError || q.isFetching;
   // Move a rule one slot up/down in the evaluation order and persist the new order.
   const move = (index: number, dir: -1 | 1) => {
     const target = index + dir;
@@ -77,7 +83,8 @@ export function ResponseRulesPage() {
           <button
             type="button"
             aria-label={`Edit ${r.name}`}
-            onClick={() => navigate({ href: `${rulesBase}/${r.id}` })}
+            disabled={busy || q.isFetching}
+            onClick={() => navigate({ href: `${rulesBase}/${encodeURIComponent(r.id)}` })}
             className="rounded-md px-2 py-1 text-xs hover:bg-accent"
           >
             Edit
@@ -98,26 +105,23 @@ export function ResponseRulesPage() {
     },
   ];
 
-  if (clusterLoading) {
-    return <p className="text-sm text-muted-foreground" data-testid="response-rules-loading">Loading cluster…</p>;
-  }
-
   return (
     <div className="space-y-4" data-testid="response-rules-page" data-cluster-id={clusterId ?? ""}>
       <PageHeader
         title="Response Rules"
-        description="Match incoming events to automatic actions — notify a channel, open a ticket, or quarantine/isolate a workload — when the conditions you define all hold. Rules evaluate top-to-bottom; use the order arrows to set precedence."
+        description="Author response rules for this cluster or review applicable organization rules. Match incoming events to automatic actions — notify a channel, open a ticket, or quarantine/isolate a workload — when the conditions you define all hold. Rules evaluate top-to-bottom; use the order arrows to set precedence."
         actions={
           <div className="flex items-center gap-2">
-            {clusterId ? <ImportExportButtons
+            <fieldset disabled={busy || q.isPending} className="flex gap-2"><ImportExportButtons
               filename="constellation-response-rules.yaml"
               label="cluster response rules"
               exportYaml={() => responseRulesV2.exportYaml(clusterId)}
               importYaml={(text) => responseRulesV2.importYaml(clusterId, text)}
               onImported={() => void qc.invalidateQueries({ queryKey: ["response-rules-v2", clusterId] })}
-            /> : null}
+            /></fieldset>
             <button
               type="button"
+              disabled={busy || q.isPending}
               onClick={() => navigate({ href: `${rulesBase}/new` })}
               className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
             >

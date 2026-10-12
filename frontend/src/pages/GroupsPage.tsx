@@ -55,11 +55,11 @@ export function GroupsPage() {
       : <>
         <VerdictBanner status={discovery ? "degraded" : groups.length ? "ok" : "info"}
           title={discovery ? `${discovery} group${discovery === 1 ? " is" : "s are"} still learning` : groups.length ? "All groups have moved beyond discovery" : "No workload groups yet"}
-          detail="Discover learns behavior, Monitor reports violations, and Protect enforces policy. Open a group to review its members and dependencies." />
+          detail="Discover learns behavior, Monitor reports violations, and Protect enforces policy. These configured modes do not confirm deployment. Open a group to review its members and dependencies." />
         <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           <StatCard label="Groups" value={groups.length} />
           <StatCard label="Learning" value={discovery} />
-          <StatCard label="Fully protected" value={protectedCount} />
+          <StatCard label="Protect configured" value={protectedCount} />
           <StatCard label="Member assignments" value={groups.reduce((count, group) => count + (group.members?.length ?? 0), 0)} />
         </section>
         <Tabs value={tab === "operations" ? "operations" : "groups"} onValueChange={setTab} items={[

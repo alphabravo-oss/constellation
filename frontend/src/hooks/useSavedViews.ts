@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
 
+import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
+import { operatorStorageKey } from "@/lib/operator-preferences";
+
 export interface SavedViewBase {
   id: string;
   name: string;
@@ -36,38 +39,51 @@ export function appendSavedView<T extends SavedViewBase>(
   return [...views, { id: makeID(), name: trimmed, ...payload } as T];
 }
 
+// Only opt into migration when the caller can identify the previous owner.
+// Generic ownerless storage keys must never be adopted by the next login.
+function readOperatorViews<T extends SavedViewBase>(storageKey: string | null, legacyUserScopedKey?: string): T[] {
+  if (!storageKey) return [];
+  try {
+    if (legacyUserScopedKey && localStorage.getItem(storageKey) === null) return readSavedViews<T>(legacyUserScopedKey);
+  } catch { /* Storage is optional. */ }
+  return readSavedViews<T>(storageKey);
+}
+
 interface SavedViewsState<T extends SavedViewBase> {
-  storageKey: string;
+  storageKey: string | null;
   views: T[];
 }
 
-export function useSavedViews<T extends SavedViewBase>(storageKey: string) {
+export function useSavedViews<T extends SavedViewBase>(key: string, options: { legacyUserScopedKey?: string } = {}) {
+  const legacyKey = options.legacyUserScopedKey;
+  const identity = useTablePreferencesIdentity();
+  const storageKey = operatorStorageKey(key, identity);
   const [state, setState] = useState<SavedViewsState<T>>(() => ({
     storageKey,
-    views: readSavedViews<T>(storageKey),
+    views: readOperatorViews<T>(storageKey, legacyKey),
   }));
 
   useEffect(() => {
     setState((current) => {
       if (current.storageKey === storageKey) return current;
-      return { storageKey, views: readSavedViews<T>(storageKey) };
+      return { storageKey, views: readOperatorViews<T>(storageKey, legacyKey) };
     });
-  }, [storageKey]);
+  }, [storageKey, legacyKey]);
 
   useEffect(() => {
-    if (state.storageKey !== storageKey) return;
+    if (!storageKey || state.storageKey !== storageKey) return;
     writeSavedViews(storageKey, state.views);
   }, [state, storageKey]);
 
   const setViews = useCallback<Dispatch<SetStateAction<T[]>>>((next) => {
     setState((current) => {
-      const currentViews = current.storageKey === storageKey ? current.views : readSavedViews<T>(storageKey);
+      const currentViews = current.storageKey === storageKey ? current.views : readOperatorViews<T>(storageKey, legacyKey);
       const views = typeof next === "function"
         ? (next as (value: T[]) => T[])(currentViews)
         : next;
       return { storageKey, views };
     });
-  }, [storageKey]);
+  }, [storageKey, legacyKey]);
 
   const saveView = useCallback((name: string, payload: Omit<T, "id" | "name">) => {
     setViews((current) => appendSavedView(current, name, payload));
@@ -77,7 +93,7 @@ export function useSavedViews<T extends SavedViewBase>(storageKey: string) {
     setViews((current) => current.filter((view) => view.id !== id));
   }, [setViews]);
 
-  const views = state.storageKey === storageKey ? state.views : readSavedViews<T>(storageKey);
+  const views = state.storageKey === storageKey ? state.views : readOperatorViews<T>(storageKey, legacyKey);
   return { views, setViews, saveView, deleteView };
 }
 

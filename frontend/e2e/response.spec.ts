@@ -5,33 +5,52 @@ test.beforeEach(async ({ page }) => {
   await login(page);
 });
 
-test("Response rules page shows catalog rules and filters by event type", async ({ page }) => {
+test("Response catalog shows built-in organization rules and URL event filters", async ({ page }) => {
   await page.goto("/response");
-  await expect(page.getByRole("heading", { name: "Response Rules" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Response Catalog", exact: true })).toBeVisible();
   await expect(page.getByTestId("response-rules-table")).toBeVisible();
   await expect(page.getByTestId("response-rule-row")).toHaveCount(5);
   await expect(page.getByTestId("response-rules-table").getByText("Unauthorized external egress")).toBeVisible();
-  await expect(page.getByTestId("response-rules-table").getByText("quarantine_workload")).toBeVisible();
+  await expect(page.getByTestId("response-rules-table").getByText("alert, quarantine_workload")).toBeVisible();
 
-  await page.getByTestId("response-rule-filters").getByRole("button", { name: "network" }).click();
+  await page.getByLabel("Event type", { exact: true }).selectOption("network");
+  await expect(page).toHaveURL(/event=network/);
   await expect(page.getByTestId("response-rule-row")).toHaveCount(1);
   await expect(page.getByTestId("response-rules-table").getByText("Unauthorized external egress")).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel("Event type", { exact: true })).toHaveValue("network");
+  await expect(page.getByTestId("response-rule-row")).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Authored response rules", exact: true })).toBeVisible();
 });
 
-test("Response rules can preview and persist governed runtime changes", async ({ page }) => {
+test("Response catalog overrides use a dedicated form and require a fresh preview", async ({ page }) => {
   await page.goto("/response");
-  await expect(page.getByTestId("response-rule-manager")).toBeVisible();
-  await page.getByTestId("response-rule-filters").getByRole("button", { name: "dlp" }).click();
-  await page.getByRole("button", { name: "Secret exfiltration pattern" }).first().click();
+  await page.getByLabel("Event type", { exact: true }).selectOption("dlp");
+  await page.getByRole("button", { name: "Edit override for Secret exfiltration pattern", exact: true }).click();
+  await expect(page).toHaveURL(/\/response\/dlp-secret-exfiltration\/edit/);
+  await expect(page.getByRole("heading", { name: "Edit response catalog override", exact: true })).toBeVisible();
+  await expect(page.getByText("This override changes organization-wide settings", { exact: true })).toBeVisible();
   await page.getByTestId("response-rule-mode-select").selectOption("enforce");
-  await page.getByTestId("response-rule-enabled-toggle").check();
+  const enabled = page.getByRole("switch", { name: "Enable built-in rule", exact: true });
+  if (await enabled.getAttribute("aria-checked") !== "true") await enabled.click();
   await page.getByTestId("response-rule-reason").fill("pilot DLP enforcement in monitor-approved namespaces");
+  await expect(page.getByTestId("response-rule-save")).toBeDisabled();
   await page.getByTestId("response-rule-preview").click();
-  await expect(page.getByTestId("response-rule-preview-card")).toContainText("dry-run only");
+  await expect(page.getByTestId("response-rule-preview-card")).toContainText("Dry run only");
   await expect(page.getByTestId("response-rule-preview-card")).toContainText("privileged Linux runtime agent");
+  await expect(page.getByTestId("response-rule-save")).toBeEnabled();
+  await page.getByTestId("response-rule-reason").fill("pilot DLP enforcement with organization owner approval");
+  await expect(page.getByTestId("response-rule-save")).toBeDisabled();
+  await page.getByTestId("response-rule-preview").click();
+  await expect(page.getByTestId("response-rule-save")).toBeEnabled();
   await page.getByTestId("response-rule-save").click();
-  await expect(page.getByTestId("response-rule-action-state")).toContainText("saved and audited");
-  await expect(page.getByTestId("response-rule-preview-card")).toContainText("persists and writes audit");
-  await expect(page.getByTestId("response-rule-manager")).toContainText("enforce");
-  await expect(page.getByTestId("response-rule-card").filter({ hasText: "Secret exfiltration pattern" }).first()).toContainText("pilot DLP enforcement");
+  await expect(page.getByRole("heading", { name: "Response Catalog", exact: true })).toBeVisible();
+  await expect(page.getByLabel("Event type", { exact: true })).toHaveValue("dlp");
+  const savedRule = page.getByTestId("response-rule-row").filter({ hasText: "Secret exfiltration pattern" });
+  await expect(savedRule).toContainText("enforce");
+  await expect(savedRule).toContainText("Organization override");
+  await savedRule.getByRole("button", { name: "Edit override for Secret exfiltration pattern", exact: true }).click();
+  await expect(page.getByTestId("response-rule-reason")).toHaveValue("pilot DLP enforcement with organization owner approval");
+  await expect(page.getByTestId("response-rule-mode-select")).toHaveValue("enforce");
+  await expect(page.getByRole("switch", { name: "Enable built-in rule", exact: true })).toHaveAttribute("aria-checked", "true");
 });

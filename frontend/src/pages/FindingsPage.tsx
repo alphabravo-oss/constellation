@@ -29,7 +29,7 @@ import { useCluster } from "@/hooks/useCluster";
 import { SeverityBadge } from "@/components/ui/severity-badge";
 import { LifecycleBadge } from "@/components/ui/status-pill";
 import { RiskScore } from "@/components/ui/risk-score";
-import { DataTable, type Column, type Density } from "@/components/ui/data-table";
+import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { QueryInput } from "@/components/ui/query-input";
 import { FilterChip } from "@/components/ui/filter-chip";
@@ -41,6 +41,7 @@ import { SEVERITY_RANK } from "@/lib/severity";
 import { cn } from "@/lib/cn";
 import { Pager } from "@/components/ui/pager";
 import { useDebounced } from "@/hooks/useDebounced";
+import { useOperatorDensity } from "@/hooks/useOperatorDensity";
 import { useSavedViews, type SavedViewBase } from "@/hooks/useSavedViews";
 
 interface SavedView extends SavedViewBase {
@@ -66,7 +67,7 @@ const QUERY_HINTS: Array<{ label: string; value: string; example: string }> = [
   { label: "kind",     value: "kind:vulnerability", example: "kind:vulnerability" },
   { label: "cve",      value: "cve:CVE-",          example: "cve:CVE-2024-3094" },
   { label: "package",  value: "package:openssl",   example: "package:openssl" },
-  { label: "source",   value: "canonical_engine:vulndb", example: "canonical_engine:vulndb" },
+  { label: "source",   value: "canonical_engine:trivy", example: "canonical_engine:trivy" },
   { label: "diff",     value: "disagreement:true", example: "disagreement:true" },
   { label: "not",      value: "!status:resolved",  example: "!status:resolved" },
 ];
@@ -112,8 +113,7 @@ export function FindingsPage() {
   const [, startTransition] = useTransition();
 
   // Density
-  const [density, setDensity] = useState<Density>(() => (localStorage.getItem(DENSITY_KEY) as Density) || "cozy");
-  useEffect(() => { localStorage.setItem(DENSITY_KEY, density); }, [density]);
+  const [density, setDensity] = useOperatorDensity(DENSITY_KEY);
 
   const { views, saveView: saveStoredView, deleteView } = useSavedViews<SavedView>(SAVED_VIEWS_KEY);
 
