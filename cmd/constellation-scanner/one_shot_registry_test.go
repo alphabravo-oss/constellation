@@ -39,7 +39,7 @@ func TestOneShotConfiguredRegistryFailsBeforeScanWithoutCredentials(t *testing.T
 			}))
 			defer server.Close()
 			scans := 0
-			worker := &worker{controlPlane: server.URL, token: "scanner-token", logger: nopLogger{}, agg: &scanner.Aggregator{Engines: []scanner.Engine{registryTestEngine{scan: func(context.Context, string, scanner.ScanOptions) (*scanner.EngineResult, error) {
+			worker := &worker{controlPlane: server.URL, token: "scanner-token", credentialJobID: "claimed-job", instanceID: "worker-1", logger: nopLogger{}, agg: &scanner.Aggregator{Engines: []scanner.Engine{registryTestEngine{scan: func(context.Context, string, scanner.ScanOptions) (*scanner.EngineResult, error) {
 				scans++
 				return &scanner.EngineResult{Engine: "syft"}, nil
 			}}}}}
@@ -59,6 +59,7 @@ func TestOneShotConfiguredRegistryRequiresControlPlaneAndToken(t *testing.T) {
 		token        string
 		registryID   string
 	}{
+		{name: "no claimed job", controlPlane: "https://example.test", token: "scanner-token", registryID: "registry"},
 		{name: "no control plane", token: "scanner-token", registryID: "registry"},
 		{name: "no token", controlPlane: "https://example.test", registryID: "registry"},
 		{name: "blank registry ID", controlPlane: "https://example.test", token: "scanner-token", registryID: " "},
@@ -81,7 +82,7 @@ func TestOneShotRegistryCredentialsAreIsolatedAndCleaned(t *testing.T) {
 	}
 	t.Setenv("DOCKER_CONFIG", ambientDir)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.Header.Get("Authorization") != "Bearer scanner-token" || request.URL.Query().Get("registry_id") != "registry" {
+		if request.Header.Get("Authorization") != "Bearer scanner-token" || request.URL.Query().Get("registry_id") != "registry" || request.URL.Query().Get("job_id") != "claimed-job" || request.Header.Get("X-Constellation-Scanner-Instance") != "worker-1" {
 			writer.WriteHeader(http.StatusUnauthorized)
 			return
 		}
@@ -89,7 +90,7 @@ func TestOneShotRegistryCredentialsAreIsolatedAndCleaned(t *testing.T) {
 	}))
 	defer server.Close()
 	var scanOptions scanner.ScanOptions
-	worker := &worker{controlPlane: server.URL, token: "scanner-token", logger: nopLogger{}, agg: &scanner.Aggregator{Engines: []scanner.Engine{registryTestEngine{scan: func(_ context.Context, ref string, options scanner.ScanOptions) (*scanner.EngineResult, error) {
+	worker := &worker{controlPlane: server.URL, token: "scanner-token", credentialJobID: "claimed-job", instanceID: "worker-1", logger: nopLogger{}, agg: &scanner.Aggregator{Engines: []scanner.Engine{registryTestEngine{scan: func(_ context.Context, ref string, options scanner.ScanOptions) (*scanner.EngineResult, error) {
 		scanOptions = options
 		return &scanner.EngineResult{Engine: "syft", ImageRef: ref}, nil
 	}}}}}
@@ -112,7 +113,7 @@ func TestOneShotExplicitAnonymousRegistryUsesEmptyDockerConfig(t *testing.T) {
 	}))
 	defer server.Close()
 	var configDir string
-	worker := &worker{controlPlane: server.URL, token: "scanner-token", logger: nopLogger{}, agg: &scanner.Aggregator{Engines: []scanner.Engine{registryTestEngine{scan: func(_ context.Context, ref string, options scanner.ScanOptions) (*scanner.EngineResult, error) {
+	worker := &worker{controlPlane: server.URL, token: "scanner-token", credentialJobID: "claimed-job", instanceID: "worker-1", logger: nopLogger{}, agg: &scanner.Aggregator{Engines: []scanner.Engine{registryTestEngine{scan: func(_ context.Context, ref string, options scanner.ScanOptions) (*scanner.EngineResult, error) {
 		configDir = options.DockerConfigDir
 		return &scanner.EngineResult{Engine: "syft", ImageRef: ref}, nil
 	}}}}}
@@ -135,7 +136,7 @@ func TestOneShotScanFailureRemovesRegistryConfig(t *testing.T) {
 	server := registryCredentialsServer(t, nil)
 	defer server.Close()
 	var configDir string
-	worker := &worker{controlPlane: server.URL, token: "scanner-token", logger: nopLogger{}, agg: &scanner.Aggregator{Engines: []scanner.Engine{registryTestEngine{scan: func(_ context.Context, _ string, options scanner.ScanOptions) (*scanner.EngineResult, error) {
+	worker := &worker{controlPlane: server.URL, token: "scanner-token", credentialJobID: "claimed-job", instanceID: "worker-1", logger: nopLogger{}, agg: &scanner.Aggregator{Engines: []scanner.Engine{registryTestEngine{scan: func(_ context.Context, _ string, options scanner.ScanOptions) (*scanner.EngineResult, error) {
 		configDir = options.DockerConfigDir
 		return nil, errors.New("scan failed")
 	}}}}}

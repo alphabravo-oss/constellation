@@ -16,13 +16,14 @@ class RecoveryProofTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
-        self.anchor = {"id": 7, "chain_hash": "public-chain-hash", "target_id": "registry-fixture"}
+        self.anchor = {"id": 7, "chain_hash": "public-chain-hash", "target_id": "12345678-1234-4234-8234-123456789abc"}
         self.bad_credentials = False
         self.broken_audit = False
         self.missing_anchor = False
         self.missing_receipt = False
         self.wrong_error = False
         proof.check("prepare", self.root, None)
+        proof.check("fixture", self.root, self.request)
         proof.check("source", self.root, self.request)
 
     def request(self, path, token=None, data=None, expected=200):
@@ -36,12 +37,19 @@ class RecoveryProofTests(unittest.TestCase):
             self.credentials = data["credentials"]
             self.assertEqual(expected, 201)
             self.assertEqual(data["scan_cadence"], "manual")
-            return {"id": "registry-fixture"}
+            return {"id": "12345678-1234-4234-8234-123456789abc"}
+        if path == "/scan-jobs/claim":
+            fixture = proof.read(self.root, "registry-proof.json")
+            return {"id": fixture["job_id"], "registry_id": fixture["id"]}
+        if path.startswith("/scan-jobs/") and path.endswith("/renew"):
+            return {"ok": True}
         if path.startswith("/scanner/registry-credentials?"):
+            fixture = proof.read(self.root, "registry-proof.json")
+            self.assertIn("&job_id=" + fixture["job_id"], path)
             self.assertEqual(token, proof.read(self.root, "scanner-token.json"))
             if expected == 500:
-                return {"error": "database unavailable" if self.wrong_error else "decrypt credentials: fixture rejection"}
-            return {"registry_id": "registry-fixture", **({} if self.bad_credentials else self.credentials)}
+                return {"error": "database unavailable" if self.wrong_error else "credential decryption failed"}
+            return {"registry_id": "12345678-1234-4234-8234-123456789abc", **({} if self.bad_credentials else self.credentials)}
         if path == "/audit/verify":
             return {"status": "broken" if self.broken_audit else "verified", "events": 7}
         if path.startswith("/audit/events?event_id="):

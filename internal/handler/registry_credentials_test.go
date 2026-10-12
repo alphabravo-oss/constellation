@@ -14,11 +14,8 @@ import (
 	"github.com/alphabravocompany/constellation/pkg/audit"
 )
 
-// TestRegistryCredentialsGetIsOrgScoped exercises the REG-PRIVAUTH-11 endpoint
-// end-to-end against the test DB: a scanner token in the owning org gets the
-// decrypted credentials; a token in a different org gets 404 (no cross-org
-// existence oracle); a missing registry_id is 400. Skips when the test DB is
-// unreachable (see openTestDB).
+// TestRegistryCredentialsGetIsOrgScoped exercises the credential release boundary
+// against a real database, including lease ownership and redacted audit receipts.
 func TestRegistryCredentialsGetIsOrgScoped(t *testing.T) {
 	d := openTestDB(t)
 	t.Cleanup(d.Close)
@@ -50,11 +47,22 @@ VALUES ($1, $2, 'privreg', 'ghcr', 'ghcr.io', 'static', $3)`,
 		t.Fatalf("seed registry: %v", err)
 	}
 
+	tokenID := uuid.New()
+	tok := &ScannerToken{ID: tokenID, OrgID: orgA, Name: "test-scanner"}
+	targetID, jobID := uuid.New(), uuid.New()
+	workerID := tok.workerID() + ":worker-1"
+	if _, err := pool.Exec(ctx, `INSERT INTO scan_targets(id,org_id,type,ref,source_type,registry_id) VALUES($1,$2,'image','ghcr.io/team/app:latest','registry',$3)`, targetID, orgA, regID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO scan_jobs(id,org_id,target_id,status,worker_id,lease_expires_at) VALUES($1,$2,$3,'running',$4,NOW()+INTERVAL '30 minutes')`, jobID, orgA, targetID, workerID); err != nil {
+		t.Fatal(err)
+	}
 	h := NewRegistryCredentials(d, audit.New(pool))
 
 	call := func(handler *RegistryCredentials, orgID uuid.UUID, registryID string) *httptest.ResponseRecorder {
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scanner/registry-credentials?registry_id="+registryID, nil)
-		tok := &ScannerToken{ID: uuid.New(), OrgID: orgID, Name: "test-scanner"}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scanner/registry-credentials?registry_id="+registryID+"&job_id="+jobID.String(), nil)
+		tok := &ScannerToken{ID: tokenID, OrgID: orgID, Name: "test-scanner"}
+		req.Header.Set("X-Constellation-Scanner-Instance", "worker-1")
 		req = req.WithContext(context.WithValue(req.Context(), scannerTokenKey{}, tok))
 		rr := httptest.NewRecorder()
 		handler.Get(rr, req)
@@ -63,6 +71,9 @@ VALUES ($1, $2, 'privreg', 'ghcr', 'ghcr.io', 'static', $3)`,
 
 	// Owning org: 200 with decrypted credentials.
 	rr := call(h, orgA, regID.String())
+	if rr.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("credential response permits caching")
+	}
 	if rr.Code != http.StatusOK {
 		t.Fatalf("orgA status=%d body=%s want 200", rr.Code, rr.Body.String())
 	}
@@ -71,7 +82,7 @@ VALUES ($1, $2, 'privreg', 'ghcr', 'ghcr.io', 'static', $3)`,
 		t.Fatalf("decode: %v", err)
 	}
 	if dto.Username != "alice" || dto.Password != "s3cret" {
-		t.Fatalf("creds=%q/%q want alice/s3cret", dto.Username, dto.Password)
+		t.Fatal("unexpected decrypted credentials")
 	}
 	if dto.Kind != "ghcr" || dto.AuthKind != "static" {
 		t.Fatalf("kind/auth_kind=%q/%q want ghcr/static", dto.Kind, dto.AuthKind)
@@ -87,7 +98,7 @@ VALUES ($1, $2, 'privreg', 'ghcr', 'ghcr.io', 'static', $3)`,
 	if err := pool.QueryRow(ctx, `SELECT after::text FROM audit_events WHERE org_id = $1 AND action = 'registry.credentials-issued' AND target_id = $2`, orgA, regID.String()).Scan(&auditAfter); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(auditAfter, dto.Password) || !strings.Contains(auditAfter, `"has_credentials": true`) {
+	if strings.Contains(auditAfter, dto.Password) || !strings.Contains(auditAfter, `"has_credentials": true`) || !strings.Contains(auditAfter, jobID.String()) || !strings.Contains(auditAfter, workerID) {
 		t.Fatalf("credential audit payload is missing the redacted receipt: %s", auditAfter)
 	}
 
@@ -99,6 +110,51 @@ VALUES ($1, $2, 'privreg', 'ghcr', 'ghcr.io', 'static', $3)`,
 	// Missing registry_id: 400.
 	if rr := call(h, orgA, ""); rr.Code != http.StatusBadRequest {
 		t.Fatalf("missing registry_id status=%d want 400", rr.Code)
+	}
+
+	// Each invalid ownership edge and lease state must deny without issuing credentials.
+	for _, tc := range []struct {
+		name, query string
+		args        []any
+	}{
+		{"expired lease", `UPDATE scan_jobs SET lease_expires_at=NOW()-INTERVAL '1 second' WHERE id=$1`, []any{jobID}},
+		{"missing lease", `UPDATE scan_jobs SET lease_expires_at=NULL WHERE id=$1`, []any{jobID}},
+		{"other instance", `UPDATE scan_jobs SET worker_id=$2 WHERE id=$1`, []any{jobID, tok.workerID() + ":worker-2"}},
+		{"other token", `UPDATE scan_jobs SET worker_id=$2 WHERE id=$1`, []any{jobID, "scanner:test-scanner:" + uuid.NewString() + ":worker-1"}},
+		{"completed job", `UPDATE scan_jobs SET status='completed' WHERE id=$1`, []any{jobID}},
+		{"paused job", `UPDATE scan_jobs SET status='paused' WHERE id=$1`, []any{jobID}},
+		{"canceled job", `UPDATE scan_jobs SET status='canceled' WHERE id=$1`, []any{jobID}},
+		{"foreign job", `UPDATE scan_jobs SET org_id=$2 WHERE id=$1`, []any{jobID, orgB}},
+		{"foreign target", `UPDATE scan_targets SET org_id=$2 WHERE id=$1`, []any{targetID, orgB}},
+		{"unrelated registry", `UPDATE scan_targets SET registry_id=NULL WHERE id=$1`, []any{targetID}},
+		{"non-image target", `UPDATE scan_targets SET type='host' WHERE id=$1`, []any{targetID}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := pool.Exec(ctx, tc.query, tc.args...); err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if _, err := pool.Exec(ctx, `UPDATE scan_jobs SET org_id=$2,status='running',worker_id=$3,lease_expires_at=NOW()+INTERVAL '30 minutes' WHERE id=$1`, jobID, orgA, workerID); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := pool.Exec(ctx, `UPDATE scan_targets SET org_id=$2,type='image',registry_id=$3 WHERE id=$1`, targetID, orgA, regID); err != nil {
+					t.Fatal(err)
+				}
+			}()
+			rr := call(h, orgA, regID.String())
+			if rr.Code != http.StatusNotFound || strings.Contains(rr.Body.String(), dto.Password) {
+				t.Fatalf("invalid lease returned status %d or disclosed credentials", rr.Code)
+			}
+		})
+	}
+	for _, query := range []string{"registry_id=" + regID.String(), "registry_id=" + regID.String() + "&job_id=invalid", "registry_id=invalid&job_id=" + jobID.String()} {
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scanner/registry-credentials?"+query, nil)
+		req = req.WithContext(context.WithValue(req.Context(), scannerTokenKey{}, tok))
+		rr := httptest.NewRecorder()
+		h.Get(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("invalid query status=%d", rr.Code)
+		}
 	}
 
 	closedPool, err := pgxpool.NewWithConfig(ctx, pool.Config())

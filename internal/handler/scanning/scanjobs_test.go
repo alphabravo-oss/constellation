@@ -324,6 +324,16 @@ func TestScanJobs_QueueLifecycle(t *testing.T) {
 	}
 	_ = json.NewDecoder(w.Body).Decode(&enqRes)
 
+	// Registry association must survive the queue claim envelope.
+	registryID := uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO registries(id,org_id,name,kind,endpoint,auth_kind) VALUES($1,$2,$3,'ghcr','ghcr.io','none')`, registryID, orgID, "queue-registry-"+registryID.String()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = pool.Exec(ctx, `DELETE FROM registries WHERE id=$1`, registryID) }()
+	if _, err := pool.Exec(ctx, `UPDATE scan_targets SET registry_id=$2 WHERE id=(SELECT target_id FROM scan_jobs WHERE id=$1)`, enqRes.ID, registryID); err != nil {
+		t.Fatal(err)
+	}
+
 	// 2) Claim as scanner.
 	r = httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/scan-jobs/claim", nil)
 	r.Header.Set("Authorization", "Bearer "+rawToken)
@@ -337,6 +347,9 @@ func TestScanJobs_QueueLifecycle(t *testing.T) {
 	_ = json.NewDecoder(w.Body).Decode(&claimRes)
 	if claimRes["id"] != enqRes.ID.String() {
 		t.Fatalf("claim returned different id: %v vs %v", claimRes["id"], enqRes.ID)
+	}
+	if claimRes["registry_id"] != registryID.String() {
+		t.Fatalf("claim lost registry association: %v", claimRes["registry_id"])
 	}
 	if claimRes["target_type"] != "image" || claimRes["target_ref"] != queueImageRef {
 		t.Fatalf("claim target = %v/%v", claimRes["target_type"], claimRes["target_ref"])

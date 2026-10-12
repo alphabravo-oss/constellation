@@ -1,14 +1,11 @@
 # CNPG backup, recovery and cutover
 
 The chart supports CNPG-I Barman Cloud backups and recovery into a new cluster.
-This is a deployment contract, not evidence that the existing development
-StatefulSet has been migrated or that an off-host recovery target is configured.
-
-Latest live continuation: migrations **168–172** are applied on the existing
-development StatefulSet. The API, frontend and admission controller have been
-updated, authenticated API session continuity and browser login pass, and the
-CNPG 1.30.1 / Barman 0.15.1 operators are installed. The new database identity is
-`constellation-cnpg-postgres`; transfer and DSN cutover are still pending.
+The main development deployment now runs **PostgreSQL 16.14 on CNPG**, schema
+**172**, with its original StatefulSet stopped and retained for rollback. The
+October 12 cutover and separate-cluster restore passed application continuity
+checks; see [main cutover evidence](#main-development-cutover). Local RustFS
+backup does not establish an off-host recovery target or independent failure domains.
 
 Install a compatible CloudNativePG operator and Barman Cloud plugin separately.
 Create an ObjectStore resource with externally managed credentials, trusted TLS,
@@ -161,8 +158,10 @@ contain exactly markers 1 and 2, exclude marker 3, and contain all three require
 extensions. Only the disposable API's DSN is switched. An existing signed
 session, saved configuration and fresh authenticated login must all work after
 the switch. The current script also creates a random encrypted registry credential
-through the production API, retrieves it through scanner-token authentication,
-and verifies its issuance receipt and the audit chain. The restored API must
+through the production API, retrieves it through scanner-token authentication for an actively leased job,
+and verifies its issuance receipt and the audit chain. The harness seeds only a
+pending image target/job for the disposable registry; the production claim and
+renew endpoints establish scanner ownership before credential release. The restored API must
 return the original credential and retain the source audit anchor. A restart with
 a different KEK must reject decryption; restoring the original key must restore
 access. A recovered database-pod deletion must also recover authenticated access.

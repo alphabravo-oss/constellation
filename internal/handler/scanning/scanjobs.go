@@ -557,6 +557,7 @@ func (h *ScanJobs) Claim(w http.ResponseWriter, r *http.Request) {
 		targetType      string
 		targetRef       string
 		targetClusterID *uuid.UUID
+		registryID      *uuid.UUID
 		sourceType      string
 		sourceRef       string
 		imageDigest     string
@@ -619,7 +620,7 @@ attempt AS (
 SELECT c.id, c.org_id, st.id, c.lease_expires_at,
        COALESCE(c.attempt_count, 0), COALESCE(c.max_attempts, 3),
        COALESCE(st.platform, ''),
-       st.type, st.ref, st.cluster_id,
+       st.type, st.ref, st.cluster_id, st.registry_id,
        st.source_type, COALESCE(st.source_ref, ''), COALESCE(st.image_digest, ''), COALESCE(st.inventory_hash, ''),
        ev.id
   FROM claimed c
@@ -651,7 +652,7 @@ SELECT c.id, c.org_id, st.id, c.lease_expires_at,
   ) ev ON st.type IN ('host', 'workload', 'platform', 'serverless', 'repository')
       OR st.type = 'image'`,
 		workerID, token.OrgID, handler.ScannerJobLeaseInterval, targetTypes)
-	if err := row.Scan(&id, &orgID, &targetID, &leaseExpiresAt, &attemptCount, &maxAttempts, &platform, &targetType, &targetRef, &targetClusterID, &sourceType, &sourceRef, &imageDigest, &inventoryHash, &evidenceID); err != nil {
+	if err := row.Scan(&id, &orgID, &targetID, &leaseExpiresAt, &attemptCount, &maxAttempts, &platform, &targetType, &targetRef, &targetClusterID, &registryID, &sourceType, &sourceRef, &imageDigest, &inventoryHash, &evidenceID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -665,6 +666,7 @@ SELECT c.id, c.org_id, st.id, c.lease_expires_at,
 		"source_type": sourceType, "source_ref": sourceRef, "image_digest": imageDigest, "inventory_hash": inventoryHash,
 		"evidence_id": evidenceID, "lease_expires_at": leaseExpiresAt,
 		"attempt_count": attemptCount, "max_attempts": maxAttempts,
+		"registry_id": registryID,
 	}
 	// SIG-ROOTS-38: ride this org's DB-managed sigstore roots-of-trust on the job envelope so the
 	// scanner (which has no DB pool) can union them onto its static --signature-roots for THIS job

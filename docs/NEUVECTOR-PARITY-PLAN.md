@@ -80,6 +80,31 @@ configuration. **149 frontend tests**, production build, focused race/API tests,
 real-browser verification and changed-code lint pass. No checklist item is closed
 by this bounded login or single-node database increment.
 
+The registry credential continuation is deployed at Helm revision **21** with
+`constellation/api:registry-leases-20261012` and
+`constellation/scanner:registry-leases-20261012`. Credential release now requires
+the same-org image target, its configured registry, an active job lease, and the
+claiming scanner token/instance. Claims include `registry_id`; requests include
+`job_id`; issuance is audited without secrets and responses prohibit caching.
+Cosign uses the same isolated per-job Docker config as the scan engines, and
+explicitly anonymous registry jobs cannot inherit ambient Docker credentials.
+Credential requests reject redirects and oversized responses. One-shot
+configured-registry scans require the claimed `--job-id` and matching instance.
+
+Validation: **2,046 seeded, repeated race-test executions**, zero skips, **98
+tooling tests**, focused scanner/signature/OpenAPI tests and changed-code lint
+pass. The live API and fresh scanner image scanned a temporary authenticated TLS
+registry image with Syft, Trivy and Grype; cosign verified its public-key signature.
+Pending, other-instance, expired and completed jobs could not obtain credentials.
+Successful and wrong-password scans removed their temporary credential configs;
+local tests also cover cancellation. Three redacted issuance receipts and the
+completed result `1dc64c8c-950e-4e88-ac39-86efb19f5bc0` were persisted. Authenticated
+result, signature, package and layer endpoints return the evidence. Temporary
+registry, token and job fixtures were removed, and both deployments are ready.
+Browser navigation succeeded but repeated collaborative snapshot calls failed;
+this increment does not claim new browser acceptance. Private cloud-provider
+connectors, refreshable tokens and the broader tenant-scope gates remain open.
+
 The admission-engine continuation adds migration **172** and persists normalized
 engine outcomes atomically with image scan completion. The built-in vulnerability
 profiles now require successful Trivy and Grype results rather than retired
@@ -99,8 +124,8 @@ has zero findings. The API image is
 `sha256:8382addded7cd3d9d2e74410772f6b64342189a0f82e88ea74abe6e19ded867b`.
 These checks do not close the remaining parity or live cutover acceptance gates.
 
-**Parity is not release-complete.** The feature checklist has 54 checked
-and 99 open items. Counts describe acceptance items, not a percentage of code
+**Parity is not release-complete.** The feature checklist has 55 checked
+and 98 open items. Counts describe acceptance items, not a percentage of code
 implemented. The complete scope and remaining gates are retained below; do not
 convert partially implemented items into checked boxes.
 
@@ -730,15 +755,16 @@ Unchecked parent items remain open until **all** their acceptance requirements
 are met. Code present is not the same as verified or release-ready. The older
 deficiency ledger includes findings that already have fixes; do not use its
 historical counts as a count of currently open defects.
-Acceptance backlog: **99 open**. The October 12 browser/FIPS CI gate closes one
+Acceptance backlog: **98 open**. The lease-scoped private-registry proof closes
+one REG-1 item. The October 12 browser/FIPS CI gate closes one
 bounded item with local and hosted evidence. The September reconciliation reached 98;
 the October 11 fleet review adds two explicit ingestion/isolation gates.
 Since the `800b0ef` baseline of 107 open,
-**thirteen existing items closed** (four OPS-1 items, three SIEM-1 items, one
-POL-1 item, one IAM-1 item, two UI-1 items, one UI-2 item and one UI-3 item), and four new items were added: vendor interoperability, legacy
+**fourteen existing items closed** (four OPS-1 items, three SIEM-1 items, one
+POL-1 item, one IAM-1 item, two UI-1 items, one UI-2 item, one UI-3 item and one REG-1 item), and four new items were added: vendor interoperability, legacy
 DPI binding tenant validation, registration/proof of the unreachable
 group-edge HTTP workflow, and durable storage-growth controls.
-The checklist contains **54 checked bounded rows** (39 at baseline); one new
+The checklist contains **55 checked bounded rows** (39 at baseline); one new
 bounded OPS-2 database-reclaim item was added as complete. Earlier
 rounds added bounded POL-1, POL-2 and API-1 fixes without closing their parent
 acceptance item. Those rounds added an eight-object cutover fixture and opt-in
@@ -1492,10 +1518,13 @@ row saying `enforced`.
 
 ### REG-1 Registry and scanner breadth
 
-- [ ] Prove private-registry credentials are scoped per job and removed after use.
+- [x] Prove private-registry credentials are scoped per job and removed after use.
+  October 12: lease-bound API authorization, isolated engine/cosign configs,
+  live signed generic-v2 fixture and success/failure cleanup; cancellation is
+  covered in local tests. Provider-specific connector validation remains below.
 - [x] Verify scanner Docker credential configs are per-job, mode-restricted and
-  removed on success, failure and cancellation in local tests. Private-registry
-  live connector behavior is not yet proven.
+  removed on success, failure and cancellation in local tests. October 12 adds
+  a live generic-v2 registry proof; other connectors remain unqualified.
 - [x] Use the job's scoped credentials for private-registry digest, manifest
   and config-history reads. Fake-registry tests cover TLS, wrong credentials,
   platform selection and no credential forwarding to redirects, bearer realms
@@ -1504,8 +1533,8 @@ row saying `enforced`.
   config-check image reads. Fake-registry tests cover authenticated metadata,
   wrong credentials despite an ambient Docker config, mismatched authority,
   plaintext rejection and cross-authority blob redirects. Opt-in one-shot
-  scans now have a configured-registry path below; signature verification
-  still lacks this per-job path.
+  scans and signature verification now share this per-job path; the October 12
+  live generic-v2 fixture also proves private cosign verification.
 - [ ] Complete and validate ECR, GCR/Artifact Registry, ACR, Harbor, GitLab,
   JFrog/Nexus, IBM Cloud, and OpenShift discovery/auth flows that are advertised.
 - [ ] Add tag/repository selection policies, refreshable cloud tokens, and

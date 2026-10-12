@@ -395,3 +395,25 @@ Trivy/Grype publish DBs). For each refresh:
 > Staleness is the main offline risk: an old DB silently misses new CVEs. Track
 > the DB build date (`grype db status` "Built", Trivy DB metadata) and alert if
 > it exceeds your refresh SLA.
+
+## Private registry job credentials
+
+Queue workers receive a configured registry ID with each claimed image job.
+The scanner credential endpoint requires both `registry_id` and `job_id`, and
+only releases credentials while that job is running with an unexpired lease
+owned by the scanner token and instance that claimed it. The target, job and
+registry must belong to the same organization. Each successful release requires
+a redacted audit receipt and returns `Cache-Control: no-store`.
+
+The worker writes a mode-600 Docker config in a mode-700 directory for that job.
+Syft, Trivy, Grype and cosign use it; normal completion, failure and cancellation
+remove it. Configured anonymous registries receive an empty isolated config.
+Digest, layer, file-risk and config-check reads use the same scoped credentials.
+
+For a one-shot scan using a stored registry credential, claim the job first and
+supply `--registry-id`, `--job-id`, `--control-plane`, and the scanner token through
+`CONSTELLATION_SCANNER_TOKEN`. Use the same `--instance-id` as the claim's
+`X-Constellation-Scanner-Instance` header. The one-shot command writes its report;
+it does not claim, renew or complete the job. Queue mode manages those steps.
+Upgrade scanners before enabling this API contract: older workers omit `job_id`
+and their configured-registry scans will fail credential authorization.

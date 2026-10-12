@@ -192,7 +192,7 @@ func TestResolveRegistryAuthAllowsExplicitlyAnonymousRegistry(t *testing.T) {
 	registryID := "anonymous-registry"
 	auth, cleanup, err := worker.resolveRegistryAuth(context.Background(), &scanJob{ID: "job", RegistryID: &registryID}, "ghcr.io/team/app:latest")
 	defer cleanup()
-	if err != nil || auth != (registryAuth{}) {
+	if err != nil || auth.DockerConfigDir == "" || auth.Username != "" || auth.Password != "" {
 		t.Fatalf("explicitly anonymous registry rejected: %+v, %v", auth, err)
 	}
 }
@@ -308,7 +308,7 @@ func registryCredentialsServer(t *testing.T, reports chan<- string) *httptest.Se
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path == "/api/v1/scanner/registry-credentials" {
-			if request.Header.Get("Authorization") != "Bearer scanner-token" {
+			if request.Header.Get("Authorization") != "Bearer scanner-token" || request.URL.Query().Get("job_id") == "" {
 				writer.WriteHeader(http.StatusUnauthorized)
 				return
 			}
@@ -378,3 +378,46 @@ type nopLogger struct{}
 func (nopLogger) Info(string, ...any)  {}
 func (nopLogger) Warn(string, ...any)  {}
 func (nopLogger) Error(string, ...any) {}
+
+func TestFetchRegistryCredentialsRejectsRedirectsAndOversizedResponses(t *testing.T) {
+	for _, tc := range []string{"redirect", "oversized", "invalid JSON"} {
+		t.Run(tc, func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				if r.URL.Path == "/redirected" {
+					t.Error("credential request followed redirect")
+					return
+				}
+				switch tc {
+				case "redirect":
+					http.Redirect(w, r, "/redirected", http.StatusTemporaryRedirect)
+				case "oversized":
+					_, _ = w.Write([]byte(`{"password":"` + strings.Repeat("x", 65<<10) + `"}`))
+				case "invalid JSON":
+					_, _ = w.Write([]byte(`{"password":"sensitive-value"`))
+				}
+			}))
+			defer server.Close()
+			worker := &worker{controlPlane: server.URL, token: "scanner-token"}
+			jobID := "job"
+			creds, err := worker.fetchRegistryCredentials(t.Context(), "registry", jobID)
+			if err == nil || creds != nil {
+				t.Fatal("unsafe credential response accepted")
+			}
+			if strings.Contains(err.Error(), "sensitive-value") {
+				t.Fatal("error leaked response contents")
+			}
+		})
+	}
+}
+
+func TestFetchRegistryCredentialsRequiresJob(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Error("credential fetch without job reached API") }))
+	defer server.Close()
+	worker := &worker{controlPlane: server.URL, token: "scanner-token"}
+	creds, err := worker.fetchRegistryCredentials(t.Context(), "registry", "")
+	if err == nil || creds != nil {
+		t.Fatal("credential request without job accepted")
+	}
+}

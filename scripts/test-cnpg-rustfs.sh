@@ -98,6 +98,8 @@ forward_api() {
   return 1
 }
 forward_api
+python3 "$fixtures/check_api.py" fixture "$api_port" "$work"
+"${k[@]}" exec -i recovery-source-postgres-1 -c postgres -- psql -U postgres -d constellation -v ON_ERROR_STOP=1 <"$work/registry-job.sql" >"$work/registry-job-seed.log"
 python3 "$fixtures/check_api.py" source "$api_port" "$work"
 sql recovery-source-postgres "INSERT INTO recovery_proof VALUES (2,'after-backup-via-wal');" >/dev/null
 sql recovery-source-postgres 'SELECT clock_timestamp()' >"$work/target-time"

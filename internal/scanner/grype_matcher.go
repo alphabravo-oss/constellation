@@ -39,7 +39,7 @@ func scannerOfflineDB() bool {
 // grypeEnv builds the env for a grype exec, disabling grype's implicit per-run DB
 // auto-update in air-gapped mode so it uses only the pre-loaded local DB.
 func grypeEnv(opts ScanOptions) []string {
-	env := registryEnv(opts)
+	env := RegistryEnvironment(opts)
 	if scannerOfflineDB() {
 		env = append(env, "GRYPE_DB_AUTO_UPDATE=false")
 	}

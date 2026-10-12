@@ -45,7 +45,7 @@ func (s *SyftEngine) Scan(ctx context.Context, ref string, opts ScanOptions) (*E
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	cmd.Env = registryEnv(opts)
+	cmd.Env = RegistryEnvironment(opts)
 
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("syft: %w (stderr=%s)", err, strings.TrimSpace(stderr.String()))
@@ -332,7 +332,7 @@ func withTimeout(parent context.Context, requested, fallback time.Duration) (con
 	return context.WithTimeout(parent, d)
 }
 
-// registryEnv builds the environment for an engine subprocess, exporting
+// RegistryEnvironment builds the environment for an engine subprocess, exporting
 // registry credentials under the variables Trivy, Grype and Syft actually read.
 //
 // The previous DOCKER_USER / DOCKER_PASSWORD pair was dead: no scan tool reads
@@ -343,7 +343,7 @@ func withTimeout(parent context.Context, requested, fallback time.Duration) (con
 // the per-job docker config.json the caller wrote. When that isolated config is
 // present, inherited engine registry-auth variables are dropped before applying
 // explicit credentials; scans without it retain their legacy environment.
-func registryEnv(opts ScanOptions) []string {
+func RegistryEnvironment(opts ScanOptions) []string {
 	env := os.Environ()
 	if opts.DockerConfigDir != "" {
 		isolated := env[:0]

@@ -7,6 +7,7 @@ import secrets
 import sys
 import urllib.error
 import urllib.request
+import uuid
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -77,7 +78,7 @@ def check(mode, root, request):
             "FROM users WHERE email='admin@demo.test';\n")
         return
     scanner = read(root, "scanner-token.json")
-    if mode == "source":
+    if mode == "fixture":
         token = request("/auth/login", data={"email": "admin@demo.test", "password": "Constellation!1"})["token"]
         save(root, "source-token.json", token)
         save(root, "source-me.json", request("/auth/me", token))
@@ -87,17 +88,33 @@ def check(mode, root, request):
             "name": "recovery-proof", "kind": "generic-v2", "endpoint": "registry.invalid",
             "auth_kind": "static", "credentials": credentials, "scan_cadence": "manual",
         }, expected=201)
-        save(root, "registry-proof.json", {"id": registry["id"], "credentials": credentials})
+        registry_id = str(uuid.UUID(registry["id"]))
+        job_id, target_id = str(uuid.uuid4()), str(uuid.uuid4())
+        save(root, "registry-proof.json", {"id": registry_id, "job_id": job_id, "credentials": credentials})
+        # Only the disposable harness seeds the pending target. The real claim
+        # endpoint assigns the scanner identity and lease before any release.
+        (root / "registry-job.sql").write_text(
+            "INSERT INTO scan_targets (id,org_id,type,ref,source_type,registry_id) "
+            f"SELECT '{target_id}',org_id,'image','registry.invalid/proof:latest','registry',id FROM registries WHERE id='{registry_id}';\n"
+            "INSERT INTO scan_jobs (id,org_id,target_id,status) "
+            f"SELECT '{job_id}',org_id,id,'pending' FROM scan_targets WHERE id='{target_id}';\n")
+        return
     else:
-        require(mode in ("restored", "wrong-key"), "Expected prepare, source, restored or wrong-key")
+        require(mode in ("source", "restored", "wrong-key"), "Expected prepare, fixture, source, restored or wrong-key")
         token = read(root, "source-token.json")
         require(request("/auth/me", token) == read(root, "source-me.json"), "Session identity changed")
         require(request("/system/config", token) == read(root, "source-config.json"), "Configuration changed")
     fixture = read(root, "registry-proof.json")
-    path = "/scanner/registry-credentials?registry_id=" + fixture["id"]
+    if mode == "source":
+        claimed = request("/scan-jobs/claim", scanner, {})
+        require(claimed.get("id") == fixture["job_id"] and claimed.get("registry_id") == fixture["id"],
+                "Recovery scanner claimed the wrong registry job")
+    else:
+        request("/scan-jobs/" + fixture["job_id"] + "/renew", scanner, {})
+    path = "/scanner/registry-credentials?registry_id=" + fixture["id"] + "&job_id=" + fixture["job_id"]
     if mode == "wrong-key":
         result = request(path, scanner, expected=500)
-        require(result.get("error", "").startswith("decrypt credentials:"), "Wrong-key failure was not decryption rejection")
+        require(result.get("error") == "credential decryption failed", "Wrong-key failure was not decryption rejection")
         require(all(value not in json.dumps(result) for value in fixture["credentials"].values()),
                 "Wrong-key response exposed credential material")
         verify_audit(request, token, read(root, "audit-anchor.json"))

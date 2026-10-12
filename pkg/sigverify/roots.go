@@ -169,7 +169,7 @@ func (v *Verifier) initPrivateTUF(ctx context.Context, cacheDir, mirror, rootPat
 		initArgs = append(initArgs, "--root", rootPath)
 	}
 	cmd := exec.CommandContext(ctx, v.CosignBinary, initArgs...)
-	cmd.Env = append(os.Environ(), "TUF_ROOT="+cacheDir)
+	cmd.Env = v.commandEnv("TUF_ROOT=" + cacheDir)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("cosign initialize private TUF: %w: %s", err, strings.TrimSpace(string(out)))
 	}

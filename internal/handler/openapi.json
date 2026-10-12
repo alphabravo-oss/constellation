@@ -11246,13 +11246,90 @@
       "get": {
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Credentials for the leased job; never cache this response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "registry_id",
+                    "kind",
+                    "auth_kind"
+                  ],
+                  "properties": {
+                    "registry_id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "auth_kind": {
+                      "type": "string"
+                    },
+                    "endpoint": {
+                      "type": "string"
+                    },
+                    "username": {
+                      "type": "string"
+                    },
+                    "password": {
+                      "type": "string"
+                    },
+                    "token": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
           },
           "default": {
             "$ref": "#/components/responses/Error"
+          },
+          "400": {
+            "description": "Missing or invalid registry_id or job_id."
+          },
+          "401": {
+            "description": "Scanner token required."
+          },
+          "404": {
+            "description": "Registry unavailable for this job and worker lease."
+          },
+          "503": {
+            "description": "Credential audit unavailable; no credentials released."
           }
         },
-        "summary": "Get registry-credentials"
+        "summary": "Get credentials for an actively leased registry scan",
+        "description": "Scanner-token authentication required. The job must be running with an unexpired lease owned by the token and X-Constellation-Scanner-Instance, and its image target must reference this registry in the same organization. Credential release requires a redacted audit receipt. Responses use Cache-Control: no-store.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "registry_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Constellation-Scanner-Instance",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must match the instance used to claim the job."
+          }
+        ]
       }
     },
     "/api/v1/search": {
