@@ -17,7 +17,7 @@ import (
 // usersReq drives a Users handler method with a Subject in context and a chi {id} route param.
 func usersReq(t *testing.T, method, path, idParam string, h http.HandlerFunc, subj Subject) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(method, path, nil)
+	req := httptest.NewRequestWithContext(t.Context(), method, path, nil)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", idParam)
 	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)

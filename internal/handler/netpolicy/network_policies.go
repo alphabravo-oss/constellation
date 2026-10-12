@@ -1246,8 +1246,7 @@ func (h *NetworkPolicies) persistAction(r *http.Request, item networkPolicyLifec
 	nextMode := nextModeForAction(item, action)
 	rollbackRef := ""
 	targetMode := item.TargetMode
-	approval := item.ApprovalStatus
-	reason := item.Reason
+	var approval, reason string
 	rollback := item.RollbackAvailable
 	var lastApplied *time.Time
 	if item.LastAppliedAt != "" {

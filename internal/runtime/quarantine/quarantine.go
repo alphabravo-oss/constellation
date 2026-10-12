@@ -1,12 +1,12 @@
 // Package quarantine is the enforce-mode response orchestrator: when WAF, DLP, or
 // the eBPF baseline drift detector raises a hard alert, this package
 //
-//	1. cordons the offending pod via a deny-all NetworkPolicy (pkg/netpolicy),
-//	2. captures up to N seconds (or M bytes) of pcap on the pod's veth,
-//	3. snapshots /proc/<pid>/{cmdline,environ,maps,status,fd} for the offending PID,
-//	4. fetches the last 200 lines of every container log via the K8s API,
-//	5. bundles all of the above into a deterministic tarball with a sha256 manifest,
-//	   and returns the on-disk path plus the manifest digest.
+//  1. cordons the offending pod via a deny-all NetworkPolicy (pkg/netpolicy),
+//  2. captures up to N seconds (or M bytes) of pcap on the pod's veth,
+//  3. snapshots /proc/<pid>/{cmdline,environ,maps,status,fd} for the offending PID,
+//  4. fetches the last 200 lines of every container log via the K8s API,
+//  5. bundles all of the above into a deterministic tarball with a sha256 manifest,
+//     and returns the on-disk path plus the manifest digest.
 //
 // The package separates Plan (decide what to do) from Execute (do it) so callers can
 // dry-run the response in monitor mode.
@@ -218,7 +218,7 @@ type Manifest struct {
 	Target     Target            `json:"target"`
 	Trigger    Trigger           `json:"trigger"`
 	Files      []FileEntry       `json:"files"`
-	SHA256     string            `json:"sha256"`     // SHA-256 of (sorted file list || file hashes)
+	SHA256     string            `json:"sha256"` // SHA-256 of (sorted file list || file hashes)
 	Version    string            `json:"version"`
 	Labels     map[string]string `json:"labels,omitempty"`
 }

@@ -59,7 +59,7 @@ VALUES ($1, 'neuvector', $2, $3, $4, $5, '2026-09-26T00:00:00Z')`, fixture.org, 
 	if _, err := other.d.Pool().Exec(ctx, `INSERT INTO migration_imports (org_id, source, source_hash, preview_json) VALUES ($1,'neuvector','foreign','{}')`, other.org); err != nil {
 		t.Fatal(err)
 	}
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/migration/imports/export", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/migration/imports/export", nil)
 	request = request.WithContext(WithSubject(request.Context(), Subject{OrgID: fixture.org, UserID: fixture.user}))
 	writer := &migrationExportWriter{ResponseRecorder: httptest.NewRecorder()}
 	writer.firstWrite = func() {
@@ -107,7 +107,7 @@ VALUES ($1, 'neuvector', $2, $3, $4, $5, '2026-09-26T00:00:00Z')`, fixture.org, 
 
 func TestMigrationImportsExportEmptyAndUnauthenticated(t *testing.T) {
 	fixture := newMigrationRemainingFixture(t)
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/migration/imports/export", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/migration/imports/export", nil)
 	unauthenticated := httptest.NewRecorder()
 	fixture.h.MigrationImportsExport(unauthenticated, request)
 	if unauthenticated.Code != http.StatusUnauthorized {
@@ -126,7 +126,7 @@ func TestMigrationImportsExportInterruptedStreamHasNoCompletion(t *testing.T) {
 	if _, err := fixture.d.Pool().Exec(context.Background(), `INSERT INTO migration_imports (org_id, source, source_hash, preview_json) VALUES ($1,'neuvector','interrupted','{}')`, fixture.org); err != nil {
 		t.Fatal(err)
 	}
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/migration/imports/export", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/migration/imports/export", nil)
 	request = request.WithContext(WithSubject(request.Context(), Subject{OrgID: fixture.org, UserID: fixture.user}))
 	writer := &migrationFailWriter{ResponseRecorder: httptest.NewRecorder()}
 	fixture.h.MigrationImportsExport(writer, request)

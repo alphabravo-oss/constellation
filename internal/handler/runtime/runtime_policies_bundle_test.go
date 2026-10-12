@@ -101,7 +101,7 @@ func TestAgentPolicyBundle_WireShapeAndOrgScope(t *testing.T) {
 
 	// 1) Happy path: correct org token + cluster.
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/runtime/policies:bundle?cluster_id="+clusterID.String(), nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/runtime/policies:bundle?cluster_id="+clusterID.String(), nil)
 	req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(),
 		&handler.RuntimeAgentToken{ID: uuid.New(), OrgID: orgID, Name: "agent-test"}))
 	h.AgentPolicyBundle(rec, req)
@@ -149,7 +149,7 @@ func TestAgentPolicyBundle_WireShapeAndOrgScope(t *testing.T) {
 
 	// 2) Cross-org isolation: a token for another org must not see this cluster.
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/runtime/policies:bundle?cluster_id="+clusterID.String(), nil)
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/runtime/policies:bundle?cluster_id="+clusterID.String(), nil)
 	req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(),
 		&handler.RuntimeAgentToken{ID: uuid.New(), OrgID: otherOrgID, Name: "other-agent"}))
 	h.AgentPolicyBundle(rec, req)
@@ -159,7 +159,7 @@ func TestAgentPolicyBundle_WireShapeAndOrgScope(t *testing.T) {
 
 	// 3) Missing token -> 401.
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/runtime/policies:bundle?cluster_id="+clusterID.String(), nil)
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/runtime/policies:bundle?cluster_id="+clusterID.String(), nil)
 	h.AgentPolicyBundle(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("no-token status=%d want 401", rec.Code)

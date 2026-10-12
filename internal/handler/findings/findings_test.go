@@ -44,7 +44,7 @@ VALUES ($1, $2, 'vulnerability', $3, $4, $4, 'high', 70, $5)`,
 		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgID)
 	})
 
-	req := httptest.NewRequest("GET", "/api/v1/findings?kind=vulnerability&lifecycle=open", nil)
+	req := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/findings?kind=vulnerability&lifecycle=open", nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	NewFindings(d, nil, nil).List(w, req)
@@ -138,7 +138,7 @@ VALUES ($1, $2, $3, 'vulnerability', 'CVE-2099-0001', 'provenance finding',
 	}
 
 	h := NewFindings(d, nil, nil)
-	req := httptest.NewRequest("GET", "/api/v1/findings?kind=vulnerability&q=canonical_engine:vulndb%20disagreement:true%20package:openssl", nil)
+	req := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/findings?kind=vulnerability&q=canonical_engine:vulndb%20disagreement:true%20package:openssl", nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	h.List(w, req)
@@ -174,7 +174,7 @@ VALUES ($1, $2, $3, 'vulnerability', 'CVE-2099-0001', 'provenance finding',
 		t.Fatalf("list vulnerability enrichment = %+v", got)
 	}
 
-	req = httptest.NewRequest("GET", "/api/v1/findings/"+findingID.String(), nil)
+	req = httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/findings/"+findingID.String(), nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", findingID.String())
@@ -254,7 +254,7 @@ VALUES
 		t.Fatalf("findings: %v", err)
 	}
 
-	req := httptest.NewRequest("GET", "/api/v1/findings/by-cve?lifecycle=open", nil)
+	req := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/findings/by-cve?lifecycle=open", nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	NewFindings(d, nil, nil).ByCVE(w, req)

@@ -33,7 +33,7 @@ func TestEnterpriseEndpointsReturnCatalogs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			tt.fn(w, httptest.NewRequest("GET", "/", nil))
+			tt.fn(w, httptest.NewRequestWithContext(t.Context(), "GET", "/", nil))
 			if w.Code != http.StatusOK {
 				t.Fatalf("status: %d", w.Code)
 			}
@@ -51,7 +51,7 @@ func TestEnterpriseEndpointsReturnCatalogs(t *testing.T) {
 
 func TestEnterpriseOnboardingNoStorageDoesNotReportReadyHealth(t *testing.T) {
 	w := httptest.NewRecorder()
-	NewEnterprise().Onboarding(w, httptest.NewRequest(http.MethodGet, "/api/v1/onboarding", nil))
+	NewEnterprise().Onboarding(w, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/onboarding", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
@@ -76,7 +76,7 @@ func TestEnterpriseOnboardingNoStorageDoesNotReportReadyHealth(t *testing.T) {
 
 func TestEnterpriseOnboardingCommandsMapToImplementedChartPaths(t *testing.T) {
 	w := httptest.NewRecorder()
-	NewEnterprise().Onboarding(w, httptest.NewRequest(http.MethodGet, "/api/v1/onboarding", nil))
+	NewEnterprise().Onboarding(w, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/onboarding", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
@@ -135,7 +135,7 @@ VALUES ($1, 'route:
 		t.Fatalf("routing: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/integrations", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/integrations", nil)
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	NewEnterprise(d).Integrations(w, req)
@@ -190,7 +190,7 @@ VALUES ($1, 'nv-1001-block-latest-tag', 'existing', 'kyverno', 'admission', 'exi
 		"source": "neuvector",
 		"export": "admission:\n  rules:\n    - id: 1001\n      desc: Block latest tag\n      criteria:\n        - key: image_name\n          op: regex\n          value: latest\n      action: deny\nresponse:\n  rules:\n    - id: 2001\n      event: process\n      conditions: [process_baseline]\n      actions: [alert, quarantine]\n"
 	}`
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/migration/preview", strings.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/migration/preview", strings.NewReader(body))
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	NewEnterprise(d).MigrationPreview(w, req)
@@ -257,7 +257,7 @@ VALUES ($1, 'nv-1001-block-latest-tag', 'existing', 'kyverno', 'admission', 'exi
 		"source": "neuvector",
 		"export": "admission:\n  rules:\n    - id: 1001\n      desc: Block latest tag\n      criteria:\n        - key: image_name\n          op: regex\n          value: latest\n      action: deny\nresponse:\n  rules:\n    - id: 2001\n      event: process\n      conditions: [process_baseline]\n      actions: [alert, quarantine]\nprofiles:\n  - group: nv.default.api\n    mode: protect\n    filters:\n      - filter: /etc/passwd\n        behavior: block_access\n        applications: [cat]\n"
 	}`
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/migration/preview", strings.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/migration/preview", strings.NewReader(body))
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	h := NewEnterprise(d).WithAudit(audit.New(pool))
@@ -489,7 +489,7 @@ func TestEnterpriseMigrationApplyNativeAdmissionExceptionRules(t *testing.T) {
 		"source": "neuvector",
 		"export": "rules:\n  - id: 11\n    comment: Allow platform namespace exception\n    rule_type: exception\n    disable: false\n    criteria:\n      - name: namespace\n        op: containsAny\n        value: kube-system, neuvector\n      - name: runAsPrivileged\n        op: =\n        value: true\n  - id: 12\n    comment: Deny privileged workloads\n    rule_type: deny\n    rule_mode: protect\n    criteria:\n      - name: runAsPrivileged\n        op: =\n        value: true\n"
 	}`
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/migration/preview", strings.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/migration/preview", strings.NewReader(body))
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	h := NewEnterprise(d).WithAudit(audit.New(pool))
@@ -600,7 +600,7 @@ items:
 	if err != nil {
 		t.Fatalf("marshal body: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/migration/preview", strings.NewReader(string(bodyBytes)))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/migration/preview", strings.NewReader(string(bodyBytes)))
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	h := NewEnterprise(d).WithAudit(audit.New(pool))
@@ -727,7 +727,7 @@ spec:
 	if err != nil {
 		t.Fatalf("marshal body: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/migration/preview", strings.NewReader(string(bodyBytes)))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/migration/preview", strings.NewReader(string(bodyBytes)))
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	h := NewEnterprise(d).WithAudit(audit.New(pool))
@@ -832,7 +832,7 @@ waf_groups:
 	if err != nil {
 		t.Fatalf("marshal body: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/migration/preview", strings.NewReader(string(bodyBytes)))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/migration/preview", strings.NewReader(string(bodyBytes)))
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	h := NewEnterprise(d).WithAudit(audit.New(pool))
@@ -955,7 +955,7 @@ dlp_groups:
 	if err != nil {
 		t.Fatalf("marshal body: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/migration/preview", strings.NewReader(string(bodyBytes)))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/migration/preview", strings.NewReader(string(bodyBytes)))
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	h := NewEnterprise(d).WithAudit(audit.New(pool))
@@ -1097,7 +1097,7 @@ network_rules:
 	if err != nil {
 		t.Fatalf("marshal body: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/migration/preview", strings.NewReader(string(bodyBytes)))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/migration/preview", strings.NewReader(string(bodyBytes)))
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	h := NewEnterprise(d).WithAudit(audit.New(pool))
@@ -1214,7 +1214,7 @@ profiles:
 	if err != nil {
 		t.Fatalf("marshal body: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/migration/preview", strings.NewReader(string(bodyBytes)))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/migration/preview", strings.NewReader(string(bodyBytes)))
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	h := NewEnterprise(d).WithAudit(audit.New(pool))
@@ -1343,7 +1343,7 @@ process_profiles:
 	if err != nil {
 		t.Fatalf("marshal body: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/migration/preview", strings.NewReader(string(bodyBytes)))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/migration/preview", strings.NewReader(string(bodyBytes)))
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	h := NewEnterprise(d).WithAudit(audit.New(pool))
@@ -1470,7 +1470,7 @@ VALUES ($1,$2,$3,'nv.api.default','nv.db.default','[{"protocol":"TCP","port":808
 	if err != nil {
 		t.Fatalf("marshal body: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/migration/preview", strings.NewReader(string(bodyBytes)))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/migration/preview", strings.NewReader(string(bodyBytes)))
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	h := NewEnterprise(d).WithAudit(audit.New(pool))
@@ -1610,7 +1610,7 @@ VALUES ($1,$2,'ip-10-0-1-2','default/api','falco','process_shell','high','alert'
 		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgID)
 	})
 
-	req := httptest.NewRequest("GET", "/api/v1/runtime/overview?hours=24", nil)
+	req := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/runtime/overview?hours=24", nil)
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	NewEnterprise(d).RuntimeOverview(w, req)

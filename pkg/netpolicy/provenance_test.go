@@ -20,7 +20,7 @@ func TestMergeRulesPreservesUserDropsLearned(t *testing.T) {
 		{PolicyRule: egressRule(80, "10.0.0.2"), CfgType: CfgTypeLearned},
 	}
 	fresh := []*SourcedRule{
-		{PolicyRule: egressRule(80, "10.0.0.3"), CfgType: CfgTypeLearned}, // new learned edge
+		{PolicyRule: egressRule(80, "10.0.0.3"), CfgType: CfgTypeLearned},   // new learned edge
 		{PolicyRule: ingressRule(443, "10.0.0.1"), CfgType: CfgTypeLearned}, // collides with user rule
 	}
 

@@ -52,7 +52,7 @@ func TestComplianceEvidenceExemptionsStayInCluster(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO compliance_checks (org_id, cluster_id, framework, control_id, title, status, severity) VALUES ($1, $2, $4, '3.2.1', 'local', 'fail', 'high'), ($1, $3, $4, '3.2.1', 'misattributed', 'fail', 'high')`, orgA, clusterA, foreignCluster, compliancepkg.FrameworkCISLinux); err != nil {
 		t.Fatal(err)
 	}
-	checksRequest := httptest.NewRequest(http.MethodGet, "/api/v1/compliance/checks?framework="+compliancepkg.FrameworkCISLinux, nil)
+	checksRequest := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/compliance/checks?framework="+compliancepkg.FrameworkCISLinux, nil)
 	checksRequest = checksRequest.WithContext(authctx.WithSubject(checksRequest.Context(), authctx.Subject{OrgID: orgA}))
 	checksResponse := httptest.NewRecorder()
 	NewCompliance(database, nil).Checks(checksResponse, checksRequest)
@@ -75,7 +75,7 @@ func TestComplianceEvidenceExemptionsStayInCluster(t *testing.T) {
 	if len(checksResult.Checks) != 1 || statuses["local"] != "exempted" || statuses["misattributed"] != "" {
 		t.Fatalf("misattributed check exemption: %s", checksResponse.Body.String())
 	}
-	summaryRequest := httptest.NewRequest(http.MethodGet, "/api/v1/compliance/summary", nil)
+	summaryRequest := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/compliance/summary", nil)
 	summaryRequest = summaryRequest.WithContext(authctx.WithSubject(summaryRequest.Context(), authctx.Subject{OrgID: orgA}))
 	summaryResponse := httptest.NewRecorder()
 	NewCompliance(database, nil).Summary(summaryResponse, summaryRequest)
@@ -100,7 +100,7 @@ func TestComplianceEvidenceExemptionsStayInCluster(t *testing.T) {
 		if clusterID != nil {
 			url += "&cluster_id=" + clusterID.String()
 		}
-		request := httptest.NewRequest(http.MethodGet, url, nil)
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
 		request = request.WithContext(authctx.WithSubject(request.Context(), authctx.Subject{OrgID: orgA}))
 		response := httptest.NewRecorder()
 		NewCompliance(database, nil).NodeEvidence(response, request)

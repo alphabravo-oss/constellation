@@ -8,10 +8,11 @@
 // (and security scanners) can suppress noise that the producer has already triaged.
 //
 // Source of truth: Constellation's finding lifecycle.
-//   open / triaged / in_progress  →  under_investigation
-//   resolved                       →  fixed
-//   suppressed                     →  not_affected (with justification)
-//   accepted                       →  not_affected (with rationale)
+//
+//	open / triaged / in_progress  →  under_investigation
+//	resolved                       →  fixed
+//	suppressed                     →  not_affected (with justification)
+//	accepted                       →  not_affected (with rationale)
 //
 // Output is stable JSON so downstream consumers can byte-compare across publications.
 package vex
@@ -68,14 +69,14 @@ func OpenVEX(author string, findings []Finding) map[string]interface{} {
 	now := time.Now().UTC()
 	id := "https://openvex.dev/docs/constellation-" + sha1Short(author+now.Format(time.RFC3339))
 	return map[string]interface{}{
-		"@context":     "https://openvex.dev/ns/v0.2.0",
-		"@id":          id,
-		"author":       author,
-		"role":         "Project Maintainer",
-		"timestamp":    now.Format(time.RFC3339),
-		"version":      1,
-		"statements":   stmts,
-		"tooling":      "Constellation OpenVEX emitter",
+		"@context":   "https://openvex.dev/ns/v0.2.0",
+		"@id":        id,
+		"author":     author,
+		"role":       "Project Maintainer",
+		"timestamp":  now.Format(time.RFC3339),
+		"version":    1,
+		"statements": stmts,
+		"tooling":    "Constellation OpenVEX emitter",
 	}
 }
 
@@ -119,8 +120,8 @@ func CycloneDXVEX(author string, findings []Finding) map[string]interface{} {
 		"serialNumber": "urn:uuid:" + uuidV4(),
 		"metadata": map[string]interface{}{
 			"timestamp": now,
-			"tools": []map[string]string{{"name": "Constellation", "vendor": "AlphaBravo"}},
-			"authors": []map[string]string{{"name": author}},
+			"tools":     []map[string]string{{"name": "Constellation", "vendor": "AlphaBravo"}},
+			"authors":   []map[string]string{{"name": author}},
 		},
 		"vulnerabilities": vulns,
 	}

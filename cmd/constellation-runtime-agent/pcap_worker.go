@@ -1,22 +1,23 @@
 // Wave C3.5: agent-side PCAP capture worker.
 //
 // Every few seconds the agent:
-//   1. GET /api/v1/runtime-pcap/claim?cluster_id=...&node=... (atomic claim)
-//      - 204 → nothing to do, sleep till next tick
-//      - 200 → PcapCapture body to execute
-//   2. Spawn `tcpdump -i any -w /tmp/cap-<id>.pcap -G <duration_s> -W 1 <filter>`
-//      where filter is built from the capture's 5-tuple fields
-//   3. POST the resulting .pcap to /runtime-pcap/{id}/upload (multipart)
-//      OR POST /runtime-pcap/{id}/status with failed + error_message
+//  1. GET /api/v1/runtime-pcap/claim?cluster_id=...&node=... (atomic claim)
+//     - 204 → nothing to do, sleep till next tick
+//     - 200 → PcapCapture body to execute
+//  2. Spawn `tcpdump -i any -w /tmp/cap-<id>.pcap -G <duration_s> -W 1 <filter>`
+//     where filter is built from the capture's 5-tuple fields
+//  3. POST the resulting .pcap to /runtime-pcap/{id}/upload (multipart)
+//     OR POST /runtime-pcap/{id}/status with failed + error_message
 //
 // Why `-i any`:
-//   Mapping "namespace/deployment" → host-side veth requires either a
-//   per-pod-IP join (we'd have to pull pod_ips for this cluster) or
-//   nsenter into the pod's netns. Both are doable but add a moving part.
-//   `-i any` captures every interface; the operator's 5-tuple filter
-//   (always present when called from the threat drilldown) scopes the
-//   output to one conversation. Trade: slightly more kernel work; gain:
-//   one fewer correlation path to maintain.
+//
+//	Mapping "namespace/deployment" → host-side veth requires either a
+//	per-pod-IP join (we'd have to pull pod_ips for this cluster) or
+//	nsenter into the pod's netns. Both are doable but add a moving part.
+//	`-i any` captures every interface; the operator's 5-tuple filter
+//	(always present when called from the threat drilldown) scopes the
+//	output to one conversation. Trade: slightly more kernel work; gain:
+//	one fewer correlation path to maintain.
 //
 // Lifecycle: the worker is killed when ctx is canceled. An in-flight
 // tcpdump subprocess is `kill`ed too — we use exec.CommandContext.

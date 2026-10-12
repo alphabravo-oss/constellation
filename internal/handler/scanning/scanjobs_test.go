@@ -233,7 +233,7 @@ func TestVulnerabilityProfileDecisionForFinding(t *testing.T) {
 func TestScanJobs_RejectsExecutableRepositoryTarget(t *testing.T) {
 	h := NewScanJobs(nil, nil)
 	body, _ := json.Marshal(EnqueueRequest{TargetType: "repository", TargetRef: "github.com/acme/app"})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs", bytes.NewReader(body))
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: uuid.New(), OrgID: uuid.New()}))
 	rec := httptest.NewRecorder()
 	h.Enqueue(rec, req)
@@ -312,7 +312,7 @@ func TestScanJobs_QueueLifecycle(t *testing.T) {
 	// 1) Enqueue a job as a user.
 	enqueueReq := EnqueueRequest{TargetType: "image", TargetRef: queueImageRef}
 	body, _ := json.Marshal(enqueueReq)
-	r := httptest.NewRequest("POST", "/api/v1/scan-jobs", bytes.NewReader(body))
+	r := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/scan-jobs", bytes.NewReader(body))
 	r = r.WithContext(authctx.WithSubject(r.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	h.Enqueue(w, r)
@@ -325,7 +325,7 @@ func TestScanJobs_QueueLifecycle(t *testing.T) {
 	_ = json.NewDecoder(w.Body).Decode(&enqRes)
 
 	// 2) Claim as scanner.
-	r = httptest.NewRequest("POST", "/api/v1/scan-jobs/claim", nil)
+	r = httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/scan-jobs/claim", nil)
 	r.Header.Set("Authorization", "Bearer "+rawToken)
 	// Wrap with the scanner-token middleware to populate context.
 	w = httptest.NewRecorder()
@@ -371,7 +371,7 @@ func TestScanJobs_QueueLifecycle(t *testing.T) {
 		"findings":        []any{},
 		"bundle_metadata": metadata,
 	})
-	r = httptest.NewRequest("POST", "/api/v1/scan-jobs/"+enqRes.ID.String()+"/complete", bytes.NewReader(completeBody))
+	r = httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/scan-jobs/"+enqRes.ID.String()+"/complete", bytes.NewReader(completeBody))
 	r.Header.Set("Authorization", "Bearer "+rawToken)
 	// chi URL params are normally injected by the router; set them manually for the test.
 	rctx := chi.NewRouteContext()
@@ -382,7 +382,7 @@ func TestScanJobs_QueueLifecycle(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("complete status: %d body: %s", w.Code, w.Body.String())
 	}
-	r = httptest.NewRequest("POST", "/api/v1/scan-jobs/"+enqRes.ID.String()+"/complete", bytes.NewReader(completeBody))
+	r = httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/scan-jobs/"+enqRes.ID.String()+"/complete", bytes.NewReader(completeBody))
 	r.Header.Set("Authorization", "Bearer "+rawToken)
 	rctx = chi.NewRouteContext()
 	rctx.URLParams.Add("id", enqRes.ID.String())
@@ -417,7 +417,7 @@ func TestScanJobs_QueueLifecycle(t *testing.T) {
 	}
 
 	// 5) Verify list API exposes first-class scan-job bundle provenance.
-	r = httptest.NewRequest("GET", "/api/v1/scan-jobs", nil)
+	r = httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/scan-jobs", nil)
 	r = r.WithContext(authctx.WithSubject(r.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	w = httptest.NewRecorder()
 	h.List(w, r)
@@ -491,7 +491,7 @@ func TestScanJobs_ClaimReclaimsExpiredLeaseAndFailureRequiresWorker(t *testing.T
 	}
 
 	h := NewScanJobs(d, audit.New(pool))
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/claim", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/claim", nil)
 	req.Header.Set("Authorization", "Bearer "+newRawToken)
 	rec := httptest.NewRecorder()
 	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(rec, req)
@@ -522,7 +522,7 @@ func TestScanJobs_ClaimReclaimsExpiredLeaseAndFailureRequiresWorker(t *testing.T
 		t.Fatalf("reclaimed job = status=%s worker=%s lease=%v finished=%v", status, workerID, leaseExpiresAt, finishedAt)
 	}
 
-	failReq := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/"+jobID.String()+"/fail", bytes.NewBufferString(`{"error":"old worker failed late"}`))
+	failReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/"+jobID.String()+"/fail", bytes.NewBufferString(`{"error":"old worker failed late"}`))
 	failReq.Header.Set("Authorization", "Bearer "+oldRawToken)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", jobID.String())
@@ -539,7 +539,7 @@ func TestScanJobs_ClaimReclaimsExpiredLeaseAndFailureRequiresWorker(t *testing.T
 		t.Fatalf("old worker changed status to %s", status)
 	}
 
-	failReq = httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/"+jobID.String()+"/fail", bytes.NewBufferString(`{"error":"scanner failed"}`))
+	failReq = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/"+jobID.String()+"/fail", bytes.NewBufferString(`{"error":"scanner failed"}`))
 	failReq.Header.Set("Authorization", "Bearer "+newRawToken)
 	rctx = chi.NewRouteContext()
 	rctx.URLParams.Add("id", jobID.String())
@@ -592,7 +592,7 @@ func TestScanJobs_RenewRequiresSameScannerInstance(t *testing.T) {
 	}
 
 	h := NewScanJobs(d, audit.New(pool))
-	claimReq := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/claim?target_type=image", nil)
+	claimReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/claim?target_type=image", nil)
 	claimReq.Header.Set("Authorization", "Bearer "+rawToken)
 	claimReq.Header.Set("X-Constellation-Scanner-Instance", "scanner-a")
 	claimRec := httptest.NewRecorder()
@@ -601,7 +601,7 @@ func TestScanJobs_RenewRequiresSameScannerInstance(t *testing.T) {
 		t.Fatalf("claim status: %d body: %s", claimRec.Code, claimRec.Body.String())
 	}
 
-	renewReq := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/"+jobID.String()+"/renew", nil)
+	renewReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/"+jobID.String()+"/renew", nil)
 	renewReq.Header.Set("Authorization", "Bearer "+rawToken)
 	renewReq.Header.Set("X-Constellation-Scanner-Instance", "scanner-b")
 	rctx := chi.NewRouteContext()
@@ -621,7 +621,7 @@ func TestScanJobs_RenewRequiresSameScannerInstance(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT lease_expires_at FROM scan_jobs WHERE id = $1`, jobID).Scan(&before); err != nil {
 		t.Fatal(err)
 	}
-	renewReq = httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/"+jobID.String()+"/renew", nil)
+	renewReq = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/"+jobID.String()+"/renew", nil)
 	renewReq.Header.Set("Authorization", "Bearer "+rawToken)
 	renewReq.Header.Set("X-Constellation-Scanner-Instance", "scanner-a")
 	rctx = chi.NewRouteContext()
@@ -640,7 +640,7 @@ func TestScanJobs_RenewRequiresSameScannerInstance(t *testing.T) {
 		t.Fatalf("lease did not renew far enough: before=%v after=%v", before, after)
 	}
 
-	completeReq := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/"+jobID.String()+"/complete", bytes.NewBufferString(`{"image_ref":"registry.example.test/renew:latest","image_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","findings":[]}`))
+	completeReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/"+jobID.String()+"/complete", bytes.NewBufferString(`{"image_ref":"registry.example.test/renew:latest","image_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","findings":[]}`))
 	completeReq.Header.Set("Authorization", "Bearer "+rawToken)
 	completeReq.Header.Set("X-Constellation-Scanner-Instance", "scanner-b")
 	rctx = chi.NewRouteContext()
@@ -695,7 +695,7 @@ func TestScanJobs_RetryBackoffAndMaxAttempts(t *testing.T) {
 	}
 
 	h := NewScanJobs(d, audit.New(pool))
-	failReq := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/"+jobID.String()+"/fail", bytes.NewBufferString(`{"error":"registry timeout","retryable":true}`))
+	failReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/"+jobID.String()+"/fail", bytes.NewBufferString(`{"error":"registry timeout","retryable":true}`))
 	failReq.Header.Set("Authorization", "Bearer "+rawToken)
 	failReq.Header.Set("X-Constellation-Scanner-Instance", "retry-a")
 	rctx := chi.NewRouteContext()
@@ -727,7 +727,7 @@ SELECT status, COALESCE(error, ''), finished_at, next_attempt_at
 		t.Fatalf("retry attempt = status=%s error=%q finished=%v next=%v", attemptStatus, attemptError, attemptFinishedAt, attemptNextAt)
 	}
 
-	claimReq := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/claim", nil)
+	claimReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/claim", nil)
 	claimReq.Header.Set("Authorization", "Bearer "+rawToken)
 	claimReq.Header.Set("X-Constellation-Scanner-Instance", "retry-a")
 	claimRec := httptest.NewRecorder()
@@ -739,7 +739,7 @@ SELECT status, COALESCE(error, ''), finished_at, next_attempt_at
 	if _, err := pool.Exec(ctx, `UPDATE scan_jobs SET next_attempt_at = NOW() - INTERVAL '1 second' WHERE id = $1`, jobID); err != nil {
 		t.Fatal(err)
 	}
-	claimReq = httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/claim", nil)
+	claimReq = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/claim", nil)
 	claimReq.Header.Set("Authorization", "Bearer "+rawToken)
 	claimReq.Header.Set("X-Constellation-Scanner-Instance", "retry-a")
 	claimRec = httptest.NewRecorder()
@@ -769,7 +769,7 @@ SELECT status, COALESCE(worker_id, ''), lease_expires_at
 		t.Fatalf("second attempt = status=%s worker=%q lease=%v", attemptStatus, attemptWorker, attemptLease)
 	}
 
-	attemptReq := httptest.NewRequest(http.MethodGet, "/api/v1/scan-jobs/"+jobID.String()+"/attempts", nil)
+	attemptReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scan-jobs/"+jobID.String()+"/attempts", nil)
 	attemptReq = attemptReq.WithContext(authctx.WithSubject(attemptReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rctx = chi.NewRouteContext()
 	rctx.URLParams.Add("id", jobID.String())
@@ -789,7 +789,7 @@ SELECT status, COALESCE(worker_id, ''), lease_expires_at
 		t.Fatalf("attempt history = %+v, want retry_scheduled then running", attemptRes.Attempts)
 	}
 
-	failReq = httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/"+terminalJobID.String()+"/fail", bytes.NewBufferString(`{"error":"registry timeout","retryable":true}`))
+	failReq = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/"+terminalJobID.String()+"/fail", bytes.NewBufferString(`{"error":"registry timeout","retryable":true}`))
 	failReq.Header.Set("Authorization", "Bearer "+rawToken)
 	failReq.Header.Set("X-Constellation-Scanner-Instance", "retry-a")
 	rctx = chi.NewRouteContext()
@@ -817,7 +817,7 @@ SELECT status, COALESCE(error, ''), finished_at
 		t.Fatalf("terminal attempt = status=%s error=%q finished=%v", attemptStatus, attemptError, attemptFinishedAt)
 	}
 
-	retryReq := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/"+terminalJobID.String()+"/retry", nil)
+	retryReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/"+terminalJobID.String()+"/retry", nil)
 	retryReq = retryReq.WithContext(authctx.WithSubject(retryReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rctx = chi.NewRouteContext()
 	rctx.URLParams.Add("id", terminalJobID.String())
@@ -872,7 +872,7 @@ func TestScanJobs_ClaimFiltersTargetTypes(t *testing.T) {
 	}
 
 	h := NewScanJobs(d, audit.New(pool))
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/claim?target_type=host", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/claim?target_type=host", nil)
 	req.Header.Set("Authorization", "Bearer "+rawToken)
 	rec := httptest.NewRecorder()
 	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(rec, req)
@@ -890,7 +890,7 @@ func TestScanJobs_ClaimFiltersTargetTypes(t *testing.T) {
 		t.Fatalf("claimed = %+v, want host", claimed)
 	}
 
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/claim?target_type=repository", nil)
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/claim?target_type=repository", nil)
 	req.Header.Set("Authorization", "Bearer "+rawToken)
 	rec = httptest.NewRecorder()
 	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(rec, req)
@@ -966,7 +966,7 @@ INSERT INTO image_workload_links (
 
 	h := NewScanJobs(d, audit.New(pool))
 	body, _ := json.Marshal(EnqueueRequest{TargetType: "image", TargetRef: imageRef})
-	r := httptest.NewRequest("POST", "/api/v1/scan-jobs", bytes.NewReader(body))
+	r := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/scan-jobs", bytes.NewReader(body))
 	r = r.WithContext(authctx.WithSubject(r.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	h.Enqueue(w, r)
@@ -980,7 +980,7 @@ INSERT INTO image_workload_links (
 		t.Fatal(err)
 	}
 
-	r = httptest.NewRequest("POST", "/api/v1/scan-jobs/claim", nil)
+	r = httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/scan-jobs/claim", nil)
 	r.Header.Set("Authorization", "Bearer "+rawToken)
 	w = httptest.NewRecorder()
 	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(w, r)
@@ -1004,7 +1004,7 @@ INSERT INTO image_workload_links (
 			CanonicalEngine: "vulndb",
 		}},
 	})
-	r = httptest.NewRequest("POST", "/api/v1/scan-jobs/"+enqRes.ID.String()+"/complete", bytes.NewReader(completeBody))
+	r = httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/scan-jobs/"+enqRes.ID.String()+"/complete", bytes.NewReader(completeBody))
 	r.Header.Set("Authorization", "Bearer "+rawToken)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", enqRes.ID.String())
@@ -1056,7 +1056,7 @@ SELECT COUNT(DISTINCT r.id)::int, COUNT(f.id)::int, MIN(r.id::text)
 	}
 
 	imageResults := handler.NewImageScanResults(d)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/image-scan-results/"+resultID.String(), nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/image-scan-results/"+resultID.String(), nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	resultCtx := chi.NewRouteContext()
 	resultCtx.URLParams.Add("id", resultID.String())
@@ -1084,7 +1084,7 @@ SELECT COUNT(DISTINCT r.id)::int, COUNT(f.id)::int, MIN(r.id::text)
 		t.Fatalf("impacted workloads = %+v", resultDetail.ImpactedWorkloads)
 	}
 
-	csvReq := httptest.NewRequest(http.MethodGet, "/api/v1/image-scan-results/"+resultID.String()+"/findings.csv", nil)
+	csvReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/image-scan-results/"+resultID.String()+"/findings.csv", nil)
 	csvReq = csvReq.WithContext(authctx.WithSubject(csvReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	csvCtx := chi.NewRouteContext()
 	csvCtx.URLParams.Add("id", resultID.String())
@@ -1201,7 +1201,7 @@ SELECT EXISTS (
 
 	h := NewScanJobs(d, audit.New(pool))
 	body, _ := json.Marshal(EnqueueRequest{TargetType: "image", TargetRef: imageRef, Platform: "linux/amd64"})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs", bytes.NewReader(body))
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rec := httptest.NewRecorder()
 	h.Enqueue(rec, req)
@@ -1215,7 +1215,7 @@ SELECT EXISTS (
 		t.Fatal(err)
 	}
 
-	claimReq := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/claim", nil)
+	claimReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/claim", nil)
 	claimReq.Header.Set("Authorization", "Bearer "+rawToken)
 	claimRec := httptest.NewRecorder()
 	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(claimRec, claimReq)
@@ -1316,7 +1316,7 @@ SELECT EXISTS (
 		}
 	}
 	completeBody, _ := json.Marshal(completePayload)
-	completeReq := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/"+enqRes.ID.String()+"/complete", bytes.NewReader(completeBody))
+	completeReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/"+enqRes.ID.String()+"/complete", bytes.NewReader(completeBody))
 	completeReq.Header.Set("Authorization", "Bearer "+rawToken)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", enqRes.ID.String())
@@ -1384,7 +1384,7 @@ SELECT package_count, payload
 	if len(inventory.Packages[0].Locations) != 1 || inventory.Packages[0].Locations[0].LayerDigest != "sha256:1111111111111111111111111111111111111111111111111111111111111111" {
 		t.Fatalf("inventory package locations = %+v", inventory.Packages[0].Locations)
 	}
-	packagesReq := httptest.NewRequest(http.MethodGet, "/api/v1/image-scan-results/"+completeRes.ImageScanResultID.String()+"/packages", nil)
+	packagesReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/image-scan-results/"+completeRes.ImageScanResultID.String()+"/packages", nil)
 	packagesReq = packagesReq.WithContext(authctx.WithSubject(packagesReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	packagesCtx := chi.NewRouteContext()
 	packagesCtx.URLParams.Add("id", completeRes.ImageScanResultID.String())
@@ -1580,7 +1580,7 @@ SELECT package_count, payload
 	}
 
 	imageResults := handler.NewImageScanResults(d)
-	pkgReq := httptest.NewRequest(http.MethodGet, "/api/v1/image-scan-results/"+completeRes.ImageScanResultID.String()+"/packages", nil)
+	pkgReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/image-scan-results/"+completeRes.ImageScanResultID.String()+"/packages", nil)
 	pkgReq = pkgReq.WithContext(authctx.WithSubject(pkgReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	pkgCtx := chi.NewRouteContext()
 	pkgCtx.URLParams.Add("id", completeRes.ImageScanResultID.String())
@@ -1602,7 +1602,7 @@ SELECT package_count, payload
 		t.Fatalf("packages endpoint = %+v", pkgRes.PackageInventory.Packages)
 	}
 	if secretArtifactsEnabled {
-		secretReq := httptest.NewRequest(http.MethodGet, "/api/v1/image-scan-results/"+completeRes.ImageScanResultID.String()+"/secrets", nil)
+		secretReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/image-scan-results/"+completeRes.ImageScanResultID.String()+"/secrets", nil)
 		secretReq = secretReq.WithContext(authctx.WithSubject(secretReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 		secretCtx := chi.NewRouteContext()
 		secretCtx.URLParams.Add("id", completeRes.ImageScanResultID.String())
@@ -1617,7 +1617,7 @@ SELECT package_count, payload
 		}
 	}
 	if layerArtifactsEnabled {
-		layersReq := httptest.NewRequest(http.MethodGet, "/api/v1/image-scan-results/"+completeRes.ImageScanResultID.String()+"/layers", nil)
+		layersReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/image-scan-results/"+completeRes.ImageScanResultID.String()+"/layers", nil)
 		layersReq = layersReq.WithContext(authctx.WithSubject(layersReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 		layersCtx := chi.NewRouteContext()
 		layersCtx.URLParams.Add("id", completeRes.ImageScanResultID.String())
@@ -1632,7 +1632,7 @@ SELECT package_count, payload
 		}
 	}
 	if fileRiskArtifactsEnabled {
-		fileRiskReq := httptest.NewRequest(http.MethodGet, "/api/v1/image-scan-results/"+completeRes.ImageScanResultID.String()+"/file-risks", nil)
+		fileRiskReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/image-scan-results/"+completeRes.ImageScanResultID.String()+"/file-risks", nil)
 		fileRiskReq = fileRiskReq.WithContext(authctx.WithSubject(fileRiskReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 		fileRiskCtx := chi.NewRouteContext()
 		fileRiskCtx.URLParams.Add("id", completeRes.ImageScanResultID.String())
@@ -1647,7 +1647,7 @@ SELECT package_count, payload
 		}
 	}
 	if signatureArtifactsEnabled {
-		signatureReq := httptest.NewRequest(http.MethodGet, "/api/v1/image-scan-results/"+completeRes.ImageScanResultID.String()+"/signature", nil)
+		signatureReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/image-scan-results/"+completeRes.ImageScanResultID.String()+"/signature", nil)
 		signatureReq = signatureReq.WithContext(authctx.WithSubject(signatureReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 		signatureCtx := chi.NewRouteContext()
 		signatureCtx.URLParams.Add("id", completeRes.ImageScanResultID.String())
@@ -1672,7 +1672,7 @@ SELECT package_count, payload
 		{name: "spdx", path: "/api/v1/image-scan-results/" + completeRes.ImageScanResultID.String() + "/sbom/spdx", handler: imageResults.SPDX, field: "spdxVersion", want: "SPDX-2.3"},
 		{name: "cyclonedx", path: "/api/v1/image-scan-results/" + completeRes.ImageScanResultID.String() + "/sbom/cyclonedx", handler: imageResults.CycloneDX, field: "bomFormat", want: "CycloneDX"},
 	} {
-		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, tc.path, nil)
 		req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 		rctx := chi.NewRouteContext()
 		rctx.URLParams.Add("id", completeRes.ImageScanResultID.String())
@@ -1910,7 +1910,7 @@ func TestScanJobs_RepositorySourceImageScanPreservesProvenance(t *testing.T) {
 		Platform:   "linux/amd64",
 		Metadata:   metadata,
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs", bytes.NewReader(body))
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rec := httptest.NewRecorder()
 	h.Enqueue(rec, req)
@@ -1924,7 +1924,7 @@ func TestScanJobs_RepositorySourceImageScanPreservesProvenance(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/scan-jobs", nil)
+	listReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scan-jobs", nil)
 	listReq = listReq.WithContext(authctx.WithSubject(listReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	listRec := httptest.NewRecorder()
 	h.List(listRec, listReq)
@@ -1948,7 +1948,7 @@ func TestScanJobs_RepositorySourceImageScanPreservesProvenance(t *testing.T) {
 		t.Fatalf("listed repository job = %+v", listed)
 	}
 
-	claimReq := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/claim", nil)
+	claimReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/claim", nil)
 	claimReq.Header.Set("Authorization", "Bearer "+rawToken)
 	claimRec := httptest.NewRecorder()
 	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(claimRec, claimReq)
@@ -1987,7 +1987,7 @@ func TestScanJobs_RepositorySourceImageScanPreservesProvenance(t *testing.T) {
 			CanonicalEngine: "vulndb",
 		}},
 	})
-	completeReq := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/"+enqRes.ID.String()+"/complete", bytes.NewReader(completeBody))
+	completeReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/"+enqRes.ID.String()+"/complete", bytes.NewReader(completeBody))
 	completeReq.Header.Set("Authorization", "Bearer "+rawToken)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", enqRes.ID.String())
@@ -2013,7 +2013,7 @@ SELECT id, COALESCE(source_type, ''), COALESCE(source_ref, '')
 	}
 
 	imageResults := handler.NewImageScanResults(d)
-	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/image-scan-results/"+resultID.String(), nil)
+	getReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/image-scan-results/"+resultID.String(), nil)
 	getReq = getReq.WithContext(authctx.WithSubject(getReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	resultCtx := chi.NewRouteContext()
 	resultCtx.URLParams.Add("id", resultID.String())
@@ -2121,7 +2121,7 @@ INSERT INTO image_workload_links (
 		t.Fatal(err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/scan-targets/"+target.ID.String()+"/impacted-workloads", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scan-targets/"+target.ID.String()+"/impacted-workloads", nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", target.ID.String())
@@ -2193,7 +2193,7 @@ VALUES ($1, $2, 'image', 'registry.example.test/app:latest', 'manual', 'registry
 		t.Fatalf("scan jobs: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/scan-jobs", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scan-jobs", nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rec := httptest.NewRecorder()
 	NewScanJobs(d, audit.New(pool)).List(rec, req)
@@ -2327,7 +2327,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 	}
 
 	// Dashboard summary now counts the image vulns under the running cluster.
-	dashReq := httptest.NewRequest(http.MethodGet, "/api/v1/dashboard/summary?cluster_id="+clusterID.String(), nil)
+	dashReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/dashboard/summary?cluster_id="+clusterID.String(), nil)
 	dashReq = dashReq.WithContext(authctx.WithSubject(dashReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	dashRec := httptest.NewRecorder()
 	handler.NewDashboard(d).Summary(dashRec, dashReq)
@@ -2451,7 +2451,7 @@ VALUES ($1, $2, 'completed', NOW() - INTERVAL '7 minutes', NOW() - INTERVAL '6 m
 		t.Fatalf("scan jobs: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/scan/status", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scan/status", nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rec := httptest.NewRecorder()
 	NewScanJobs(d, audit.New(pool)).Status(rec, req)
@@ -2507,7 +2507,7 @@ VALUES ($1, $2, $3, 'canceled', $4, NOW() - INTERVAL '5 minutes', NOW() - INTERV
 	}
 	h := NewScanJobs(d, audit.New(pool))
 
-	completeReq := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/"+completeJobID.String()+"/complete", bytes.NewBufferString(`{}`))
+	completeReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/"+completeJobID.String()+"/complete", bytes.NewBufferString(`{}`))
 	completeReq.Header.Set("Authorization", "Bearer "+rawToken)
 	completeReq.Header.Set("X-Constellation-Scanner-Instance", "pod-a")
 	rctx := chi.NewRouteContext()
@@ -2522,7 +2522,7 @@ VALUES ($1, $2, $3, 'canceled', $4, NOW() - INTERVAL '5 minutes', NOW() - INTERV
 		t.Fatalf("complete canceled body = %s", completeRec.Body.String())
 	}
 
-	failReq := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/"+failJobID.String()+"/fail", bytes.NewBufferString(`{"error":"late scanner error"}`))
+	failReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/"+failJobID.String()+"/fail", bytes.NewBufferString(`{"error":"late scanner error"}`))
 	failReq.Header.Set("Authorization", "Bearer "+rawToken)
 	failReq.Header.Set("X-Constellation-Scanner-Instance", "pod-a")
 	rctx = chi.NewRouteContext()
@@ -2550,7 +2550,7 @@ func TestScannerTokenMiddleware_Rejects(t *testing.T) {
 	d := openTestDB(t)
 	defer d.Close()
 
-	r := httptest.NewRequest("POST", "/api/v1/scan-jobs/claim", nil)
+	r := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/scan-jobs/claim", nil)
 	r.Header.Set("Authorization", "Bearer not-a-real-token")
 	w := httptest.NewRecorder()
 	called := false

@@ -14,18 +14,18 @@ import (
 // NV's per-conversation peer list. Direction is relative to the workload: ingress = the peer
 // initiated to us, egress = we initiated to the peer.
 type peerDTO struct {
-	PeerIP     string  `json:"peer_ip"`
-	Peer       string  `json:"peer"`        // resolved workload id when the peer is in-cluster, else ""
-	FQDN       string  `json:"fqdn,omitempty"`
-	Direction  string  `json:"direction"`   // ingress | egress
-	External   bool    `json:"external"`
-	Bytes      int64   `json:"bytes"`
-	Sessions   int64   `json:"sessions"`
-	Packets    int64   `json:"packets"`
-	Ports      []int32 `json:"ports"`
+	PeerIP     string   `json:"peer_ip"`
+	Peer       string   `json:"peer"` // resolved workload id when the peer is in-cluster, else ""
+	FQDN       string   `json:"fqdn,omitempty"`
+	Direction  string   `json:"direction"` // ingress | egress
+	External   bool     `json:"external"`
+	Bytes      int64    `json:"bytes"`
+	Sessions   int64    `json:"sessions"`
+	Packets    int64    `json:"packets"`
+	Ports      []int32  `json:"ports"`
 	Protocols  []string `json:"protocols"`
-	Verdict    string  `json:"verdict"`
-	LastSeenAt string  `json:"last_seen_at"`
+	Verdict    string   `json:"verdict"`
+	LastSeenAt string   `json:"last_seen_at"`
 }
 
 // Peers lists every individual peer IP for a workload (both directions), with bytes / sessions /

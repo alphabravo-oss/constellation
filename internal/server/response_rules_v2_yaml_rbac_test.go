@@ -35,7 +35,7 @@ func TestResponseRulesV2YAMLRoutesRBACAndScope(t *testing.T) {
 	yamlBody := "api_version: constellation.io/v1\nkind: ResponseRules\nscope: cluster\nrules:\n  - name: yaml-rbac-rule\n    enabled: true\n    priority: 10\n    event_type: runtime\n    conditions: []\n    actions: []\n    workload_match: {}\n"
 	request := func(method, path, token, body string) (int, string) {
 		t.Helper()
-		httpRequest, err := http.NewRequest(method, server.URL+path, strings.NewReader(body))
+		httpRequest, err := http.NewRequestWithContext(t.Context(), method, server.URL+path, strings.NewReader(body))
 		if err != nil {
 			t.Fatal(err)
 		}

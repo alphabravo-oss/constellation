@@ -4,8 +4,9 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 )
 
 // EventsExport streams the org's findings and runtime threats as NDJSON (one

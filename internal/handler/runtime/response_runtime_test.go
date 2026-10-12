@@ -137,7 +137,7 @@ VALUES ($1, $2, $3, '', true, 'runtime', $4, $5, $6) RETURNING id`,
 	h := NewEventsIngest(d, audit.New(pool), bf).
 		WithResponseEngine(NewResponseDispatch(d, nil))
 
-	req := httptest.NewRequest("POST", "/api/v1/events:bulk?cluster_id="+clusterID.String(), bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/events:bulk?cluster_id="+clusterID.String(), bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+raw)
 	w := httptest.NewRecorder()
 	handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(h.Bulk)).ServeHTTP(w, req)
@@ -215,7 +215,7 @@ VALUES ($1, $2, $3, '', true, 'runtime', $4, $5, $6) RETURNING id`,
 		WithResponseEngine(NewResponseDispatch(d, nil)).
 		WithResponseDecision(NewResponseDecision(d))
 
-	req := httptest.NewRequest("POST", "/api/v1/events:bulk?cluster_id="+clusterID.String(), bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/events:bulk?cluster_id="+clusterID.String(), bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+raw)
 	w := httptest.NewRecorder()
 	handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(h.Bulk)).ServeHTTP(w, req)
@@ -326,7 +326,7 @@ VALUES ($1, $2, $3, '', true, 'runtime', $4, $5, $6) RETURNING id`,
 		WithResponseEngine(NewResponseDispatch(d, nil)).
 		WithResponseDecision(NewResponseDecision(d))
 
-	req := httptest.NewRequest("POST", "/api/v1/events:bulk?cluster_id="+clusterID.String(), bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/events:bulk?cluster_id="+clusterID.String(), bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+raw)
 	w := httptest.NewRecorder()
 	handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(h.Bulk)).ServeHTTP(w, req)

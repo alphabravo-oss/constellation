@@ -8,8 +8,9 @@ import (
 	"log/slog"
 	"sync/atomic"
 
-	"github.com/alphabravocompany/constellation/internal/runtime/dp"
 	"golang.org/x/sys/unix"
+
+	"github.com/alphabravocompany/constellation/internal/runtime/dp"
 )
 
 // ethPAll is ETH_P_ALL in network byte order, for the AF_PACKET socket protocol

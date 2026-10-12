@@ -19,7 +19,7 @@ func TestMigrationImportsExportRouteRBACAndContract(t *testing.T) {
 	if status, _ := doJSON(t, http.MethodGet, url, auditor, nil); status != http.StatusForbidden {
 		t.Fatalf("auditor export status=%d", status)
 	}
-	request, err := http.NewRequest(http.MethodGet, url, nil)
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

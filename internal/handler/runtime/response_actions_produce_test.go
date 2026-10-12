@@ -61,7 +61,7 @@ VALUES ($1, $2, $3, 'kill_process', $4, $5)`,
 	})
 
 	h := NewResponseActions(d)
-	req := httptest.NewRequest(http.MethodGet,
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
 		"/api/v1/runtime/response-actions:pending?cluster_id="+clusterID.String()+"&node=node-a", nil)
 	req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(), tokenA))
 	w := httptest.NewRecorder()
@@ -116,7 +116,7 @@ VALUES ($1, $2, 'node-a', 'kill_process', 'ns/api', 'pending') RETURNING id`,
 		ID: id.String(), Type: "kill_process", Node: "node-a", Applied: true, Reason: "", At: time.Now().UTC(),
 	})
 	h := NewResponseActions(d)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/runtime/response-actions:result", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/runtime/response-actions:result", bytes.NewReader(body))
 	req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(), token))
 	w := httptest.NewRecorder()
 	h.Result(w, req)
@@ -143,7 +143,7 @@ VALUES ($1, $2, 'kill_process', 'ns/api2', 'pending') RETURNING id`, orgID, clus
 		t.Fatalf("seed2: %v", err)
 	}
 	body2, _ := json.Marshal(responseActionResultWire{ID: id2.String(), Applied: true, At: time.Now().UTC()})
-	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/runtime/response-actions:result", bytes.NewReader(body2))
+	req2 := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/runtime/response-actions:result", bytes.NewReader(body2))
 	req2 = req2.WithContext(handler.WithRuntimeAgentToken(req2.Context(), &handler.RuntimeAgentToken{OrgID: uuid.New()}))
 	w2 := httptest.NewRecorder()
 	h.Result(w2, req2)

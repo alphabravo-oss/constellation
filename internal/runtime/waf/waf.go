@@ -64,13 +64,13 @@ type Operator = MatchExpr
 type Rule struct {
 	ID              int
 	Msg             string
-	Phase           string   // "request" | "response"
+	Phase           string // "request" | "response"
 	Severity        Severity
 	Transformations []string // "lowercase" | "urlDecode" | "trim" | "removeWhitespace"
 	Target          string   // see package comment
 	Operator        MatchExpr
 	Tags            []string
-	Action          string   // "block" | "alert"
+	Action          string // "block" | "alert"
 }
 
 // CfgType mirrors the NeuVector sensor library shape: federal, predefined, user.
@@ -93,9 +93,9 @@ type Sensor struct {
 
 // Verdict is the decision the engine returns for one request.
 type Verdict struct {
-	Action   string // "allow" | "alert" | "block"
-	Matches  []Match
-	Mode     baseline.Mode
+	Action  string // "allow" | "alert" | "block"
+	Matches []Match
+	Mode    baseline.Mode
 }
 
 // Match is one rule fire.

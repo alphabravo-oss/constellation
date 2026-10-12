@@ -7,14 +7,16 @@
 //	    --verify-key=cosign.pub --on-conflict=skip
 //
 // Modes for verification:
-//   --verify-key=<pubkey.pem>  (static-key)
-//   (default keyless)           when manifest.json.cert is present in the tarball;
-//                               cosign must be on PATH.
-//   --allow-unverified         to skip signature checks (DEV ONLY).
+//
+//	--verify-key=<pubkey.pem>  (static-key)
+//	(default keyless)           when manifest.json.cert is present in the tarball;
+//	                            cosign must be on PATH.
+//	--allow-unverified         to skip signature checks (DEV ONLY).
 //
 // Conflict policy:
-//   --on-conflict=skip          (default) preserve existing rows.
-//   --on-conflict=overwrite     update existing rows from the tarball.
+//
+//	--on-conflict=skip          (default) preserve existing rows.
+//	--on-conflict=overwrite     update existing rows from the tarball.
 //
 // The restorer applies tables in dependency order: orgs -> clusters -> deployments / assets
 // -> per-org tables (policies, groups, etc) -> audit_events_recent. FK columns are remapped
@@ -22,7 +24,8 @@
 // table's natural-key UNIQUE constraint.
 //
 // Per-table progress is printed to stdout in the form:
-//   clusters:  3 new / 0 updated / 2 skipped
+//
+//	clusters:  3 new / 0 updated / 2 skipped
 package main
 
 import (

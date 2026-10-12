@@ -6,9 +6,9 @@
 //
 // Strategy:
 //
-//   default action = DENY (PolicyActionDeny)
-//   for each unique observed (peer_ip, peer_port, protocol, direction):
-//     emit one rule with Action = ALLOW
+//	default action = DENY (PolicyActionDeny)
+//	for each unique observed (peer_ip, peer_port, protocol, direction):
+//	  emit one rule with Action = ALLOW
 //
 // Two-layer defense: a kube NetworkPolicy says "drop everything not on
 // this list" at the kube-proxy layer; dp's policy says "drop everything

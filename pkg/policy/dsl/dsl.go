@@ -94,11 +94,11 @@ type Scope struct {
 // Exclusion suppresses matches for a specific deployment / image / namespace.
 // Expiration is a hard cutoff: once past, the exclusion is no longer honored.
 type Exclusion struct {
-	Name        string     `json:"name,omitempty"`
-	Deployment  string     `json:"deployment,omitempty"`
-	Image       string     `json:"image,omitempty"`
-	Namespace   string     `json:"namespace,omitempty"`
-	Expiration  string     `json:"expiration,omitempty"` // RFC3339; empty => never expires
+	Name       string `json:"name,omitempty"`
+	Deployment string `json:"deployment,omitempty"`
+	Image      string `json:"image,omitempty"`
+	Namespace  string `json:"namespace,omitempty"`
+	Expiration string `json:"expiration,omitempty"` // RFC3339; empty => never expires
 }
 
 // Validate returns nil if the policy is structurally well-formed. Callers should

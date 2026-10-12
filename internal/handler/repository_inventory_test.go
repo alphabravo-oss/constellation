@@ -60,7 +60,7 @@ INSERT INTO users (id, org_id, email, display_name) VALUES ($1, $2, $3, 'Reposit
 			Purl:      "pkg:golang/golang.org/x/net@v0.21.0",
 		}},
 	})
-	reportReq := httptest.NewRequest(http.MethodPost, "/api/v1/repository-packages:report", bytes.NewReader(body))
+	reportReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/repository-packages:report", bytes.NewReader(body))
 	reportReq = reportReq.WithContext(WithSubject(reportReq.Context(), Subject{UserID: userID, OrgID: orgID}))
 	reportRec := httptest.NewRecorder()
 	NewRepositoryPackages(d).Report(reportRec, reportReq)
@@ -75,7 +75,7 @@ INSERT INTO users (id, org_id, email, display_name) VALUES ($1, $2, $3, 'Reposit
 	}
 
 	inventory := NewRepositoryInventory(d)
-	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/repository-scans?q=payments&branch=main&workflow=dependency-scan", nil)
+	listReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/repository-scans?q=payments&branch=main&workflow=dependency-scan", nil)
 	listReq = listReq.WithContext(WithSubject(listReq.Context(), Subject{UserID: userID, OrgID: orgID}))
 	listRec := httptest.NewRecorder()
 	inventory.List(listRec, listReq)
@@ -105,7 +105,7 @@ INSERT INTO users (id, org_id, email, display_name) VALUES ($1, $2, $3, 'Reposit
 		t.Fatalf("repository scan item = %+v", item)
 	}
 
-	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/repository-scans/"+report.ScanTargetID.String(), nil)
+	getReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/repository-scans/"+report.ScanTargetID.String(), nil)
 	getReq = getReq.WithContext(WithSubject(getReq.Context(), Subject{UserID: userID, OrgID: orgID}))
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", report.ScanTargetID.String())

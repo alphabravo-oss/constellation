@@ -26,7 +26,7 @@ func TestInit_PrometheusOnly(t *testing.T) {
 	}()
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/metrics", nil)
 	tel.MetricsHandler().ServeHTTP(rec, req)
 	if rec.Code != 200 {
 		t.Fatalf("metrics status %d", rec.Code)
@@ -95,7 +95,7 @@ func TestHTTPMiddleware_RecordsHistogram(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/things", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/things", nil)
 		req = SetRoutePattern(req, "/things")
 		h.ServeHTTP(rec, req)
 		if rec.Code != 204 {
@@ -108,7 +108,7 @@ func TestHTTPMiddleware_RecordsHistogram(t *testing.T) {
 
 	// Scrape metrics and assert the bucket appears.
 	rec := httptest.NewRecorder()
-	tel.MetricsHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	tel.MetricsHandler().ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/metrics", nil))
 	body := rec.Body.String()
 	if !strings.Contains(body, "constellation_http_request_duration_seconds") {
 		t.Fatalf("expected histogram in metrics output:\n%s", truncate(body, 2000))

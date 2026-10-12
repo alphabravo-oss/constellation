@@ -18,8 +18,8 @@ const AggregationWindow = 8 * time.Minute
 
 // defaultRegistries is the canonical list of registries treated as the docker default.
 var defaultRegistries = map[string]struct{}{
-	"https://docker.io/":           {},
-	"https://index.docker.io/":     {},
+	"https://docker.io/":            {},
+	"https://index.docker.io/":      {},
 	"https://registry-1.docker.io/": {},
 }
 
@@ -34,9 +34,9 @@ type ImageRef struct {
 
 // ContainerImage is one container-from-podspec ref, including sidecars and inits.
 type ContainerImage struct {
-	Name       string // container name from the pod spec
-	Role       string // "init" | "container" | "ephemeral"
-	Image      ImageRef
+	Name  string // container name from the pod spec
+	Role  string // "init" | "container" | "ephemeral"
+	Image ImageRef
 }
 
 // ParseReqImageName parses an image string in the same shape NeuVector's

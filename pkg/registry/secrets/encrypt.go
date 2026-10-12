@@ -141,8 +141,8 @@ func loadOrBootstrapKEK(ctx context.Context, pool *pgxpool.Pool, logger *slog.Lo
 		if existing, err := readFromSettings(ctx, pool); err == nil && len(existing) == keyLen {
 			if logger != nil {
 				logger.Warn(
-					"registry KEK loaded from org_settings (no env var). For production, set "+
-						EnvKEK+" in your service environment so the secret never lives in the database.",
+					"registry KEK loaded from org_settings (no env var). For production, set " +
+						EnvKEK + " in your service environment so the secret never lives in the database.",
 				)
 			}
 			return existing, nil

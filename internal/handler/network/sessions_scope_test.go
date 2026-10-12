@@ -68,7 +68,7 @@ func TestIngestSessionsUsesTokenClusterAndRejectsInvalidSnapshots(t *testing.T) 
 		if err != nil {
 			t.Fatal(err)
 		}
-		request := httptest.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, url, bytes.NewReader(body))
 		request = request.WithContext(handler.WithRuntimeAgentToken(request.Context(), token))
 		response := httptest.NewRecorder()
 		NewNetwork(database).IngestSessions(response, request)
@@ -193,7 +193,7 @@ func TestIngestSessionsAcceptsUnboundTokenForSingleCluster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/network-sessions:bulk", bytes.NewReader(body))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/network-sessions:bulk", bytes.NewReader(body))
 	request = request.WithContext(handler.WithRuntimeAgentToken(request.Context(), &handler.RuntimeAgentToken{ID: tokenID, OrgID: orgID}))
 	response := httptest.NewRecorder()
 	NewNetwork(database).IngestSessions(response, request)

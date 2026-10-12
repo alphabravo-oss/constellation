@@ -7,8 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 )
 
 func TestNetworkPolicyLifecyclePlatformRole(t *testing.T) {
@@ -34,7 +35,7 @@ func TestNetworkPolicyLifecyclePlatformRole(t *testing.T) {
 		($1, $2, 'security/agent', 'payments/api', 'tcp', 443, 'allow')`, orgID, clusterID); err != nil {
 		t.Fatal(err)
 	}
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/network/policies/lifecycle?cluster_id="+clusterID.String(), nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/network/policies/lifecycle?cluster_id="+clusterID.String(), nil)
 	request = request.WithContext(authctx.WithSubject(request.Context(), authctx.Subject{OrgID: orgID, UserID: uuid.New()}))
 	response := httptest.NewRecorder()
 	NewNetworkPolicies(database).List(response, request)

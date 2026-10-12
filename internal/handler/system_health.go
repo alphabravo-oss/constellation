@@ -456,6 +456,7 @@ func (h *SystemHealth) overlayHeartbeats(parent context.Context, out *systemHeal
 //   - degraded: scanner is alive but its local VulnDB/cache dependencies are not
 //     ready
 //   - healthy: otherwise
+//
 // loadRecentRestarts counts restart events per instance (component\x00hostname) in
 // the last hour, so crashloop scoring reflects restarting-right-now rather than the
 // lifetime restart_count. Returns an empty map on error (nothing flagged crashlooping).

@@ -117,7 +117,7 @@ func TestOutboundRequestShape(t *testing.T) {
 		t.Fatal(err)
 	}
 	sig, _ := signHMAC(rec.SecretKey, body, time.Now().UTC())
-	req, _ := http.NewRequest("POST", rec.Endpoint, strings.NewReader(string(body)))
+	req, _ := http.NewRequestWithContext(t.Context(), "POST", rec.Endpoint, strings.NewReader(string(body)))
 	req.Header.Set("Content-Type", ct)
 	req.Header.Set("X-Constellation-Signature", sig)
 	req.Header.Set("X-Constellation-Idempotency", ev.IdempotencyKey.String())

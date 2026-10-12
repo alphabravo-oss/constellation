@@ -53,7 +53,7 @@ VALUES ($1,$2,'ent3-joint','joint','pending',0) RETURNING id`,
 	}
 
 	// 1) A sync poll identifying the joint stamps last_sync_at and activates it.
-	r := httptest.NewRequest("GET", "/api/v1/federation/sync?since=0&cluster_id="+clusterID, nil)
+	r := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/federation/sync?since=0&cluster_id="+clusterID, nil)
 	r = r.WithContext(WithSubject(r.Context(), subj))
 	w := httptest.NewRecorder()
 	h.Sync(w, r)
@@ -87,7 +87,7 @@ VALUES ($1,$2,'ent3-joint','joint','pending',0) RETURNING id`,
 	}
 
 	// 3) Kick revokes the member.
-	r = httptest.NewRequest("DELETE", "/api/v1/federation/members/"+memberID.String(), nil)
+	r = httptest.NewRequestWithContext(t.Context(), "DELETE", "/api/v1/federation/members/"+memberID.String(), nil)
 	r = r.WithContext(WithSubject(r.Context(), subj))
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", memberID.String())
@@ -106,7 +106,7 @@ VALUES ($1,$2,'ent3-joint','joint','pending',0) RETURNING id`,
 
 	// 4) A subsequent sync poll from the kicked joint is rejected (403) and does not
 	//    re-activate the member.
-	r = httptest.NewRequest("GET", "/api/v1/federation/sync?since=0&cluster_id="+clusterID, nil)
+	r = httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/federation/sync?since=0&cluster_id="+clusterID, nil)
 	r = r.WithContext(WithSubject(r.Context(), subj))
 	w = httptest.NewRecorder()
 	h.Sync(w, r)
@@ -123,7 +123,7 @@ VALUES ($1,$2,'ent3-joint','joint','pending',0) RETURNING id`,
 
 func listMemberStatus(t *testing.T, h *Federation, subj Subject, clusterID string) string {
 	t.Helper()
-	r := httptest.NewRequest("GET", "/api/v1/federation/members", nil)
+	r := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/federation/members", nil)
 	r = r.WithContext(WithSubject(r.Context(), subj))
 	w := httptest.NewRecorder()
 	h.ListMembers(w, r)

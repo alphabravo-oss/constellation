@@ -6,8 +6,9 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/alphabravocompany/constellation/pkg/admission"
 	admissionv1 "k8s.io/api/admission/v1"
+
+	"github.com/alphabravocompany/constellation/pkg/admission"
 )
 
 func TestAdmissionPolicyRowsToRulesParsesSupportedRows(t *testing.T) {

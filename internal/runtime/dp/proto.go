@@ -14,19 +14,19 @@ const DPMsgSize = 8192
 // Message kinds, mirrored from defs.h DP_KIND_*. dp sends one of these in the
 // header's Kind field for every notification it emits on /tmp/ctrl_listen.sock.
 const (
-	KindAppUpdate              = 1
-	KindSessionList            = 2
-	KindSessionCount           = 3
-	KindDeviceCounter          = 4
-	KindMeterList              = 5
-	KindThreatLog              = 6
-	KindConnection             = 7
-	KindMacStats               = 8
-	KindDeviceStats            = 9
-	KindKeepAlive              = 10
-	KindFqdnUpdate             = 11
-	KindIPFqdnStorageUpdate    = 12
-	KindIPFqdnStorageRelease   = 13
+	KindAppUpdate            = 1
+	KindSessionList          = 2
+	KindSessionCount         = 3
+	KindDeviceCounter        = 4
+	KindMeterList            = 5
+	KindThreatLog            = 6
+	KindConnection           = 7
+	KindMacStats             = 8
+	KindDeviceStats          = 9
+	KindKeepAlive            = 10
+	KindFqdnUpdate           = 11
+	KindIPFqdnStorageUpdate  = 12
+	KindIPFqdnStorageRelease = 13
 )
 
 // kindName returns a human-readable label for a DP_KIND_* value. Falls back
@@ -392,40 +392,40 @@ const dpMsgSessionSize = 140
 // match defs.h exactly; not every dp field is plumbed up — we surface
 // what the flow ingest + threat path actually need.
 type Session struct {
-	ID           uint32
-	EPMAC        net.HardwareAddr
-	EtherType    uint16
-	ClientMAC    net.HardwareAddr
-	ServerMAC    net.HardwareAddr
-	ClientIP     net.IP
-	ServerIP     net.IP
-	ClientPort   uint16
-	ServerPort   uint16
-	ICMPCode     uint8
-	ICMPType     uint8
-	IPProto      uint8
-	ClientPkts   uint32
-	ServerPkts   uint32
-	ClientBytes  uint32
-	ServerBytes  uint32
+	ID             uint32
+	EPMAC          net.HardwareAddr
+	EtherType      uint16
+	ClientMAC      net.HardwareAddr
+	ServerMAC      net.HardwareAddr
+	ClientIP       net.IP
+	ServerIP       net.IP
+	ClientPort     uint16
+	ServerPort     uint16
+	ICMPCode       uint8
+	ICMPType       uint8
+	IPProto        uint8
+	ClientPkts     uint32
+	ServerPkts     uint32
+	ClientBytes    uint32
+	ServerBytes    uint32
 	ClientAsmPkts  uint32
 	ServerAsmPkts  uint32
 	ClientAsmBytes uint32
 	ServerAsmBytes uint32
-	ClientState  uint8
-	ServerState  uint8
-	Idle         uint16
-	Age          uint32
-	Life         uint16
-	Application  uint16
-	ThreatID     uint32
-	PolicyID     uint32
-	PolicyAction uint8
-	Severity     uint8
-	Flags        uint16
-	XffIP        net.IP
-	XffApp       uint16
-	XffPort      uint16
+	ClientState    uint8
+	ServerState    uint8
+	Idle           uint16
+	Age            uint32
+	Life           uint16
+	Application    uint16
+	ThreatID       uint32
+	PolicyID       uint32
+	PolicyAction   uint8
+	Severity       uint8
+	Flags          uint16
+	XffIP          net.IP
+	XffApp         uint16
+	XffPort        uint16
 }
 
 // decodeSessions parses one DPMsgSessionHdr + N DPMsgSession records.

@@ -199,8 +199,8 @@ type govulnMessage struct {
 }
 
 type govulnFinding struct {
-	OSV   string         `json:"osv"`
-	Trace []govulnFrame  `json:"trace"`
+	OSV   string        `json:"osv"`
+	Trace []govulnFrame `json:"trace"`
 }
 
 type govulnFrame struct {
@@ -210,9 +210,9 @@ type govulnFrame struct {
 }
 
 type osvRecord struct {
-	ID       string         `json:"id"`
-	Aliases  []string       `json:"aliases"`
-	Affected []osvAffected  `json:"affected"`
+	ID       string        `json:"id"`
+	Aliases  []string      `json:"aliases"`
+	Affected []osvAffected `json:"affected"`
 }
 
 type osvAffected struct {

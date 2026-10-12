@@ -55,7 +55,7 @@ VALUES ($1, $2, 'team/app', 'team', $3, $4) RETURNING id`,
 		{"ambiguous token", freeToken, http.StatusForbidden},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			claim := httptest.NewRequest(http.MethodGet, "/api/v1/runtime-pcap/claim?cluster_id="+clusterB.String()+"&node=node-a", nil)
+			claim := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/runtime-pcap/claim?cluster_id="+clusterB.String()+"&node=node-a", nil)
 			claim = claim.WithContext(handler.WithRuntimeAgentToken(claim.Context(), testCase.token))
 			claimResult := httptest.NewRecorder()
 			h.Claim(claimResult, claim)
@@ -63,7 +63,7 @@ VALUES ($1, $2, 'team/app', 'team', $3, $4) RETURNING id`,
 				t.Fatalf("claim status=%d body=%s", claimResult.Code, claimResult.Body.String())
 			}
 
-			upload := httptest.NewRequest(http.MethodPost, "/api/v1/runtime-pcap/"+runningID.String()+"/upload", bytes.NewBufferString("pcap bytes"))
+			upload := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/runtime-pcap/"+runningID.String()+"/upload", bytes.NewBufferString("pcap bytes"))
 			upload = upload.WithContext(handler.WithRuntimeAgentToken(upload.Context(), testCase.token))
 			uploadResult := httptest.NewRecorder()
 			h.Upload(uploadResult, upload)
@@ -71,7 +71,7 @@ VALUES ($1, $2, 'team/app', 'team', $3, $4) RETURNING id`,
 				t.Fatalf("upload status=%d body=%s", uploadResult.Code, uploadResult.Body.String())
 			}
 
-			status := httptest.NewRequest(http.MethodPost, "/api/v1/runtime-pcap/"+runningID.String()+"/status", bytes.NewBufferString(`{"status":"failed"}`))
+			status := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/runtime-pcap/"+runningID.String()+"/status", bytes.NewBufferString(`{"status":"failed"}`))
 			status = status.WithContext(handler.WithRuntimeAgentToken(status.Context(), testCase.token))
 			statusResult := httptest.NewRecorder()
 			h.UpdateStatus(statusResult, status)
@@ -101,7 +101,7 @@ VALUES ($1, $2, 'team/app', 'team', $3, 'running') RETURNING id`,
 			t.Fatal(err)
 		}
 	}
-	upload := httptest.NewRequest(http.MethodPost, "/api/v1/runtime-pcap/"+uploadID.String()+"/upload", bytes.NewBufferString("pcap bytes"))
+	upload := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/runtime-pcap/"+uploadID.String()+"/upload", bytes.NewBufferString("pcap bytes"))
 	upload = upload.WithContext(handler.WithRuntimeAgentToken(upload.Context(), tokenA))
 	uploadResult := httptest.NewRecorder()
 	h.Upload(uploadResult, upload)
@@ -112,7 +112,7 @@ VALUES ($1, $2, 'team/app', 'team', $3, 'running') RETURNING id`,
 	if err != nil || string(file) != "pcap bytes" {
 		t.Fatalf("bound upload file=%q err=%v", file, err)
 	}
-	status := httptest.NewRequest(http.MethodPost, "/api/v1/runtime-pcap/"+statusID.String()+"/status", bytes.NewBufferString(`{"status":"failed"}`))
+	status := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/runtime-pcap/"+statusID.String()+"/status", bytes.NewBufferString(`{"status":"failed"}`))
 	status = status.WithContext(handler.WithRuntimeAgentToken(status.Context(), tokenA))
 	statusResult := httptest.NewRecorder()
 	h.UpdateStatus(statusResult, status)

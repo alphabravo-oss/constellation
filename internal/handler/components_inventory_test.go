@@ -71,7 +71,7 @@ INSERT INTO component_heartbeats (
 		t.Fatalf("heartbeats: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/components?cluster_id="+clusterID.String(), nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/components?cluster_id="+clusterID.String(), nil)
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	rec := httptest.NewRecorder()
 	NewComponentsInventory(d).List(rec, req)
@@ -132,7 +132,7 @@ INSERT INTO component_heartbeats (
 	router := chi.NewRouter()
 	router.Get("/api/v1/components/{id}", NewComponentsInventory(d).Get)
 	router.Get("/api/v1/components/{id}/diagnostics", NewComponentsInventory(d).Diagnostics)
-	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/components/"+scannerID.String(), nil)
+	getReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/components/"+scannerID.String(), nil)
 	getReq = getReq.WithContext(WithSubject(getReq.Context(), Subject{UserID: userID, OrgID: orgID}))
 	getRec := httptest.NewRecorder()
 	router.ServeHTTP(getRec, getReq)
@@ -149,7 +149,7 @@ INSERT INTO component_heartbeats (
 		t.Fatalf("detail = %+v", detail.Component)
 	}
 
-	diagReq := httptest.NewRequest(http.MethodGet, "/api/v1/components/"+scannerID.String()+"/diagnostics", nil)
+	diagReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/components/"+scannerID.String()+"/diagnostics", nil)
 	diagReq = diagReq.WithContext(WithSubject(diagReq.Context(), Subject{UserID: userID, OrgID: orgID}))
 	diagRec := httptest.NewRecorder()
 	router.ServeHTTP(diagRec, diagReq)
@@ -197,7 +197,7 @@ INSERT INTO component_heartbeats (
 		t.Fatalf("debug gates = %+v", diag.Debug)
 	}
 
-	missingReq := httptest.NewRequest(http.MethodGet, "/api/v1/components/"+uuid.NewString()+"/diagnostics", nil)
+	missingReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/components/"+uuid.NewString()+"/diagnostics", nil)
 	missingReq = missingReq.WithContext(WithSubject(missingReq.Context(), Subject{UserID: userID, OrgID: orgID}))
 	missingRec := httptest.NewRecorder()
 	router.ServeHTTP(missingRec, missingReq)
@@ -273,7 +273,7 @@ func TestComponentsInventoryRequiredAndOptionalRoleRollups(t *testing.T) {
 		if cluster != nil {
 			path += "?cluster_id=" + cluster.String()
 		}
-		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
 		req = req.WithContext(WithSubject(req.Context(), subject))
 		rec := httptest.NewRecorder()
 		inventory.List(rec, req)
@@ -366,7 +366,7 @@ func TestComponentsInventoryRequiredAndOptionalRoleRollups(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/heartbeats", strings.NewReader(string(payload)))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/heartbeats", strings.NewReader(string(payload)))
 		req.Header.Set("Authorization", "Bearer "+scannerToken)
 		rec := httptest.NewRecorder()
 		ingestHandler.ServeHTTP(rec, req)
@@ -545,7 +545,7 @@ VALUES ($1, $2, $3, 'linux-node', 12, 1, 2, 3, '{"checks":[]}'::jsonb, $4)`,
 
 	router := chi.NewRouter()
 	router.Get("/api/v1/components/{id}/diagnostics", NewComponentsInventory(d).Diagnostics)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/components/"+heartbeatID.String()+"/diagnostics", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/components/"+heartbeatID.String()+"/diagnostics", nil)
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -644,7 +644,7 @@ VALUES ($1, $2, $3, $4, 'test', 'current-commit', $5, 60, $6::jsonb, $7, $7)`,
 	router.Get("/api/v1/components/{id}", inventory.Get)
 	router.Get("/api/v1/components/{id}/diagnostics", inventory.Diagnostics)
 	request := func(path string, authenticated bool) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
 		if authenticated {
 			req = req.WithContext(WithSubject(req.Context(), subject))
 		}

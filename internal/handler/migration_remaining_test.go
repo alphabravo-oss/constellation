@@ -9,9 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/pkg/audit"
-	"github.com/google/uuid"
 )
 
 const migrationRemainingSecret = "MIG1-credential-sentinel-do-not-persist"
@@ -81,7 +82,7 @@ func migrationRemainingPreviewCall(t *testing.T, h *Enterprise, subj Subject, ex
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/migration/preview", strings.NewReader(string(body)))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/migration/preview", strings.NewReader(string(body)))
 	if subj.OrgID != uuid.Nil {
 		req = req.WithContext(WithSubject(req.Context(), subj))
 	}
@@ -434,7 +435,7 @@ func TestMigrationRemainingVulnerabilityRollbackRestoresOriginal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/migration/preview", strings.NewReader(string(body)))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/migration/preview", strings.NewReader(string(body)))
 	req = req.WithContext(WithSubject(req.Context(), Subject{OrgID: f.org, UserID: f.user}))
 	w := httptest.NewRecorder()
 	f.h.MigrationPreview(w, req)

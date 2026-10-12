@@ -8,10 +8,11 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/alphabravocompany/constellation/internal/flowrollup"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/alphabravocompany/constellation/internal/flowrollup"
 )
 
 // PartitionManager keeps the big time-series tables (events, network_flows) healthy

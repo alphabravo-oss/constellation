@@ -40,11 +40,11 @@ type Schema struct {
 type FieldType string
 
 const (
-	FieldString  FieldType = "string"
-	FieldInt     FieldType = "int"
-	FieldFloat   FieldType = "float"
-	FieldTime    FieldType = "time"
-	FieldBool    FieldType = "bool"
+	FieldString FieldType = "string"
+	FieldInt    FieldType = "int"
+	FieldFloat  FieldType = "float"
+	FieldTime   FieldType = "time"
+	FieldBool   FieldType = "bool"
 )
 
 type Field struct {
@@ -145,7 +145,7 @@ func tokenize(q string) []token {
 			for j < len(q) && q[j] != '"' {
 				j++
 			}
-			out = append(out, token{kind: "ident", val: q[i : minInt(j+1, len(q))]})
+			out = append(out, token{kind: "ident", val: q[i:minInt(j+1, len(q))]})
 			i = j + 1
 		default:
 			j := i

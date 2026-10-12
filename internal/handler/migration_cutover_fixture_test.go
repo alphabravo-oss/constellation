@@ -73,7 +73,7 @@ func TestNeuVectorCutoverFixtureManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	previewRequest := httptest.NewRequest(http.MethodPost, "/api/v1/migration/preview", strings.NewReader(string(body)))
+	previewRequest := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/migration/preview", strings.NewReader(string(body)))
 	previewRequest = previewRequest.WithContext(WithSubject(previewRequest.Context(), Subject{OrgID: fixture.org, UserID: fixture.user}))
 	previewResponse := httptest.NewRecorder()
 	fixture.h.MigrationPreview(previewResponse, previewRequest)

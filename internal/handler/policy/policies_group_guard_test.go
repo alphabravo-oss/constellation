@@ -29,7 +29,7 @@ func rawPolicyRequest(t *testing.T, method, path string, body any, orgID, userID
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := httptest.NewRequest(method, path, bytes.NewReader(encoded))
+	request := httptest.NewRequestWithContext(t.Context(), method, path, bytes.NewReader(encoded))
 	if policyID != uuid.Nil {
 		route := chi.NewRouteContext()
 		route.URLParams.Add("id", policyID.String())

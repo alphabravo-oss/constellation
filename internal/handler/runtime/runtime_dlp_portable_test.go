@@ -57,7 +57,7 @@ func TestRuntimeDLPPortableSeparatesDLPAndSignatures(t *testing.T) {
 
 	subject := authctx.Subject{OrgID: orgID, UserID: userID}
 	dlpExport := httptest.NewRecorder()
-	dlpReq := httptest.NewRequest(http.MethodGet, "/api/v1/runtime-dlp-rules:export?cluster_id="+clusterID.String(), nil)
+	dlpReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/runtime-dlp-rules:export?cluster_id="+clusterID.String(), nil)
 	dlpReq = dlpReq.WithContext(authctx.WithSubject(dlpReq.Context(), subject))
 	NewRuntimeDLPHTTP(d, nil).Export(dlpExport, dlpReq)
 	if dlpExport.Code != http.StatusOK {
@@ -68,7 +68,7 @@ func TestRuntimeDLPPortableSeparatesDLPAndSignatures(t *testing.T) {
 	}
 
 	sigExport := httptest.NewRecorder()
-	sigReq := httptest.NewRequest(http.MethodGet, "/api/v1/runtime-signatures:export?cluster_id="+clusterID.String(), nil)
+	sigReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/runtime-signatures:export?cluster_id="+clusterID.String(), nil)
 	sigReq = sigReq.WithContext(authctx.WithSubject(sigReq.Context(), subject))
 	NewRuntimeSignaturesHTTP(d, nil).Export(sigExport, sigReq)
 	if sigExport.Code != http.StatusOK {
@@ -96,7 +96,7 @@ rules:
         context: uri
 `
 	importRec := httptest.NewRecorder()
-	importReq := httptest.NewRequest(http.MethodPost, "/api/v1/runtime-signatures:import?cluster_id="+importClusterID.String(), strings.NewReader(importBody))
+	importReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/runtime-signatures:import?cluster_id="+importClusterID.String(), strings.NewReader(importBody))
 	importReq = importReq.WithContext(authctx.WithSubject(importReq.Context(), subject))
 	NewRuntimeSignaturesHTTP(d, nil).Import(importRec, importReq)
 	if importRec.Code != http.StatusOK {

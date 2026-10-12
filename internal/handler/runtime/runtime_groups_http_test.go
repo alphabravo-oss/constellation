@@ -45,7 +45,7 @@ func TestGroupEdgesAuditAttemptFailurePreventsMutation(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		request := httptest.NewRequest(method, path, bytes.NewReader(payload))
+		request := httptest.NewRequestWithContext(t.Context(), method, path, bytes.NewReader(payload))
 		request = request.WithContext(authctx.WithSubject(request.Context(), authctx.Subject{OrgID: orgID, UserID: userID}))
 		response := httptest.NewRecorder()
 		serve(response, request)

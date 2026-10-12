@@ -41,7 +41,7 @@ func TestReceiptConcurrentReplayRollbackAndScope(t *testing.T) {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM telemetry_producers WHERE producer_id=$1`, producer)
 	}()
 	request := func(seq int64) *http.Request {
-		r := httptest.NewRequest("POST", "/", nil)
+		r := httptest.NewRequestWithContext(t.Context(), "POST", "/", nil)
 		r.Header.Set(ProducerHeader, producer.String())
 		r.Header.Set(SequenceHeader, strconv.FormatInt(seq, 10))
 		return r

@@ -83,7 +83,7 @@ VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`,
 			if err != nil {
 				t.Fatal(err)
 			}
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/heartbeats", strings.NewReader(string(body)))
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/heartbeats", strings.NewReader(string(body)))
 			req.Header.Set("Authorization", "Bearer "+tc.token)
 			rec := httptest.NewRecorder()
 			AnyServiceTokenMiddleware(pool)(http.HandlerFunc(NewHeartbeats(d, nil).Ingest)).ServeHTTP(rec, req)
@@ -166,7 +166,7 @@ func TestHeartbeatsScannerTokenClusterScope(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/heartbeats", strings.NewReader(string(body)))
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/heartbeats", strings.NewReader(string(body)))
 			req.Header.Set("Authorization", "Bearer "+raw)
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)
@@ -217,7 +217,7 @@ VALUES ($1, $2, 'legacy-scanner', $3)`, tokenID, orgID, hash); err != nil {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgID)
 	})
 
-	req := httptest.NewRequest("POST", "/api/v1/heartbeats", nil)
+	req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/heartbeats", nil)
 	req.Header.Set("Authorization", "Bearer "+raw)
 	w := httptest.NewRecorder()
 	AnyServiceTokenMiddleware(pool)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -258,7 +258,7 @@ VALUES ($1, $2, 'legacy-runtime', $3)`, tokenID, orgID, hash); err != nil {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgID)
 	})
 
-	req := httptest.NewRequest("POST", "/api/v1/heartbeats", nil)
+	req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/heartbeats", nil)
 	req.Header.Set("Authorization", "Bearer "+raw)
 	w := httptest.NewRecorder()
 	AnyServiceTokenMiddleware(pool)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -308,7 +308,7 @@ VALUES ($1, 'scanner-heartbeat', $2)`, orgID, hash); err != nil {
 			"hostname":"scanner-null-cluster",
 			"uptime_seconds":` + strconv.Itoa(uptime) + `
 		}`
-		req := httptest.NewRequest("POST", "/api/v1/heartbeats", strings.NewReader(body))
+		req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/heartbeats", strings.NewReader(body))
 		req.Header.Set("Authorization", "Bearer "+raw)
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, req)
@@ -381,7 +381,7 @@ VALUES ($1, 'scanner-heartbeat-cluster-name', $2)`, orgID, hash); err != nil {
 		"hostname":"scanner-cluster-name",
 		"uptime_seconds":10
 	}`
-	req := httptest.NewRequest("POST", "/api/v1/heartbeats", strings.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/heartbeats", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+raw)
 	w := httptest.NewRecorder()
 	AnyServiceTokenMiddleware(pool)(http.HandlerFunc(NewHeartbeats(d, nil).Ingest)).ServeHTTP(w, req)
@@ -438,7 +438,7 @@ VALUES ($1, 'scanner-heartbeat-metadata', $2)`, orgID, hash); err != nil {
 			"vulndb":{"enabled":true,"ready":true,"status":"ready","bundle_version":"fixture"}
 		}
 	}`
-	req := httptest.NewRequest("POST", "/api/v1/heartbeats", strings.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/heartbeats", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+raw)
 	w := httptest.NewRecorder()
 	AnyServiceTokenMiddleware(pool)(http.HandlerFunc(NewHeartbeats(d, nil).Ingest)).ServeHTTP(w, req)

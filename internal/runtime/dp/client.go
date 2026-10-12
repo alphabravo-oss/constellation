@@ -55,8 +55,12 @@ type tapPort struct {
 	EPMAC string `json:"epmac,omitempty"`
 }
 
-type addTapPortReq struct{ Add *tapPort `json:"ctrl_add_tap_port"` }
-type delTapPortReq struct{ Del *tapPort `json:"ctrl_del_tap_port"` }
+type addTapPortReq struct {
+	Add *tapPort `json:"ctrl_add_tap_port"`
+}
+type delTapPortReq struct {
+	Del *tapPort `json:"ctrl_del_tap_port"`
+}
 
 // clearSessionReq maps to dp's ctrl_clear_session (ctrl.c:1250). filter_id is the
 // dp session id to terminate; 0 would clear ALL sessions, so callers must pass a
@@ -71,9 +75,9 @@ type clearSessionPayload struct {
 // DPI_THRT_* enum indices (dpi/dpi_log.h) for the weak-TLS version signatures that
 // dp lets us toggle at runtime. These index the global threat_config[] table.
 const (
-	ThreatSSLv3   uint32 = 16 // DPI_THRT_SSL_VER_2OR3
-	ThreatTLS10   uint32 = 17 // DPI_THRT_SSL_TLS_1DOT0
-	ThreatTLS11   uint32 = 29 // DPI_THRT_SSL_TLS_1DOT1
+	ThreatSSLv3 uint32 = 16 // DPI_THRT_SSL_VER_2OR3
+	ThreatTLS10 uint32 = 17 // DPI_THRT_SSL_TLS_1DOT0
+	ThreatTLS11 uint32 = 29 // DPI_THRT_SSL_TLS_1DOT1
 )
 
 // setThreatReq maps to dp's ctrl_set_threat (ctrl.c): toggle a built-in DPI signature
@@ -107,7 +111,9 @@ type setDebugPayload struct {
 	Categories []string `json:"categories"`
 }
 
-type setDebugReq struct{ Set *setDebugPayload `json:"ctrl_set_debug"` }
+type setDebugReq struct {
+	Set *setDebugPayload `json:"ctrl_set_debug"`
+}
 
 // nfqPort is the JSON wire shape for ctrl_add_nfq_port / ctrl_del_nfq_port.
 // Mirrors neuvector/agent/dp/dp_apis.go DPNfqPort. NFQUEUE mode is the
@@ -128,8 +134,12 @@ type nfqPort struct {
 	JumboFrame *bool  `json:"jumboframe,omitempty"`
 }
 
-type addNfqPortReq struct{ Add *nfqPort `json:"ctrl_add_nfq_port"` }
-type delNfqPortReq struct{ Del *nfqPort `json:"ctrl_del_nfq_port"` }
+type addNfqPortReq struct {
+	Add *nfqPort `json:"ctrl_add_nfq_port"`
+}
+type delNfqPortReq struct {
+	Del *nfqPort `json:"ctrl_del_nfq_port"`
+}
 
 // macPip is one element of DPAddMAC.PIPS — a pod IP that dp should associate
 // with the registered MAC. Mirrors neuvector/agent/dp/dp_apis.go DPMacPip.
@@ -151,14 +161,18 @@ type addMACPayload struct {
 	PIPS   []macPip `json:"pips"`
 }
 
-type addMACReq struct{ Add *addMACPayload `json:"ctrl_add_mac"` }
+type addMACReq struct {
+	Add *addMACPayload `json:"ctrl_add_mac"`
+}
 
 type delMACPayload struct {
 	Iface string `json:"iface"`
 	MAC   string `json:"mac"`
 }
 
-type delMACReq struct{ Del *delMACPayload `json:"ctrl_del_mac"` }
+type delMACReq struct {
+	Del *delMACPayload `json:"ctrl_del_mac"`
+}
 
 // protoPortApp is one listening-port app hint in ctrl_cfg_mac.apps. Mirrors
 // the io_app_t seed fields dp reads in dp_ctrl_cfg_mac (third_party/neuvector/
@@ -183,7 +197,9 @@ type macConfig struct {
 	Apps []protoPortApp `json:"apps,omitempty"`
 }
 
-type cfgMACReq struct{ Cfg *macConfig `json:"ctrl_cfg_mac"` }
+type cfgMACReq struct {
+	Cfg *macConfig `json:"ctrl_cfg_mac"`
+}
 
 // dpClient owns the dial-bound unixgram socket that requests go out on and
 // replies arrive on. dp's responses to client requests come back on this
@@ -194,9 +210,9 @@ type dpClient struct {
 
 	// mu guards conn/seq state (connect/close/resetOnErr). It is held only
 	// briefly to fetch the conn pointer — never across socket I/O.
-	mu      sync.Mutex
-	conn    *net.UnixConn
-	seq     uint32 // last keepalive seq sent
+	mu       sync.Mutex
+	conn     *net.UnixConn
+	seq      uint32 // last keepalive seq sent
 	connWait time.Duration
 
 	// txMu serializes whole request/reply transactions on the single shared
@@ -558,7 +574,9 @@ func (c *dpClient) DelNfqPort(netns, iface string) error {
 // datagrams. The reply on the dp_client socket is just an empty ack; the
 // real data flows to our ipcServer which the supervisor wires to a
 // session-cache update.
-type listSessionsReq struct{ Empty struct{} `json:"ctrl_list_session"` }
+type listSessionsReq struct {
+	Empty struct{} `json:"ctrl_list_session"`
+}
 
 // ListSessions requests a session dump. Fire-and-forget: the records arrive
 // asynchronously on the notification path. Wave C1's supervisor polls this

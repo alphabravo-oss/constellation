@@ -1,8 +1,9 @@
 package netpolicy
 
 import (
-	netpolicy "github.com/alphabravocompany/constellation/pkg/netpolicy"
 	"testing"
+
+	netpolicy "github.com/alphabravocompany/constellation/pkg/netpolicy"
 )
 
 func TestObservedPolicyAddedLines_Dedup(t *testing.T) {

@@ -53,7 +53,7 @@ VALUES ($1, $2, 'privreg', 'ghcr', 'ghcr.io', 'static', $3)`,
 	h := NewRegistryCredentials(d, audit.New(pool))
 
 	call := func(handler *RegistryCredentials, orgID uuid.UUID, registryID string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/scanner/registry-credentials?registry_id="+registryID, nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scanner/registry-credentials?registry_id="+registryID, nil)
 		tok := &ScannerToken{ID: uuid.New(), OrgID: orgID, Name: "test-scanner"}
 		req = req.WithContext(context.WithValue(req.Context(), scannerTokenKey{}, tok))
 		rr := httptest.NewRecorder()

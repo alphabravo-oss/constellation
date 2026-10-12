@@ -26,85 +26,85 @@ import (
 // sessionUploadRow is the wire shape POSTed to /network-sessions:bulk. Field
 // tags mirror handler/network.sessionIngestRow — keep them in lockstep.
 type sessionUploadRow struct {
-	ID           int64  `json:"id"`
-	Node         string `json:"node,omitempty"`
-	EPMAC        string `json:"ep_mac,omitempty"`
-	EtherType    int    `json:"ether_type,omitempty"`
-	IPProto      int    `json:"ip_proto,omitempty"`
-	Application  int    `json:"application,omitempty"`
-	ClientMAC    string `json:"client_mac,omitempty"`
-	ServerMAC    string `json:"server_mac,omitempty"`
-	ClientIP     string `json:"client_ip,omitempty"`
-	ServerIP     string `json:"server_ip,omitempty"`
-	ClientPort   int    `json:"client_port,omitempty"`
-	ServerPort   int    `json:"server_port,omitempty"`
-	ICMPCode     int    `json:"icmp_code,omitempty"`
-	ICMPType     int    `json:"icmp_type,omitempty"`
-	ClientPkts   int64  `json:"client_pkts,omitempty"`
-	ServerPkts   int64  `json:"server_pkts,omitempty"`
-	ClientBytes  int64  `json:"client_bytes,omitempty"`
-	ServerBytes  int64  `json:"server_bytes,omitempty"`
-	ClientAsmPkts  int64 `json:"client_asm_pkts,omitempty"`
-	ServerAsmPkts  int64 `json:"server_asm_pkts,omitempty"`
-	ClientAsmBytes int64 `json:"client_asm_bytes,omitempty"`
-	ServerAsmBytes int64 `json:"server_asm_bytes,omitempty"`
-	ClientState  int    `json:"client_state,omitempty"`
-	ServerState  int    `json:"server_state,omitempty"`
-	Idle         int    `json:"idle,omitempty"`
-	Age          int    `json:"age,omitempty"`
-	Life         int    `json:"life,omitempty"`
-	ThreatID     int64  `json:"threat_id,omitempty"`
-	PolicyID     int64  `json:"policy_id,omitempty"`
-	PolicyAction int    `json:"policy_action,omitempty"`
-	Severity     int    `json:"severity,omitempty"`
-	Ingress      bool   `json:"ingress,omitempty"`
-	Tap          bool   `json:"tap,omitempty"`
-	MidStream    bool   `json:"mid_stream,omitempty"`
-	XffIP        string `json:"xff_ip,omitempty"`
-	XffApp       int    `json:"xff_app,omitempty"`
-	XffPort      int    `json:"xff_port,omitempty"`
+	ID             int64  `json:"id"`
+	Node           string `json:"node,omitempty"`
+	EPMAC          string `json:"ep_mac,omitempty"`
+	EtherType      int    `json:"ether_type,omitempty"`
+	IPProto        int    `json:"ip_proto,omitempty"`
+	Application    int    `json:"application,omitempty"`
+	ClientMAC      string `json:"client_mac,omitempty"`
+	ServerMAC      string `json:"server_mac,omitempty"`
+	ClientIP       string `json:"client_ip,omitempty"`
+	ServerIP       string `json:"server_ip,omitempty"`
+	ClientPort     int    `json:"client_port,omitempty"`
+	ServerPort     int    `json:"server_port,omitempty"`
+	ICMPCode       int    `json:"icmp_code,omitempty"`
+	ICMPType       int    `json:"icmp_type,omitempty"`
+	ClientPkts     int64  `json:"client_pkts,omitempty"`
+	ServerPkts     int64  `json:"server_pkts,omitempty"`
+	ClientBytes    int64  `json:"client_bytes,omitempty"`
+	ServerBytes    int64  `json:"server_bytes,omitempty"`
+	ClientAsmPkts  int64  `json:"client_asm_pkts,omitempty"`
+	ServerAsmPkts  int64  `json:"server_asm_pkts,omitempty"`
+	ClientAsmBytes int64  `json:"client_asm_bytes,omitempty"`
+	ServerAsmBytes int64  `json:"server_asm_bytes,omitempty"`
+	ClientState    int    `json:"client_state,omitempty"`
+	ServerState    int    `json:"server_state,omitempty"`
+	Idle           int    `json:"idle,omitempty"`
+	Age            int    `json:"age,omitempty"`
+	Life           int    `json:"life,omitempty"`
+	ThreatID       int64  `json:"threat_id,omitempty"`
+	PolicyID       int64  `json:"policy_id,omitempty"`
+	PolicyAction   int    `json:"policy_action,omitempty"`
+	Severity       int    `json:"severity,omitempty"`
+	Ingress        bool   `json:"ingress,omitempty"`
+	Tap            bool   `json:"tap,omitempty"`
+	MidStream      bool   `json:"mid_stream,omitempty"`
+	XffIP          string `json:"xff_ip,omitempty"`
+	XffApp         int    `json:"xff_app,omitempty"`
+	XffPort        int    `json:"xff_port,omitempty"`
 }
 
 // dp session Flags bits (NV defs.h DPSESS_FLAG_*).
 const (
-	dpSessIngress      = 0x0001 // DPSESS_FLAG_INGRESS
-	dpSessTap          = 0x0002 // DPSESS_FLAG_TAP
+	dpSessIngress       = 0x0001 // DPSESS_FLAG_INGRESS
+	dpSessTap           = 0x0002 // DPSESS_FLAG_TAP
 	dpSessFlagMidStream = 0x0004 // DPSESS_FLAG_MID
 )
 
 func dpSessionToRow(s *dp.Session, node string) sessionUploadRow {
 	row := sessionUploadRow{
-		ID:           int64(s.ID),
-		Node:         node,
-		EtherType:    int(s.EtherType),
-		IPProto:      int(s.IPProto),
-		Application:  int(s.Application),
-		ClientPort:   int(s.ClientPort),
-		ServerPort:   int(s.ServerPort),
-		ICMPCode:     int(s.ICMPCode),
-		ICMPType:     int(s.ICMPType),
-		ClientPkts:   int64(s.ClientPkts),
-		ServerPkts:   int64(s.ServerPkts),
-		ClientBytes:  int64(s.ClientBytes),
-		ServerBytes:  int64(s.ServerBytes),
+		ID:             int64(s.ID),
+		Node:           node,
+		EtherType:      int(s.EtherType),
+		IPProto:        int(s.IPProto),
+		Application:    int(s.Application),
+		ClientPort:     int(s.ClientPort),
+		ServerPort:     int(s.ServerPort),
+		ICMPCode:       int(s.ICMPCode),
+		ICMPType:       int(s.ICMPType),
+		ClientPkts:     int64(s.ClientPkts),
+		ServerPkts:     int64(s.ServerPkts),
+		ClientBytes:    int64(s.ClientBytes),
+		ServerBytes:    int64(s.ServerBytes),
 		ClientAsmPkts:  int64(s.ClientAsmPkts),
 		ServerAsmPkts:  int64(s.ServerAsmPkts),
 		ClientAsmBytes: int64(s.ClientAsmBytes),
 		ServerAsmBytes: int64(s.ServerAsmBytes),
-		ClientState:  int(s.ClientState),
-		ServerState:  int(s.ServerState),
-		Idle:         int(s.Idle),
-		Age:          int(s.Age),
-		Life:         int(s.Life),
-		ThreatID:     int64(s.ThreatID),
-		PolicyID:     int64(s.PolicyID),
-		PolicyAction: int(s.PolicyAction),
-		Severity:     int(s.Severity),
-		Ingress:      s.Flags&dpSessIngress != 0,
-		Tap:          s.Flags&dpSessTap != 0,
-		MidStream:    s.Flags&dpSessFlagMidStream != 0,
-		XffApp:       int(s.XffApp),
-		XffPort:      int(s.XffPort),
+		ClientState:    int(s.ClientState),
+		ServerState:    int(s.ServerState),
+		Idle:           int(s.Idle),
+		Age:            int(s.Age),
+		Life:           int(s.Life),
+		ThreatID:       int64(s.ThreatID),
+		PolicyID:       int64(s.PolicyID),
+		PolicyAction:   int(s.PolicyAction),
+		Severity:       int(s.Severity),
+		Ingress:        s.Flags&dpSessIngress != 0,
+		Tap:            s.Flags&dpSessTap != 0,
+		MidStream:      s.Flags&dpSessFlagMidStream != 0,
+		XffApp:         int(s.XffApp),
+		XffPort:        int(s.XffPort),
 	}
 	if s.EPMAC != nil {
 		row.EPMAC = strings.ToLower(s.EPMAC.String())

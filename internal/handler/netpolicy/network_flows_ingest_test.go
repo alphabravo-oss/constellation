@@ -77,7 +77,7 @@ func TestNetworkFlowsIngest_DPFields(t *testing.T) {
 	}})
 
 	h := NewNetworkFlowsIngest(d)
-	req := httptest.NewRequest("POST", "/api/v1/network-flows:bulk", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/network-flows:bulk", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+raw)
 	w := httptest.NewRecorder()
 	handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(h.Bulk)).ServeHTTP(w, req)
@@ -97,7 +97,7 @@ func TestNetworkFlowsIngest_DPFields(t *testing.T) {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM telemetry_producers WHERE producer_id=$1`, producer)
 	})
 	for range 2 {
-		request := httptest.NewRequest("POST", "/api/v1/network-flows:bulk", bytes.NewReader(replayBody))
+		request := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/network-flows:bulk", bytes.NewReader(replayBody))
 		request.Header.Set("Authorization", "Bearer "+raw)
 		request.Header.Set("X-Constellation-Producer", producer)
 		request.Header.Set("X-Constellation-Sequence", "1")
@@ -199,7 +199,7 @@ func TestNetworkFlowsIngestLateObservationReachesRollup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/network-flows:bulk", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/network-flows:bulk", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+raw)
 	w := httptest.NewRecorder()
 	h := NewNetworkFlowsIngest(d)
@@ -273,7 +273,7 @@ func TestNetworkFlowsIngest_HubbleSource(t *testing.T) {
 	})
 
 	h := NewNetworkFlowsIngest(d)
-	req := httptest.NewRequest("POST", "/api/v1/network-flows:bulk", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/network-flows:bulk", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+raw)
 	w := httptest.NewRecorder()
 	handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(h.Bulk)).ServeHTTP(w, req)
@@ -350,7 +350,7 @@ func TestNetworkFlowsIngest_LegacyBPFStillWorks(t *testing.T) {
 		// No Source field → defaults to "bpf". No client_bytes/etc.
 	}})
 	h := NewNetworkFlowsIngest(d)
-	req := httptest.NewRequest("POST", "/api/v1/network-flows:bulk", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/network-flows:bulk", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+raw)
 	w := httptest.NewRecorder()
 	handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(h.Bulk)).ServeHTTP(w, req)

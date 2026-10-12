@@ -39,7 +39,7 @@ func TestResponseRulesV2YAMLImportAuditAttemptDoesNotBlockOrgLock(t *testing.T) 
 	fixture := responseRulesYAMLFixture("global", "  - name: deadline-rule\n    enabled: true\n    priority: 10\n    event_type: runtime\n    conditions: []\n    actions: []\n    workload_match: {}\n")
 	contextWithDeadline, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	request := withSubj(httptest.NewRequest(http.MethodPost, "/api/v1/response-rules-v2:import", strings.NewReader(fixture)).WithContext(contextWithDeadline), orgID, userID)
+	request := withSubj(httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/response-rules-v2:import", strings.NewReader(fixture)).WithContext(contextWithDeadline), orgID, userID)
 	request.Header.Set("Content-Type", "application/yaml")
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
@@ -255,14 +255,14 @@ func TestResponseRulesV2YAMLRejectsUnsafeDocumentsAndAuditUnavailable(t *testing
 	if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM response_rules_v2 WHERE org_id=$1`, orgID).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("audit unavailable persisted %d rules: %v", count, err)
 	}
-	request := withSubj(httptest.NewRequest(http.MethodPost, "/api/v1/response-rules-v2:import", strings.NewReader(base)), orgID, userID)
+	request := withSubj(httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/response-rules-v2:import", strings.NewReader(base)), orgID, userID)
 	request.Header.Set("Content-Type", "application/json")
 	response = httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	if response.Code != http.StatusUnsupportedMediaType {
 		t.Fatalf("non-YAML media type status=%d body=%s", response.Code, response.Body.String())
 	}
-	request = withSubj(httptest.NewRequest(http.MethodPost, "/api/v1/response-rules-v2:import", strings.NewReader(base)), orgID, userID)
+	request = withSubj(httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/response-rules-v2:import", strings.NewReader(base)), orgID, userID)
 	request.Header.Set("Content-Type", "application/yaml; charset=iso-8859-1")
 	response = httptest.NewRecorder()
 	router.ServeHTTP(response, request)

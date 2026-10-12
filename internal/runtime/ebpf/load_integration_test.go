@@ -14,8 +14,9 @@ import (
 //   - runtime.bpf.o compiled (run `make -C internal/runtime/ebpf/bpf` first)
 //
 // Run with:
-//   sudo -E env "PATH=$PATH" go test -tags=linux,integration \
-//       ./internal/runtime/ebpf/... -run TestLoad
+//
+//	sudo -E env "PATH=$PATH" go test -tags=linux,integration \
+//	    ./internal/runtime/ebpf/... -run TestLoad
 func TestLoad(t *testing.T) {
 	a, err := New(Options{
 		AttachExec: true, AttachNetwork: true, AttachFile: true,

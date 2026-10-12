@@ -161,7 +161,7 @@ func TestMigrationRemainingRollbackRefusesOperatorChanges(t *testing.T) {
 
 func TestMigrationRemainingDuplicateNamesAreUnsupported(t *testing.T) {
 	export := `{"vulnerability_profiles":[{"name":"same","entries":[{"name":"CVE-2026-1"}]},{"name":"same","entries":[{"name":"CVE-2026-2"}]}],"registries":[{"name":"same","registry_type":"harbor","registry":"https://first.example.com"},{"name":"same","registry_type":"harbor","registry":"https://second.example.com"}]}`
-	profiles, registries, unsupported, err := NewEnterprise().convertMigrationRemaining(httptest.NewRequest(http.MethodPost, "/migration/preview", nil), Subject{}.OrgID, "neuvector", []byte(export), "")
+	profiles, registries, unsupported, err := NewEnterprise().convertMigrationRemaining(httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/migration/preview", nil), Subject{}.OrgID, "neuvector", []byte(export), "")
 	if err != nil || len(profiles) != 0 || len(registries) != 0 || len(unsupported) != 4 {
 		t.Fatalf("ambiguous duplicate names were accepted: profiles=%v registries=%v unsupported=%v error=%v", profiles, registries, unsupported, err)
 	}

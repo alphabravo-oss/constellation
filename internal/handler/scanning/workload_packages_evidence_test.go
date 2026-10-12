@@ -4,12 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/alphabravocompany/constellation/internal/handler"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/handler"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -77,7 +78,7 @@ func TestWorkloadPackagesReportQueuesScanEvidence(t *testing.T) {
 	d := openTestDB(t)
 	defer d.Close()
 
-	ctx := httptest.NewRequest("GET", "/", nil).Context()
+	ctx := httptest.NewRequestWithContext(t.Context(), "GET", "/", nil).Context()
 	pool := d.Pool()
 	var regclass string
 	if err := pool.QueryRow(ctx, `SELECT COALESCE(to_regclass('public.scan_evidence')::text, '')`).Scan(&regclass); err != nil || regclass == "" {
@@ -153,7 +154,7 @@ INSERT INTO image_workload_links (
 			}},
 		}},
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/workload-packages:report", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/workload-packages:report", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+runtimeToken)
 	rec := httptest.NewRecorder()
 	handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(NewWorkloadPackages(d).Report)).ServeHTTP(rec, req)
@@ -202,7 +203,7 @@ INSERT INTO image_workload_links (
 	}
 	claims := map[string]claimResponse{}
 	for i := 0; i < 2; i++ {
-		req = httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/claim", nil)
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/claim", nil)
 		req.Header.Set("Authorization", "Bearer "+scannerToken)
 		rec = httptest.NewRecorder()
 		handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(jobs.Claim)).ServeHTTP(rec, req)
@@ -232,7 +233,7 @@ INSERT INTO image_workload_links (
 	}
 
 	evidence := handler.NewScanEvidence(d)
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/scan-evidence/"+report.ScanEvidenceID.String(), nil)
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scan-evidence/"+report.ScanEvidenceID.String(), nil)
 	req.Header.Set("Authorization", "Bearer "+scannerToken)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", report.ScanEvidenceID.String())
@@ -269,7 +270,7 @@ INSERT INTO image_workload_links (
 		t.Fatalf("packages = %+v", evidenceRes.Packages)
 	}
 
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/scan-evidence/"+report.ImageScanTargets[0].ScanEvidenceID.String(), nil)
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scan-evidence/"+report.ImageScanTargets[0].ScanEvidenceID.String(), nil)
 	req.Header.Set("Authorization", "Bearer "+scannerToken)
 	rctx = chi.NewRouteContext()
 	rctx.URLParams.Add("id", report.ImageScanTargets[0].ScanEvidenceID.String())

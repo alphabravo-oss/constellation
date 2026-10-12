@@ -117,7 +117,7 @@ VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`,
 		FileSizeMB: 25,
 	})
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/runtime-pcap/start", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/runtime-pcap/start", bytes.NewReader(body))
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	h.Start(rec, req)
 	if rec.Code != http.StatusCreated {
@@ -134,7 +134,7 @@ VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`,
 	}
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet,
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodGet,
 		"/api/v1/runtime-pcap?cluster_id="+clusterID.String()+"&status=pending&protocol=tcp&src_ip=10.0.0.5&dst_port=443",
 		nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
@@ -167,7 +167,7 @@ VALUES ($1, $2, 'inventory/api', 'inventory', $3, 30, 'completed')`,
 		t.Fatalf("other capture: %v", err)
 	}
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet,
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodGet,
 		"/api/v1/runtime-pcap?cluster_id="+clusterID.String()+"&group="+groupID.String(),
 		nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
@@ -191,7 +191,7 @@ VALUES ($1, $2, 'inventory/api', 'inventory', $3, 30, 'completed')`,
 	}
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/runtime-pcap/claim?cluster_id="+clusterID.String()+"&node=node-a", nil)
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/runtime-pcap/claim?cluster_id="+clusterID.String()+"&node=node-a", nil)
 	req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(), &handler.RuntimeAgentToken{ID: tokenID, OrgID: orgID, Name: "agent"}))
 	h.Claim(rec, req)
 	if rec.Code != http.StatusOK {

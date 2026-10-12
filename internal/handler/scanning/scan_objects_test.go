@@ -38,7 +38,7 @@ func TestScanObjects_TriggerQueuesEvidenceBackedTargets(t *testing.T) {
 	h := NewScanJobs(d, nil)
 	subj := authctx.Subject{UserID: userID, OrgID: orgID}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/scan/host/"+hostRef+"?cluster_id="+clusterID.String(), nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan/host/"+hostRef+"?cluster_id="+clusterID.String(), nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), subj))
 	req = withRouteParam(req, "id", hostRef)
 	rec := httptest.NewRecorder()
@@ -54,7 +54,7 @@ func TestScanObjects_TriggerQueuesEvidenceBackedTargets(t *testing.T) {
 		t.Fatalf("host trigger = %+v target=%s evidence=%s", hostOut, hostTargetID, hostEvidenceID)
 	}
 
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/scan/host/"+hostRef+"?cluster_id="+clusterID.String(), nil)
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan/host/"+hostRef+"?cluster_id="+clusterID.String(), nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), subj))
 	req = withRouteParam(req, "id", hostRef)
 	rec = httptest.NewRecorder()
@@ -78,7 +78,7 @@ SELECT COUNT(*)::int FROM scan_jobs WHERE org_id = $1 AND target_id = $2 AND sta
 		t.Fatalf("pending host jobs = %d, want 1", pending)
 	}
 
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/scan/workload/"+workloadRef+"?cluster_id="+clusterID.String(), nil)
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan/workload/"+workloadRef+"?cluster_id="+clusterID.String(), nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), subj))
 	req = withRouteParam(req, "id", workloadRef)
 	rec = httptest.NewRecorder()
@@ -94,7 +94,7 @@ SELECT COUNT(*)::int FROM scan_jobs WHERE org_id = $1 AND target_id = $2 AND sta
 		t.Fatalf("workload trigger = %+v target=%s", workloadOut, workloadTargetID)
 	}
 
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/scan/platform/platform", nil)
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan/platform/platform", nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), subj))
 	rec = httptest.NewRecorder()
 	h.TriggerPlatform(rec, req)
@@ -160,7 +160,7 @@ INSERT INTO findings (
 	}
 
 	h := NewScanJobs(d, nil)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/scan/host/"+hostRef+"?cluster_id="+clusterID.String(), nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scan/host/"+hostRef+"?cluster_id="+clusterID.String(), nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	req = withRouteParam(req, "id", hostRef)
 	rec := httptest.NewRecorder()
@@ -184,7 +184,7 @@ INSERT INTO findings (
 	}
 
 	missingRef := "payments/pod/missing-" + uuid.NewString()
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/scan/workload/"+missingRef, nil)
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scan/workload/"+missingRef, nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	req = withRouteParam(req, "id", missingRef)
 	rec = httptest.NewRecorder()
@@ -217,7 +217,7 @@ INSERT INTO scan_jobs (id, org_id, target_id, status, package_count, finding_cou
 VALUES ($1, $2, $3, 'completed', 4, 0, $4)`, uuid.New(), orgID, platformTargetID, now); err != nil {
 		t.Fatal(err)
 	}
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/scan/platform", nil)
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scan/platform", nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rec = httptest.NewRecorder()
 	h.PlatformSummary(rec, req)
@@ -306,7 +306,7 @@ INSERT INTO findings (
 		t.Fatalf("foreign-linked vulnerabilities = %+v, err = %v", vulnerabilities, err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/scan/host/"+foreignRef+"?cluster_id="+clusterID.String(), nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan/host/"+foreignRef+"?cluster_id="+clusterID.String(), nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	req = withRouteParam(req, "id", foreignRef)
 	rec := httptest.NewRecorder()

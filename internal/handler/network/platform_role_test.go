@@ -7,8 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 )
 
 func TestNetworkMapPlatformRole(t *testing.T) {
@@ -29,7 +30,7 @@ func TestNetworkMapPlatformRole(t *testing.T) {
 		($1, $2, 'payments', 'api', 'Deployment', '{}'::jsonb)`, orgID, clusterID); err != nil {
 		t.Fatal(err)
 	}
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/network/map?cluster_id="+clusterID.String(), nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/network/map?cluster_id="+clusterID.String(), nil)
 	request = request.WithContext(authctx.WithSubject(request.Context(), authctx.Subject{OrgID: orgID, UserID: uuid.New()}))
 	response := httptest.NewRecorder()
 	NewNetwork(database).Map(response, request)
@@ -63,7 +64,7 @@ func TestNetworkMapPlatformRole(t *testing.T) {
 		($1, $2, 'external', 'operations/houston', '8.8.8.8', '10.0.0.10', 'tcp', 443, 1)`, orgID, clusterID); err != nil {
 		t.Fatal(err)
 	}
-	request = httptest.NewRequest(http.MethodGet, "/api/v1/network/exposure?cluster_id="+clusterID.String(), nil)
+	request = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/network/exposure?cluster_id="+clusterID.String(), nil)
 	request = request.WithContext(authctx.WithSubject(request.Context(), authctx.Subject{OrgID: orgID, UserID: uuid.New()}))
 	response = httptest.NewRecorder()
 	NewNetwork(database).Exposure(response, request)

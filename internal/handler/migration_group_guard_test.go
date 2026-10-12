@@ -103,7 +103,7 @@ func TestMigrationNetworkEdgeReferentsAreScopedAndLocked(t *testing.T) {
 	if _, err := fixture.d.Pool().Exec(context.Background(), `INSERT INTO groups (org_id, cluster_id, name, kind) VALUES ($1,$2,'foreign-only','ground')`, foreignOrg, foreignCluster); err != nil {
 		t.Fatal(err)
 	}
-	request := httptest.NewRequest(http.MethodPost, "/migration/apply", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/migration/apply", nil)
 	for _, destination := range []string{"missing", "other-cluster", "foreign-only"} {
 		tx, err := fixture.d.Pool().Begin(context.Background())
 		if err != nil {
@@ -146,7 +146,7 @@ func TestMigrationNetworkEdgeReferentsAreScopedAndLocked(t *testing.T) {
 func TestMigrationRollbackRejectsExternallyReferencedGroupAndMissingEdgeReferent(t *testing.T) {
 	fixture := newMigrationGroupGuardFixture(t)
 	groupID := fixture.seedGroup("guard-api", fixture.cluster)
-	request := httptest.NewRequest(http.MethodPost, "/migration/rollback", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/migration/rollback", nil)
 	fixture.seedEdge("guard-api", "external")
 	tx, err := fixture.d.Pool().Begin(context.Background())
 	if err != nil {
@@ -248,7 +248,7 @@ func TestMigrationGroupReferenceLockWaitsForConcurrentWriter(t *testing.T) {
 	defer tx.Rollback(context.Background())
 	result := make(chan error, 1)
 	go func() {
-		result <- lockMigrationGroupReferences(httptest.NewRequest(http.MethodPost, "/migration/apply", nil), tx, fixture.org, true, true)
+		result <- lockMigrationGroupReferences(httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/migration/apply", nil), tx, fixture.org, true, true)
 	}()
 	select {
 	case err := <-result:
@@ -284,7 +284,7 @@ func TestMigrationGroupReferenceLockRejectsConcurrentOrgDelete(t *testing.T) {
 	}
 	defer tx.Rollback(context.Background())
 	started := time.Now()
-	err = lockMigrationGroupReferences(httptest.NewRequest(http.MethodPost, "/migration/apply", nil), tx, fixture.org, true, false)
+	err = lockMigrationGroupReferences(httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/migration/apply", nil), tx, fixture.org, true, false)
 	if !errors.Is(err, errMigrationGroupConflict) || time.Since(started) > time.Second {
 		t.Fatalf("concurrent organization delete did not yield a prompt conflict: %v", err)
 	}

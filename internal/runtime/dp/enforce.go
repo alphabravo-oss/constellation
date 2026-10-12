@@ -4,17 +4,17 @@
 // observation. The desired set comes from an EnforceProvider; the
 // reconciler diffs against the current set and:
 //
-//   add new entry:
-//     1. allocate a queue number from QnumAllocator
-//     2. tell dp to bind its NFQUEUE listener via AddNfqPort
-//     3. tell dp the workload identity via AddMAC
-//     4. install iptables PREROUTING + POSTROUTING rules with --queue-bypass
+//	add new entry:
+//	  1. allocate a queue number from QnumAllocator
+//	  2. tell dp to bind its NFQUEUE listener via AddNfqPort
+//	  3. tell dp the workload identity via AddMAC
+//	  4. install iptables PREROUTING + POSTROUTING rules with --queue-bypass
 //
-//   remove gone entry:
-//     1. drop the iptables rules (fail-open: if dp dies before this
-//        completes, --queue-bypass keeps the pod connected)
-//     2. tell dp to release the NFQUEUE via DelNfqPort + DelMAC
-//     3. release the queue number
+//	remove gone entry:
+//	  1. drop the iptables rules (fail-open: if dp dies before this
+//	     completes, --queue-bypass keeps the pod connected)
+//	  2. tell dp to release the NFQUEUE via DelNfqPort + DelMAC
+//	  3. release the queue number
 //
 // The policy state machine (Wave A5) decides which workloads belong in
 // the desired set — typically "every workload with an enforce-mode
@@ -87,8 +87,8 @@ type enforceManager struct {
 	logger   *slog.Logger
 	interval time.Duration
 
-	ipt    *ipt
-	qnums  *QnumAllocator
+	ipt   *ipt
+	qnums *QnumAllocator
 
 	mu      sync.Mutex
 	current map[string]EnforceTarget // key → target known to dp (with assigned Qnum)

@@ -124,7 +124,7 @@ VALUES ($1, $2, $3, 'Revoke Admin', 0)`, userID, orgID, email); err != nil {
 // getMe issues GET /api/v1/auth/me with the bearer and returns the status code.
 func getMe(t *testing.T, baseURL, bearer string) int {
 	t.Helper()
-	req, err := http.NewRequest(http.MethodGet, baseURL+"/api/v1/auth/me", nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, baseURL+"/api/v1/auth/me", nil)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestAuthMiddleware_LogoutInvalidatesJWT(t *testing.T) {
 
 	tok := issueFor(t, signer, userID, orgID, 0)
 	// Logout with the token bumps the epoch server-side.
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/auth/logout", nil)
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, ts.URL+"/api/v1/auth/logout", nil)
 	req.Header.Set("Authorization", "Bearer "+tok)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

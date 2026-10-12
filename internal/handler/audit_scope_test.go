@@ -47,7 +47,7 @@ func TestAuditListScopesOrgAndCluster(t *testing.T) {
 		if clusterID != nil {
 			url += "&cluster_id=" + clusterID.String()
 		}
-		request := httptest.NewRequest(http.MethodGet, url, nil)
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
 		request = request.WithContext(WithSubject(request.Context(), Subject{OrgID: orgID}))
 		response := httptest.NewRecorder()
 		NewAudit(database).List(response, request)

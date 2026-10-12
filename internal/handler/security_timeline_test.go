@@ -64,7 +64,7 @@ func TestSecurityTimelineDoesNotJoinForeignDeployment(t *testing.T) {
 		if clusterID != nil {
 			url += "&cluster_id=" + clusterID.String()
 		}
-		request := httptest.NewRequest(http.MethodGet, url, nil)
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
 		request = request.WithContext(WithSubject(request.Context(), Subject{OrgID: orgID}))
 		response := httptest.NewRecorder()
 		NewSecurityTimeline(database).List(response, request)
@@ -98,7 +98,7 @@ func TestSecurityTimelineDoesNotJoinForeignDeployment(t *testing.T) {
 			t.Fatalf("unexpected org A event: %+v", item)
 		}
 	}
-	foreignRequest := httptest.NewRequest(http.MethodGet, "/api/v1/security/timeline?cluster_id="+clusterB.String(), nil)
+	foreignRequest := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/security/timeline?cluster_id="+clusterB.String(), nil)
 	foreignRequest = foreignRequest.WithContext(WithSubject(foreignRequest.Context(), Subject{OrgID: orgA}))
 	foreignResponse := httptest.NewRecorder()
 	NewSecurityTimeline(database).List(foreignResponse, foreignRequest)

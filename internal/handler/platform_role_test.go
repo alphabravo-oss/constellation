@@ -62,7 +62,7 @@ func TestPlatformRoleInventoryAPIs(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{OrgID: orgID, UserID: userID}
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/deployments", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/deployments", nil)
 	request = request.WithContext(WithSubject(request.Context(), subject))
 	response := httptest.NewRecorder()
 	NewDeployments(database, nil).List(response, request)
@@ -76,7 +76,7 @@ func TestPlatformRoleInventoryAPIs(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertPlatformRoles(t, listed.Deployments)
-	request = httptest.NewRequest(http.MethodGet, "/api/v1/deployments/"+coreID.String(), nil)
+	request = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/deployments/"+coreID.String(), nil)
 	route := chi.NewRouteContext()
 	route.URLParams.Add("id", coreID.String())
 	request = request.WithContext(WithSubject(context.WithValue(request.Context(), chi.RouteCtxKey, route), subject))
@@ -93,7 +93,7 @@ func TestPlatformRoleInventoryAPIs(t *testing.T) {
 		t.Fatalf("deployment detail role: %#v", detail["platform_role"])
 	}
 
-	request = httptest.NewRequest(http.MethodGet, "/api/v1/clusters/"+clusterID.String()+"/containers", nil)
+	request = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/clusters/"+clusterID.String()+"/containers", nil)
 	route = chi.NewRouteContext()
 	route.URLParams.Add("id", clusterID.String())
 	request = request.WithContext(WithSubject(context.WithValue(request.Context(), chi.RouteCtxKey, route), subject))

@@ -7,9 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
-	"github.com/google/uuid"
 )
 
 // process baseline bundle — the agent-side process enforcer pulls this to learn,

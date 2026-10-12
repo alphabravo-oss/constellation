@@ -38,7 +38,7 @@ func TestBackupVerificationEnforcesTrustScopeAndRBAC(t *testing.T) {
 	}
 	post := func(path, token string, archive []byte) (int, map[string]any) {
 		t.Helper()
-		request, err := http.NewRequest(http.MethodPost, server.URL+path, bytes.NewReader(archive))
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+path, bytes.NewReader(archive))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -73,7 +73,7 @@ func TestBackupVerificationEnforcesTrustScopeAndRBAC(t *testing.T) {
 	}
 	_, otherServer, _, otherSigner, otherAdminID, _, otherOrgID := newSysConfigTestServer(t)
 	foreignToken := issueFor(t, otherSigner, otherAdminID, otherOrgID, 0)
-	request, _ := http.NewRequest(http.MethodPost, otherServer.URL+"/api/v1/backups/verify", bytes.NewReader(signed.Bytes()))
+	request, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, otherServer.URL+"/api/v1/backups/verify", bytes.NewReader(signed.Bytes()))
 	request.Header.Set("Authorization", "Bearer "+foreignToken)
 	response, err := otherServer.Client().Do(request)
 	if err != nil {

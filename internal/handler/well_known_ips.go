@@ -8,12 +8,13 @@
 // database lookups.
 //
 // Mappings (per spec):
-//   127.0.0.0/8, ::1            -> node/<nodeName>  (or node-local/loopback)
-//   169.254.169.254             -> external/cloud-metadata
-//   100.64.0.0/10               -> external/cgnat-<addr>      (CGNAT carrier-grade NAT)
-//   224.0.0.251                 -> multicast/mdns
-//   224.0.0.0/4                 -> multicast/<addr>
-//   fe80::/10                   -> link-local/<addr>
+//
+//	127.0.0.0/8, ::1            -> node/<nodeName>  (or node-local/loopback)
+//	169.254.169.254             -> external/cloud-metadata
+//	100.64.0.0/10               -> external/cgnat-<addr>      (CGNAT carrier-grade NAT)
+//	224.0.0.251                 -> multicast/mdns
+//	224.0.0.0/4                 -> multicast/<addr>
+//	fe80::/10                   -> link-local/<addr>
 package handler
 
 import (

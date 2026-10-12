@@ -73,7 +73,7 @@ func TestGroupEdgesHTTPRoutesRBACScopeAndAudit(t *testing.T) {
 			}
 			payload = bytes.NewReader(encoded)
 		}
-		request, err := http.NewRequest(method, server.URL+path, payload)
+		request, err := http.NewRequestWithContext(t.Context(), method, server.URL+path, payload)
 		if err != nil {
 			t.Fatal(err)
 		}

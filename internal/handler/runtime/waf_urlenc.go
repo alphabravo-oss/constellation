@@ -20,6 +20,7 @@ import "strings"
 //   - `\s`            -> (?:\s|%09|%0[AaCcDd]|%20|\+)
 //   - escaped `\. \/ \\ \|` and the literal set (' " < > : ; / ` = & , space)
 //     -> (?:orig|%HH)
+//
 // Character classes are augmented (not skipped) with the encodings of their
 // encodable members so e.g. `[\s>]` also matches `%3E`. Group openers ((?:, (?i),
 // (?i:, (?<name>, lookaround) and quantifier braces are copied verbatim so their

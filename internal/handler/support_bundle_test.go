@@ -305,7 +305,7 @@ func TestSupportBundleDownloadFailsClosedOnInvalidSigningKey(t *testing.T) {
 	defer database.Close()
 	path := filepath.Join(t.TempDir(), "missing-key.pem")
 	t.Setenv(supportBundleSigningKeyEnv, path)
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/support/bundle", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/support/bundle", nil)
 	request = request.WithContext(WithSubject(context.Background(), Subject{UserID: uuid.New(), OrgID: uuid.New()}))
 	response := httptest.NewRecorder()
 	NewSupportBundle(database, nil).Download(response, request)

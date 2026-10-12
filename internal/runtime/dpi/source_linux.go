@@ -31,9 +31,9 @@ type SourceConfig struct {
 // to the engine. The kernel-mode WAF wraps this with its own callback to issue
 // per-packet verdicts (allow/deny).
 type Source struct {
-	cfg    SourceConfig
-	engine *Engine
-	q      *nfqueue.Nfqueue
+	cfg         SourceConfig
+	engine      *Engine
+	q           *nfqueue.Nfqueue
 	verdictHook func(packetID uint32, evt *L7Event) int // optional
 }
 
@@ -170,8 +170,8 @@ func parseL4(src, dst netip.Addr, proto byte, l4 []byte) (Flow, []byte, bool) {
 			return Flow{}, nil, false
 		}
 		return Flow{
-			Src: netip.AddrPortFrom(src, sport),
-			Dst: netip.AddrPortFrom(dst, dport),
+			Src:      netip.AddrPortFrom(src, sport),
+			Dst:      netip.AddrPortFrom(dst, dport),
 			Protocol: "tcp",
 		}, l4[dataOff:], true
 	case unix.IPPROTO_UDP:
@@ -181,8 +181,8 @@ func parseL4(src, dst netip.Addr, proto byte, l4 []byte) (Flow, []byte, bool) {
 		sport := uint16(l4[0])<<8 | uint16(l4[1])
 		dport := uint16(l4[2])<<8 | uint16(l4[3])
 		return Flow{
-			Src: netip.AddrPortFrom(src, sport),
-			Dst: netip.AddrPortFrom(dst, dport),
+			Src:      netip.AddrPortFrom(src, sport),
+			Dst:      netip.AddrPortFrom(dst, dport),
 			Protocol: "udp",
 		}, l4[8:], true
 	}

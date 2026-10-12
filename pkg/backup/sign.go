@@ -8,14 +8,16 @@
 // covers keyless / Fulcio signing which requires interactive OIDC.
 //
 // Static-key mode:
-//   sign:   ed25519.Sign(privKey, manifestBytes)            -> base64 -> manifest.json.sig
-//   verify: ed25519.Verify(pubKey, manifestBytes, sigBytes)
+//
+//	sign:   ed25519.Sign(privKey, manifestBytes)            -> base64 -> manifest.json.sig
+//	verify: ed25519.Verify(pubKey, manifestBytes, sigBytes)
 //
 // Keyless (Fulcio) mode:
-//   handled by external `cosign sign-blob --identity-token ... --bundle ...` invocation;
-//   we record the cosign bundle as manifest.json.sig and the Fulcio cert as manifest.json.cert.
-//   Verification then runs `cosign verify-blob --certificate ... --certificate-identity ...`.
-//   The library here detects the bundle format and shells out to cosign for verify-only.
+//
+//	handled by external `cosign sign-blob --identity-token ... --bundle ...` invocation;
+//	we record the cosign bundle as manifest.json.sig and the Fulcio cert as manifest.json.cert.
+//	Verification then runs `cosign verify-blob --certificate ... --certificate-identity ...`.
+//	The library here detects the bundle format and shells out to cosign for verify-only.
 package backup
 
 import (
@@ -36,9 +38,9 @@ import (
 type SignMode string
 
 const (
-	SignModeNone SignMode = "none"
+	SignModeNone      SignMode = "none"
 	SignModeStaticKey SignMode = "static-key"
-	SignModeKeyless SignMode = "keyless"
+	SignModeKeyless   SignMode = "keyless"
 )
 
 // SignerOptions configures Sign.

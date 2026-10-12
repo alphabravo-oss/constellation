@@ -41,11 +41,11 @@ const (
 
 // Entry is one rule inside a profile.
 type Entry struct {
-	Name          string     `json:"name"`            // identifier
+	Name          string     `json:"name"`                 // identifier
 	NameRegex     string     `json:"name_regex,omitempty"` // CVE id regex, e.g. CVE-2024-.*
 	Images        []string   `json:"images,omitempty"`     // image-name globs
 	Action        ActionKind `json:"action"`
-	DaysToFix     int        `json:"days_to_fix,omitempty"` // 0 = no deadline
+	DaysToFix     int        `json:"days_to_fix,omitempty"`    // 0 = no deadline
 	SeverityFloor string     `json:"severity_floor,omitempty"` // low|medium|high|critical
 	ScoreFloor    float64    `json:"score_floor,omitempty"`    // CVSS base score floor
 	Reserved      string     `json:"reserved,omitempty"`       // "" | "_recent"

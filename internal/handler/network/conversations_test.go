@@ -82,7 +82,7 @@ func TestNetworkConversationsPlatformRolesForSQLAndLiveGraph(t *testing.T) {
 		if cluster != nil {
 			url += "?cluster_id=" + cluster.String()
 		}
-		request := httptest.NewRequest(http.MethodGet, url, nil)
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
 		request = request.WithContext(authctx.WithSubject(request.Context(), authctx.Subject{OrgID: orgID, UserID: uuid.New()}))
 		response := httptest.NewRecorder()
 		handler := NewNetworkConversations(database)
@@ -157,7 +157,7 @@ func TestNetworkConversationsPlatformRolesForSQLAndLiveGraph(t *testing.T) {
 			if testCase.cluster != "" {
 				url += "&cluster_id=" + testCase.cluster
 			}
-			request := httptest.NewRequest(http.MethodGet, url, nil)
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
 			request = request.WithContext(authctx.WithSubject(request.Context(), authctx.Subject{OrgID: orgID, UserID: uuid.New()}))
 			response := httptest.NewRecorder()
 			NewNetworkConversations(database).Detail(response, request)
@@ -190,7 +190,7 @@ func TestNetworkConversationsPlatformRolesForSQLAndLiveGraph(t *testing.T) {
 		})
 	}
 	for _, path := range []string{"/api/v1/network/conversations?cluster_id=invalid", "/api/v1/network/conversations/entries?from=operations/houston&to=payments/api&cluster_id=invalid"} {
-		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
 		request = request.WithContext(authctx.WithSubject(request.Context(), authctx.Subject{OrgID: orgID, UserID: uuid.New()}))
 		response := httptest.NewRecorder()
 		if path == "/api/v1/network/conversations?cluster_id=invalid" {

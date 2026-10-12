@@ -37,7 +37,7 @@ func TestRegistryCreateKindValidation(t *testing.T) {
 		})
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/registries", strings.NewReader(`{"name":"test","kind":"unknown","endpoint":"registry.example.com","auth_kind":"none"}`))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/registries", strings.NewReader(`{"name":"test","kind":"unknown","endpoint":"registry.example.com","auth_kind":"none"}`))
 	req = req.WithContext(WithSubject(req.Context(), Subject{OrgID: uuid.New(), UserID: uuid.New()}))
 	response := httptest.NewRecorder()
 	(&Registries{}).Create(response, req)
@@ -60,7 +60,7 @@ func TestRegistryPatchRejectsKind(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			id := uuid.New().String()
-			req := httptest.NewRequest(http.MethodPatch, "/api/v1/registries/"+id, strings.NewReader(tc.body))
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPatch, "/api/v1/registries/"+id, strings.NewReader(tc.body))
 			route := chi.NewRouteContext()
 			route.URLParams.Add("id", id)
 			req = req.WithContext(WithSubject(context.WithValue(req.Context(), chi.RouteCtxKey, route), Subject{OrgID: uuid.New(), UserID: uuid.New()}))

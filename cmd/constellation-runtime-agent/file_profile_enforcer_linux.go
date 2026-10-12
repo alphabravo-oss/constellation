@@ -17,8 +17,9 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/alphabravocompany/constellation/internal/runtime/hostscan"
 	"golang.org/x/sys/unix"
+
+	"github.com/alphabravocompany/constellation/internal/runtime/hostscan"
 )
 
 type fileProfileEnforcerConfig struct {

@@ -34,7 +34,7 @@ SELECT $1, $2, 1001, 8, 0, 7, '10.0.0.1', 40000 + seq, '10.0.0.2', 443, NOW(), N
 	}
 	for _, offset := range []int{0, 100, 200} {
 		path := fmt.Sprintf("/api/v1/runtime-threats?cluster_id=%s&limit=100&offset=%d&port=443&peer=10.0.0.2&application=7", clusterID, offset)
-		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
 		request = request.WithContext(authctx.WithSubject(request.Context(), authctx.Subject{OrgID: orgID, UserID: uuid.New()}))
 		response := httptest.NewRecorder()
 		NewRuntimeThreats(database).List(response, request)

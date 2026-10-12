@@ -78,7 +78,7 @@ func TestResponseRuleDefs_CreateValidatesAndPersists(t *testing.T) {
 
 	// Invalid: bad op -> 400.
 	bad := `{"name":"bad","enabled":true,"event_type":"process","conditions":[{"field":"p","op":"startswith","value":"x"}],"actions":[{"type":"tag"}]}`
-	req := withSubj(httptest.NewRequest("POST", "/api/v1/response-rule-defs", strings.NewReader(bad)), orgID, userID)
+	req := withSubj(httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/response-rule-defs", strings.NewReader(bad)), orgID, userID)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
@@ -87,7 +87,7 @@ func TestResponseRuleDefs_CreateValidatesAndPersists(t *testing.T) {
 
 	// Valid.
 	good := `{"name":"curl-quarantine","enabled":true,"priority":10,"event_type":"process","conditions":[{"field":"process_name","op":"contains","value":"curl"}],"actions":[{"type":"quarantine"}]}`
-	req = withSubj(httptest.NewRequest("POST", "/api/v1/response-rule-defs", strings.NewReader(good)), orgID, userID)
+	req = withSubj(httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/response-rule-defs", strings.NewReader(good)), orgID, userID)
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusCreated {
@@ -95,7 +95,7 @@ func TestResponseRuleDefs_CreateValidatesAndPersists(t *testing.T) {
 	}
 
 	// List reflects it.
-	req = withSubj(httptest.NewRequest("GET", "/api/v1/response-rule-defs", nil), orgID, userID)
+	req = withSubj(httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/response-rule-defs", nil), orgID, userID)
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	var got struct {
@@ -121,7 +121,7 @@ func TestResponseRuleDefs_RejectsTagOnCreateAndUpdate(t *testing.T) {
 	router.Put("/api/v1/response-rule-defs/{id}", h.Update)
 
 	tagBody := `{"name":"tag-rule","enabled":true,"event_type":"process","actions":[{"type":"tag","params":{"key":"team","value":"sec"}}]}`
-	request := withSubj(httptest.NewRequest(http.MethodPost, "/api/v1/response-rule-defs", strings.NewReader(tagBody)), orgID, userID)
+	request := withSubj(httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/response-rule-defs", strings.NewReader(tagBody)), orgID, userID)
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "tag action is unsupported") {
@@ -134,7 +134,7 @@ INSERT INTO response_rules (org_id, name, event_type, conditions, actions)
 VALUES ($1, 'legacy-tag', 'process', '[]'::jsonb, '[{"type":"tag"}]'::jsonb) RETURNING id`, orgID).Scan(&ruleID); err != nil {
 		t.Fatalf("insert legacy rule: %v", err)
 	}
-	request = withSubj(httptest.NewRequest(http.MethodPut, "/api/v1/response-rule-defs/"+ruleID.String(), strings.NewReader(tagBody)), orgID, userID)
+	request = withSubj(httptest.NewRequestWithContext(t.Context(), http.MethodPut, "/api/v1/response-rule-defs/"+ruleID.String(), strings.NewReader(tagBody)), orgID, userID)
 	response = httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "tag action is unsupported") {
@@ -154,7 +154,7 @@ func TestResponseRuleDefs_RejectsScanSuppressLog(t *testing.T) {
 	router.Put("/api/v1/response-rule-defs/{id}", responseHandler.Update)
 
 	suppressedBody := `{"name":"scan-rule","enabled":true,"event_type":"scan","actions":[{"type":"suppress_log"}]}`
-	request := withSubj(httptest.NewRequest(http.MethodPost, "/api/v1/response-rule-defs", strings.NewReader(suppressedBody)), orgID, userID)
+	request := withSubj(httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/response-rule-defs", strings.NewReader(suppressedBody)), orgID, userID)
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "suppress_log is unsupported for scan events") {
@@ -162,7 +162,7 @@ func TestResponseRuleDefs_RejectsScanSuppressLog(t *testing.T) {
 	}
 
 	validBody := `{"name":"scan-rule","enabled":true,"event_type":"scan","actions":[{"type":"quarantine"}]}`
-	request = withSubj(httptest.NewRequest(http.MethodPost, "/api/v1/response-rule-defs", strings.NewReader(validBody)), orgID, userID)
+	request = withSubj(httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/response-rule-defs", strings.NewReader(validBody)), orgID, userID)
 	response = httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	if response.Code != http.StatusCreated {
@@ -174,7 +174,7 @@ func TestResponseRuleDefs_RejectsScanSuppressLog(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil {
 		t.Fatal(err)
 	}
-	request = withSubj(httptest.NewRequest(http.MethodPut, "/api/v1/response-rule-defs/"+created.ID.String(), strings.NewReader(suppressedBody)), orgID, userID)
+	request = withSubj(httptest.NewRequestWithContext(t.Context(), http.MethodPut, "/api/v1/response-rule-defs/"+created.ID.String(), strings.NewReader(suppressedBody)), orgID, userID)
 	response = httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "suppress_log is unsupported for scan events") {
@@ -198,7 +198,7 @@ func TestResponseRuleDefs_RejectsScanSuppressLog(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	request = withSubj(httptest.NewRequest(http.MethodGet, "/api/v1/response-rule-defs", nil), orgID, userID)
+	request = withSubj(httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/response-rule-defs", nil), orgID, userID)
 	response = httptest.NewRecorder()
 	responseHandler.List(response, request)
 	if response.Code != http.StatusOK {
@@ -222,7 +222,7 @@ func TestResponseRuleDefs_RejectsScanSuppressLog(t *testing.T) {
 	if legacyListed != 2 {
 		t.Fatalf("listed legacy scan rules=%d, want 2", legacyListed)
 	}
-	request = httptest.NewRequest(http.MethodGet, "/api/v1/runtime/response-rules:sync", nil)
+	request = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/runtime/response-rules:sync", nil)
 	request = request.WithContext(handler.WithRuntimeAgentToken(request.Context(), &handler.RuntimeAgentToken{ID: uuid.New(), OrgID: orgID, Name: "agent"}))
 	response = httptest.NewRecorder()
 	responseHandler.AgentSyncBundle(response, request)
@@ -272,7 +272,7 @@ func TestResponseRuleDefs_WebhookReceiverValidation(t *testing.T) {
 
 	// Unknown receiver -> 400.
 	unknown := `{"name":"wh-unknown","enabled":true,"event_type":"process","conditions":[],"actions":[{"type":"webhook","params":{"receiver":"no-such-receiver"}}]}`
-	req := withSubj(httptest.NewRequest("POST", "/api/v1/response-rule-defs", strings.NewReader(unknown)), orgID, userID)
+	req := withSubj(httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/response-rule-defs", strings.NewReader(unknown)), orgID, userID)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
@@ -286,7 +286,7 @@ func TestResponseRuleDefs_WebhookReceiverValidation(t *testing.T) {
 		t.Fatalf("seed receiver: %v", err)
 	}
 	good := `{"name":"wh-ok","enabled":true,"event_type":"process","conditions":[],"actions":[{"type":"webhook","params":{"receiver":"pagerduty-oncall"}}]}`
-	req = withSubj(httptest.NewRequest("POST", "/api/v1/response-rule-defs", strings.NewReader(good)), orgID, userID)
+	req = withSubj(httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/response-rule-defs", strings.NewReader(good)), orgID, userID)
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusCreated {
@@ -318,7 +318,7 @@ VALUES ($1,$2,$3,$4,'process','[]'::jsonb,'[{"type":"quarantine"}]'::jsonb)`,
 
 	h := NewResponseRuleDefs(d, audit.New(pool))
 	// Agent sync requires a runtime-agent token on the context (not a user subject).
-	req := httptest.NewRequest("GET", "/api/v1/runtime/response-rules:sync", nil)
+	req := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/runtime/response-rules:sync", nil)
 	req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(), &handler.RuntimeAgentToken{ID: uuid.New(), OrgID: orgID, Name: "agent"}))
 	w := httptest.NewRecorder()
 	h.AgentSyncBundle(w, req)
@@ -359,7 +359,7 @@ INSERT INTO response_rules (org_id, name, enabled, event_type, conditions, actio
 		t.Fatalf("seed legacy rules: %v", err)
 	}
 	h := NewResponseRuleDefs(d, audit.New(pool))
-	request := withSubj(httptest.NewRequest(http.MethodGet, "/api/v1/response-rule-defs", nil), orgID, userID)
+	request := withSubj(httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/response-rule-defs", nil), orgID, userID)
 	response := httptest.NewRecorder()
 	h.List(response, request)
 	if response.Code != http.StatusOK {
@@ -380,7 +380,7 @@ INSERT INTO response_rules (org_id, name, enabled, event_type, conditions, actio
 		}
 	}
 
-	request = httptest.NewRequest(http.MethodGet, "/api/v1/runtime/response-rules:sync", nil)
+	request = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/runtime/response-rules:sync", nil)
 	request = request.WithContext(handler.WithRuntimeAgentToken(request.Context(), &handler.RuntimeAgentToken{ID: uuid.New(), OrgID: orgID, Name: "agent"}))
 	response = httptest.NewRecorder()
 	h.AgentSyncBundle(response, request)
@@ -424,7 +424,7 @@ VALUES ($1,$2,true,10,'process','[]'::jsonb,'[{"type":"quarantine"}]'::jsonb)`, 
 	h := NewResponseRuleDefs(d, audit.New(pool))
 
 	// Agent :sync with org B's token returns ONLY org B's rule.
-	req := httptest.NewRequest("GET", "/api/v1/runtime/response-rules:sync", nil)
+	req := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/runtime/response-rules:sync", nil)
 	req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(), &handler.RuntimeAgentToken{ID: uuid.New(), OrgID: orgB, Name: "agent-b"}))
 	w := httptest.NewRecorder()
 	h.AgentSyncBundle(w, req)
@@ -442,7 +442,7 @@ VALUES ($1,$2,true,10,'process','[]'::jsonb,'[{"type":"quarantine"}]'::jsonb)`, 
 	}
 
 	// User-scoped List for org B returns ONLY org B's rule.
-	req = withSubj(httptest.NewRequest("GET", "/api/v1/response-rule-defs", nil), orgB, userB)
+	req = withSubj(httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/response-rule-defs", nil), orgB, userB)
 	w = httptest.NewRecorder()
 	h.List(w, req)
 	var listed struct {
@@ -462,7 +462,7 @@ func TestResponseRuleDefs_AgentSyncRequiresAgentToken(t *testing.T) {
 	h := NewResponseRuleDefs(d, audit.New(d.Pool()))
 	w := httptest.NewRecorder()
 	// No runtime-agent token on the context -> 401.
-	h.AgentSyncBundle(w, httptest.NewRequest("GET", "/api/v1/runtime/response-rules:sync", nil))
+	h.AgentSyncBundle(w, httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/runtime/response-rules:sync", nil))
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("missing agent token = %d, want 401", w.Code)
 	}
@@ -520,7 +520,7 @@ func TestResponseRuleDefs_RBAC403(t *testing.T) {
 	// Auditor lacks manage-response-rules -> 403, handler not reached.
 	auditor := []rbac.RoleAssignment{{Role: rbac.RoleAuditor, Scope: rbac.Scope{OrgID: org}}}
 	w := httptest.NewRecorder()
-	gate(rbac.VerbManageResponseRules, auditor, next)(w, httptest.NewRequest("POST", "/api/v1/response-rule-defs", nil))
+	gate(rbac.VerbManageResponseRules, auditor, next)(w, httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/response-rule-defs", nil))
 	if w.Code != http.StatusForbidden || called {
 		t.Fatalf("auditor: code=%d called=%v, want 403 and not called", w.Code, called)
 	}
@@ -529,7 +529,7 @@ func TestResponseRuleDefs_RBAC403(t *testing.T) {
 	called = false
 	admin := []rbac.RoleAssignment{{Role: rbac.RoleClusterAdmin, Scope: rbac.Scope{OrgID: org}}}
 	w = httptest.NewRecorder()
-	gate(rbac.VerbManageResponseRules, admin, next)(w, httptest.NewRequest("POST", "/api/v1/response-rule-defs", nil))
+	gate(rbac.VerbManageResponseRules, admin, next)(w, httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/response-rule-defs", nil))
 	if w.Code != http.StatusOK || !called {
 		t.Fatalf("clusteradmin: code=%d called=%v, want 200 and called", w.Code, called)
 	}

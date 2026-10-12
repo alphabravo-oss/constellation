@@ -13,7 +13,7 @@ import (
 
 func TestIntegrationDeliveries_OverviewWithoutStorageReturnsEmptyLiveState(t *testing.T) {
 	w := httptest.NewRecorder()
-	NewIntegrationDeliveries().List(w, httptest.NewRequest(http.MethodGet, "/api/v1/integration-deliveries", nil))
+	NewIntegrationDeliveries().List(w, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/integration-deliveries", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("status: %d body=%s", w.Code, w.Body.String())
 	}
@@ -90,7 +90,7 @@ VALUES ($1, 'route:
 		t.Fatalf("routing: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/integration-deliveries", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/integration-deliveries", nil)
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	NewIntegrationDeliveries(d).Overview(w, req)
@@ -178,7 +178,7 @@ VALUES ($1, $2, 'SecOps Slack', 'slack', 'https://hooks.slack.com/services/T/B/s
 		t.Fatalf("receiver: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/integration-deliveries/test?id="+receiverID.String(), nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/integration-deliveries/test?id="+receiverID.String(), nil)
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	NewIntegrationDeliveries(d).TestPreview(w, req)
@@ -212,13 +212,13 @@ VALUES ($1, $2, 'SecOps Slack', 'slack', 'https://hooks.slack.com/services/T/B/s
 
 func TestIntegrationDeliveries_TestPreviewValidation(t *testing.T) {
 	w := httptest.NewRecorder()
-	NewIntegrationDeliveries().TestPreview(w, httptest.NewRequest(http.MethodPost, "/api/v1/integration-deliveries/test", nil))
+	NewIntegrationDeliveries().TestPreview(w, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/integration-deliveries/test", nil))
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("missing id status: %d", w.Code)
 	}
 
 	w = httptest.NewRecorder()
-	NewIntegrationDeliveries().TestPreview(w, httptest.NewRequest(http.MethodPost, "/api/v1/integration-deliveries/test?id="+uuid.NewString(), nil))
+	NewIntegrationDeliveries().TestPreview(w, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/integration-deliveries/test?id="+uuid.NewString(), nil))
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("no-storage status: %d", w.Code)
 	}

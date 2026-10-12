@@ -27,10 +27,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alphabravocompany/constellation/internal/flowrollup"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/spf13/cobra"
+
+	"github.com/alphabravocompany/constellation/internal/flowrollup"
 )
 
 // networkFlowsCmd is the parent for `constellationctl network-flows ...`.

@@ -278,4 +278,3 @@ func apiCall(ctx context.Context, method, path string, body any) ([]byte, error)
 	}
 	return rb, nil
 }
-

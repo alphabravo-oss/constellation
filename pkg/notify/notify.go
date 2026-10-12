@@ -29,16 +29,16 @@ import (
 // Alert is the minimal record a router dispatches. It's purposefully smaller than the full
 // Constellation Finding so the router doesn't pull in DB types.
 type Alert struct {
-	ID          string
-	OrgID       string
-	Severity    string // info | low | medium | high | critical
-	Kind        string // finding | runtime | compliance | drift | …
-	Title       string
-	Cluster     string
-	Workload    string
-	Labels      map[string]string
-	URL         string // deep-link back to Constellation
-	FiredAt     time.Time
+	ID       string
+	OrgID    string
+	Severity string // info | low | medium | high | critical
+	Kind     string // finding | runtime | compliance | drift | …
+	Title    string
+	Cluster  string
+	Workload string
+	Labels   map[string]string
+	URL      string // deep-link back to Constellation
+	FiredAt  time.Time
 }
 
 // Receiver is one notification destination.
@@ -103,11 +103,11 @@ func (p *PagerDuty) Send(ctx context.Context, alerts []Alert) error {
 			"event_action": "trigger",
 			"dedup_key":    a.ID,
 			"payload": map[string]any{
-				"summary":   a.Title,
-				"severity":  mapToPagerDutySeverity(a.Severity),
-				"source":    a.Cluster,
-				"component": a.Workload,
-				"class":     a.Kind,
+				"summary":        a.Title,
+				"severity":       mapToPagerDutySeverity(a.Severity),
+				"source":         a.Cluster,
+				"component":      a.Workload,
+				"class":          a.Kind,
 				"custom_details": a.Labels,
 			},
 			"links": []map[string]string{{"href": a.URL, "text": "Open in Constellation"}},
@@ -157,8 +157,8 @@ func (j *Jira) Send(ctx context.Context, alerts []Alert) error {
 	for _, a := range alerts {
 		issue := map[string]any{
 			"fields": map[string]any{
-				"project":     map[string]string{"key": j.ProjectID},
-				"summary":     "[Constellation] " + a.Title,
+				"project": map[string]string{"key": j.ProjectID},
+				"summary": "[Constellation] " + a.Title,
 				"description": atlassianDoc(fmt.Sprintf("Severity: %s\nCluster: %s\nWorkload: %s\nLink: %s",
 					a.Severity, a.Cluster, a.Workload, a.URL)),
 				"issuetype": map[string]string{"name": j.IssueType},
@@ -187,7 +187,7 @@ func atlassianDoc(text string) map[string]any {
 		"type":    "doc",
 		"version": 1,
 		"content": []map[string]any{{
-			"type": "paragraph",
+			"type":    "paragraph",
 			"content": []map[string]any{{"type": "text", "text": text}},
 		}},
 	}
@@ -723,11 +723,11 @@ func nonzeroDur(d, fallback time.Duration) time.Duration {
 // Route is one node in the Alertmanager-style match tree. Children are evaluated after
 // the parent matches; the first matching leaf wins (or all leaves, if Continue=true).
 type Route struct {
-	Match    map[string]string // label key→value (substring match)
-	GroupBy  []string          // labels to group on
-	GroupWait time.Duration    // batch window before sending
-	Continue bool              // when true, descend into siblings too
-	Receivers []string         // names of receivers in the Router's catalog
+	Match     map[string]string // label key→value (substring match)
+	GroupBy   []string          // labels to group on
+	GroupWait time.Duration     // batch window before sending
+	Continue  bool              // when true, descend into siblings too
+	Receivers []string          // names of receivers in the Router's catalog
 	Children  []Route
 }
 

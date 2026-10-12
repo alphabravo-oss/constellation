@@ -72,7 +72,7 @@ VALUES ($1, $2, $3, $4, 'host', $5, $6, $7, 'critical', $8)`, orgID, clusterID, 
 	}) {
 		t.Helper()
 		url := fmt.Sprintf("/api/v1/clusters/%s/nodes?%s", clusterID, query)
-		req := httptest.NewRequest(http.MethodGet, url, nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
 		req = req.WithContext(WithSubject(req.Context(), Subject{OrgID: subjectOrgID}))
 		req = withRouteParam(req, "id", clusterID.String())
 		rec := httptest.NewRecorder()

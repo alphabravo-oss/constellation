@@ -108,7 +108,7 @@ func responseRuleV2Router(d *db.DB, pool *pgxpool.Pool) *chi.Mux {
 
 func listResponseRulesV2(t *testing.T, r http.Handler, orgID, userID, clusterID uuid.UUID) []responseRuleV2DTO {
 	t.Helper()
-	req := withSubj(httptest.NewRequest(http.MethodGet, "/api/v1/response-rules-v2?cluster_id="+clusterID.String(), nil), orgID, userID)
+	req := withSubj(httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/response-rules-v2?cluster_id="+clusterID.String(), nil), orgID, userID)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -142,7 +142,7 @@ func TestResponseRulesV2_ReorderIsScopedAndDrivesListOrder(t *testing.T) {
 		t.Fatalf("initial cluster-a order = %+v", before)
 	}
 
-	req := withSubj(httptest.NewRequest(http.MethodPatch, "/api/v1/response-rules-v2:reorder?cluster_id="+clusterA.String(),
+	req := withSubj(httptest.NewRequestWithContext(t.Context(), http.MethodPatch, "/api/v1/response-rules-v2:reorder?cluster_id="+clusterA.String(),
 		strings.NewReader(`{"ordered_ids":["`+clusterAID.String()+`","`+globalID.String()+`"]}`)), orgID, userID)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -155,7 +155,7 @@ func TestResponseRulesV2_ReorderIsScopedAndDrivesListOrder(t *testing.T) {
 	}
 
 	createBody := `{"name":"cluster-a-new","description":"","enabled":true,"event_type":"runtime","conditions":[{"type":"level","value":"high"}],"actions":[{"kind":"quarantine"}],"workload_match":{}}`
-	req = withSubj(httptest.NewRequest(http.MethodPost, "/api/v1/response-rules-v2?cluster_id="+clusterA.String(), strings.NewReader(createBody)), orgID, userID)
+	req = withSubj(httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/response-rules-v2?cluster_id="+clusterA.String(), strings.NewReader(createBody)), orgID, userID)
 	w = httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusCreated {
@@ -197,7 +197,7 @@ func TestResponseRulesV2_ReorderRejectsPartialDuplicateAndOutOfScopeIDs(t *testi
 		{"out-of-scope", `{"ordered_ids":["` + globalID.String() + `","` + clusterBID.String() + `"]}`},
 	}
 	for _, tc := range cases {
-		req := withSubj(httptest.NewRequest(http.MethodPatch, "/api/v1/response-rules-v2:reorder?cluster_id="+clusterA.String(), strings.NewReader(tc.body)), orgID, userID)
+		req := withSubj(httptest.NewRequestWithContext(t.Context(), http.MethodPatch, "/api/v1/response-rules-v2:reorder?cluster_id="+clusterA.String(), strings.NewReader(tc.body)), orgID, userID)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 		if w.Code != http.StatusBadRequest {
@@ -224,7 +224,7 @@ func TestResponseRulesV2_ReorderAuditCompletionIsAtomic(t *testing.T) {
 	body := `{"ordered_ids":["` + secondID.String() + `","` + firstID.String() + `"]}`
 	request := func(handler *ResponseRulesV2) *httptest.ResponseRecorder {
 		t.Helper()
-		request := withSubj(httptest.NewRequest(http.MethodPatch, path, strings.NewReader(body)), orgID, userID)
+		request := withSubj(httptest.NewRequestWithContext(t.Context(), http.MethodPatch, path, strings.NewReader(body)), orgID, userID)
 		response := httptest.NewRecorder()
 		handler.Reorder(response, request)
 		return response
@@ -290,7 +290,7 @@ func TestResponseRulesV2_OptionsExposeNVEventCatalogAndReceivers(t *testing.T) {
 		t.Fatalf("receivers: %v", err)
 	}
 	router := responseRuleV2Router(d, pool)
-	req := withSubj(httptest.NewRequest(http.MethodGet, "/api/v1/response-rules-v2/options", nil), orgID, userID)
+	req := withSubj(httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/response-rules-v2/options", nil), orgID, userID)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -343,7 +343,7 @@ func TestResponseRulesV2_CreateAcceptsNVEventAndWebhookAction(t *testing.T) {
 	orgID, userID := seedOrgUser(t, pool)
 	router := responseRuleV2Router(d, pool)
 	body := `{"name":"nv-threat-webhook","description":"","enabled":true,"event_type":"threat","conditions":[{"type":"level","value":"high"}],"actions":[{"kind":"webhook","target":"sec-webhook"}],"workload_match":{}}`
-	req := withSubj(httptest.NewRequest(http.MethodPost, "/api/v1/response-rules-v2", strings.NewReader(body)), orgID, userID)
+	req := withSubj(httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/response-rules-v2", strings.NewReader(body)), orgID, userID)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusCreated {
@@ -368,7 +368,7 @@ func TestResponseRulesV2_CreateAcceptsSuppressLogAction(t *testing.T) {
 	router := responseRuleV2Router(d, pool)
 
 	body := `{"name":"nv-threat-suppress","description":"","enabled":true,"event_type":"threat","conditions":[{"type":"level","value":"high"}],"actions":[{"kind":"suppress-log"}],"workload_match":{}}`
-	req := withSubj(httptest.NewRequest(http.MethodPost, "/api/v1/response-rules-v2", strings.NewReader(body)), orgID, userID)
+	req := withSubj(httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/response-rules-v2", strings.NewReader(body)), orgID, userID)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusCreated {
@@ -395,7 +395,7 @@ func TestResponseRulesV2_CreatePreservesGroupSelector(t *testing.T) {
 	router := responseRuleV2Router(d, pool)
 
 	body := `{"name":"nv-threat-group","description":"","enabled":true,"event_type":"threat","conditions":[{"type":"level","value":"high"}],"actions":[{"kind":"suppress-log"}],"workload_match":{"group":"nv.api","namespace":"prod"}}`
-	req := withSubj(httptest.NewRequest(http.MethodPost, "/api/v1/response-rules-v2", strings.NewReader(body)), orgID, userID)
+	req := withSubj(httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/response-rules-v2", strings.NewReader(body)), orgID, userID)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusCreated {

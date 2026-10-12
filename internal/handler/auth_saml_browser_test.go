@@ -35,7 +35,7 @@ func samlBrowserTestHandler(t *testing.T) *Auth {
 
 func startSAMLBrowserTestLogin(t *testing.T, handler *Auth) *http.Cookie {
 	t.Helper()
-	request := httptest.NewRequest(http.MethodGet, "https://console.example.com/api/v1/auth/saml/login?relay_state=attacker-controlled", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "https://console.example.com/api/v1/auth/saml/login?relay_state=attacker-controlled", nil)
 	request.Header.Set("Sec-Fetch-Mode", "navigate")
 	response := httptest.NewRecorder()
 	handler.SAMLLogin(response, request)
@@ -109,7 +109,7 @@ func TestSAMLBrowserBindingRejectsBeforeAssertionParsing(t *testing.T) {
 				request = samlBrowserTestACS(cookie, "")
 				request.URL.RawQuery = url.Values{"RelayState": {cookie.Value}}.Encode()
 			case "duplicate-relay":
-				request = httptest.NewRequest(http.MethodPost, request.URL.String(), strings.NewReader("SAMLResponse=secret-assertion&RelayState="+cookie.Value+"&RelayState="+cookie.Value))
+				request = httptest.NewRequestWithContext(t.Context(), http.MethodPost, request.URL.String(), strings.NewReader("SAMLResponse=secret-assertion&RelayState="+cookie.Value+"&RelayState="+cookie.Value))
 				request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 				request.AddCookie(cookie)
 			case "duplicate-cookie":
@@ -121,12 +121,12 @@ func TestSAMLBrowserBindingRejectsBeforeAssertionParsing(t *testing.T) {
 				handler.samlBrowserBindings.pending[cookie.Value] = time.Now().Add(-time.Second)
 				handler.samlBrowserBindings.mu.Unlock()
 			case "oversized":
-				request = httptest.NewRequest(http.MethodPost, request.URL.String(), strings.NewReader(strings.Repeat("x", samlACSBodyLimit+1)))
+				request = httptest.NewRequestWithContext(t.Context(), http.MethodPost, request.URL.String(), strings.NewReader(strings.Repeat("x", samlACSBodyLimit+1)))
 				request.ContentLength = -1
 				request.AddCookie(cookie)
 				want = http.StatusRequestEntityTooLarge
 			case "malformed-form":
-				request = httptest.NewRequest(http.MethodPost, request.URL.String(), strings.NewReader("RelayState=%zz&secret=password"))
+				request = httptest.NewRequestWithContext(t.Context(), http.MethodPost, request.URL.String(), strings.NewReader("RelayState=%zz&secret=password"))
 				request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 				request.AddCookie(cookie)
 				want = http.StatusBadRequest
@@ -134,7 +134,7 @@ func TestSAMLBrowserBindingRejectsBeforeAssertionParsing(t *testing.T) {
 				request.URL.RawQuery = "SAMLart=secret-artifact"
 				want = http.StatusBadRequest
 			case "duplicate-assertion":
-				request = httptest.NewRequest(http.MethodPost, request.URL.String(), strings.NewReader("RelayState="+cookie.Value+"&SAMLResponse=one&SAMLResponse=two"))
+				request = httptest.NewRequestWithContext(t.Context(), http.MethodPost, request.URL.String(), strings.NewReader("RelayState="+cookie.Value+"&SAMLResponse=one&SAMLResponse=two"))
 				request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 				request.AddCookie(cookie)
 				want = http.StatusBadRequest
@@ -244,7 +244,7 @@ func TestSAMLBrowserBindingSessionAndCLICompatibility(t *testing.T) {
 		t.Fatal("browser session cookies missing")
 	}
 	response = httptest.NewRecorder()
-	handler.SAMLACS(response, httptest.NewRequest(http.MethodPost, "/api/v1/auth/saml/acs", nil))
+	handler.SAMLACS(response, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/auth/saml/acs", nil))
 	if response.Code != http.StatusOK || len(response.Result().Cookies()) != 0 {
 		t.Fatalf("CLI ACS = %d: %s", response.Code, response.Body.String())
 	}
@@ -253,7 +253,7 @@ func TestSAMLBrowserBindingSessionAndCLICompatibility(t *testing.T) {
 		t.Fatalf("CLI bearer identity: %v / %v", claims, err)
 	}
 	response = httptest.NewRecorder()
-	handler.SAMLLogin(response, httptest.NewRequest(http.MethodGet, "/api/v1/auth/saml/login?relay_state=cli-state", nil))
+	handler.SAMLLogin(response, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/auth/saml/login?relay_state=cli-state", nil))
 	redirect, err := url.Parse(response.Header().Get("Location"))
 	if err != nil || response.Code != http.StatusFound || redirect.Query().Get("RelayState") != "cli-state" || len(response.Result().Cookies()) != 0 {
 		t.Fatalf("CLI login changed: %d %v", response.Code, err)

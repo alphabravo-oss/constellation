@@ -126,7 +126,7 @@ func doJSON(t *testing.T, method, url, bearer string, body any) (int, map[string
 		b, _ := json.Marshal(body)
 		rdr = bytes.NewReader(b)
 	}
-	req, err := http.NewRequest(method, url, rdr)
+	req, err := http.NewRequestWithContext(t.Context(), method, url, rdr)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}

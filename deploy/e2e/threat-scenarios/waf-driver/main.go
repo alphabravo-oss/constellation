@@ -387,11 +387,11 @@ RETURNING id`,
 		TargetKind: "pod",
 		TargetID:   pod.Namespace + "/" + pod.Name,
 		After: map[string]any{
-			"image":         pod.Spec.Containers[0].Image,
-			"rule_id":       "require-image-signature",
-			"verdict":       "deny",
-			"reason":        msg,
-			"decision_id":   decisionID,
+			"image":       pod.Spec.Containers[0].Image,
+			"rule_id":     "require-image-signature",
+			"verdict":     "deny",
+			"reason":      msg,
+			"decision_id": decisionID,
 		},
 	})
 	if err != nil {

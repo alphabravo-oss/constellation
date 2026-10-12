@@ -14,7 +14,7 @@ import (
 
 func TestSystemHealth_ListReturnsNeutralOperationsInventory(t *testing.T) {
 	w := httptest.NewRecorder()
-	NewSystemHealth().List(w, httptest.NewRequest("GET", "/api/v1/system-health", nil))
+	NewSystemHealth().List(w, httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/system-health", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("status: %d", w.Code)
 	}
@@ -75,7 +75,7 @@ func TestSystemHealth_ListReturnsNeutralOperationsInventory(t *testing.T) {
 
 func TestSystemHealth_OverviewMatchesListShape(t *testing.T) {
 	w := httptest.NewRecorder()
-	NewSystemHealth().Overview(w, httptest.NewRequest("GET", "/api/v1/system-health/overview", nil))
+	NewSystemHealth().Overview(w, httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/system-health/overview", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("status: %d", w.Code)
 	}
@@ -142,7 +142,7 @@ INSERT INTO component_heartbeats (
 		t.Fatalf("heartbeat: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/system-health", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/system-health", nil)
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	NewSystemHealth(d).List(w, req)
@@ -191,7 +191,7 @@ INSERT INTO component_heartbeats (
 
 	router := chi.NewRouter()
 	router.Get("/api/v1/system-health/clusters/{cluster_id}", NewSystemHealth(d).Cluster)
-	clusterReq := httptest.NewRequest(http.MethodGet, "/api/v1/system-health/clusters/"+clusterID.String(), nil)
+	clusterReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/system-health/clusters/"+clusterID.String(), nil)
 	clusterReq = clusterReq.WithContext(WithSubject(clusterReq.Context(), Subject{UserID: userID, OrgID: orgID}))
 	clusterResponse := httptest.NewRecorder()
 	router.ServeHTTP(clusterResponse, clusterReq)

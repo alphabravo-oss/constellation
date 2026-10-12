@@ -8,12 +8,12 @@
 //
 // Detection strategy mirrors what other agents do:
 //
-//   1. Walk /etc/cni/net.d/*.conf*. The filename and the JSON `type` field
-//      uniquely identify every common CNI today.
+//  1. Walk /etc/cni/net.d/*.conf*. The filename and the JSON `type` field
+//     uniquely identify every common CNI today.
 //
-//   2. Fall back to "unknown" if the directory is empty or unreadable.
-//      The agent treats unknown as "stock iptables CNI" — safe default
-//      since NFQUEUE on a Cilium cluster is a no-op, not a crash.
+//  2. Fall back to "unknown" if the directory is empty or unreadable.
+//     The agent treats unknown as "stock iptables CNI" — safe default
+//     since NFQUEUE on a Cilium cluster is a no-op, not a crash.
 //
 // The CNI string is reported once at startup + included in the heartbeat
 // payload + emitted as a Prometheus gauge so operators can correlate
@@ -66,13 +66,13 @@ const (
 // Override list with the explicit `dir` arg to DetectCNI for tests or for
 // non-standard installs.
 var CandidateCNIDirs = []string{
-	"/etc/cni/net.d",                                  // kubeadm, EKS, GKE, AKS, kind, most upstream
-	"/var/lib/rancher/k3s/agent/etc/cni/net.d",        // k3s
-	"/var/lib/rancher/rke2/agent/etc/cni/net.d",       // RKE2
-	"/etc/cni/multus/net.d",                           // OpenShift OVN-Kubernetes (multus delegates)
-	"/etc/origin/openshift-sdn/net.d",                 // legacy OpenShift SDN
-	"/var/snap/microk8s/current/args/cni-network",     // microk8s (snap)
-	"/host/etc/cni/net.d",                             // when /etc is mounted under /host
+	"/etc/cni/net.d", // kubeadm, EKS, GKE, AKS, kind, most upstream
+	"/var/lib/rancher/k3s/agent/etc/cni/net.d",    // k3s
+	"/var/lib/rancher/rke2/agent/etc/cni/net.d",   // RKE2
+	"/etc/cni/multus/net.d",                       // OpenShift OVN-Kubernetes (multus delegates)
+	"/etc/origin/openshift-sdn/net.d",             // legacy OpenShift SDN
+	"/var/snap/microk8s/current/args/cni-network", // microk8s (snap)
+	"/host/etc/cni/net.d",                         // when /etc is mounted under /host
 }
 
 // DetectCNI walks the well-known CNI config dirs (or the explicit override

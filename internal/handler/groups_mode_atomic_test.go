@@ -41,7 +41,7 @@ func TestGroupCreateAndUpdateRollBackFailedProfilePropagation(t *testing.T) {
 	}
 	handler := NewGroups(database, audit.New(pool))
 	create := func(name, mode string) *httptest.ResponseRecorder {
-		request := httptest.NewRequest(http.MethodPost, "/groups?cluster_id="+clusterID.String(), strings.NewReader(`{"name":"`+name+`","kind":"ground","criteria":[{"key":"namespace","op":"eq","value":"default"}],"cfg_type":"user","policy_mode":"monitor","profile_mode":"`+mode+`"}`))
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/groups?cluster_id="+clusterID.String(), strings.NewReader(`{"name":"`+name+`","kind":"ground","criteria":[{"key":"namespace","op":"eq","value":"default"}],"cfg_type":"user","policy_mode":"monitor","profile_mode":"`+mode+`"}`))
 		request = request.WithContext(WithSubject(request.Context(), Subject{OrgID: orgID, UserID: userID}))
 		response := httptest.NewRecorder()
 		handler.Create(response, request)
@@ -64,7 +64,7 @@ func TestGroupCreateAndUpdateRollBackFailedProfilePropagation(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT id FROM groups WHERE org_id=$1 AND name='atomic-update'`, orgID).Scan(&groupID); err != nil {
 		t.Fatal(err)
 	}
-	request := httptest.NewRequest(http.MethodPut, "/groups/"+groupID.String()+"?cluster_id="+clusterID.String(), strings.NewReader(`{"name":"atomic-update","kind":"ground","criteria":[{"key":"namespace","op":"eq","value":"default"}],"cfg_type":"user","policy_mode":"monitor","profile_mode":"protect"}`))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPut, "/groups/"+groupID.String()+"?cluster_id="+clusterID.String(), strings.NewReader(`{"name":"atomic-update","kind":"ground","criteria":[{"key":"namespace","op":"eq","value":"default"}],"cfg_type":"user","policy_mode":"monitor","profile_mode":"protect"}`))
 	request = request.WithContext(WithSubject(request.Context(), Subject{OrgID: orgID, UserID: userID}))
 	response := httptest.NewRecorder()
 	router := chi.NewRouter()

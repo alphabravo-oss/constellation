@@ -9,7 +9,7 @@ import (
 
 func TestCoverage_ListHasDecisionEvidence(t *testing.T) {
 	w := httptest.NewRecorder()
-	NewCoverage().List(w, httptest.NewRequest("GET", "/api/v1/coverage", nil))
+	NewCoverage().List(w, httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/coverage", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("status: %d", w.Code)
 	}

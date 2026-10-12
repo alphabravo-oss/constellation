@@ -126,7 +126,7 @@ ON CONFLICT DO NOTHING`, userID, orgID); err != nil {
 	}
 
 	// 4. /api/v1/auth/me with bearer
-	req, _ := http.NewRequest("GET", ts.URL+"/api/v1/auth/me", nil)
+	req, _ := http.NewRequestWithContext(t.Context(), "GET", ts.URL+"/api/v1/auth/me", nil)
 	req.Header.Set("Authorization", "Bearer "+lr.Token)
 	resp, err = http.DefaultClient.Do(req)
 	if err != nil {
@@ -148,7 +148,7 @@ ON CONFLICT DO NOTHING`, userID, orgID); err != nil {
 	}
 
 	// 5. /api/v1/findings — should be empty, not error.
-	req, _ = http.NewRequest("GET", ts.URL+"/api/v1/findings", nil)
+	req, _ = http.NewRequestWithContext(t.Context(), "GET", ts.URL+"/api/v1/findings", nil)
 	req.Header.Set("Authorization", "Bearer "+lr.Token)
 	resp, err = http.DefaultClient.Do(req)
 	if err != nil {
@@ -306,7 +306,7 @@ func mustStatus(t *testing.T, url string, _ string, want int) {
 
 func mustBearerStatus(t *testing.T, url, token string, want int) {
 	t.Helper()
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequestWithContext(t.Context(), "GET", url, nil)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}

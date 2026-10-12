@@ -138,9 +138,9 @@ func TestHubbleEnabled(t *testing.T) {
 		want       bool
 	}{
 		{"cilium", "hubble-relay.kube-system:80", true},
-		{"Cilium", "hubble-relay:80", true}, // case-insensitive CNI match
-		{"cilium", "", false},               // no relay addr
-		{"calico", "hubble-relay:80", false},// not cilium (dp is not blind)
+		{"Cilium", "hubble-relay:80", true},  // case-insensitive CNI match
+		{"cilium", "", false},                // no relay addr
+		{"calico", "hubble-relay:80", false}, // not cilium (dp is not blind)
 		{"unknown", "", false},
 	}
 	for _, c := range cases {

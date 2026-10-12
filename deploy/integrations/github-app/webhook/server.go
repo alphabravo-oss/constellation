@@ -89,10 +89,10 @@ func envOr(k, def string) string {
 
 // Server is the webhook HTTP server.
 type Server struct {
-	cfg    Config
-	log    *slog.Logger
+	cfg     Config
+	log     *slog.Logger
 	privPEM []byte
-	client *http.Client
+	client  *http.Client
 }
 
 // New constructs the server, validating the private key on the way through.
@@ -348,7 +348,7 @@ func (s *Server) postIssueComment(ctx context.Context, token, repo string, prNum
 
 func (s *Server) postStatus(ctx context.Context, token, repo, sha, state, desc string) error {
 	payload, _ := json.Marshal(map[string]string{
-		"state":       state,       // "success" | "failure" | "pending" | "error"
+		"state":       state, // "success" | "failure" | "pending" | "error"
 		"description": desc,
 		"context":     "constellation/security",
 	})

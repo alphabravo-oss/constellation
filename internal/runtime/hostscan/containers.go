@@ -30,9 +30,9 @@ type Container struct {
 	ID        string            `json:"id"`
 	Name      string            `json:"name"`
 	Image     string            `json:"image"`
-	ImageRef  string            `json:"image_ref,omitempty"`  // resolved digest, if crictl returns one
-	State     string            `json:"state"`                // CONTAINER_RUNNING / CONTAINER_EXITED / …
-	PodName   string            `json:"pod_name,omitempty"`   // io.kubernetes.pod.name
+	ImageRef  string            `json:"image_ref,omitempty"` // resolved digest, if crictl returns one
+	State     string            `json:"state"`               // CONTAINER_RUNNING / CONTAINER_EXITED / …
+	PodName   string            `json:"pod_name,omitempty"`  // io.kubernetes.pod.name
 	PodNS     string            `json:"pod_namespace,omitempty"`
 	PodUID    string            `json:"pod_uid,omitempty"`
 	Labels    map[string]string `json:"labels,omitempty"`
@@ -69,8 +69,8 @@ type crictlListResponse struct {
 }
 
 type crictlContainer struct {
-	ID           string            `json:"id"`
-	PodSandboxID string            `json:"podSandboxId"`
+	ID           string `json:"id"`
+	PodSandboxID string `json:"podSandboxId"`
 	Metadata     struct {
 		Name    string `json:"name"`
 		Attempt uint32 `json:"attempt"`

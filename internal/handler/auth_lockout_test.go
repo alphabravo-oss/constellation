@@ -5,9 +5,10 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/google/uuid"
+
 	authpkg "github.com/alphabravocompany/constellation/internal/auth"
 	"github.com/alphabravocompany/constellation/pkg/audit"
-	"github.com/google/uuid"
 )
 
 // A2: N consecutive failed local logins lock the account for the window, a good password

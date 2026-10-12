@@ -26,7 +26,7 @@ func TestResolveSensorMACs_ResolvesGroupMembersToMACs(t *testing.T) {
 		groupB: {"ns/api"},
 	}
 	workloadMACs := map[string][]string{
-		"ns/web": {"AA:AA:AA:AA:AA:AA"},          // upper-case → normalised
+		"ns/web": {"AA:AA:AA:AA:AA:AA"}, // upper-case → normalised
 		"ns/api": {"bb:bb:bb:bb:bb:bb", "cc:cc:cc:cc:cc:cc"},
 	}
 

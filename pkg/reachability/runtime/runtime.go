@@ -6,11 +6,11 @@
 //
 // the Confirmer:
 //
-//	1. tries to attach a uprobe to the binary symbol (when the symbol is known and
-//	   the target process is running with a resolvable executable),
-//	2. if the symbol can't be resolved (e.g. a non-Go binary, a stripped build), it
-//	   falls back to a coarse "process loaded library X" mark from the eBPF
-//	   library-load events.
+//  1. tries to attach a uprobe to the binary symbol (when the symbol is known and
+//     the target process is running with a resolvable executable),
+//  2. if the symbol can't be resolved (e.g. a non-Go binary, a stripped build), it
+//     falls back to a coarse "process loaded library X" mark from the eBPF
+//     library-load events.
 //
 // Either way, when the runtime mark fires, MarkConfirmed is called with the verdict
 // id + container/pid context; callers persist this onto the corresponding finding

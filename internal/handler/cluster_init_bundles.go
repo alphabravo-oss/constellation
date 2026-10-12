@@ -164,28 +164,28 @@ type CreateBundleRequest struct {
 
 // BundleSummary is the list/detail response shape (no contents).
 type BundleSummary struct {
-	ID          uuid.UUID  `json:"id"`
-	OrgID       uuid.UUID  `json:"org_id"`
-	ClusterID   uuid.UUID  `json:"cluster_id"`
-	Name        string     `json:"name"`
-	Distro      string     `json:"distro"`
-	Region      string     `json:"region,omitempty"`
-	Status      string     `json:"status"` // active | expired | revoked
-	ExpiresAt   time.Time  `json:"expires_at"`
-	RevokedAt   *time.Time `json:"revoked_at,omitempty"`
+	ID           uuid.UUID  `json:"id"`
+	OrgID        uuid.UUID  `json:"org_id"`
+	ClusterID    uuid.UUID  `json:"cluster_id"`
+	Name         string     `json:"name"`
+	Distro       string     `json:"distro"`
+	Region       string     `json:"region,omitempty"`
+	Status       string     `json:"status"` // active | expired | revoked
+	ExpiresAt    time.Time  `json:"expires_at"`
+	RevokedAt    *time.Time `json:"revoked_at,omitempty"`
 	DownloadedAt *time.Time `json:"downloaded_at,omitempty"`
-	CreatedAt   time.Time  `json:"created_at"`
-	CreatedBy   *uuid.UUID `json:"created_by,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+	CreatedBy    *uuid.UUID `json:"created_by,omitempty"`
 }
 
 // MintResponse is the response to POST and rotate: includes the rendered YAML once.
 type MintResponse struct {
 	BundleSummary
-	YAML       string `json:"yaml"`
-	ServerURL  string `json:"server_url"`
+	YAML      string `json:"yaml"`
+	ServerURL string `json:"server_url"`
 	// ImportURL is the one-command join URL (kubectl apply -f). The URL's token IS
 	// the runtime-agent credential, so treat it like a secret.
-	ImportURL  string `json:"import_url"`
+	ImportURL string `json:"import_url"`
 }
 
 // ClusterInitBundleManifest is the structure rendered into the YAML payload.
@@ -561,13 +561,13 @@ VALUES ($1, $2, $3, $4, $5, NULLIF($6,''), $7, $8, $9, $10, $11, $12)`,
 		TargetKind: "cluster-init-bundle",
 		TargetID:   bundleID.String(),
 		After: map[string]any{
-			"cluster_id":              clusterID.String(),
-			"name":                    args.Name,
-			"distro":                  args.Distro,
-			"region":                  args.Region,
-			"expires_at":              expiresAt,
-			"scanner_token_id":        scannerID.String(),
-			"runtime_agent_token_id":  agentID.String(),
+			"cluster_id":             clusterID.String(),
+			"name":                   args.Name,
+			"distro":                 args.Distro,
+			"region":                 args.Region,
+			"expires_at":             expiresAt,
+			"scanner_token_id":       scannerID.String(),
+			"runtime_agent_token_id": agentID.String(),
 		},
 	})
 

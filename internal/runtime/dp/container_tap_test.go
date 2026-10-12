@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"testing"
-
 )
 
 func quietLogger() *slog.Logger {

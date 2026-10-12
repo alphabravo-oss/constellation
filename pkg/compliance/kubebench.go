@@ -44,7 +44,7 @@ type kbReport struct {
 type kbResult struct {
 	TestNumber  string `json:"test_number"`
 	TestDesc    string `json:"test_desc"`
-	Status      string `json:"status"`        // PASS | FAIL | WARN | INFO
+	Status      string `json:"status"` // PASS | FAIL | WARN | INFO
 	ActualValue string `json:"actual_value"`
 	Scored      bool   `json:"scored"`
 	Remediation string `json:"remediation"`
@@ -203,14 +203,15 @@ func isVersionToken(s string) bool {
 }
 
 // severityForKBNumber maps the test number prefix to a severity. We tier:
-//   1.1.x — control plane file perms          -> medium
-//   1.2.x — API server flags                  -> high
-//   1.3.x — controller-manager flags          -> high
-//   1.4.x — scheduler flags                   -> medium
-//   2.x   — etcd                              -> high
-//   3.x   — control-plane configuration       -> high
-//   4.x   — worker node                       -> medium
-//   5.x   — policies (PSP/PSA/RBAC)           -> high
+//
+//	1.1.x — control plane file perms          -> medium
+//	1.2.x — API server flags                  -> high
+//	1.3.x — controller-manager flags          -> high
+//	1.4.x — scheduler flags                   -> medium
+//	2.x   — etcd                              -> high
+//	3.x   — control-plane configuration       -> high
+//	4.x   — worker node                       -> medium
+//	5.x   — policies (PSP/PSA/RBAC)           -> high
 func severityForKBNumber(s string) string {
 	if strings.HasPrefix(s, "1.2.") ||
 		strings.HasPrefix(s, "1.3.") ||

@@ -105,7 +105,7 @@ VALUES ($1, $2, $3, 'running', $4, NOW(), 1)`, jobID, orgID, targetID, workerID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			request := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/"+jobID.String()+"/complete", bytes.NewReader(requestBody))
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/"+jobID.String()+"/complete", bytes.NewReader(requestBody))
 			request.Header.Set("Authorization", "Bearer "+rawToken)
 			route := chi.NewRouteContext()
 			route.URLParams.Add("id", jobID.String())

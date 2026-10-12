@@ -26,7 +26,7 @@ func TestHostFactsAttributesToBundleCluster(t *testing.T) {
 	d := openTestDB(t)
 	defer d.Close()
 
-	ctx := httptest.NewRequest("GET", "/", nil).Context()
+	ctx := httptest.NewRequestWithContext(t.Context(), "GET", "/", nil).Context()
 	pool := d.Pool()
 
 	var regclass string
@@ -97,7 +97,7 @@ VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`,
 
 	report := func(tok, nodeName string, at time.Time) {
 		body, _ := json.Marshal(HostFacts{Node: nodeName, ObservedAt: at})
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/host-facts:report", bytes.NewReader(body))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/host-facts:report", bytes.NewReader(body))
 		req.Header.Set("Authorization", "Bearer "+tok)
 		rec := httptest.NewRecorder()
 		RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(NewHostFacts(d).Report)).ServeHTTP(rec, req)
@@ -163,7 +163,7 @@ func TestHostFactsRejectsCrossTenantBundleAttribution(t *testing.T) {
 	d := openTestDB(t)
 	defer d.Close()
 
-	ctx := httptest.NewRequest(http.MethodGet, "/", nil).Context()
+	ctx := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil).Context()
 	pool := d.Pool()
 	orgA, orgB := uuid.New(), uuid.New()
 	clusterA, clusterB := uuid.New(), uuid.New()
@@ -203,7 +203,7 @@ VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`,
 			if err != nil {
 				t.Fatal(err)
 			}
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/host-facts:report", bytes.NewReader(body))
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/host-facts:report", bytes.NewReader(body))
 			req.Header.Set("Authorization", "Bearer "+raw)
 			rec := httptest.NewRecorder()
 			RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(NewHostFacts(d).Report)).ServeHTTP(rec, req)

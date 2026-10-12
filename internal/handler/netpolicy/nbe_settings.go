@@ -31,9 +31,9 @@ import (
 
 // NBESettings is one netpolicy_nbe_settings row in wire form.
 type NBESettings struct {
-	Namespace string           `json:"namespace"`
+	Namespace string            `json:"namespace"`
 	Mode      netpolicy.NBEMode `json:"mode"`
-	UpdatedAt string           `json:"updated_at,omitempty"`
+	UpdatedAt string            `json:"updated_at,omitempty"`
 }
 
 // NBEStore reads/writes the per-namespace NBE toggle.

@@ -27,7 +27,7 @@ func TestNamespaceScopeFromRequest(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			r := httptest.NewRequest("GET", "/x"+tc.query, nil)
+			r := httptest.NewRequestWithContext(t.Context(), "GET", "/x"+tc.query, nil)
 			rctx := chi.NewRouteContext()
 			if tc.routeNS != "" {
 				rctx.URLParams.Add("namespace", tc.routeNS)

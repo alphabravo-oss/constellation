@@ -28,10 +28,10 @@ import (
 
 func main() {
 	var (
-		duration  = flag.Duration("duration", 10*time.Second, "smoke window")
-		minExec   = flag.Int("min-exec", 10, "minimum /bin/true exec events to require")
-		minTCP    = flag.Int("min-tcp", 1, "minimum tcp_connect events to require")
-		showFile  = flag.Bool("show-file", false, "log first file_open events")
+		duration = flag.Duration("duration", 10*time.Second, "smoke window")
+		minExec  = flag.Int("min-exec", 10, "minimum /bin/true exec events to require")
+		minTCP   = flag.Int("min-tcp", 1, "minimum tcp_connect events to require")
+		showFile = flag.Bool("show-file", false, "log first file_open events")
 	)
 	flag.Parse()
 

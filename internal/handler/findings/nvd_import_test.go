@@ -13,7 +13,7 @@ func TestParseNVDPage(t *testing.T) {
           "published": "2021-12-10T10:15:09.000Z",
           "lastModified": "2023-04-03T20:15:09.000Z",
           "descriptions": [
-            {"lang":"es","value":"descripcion"},
+            {"lang":"es","value":"descripción"},
             {"lang":"en","value":"Apache Log4j2 JNDI RCE."}
           ],
           "metrics": {"cvssMetricV31": [{"cvssData": {"baseScore": 10.0, "vectorString": "CVSS:3.1/AV:N"}}]}

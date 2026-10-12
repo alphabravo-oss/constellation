@@ -140,7 +140,7 @@ func TestForcedPasswordReset_BlocksOtherRequests(t *testing.T) {
 
 	// The change-password endpoint is reachable; a valid change clears the flag.
 	body, _ := json.Marshal(map[string]string{"current_password": pw, "new_password": "AfterReset-Pass2!"})
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/auth/change-password", bytes.NewReader(body))
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, ts.URL+"/api/v1/auth/change-password", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+tok)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)

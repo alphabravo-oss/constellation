@@ -10,9 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/internal/handler"
 )
 
 func TestParseFileProfileFilter(t *testing.T) {
@@ -328,7 +329,7 @@ INSERT INTO events (
 	}
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/runtime/file-profile-rules:bundle?cluster_id="+clusterID.String(), nil)
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/runtime/file-profile-rules:bundle?cluster_id="+clusterID.String(), nil)
 	req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(), &handler.RuntimeAgentToken{
 		ID:    uuid.New(),
 		OrgID: orgID,
@@ -382,7 +383,7 @@ INSERT INTO events (
 		}},
 	})
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/runtime/file-profile-watches:report", bytes.NewReader(body))
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/runtime/file-profile-watches:report", bytes.NewReader(body))
 	req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(), &handler.RuntimeAgentToken{
 		ID:    uuid.New(),
 		OrgID: orgID,
@@ -532,7 +533,7 @@ VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`,
 	h := NewFileProfiles(d, nil)
 	get := func(token *handler.RuntimeAgentToken, clusterID uuid.UUID) *httptest.ResponseRecorder {
 		t.Helper()
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/runtime/file-profile-rules:bundle?cluster_id="+clusterID.String(), nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/runtime/file-profile-rules:bundle?cluster_id="+clusterID.String(), nil)
 		req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(), token))
 		rec := httptest.NewRecorder()
 		h.AgentRulesBundle(rec, req)
@@ -672,7 +673,7 @@ VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`,
 		if err != nil {
 			t.Fatal(err)
 		}
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/runtime/file-profile-watches:report", bytes.NewReader(body))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/runtime/file-profile-watches:report", bytes.NewReader(body))
 		req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(), token))
 		rec := httptest.NewRecorder()
 		h.ReportWatchInventory(rec, req)

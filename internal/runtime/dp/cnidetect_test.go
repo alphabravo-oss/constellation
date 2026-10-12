@@ -62,8 +62,8 @@ func TestDetectCNI_CiliumWinsOverChained(t *testing.T) {
 	// Cilium chained on top of Calico is a real-world setup; our
 	// enforcement decision wants Cilium-detect because NFQUEUE is moot.
 	dir := cniFixture(t, map[string]string{
-		"05-cilium.conflist":  `{}`,
-		"10-calico.conflist":  `{}`,
+		"05-cilium.conflist": `{}`,
+		"10-calico.conflist": `{}`,
 	})
 	if got := DetectCNI(dir).Name; got != CNICilium {
 		t.Errorf("Cilium chained over Calico → %q, want %q", got, CNICilium)

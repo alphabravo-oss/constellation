@@ -42,7 +42,7 @@ VALUES ($1, $2, 'vulnerability', $3, $4, $4, $5, 80, 'open')`,
 		}
 	}
 
-	req := httptest.NewRequest("GET", "/api/v1/dashboard/summary", nil)
+	req := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/dashboard/summary", nil)
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	NewDashboard(d).Summary(w, req)
@@ -106,7 +106,7 @@ func TestSettings_OrgRoundtrip(t *testing.T) {
 
 	// Patch.
 	body := strings.NewReader(`{"theme":"dark","ai_enabled":true}`)
-	req := httptest.NewRequest("PATCH", "/api/v1/settings/org", body)
+	req := httptest.NewRequestWithContext(t.Context(), "PATCH", "/api/v1/settings/org", body)
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	h.PatchOrg(w, req)
@@ -115,7 +115,7 @@ func TestSettings_OrgRoundtrip(t *testing.T) {
 	}
 
 	// Get.
-	req = httptest.NewRequest("GET", "/api/v1/settings/org", nil)
+	req = httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/settings/org", nil)
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	w = httptest.NewRecorder()
 	h.GetOrg(w, req)

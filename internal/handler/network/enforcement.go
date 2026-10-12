@@ -298,7 +298,7 @@ func blockIPManifest(ns, name, ip, direction string, labels map[string]string) (
 
 func managedLabels(kind string) map[string]any {
 	return map[string]any{
-		"app.kubernetes.io/managed-by": "constellation",
+		"app.kubernetes.io/managed-by":  "constellation",
 		"constellation.dev/enforcement": kind,
 	}
 }

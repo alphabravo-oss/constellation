@@ -101,7 +101,7 @@ func TestEventsIngest_E1RuleFiresOnIngest(t *testing.T) {
 
 	h := NewEventsIngest(d, audit.New(pool), bf).WithResponseRuleEngine(eval)
 
-	req := httptest.NewRequest("POST", "/api/v1/events:bulk", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/events:bulk", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+raw)
 	w := httptest.NewRecorder()
 	handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(h.Bulk)).ServeHTTP(w, req)
@@ -276,7 +276,7 @@ func TestEventsIngest_E1SuppressLog(t *testing.T) {
 
 	h := NewEventsIngest(d, audit.New(pool), bf).WithResponseRuleEngine(eval)
 
-	req := httptest.NewRequest("POST", "/api/v1/events:bulk", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/events:bulk", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+raw)
 	w := httptest.NewRecorder()
 	handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(h.Bulk)).ServeHTTP(w, req)

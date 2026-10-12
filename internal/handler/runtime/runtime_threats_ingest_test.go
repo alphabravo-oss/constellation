@@ -9,11 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/response"
-	"github.com/google/uuid"
 )
 
 // TestRuntimeThreats_BulkRoundTrip covers Wave 5: agent POSTs a DPI threat
@@ -110,7 +111,7 @@ DO UPDATE SET namespace = EXCLUDED.namespace,
 	})
 
 	h := NewRuntimeThreats(d)
-	req := httptest.NewRequest("POST", "/api/v1/runtime-threats:bulk", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/runtime-threats:bulk", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+raw)
 	w := httptest.NewRecorder()
 	handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(h.Bulk)).ServeHTTP(w, req)
@@ -247,7 +248,7 @@ VALUES ($1, $2, '', true, 'threat', $3, $4, $5) RETURNING id`,
 		WithAudit(audit.New(pool)).
 		WithResponseEngine(NewResponseDispatch(d, nil)).
 		WithResponseDecision(NewResponseDecision(d))
-	req := httptest.NewRequest("POST", "/api/v1/runtime-threats:bulk", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/runtime-threats:bulk", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+raw)
 	w := httptest.NewRecorder()
 	handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(h.Bulk)).ServeHTTP(w, req)
@@ -338,7 +339,7 @@ func TestRuntimeThreats_V2SpecificCategoriesSuppressOnlyMatchingThreats(t *testi
 		WithResponseEngine(func(_ context.Context, _, _ uuid.UUID, event response.Event) {
 			gotTypes = append(gotTypes, event.Type)
 		})
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/runtime-threats:bulk", bytes.NewReader(body))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/runtime-threats:bulk", bytes.NewReader(body))
 	request.Header.Set("Authorization", "Bearer "+raw)
 	result := httptest.NewRecorder()
 	handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(h.Bulk)).ServeHTTP(result, request)
@@ -441,7 +442,7 @@ func TestRuntimeThreats_CategoryFilter(t *testing.T) {
 		{At: time.Now().UTC(), Node: node, ThreatID: 40001, Severity: 6, DlpNameHash: 0},  // WAF rule, hash unset
 	})
 	h := NewRuntimeThreats(d)
-	req := httptest.NewRequest("POST", "/api/v1/runtime-threats:bulk", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/runtime-threats:bulk", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+raw)
 	w := httptest.NewRecorder()
 	handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(h.Bulk)).ServeHTTP(w, req)
@@ -453,7 +454,7 @@ func TestRuntimeThreats_CategoryFilter(t *testing.T) {
 	// threat_ids (restricted to this test's node) so cross-test rows don't interfere.
 	listCategory := func(cat string) []int32 {
 		t.Helper()
-		lreq := httptest.NewRequest("GET", "/api/v1/runtime-threats?category="+cat, nil)
+		lreq := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/runtime-threats?category="+cat, nil)
 		lreq = lreq.WithContext(authctx.WithSubject(ctx, authctx.Subject{OrgID: orgID}))
 		lw := httptest.NewRecorder()
 		h.List(lw, lreq)
@@ -530,7 +531,7 @@ VALUES
 		t.Fatalf("threats: %v", err)
 	}
 
-	req := httptest.NewRequest("GET", "/api/v1/runtime-threats?cluster_id="+clusterID.String()+"&group="+groupID.String(), nil)
+	req := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/runtime-threats?cluster_id="+clusterID.String()+"&group="+groupID.String(), nil)
 	req = req.WithContext(authctx.WithSubject(ctx, authctx.Subject{OrgID: orgID}))
 	rec := httptest.NewRecorder()
 	NewRuntimeThreats(d).List(rec, req)

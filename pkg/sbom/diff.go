@@ -21,16 +21,16 @@ type PackageRef struct {
 
 // Diff is the result of comparing two SBOMs.
 type Diff struct {
-	Added   []PackageRef       `json:"added"`
-	Removed []PackageRef       `json:"removed"`
+	Added   []PackageRef           `json:"added"`
+	Removed []PackageRef           `json:"removed"`
 	Changed []PackageVersionChange `json:"changed"`
 }
 
 // PackageVersionChange is one (ecosystem,name) pair that's present in both SBOMs with a
 // different version.
 type PackageVersionChange struct {
-	Ecosystem string `json:"ecosystem"`
-	Name      string `json:"name"`
+	Ecosystem  string `json:"ecosystem"`
+	Name       string `json:"name"`
 	OldVersion string `json:"old_version"`
 	NewVersion string `json:"new_version"`
 }

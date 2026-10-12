@@ -15,12 +15,12 @@
 //
 // Why a snapshot rather than a per-request DB call?
 //
-//   The admission webhook is on the critical path of every Pod CREATE.
-//   A 50ms DB round-trip per request is the difference between "fine" and
-//   "the kubelet times out and the node thrashes." We accept up to 5s of
-//   staleness (configurable) — quarantine is not an enforcement primitive
-//   for already-running pods (use the policy state machine for that), so
-//   a short staleness window has no security cost.
+//	The admission webhook is on the critical path of every Pod CREATE.
+//	A 50ms DB round-trip per request is the difference between "fine" and
+//	"the kubelet times out and the node thrashes." We accept up to 5s of
+//	staleness (configurable) — quarantine is not an enforcement primitive
+//	for already-running pods (use the policy state machine for that), so
+//	a short staleness window has no security cost.
 package quarantine
 
 import (
@@ -49,16 +49,16 @@ const (
 // Entry is one quarantine row materialized in memory. Field names match
 // the SQL column names for symmetry.
 type Entry struct {
-	ID         uuid.UUID `json:"id"`
-	OrgID      uuid.UUID `json:"org_id"`
-	ClusterID  uuid.UUID `json:"cluster_id"`
-	Scope      Scope     `json:"scope"`
-	MatchKey   string    `json:"match_key"`
-	Reason     string    `json:"reason"`
-	Origin     string    `json:"origin"`
-	SourceKind string    `json:"source_kind,omitempty"`
+	ID         uuid.UUID  `json:"id"`
+	OrgID      uuid.UUID  `json:"org_id"`
+	ClusterID  uuid.UUID  `json:"cluster_id"`
+	Scope      Scope      `json:"scope"`
+	MatchKey   string     `json:"match_key"`
+	Reason     string     `json:"reason"`
+	Origin     string     `json:"origin"`
+	SourceKind string     `json:"source_kind,omitempty"`
 	SourceID   *uuid.UUID `json:"source_id,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
+	CreatedAt  time.Time  `json:"created_at"`
 	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 }
 
@@ -75,9 +75,9 @@ type Snapshot struct {
 	clusterID uuid.UUID
 	at        time.Time
 	// Indexed views.
-	namespaces map[string]Entry        // ns -> first matching entry
-	workloads  map[string]Entry        // "ns/name" -> entry
-	images     []Entry                 // scope=image; matched by HasPrefix
+	namespaces map[string]Entry // ns -> first matching entry
+	workloads  map[string]Entry // "ns/name" -> entry
+	images     []Entry          // scope=image; matched by HasPrefix
 }
 
 // Hit describes a quarantine match against a candidate pod.
@@ -256,11 +256,11 @@ func (s *Source) Current() *Snapshot { return s.snap.Load() }
 
 // Health describes the source's freshness for /readyz and /metrics.
 type Health struct {
-	LastRefresh time.Time `json:"last_refresh"`
+	LastRefresh time.Time     `json:"last_refresh"`
 	Age         time.Duration `json:"age"`
-	Successes   int64     `json:"successes"`
-	Failures    int64     `json:"failures"`
-	LastError   string    `json:"last_error,omitempty"`
+	Successes   int64         `json:"successes"`
+	Failures    int64         `json:"failures"`
+	LastError   string        `json:"last_error,omitempty"`
 }
 
 // Health returns a fresh snapshot of the source's state.

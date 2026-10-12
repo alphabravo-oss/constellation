@@ -24,9 +24,9 @@ import (
 const (
 	ActionPolicyCreate       = "runtime.policy.create"
 	ActionPolicyUpdate       = "runtime.policy.update"
-	ActionPolicyPromote      = "runtime.policy.promote"       // mode → enforce
-	ActionPolicyDemote       = "runtime.policy.demote"        // mode → monitor (operator-initiated)
-	ActionPolicyDisable      = "runtime.policy.disable"       // mode → disabled
+	ActionPolicyPromote      = "runtime.policy.promote" // mode → enforce
+	ActionPolicyDemote       = "runtime.policy.demote"  // mode → monitor (operator-initiated)
+	ActionPolicyDisable      = "runtime.policy.disable" // mode → disabled
 	ActionPolicyDelete       = "runtime.policy.delete"
 	ActionPolicyAutoRollback = "runtime.policy.auto_rollback" // mode → monitor (system-initiated)
 )
@@ -39,13 +39,13 @@ const TargetKindPolicy = "runtime_policy"
 // columns. It's deliberately small: full rules are in runtime_policies, and
 // duplicating them on every mode flip would bloat audit_events.
 type PolicySnapshot struct {
-	ID         uuid.UUID `json:"id"`
-	Workload   string    `json:"workload"`
-	Namespace  string    `json:"namespace"`
-	Name       string    `json:"name"`
-	Mode       string    `json:"mode"`
-	RuleCount  int       `json:"rule_count"`
-	Version    int64     `json:"version"`
+	ID        uuid.UUID `json:"id"`
+	Workload  string    `json:"workload"`
+	Namespace string    `json:"namespace"`
+	Name      string    `json:"name"`
+	Mode      string    `json:"mode"`
+	RuleCount int       `json:"rule_count"`
+	Version   int64     `json:"version"`
 }
 
 // LogPolicyEvent is the underlying writer. Specific helpers below pick the

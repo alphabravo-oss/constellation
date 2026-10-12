@@ -21,9 +21,9 @@ func TestRenderImportManifest(t *testing.T) {
 		"kind: DaemonSet",
 		"kind: ClusterRoleBinding",
 		`value: "https://constellation.dev.alphabravo.io"`, // control plane FQDN
-		`token: "raw-agent-token-abc123def456"`,             // credential in the secret
-		`value: "prod-us-east-1"`,                            // cluster name
-		`value: "2a46e2a1-9485-4bd6-a622-b1fcd6ee4130"`,      // cluster id
+		`token: "raw-agent-token-abc123def456"`,            // credential in the secret
+		`value: "prod-us-east-1"`,                          // cluster name
+		`value: "2a46e2a1-9485-4bd6-a622-b1fcd6ee4130"`,    // cluster id
 		"ghcr.io/alphabravocompany/constellation/runtime-agent:latest",
 	} {
 		if !strings.Contains(m, want) {

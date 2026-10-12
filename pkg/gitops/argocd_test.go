@@ -9,7 +9,7 @@ func TestDetectDrift_FindsModifiedAndOrphanedResources(t *testing.T) {
 	}
 	live := []Resource{
 		{Kind: "RoleBinding", Name: "rb-1", Namespace: "default", Spec: map[string]any{"subjects": []any{"alice", "EVIL"}}}, // tampered
-		{Kind: "RoleBinding", Name: "rb-2", Namespace: "default", Spec: map[string]any{"subjects": []any{"bob"}}},          // out-of-band addition
+		{Kind: "RoleBinding", Name: "rb-2", Namespace: "default", Spec: map[string]any{"subjects": []any{"bob"}}},           // out-of-band addition
 		// np-1 missing → declared-but-not-in-cluster
 	}
 	drift := DetectDrift("argocd", "demo-app", declared, live)

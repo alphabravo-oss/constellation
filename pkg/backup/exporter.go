@@ -27,12 +27,12 @@ import (
 
 // ExportOptions configures Export.
 type ExportOptions struct {
-	OrgID         string
-	OrgName       string
-	Out           io.Writer
-	GeneratedBy   string
+	OrgID          string
+	OrgName        string
+	Out            io.Writer
+	GeneratedBy    string
 	SourceInstance string
-	Sign          SignerOptions
+	Sign           SignerOptions
 	// AuditRecentWindow caps the audit_events_recent export at the most recent N. Default
 	// 30 days. Set to 0 to disable the audit export entirely.
 	AuditRecentWindow time.Duration
@@ -40,10 +40,10 @@ type ExportOptions struct {
 
 // ExportResult summarizes what was written.
 type ExportResult struct {
-	Manifest Manifest
-	Bytes    int64
+	Manifest       Manifest
+	Bytes          int64
 	SignerIdentity string
-	SignMode SignMode
+	SignMode       SignMode
 }
 
 // Export streams a backup tarball for the org identified by opts.OrgID into opts.Out.
@@ -176,7 +176,7 @@ func exportOne(ctx context.Context, pool *pgxpool.Pool, table, orgID string, aud
 	fd := rows.FieldDescriptions()
 	colNames := make([]string, len(fd))
 	for i, f := range fd {
-		colNames[i] = string(f.Name)
+		colNames[i] = f.Name
 	}
 
 	var buf bytes.Buffer

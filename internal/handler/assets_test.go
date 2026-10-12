@@ -84,7 +84,7 @@ VALUES ($1, 'cyclonedx-1.6', '{}'::jsonb, 'sha256:legacy-sbom')`, assetID); err 
 		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgID)
 	})
 
-	r := httptest.NewRequest("GET", "/api/v1/assets/"+assetID.String(), nil)
+	r := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/assets/"+assetID.String(), nil)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", assetID.String())
 	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
@@ -186,7 +186,7 @@ INSERT INTO image_scan_artifacts (
 		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgID)
 	})
 
-	r := httptest.NewRequest("GET", "/api/v1/assets?limit=10", nil)
+	r := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/assets?limit=10", nil)
 	r = r.WithContext(WithSubject(r.Context(), Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	NewAssets(d).List(w, r)

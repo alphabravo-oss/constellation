@@ -55,7 +55,7 @@ VALUES ($1, $2, $4, 'nv.promote-policy', 'ground', '[]'::jsonb, '[]'::jsonb, 'us
 	router := chi.NewRouter()
 	router.Post("/groups:promote", h.Promote)
 
-	req := httptest.NewRequest(http.MethodPost, "/groups:promote?cluster_id="+clusterID.String(),
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/groups:promote?cluster_id="+clusterID.String(),
 		strings.NewReader(`{"dimension":"policy","from":"discover"}`))
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	rec := httptest.NewRecorder()
@@ -76,7 +76,7 @@ VALUES ($1, $2, $4, 'nv.promote-policy', 'ground', '[]'::jsonb, '[]'::jsonb, 'us
 		t.Fatalf("legacy promote response = %+v", legacyResp)
 	}
 
-	req = httptest.NewRequest(http.MethodPost, "/groups:promote?cluster_id="+clusterID.String(),
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/groups:promote?cluster_id="+clusterID.String(),
 		strings.NewReader(`{"dimension":"profile","from":"protect","to":"monitor"}`))
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	rec = httptest.NewRecorder()
@@ -145,7 +145,7 @@ func TestGroupsPromoteRollsBackGroupAndBaselinesOnPropagationFailure(t *testing.
 		t.Fatal(err)
 	}
 	handler := NewGroups(database, audit.New(pool))
-	request := httptest.NewRequest(http.MethodPost, "/groups:promote?cluster_id="+clusterID.String(), strings.NewReader(`{"dimension":"profile","from":"monitor","to":"protect"}`))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/groups:promote?cluster_id="+clusterID.String(), strings.NewReader(`{"dimension":"profile","from":"monitor","to":"protect"}`))
 	request = request.WithContext(WithSubject(request.Context(), Subject{OrgID: orgID, UserID: uuid.New()}))
 	response := httptest.NewRecorder()
 	handler.Promote(response, request)

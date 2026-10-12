@@ -22,7 +22,7 @@ func BuiltinSensor() Sensor {
 			{
 				ID: 1001, Msg: "Credit card number (Luhn-valid)",
 				Severity: SevCritical, Action: "block",
-				Regex:    `\b(?:\d[ -]*?){13,19}\b`,
+				Regex: `\b(?:\d[ -]*?){13,19}\b`,
 				Validator: func(s string) bool {
 					return luhnValid(stripNonDigits(s))
 				},
@@ -32,9 +32,9 @@ func BuiltinSensor() Sensor {
 				ID: 1002, Msg: "US Social Security Number",
 				Severity: SevCritical, Action: "block",
 				// RE2 has no negative lookaheads; we validate exclusions in code.
-				Regex:   `\b\d{3}-\d{2}-\d{4}\b`,
+				Regex:     `\b\d{3}-\d{2}-\d{4}\b`,
 				Validator: validSSN,
-				Targets: defaultTargets,
+				Targets:   defaultTargets,
 			},
 			{
 				ID: 1003, Msg: "AWS Access Key ID",
@@ -82,7 +82,7 @@ func BuiltinSensor() Sensor {
 			{
 				ID: 1010, Msg: "EU IBAN",
 				Severity: SevWarning, Action: "alert",
-				Regex:   `\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b`,
+				Regex: `\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b`,
 				Validator: func(s string) bool {
 					s = strings.ToUpper(stripNonAlnum(s))
 					return looksLikeIBAN(s)

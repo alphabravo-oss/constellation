@@ -109,7 +109,7 @@ func TestSystemConfig_RedactedFieldErrorsDoNotMutateAndRBAC(t *testing.T) {
 	}
 	for _, testcase := range cases {
 		t.Run(testcase.name, func(t *testing.T) {
-			request, err := http.NewRequest(http.MethodPatch, server.URL+"/api/v1/system/config", strings.NewReader(testcase.patch))
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodPatch, server.URL+"/api/v1/system/config", strings.NewReader(testcase.patch))
 			if err != nil {
 				t.Fatal(err)
 			}

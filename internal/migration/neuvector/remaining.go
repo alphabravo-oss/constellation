@@ -8,8 +8,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/alphabravocompany/constellation/pkg/vulnprofile"
 	"gopkg.in/yaml.v3"
+
+	"github.com/alphabravocompany/constellation/pkg/vulnprofile"
 )
 
 // RemainingFamilies contains only reviewed metadata and exactly representable

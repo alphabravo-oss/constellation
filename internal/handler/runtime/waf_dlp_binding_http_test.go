@@ -56,7 +56,7 @@ func TestGroupSensorBindings_HTTP_RoundTrip(t *testing.T) {
 	// --- Bind (happy path) ---
 	body, _ := json.Marshal(BindRequest{GroupID: groupID, SensorKind: SensorKindWAF, SensorID: sensorID})
 	rec := httptest.NewRecorder()
-	req := withUser(httptest.NewRequest(http.MethodPost, "/api/v1/runtime/dpi-sensor-bindings", bytes.NewReader(body)), orgID)
+	req := withUser(httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/runtime/dpi-sensor-bindings", bytes.NewReader(body)), orgID)
 	h.Bind(rec, req)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("Bind status = %d, body=%s", rec.Code, rec.Body.String())
@@ -84,7 +84,7 @@ func TestGroupSensorBindings_HTTP_RoundTrip(t *testing.T) {
 	})
 	body, _ = json.Marshal(map[string]any{"group_id": implicitGroupID, "sensor_kind": SensorKindDLP})
 	rec = httptest.NewRecorder()
-	req = withUser(httptest.NewRequest(http.MethodPost, "/api/v1/runtime/dpi-sensor-bindings", bytes.NewReader(body)), orgID)
+	req = withUser(httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/runtime/dpi-sensor-bindings", bytes.NewReader(body)), orgID)
 	h.Bind(rec, req)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("Bind implicit status = %d, body=%s", rec.Code, rec.Body.String())
@@ -99,7 +99,7 @@ func TestGroupSensorBindings_HTTP_RoundTrip(t *testing.T) {
 
 	// --- List (owning org sees it) ---
 	rec = httptest.NewRecorder()
-	req = withUser(httptest.NewRequest(http.MethodGet, "/api/v1/runtime/dpi-sensor-bindings", nil), orgID)
+	req = withUser(httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/runtime/dpi-sensor-bindings", nil), orgID)
 	h.List(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("List status = %d", rec.Code)
@@ -121,7 +121,7 @@ func TestGroupSensorBindings_HTTP_RoundTrip(t *testing.T) {
 	// --- Org scoping: a different org never sees it ---
 	otherOrg := uuid.New()
 	rec = httptest.NewRecorder()
-	req = withUser(httptest.NewRequest(http.MethodGet, "/api/v1/runtime/dpi-sensor-bindings", nil), otherOrg)
+	req = withUser(httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/runtime/dpi-sensor-bindings", nil), otherOrg)
 	h.List(rec, req)
 	var otherResp struct {
 		Bindings []GroupSensorBinding `json:"bindings"`
@@ -135,7 +135,7 @@ func TestGroupSensorBindings_HTTP_RoundTrip(t *testing.T) {
 
 	// --- Unbind is org-scoped: the other org cannot delete it ---
 	rec = httptest.NewRecorder()
-	req = withUser(httptest.NewRequest(http.MethodDelete, "/api/v1/runtime/dpi-sensor-bindings/"+created.ID.String(), nil), otherOrg)
+	req = withUser(httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "/api/v1/runtime/dpi-sensor-bindings/"+created.ID.String(), nil), otherOrg)
 	h.Unbind(rec, req)
 	// still present under the owning org
 	got, err := h.store.ListForOrg(ctx, orgID)
@@ -148,7 +148,7 @@ func TestGroupSensorBindings_HTTP_RoundTrip(t *testing.T) {
 
 	// --- Unbind (owning org) removes it ---
 	rec = httptest.NewRecorder()
-	req = withUser(httptest.NewRequest(http.MethodDelete, "/api/v1/runtime/dpi-sensor-bindings/"+created.ID.String(), nil), orgID)
+	req = withUser(httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "/api/v1/runtime/dpi-sensor-bindings/"+created.ID.String(), nil), orgID)
 	h.Unbind(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("Unbind status = %d", rec.Code)
@@ -187,7 +187,7 @@ func TestGroupSensorBindings_RejectForeignOrgGroup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/runtime/dpi-sensor-bindings", bytes.NewReader(body))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/runtime/dpi-sensor-bindings", bytes.NewReader(body))
 	request = request.WithContext(authctx.WithSubject(request.Context(), authctx.Subject{UserID: otherUserID, OrgID: otherOrgID}))
 	response := httptest.NewRecorder()
 	NewGroupSensorBindingsHTTP(database, nil).Bind(response, request)

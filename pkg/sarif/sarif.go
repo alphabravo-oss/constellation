@@ -44,11 +44,11 @@ type Tool struct {
 }
 
 type Driver struct {
-	Name           string   `json:"name"`
-	Version        string   `json:"version"`
-	FullName       string   `json:"fullName"`
-	InformationURI string   `json:"informationUri"`
-	Rules          []Rule   `json:"rules"`
+	Name           string `json:"name"`
+	Version        string `json:"version"`
+	FullName       string `json:"fullName"`
+	InformationURI string `json:"informationUri"`
+	Rules          []Rule `json:"rules"`
 }
 
 type Rule struct {
@@ -65,10 +65,10 @@ type RuleConfig struct {
 }
 
 type Result struct {
-	RuleID    string     `json:"ruleId"`
-	Level     string     `json:"level"`
-	Message   Text       `json:"message"`
-	Locations []Location `json:"locations,omitempty"`
+	RuleID     string                 `json:"ruleId"`
+	Level      string                 `json:"level"`
+	Message    Text                   `json:"message"`
+	Locations  []Location             `json:"locations,omitempty"`
 	Properties map[string]interface{} `json:"properties,omitempty"`
 }
 

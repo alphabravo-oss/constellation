@@ -45,14 +45,14 @@ type BuildDefinition struct {
 }
 
 type RunDetails struct {
-	Builder   Builder              `json:"builder"`
-	Metadata  Metadata             `json:"metadata"`
+	Builder    Builder              `json:"builder"`
+	Metadata   Metadata             `json:"metadata"`
 	Byproducts []ResourceDescriptor `json:"byproducts,omitempty"`
 }
 
 type Builder struct {
-	ID       string                 `json:"id"`
-	Version  map[string]string      `json:"version,omitempty"`
+	ID                  string               `json:"id"`
+	Version             map[string]string    `json:"version,omitempty"`
 	BuilderDependencies []ResourceDescriptor `json:"builderDependencies,omitempty"`
 }
 

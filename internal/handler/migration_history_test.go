@@ -44,7 +44,7 @@ func TestMigrationImportsPaginationAndScope(t *testing.T) {
 		NextCursor string                       `json:"next_cursor"`
 	}) {
 		t.Helper()
-		request := httptest.NewRequest(http.MethodGet, "/api/v1/migration/imports"+query, nil)
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/migration/imports"+query, nil)
 		request = request.WithContext(WithSubject(request.Context(), Subject{OrgID: fixture.org, UserID: fixture.user}))
 		response := httptest.NewRecorder()
 		fixture.h.MigrationImports(response, request)
@@ -104,7 +104,7 @@ func TestMigrationPreviewPersistsValidatedTargetCluster(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		request := httptest.NewRequest(http.MethodPost, "/api/v1/migration/preview", strings.NewReader(string(body)))
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/migration/preview", strings.NewReader(string(body)))
 		request = request.WithContext(WithSubject(request.Context(), Subject{OrgID: fixture.org, UserID: fixture.user}))
 		response := httptest.NewRecorder()
 		fixture.h.MigrationPreview(response, request)
@@ -121,7 +121,7 @@ func TestMigrationPreviewPersistsValidatedTargetCluster(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil || result.TargetClusterID != clusterID.String() {
 		t.Fatalf("target cluster=%q err=%v", result.TargetClusterID, err)
 	}
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/migration/imports", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/migration/imports", nil)
 	request = request.WithContext(WithSubject(request.Context(), Subject{OrgID: fixture.org, UserID: fixture.user}))
 	history := httptest.NewRecorder()
 	fixture.h.MigrationImports(history, request)
@@ -148,7 +148,7 @@ func TestMigrationImportsCursorOrdersTiedTimestamps(t *testing.T) {
 		if cursor != "" {
 			path += "&cursor=" + cursor
 		}
-		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
 		request = request.WithContext(WithSubject(request.Context(), Subject{OrgID: fixture.org, UserID: fixture.user}))
 		response := httptest.NewRecorder()
 		fixture.h.MigrationImports(response, request)

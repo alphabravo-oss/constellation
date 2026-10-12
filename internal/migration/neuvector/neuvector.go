@@ -31,8 +31,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/alphabravocompany/constellation/pkg/admission"
 	"gopkg.in/yaml.v3"
+
+	"github.com/alphabravocompany/constellation/pkg/admission"
 )
 
 // SourceExport is the subset of NeuVector's settings export we read.

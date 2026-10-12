@@ -95,7 +95,7 @@ func TestNetworkFlowsIngest_MatchCountersAndNBE(t *testing.T) {
 	})
 
 	h := NewNetworkFlowsIngest(d)
-	req := httptest.NewRequest("POST", "/api/v1/network-flows:bulk", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/network-flows:bulk", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+raw)
 	w := httptest.NewRecorder()
 	handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(h.Bulk)).ServeHTTP(w, req)

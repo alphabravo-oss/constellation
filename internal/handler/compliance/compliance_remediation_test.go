@@ -52,7 +52,7 @@ func TestComplianceRemediation_PersistedAndReturned(t *testing.T) {
 	h := NewCompliance(d, audit.New(pool))
 
 	// Ingest.
-	ingReq := httptest.NewRequest(http.MethodPost, "/api/v1/compliance/ingest?profile=kube-bench&cluster_id="+clusterID.String(), bytes.NewReader([]byte(kbRemediationSampleJSON)))
+	ingReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/compliance/ingest?profile=kube-bench&cluster_id="+clusterID.String(), bytes.NewReader([]byte(kbRemediationSampleJSON)))
 	ingReq = ingReq.WithContext(authctx.WithSubject(ingReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	ingResp := httptest.NewRecorder()
 	h.Ingest(ingResp, ingReq)
@@ -72,7 +72,7 @@ SELECT remediation FROM compliance_checks
 	}
 
 	// Returned by the Checks read DTO.
-	chkReq := httptest.NewRequest(http.MethodGet, "/api/v1/compliance/checks?cluster_id="+clusterID.String(), nil)
+	chkReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/compliance/checks?cluster_id="+clusterID.String(), nil)
 	chkReq = chkReq.WithContext(authctx.WithSubject(chkReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	chkResp := httptest.NewRecorder()
 	h.Checks(chkResp, chkReq)

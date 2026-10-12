@@ -20,7 +20,7 @@ import (
 func TestConnectorCoverage_OverviewWithoutStorageReturnsEmptyLiveState(t *testing.T) {
 	w := httptest.NewRecorder()
 
-	NewConnectorCoverage().Overview(w, httptest.NewRequest(http.MethodGet, "/api/v1/connector-coverage", nil))
+	NewConnectorCoverage().Overview(w, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/connector-coverage", nil))
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
@@ -61,7 +61,7 @@ INSERT INTO users (id, org_id, email, display_name) VALUES ($1, $2, $3, 'Connect
 		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgID)
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/connector-coverage/configs", bytes.NewBufferString(`{
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/connector-coverage/configs", bytes.NewBufferString(`{
 		"connector_id":"test-registry",
 		"connector_type":"registry",
 		"provider":"ghcr",
@@ -107,7 +107,7 @@ INSERT INTO users (id, org_id, email, display_name) VALUES ($1, $2, $3, 'Connect
 		t.Fatalf("saved config test must remain read-only: %+v", tested)
 	}
 
-	overviewReq := httptest.NewRequest(http.MethodGet, "/api/v1/connector-coverage", nil)
+	overviewReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/connector-coverage", nil)
 	overviewReq = overviewReq.WithContext(authctx.WithSubject(overviewReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	overviewResp := httptest.NewRecorder()
 	NewConnectorCoverage(d).Overview(overviewResp, overviewReq)
@@ -125,7 +125,7 @@ INSERT INTO users (id, org_id, email, display_name) VALUES ($1, $2, $3, 'Connect
 		t.Fatalf("overview missing saved health: %+v", overview.Configs[0])
 	}
 
-	rejectReq := httptest.NewRequest(http.MethodPost, "/api/v1/connector-coverage/configs", bytes.NewBufferString(`{
+	rejectReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/connector-coverage/configs", bytes.NewBufferString(`{
 		"connector_id":"test-registry",
 		"connector_type":"registry",
 		"display_name":"Test Registry",
@@ -276,7 +276,7 @@ VALUES ($1,'scanner','test-version','scanner-0',120,$2::jsonb,$3)`,
 		t.Fatalf("heartbeat: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/connector-coverage", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/connector-coverage", nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	NewConnectorCoverage(d).Overview(w, req)
@@ -346,7 +346,7 @@ VALUES ($1,'scanner','test-version','scanner-0',120,$2::jsonb,$3)`,
 		t.Fatalf("host evidence coverage = %+v", coverageByScope["Host package evidence"])
 	}
 
-	testReq := httptest.NewRequest(http.MethodPost, "/api/v1/connector-coverage/test?id="+registryID.String()+"&type=registry", nil)
+	testReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/connector-coverage/test?id="+registryID.String()+"&type=registry", nil)
 	testReq = testReq.WithContext(authctx.WithSubject(testReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	testResp := httptest.NewRecorder()
 	NewConnectorCoverage(d).Test(testResp, testReq)
@@ -354,7 +354,7 @@ VALUES ($1,'scanner','test-version','scanner-0',120,$2::jsonb,$3)`,
 		t.Fatalf("preview existing registry status=%d body=%s", testResp.Code, testResp.Body.String())
 	}
 
-	missingReq := httptest.NewRequest(http.MethodPost, "/api/v1/connector-coverage/test?id=test-registry&type=registry", nil)
+	missingReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/connector-coverage/test?id=test-registry&type=registry", nil)
 	missingReq = missingReq.WithContext(authctx.WithSubject(missingReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	missingResp := httptest.NewRecorder()
 	NewConnectorCoverage(d).Test(missingResp, missingReq)
@@ -533,7 +533,7 @@ CREATE TABLE IF NOT EXISTS connector_configs (
 func TestConnectorCoverage_TestIsReadOnly(t *testing.T) {
 	w := httptest.NewRecorder()
 
-	NewConnectorCoverage().Test(w, httptest.NewRequest(http.MethodPost, "/api/v1/connector-coverage/test?id=test-registry&type=registry", nil))
+	NewConnectorCoverage().Test(w, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/connector-coverage/test?id=test-registry&type=registry", nil))
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())

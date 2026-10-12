@@ -157,7 +157,7 @@ func TestNetworkRulesPreservesNegativePrecedence(t *testing.T) {
 	handler := NewNetwork(database)
 	router := chi.NewRouter()
 	router.Get("/clusters/{id}/network-rules", handler.NetworkRules)
-	request := httptest.NewRequest(http.MethodGet, "/clusters/"+clusterID.String()+"/network-rules", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/clusters/"+clusterID.String()+"/network-rules", nil)
 	request = request.WithContext(authctx.WithSubject(request.Context(), authctx.Subject{OrgID: orgID, UserID: userID}))
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)

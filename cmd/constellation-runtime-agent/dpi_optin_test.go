@@ -4,8 +4,8 @@ import "testing"
 
 func TestDPIOptIn(t *testing.T) {
 	cases := []struct {
-		name    string
-		labels  map[string]string
+		name     string
+		labels   map[string]string
 		waf, dlp bool
 	}{
 		{"none", nil, false, false},
