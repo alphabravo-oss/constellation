@@ -35,6 +35,15 @@ type Query struct {
 	Framework string
 	Namespace string
 	Limit     int
+	Offset    int
+	Sort      string
+	Order     string
+	ControlID string
+	Status    string
+	Search    string
+	Target    string
+	// Nil means no target filter; an explicit empty slice matches nothing.
+	Targets []string
 }
 
 // Collector reads evidence from Postgres.
@@ -44,8 +53,22 @@ type Collector struct {
 
 // Result is the API/report-facing evidence envelope.
 type Result struct {
-	Items   []Item  `json:"items"`
-	Summary Summary `json:"summary"`
+	Items     []Item     `json:"items"`
+	Summary   Summary    `json:"summary"`
+	Total     int        `json:"total"`
+	Limit     int        `json:"limit"`
+	Offset    int        `json:"offset"`
+	Sort      string     `json:"sort"`
+	Order     string     `json:"order"`
+	HasMore   bool       `json:"has_more"`
+	ClusterID *uuid.UUID `json:"cluster_id,omitempty"`
+	Scope     string     `json:"scope"`
+	Framework string     `json:"framework"`
+	Namespace string     `json:"namespace"`
+	ControlID string     `json:"control_id"`
+	Status    string     `json:"status"`
+	Search    string     `json:"q"`
+	Target    string     `json:"target"`
 }
 
 // Summary counts raw/effective status across a result set.
@@ -128,74 +151,7 @@ func (i Item) ReportEvidence() string {
 // Collect returns evidence for one scope or all scopes when Query.Scope is empty
 // or "all".
 func (c Collector) Collect(ctx context.Context, q Query) (Result, error) {
-	if q.Limit <= 0 {
-		q.Limit = 1000
-	}
-	q.Scope = strings.ToLower(strings.TrimSpace(q.Scope))
-	q.Framework = strings.TrimSpace(q.Framework)
-	q.Namespace = strings.TrimSpace(q.Namespace)
-
-	var items []Item
-	appendScope := func(scope string, fn func(context.Context, Query) ([]Item, error)) error {
-		scoped := q
-		scoped.Scope = scope
-		out, err := fn(ctx, scoped)
-		if err != nil {
-			return err
-		}
-		items = append(items, out...)
-		return nil
-	}
-
-	switch q.Scope {
-	case ScopeAll, "all":
-		if err := appendScope(ScopeKubernetes, c.collectKubernetes); err != nil {
-			return Result{}, err
-		}
-		if err := appendScope(ScopeNode, c.collectNodes); err != nil {
-			return Result{}, err
-		}
-		if err := appendScope(ScopeWorkload, c.collectWorkloads); err != nil {
-			return Result{}, err
-		}
-		if err := appendScope(ScopeCloud, c.collectCloud); err != nil {
-			return Result{}, err
-		}
-	case ScopeKubernetes:
-		var err error
-		items, err = c.collectKubernetes(ctx, q)
-		if err != nil {
-			return Result{}, err
-		}
-	case ScopeNode:
-		var err error
-		items, err = c.collectNodes(ctx, q)
-		if err != nil {
-			return Result{}, err
-		}
-	case ScopeWorkload:
-		var err error
-		items, err = c.collectWorkloads(ctx, q)
-		if err != nil {
-			return Result{}, err
-		}
-	case ScopeCloud:
-		var err error
-		items, err = c.collectCloud(ctx, q)
-		if err != nil {
-			return Result{}, err
-		}
-	default:
-		return Result{}, fmt.Errorf("unsupported compliance evidence scope %q", q.Scope)
-	}
-
-	if len(items) > q.Limit {
-		items = items[:q.Limit]
-	}
-	if err := c.applyExemptions(ctx, q, items); err != nil {
-		return Result{}, err
-	}
-	return Result{Items: items, Summary: summarize(items)}, nil
+	return c.readInventory(ctx, q)
 }
 
 func (c Collector) collectKubernetes(ctx context.Context, q Query) ([]Item, error) {

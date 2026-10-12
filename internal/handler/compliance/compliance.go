@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -152,55 +151,11 @@ func (c *Compliance) CloudEvidence(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *Compliance) writeEvidence(w http.ResponseWriter, r *http.Request, scope string) {
-	subj, ok := authctx.SubjectFrom(r.Context())
-	if !ok {
-		jsonError(w, http.StatusUnauthorized, "subject required")
-		return
-	}
-	clusterID, err := evidenceClusterIDParam(r)
-	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-	if clusterID != nil {
-		var owned bool
-		if err := c.db.Pool().QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM clusters WHERE id = $1 AND org_id = $2)`, clusterID, subj.OrgID).Scan(&owned); err != nil {
-			jsonError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		if !owned {
-			jsonError(w, http.StatusNotFound, "cluster not found")
-			return
-		}
-	}
-	limit := 1000
-	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
-		parsed, err := strconv.Atoi(raw)
-		if err != nil {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid limit"})
-			return
-		}
-		if parsed < 1 {
-			parsed = 1
-		}
-		if parsed > 5000 {
-			parsed = 5000
-		}
-		limit = parsed
-	}
-	result, err := evidence.Collector{Pool: c.db.Pool()}.Collect(r.Context(), evidence.Query{
-		OrgID:     subj.OrgID,
-		ClusterID: clusterID,
-		Scope:     scope,
-		Framework: r.URL.Query().Get("framework"),
-		Namespace: r.URL.Query().Get("namespace"),
-		Limit:     limit,
-	})
-	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	httpx.WriteJSON(w, http.StatusOK, result)
+	c.writeEvidenceInventory(w, r, scope, false)
+}
+
+func (c *Compliance) EvidenceCSV(w http.ResponseWriter, r *http.Request) {
+	c.writeEvidenceInventory(w, r, r.URL.Query().Get("scope"), true)
 }
 
 func evidenceClusterIDParam(r *http.Request) (*uuid.UUID, error) {

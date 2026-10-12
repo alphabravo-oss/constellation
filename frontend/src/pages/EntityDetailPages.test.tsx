@@ -3,9 +3,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { createMemoryHistory, type RouterHistory } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { api, cve, nodes, serverlessFunctions, type NodeDetail, type ServerlessFunctionDetail, type CVEAffectedResponse } from "@/api/client";
+import { api, cve, nodes, serverlessFunctions, type NodeDetail, type ServerlessFunctionDetail, type CVEAffectedResponse, type CVEAffectedInventoryParams, type CVEAffectedInventoryView } from "@/api/client";
 import { downloadCsv } from "@/lib/csv";
 import { TestRouter } from "@/test/router";
+import { TablePreferencesProvider } from "@/contexts/TablePreferencesContext";
 import { NodeDetailPage } from "./NodeDetailPage";
 import { ServerlessFunctionDetailPage } from "./ServerlessFunctionDetailPage";
 import { CVEDetailPage } from "./CVEDetailPage";
@@ -15,7 +16,7 @@ vi.mock("@/hooks/useCluster", async () => {
  const router = await vi.importActual<typeof import("@tanstack/react-router")>("@tanstack/react-router");
  return { useCluster: () => { const { id } = router.useParams({ strict: false }); return { clusterId: id, cluster: scope.resolved ? { id: scope.resolvedId || id, name: `Resolved ${id}` } : undefined, isLoading: scope.loading, error: scope.error }; } };
 });
-vi.mock("@/api/client", () => ({ api: { get: vi.fn() }, cve: { affected: vi.fn() }, nodes: { get: vi.fn(), scan: vi.fn() }, serverlessFunctions: { get: vi.fn() } }));
+vi.mock("@/api/client", () => ({ api: { get: vi.fn() }, cve: { affected: vi.fn(), affectedInventory: vi.fn(), affectedInventoryCSV: vi.fn() }, nodes: { get: vi.fn(), scan: vi.fn(), vulnerabilities: vi.fn(), exportVulnerabilitiesCSV: vi.fn() }, serverlessFunctions: { get: vi.fn() } }));
 vi.mock("@/lib/csv", () => ({ downloadCsv: vi.fn() }));
 const at = "2026-10-12T12:00:00Z";
 const nodeDetail = (cluster = "cluster-a", name = "node-a"): NodeDetail => ({
@@ -39,14 +40,26 @@ const affected = (cluster = "cluster-a", id = "CVE-2026-1234"): CVEAffectedRespo
  workloads: [{ cluster_id: cluster, cluster_name: cluster, deployment_id: "deployment-a", workload_id: "default/api", namespace: "default", name: "api", kind: "Deployment", image_ref: "registry.example/api:v1", image_ref_normalized: "registry.example/api:v1", image_digest: "sha256:exact", finding_count: 2, max_risk_score: 80, critical_count: 0, high_count: 2, last_seen_at: at }],
  clusters: [{ cluster_id: cluster, name: cluster, workload_count: 1, finding_count: 2, max_risk_score: 80 }],
 });
+
+const inventory = (id: string, view: CVEAffectedInventoryView, request: CVEAffectedInventoryParams = {}, source = affected(request.cluster_id ?? 'cluster-a', id)) => {
+ const image=source.images[0];
+ const items=view==='images'?source.images.map(row=>({...row,row_id:row.image_scan_result_id})):view==='workloads'?source.workloads.map(row=>({...row,image_evidence:[{image_ref:row.image_ref,image_ref_normalized:row.image_ref_normalized,image_repository:row.image_repository??"",image_tag:row.image_tag??"",image_digest:row.image_digest??""}],row_id:JSON.stringify([row.cluster_id,row.deployment_id,row.workload_id,row.namespace,row.name,row.kind])})):view==='clusters'?source.clusters.map(row=>({...row,row_id:row.cluster_id})):source.images.flatMap(scan=>scan.packages.map(pkg=>({...pkg,row_id:pkg.finding_id,image_scan_result_id:scan.image_scan_result_id,image_ref:scan.image_ref,image_repository:scan.image_repository,image_tag:scan.image_tag??'',image_digest:scan.image_digest,last_seen_at:scan.last_seen_at})));
+ const total=items.length;
+ const summary={total,finding_count:view==='packages'?total:view==='images'?source.images.reduce((sum,row)=>sum+row.finding_count,0):view==='workloads'?source.workloads.reduce((sum,row)=>sum+row.finding_count,0):source.clusters.reduce((sum,row)=>sum+row.finding_count,0),max_risk_score:image?.max_risk_score??0,image_count:source.images.length,workload_count:source.workloads.length,cluster_count:source.clusters.length,deployment_count:new Set(source.workloads.map(row=>row.deployment_id)).size,package_count:total};
+ const offset=request.offset??0;return {cve_id:source.cve_id,cluster_id:request.cluster_id??null,view,items:items.slice(offset,offset+100),total,summary,has_more:offset+100<total,limit:100,offset,sort:request.sort??(view==='clusters'?'workloads':'risk'),order:request.order??'desc'};
+};
 let root: Root; let host: HTMLDivElement; let client: QueryClient; let history: RouterHistory;
 beforeEach(() => {
  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
  scope.resolved = true; scope.resolvedId = ""; scope.loading = false; scope.error = null;
+ vi.mocked(nodes.vulnerabilities).mockImplementation(async (cluster, name, params) => ({ node: name, cluster_id: cluster, items: [{ ...nodeDetail(cluster, name).vulnerabilities[0], id: "finding-a", row_id: "finding-a:1791763200.000000", first_seen_at: at, source_cluster_id: cluster, risk_score: 80, fixable: true }], total: 1, has_more: false, summary: { total: 1, critical: 0, high: 1, fixable: 1, unique_cves: 1 }, limit: 100, offset: params?.offset || 0, q: params?.q || "", severity: params?.severity || "", fixable: params?.fixable || "", source: params?.source || "", sort: params?.sort || "risk", order: params?.order || "desc" }));
+ vi.mocked(nodes.exportVulnerabilitiesCSV).mockResolvedValue({ total: 1, exported: 1, limit: 100000, truncated: false });
  vi.mocked(nodes.get).mockImplementation(async (cluster, name) => nodeDetail(cluster, name)); vi.mocked(nodes.scan).mockResolvedValue({ data: {} } as never);
  vi.mocked(serverlessFunctions.get).mockImplementation(async (id) => functionDetail(id));
  vi.mocked(api.get).mockImplementation(async (url) => ({ data: intelligence(String(url).split('/').at(-1)) }) as never);
  vi.mocked(cve.affected).mockImplementation(async (id, cluster) => affected(cluster, id));
+ vi.mocked(cve.affectedInventory).mockImplementation(async (id, view, request) => inventory(id,view,request) as never);
+ vi.mocked(cve.affectedInventoryCSV).mockResolvedValue({total:1,exported:1,limit:100000,truncated:false});
 });
 afterEach(() => { act(() => root?.unmount()); host?.remove(); client?.clear(); vi.resetAllMocks(); });
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
@@ -55,18 +68,18 @@ async function render(kind: "node" | "function" | "cve" | "global-cve", url?: st
  const path = kind === 'node' ? '/clusters/$id/nodes/$nodeName' : kind === 'function' ? '/clusters/$id/serverless/$functionId' : kind === 'cve' ? '/clusters/$id/cve/$cveId' : '/cve/$id';
  const initial = url ?? (kind === 'node' ? '/clusters/cluster-a/nodes/node-a' : kind === 'function' ? '/clusters/cluster-a/serverless/function-a' : kind === 'cve' ? '/clusters/cluster-a/cve/CVE-2026-1234' : '/cve/CVE-2026-1234');
  history = createMemoryHistory({ initialEntries: [initial] });
- await act(async () => root.render(<QueryClientProvider client={client}><TestRouter path={path} history={history}>{kind === 'node' ? <NodeDetailPage /> : kind === 'function' ? <ServerlessFunctionDetailPage /> : <CVEDetailPage />}</TestRouter></QueryClientProvider>));
+ await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{ org_id: "org", user_id: "user" }}><TestRouter path={path} history={history}>{kind === 'node' ? <NodeDetailPage /> : kind === 'function' ? <ServerlessFunctionDetailPage /> : <CVEDetailPage />}</TestRouter></TablePreferencesProvider></QueryClientProvider>));
 }
 const stats = (name: string) => [...host.querySelectorAll(`[data-testid="${name}"] .app-stat-value`)].map((item) => item.textContent);
 const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent === label)!;
 async function tab(label: string) { const trigger = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((item) => item.textContent === label)!; await act(async () => trigger.focus()); await settled(() => expect(trigger.getAttribute('aria-selected')).toBe('true')); }
 
-it('shows five reported node KPIs with a single bounded host-vulnerability workspace', async () => {
- await render('node'); await settled(() => expect(host.querySelector('[data-testid="node-vulnerabilities"]')).not.toBeNull()); expect(stats('node-stats')).toEqual(['2401', '4', '1', '1', '1']);
- expect(host.textContent).toContain('Server fetch limit: 2,000 rows'); expect(host.textContent).toContain('summary can exceed this detail limit'); expect(host.textContent).toContain('host-package'); expect(host.textContent).not.toContain('Fixture benchmark'); expect(host.textContent).not.toContain('fixture-process'); expect(host.querySelector('[data-testid="node-stats"]')!.children).toHaveLength(5);
+it('shows five reported node KPIs with a server-scoped host finding workspace', async () => {
+ await render('node'); await settled(() => expect(host.textContent).toContain('1 matching finding instances')); expect(stats('node-stats')).toEqual(['2401', '4', '1', '1', '1']);
+ expect(host.textContent).toContain('1 matching finding instances'); expect(host.textContent).toContain('unique CVE / advisory IDs'); expect(host.textContent).toContain('host-package'); expect(host.textContent).not.toContain('Fixture benchmark'); expect(host.textContent).not.toContain('fixture-process'); expect(host.querySelector('[data-testid="node-stats"]')!.children).toHaveLength(5);
 });
 it.each(['node', 'function', 'cve'] as const)('does not query %s details before cluster scope is settled', async (kind) => {
- scope.loading = true; await render(kind); expect(nodes.get).not.toHaveBeenCalled(); expect(serverlessFunctions.get).not.toHaveBeenCalled(); expect(api.get).not.toHaveBeenCalled(); expect(cve.affected).not.toHaveBeenCalled();
+ scope.loading = true; await render(kind); expect(nodes.get).not.toHaveBeenCalled(); expect(serverlessFunctions.get).not.toHaveBeenCalled(); expect(api.get).not.toHaveBeenCalled(); expect(cve.affectedInventory).not.toHaveBeenCalled();
  scope.loading = false; scope.resolvedId = 'another'; await act(async () => history.push(`${history.location.pathname.replace("cluster-a", "cluster-b")}?scope=mismatched`)); await settled(() => expect(host.textContent).toContain('could not be resolved')); expect(nodes.get).not.toHaveBeenCalled(); expect(serverlessFunctions.get).not.toHaveBeenCalled(); expect(api.get).not.toHaveBeenCalled();
 });
 it('keeps uncollected node values distinct from zero and preserves peer evidence through URL history', async () => {
@@ -81,7 +94,7 @@ it('rejects wrong-node and wrong-cluster returned or cached evidence', async () 
  await settled(() => expect(host.textContent).toContain('does not match the requested node and cluster')); expect(host.querySelector('[data-testid="node-stats"]')).toBeNull(); expect(host.textContent).not.toContain('host-package'); expect(nodes.scan).not.toHaveBeenCalled();
 });
 it('retains node rows during a deferred refresh then hides them on failure with Retry', async () => {
- await render('node'); await settled(() => expect(stats('node-stats')[0]).toBe('2401'));
+ await render('node'); await settled(() => expect(host.textContent).toContain('1 matching finding instances'));
  let reject!: (error: Error) => void; vi.mocked(nodes.get).mockImplementationOnce(() => new Promise((_, fail) => { reject = fail; })); let fetch!: Promise<void>;
  await act(async () => { fetch = client.refetchQueries({ queryKey: ['node-detail'] }); }); await settled(() => expect(host.textContent).toContain('Refreshing node evidence')); expect(host.textContent).toContain('host-package'); expect(button('Scan node').disabled).toBe(true);
  await act(async () => { reject(new Error('Node refresh failed')); await fetch; }); await settled(() => expect(host.textContent).toContain('Node refresh failed')); expect(stats('node-stats')).toEqual([]); expect(host.textContent).not.toContain('host-package');
@@ -125,40 +138,32 @@ it('keeps successful serverless rows during refresh then exposes failure without
  await act(async () => { fetch = client.refetchQueries({ queryKey: ['serverless-function'] }); }); await settled(() => expect(host.textContent).toContain('Refreshing serverless evidence')); expect(host.textContent).toContain('Organization function finding');
  await act(async () => { reject(new Error('Function refresh failed')); await fetch; }); await settled(() => expect(host.textContent).toContain('Function refresh failed')); expect(stats('serverless-function-stats')).toEqual([]); expect(host.textContent).not.toContain('Organization function finding');
 });
-it('shows four bounded CVE metrics and a paginated semantic image workspace', async () => {
- await render('cve'); await settled(() => expect(stats('cve-detail-stats')).toEqual(['1', '1', '1', '2'])); expect(host.textContent).toContain('listed as known exploited'); expect(host.textContent).toContain('Server fetch limit: 500 rows'); expect(host.textContent).toContain('1,000 workload associations'); expect(host.querySelector('[data-testid="cve-tile-lists"]')).toBeNull(); expect(host.querySelector('[data-testid="cve-affected-workloads"]')).toBeNull();
- expect(host.querySelector<HTMLAnchorElement>('a[href*="/images/"]')?.getAttribute('href')).toBe('/clusters/cluster-a/images/image-a'); expect(cve.affected).toHaveBeenCalledWith('CVE-2026-1234', 'cluster-a');
+it('shows full selected-view CVE metrics and semantic server image workspace', async () => {
+ await render('cve'); await settled(() => expect(stats('cve-detail-stats')).toEqual(['1','2','80','1'])); expect(host.textContent).toContain('listed as known exploited'); expect(host.textContent).not.toContain('Server fetch limit: 500 rows'); expect(host.querySelector('[data-testid="cve-affected-workloads"]')).toBeNull(); expect(host.querySelector<HTMLAnchorElement>('a[href*="/images/"]')?.getAttribute('href')).toBe('/clusters/cluster-a/images/image-a'); expect(cve.affectedInventory).toHaveBeenCalledWith('CVE-2026-1234','images',expect.objectContaining({cluster_id:'cluster-a',limit:100,offset:0}));
 });
-it('keeps global CVE evidence organization scoped without requiring or inventing a selected cluster', async () => {
- scope.resolved = false; scope.error = new Error('No navigation cluster'); await render('global-cve'); await settled(() => expect(stats('cve-detail-stats')[0]).toBe('1')); expect(host.textContent).toContain('across the organization'); expect(cve.affected).toHaveBeenCalledWith('CVE-2026-1234', undefined); expect(host.querySelector<HTMLAnchorElement>('a')?.getAttribute('href')).toBe('/cve');
+it('keeps global CVE evidence organization scoped without inventing a navigation cluster', async () => {
+ scope.resolved=false;scope.error=new Error('No navigation cluster');await render('global-cve');await settled(()=>expect(stats('cve-detail-stats')[0]).toBe('1'));expect(host.textContent).toContain('across the organization');expect(cve.affectedInventory).toHaveBeenCalledWith('CVE-2026-1234','images',expect.objectContaining({cluster_id:undefined}));expect(host.querySelector<HTMLAnchorElement>('a')?.getAttribute('href')).toBe('/cve');expect(host.querySelector('a[href*="/images/"]')).toBeNull();
 });
-it('keeps pending affected evidence unknown instead of zero and visibly recovers after Retry', async () => {
- let reject!: (error: Error) => void; vi.mocked(cve.affected).mockImplementationOnce(() => new Promise((_, fail) => { reject = fail; })); await render('cve'); await settled(() => expect(stats('cve-detail-stats')).toEqual(['—', '—', '—', '—'])); expect(host.textContent).toContain('Loading affected evidence'); expect(host.textContent).not.toContain('No affected image scans');
- await act(async () => reject(new Error('Affected unavailable'))); await settled(() => expect(host.textContent).toContain('Affected unavailable')); expect(stats('cve-detail-stats')).toEqual(['—', '—', '—', '—']);
- await act(async () => button('Retry affected evidence').click()); await settled(() => expect(stats('cve-detail-stats')[0]).toBe('1'));
+it('keeps pending affected counts unknown and visibly recovers through Retry', async()=>{
+ let reject!:(error:Error)=>void;vi.mocked(cve.affectedInventory).mockImplementationOnce(()=>new Promise((_,fail)=>{reject=fail;}));await render('cve');await settled(()=>expect(stats('cve-detail-stats')).toEqual(['—','—','—','—']));expect(host.textContent).toContain('Loading affected evidence');await act(async()=>reject(new Error('Affected unavailable')));await settled(()=>expect(host.textContent).toContain('Affected unavailable'));expect(stats('cve-detail-stats')).toEqual(['—','—','—','—']);await act(async()=>button('Retry affected evidence').click());await settled(()=>expect(stats('cve-detail-stats')[0]).toBe('1'));
 });
-it.each(['cve', 'cluster'] as const)('rejects affected evidence with the wrong %s identity', async (identity) => {
- vi.mocked(cve.affected).mockResolvedValue(affected(identity === 'cluster' ? 'another' : 'cluster-a', identity === 'cve' ? 'CVE-2026-9999' : 'CVE-2026-1234')); await render('cve'); await settled(() => expect(host.textContent).toContain('does not match the requested CVE and cluster scope')); expect(stats('cve-detail-stats')).toEqual(['—', '—', '—', '—']); expect(host.querySelector('[data-testid="cve-affected-images"]')).toBeNull();
+it.each(['cve','cluster']as const)('rejects affected %s identity mismatch',async identity=>{
+ vi.mocked(cve.affectedInventory).mockImplementation(async(id,view,request)=>({...inventory(id,view,request),...(identity==='cve'?{cve_id:'CVE-2026-9999'}:{cluster_id:'another'})})as never);await render('cve');await settled(()=>expect(host.textContent).toContain('does not match the requested CVE and cluster scope'));expect(stats('cve-detail-stats')).toEqual(['—','—','—','—']);expect(host.querySelector('table')).toBeNull();
 });
-it('rejects cached affected evidence from another cluster before its refresh resolves', async () => {
- vi.mocked(cve.affected).mockImplementation(() => new Promise(() => {})); await render('cve', undefined, (qc) => qc.setQueryData(['cve-affected', 'CVE-2026-1234', 'cluster-a'], affected('another')));
- await settled(() => expect(host.textContent).toContain('does not match the requested CVE and cluster scope')); expect(host.querySelector('[data-testid="cve-affected-images"]')).toBeNull(); expect(stats('cve-detail-stats')).toEqual(['—', '—', '—', '—']);
+it('rejects cached affected scope mismatch before refresh resolves',async()=>{
+ vi.mocked(cve.affectedInventory).mockImplementation(()=>new Promise(()=>{}));const request={cluster_id:'cluster-a',q:undefined,namespace:undefined,severity:undefined,sort:'risk',order:'desc',limit:100,offset:0};await render('cve',undefined,qc=>qc.setQueryData(['cve-affected','org:user','CVE-2026-1234','cluster-a','images',request],{...inventory('CVE-2026-1234','images',request as CVEAffectedInventoryParams),cluster_id:'another'}));await settled(()=>expect(host.textContent).toContain('does not match the requested CVE and cluster scope'));expect(host.querySelector('table')).toBeNull();expect(stats('cve-detail-stats')).toEqual(['—','—','—','—']);
 });
-it('rejects CVE metadata returned for another ID', async () => {
- vi.mocked(api.get).mockResolvedValue({ data: intelligence('CVE-2026-9999') } as never); await render('cve'); await settled(() => expect(host.textContent).toContain('does not match the requested CVE ID')); expect(host.querySelector('[data-testid="cve-detail-stats"]')).toBeNull();
+it('rejects CVE metadata from another ID',async()=>{
+ vi.mocked(api.get).mockResolvedValue({data:intelligence('CVE-2026-9999')}as never);await render('cve');await settled(()=>expect(host.textContent).toContain('does not match the requested CVE ID'));expect(stats('cve-detail-stats')).toEqual([]);
 });
-it('keeps successful CVE rows during refresh but hides stale affected evidence after failure', async () => {
- await render('cve'); await settled(() => expect(stats('cve-detail-stats')[0]).toBe('1')); let reject!: (error: Error) => void; vi.mocked(cve.affected).mockImplementationOnce(() => new Promise((_, fail) => { reject = fail; })); let fetch!: Promise<void>;
- await act(async () => { fetch = client.refetchQueries({ queryKey: ['cve-affected'] }); }); await settled(() => expect(host.textContent).toContain('Refreshing CVE evidence')); expect(host.querySelector('[data-testid="cve-affected-images"]')).not.toBeNull();
- await act(async () => { reject(new Error('Affected refresh failed')); await fetch; }); await settled(() => expect(host.textContent).toContain('Affected refresh failed')); expect(stats('cve-detail-stats')).toEqual(['—', '—', '—', '—']); expect(host.querySelector('[data-testid="cve-affected-images"]')).toBeNull();
+it('blocks cached affected rows/export while refreshing and after failure',async()=>{
+ await render('cve');await settled(()=>expect(stats('cve-detail-stats')[0]).toBe('1'));let reject!:(error:Error)=>void;vi.mocked(cve.affectedInventory).mockImplementationOnce(()=>new Promise((_,fail)=>{reject=fail;}));let fetch!:Promise<void>;await act(async()=>{fetch=client.refetchQueries({queryKey:['cve-affected']});});await settled(()=>expect(host.textContent).toContain('Refreshing CVE evidence'));expect(host.querySelector('table')).toBeNull();expect(button('Export matching CSV').disabled).toBe(true);await act(async()=>{reject(new Error('Affected refresh failed'));await fetch;});await settled(()=>expect(host.textContent).toContain('Affected refresh failed'));expect(stats('cve-detail-stats')).toEqual(['—','—','—','—']);expect(host.querySelector('table')).toBeNull();
 });
-it('preserves CVE URL tabs and package evidence without false generic finding links', async () => {
- await render('cve', '/clusters/cluster-a/cve/CVE-2026-1234?tab=workloads&context=keep'); await settled(() => expect(host.querySelector('[data-testid="cve-affected-workloads"]')).not.toBeNull()); expect(host.textContent).toContain('Server fetch limit: 1,000 rows');
- await tab('Package evidence'); expect(history.location.search).toContain('tab=packages'); expect(history.location.search).toContain('context=keep'); expect(host.textContent).toContain('vulnerable-package'); expect(host.textContent).toContain('1.1'); expect(host.querySelector('a[href*="/findings/"]')).toBeNull(); await act(async () => history.back()); await settled(() => expect(host.querySelector('[data-testid="cve-affected-workloads"]')).not.toBeNull());
+it('preserves CVE tabs/context and loads packages independently of image pages',async()=>{
+ await render('cve','/clusters/cluster-a/cve/CVE-2026-1234?tab=workloads&context=keep');await settled(()=>expect(host.querySelector('table')).not.toBeNull());await tab('Package evidence');await settled(()=>expect(host.textContent).toContain('vulnerable-package'));expect(history.location.search).toContain('tab=packages');expect(history.location.search).toContain('context=keep');expect(cve.affectedInventory).toHaveBeenCalledWith('CVE-2026-1234','packages',expect.objectContaining({cluster_id:'cluster-a'}));expect(host.textContent).toContain('1.1');expect(host.querySelector('a[href*="/findings/"]')).toBeNull();await act(async()=>history.back());await settled(()=>expect(host.querySelector('[data-testid="cve-affected-workloads"]')).not.toBeNull());
 });
-it('paginates and exports all loaded CVE image rows rather than only the visible table page', async () => {
- const data = affected(); data.images = Array.from({ length: 120 }, (_, index) => ({ ...data.images[0], image_scan_result_id: `image-${index}`, image_repository: `registry.example/image-${index}` })); vi.mocked(cve.affected).mockResolvedValue(data); await render('cve'); await settled(() => expect(host.textContent).toContain('Page 1 of 2'));
- await act(async () => button('Export CSV').click()); expect(downloadCsv).toHaveBeenCalledOnce(); expect(vi.mocked(downloadCsv).mock.calls[0][2]).toHaveLength(120); expect(vi.mocked(downloadCsv).mock.calls[0][0]).toBe('CVE-2026-1234-cluster-a-affected-images-loaded');
+it('exports only the server page while matching export retains source filters',async()=>{
+ const data=affected();data.images=Array.from({length:120},(_,index)=>({...data.images[0],image_scan_result_id:`image-${index}`,image_repository:`registry.example/image-${index}`}));vi.mocked(cve.affectedInventory).mockImplementation(async(id,view,request)=>inventory(id,view,request,data)as never);await render('cve');await settled(()=>expect(host.textContent).toContain('Page 1 of 2'));await act(async()=>button('Export this page CSV').click());expect(vi.mocked(downloadCsv).mock.calls[0][2]).toHaveLength(100);expect(vi.mocked(downloadCsv).mock.calls[0][0]).toBe('CVE-2026-1234-cluster-a-images-page-1');
 });
 it('pauses all scoped detail evidence during a cluster registry refresh and hides it on error', async () => {
  await render('node', undefined, (qc) => { qc.setQueryData(['clusters'], { clusters: [{ id: 'cluster-a' }] }); qc.getQueryCache().build(qc, { queryKey: ['cluster', 'cluster-a'], queryFn: async () => ({ id: 'cluster-a' }) }); }); await settled(() => expect(stats('node-stats')[0]).toBe('2401'));

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { assets, type AssetDetail, type ImageAcceptance } from "@/api/client";
 import { TestRouter } from "@/test/router";
 import { AssetImageAcceptanceFormPage } from "./AssetImageAcceptanceFormPage";
+vi.mock("@/contexts/TablePreferencesContext", () => ({ useTablePreferencesIdentity: () => ({ org_id: "org-a", user_id: "user-a" }) }));
 const scope = vi.hoisted(() => ({ available: true, resolvedId: "", loading: false, error: null as Error | null }));
 vi.mock("@/hooks/useCluster", async () => {
  const router = await vi.importActual<typeof import("@tanstack/react-router")>("@tanstack/react-router");
@@ -47,7 +48,7 @@ it('retains the draft and server error after failed save', async () => {
  await settled(() => expect(host.textContent).toContain('Acceptance already recorded')); expect(host.querySelector<HTMLTextAreaElement>('#image-accept-rationale')?.value).toBe('Preserve my reviewed rationale'); expect(button('Save acceptance').disabled).toBe(false);
 });
 it('does not capture cached image data until initial refresh settles', async () => {
- vi.mocked(assets.get).mockImplementation(() => new Promise(() => {})); await render('create', undefined, (qc) => qc.setQueryData(['asset', 'cluster-a', 'asset-a'], detail()));
+ vi.mocked(assets.get).mockImplementation(() => new Promise(() => {})); await render('create', undefined, (qc) => qc.setQueryData(['asset', 'cluster-a', 'asset-a', 'org-a:user-a'], detail()));
  await settled(() => expect(host.textContent).toContain('Loading exact image digest')); expect(host.querySelector('form')).toBeNull();
 });
 it('never loads or writes an image decision in unresolved cluster scope', async () => {
@@ -55,8 +56,8 @@ it('never loads or writes an image decision in unresolved cluster scope', async 
 });
 it('retains draft during failed refresh and blocks save until a valid retry', async () => {
  await render(); await settled(() => expect(host.querySelector('form')).not.toBeNull()); await rationale('Keep my image rationale'); vi.mocked(assets.get).mockRejectedValueOnce(new Error('Refresh failed'));
- await act(async () => { await client.refetchQueries({ queryKey: ['asset', 'cluster-a', 'asset-a'] }); }); await settled(() => expect(button('Save acceptance').disabled).toBe(true)); expect(host.textContent).toContain('draft is preserved'); expect(host.querySelector<HTMLTextAreaElement>('#image-accept-rationale')?.value).toBe('Keep my image rationale'); await submit(); expect(assets.createImageAcceptance).not.toHaveBeenCalled();
- await act(async () => { await client.refetchQueries({ queryKey: ['asset', 'cluster-a', 'asset-a'] }); }); await settled(() => expect(button('Save acceptance').disabled).toBe(false));
+ await act(async () => { await client.refetchQueries({ queryKey: ['asset', 'cluster-a', 'asset-a', 'org-a:user-a'] }); }); await settled(() => expect(button('Save acceptance').disabled).toBe(true)); expect(host.textContent).toContain('draft is preserved'); expect(host.querySelector<HTMLTextAreaElement>('#image-accept-rationale')?.value).toBe('Keep my image rationale'); await submit(); expect(assets.createImageAcceptance).not.toHaveBeenCalled();
+ await act(async () => { await client.refetchQueries({ queryKey: ['asset', 'cluster-a', 'asset-a', 'org-a:user-a'] }); }); await settled(() => expect(button('Save acceptance').disabled).toBe(false));
 });
 it('blocks a changed digest in a fresh submit preflight while preserving the reviewed reason', async () => {
  await render(); await settled(() => expect(host.querySelector('form')).not.toBeNull()); await rationale(); const updated = detail(); updated.image!.digest = 'sha256:changed'; vi.mocked(assets.get).mockResolvedValueOnce(updated); await submit();

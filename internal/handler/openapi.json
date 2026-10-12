@@ -3656,6 +3656,967 @@
           "last_scanned_at",
           "updated_at"
         ]
+      },
+      "AssetFindingInventoryRow": {
+        "type": "object",
+        "required": [
+          "row_id",
+          "id",
+          "title",
+          "kind",
+          "severity",
+          "risk_score",
+          "lifecycle",
+          "source",
+          "last_seen_at"
+        ],
+        "properties": {
+          "row_id": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "external_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "lifecycle": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "last_seen_at": {
+            "type": "string"
+          },
+          "risk_score": {
+            "type": "integer"
+          },
+          "image_scan_result_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "finding_key": {
+            "type": "string"
+          }
+        }
+      },
+      "AssetFindingInventory": {
+        "type": "object",
+        "required": [
+          "total",
+          "summary",
+          "limit",
+          "offset",
+          "has_more",
+          "sort",
+          "order",
+          "asset_id",
+          "cluster_id",
+          "items",
+          "q",
+          "severity",
+          "lifecycle",
+          "source"
+        ],
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "summary": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "sort": {
+            "type": "string"
+          },
+          "order": {
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ]
+          },
+          "asset_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AssetFindingInventoryRow"
+            }
+          },
+          "q": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "lifecycle": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        }
+      },
+      "NodeVulnerabilityInventoryRow": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "node": {
+            "type": "string"
+          },
+          "cluster_id": {
+            "type": "string"
+          },
+          "source_cluster_id": {
+            "type": "string"
+          },
+          "package_name": {
+            "type": "string"
+          },
+          "package_version": {
+            "type": "string"
+          },
+          "vuln_id": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "references": {
+            "type": "string"
+          },
+          "fixed_version": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "aliases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "risk_score": {
+            "type": "number"
+          },
+          "fixable": {
+            "type": "boolean"
+          },
+          "row_id": {
+            "type": "string",
+            "description": "Finding UUID plus first_seen_at epoch seconds; preserves physical historical instances."
+          },
+          "first_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "row_id",
+          "first_seen_at",
+          "node",
+          "risk_score",
+          "fixable"
+        ]
+      },
+      "NodeVulnerabilityInventory": {
+        "type": "object",
+        "required": [
+          "total",
+          "summary",
+          "limit",
+          "offset",
+          "has_more",
+          "sort",
+          "order",
+          "node",
+          "cluster_id",
+          "items",
+          "q",
+          "severity",
+          "fixable",
+          "source"
+        ],
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "summary": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "sort": {
+            "type": "string"
+          },
+          "order": {
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ]
+          },
+          "node": {
+            "type": "string"
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NodeVulnerabilityInventoryRow"
+            }
+          },
+          "q": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "fixable": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        }
+      },
+      "CVEAffectedPackage": {
+        "type": "object",
+        "required": [
+          "finding_id",
+          "severity",
+          "risk_score"
+        ],
+        "properties": {
+          "finding_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "package_ecosystem": {
+            "type": "string"
+          },
+          "package_name": {
+            "type": "string"
+          },
+          "package_version": {
+            "type": "string"
+          },
+          "package_purl": {
+            "type": "string"
+          },
+          "fixed_version": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "risk_score": {
+            "type": "integer"
+          }
+        }
+      },
+      "CVEAffectedImage": {
+        "type": "object",
+        "required": [
+          "image_scan_result_id",
+          "image_ref",
+          "image_ref_normalized",
+          "image_repository",
+          "image_digest",
+          "scanner_profile",
+          "finding_count",
+          "max_risk_score",
+          "severity_counts",
+          "packages",
+          "last_seen_at",
+          "last_scanned_at",
+          "row_id"
+        ],
+        "properties": {
+          "image_scan_result_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "asset_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "image_ref": {
+            "type": "string"
+          },
+          "image_ref_normalized": {
+            "type": "string"
+          },
+          "image_repository": {
+            "type": "string"
+          },
+          "image_tag": {
+            "type": "string",
+            "nullable": true
+          },
+          "image_digest": {
+            "type": "string"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "scanner_profile": {
+            "type": "string"
+          },
+          "vulndb_bundle_version": {
+            "type": "string"
+          },
+          "vulndb_bundle_hash": {
+            "type": "string"
+          },
+          "finding_count": {
+            "type": "integer"
+          },
+          "max_risk_score": {
+            "type": "integer"
+          },
+          "severity_counts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "packages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CVEAffectedPackage"
+            }
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_scanned_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "row_id": {
+            "type": "string"
+          }
+        }
+      },
+      "CVEAffectedWorkload": {
+        "type": "object",
+        "required": [
+          "cluster_id",
+          "deployment_id",
+          "workload_id",
+          "namespace",
+          "name",
+          "kind",
+          "image_ref",
+          "image_ref_normalized",
+          "finding_count",
+          "max_risk_score",
+          "critical_count",
+          "high_count",
+          "last_seen_at",
+          "row_id",
+          "image_evidence"
+        ],
+        "properties": {
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "cluster_name": {
+            "type": "string"
+          },
+          "deployment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "workload_id": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "image_ref": {
+            "type": "string"
+          },
+          "image_ref_normalized": {
+            "type": "string"
+          },
+          "image_repository": {
+            "type": "string"
+          },
+          "image_tag": {
+            "type": "string"
+          },
+          "image_digest": {
+            "type": "string"
+          },
+          "finding_count": {
+            "type": "integer"
+          },
+          "max_risk_score": {
+            "type": "integer"
+          },
+          "critical_count": {
+            "type": "integer"
+          },
+          "high_count": {
+            "type": "integer"
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "row_id": {
+            "type": "string"
+          },
+          "image_evidence": {
+            "type": "array",
+            "description": "Distinct exact image link tuples, deterministically ordered; scalar compatibility fields are not used to reconstruct image identity.",
+            "items": {
+              "type": "object",
+              "required": [
+                "image_ref",
+                "image_ref_normalized",
+                "image_repository",
+                "image_tag",
+                "image_digest"
+              ],
+              "properties": {
+                "image_ref": {
+                  "type": "string"
+                },
+                "image_ref_normalized": {
+                  "type": "string"
+                },
+                "image_repository": {
+                  "type": "string"
+                },
+                "image_tag": {
+                  "type": "string"
+                },
+                "image_digest": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "CVEAffectedCluster": {
+        "type": "object",
+        "required": [
+          "cluster_id",
+          "workload_count",
+          "finding_count",
+          "max_risk_score",
+          "row_id"
+        ],
+        "properties": {
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "workload_count": {
+            "type": "integer"
+          },
+          "finding_count": {
+            "type": "integer"
+          },
+          "max_risk_score": {
+            "type": "integer"
+          },
+          "row_id": {
+            "type": "string"
+          }
+        }
+      },
+      "CVEAffectedPackageInventoryRow": {
+        "type": "object",
+        "required": [
+          "finding_id",
+          "severity",
+          "risk_score",
+          "row_id",
+          "image_scan_result_id",
+          "image_ref",
+          "image_repository",
+          "image_tag",
+          "image_digest",
+          "last_seen_at"
+        ],
+        "properties": {
+          "finding_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "package_ecosystem": {
+            "type": "string"
+          },
+          "package_name": {
+            "type": "string"
+          },
+          "package_version": {
+            "type": "string"
+          },
+          "package_purl": {
+            "type": "string"
+          },
+          "fixed_version": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "risk_score": {
+            "type": "integer"
+          },
+          "row_id": {
+            "type": "string"
+          },
+          "image_scan_result_id": {
+            "type": "string"
+          },
+          "image_ref": {
+            "type": "string"
+          },
+          "image_repository": {
+            "type": "string"
+          },
+          "image_tag": {
+            "type": "string"
+          },
+          "image_digest": {
+            "type": "string"
+          },
+          "last_seen_at": {
+            "type": "string"
+          }
+        }
+      },
+      "CVEAffectedInventory": {
+        "type": "object",
+        "required": [
+          "total",
+          "summary",
+          "limit",
+          "offset",
+          "has_more",
+          "sort",
+          "order",
+          "cve_id",
+          "cluster_id",
+          "view",
+          "items"
+        ],
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "summary": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "sort": {
+            "type": "string"
+          },
+          "order": {
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ]
+          },
+          "cve_id": {
+            "type": "string"
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "images",
+              "workloads",
+              "clusters",
+              "packages"
+            ]
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/CVEAffectedImage"
+                },
+                {
+                  "$ref": "#/components/schemas/CVEAffectedWorkload"
+                },
+                {
+                  "$ref": "#/components/schemas/CVEAffectedCluster"
+                },
+                {
+                  "$ref": "#/components/schemas/CVEAffectedPackageInventoryRow"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "RawComplianceEvidenceRow": {
+        "type": "object",
+        "required": [
+          "id",
+          "scope",
+          "source",
+          "framework",
+          "control_id",
+          "title",
+          "severity",
+          "status",
+          "effective_status",
+          "target_kind",
+          "target",
+          "observed_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "framework": {
+            "type": "string"
+          },
+          "control_id": {
+            "type": "string"
+          },
+          "internal_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "effective_status": {
+            "type": "string"
+          },
+          "target_kind": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "cluster_id": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          },
+          "remediation": {
+            "type": "string"
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "exemption": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "expires_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          },
+          "tags_v2": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "required": [
+                "profile"
+              ],
+              "properties": {
+                "profile": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "references": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "RawComplianceEvidenceInventory": {
+        "type": "object",
+        "required": [
+          "total",
+          "summary",
+          "limit",
+          "offset",
+          "has_more",
+          "sort",
+          "order",
+          "items",
+          "scope",
+          "framework",
+          "namespace",
+          "control_id",
+          "status",
+          "q",
+          "target"
+        ],
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "summary": {
+            "type": "object",
+            "required": [
+              "total",
+              "pass",
+              "fail",
+              "manual",
+              "not_applicable",
+              "exempted"
+            ],
+            "properties": {
+              "total": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "pass": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "fail": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "manual": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "not_applicable": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "exempted": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "by_scope": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "required": [
+                    "total",
+                    "pass",
+                    "fail",
+                    "manual",
+                    "not_applicable",
+                    "exempted"
+                  ],
+                  "properties": {
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "pass": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "fail": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "manual": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "not_applicable": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "exempted": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100000
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "sort": {
+            "type": "string"
+          },
+          "order": {
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ]
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RawComplianceEvidenceRow"
+            }
+          },
+          "scope": {
+            "type": "string"
+          },
+          "framework": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "control_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "q": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        }
       }
     },
     "responses": {
@@ -4183,6 +5144,316 @@
       "get": {
         "summary": "Get one asset with image, findings, SBOM context, and image accept-risk history",
         "description": " Image assets expose display_name as the reported repository/tag reference without its digest suffix; raw name and digest remain unchanged. Asset-name sorting and literal search use this display identity. Matching CSV includes Display name alongside raw Name and Digest."
+      }
+    },
+    "/api/v1/assets/{id}/findings": {
+      "get": {
+        "summary": "List and summarize all matching asset findings",
+        "description": "Organization-owned asset findings in the exact asset cluster plus canonical findings from the latest organization-owned image scan matching the exact asset digest (asset-ID fallback only when the digest is absent). Distinct evidence records are counted; this is not a unique-CVE count. Search, severity, lifecycle and source filters apply before full summary, stable sorting and pagination. A zero count does not establish scan coverage. CSV ignores page/limit and exports up to 100,000 matching records.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Literal case-insensitive search across matching evidence."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "finding",
+                "kind",
+                "severity",
+                "risk",
+                "lifecycle",
+                "source",
+                "observed"
+              ],
+              "default": "risk"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "critical",
+                "high",
+                "medium",
+                "low",
+                "info",
+                "unknown"
+              ]
+            }
+          },
+          {
+            "name": "lifecycle",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "open",
+                "triaged",
+                "in_progress",
+                "resolved",
+                "suppressed",
+                "accepted"
+              ]
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asset",
+                "image_scan"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching page and full filtered summary from one database snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetFindingInventory"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid filters, sorting or pagination"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Entity or scope not found in this organization"
+          },
+          "500": {
+            "description": "Evidence could not be read; not an empty result"
+          }
+        }
+      }
+    },
+    "/api/v1/assets/{id}/findings.csv": {
+      "get": {
+        "summary": "Export all matching asset findings",
+        "description": "Organization-owned asset findings in the exact asset cluster plus canonical findings from the latest organization-owned image scan matching the exact asset digest (asset-ID fallback only when the digest is absent). Distinct evidence records are counted; this is not a unique-CVE count. Search, severity, lifecycle and source filters apply before full summary, stable sorting and pagination. A zero count does not establish scan coverage. CSV ignores page/limit and exports up to 100,000 matching records.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Literal case-insensitive search across matching evidence."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "finding",
+                "kind",
+                "severity",
+                "risk",
+                "lifecycle",
+                "source",
+                "observed"
+              ],
+              "default": "risk"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "critical",
+                "high",
+                "medium",
+                "low",
+                "info",
+                "unknown"
+              ]
+            }
+          },
+          {
+            "name": "lifecycle",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "open",
+                "triaged",
+                "in_progress",
+                "resolved",
+                "suppressed",
+                "accepted"
+              ]
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asset",
+                "image_scan"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Full matching records, capped at 100,000 with explicit export metadata",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Export-Total": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-Export-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "enum": [
+                    100000
+                  ]
+                }
+              },
+              "X-Export-Truncated": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid filters, sorting or pagination"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Entity or scope not found in this organization"
+          },
+          "500": {
+            "description": "Evidence could not be read; not an empty result"
+          }
+        }
       }
     },
     "/api/v1/assets/{id}/image-acceptances": {
@@ -6644,6 +7915,300 @@
         "summary": "Get node posture detail with raw host evidence and scanner-backed host CVEs"
       }
     },
+    "/api/v1/clusters/{id}/nodes/{node}/vulnerabilities": {
+      "get": {
+        "summary": "List and summarize node vulnerability evidence",
+        "description": "Open host vulnerability finding instances attributed to this node through either source cluster or effective target cluster. Both cluster identities are retained; effective cluster may differ from the requested source cluster. Full filtered totals, severity/fix counts and unique CVEs are computed before paging in one snapshot. CSV ignores pagination and returns up to 100,000 matches with explicit export headers.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "node",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Literal case-insensitive search across matching evidence."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "risk",
+                "cve",
+                "package",
+                "version",
+                "severity",
+                "fix",
+                "source",
+                "observed"
+              ],
+              "default": "risk"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "critical",
+                "high",
+                "medium",
+                "low",
+                "info",
+                "unknown"
+              ]
+            }
+          },
+          {
+            "name": "fixable",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching page and full filtered summary from one database snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeVulnerabilityInventory"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid filters, sorting or pagination"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Entity or scope not found in this organization"
+          },
+          "500": {
+            "description": "Evidence could not be read; not an empty result"
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{id}/nodes/{node}/vulnerabilities.csv": {
+      "get": {
+        "summary": "Export all matching node vulnerability evidence",
+        "description": "Open host vulnerability finding instances attributed to this node through either source cluster or effective target cluster. Both cluster identities are retained; effective cluster may differ from the requested source cluster. Full filtered totals, severity/fix counts and unique CVEs are computed before paging in one snapshot. CSV ignores pagination and returns up to 100,000 matches with explicit export headers.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "node",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Literal case-insensitive search across matching evidence."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "risk",
+                "cve",
+                "package",
+                "version",
+                "severity",
+                "fix",
+                "source",
+                "observed"
+              ],
+              "default": "risk"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "critical",
+                "high",
+                "medium",
+                "low",
+                "info",
+                "unknown"
+              ]
+            }
+          },
+          {
+            "name": "fixable",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Full matching records, capped at 100,000 with explicit export metadata",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Export-Total": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-Export-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "enum": [
+                    100000
+                  ]
+                }
+              },
+              "X-Export-Truncated": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid filters, sorting or pagination"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Entity or scope not found in this organization"
+          },
+          "500": {
+            "description": "Evidence could not be read; not an empty result"
+          }
+        }
+      }
+    },
     "/api/v1/clusters/{id}/platform-facts": {
       "get": {
         "responses": {
@@ -7023,15 +8588,152 @@
     },
     "/api/v1/compliance/cloud": {
       "get": {
+        "summary": "List complete cloud compliance evidence",
+        "description": "Normalized node, Kubernetes, workload and cloud control evidence. Framework mapping, exact target/namespace scope and active exemption overlays apply before effective-status/search filtering, complete status/by-scope counts, stable sorting and paging, in one read-only snapshot. Identity includes the source record and projection. A full summary is independent of the returned page; a zero total does not establish scan coverage. CSV ignores requested page and exports up to 100,000 matching rows with truncation headers. This alias fixes scope to cloud. Known image digests require exact scan-digest matches; mutable reference fallback is only allowed without a digest.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "framework",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "namespace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "control_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pass",
+                "fail",
+                "manual",
+                "not_applicable",
+                "exempted"
+              ]
+            }
+          },
+          {
+            "name": "target",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Literal case-insensitive search across matching evidence."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "observed",
+                "scope",
+                "target",
+                "framework",
+                "control",
+                "status",
+                "severity"
+              ],
+              "default": "observed"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000,
+              "default": 1000
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "maximum": 1000000
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Matching page and full filtered summary from one database snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RawComplianceEvidenceInventory"
+                }
+              }
+            }
           },
-          "default": {
-            "$ref": "#/components/responses/Error"
+          "400": {
+            "description": "Invalid filters, sorting or pagination"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Entity or scope not found in this organization"
+          },
+          "500": {
+            "description": "Evidence could not be read; not an empty result"
           }
-        },
-        "summary": "Get cloud"
+        }
       }
     },
     "/api/v1/compliance/control-mappings": {
@@ -7123,15 +8825,329 @@
     },
     "/api/v1/compliance/evidence": {
       "get": {
+        "summary": "List and summarize all matching raw compliance evidence",
+        "description": "Normalized node, Kubernetes, workload and cloud control evidence. Framework mapping, exact target/namespace scope and active exemption overlays apply before effective-status/search filtering, complete status/by-scope counts, stable sorting and paging, in one read-only snapshot. Identity includes the source record and projection. A full summary is independent of the returned page; a zero total does not establish scan coverage. CSV ignores requested page and exports up to 100,000 matching rows with truncation headers. Known image digests require exact scan-digest matches; mutable reference fallback is only allowed without a digest.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "node",
+                "workload",
+                "kubernetes",
+                "cloud"
+              ]
+            }
+          },
+          {
+            "name": "framework",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "namespace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "control_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pass",
+                "fail",
+                "manual",
+                "not_applicable",
+                "exempted"
+              ]
+            }
+          },
+          {
+            "name": "target",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Literal case-insensitive search across matching evidence."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "observed",
+                "scope",
+                "target",
+                "framework",
+                "control",
+                "status",
+                "severity"
+              ],
+              "default": "observed"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000,
+              "default": 1000
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "maximum": 1000000
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Matching page and full filtered summary from one database snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RawComplianceEvidenceInventory"
+                }
+              }
+            }
           },
-          "default": {
-            "$ref": "#/components/responses/Error"
+          "400": {
+            "description": "Invalid filters, sorting or pagination"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Entity or scope not found in this organization"
+          },
+          "500": {
+            "description": "Evidence could not be read; not an empty result"
           }
-        },
-        "summary": "Get evidence"
+        }
+      }
+    },
+    "/api/v1/compliance/evidence.csv": {
+      "get": {
+        "summary": "Export all matching raw compliance evidence",
+        "description": "Normalized node, Kubernetes, workload and cloud control evidence. Framework mapping, exact target/namespace scope and active exemption overlays apply before effective-status/search filtering, complete status/by-scope counts, stable sorting and paging, in one read-only snapshot. Identity includes the source record and projection. A full summary is independent of the returned page; a zero total does not establish scan coverage. CSV ignores requested page and exports up to 100,000 matching rows with truncation headers. Known image digests require exact scan-digest matches; mutable reference fallback is only allowed without a digest.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "node",
+                "workload",
+                "kubernetes",
+                "cloud"
+              ]
+            }
+          },
+          {
+            "name": "framework",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "namespace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "control_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pass",
+                "fail",
+                "manual",
+                "not_applicable",
+                "exempted"
+              ]
+            }
+          },
+          {
+            "name": "target",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Literal case-insensitive search across matching evidence."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "observed",
+                "scope",
+                "target",
+                "framework",
+                "control",
+                "status",
+                "severity"
+              ],
+              "default": "observed"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Full matching records, capped at 100,000 with explicit export metadata",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Export-Total": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-Export-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "enum": [
+                    100000
+                  ]
+                }
+              },
+              "X-Export-Truncated": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid filters, sorting or pagination"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Entity or scope not found in this organization"
+          },
+          "500": {
+            "description": "Evidence could not be read; not an empty result"
+          }
+        }
       }
     },
     "/api/v1/compliance/exemptions": {
@@ -7175,28 +9191,302 @@
     },
     "/api/v1/compliance/kubernetes": {
       "get": {
+        "summary": "List complete kubernetes compliance evidence",
+        "description": "Normalized node, Kubernetes, workload and cloud control evidence. Framework mapping, exact target/namespace scope and active exemption overlays apply before effective-status/search filtering, complete status/by-scope counts, stable sorting and paging, in one read-only snapshot. Identity includes the source record and projection. A full summary is independent of the returned page; a zero total does not establish scan coverage. CSV ignores requested page and exports up to 100,000 matching rows with truncation headers. This alias fixes scope to kubernetes. Known image digests require exact scan-digest matches; mutable reference fallback is only allowed without a digest.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "framework",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "namespace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "control_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pass",
+                "fail",
+                "manual",
+                "not_applicable",
+                "exempted"
+              ]
+            }
+          },
+          {
+            "name": "target",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Literal case-insensitive search across matching evidence."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "observed",
+                "scope",
+                "target",
+                "framework",
+                "control",
+                "status",
+                "severity"
+              ],
+              "default": "observed"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000,
+              "default": 1000
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "maximum": 1000000
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Matching page and full filtered summary from one database snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RawComplianceEvidenceInventory"
+                }
+              }
+            }
           },
-          "default": {
-            "$ref": "#/components/responses/Error"
+          "400": {
+            "description": "Invalid filters, sorting or pagination"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Entity or scope not found in this organization"
+          },
+          "500": {
+            "description": "Evidence could not be read; not an empty result"
           }
-        },
-        "summary": "Get kubernetes"
+        }
       }
     },
     "/api/v1/compliance/nodes": {
       "get": {
+        "summary": "List complete node compliance evidence",
+        "description": "Normalized node, Kubernetes, workload and cloud control evidence. Framework mapping, exact target/namespace scope and active exemption overlays apply before effective-status/search filtering, complete status/by-scope counts, stable sorting and paging, in one read-only snapshot. Identity includes the source record and projection. A full summary is independent of the returned page; a zero total does not establish scan coverage. CSV ignores requested page and exports up to 100,000 matching rows with truncation headers. This alias fixes scope to node. Known image digests require exact scan-digest matches; mutable reference fallback is only allowed without a digest.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "framework",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "namespace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "control_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pass",
+                "fail",
+                "manual",
+                "not_applicable",
+                "exempted"
+              ]
+            }
+          },
+          {
+            "name": "target",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Literal case-insensitive search across matching evidence."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "observed",
+                "scope",
+                "target",
+                "framework",
+                "control",
+                "status",
+                "severity"
+              ],
+              "default": "observed"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000,
+              "default": 1000
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "maximum": 1000000
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Matching page and full filtered summary from one database snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RawComplianceEvidenceInventory"
+                }
+              }
+            }
           },
-          "default": {
-            "$ref": "#/components/responses/Error"
+          "400": {
+            "description": "Invalid filters, sorting or pagination"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Entity or scope not found in this organization"
+          },
+          "500": {
+            "description": "Evidence could not be read; not an empty result"
           }
-        },
-        "summary": "Get nodes"
+        }
       }
     },
     "/api/v1/compliance/primitives": {
@@ -7309,15 +9599,152 @@
     },
     "/api/v1/compliance/workloads": {
       "get": {
+        "summary": "List complete workload compliance evidence",
+        "description": "Normalized node, Kubernetes, workload and cloud control evidence. Framework mapping, exact target/namespace scope and active exemption overlays apply before effective-status/search filtering, complete status/by-scope counts, stable sorting and paging, in one read-only snapshot. Identity includes the source record and projection. A full summary is independent of the returned page; a zero total does not establish scan coverage. CSV ignores requested page and exports up to 100,000 matching rows with truncation headers. This alias fixes scope to workload. Known image digests require exact scan-digest matches; mutable reference fallback is only allowed without a digest.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "framework",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "namespace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "control_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pass",
+                "fail",
+                "manual",
+                "not_applicable",
+                "exempted"
+              ]
+            }
+          },
+          {
+            "name": "target",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Literal case-insensitive search across matching evidence."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "observed",
+                "scope",
+                "target",
+                "framework",
+                "control",
+                "status",
+                "severity"
+              ],
+              "default": "observed"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000,
+              "default": 1000
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "maximum": 1000000
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Matching page and full filtered summary from one database snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RawComplianceEvidenceInventory"
+                }
+              }
+            }
           },
-          "default": {
-            "$ref": "#/components/responses/Error"
+          "400": {
+            "description": "Invalid filters, sorting or pagination"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Entity or scope not found in this organization"
+          },
+          "500": {
+            "description": "Evidence could not be read; not an empty result"
           }
-        },
-        "summary": "Get workloads"
+        }
       }
     },
     "/api/v1/components": {
@@ -7891,6 +10318,312 @@
     "/api/v1/cve/{id}/affected": {
       "get": {
         "summary": "List canonical image scan and workload exposure for one CVE"
+      }
+    },
+    "/api/v1/cve/{id}/affected/{view}": {
+      "get": {
+        "summary": "List and summarize CVE affected inventory",
+        "description": "Complete matching canonical scan findings and organization-owned workload associations for this CVE, independent of the bounded legacy affected response. Each view has its own full summary, stable paging and export. Images and packages count canonical finding IDs; workload and cluster finding counts count distinct findings per workload association, so the same finding can count for multiple workloads. Workload row identity includes cluster, deployment, workload ID, namespace, name and kind. Namespace/cluster scope filters apply to associations before aggregation. Sorts: images=image/findings/risk/scanned/last_seen; workloads=name/cluster/kind/findings/risk/last_seen; clusters=name/workloads/findings/risk (default workloads); packages=package/image/severity/risk/version/fixed/last_seen. Other views default risk descending. CSV ignores limit/offset and reports its 100,000-row cap. Known image digests require exact scan-digest matches; mutable reference fallback is only allowed without a digest.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "view",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "images",
+                "workloads",
+                "clusters",
+                "packages"
+              ]
+            }
+          },
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "namespace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "critical",
+                "high",
+                "medium",
+                "low",
+                "info"
+              ]
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Literal case-insensitive search across matching evidence."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "image",
+                "findings",
+                "risk",
+                "scanned",
+                "last_seen",
+                "name",
+                "cluster",
+                "kind",
+                "workloads",
+                "package",
+                "severity",
+                "version",
+                "fixed"
+              ],
+              "default": "risk"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching page and full filtered summary from one database snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CVEAffectedInventory"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid filters, sorting or pagination"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Entity or scope not found in this organization"
+          },
+          "500": {
+            "description": "Evidence could not be read; not an empty result"
+          }
+        }
+      }
+    },
+    "/api/v1/cve/{id}/affected/{view}.csv": {
+      "get": {
+        "summary": "Export matching CVE affected inventory",
+        "description": "Complete matching canonical scan findings and organization-owned workload associations for this CVE, independent of the bounded legacy affected response. Each view has its own full summary, stable paging and export. Images and packages count canonical finding IDs; workload and cluster finding counts count distinct findings per workload association, so the same finding can count for multiple workloads. Workload row identity includes cluster, deployment, workload ID, namespace, name and kind. Namespace/cluster scope filters apply to associations before aggregation. Sorts: images=image/findings/risk/scanned/last_seen; workloads=name/cluster/kind/findings/risk/last_seen; clusters=name/workloads/findings/risk (default workloads); packages=package/image/severity/risk/version/fixed/last_seen. Other views default risk descending. CSV ignores limit/offset and reports its 100,000-row cap. Known image digests require exact scan-digest matches; mutable reference fallback is only allowed without a digest.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "view",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "images",
+                "workloads",
+                "clusters",
+                "packages"
+              ]
+            }
+          },
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "namespace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "critical",
+                "high",
+                "medium",
+                "low",
+                "info"
+              ]
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Literal case-insensitive search across matching evidence."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "image",
+                "findings",
+                "risk",
+                "scanned",
+                "last_seen",
+                "name",
+                "cluster",
+                "kind",
+                "workloads",
+                "package",
+                "severity",
+                "version",
+                "fixed"
+              ],
+              "default": "risk"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Full matching records, capped at 100,000 with explicit export metadata",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Export-Total": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-Export-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "enum": [
+                    100000
+                  ]
+                }
+              },
+              "X-Export-Truncated": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid filters, sorting or pagination"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Entity or scope not found in this organization"
+          },
+          "500": {
+            "description": "Evidence could not be read; not an empty result"
+          }
+        }
       }
     },
     "/api/v1/dashboard/events-timeline": {

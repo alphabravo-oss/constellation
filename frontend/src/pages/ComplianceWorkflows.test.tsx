@@ -3,6 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { compliance, type ComplianceCheck, type ComplianceChecksParams, type ComplianceChecksResponse, type ComplianceScheduleDB } from "@/api/client";
+import { TablePreferencesProvider } from "@/contexts/TablePreferencesContext";
 import { CompliancePage } from "./CompliancePage";
 import { ComplianceExemptionFormPage } from "./ComplianceExemptionFormPage";
 import { ComplianceScheduleFormPage } from "./ComplianceScheduleFormPage";
@@ -36,9 +37,9 @@ afterEach(() => { act(() => root?.unmount()); client?.clear(); host?.remove(); v
 async function renderPage(node: ReactNode) {
   mounted = node; host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  await act(async () => root.render(<QueryClientProvider client={client}>{node}</QueryClientProvider>));
+  await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{org_id:"org",user_id:"user"}}>{node}</TablePreferencesProvider></QueryClientProvider>));
 }
-async function rerender() { await act(async () => root.render(<QueryClientProvider client={client}>{cloneElement(mounted as ReactElement)}</QueryClientProvider>)); }
+async function rerender() { await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{org_id:"org",user_id:"user"}}>{cloneElement(mounted as ReactElement)}</TablePreferencesProvider></QueryClientProvider>)); }
 async function settled(checkResult: () => void) { await vi.waitFor(async () => { await act(async () => {}); checkResult(); }); }
 async function edit(selector: string, value: string) {
   const field = host.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector)!;
@@ -157,8 +158,8 @@ describe("compliance workspaces", () => {
   });
   it("shows evidence failure instead of empty success", async () => {
     route.search = "tab=evidence"; vi.mocked(compliance.evidence).mockRejectedValue(new Error("private"));
-    await renderPage(<CompliancePage />); await settled(() => expect(host.textContent).toContain("Compliance evidence could not be loaded"));
-    expect(host.textContent).not.toContain("No collected compliance evidence"); expect(compliance.evidence).toHaveBeenCalledWith({ cluster_id: "cluster", limit: 500 });
+    await renderPage(<CompliancePage />); await settled(() => expect(host.textContent).toContain("Compliance source evidence could not be loaded"));
+    expect(host.textContent).not.toContain("No collected compliance evidence"); expect(compliance.evidence).toHaveBeenCalledWith(expect.objectContaining({ cluster_id: "cluster", limit: 100, offset: 0, sort: "observed", order: "desc" }));
   });
   it("keeps inherited schedule scope, run/history/download actions, and standalone creation", async () => {
     route.search = "tab=schedules&filter=a&filter=b";

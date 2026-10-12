@@ -346,7 +346,11 @@ SELECT cve_id, COALESCE(title,''), COALESCE(description,''), cvss_base, cvss_vec
 }
 
 func (c *CVE) Affected(w http.ResponseWriter, r *http.Request) {
-	subj, _ := authctx.SubjectFrom(r.Context())
+	subj, ok := authctx.SubjectFrom(r.Context())
+	if !ok {
+		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "subject required"})
+		return
+	}
 	id := strings.ToUpper(strings.TrimSpace(chi.URLParam(r, "id")))
 	if id == "" {
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "missing cve id"})
@@ -360,6 +364,15 @@ func (c *CVE) Affected(w http.ResponseWriter, r *http.Request) {
 		cid, perr := uuid.Parse(cs)
 		if perr != nil {
 			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster_id"})
+			return
+		}
+		var owned bool
+		if err := c.db.Pool().QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM clusters WHERE id=$1 AND org_id=$2)`, cid, subj.OrgID).Scan(&owned); err != nil {
+			httpx.WriteJSON(w, 500, map[string]string{"error": "Affected evidence could not be loaded"})
+			return
+		}
+		if !owned {
+			httpx.WriteJSON(w, 404, map[string]string{"error": "cluster not found"})
 			return
 		}
 		clusterArg = cid
@@ -397,24 +410,25 @@ SELECT r.id,
        MAX(f.last_seen_at),
        r.last_scanned_at
   FROM image_scan_findings f
-  JOIN image_scan_results r ON r.id = f.image_scan_result_id
+  JOIN image_scan_results r ON r.id = f.image_scan_result_id AND r.org_id = f.org_id
  WHERE f.org_id = $1
    AND UPPER(COALESCE(f.external_id, '')) = $2
    AND ($3::uuid IS NULL OR EXISTS (
         SELECT 1 FROM image_workload_links l
+         JOIN deployments owned_deployment ON owned_deployment.id=l.deployment_id AND owned_deployment.org_id=f.org_id AND owned_deployment.cluster_id=l.cluster_id
          WHERE l.org_id = f.org_id AND l.cluster_id = $3
-           AND (l.image_digest = r.image_digest
-                OR l.image_ref = r.image_ref
-                OR l.image_ref_normalized = r.image_ref_normalized
-                OR (COALESCE(r.image_repository,'') <> '' AND l.image_repository = r.image_repository
-                    AND (COALESCE(r.image_tag,'') = '' OR l.image_tag = r.image_tag)))))
+           AND ((COALESCE(l.image_digest,'')<>'' AND l.image_digest=r.image_digest)
+             OR (COALESCE(l.image_digest,'')='' AND ((r.image_ref<>'' AND l.image_ref=r.image_ref)
+                OR (r.image_ref_normalized<>'' AND l.image_ref_normalized=r.image_ref_normalized)
+                OR (COALESCE(r.image_repository,'')<>'' AND l.image_repository=r.image_repository
+                    AND (COALESCE(r.image_tag,'')='' OR l.image_tag=r.image_tag)))))))
  GROUP BY r.id, r.asset_id, r.image_ref, r.image_ref_normalized, r.image_repository,
           r.image_tag, r.image_digest, r.platform, r.scanner_profile,
           r.vulndb_bundle_version, r.vulndb_bundle_hash, r.last_scanned_at
- ORDER BY max_risk_score DESC, r.last_scanned_at DESC
+ ORDER BY max_risk_score DESC, r.last_scanned_at DESC, r.id ASC
  LIMIT 500`, subj.OrgID, id, clusterArg)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "Affected evidence could not be loaded"})
 		return
 	}
 	defer imageRows.Close()
@@ -449,7 +463,7 @@ SELECT r.id,
 			&row.LastSeenAt,
 			&row.LastScannedAt,
 		); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "Affected evidence could not be loaded"})
 			return
 		}
 		row.SeverityCounts = map[string]int{
@@ -469,7 +483,7 @@ SELECT r.id,
 		images = append(images, row)
 	}
 	if err := imageRows.Err(); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "Affected evidence could not be loaded"})
 		return
 	}
 
@@ -484,7 +498,7 @@ WITH matches AS (
            COALESCE(r.image_tag, '') AS image_tag,
            r.image_digest
       FROM image_scan_findings f
-      JOIN image_scan_results r ON r.id = f.image_scan_result_id
+      JOIN image_scan_results r ON r.id = f.image_scan_result_id AND r.org_id = f.org_id
      WHERE f.org_id = $1
        AND UPPER(COALESCE(f.external_id, '')) = $2
 )
@@ -509,18 +523,17 @@ SELECT l.cluster_id,
   JOIN image_workload_links l
     ON l.org_id = $1
    AND ($3::uuid IS NULL OR l.cluster_id = $3)
-   AND (
-        (m.image_digest <> '' AND l.image_digest = m.image_digest)
-     OR (m.image_ref <> '' AND l.image_ref = m.image_ref)
-     OR (m.image_ref_normalized <> '' AND l.image_ref_normalized = m.image_ref_normalized)
-     OR (m.image_repository <> '' AND l.image_repository = m.image_repository AND (m.image_tag = '' OR l.image_tag = m.image_tag))
-   )
-  LEFT JOIN clusters c ON c.id = l.cluster_id AND c.org_id = $1
+   AND ((COALESCE(l.image_digest,'')<>'' AND l.image_digest=m.image_digest)
+     OR (COALESCE(l.image_digest,'')='' AND ((m.image_ref<>'' AND l.image_ref=m.image_ref)
+     OR (m.image_ref_normalized<>'' AND l.image_ref_normalized=m.image_ref_normalized)
+     OR (m.image_repository<>'' AND l.image_repository=m.image_repository AND (m.image_tag='' OR l.image_tag=m.image_tag)))))
+  JOIN clusters c ON c.id = l.cluster_id AND c.org_id = $1
+  JOIN deployments owned_deployment ON owned_deployment.id=l.deployment_id AND owned_deployment.org_id=$1 AND owned_deployment.cluster_id=l.cluster_id
  GROUP BY l.cluster_id, c.name, l.deployment_id, l.workload_id, l.namespace, l.name, l.kind
- ORDER BY max_risk_score DESC, MAX(l.last_seen_at) DESC
+ ORDER BY max_risk_score DESC, MAX(l.last_seen_at) DESC, l.cluster_id, l.deployment_id, l.workload_id, l.namespace, l.name, l.kind
  LIMIT 1000`, subj.OrgID, id, clusterArg)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "Affected evidence could not be loaded"})
 		return
 	}
 	defer workloadRows.Close()
@@ -548,7 +561,7 @@ SELECT l.cluster_id,
 			&row.HighCount,
 			&row.LastSeenAt,
 		); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "Affected evidence could not be loaded"})
 			return
 		}
 		cluster := clustersByID[row.ClusterID]
@@ -567,7 +580,7 @@ SELECT l.cluster_id,
 		workloads = append(workloads, row)
 	}
 	if err := workloadRows.Err(); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "Affected evidence could not be loaded"})
 		return
 	}
 

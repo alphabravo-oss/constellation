@@ -140,10 +140,12 @@ it("sends literal search and server status/type sorting while preserving tab and
   expect(scanJobs.list).toHaveBeenLastCalledWith(expect.objectContaining({q:"%_needle",offset:0}));
   expect(history.location.href).toContain("context=keep");expect(history.location.href).toContain("tab=jobs");expect(history.location.href).not.toContain("page=");
   await click("failed");await settled(()=>expect(scanJobs.list).toHaveBeenLastCalledWith(expect.objectContaining({status:"failed",q:"%_needle"})));
+  await settled(()=>expect(host.querySelector('[data-testid="scanner-recent-jobs"]')).not.toBeNull());
   const table=host.querySelector('[data-testid="scanner-recent-jobs"]')!;
   await act(async()=>[...table.querySelectorAll<HTMLButtonElement>('th[data-column-id="target"] button')].find(button=>button.textContent==="Target")!.click());
   await settled(()=>expect(scanJobs.list).toHaveBeenLastCalledWith(expect.objectContaining({sort:"target",order:"desc"})));
-  expect(table.querySelector('th[data-column-id="worker"] [aria-sort]')).toBeNull();
+  await settled(()=>expect(host.querySelector('[data-testid="scanner-recent-jobs"]')).not.toBeNull());
+  expect(host.querySelector('[data-testid="scanner-recent-jobs"] th[data-column-id="worker"] [aria-sort]')).toBeNull();
   await act(async()=>history.back());await settled(()=>expect(history.location.href).not.toContain("sort="));
 });
 it("retains an off-page exact selection without substituting another job or fetching its attempts", async () => {

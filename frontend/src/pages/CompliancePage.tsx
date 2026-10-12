@@ -3,7 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { Download, PlayCircle, Plus, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
-import { compliance, type ComplianceCheck, type ComplianceChecksParams, type ComplianceChecksResponse, type ComplianceEvidenceItem, type ComplianceEvidenceResponse, type ComplianceExemption, type ComplianceScheduleDB } from "@/api/client";
+import { compliance, type ComplianceCheck, type ComplianceChecksParams, type ComplianceChecksResponse, type ComplianceExemption, type ComplianceScheduleDB } from "@/api/client";
+import { ComplianceEvidenceInventory } from "./ComplianceEvidenceInventory";
 import { useEntityClusterScope } from "./entity-detail-scope";
 import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
 import { useInventoryRoute, ScanInventoryExport } from "./inventory-workspace";
@@ -71,7 +72,7 @@ export function CompliancePage() {
   }, [fws.isSuccess, fws.data, summary.isSuccess, summary.data]);
   const validFramework = active === "all" || frameworks.some(item => item.id === active);
   const exemptions = useQuery({ queryKey: ["compliance", "exemptions", active, clusterId], queryFn: () => compliance.listExemptions({ framework: active === "all" ? undefined : active, cluster_id: clusterId! }), enabled: scopeReady && tab === "controls" });
-  const evidence = useQuery({ queryKey: ["compliance", "evidence", clusterId], queryFn: () => compliance.evidence({ cluster_id: clusterId!, limit: 500 }), enabled: scopeReady && tab === "evidence" });
+
   const invalidate = () => { for (const family of ["summary", "checks", "evidence", "exemptions"]) void qc.invalidateQueries({ queryKey: ["compliance", family] }); };
   const revokeExemption = useMutation({ mutationFn: (id: string) => {
     const state = qc.getQueryState<ComplianceChecksResponse>(queryKey);
@@ -186,6 +187,7 @@ export function CompliancePage() {
   return <div className="space-y-6" data-testid="compliance-page" data-cluster-id={clusterId ?? ""}>
     <PageHeader title="Compliance" description="Review persisted control evidence across frameworks, inspect supporting sources and configure recurring reports for this cluster." />
     {!scopeReady ? scope.loading ? <LoadingState label="Loading cluster…" /> : <ErrorState title="The selected cluster could not be resolved. Review its registration and retry." action={<Button onClick={scope.retry}>Retry cluster</Button>} /> : <>
+      {tab === "controls" && <>
       <VerdictBanner status={!validFilters || checks.isError || invalid ? "degraded" : !available || percentage === undefined ? "info" : totals!.fail > 0 ? "degraded" : "ok"}
         title={!validFilters ? "The requested compliance filter or sort is invalid" : checks.isError || invalid ? "Compliance evidence is unavailable" : !available ? "Loading compliance evidence" : !totals!.total ? "No evidence rows match these filters" : totals!.fail > 0 ? `${totals!.fail} failing evidence rows need review` : graded > 0 ? "Graded evidence has no active failures" : "No graded controls in this cohort"}
         detail="Graded pass percentage is passing / (passing + failing). Active exemptions, manual review, not applicable and unrecognized statuses are excluded. Evidence rows and framework mappings are counted separately; these counts do not deduplicate controls." />
@@ -196,6 +198,7 @@ export function CompliancePage() {
         <StatCard label="Matching evidence rows" value={totals?.total ?? "—"} />
         <StatCard label="Ungraded" value={totals?.ungraded ?? "—"} hint="outside pass / fail denominator" />
       </StatGrid>
+      </>}
       <Tabs value={tab} onValueChange={setTab} items={[
         { value: "controls", label: "Controls", content: <div className="space-y-5">
           <div className="flex flex-wrap items-end gap-3">
@@ -223,7 +226,7 @@ export function CompliancePage() {
             </section>
           </>}
         </div> },
-        { value: "evidence", label: "Source evidence", content: <EvidencePanel data={evidence.isSuccess ? evidence.data : undefined} isPending={evidence.isPending} isError={evidence.isError} onRetry={() => void evidence.refetch()} /> },
+        { value: "evidence", label: "Source evidence", content: <ComplianceEvidenceInventory clusterId={clusterId!} ready={scopeReady} active={tab === "evidence"} /> },
         { value: "schedules", label: "Schedules", content: <SchedulesManager clusterId={clusterId!} listPath={listPath} scopeReady={scopeReady} /> },
       ]} />
     </>}
@@ -236,81 +239,6 @@ function checksResponseMatches(data: ComplianceChecksResponse, request: Complian
   if (!Array.isArray(rows) || data.cluster_id !== request.cluster_id || data.framework !== (request.framework === "all" ? "" : request.framework || "") || data.status !== (request.status || "") || data.profile !== (request.profile || "") || data.control_id !== (request.control_id || "") || data.q !== (request.q || "").trim() || data.limit !== 100 || data.offset !== request.offset || data.sort !== request.sort || data.order !== request.order || !Number.isSafeInteger(total) || total! < 0 || !keys.every(key => Number.isSafeInteger(data.summary?.[key]) && data.summary![key] >= 0) || data.summary!.total !== total || data.summary!.graded !== data.summary!.pass + data.summary!.fail || total !== data.summary!.graded + data.summary!.ungraded || rows.length !== Math.min(100, Math.max(0, total! - request.offset!)) || data.has_more !== (total! > request.offset! + rows.length)) return false;
   const ids = new Set<string>();
   return rows.every(row => { if (!row.id?.trim() || ids.has(row.id) || row.cluster_id !== request.cluster_id || request.framework && request.framework !== "all" && row.framework !== request.framework || request.control_id && row.control_id !== request.control_id || request.status === "graded" && !["pass", "fail"].includes(row.effective_status) || request.status === "ungraded" && ["pass", "fail"].includes(row.effective_status) || request.status && !["graded", "ungraded"].includes(request.status) && row.effective_status !== request.status) return false; ids.add(row.id); return true; });
-}
-
-const evidenceColumns: Column<ComplianceEvidenceItem>[] = [
-  {
-    id: "scope", kind: "status", size: 112, minSize: 96,
-    exportValue: (item) => item.scope,
-    header: "Scope",
-    cell: (item) => <span className="text-xs text-muted-foreground">{item.scope}</span>,
-  },
-  {
-    id: "target", kind: "name", grow: true, minSize: 200, wrap: true,
-    exportValue: (item) => item.target,
-    header: "Target",
-    cell: (item) => (
-      <>
-        <div className="font-medium" title={item.target}>{item.target}</div>
-        <div className="text-xs text-muted-foreground">{item.target_kind}</div>
-      </>
-    ),
-  },
-  {
-    id: "control", kind: "id", size: 160, minSize: 128, wrap: true,
-    exportValue: (item) => `${item.framework} · ${item.control_id}`,
-    header: "Control",
-    cell: (item) => (
-      <>
-        <div className="font-mono text-xs">{item.framework} · {item.control_id}</div>
-        <div className="text-xs text-muted-foreground" title={item.title}>{item.title}</div>
-      </>
-    ),
-  },
-  {
-    id: "status", kind: "status", size: 120, minSize: 104,
-    exportValue: (item) => item.effective_status ?? item.status,
-    header: "Status",
-    cell: (item) => {
-      const status = item.effective_status ?? item.status;
-      return (
-        <span className={`rounded-md px-1.5 py-0.5 text-xs ${statusClass(status)}`}>
-          {status}
-        </span>
-      );
-    },
-  },
-  {
-    id: "evidence", kind: "text", grow: true, minSize: 280, wrap: true,
-    exportValue: (item) => item.evidence ?? "",
-    header: "Evidence",
-    cell: (item) => (
-      <>
-        <div className="text-xs text-muted-foreground" title={item.evidence || ""}>
-          {item.evidence || "No evidence text"}
-        </div>
-        {item.exemption && (
-          <div className="mt-0.5 text-xs text-muted-foreground" title={item.exemption.reason}>
-            Exempt until {formatDateTime(item.exemption.expires_at)} · {item.exemption.reason}
-          </div>
-        )}
-      </>
-    ),
-  },
-];
-
-
-function EvidencePanel({ data, isPending, isError, onRetry }: { data?: ComplianceEvidenceResponse; isPending: boolean; isError: boolean; onRetry: () => void }) {
-  const items = data?.items ?? [];
-  return <section className="space-y-4" data-testid="compliance-evidence-panel">
-    <p className="text-sm text-muted-foreground">Collected evidence across node, workload, Kubernetes, and cloud scopes. This view loads up to 500 records.</p>
-    {isPending && <LoadingState label="Loading evidence…" />}
-    {isError && <ErrorState title={data ? "Could not refresh evidence. Showing the last loaded records." : "Compliance evidence could not be loaded."} action={<Button onClick={onRetry}>Retry</Button>} />}
-    {data && <>
-      <Collapse label="Evidence status details"><div className="grid gap-2 text-xs md:grid-cols-5" data-testid="compliance-evidence-summary"><StatusMetric label="Pass" value={data.summary.pass} status="pass" /><StatusMetric label="Fail" value={data.summary.fail} status="fail" /><StatusMetric label="Manual" value={data.summary.manual} status="manual" /><StatusMetric label="Exempted" value={data.summary.exempted} status="exempted" /><StatusMetric label="N/A" value={data.summary.not_applicable} status="not_applicable" /></div></Collapse>
-      <DataTable rows={items} sourceLimit={500} sourceCount={items.length} columns={evidenceColumns} rowKey={(item) => item.id} preferencesKey="compliance-evidence" exportFileName="compliance-evidence.csv" emptyState={<EmptyState title="No collected compliance evidence" hint="Evidence will appear here after controls are evaluated." />} />
-    </>}
-  </section>;
 }
 
 function ComplianceExemptionsList({
@@ -357,16 +285,6 @@ function ComplianceExemptionsList({
   );
 }
 
-function StatusMetric({ label, value, status }: { label: string; value: number; status: string }) {
-  return (
-    <div className="rounded-md border border-border bg-background p-2">
-      <div className="text-[10px] uppercase text-muted-foreground">{label}</div>
-      <div className={`mt-1 inline-flex rounded-md px-1.5 py-0.5 font-mono text-sm ${statusClass(status)}`}>
-        {value}
-      </div>
-    </div>
-  );
-}
 
 function SchedulesManager({ clusterId, listPath, scopeReady }: { clusterId: string; listPath: string; scopeReady: boolean }) {
   const qc = useQueryClient();

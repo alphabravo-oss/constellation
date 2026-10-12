@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { useMutation, useIsFetching, useQueryClient } from "@tanstack/react-query";
 import { useCluster } from "@/hooks/useCluster";
 import { useDebounced } from "@/hooks/useDebounced";
@@ -61,10 +62,17 @@ export function scanInventoryResponseValid(data: (ScanInventoryMetadata & { limi
 }
 
 export function ScanInventoryExport({ context, disabled, download }: { context: string; disabled: boolean; download: () => Promise<ScanInventoryExportResult> }) {
-  const exportCSV = useMutation({ mutationFn: async (requestContext: string) => ({ ...await download(), context: requestContext }) });
+  const current = useRef({ context, disabled });
+  current.current = { context, disabled };
+  const mounted = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const exportCSV = useMutation({ mutationFn: async (request: { context: string; download: () => Promise<ScanInventoryExportResult> }) => {
+    if (!mounted.current || current.current.disabled || request.context !== current.current.context) throw new Error("Refresh the inventory before exporting this scope.");
+    return { ...await request.download(), context: request.context };
+  } });
   const result = exportCSV.data?.context === context ? exportCSV.data : undefined;
-  const failed = exportCSV.isError && exportCSV.variables === context;
-  return <div className="space-y-2"><Button disabled={disabled || exportCSV.isPending} onClick={() => exportCSV.mutate(context)}>{exportCSV.isPending ? "Exporting matching CSV…" : "Export matching CSV"}</Button>
+  const failed = exportCSV.isError && exportCSV.variables?.context === context;
+  return <div className="space-y-2"><Button disabled={disabled || exportCSV.isPending} onClick={() => exportCSV.mutate({ context, download })}>{exportCSV.isPending ? "Exporting matching CSV…" : "Export matching CSV"}</Button>
     {failed && <p role="alert" className="text-sm text-destructive">Matching CSV could not be exported. Refresh the evidence and try again.</p>}
     {result && <p role={result.truncated ? "alert" : "status"} className="text-sm">{result.truncated ? `Export capped at ${result.limit.toLocaleString()} of ${result.total.toLocaleString()} matching records. Narrow filters for a complete export.` : `Exported all ${result.exported.toLocaleString()} matching records across pages.`}</p>}
   </div>;

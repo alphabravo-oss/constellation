@@ -2,11 +2,13 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/db"
 )
@@ -47,7 +49,14 @@ func (a *Assets) Get(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	subj, _ := SubjectFrom(r.Context())
+	subj, ok := SubjectFrom(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	fail := func() {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "asset evidence unavailable"})
+	}
 	var d assetDTO
 	var labels []byte
 	err = a.db.Pool().QueryRow(r.Context(),
@@ -55,8 +64,12 @@ func (a *Assets) Get(w http.ResponseWriter, r *http.Request) {
            FROM assets a LEFT JOIN images i ON i.asset_id=a.id WHERE a.id = $1 AND a.org_id = $2`, id, subj.OrgID).
 		Scan(&d.ID, &d.ClusterID, &d.Kind, &d.Name, &d.DisplayName, &d.Digest, &labels, &d.AIWorkload,
 			&d.Criticality, &d.FirstSeenAt, &d.LastSeenAt)
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	if err != nil {
+		fail()
 		return
 	}
 	d.Labels = labels
@@ -70,70 +83,82 @@ func (a *Assets) Get(w http.ResponseWriter, r *http.Request) {
 		}
 		resultHandler := NewImageScanResults(a.db)
 		var resultID uuid.UUID
-		if err := a.db.Pool().QueryRow(r.Context(), `
-SELECT id
-  FROM image_scan_results
- WHERE org_id = $1
-   AND (asset_id = $2 OR ($3 <> '' AND image_digest = $3))
- ORDER BY last_scanned_at DESC
- LIMIT 1`, subj.OrgID, id, imageDigest).Scan(&resultID); err == nil {
-			result, err := resultHandler.getResult(r, subj.OrgID, resultID)
-			if err == nil {
-				imageScanResult = result
-				if canonicalFindings, err := resultHandler.getFindings(r, subj.OrgID, resultID); err == nil {
-					for _, f := range canonicalFindings {
-						findings = append(findings, map[string]any{
-							"id":                   f.ID.String(),
-							"kind":                 "vulnerability",
-							"external_id":          f.ExternalID,
-							"title":                f.Title,
-							"severity":             f.Severity,
-							"risk_score":           f.RiskScore,
-							"lifecycle":            "open",
-							"last_seen_at":         f.LastSeenAt.UTC().Format(time.RFC3339),
-							"image_scan_result_id": f.ImageScanResultID.String(),
-							"finding_key":          f.FindingKey,
-						})
-					}
-				}
-			}
+		err := a.db.Pool().QueryRow(r.Context(), `
+SELECT id FROM image_scan_results
+ WHERE org_id=$1 AND (($3<>'' AND image_digest=$3) OR ($3='' AND asset_id=$2))
+ ORDER BY last_scanned_at DESC NULLS LAST, id DESC LIMIT 1`, subj.OrgID, id, imageDigest).Scan(&resultID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			fail()
+			return
 		}
-	}
-	rows, err := a.db.Pool().Query(r.Context(), `
-SELECT id, kind, external_id, title, severity, risk_score, lifecycle, last_seen_at
-  FROM findings
- WHERE org_id = $1 AND asset_id = $2
- ORDER BY risk_score DESC, last_seen_at DESC
- LIMIT 100`, subj.OrgID, id)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var (
-				fid, kind, externalID, title, severity, lifecycle string
-				risk                                              int
-				lastSeen                                          time.Time
-			)
-			if err := rows.Scan(&fid, &kind, &externalID, &title, &severity, &risk, &lifecycle, &lastSeen); err == nil {
+		if err == nil {
+			result, e := resultHandler.getResult(r, subj.OrgID, resultID)
+			if e != nil {
+				fail()
+				return
+			}
+			imageScanResult = result
+			canonicalFindings, e := resultHandler.getFindings(r, subj.OrgID, resultID)
+			if e != nil {
+				fail()
+				return
+			}
+			for _, f := range canonicalFindings {
 				findings = append(findings, map[string]any{
-					"id": fid, "kind": kind, "external_id": externalID, "title": title,
-					"severity": severity, "risk_score": risk, "lifecycle": lifecycle,
-					"last_seen_at": lastSeen.UTC().Format(time.RFC3339),
+					"id": f.ID.String(), "kind": "vulnerability", "external_id": f.ExternalID, "title": f.Title, "severity": f.Severity, "risk_score": f.RiskScore, "lifecycle": "open", "last_seen_at": f.LastSeenAt.UTC().Format(time.RFC3339), "image_scan_result_id": f.ImageScanResultID.String(), "finding_key": f.FindingKey,
 				})
 			}
 		}
 	}
+	rows, err := a.db.Pool().Query(r.Context(), `
+SELECT id, kind, COALESCE(external_id,''), title, severity, risk_score, lifecycle, last_seen_at
+  FROM findings
+ WHERE org_id = $1 AND asset_id = $2 AND cluster_id IS NOT DISTINCT FROM $3::uuid
+ ORDER BY risk_score DESC, last_seen_at DESC, id, first_seen_at
+ LIMIT 100`, subj.OrgID, id, d.ClusterID)
+	if err != nil {
+		fail()
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			fid, kind, externalID, title, severity, lifecycle string
+			risk                                              int
+			lastSeen                                          time.Time
+		)
+		if err := rows.Scan(&fid, &kind, &externalID, &title, &severity, &risk, &lifecycle, &lastSeen); err != nil {
+			fail()
+			return
+		}
+		findings = append(findings, map[string]any{
+			"id": fid, "kind": kind, "external_id": externalID, "title": title,
+			"severity": severity, "risk_score": risk, "lifecycle": lifecycle,
+			"last_seen_at": lastSeen.UTC().Format(time.RFC3339),
+		})
+	}
 
+	if rows.Err() != nil {
+		fail()
+		return
+	}
+	rows.Close()
 	var image map[string]any
 	var registry, repository, tag, digest string
 	var layers, architectures, sigInfo []byte
 	var size *int64
 	var signed bool
 	var pulled time.Time
-	if err := a.db.Pool().QueryRow(r.Context(), `
+	err = a.db.Pool().QueryRow(r.Context(), `
 SELECT registry, repository, COALESCE(tag,''), digest, layers, architectures, size_bytes,
        signed, signature_info, pulled_at
   FROM images WHERE asset_id = $1`, id).
-		Scan(&registry, &repository, &tag, &digest, &layers, &architectures, &size, &signed, &sigInfo, &pulled); err == nil {
+		Scan(&registry, &repository, &tag, &digest, &layers, &architectures, &size, &signed, &sigInfo, &pulled)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		fail()
+		return
+	}
+	if err == nil {
 		image = map[string]any{
 			"registry": registry, "repository": repository, "tag": tag, "digest": digest,
 			"layers": json.RawMessage(layers), "architectures": json.RawMessage(architectures),
@@ -167,22 +192,32 @@ SELECT id, format, sha256, created_at
          ORDER BY format, source_priority, created_at DESC
        ) latest_by_format
  ORDER BY created_at DESC`, subj.OrgID, id)
-	if err == nil {
-		defer sbomRows.Close()
-		for sbomRows.Next() {
-			var sid, format, sha string
-			var created time.Time
-			if err := sbomRows.Scan(&sid, &format, &sha, &created); err == nil {
-				sboms = append(sboms, map[string]any{
-					"id": sid, "format": format, "sha256": sha, "created_at": created.UTC().Format(time.RFC3339),
-				})
-			}
+	if err != nil {
+		fail()
+		return
+	}
+	defer sbomRows.Close()
+	for sbomRows.Next() {
+		var sid, format, sha string
+		var created time.Time
+		if err := sbomRows.Scan(&sid, &format, &sha, &created); err != nil {
+			fail()
+			return
 		}
+		sboms = append(sboms, map[string]any{
+			"id": sid, "format": format, "sha256": sha, "created_at": created.UTC().Format(time.RFC3339),
+		})
 	}
 
+	if sbomRows.Err() != nil {
+		fail()
+		return
+	}
+	sbomRows.Close()
 	imageAcceptances, err := NewImageAcceptances(a.db, nil).listForAsset(r, subj.OrgID, id)
 	if err != nil {
-		imageAcceptances = []imageAcceptanceDTO{}
+		fail()
+		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{

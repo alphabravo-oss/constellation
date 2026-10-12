@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/db"
+	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 )
 
 // Nodes aggregates NeuVector-style host posture around a Kubernetes node:
@@ -69,13 +70,16 @@ type NodeSummary struct {
 }
 
 type NodeDetail struct {
-	Node            NodeSummary     `json:"node"`
-	Facts           json.RawMessage `json:"facts,omitempty"`
-	Packages        json.RawMessage `json:"packages,omitempty"`
-	Containers      json.RawMessage `json:"containers,omitempty"`
-	Processes       json.RawMessage `json:"processes,omitempty"`
-	CIS             json.RawMessage `json:"cis,omitempty"`
-	Vulnerabilities []HostVulnRow   `json:"vulnerabilities"`
+	Node                   NodeSummary            `json:"node"`
+	Facts                  json.RawMessage        `json:"facts,omitempty"`
+	Packages               json.RawMessage        `json:"packages,omitempty"`
+	Containers             json.RawMessage        `json:"containers,omitempty"`
+	Processes              json.RawMessage        `json:"processes,omitempty"`
+	CIS                    json.RawMessage        `json:"cis,omitempty"`
+	Vulnerabilities        []NodeVulnerabilityRow `json:"vulnerabilities"`
+	VulnerabilitiesTotal   int64                  `json:"vulnerabilities_total"`
+	VulnerabilitiesLimit   int                    `json:"vulnerabilities_limit"`
+	VulnerabilitiesHasMore bool                   `json:"vulnerabilities_has_more"`
 }
 
 func (h *Nodes) List(w http.ResponseWriter, r *http.Request) { h.writeNodeInventory(w, r, false) }
@@ -126,7 +130,11 @@ func (h *Nodes) Get(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusInternalServerError, "host cis: "+err.Error())
 		return
 	}
-	detail.Vulnerabilities, err = h.nodeVulnerabilities(r, subj.OrgID, clusterID, node)
+	var vulnerabilityMeta inventorylist.Metadata
+	detail.Vulnerabilities, vulnerabilityMeta, err = h.nodeVulnerabilities(r, subj.OrgID, clusterID, node)
+	detail.VulnerabilitiesTotal = vulnerabilityMeta.Total
+	detail.VulnerabilitiesLimit = 2000
+	detail.VulnerabilitiesHasMore = vulnerabilityMeta.HasMore
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, "host vulnerabilities: "+err.Error())
 		return
@@ -391,48 +399,6 @@ func (h *Nodes) nodePayload(r *http.Request, orgID, clusterID uuid.UUID, node, t
 	return json.RawMessage(raw), nil
 }
 
-func (h *Nodes) nodeVulnerabilities(r *http.Request, orgID, clusterID uuid.UUID, node string) ([]HostVulnRow, error) {
-	rows, err := h.db.Pool().Query(r.Context(), `
-SELECT COALESCE(NULLIF(f.target_ref, ''), a.name, ''),
-       COALESCE(f.target_cluster_id, f.cluster_id),
-       COALESCE(f.detail_json->'package'->>'name', ''),
-       COALESCE(f.detail_json->'package'->>'version', ''),
-       COALESCE(f.external_id, ''),
-       COALESCE(f.detail_json->'aliases', '[]'::jsonb),
-       COALESCE(f.severity, ''),
-       COALESCE(NULLIF(f.description, ''), f.title, ''),
-       COALESCE(f.detail_json->'references', '[]'::jsonb),
-       COALESCE(f.detail_json->>'fixed', ''),
-       COALESCE(NULLIF(f.source_type, ''), NULLIF(f.canonical_engine, ''), 'scanner'),
-       f.last_seen_at
-  FROM findings f
-  LEFT JOIN assets a ON a.id = f.asset_id
- WHERE f.org_id = $1
-   AND f.kind = 'vulnerability'
-   AND f.lifecycle = 'open'
-   AND f.target_type = 'host'
-   AND f.target_ref = $2
-   AND (f.cluster_id = $3 OR COALESCE(f.target_cluster_id, f.cluster_id) = $3)
- ORDER BY f.risk_score DESC NULLS LAST, f.last_seen_at DESC
- LIMIT 2000`, orgID, node, clusterID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []HostVulnRow{}
-	for rows.Next() {
-		var item HostVulnRow
-		var aliasesRaw, refsRaw []byte
-		if err := rows.Scan(
-			&item.Node, &item.ClusterID, &item.PackageName, &item.PackageVersion,
-			&item.VulnID, &aliasesRaw, &item.Severity, &item.Summary, &refsRaw,
-			&item.FixedVersion, &item.Source, &item.ObservedAt,
-		); err != nil {
-			return nil, err
-		}
-		item.Aliases = decodeStringList(aliasesRaw)
-		item.References = strings.Join(decodeStringList(refsRaw), ",")
-		out = append(out, item)
-	}
-	return out, rows.Err()
+func (h *Nodes) nodeVulnerabilities(r *http.Request, orgID, clusterID uuid.UUID, node string) ([]NodeVulnerabilityRow, inventorylist.Metadata, error) {
+	return inventorylist.Read(r.Context(), h.db.Pool(), nodeVulnerabilityDefinition(orgID, clusterID, node), inventorylist.Options{Limit: 2000, OrderSQL: "risk_score DESC NULLS LAST, observed_at DESC, id ASC"}, scanNodeVulnerability)
 }

@@ -264,6 +264,14 @@ export interface AssetFinding {
   finding_key?: string;
 }
 
+export interface AssetFindingInventoryParams extends ScanInventoryParams { cluster_id?: string; severity?: string; lifecycle?: string; source?: string }
+export interface AssetFindingInventoryResponse {
+  asset_id: string; cluster_id: string | null;
+  items: Array<AssetFinding & { row_id: string; source: "asset" | "image_scan" }>;
+  total: number; summary: Record<string, number>; has_more: boolean; limit: number; offset: number;
+  sort: string; order: "asc" | "desc"; q: string; severity: string; lifecycle: string; source: string;
+}
+
 export interface AssetImageDetail {
   registry: string;
   repository: string;
@@ -307,6 +315,8 @@ export interface AssetDetail {
 export interface AssetsListParams { limit?: number; offset?: number; cluster_id?: string; q?: string; search?: string; kind?: string; criticality?: string; ai_workload?: boolean; sort?: string; order?: "asc" | "desc" }
 export interface AssetsListResponse { assets: Asset[]; limit: number; offset: number; has_more: boolean; total: number; summary: Record<string, number>; sort: string; order: "asc" | "desc" }
 export const assets = {
+  findings: (id: string, params: AssetFindingInventoryParams) => api.get<AssetFindingInventoryResponse>(`/assets/${encodeURIComponent(id)}/findings`, { params }).then(r => r.data),
+  findingsCSV: (id: string, params: AssetFindingInventoryParams) => downloadScanInventoryCSV(`/assets/${encodeURIComponent(id)}/findings.csv`, params, `asset-${id}-findings.csv`),
   list: (params: AssetsListParams = {}) =>
     api.get<AssetsListResponse>("/assets", { params }).then((r) => r.data),
   exportCsv: async (params: AssetsListParams = {}) => {
@@ -403,6 +413,22 @@ export interface NodeListResponse {
   total?: number; has_more?: boolean; limit?: number; offset?: number; q?: string; agent?: string; risk?: string; host_cves?: string; sort?: string; order?: "asc" | "desc";
 }
 
+export interface NodeVulnerability extends HostVulnerability {
+  id: string;
+  row_id: string;
+  first_seen_at: string;
+  source_cluster_id?: string | null;
+  risk_score: number;
+  fixable: boolean;
+}
+export interface NodeVulnerabilityParams { q?: string; severity?: string; fixable?: "true" | "false"; source?: string; sort?: string; order?: "asc" | "desc"; limit?: number; offset?: number }
+export interface NodeVulnerabilityResponse {
+  node: string; cluster_id: string; items: NodeVulnerability[];
+  total: number; has_more: boolean; limit: number; offset: number;
+  q: string; severity: string; fixable: string; source: string; sort: string; order: "asc" | "desc";
+  summary: { total: number; critical: number; high: number; fixable: number; unique_cves: number };
+}
+
 export interface NodeDetail {
   node: NodeSummary;
   facts?: unknown;
@@ -410,7 +436,8 @@ export interface NodeDetail {
   containers?: unknown;
   processes?: unknown;
   cis?: unknown;
-  vulnerabilities: HostVulnerability[];
+  vulnerabilities: Array<HostVulnerability & { id?: string; row_id?: string; first_seen_at?: string; source_cluster_id?: string | null; risk_score?: number; fixable?: boolean }>;
+  vulnerabilities_total?: number; vulnerabilities_limit?: number; vulnerabilities_has_more?: boolean;
 }
 
 export interface ContainerRow {
@@ -507,6 +534,10 @@ export const nodes = {
   },
   get: (clusterID: string, node: string) =>
     api.get<NodeDetail>(`/clusters/${encodeURIComponent(clusterID)}/nodes/${encodeURIComponent(node)}`).then((r) => r.data),
+  vulnerabilities: (clusterID: string, node: string, params: NodeVulnerabilityParams = {}) =>
+    api.get<NodeVulnerabilityResponse>(`/clusters/${encodeURIComponent(clusterID)}/nodes/${encodeURIComponent(node)}/vulnerabilities`, { params }).then(r => r.data),
+  exportVulnerabilitiesCSV: (clusterID: string, node: string, params: NodeVulnerabilityParams = {}) =>
+    downloadScanInventoryCSV(`/clusters/${encodeURIComponent(clusterID)}/nodes/${encodeURIComponent(node)}/vulnerabilities.csv`, params, "constellation-node-host-vulnerabilities.csv"),
   scan: (scanTargetID: string) =>
     api.post(`/scan/host/${encodeURIComponent(scanTargetID)}`, {}).then((r) => r.data),
 };
@@ -576,6 +607,7 @@ export interface ComplianceEvidenceItem {
   evidence?: string;
   remediation?: string;
   observed_at: string;
+  tags_v2?: ComplianceCheck["tags_v2"];
   exemption?: {
     id: string;
     reason: string;
@@ -591,9 +623,12 @@ export interface ComplianceEvidenceSummary {
   total: number;
   by_scope?: Record<string, Omit<ComplianceEvidenceSummary, "by_scope">>;
 }
+export interface ComplianceEvidenceParams { cluster_id?: string; scope?: string; framework?: string; namespace?: string; control_id?: string; status?: string; q?: string; target?: string; sort?: string; order?: "asc" | "desc"; limit?: number; offset?: number }
 export interface ComplianceEvidenceResponse {
   items: ComplianceEvidenceItem[];
   summary: ComplianceEvidenceSummary;
+  total?: number; limit?: number; offset?: number; sort?: string; order?: "asc" | "desc"; has_more?: boolean;
+  cluster_id?: string | null; scope?: string; framework?: string; namespace?: string; control_id?: string; status?: string; q?: string; target?: string;
 }
 
 // DB-backed compliance scheduling.
@@ -667,15 +702,16 @@ export const compliance = {
   },
   summary:    (cluster_id?: string) =>
     api.get<{ frameworks: ComplianceSummary[] }>("/compliance/summary", { params: { cluster_id } }).then((r) => r.data),
-  evidence: (params: { cluster_id?: string; scope?: string; framework?: string; namespace?: string; limit?: number } = {}) =>
+  evidence: (params: ComplianceEvidenceParams = {}) =>
     api.get<ComplianceEvidenceResponse>("/compliance/evidence", { params }).then((r) => r.data),
-  nodeEvidence: (params: { cluster_id?: string; framework?: string; limit?: number } = {}) =>
+  exportEvidenceCSV: (params: ComplianceEvidenceParams = {}) => downloadScanInventoryCSV("/compliance/evidence.csv", params, "constellation-compliance-evidence.csv"),
+  nodeEvidence: (params: ComplianceEvidenceParams = {}) =>
     api.get<ComplianceEvidenceResponse>("/compliance/nodes", { params }).then((r) => r.data),
-  workloadEvidence: (params: { cluster_id?: string; framework?: string; namespace?: string; limit?: number } = {}) =>
+  workloadEvidence: (params: ComplianceEvidenceParams = {}) =>
     api.get<ComplianceEvidenceResponse>("/compliance/workloads", { params }).then((r) => r.data),
-  kubernetesEvidence: (params: { cluster_id?: string; framework?: string; limit?: number } = {}) =>
+  kubernetesEvidence: (params: ComplianceEvidenceParams = {}) =>
     api.get<ComplianceEvidenceResponse>("/compliance/kubernetes", { params }).then((r) => r.data),
-  cloudEvidence: (params: { cluster_id?: string; framework?: string; limit?: number } = {}) =>
+  cloudEvidence: (params: ComplianceEvidenceParams = {}) =>
     api.get<ComplianceEvidenceResponse>("/compliance/cloud", { params }).then((r) => r.data),
   listExemptions: (params: { framework?: string; control_id?: string; cluster_id?: string } = {}) =>
     api.get<{ exemptions: ComplianceExemption[] }>("/compliance/exemptions", { params }).then((r) => r.data),
@@ -5348,6 +5384,13 @@ export interface CVEAffectedResponse {
   clusters: CVEAffectedCluster[];
 }
 
+export type CVEAffectedInventoryView = "images" | "workloads" | "clusters" | "packages";
+export interface CVEAffectedInventoryParams { cluster_id?: string; q?: string; namespace?: string; severity?: string; sort?: string; order?: "asc" | "desc"; limit?: number; offset?: number }
+export interface CVEAffectedInventoryPackage extends CVEAffectedPackage { row_id: string; image_scan_result_id: string; image_ref: string; image_repository: string; image_tag: string; image_digest: string; last_seen_at: string }
+export interface CVEAffectedImageEvidence { image_ref: string; image_ref_normalized: string; image_repository: string; image_tag: string; image_digest: string }
+export interface CVEAffectedInventoryRows { images: CVEAffectedImage & {row_id: string}; workloads: CVEAffectedWorkload & {row_id: string; image_evidence: CVEAffectedImageEvidence[]}; clusters: CVEAffectedCluster & {row_id: string}; packages: CVEAffectedInventoryPackage }
+export interface CVEAffectedInventoryResponse<T> { cve_id: string; cluster_id: string | null; view: CVEAffectedInventoryView; items: T[]; total: number; summary: Record<string,number>; has_more: boolean; limit: number; offset: number; sort: string; order: "asc" | "desc" }
+
 export const cve = {
   search: (qOrParams: string | CVESearchParams = "") => {
     const params: Record<string, unknown> = typeof qOrParams === "string"
@@ -5370,6 +5413,11 @@ export const cve = {
   stats:  () => api.get<CVEStats>(`/cve/stats`).then((r) => r.data),
   affected: (id: string, clusterId?: string) =>
     api.get<CVEAffectedResponse>(`/cve/${encodeURIComponent(id)}/affected`, { params: clusterId ? { cluster_id: clusterId } : undefined }).then((r) => r.data),
+  affectedInventory: <V extends CVEAffectedInventoryView>(id: string, view: V, params: CVEAffectedInventoryParams = {}) =>
+    api.get<CVEAffectedInventoryResponse<CVEAffectedInventoryRows[V]>>(`/cve/${encodeURIComponent(id)}/affected/${view}`, { params }).then(response => response.data),
+  affectedInventoryCSV: (id: string, view: CVEAffectedInventoryView, params: CVEAffectedInventoryParams = {}) =>
+    downloadScanInventoryCSV(`/cve/${encodeURIComponent(id)}/affected/${view}.csv`, params, `constellation-cve-affected-${view}.csv`),
+
 };
 
 // ----- Wave D: Response Rules V2 (NeuVector-style condition catalog) ------

@@ -15,7 +15,7 @@ import (
 
 func TestCVE_AffectedUsesCanonicalImageResults(t *testing.T) {
 	d := openTestDB(t)
-	defer d.Close()
+	t.Cleanup(d.Close)
 
 	ctx := context.Background()
 	pool := d.Pool()

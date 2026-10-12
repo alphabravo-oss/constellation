@@ -1432,17 +1432,6 @@ SELECT node,
 }
 
 func (h *Deployments) deploymentCompliance(r *http.Request, orgID uuid.UUID, clusterID *uuid.UUID, workloadIDs []string, namespace, name string) ([]deploymentComplianceDTO, error) {
-	collector := complianceevidence.Collector{Pool: h.db.Pool()}
-	result, err := collector.Collect(r.Context(), complianceevidence.Query{
-		OrgID:     orgID,
-		ClusterID: clusterID,
-		Scope:     complianceevidence.ScopeWorkload,
-		Namespace: namespace,
-		Limit:     500,
-	})
-	if err != nil {
-		return nil, err
-	}
 	workloadSet := map[string]bool{}
 	for _, id := range workloadIDs {
 		id = strings.TrimSpace(id)
@@ -1453,6 +1442,24 @@ func (h *Deployments) deploymentCompliance(r *http.Request, orgID uuid.UUID, clu
 	baseWorkloadID := deploymentWorkloadID(namespace, name)
 	if baseWorkloadID != "" {
 		workloadSet[baseWorkloadID] = true
+	}
+
+	targets := make([]string, 0, len(workloadSet))
+	for target := range workloadSet {
+		targets = append(targets, target)
+	}
+	sort.Strings(targets)
+	collector := complianceevidence.Collector{Pool: h.db.Pool()}
+	result, err := collector.Collect(r.Context(), complianceevidence.Query{
+		OrgID:     orgID,
+		ClusterID: clusterID,
+		Scope:     complianceevidence.ScopeWorkload,
+		Namespace: namespace,
+		Limit:     500,
+		Targets:   targets,
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	out := []deploymentComplianceDTO{}

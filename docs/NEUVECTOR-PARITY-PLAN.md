@@ -1104,14 +1104,92 @@ relative times with exact timestamp tooltips and raw ISO values in CSV. Digests
 remain hidden by default. No live scan, policy, capture or acceptance mutations
 were submitted. Full accessibility and cross-dataset acceptance remain open.
 
+The detail-evidence continuation replaces the Asset Findings and Node CVE
+page-local inventories with full server filtering, stable paging, complete
+matching summaries and matching CSV. Asset evidence keeps exact-cluster asset
+findings separate from the latest organization-owned exact-digest scan; these
+are evidence records, not unique vulnerabilities. Node evidence preserves the
+source-cluster OR effective-target-cluster attribution rule. Historical finding
+instances retain the composite UUID/timestamp identity instead of collapsing
+repeated UUIDs. Existing bounded detail payloads remain compatibility surfaces;
+the new primary tables do not derive full counts from them.
+
+Asset metadata reads now distinguish missing records from database failures,
+and propagate failures in scan findings, image metadata, software inventories
+and acceptance history. Account changes isolate the parent asset cache and reset
+risk-decision context. Pending/failed/malformed inventory reads hide finding
+counts and exports. The shared matching-CSV control captures the clicked download
+callback and rejects a changed, unavailable or unmounted scope before dispatch.
+
+CVE affected Images, Workloads, Clusters and Packages each read a full server
+inventory; package and cluster totals no longer derive from capped image or
+workload pages. Canonical finding IDs remain deduplicated per workload
+association, whose identity includes cluster, deployment, workload ID, namespace,
+name and kind. Exact image-link tuples are retained together in UI disclosure
+and structured CSV, so separately aggregated repository/tag/digest fields cannot
+invent an image identity. A known image digest requires an exact scan digest;
+mutable tag/reference fallback applies only when the digest is absent. This fixes
+inherited cases where a different image could supply apparently clean evidence.
+Counts of findings across workloads are association counts,
+not globally unique vulnerabilities. Raw compliance normalizes all source scopes
+and expands framework mappings and active exemptions before filtering, summary,
+paging or export. Embedded deployment compliance supplies its exact target set
+before the collector limit, preventing unrelated workloads from consuming it.
+
+The full frontend suite passes **1,715 tests across 132 files**. The initial run
+had one scanner-source test that inspected the table before refresh completed;
+waiting for the rendered table resolves it without a product change. The final
+malformed-response guard passes **67 focused compliance tests** after that run.
+Production build/typecheck, full lint, affected Go vet, generated OpenAPI/contracts,
+107 endpoint mappings and plan checks pass. **50 fresh PostgreSQL race/shuffle
+executions pass without skips**: Asset 6, Node 30, CVE 4, Compliance/deployment 10.
+Fixtures include inventories beyond legacy caps, tenant and cluster exclusions,
+historical composite finding IDs, mutable-tag digest replacement, stable paging,
+full matching CSV and malformed/unavailable evidence. These are changed-domain
+checks; the pre-existing default test database is schema 161, so an unrelated full
+server run against it is not claimed green.
+
+Helm revision **66** deploys API/frontend `evidence-inventory-20261012`, retaining
+migration `audit-lookup-20261012` and schema173; all seven deployments are ready.
+Live list/CSV reads reconcile five assets with **1,606 /510 /906 /83 /160** records,
+**641** host finding instances (**537** unique advisory IDs), and **794** source
+compliance rows. One live CVE has **3 images /2 workload associations /1 cluster
+/4 package records**, each agreeing with matching CSV. Filtered exports also agree
+and a missing asset returns404. Asset records include both attributed findings
+and canonical scan evidence; totals are not unique-CVE counts. Later compliance
+browser reads observe 778 rows, reflecting changing source state.
+
+The collaborative browser verifies Asset page 2, Compliance paging and Back
+restoration, all four CVE tabs, hidden digests, and desktop/640px alignment with
+contained table scrolling and no clipped actions. The exact host warning quoted
+by the user is a **32px** compact row with its explanatory text collapsed behind
+Details. No live scan, policy, capture or acceptance mutations were submitted.
+
+Final browser-driven refinements hide internal Node finding IDs by default,
+remove duplicated advisory text and collapse inventory context. Asset titles are
+limited to two lines with full-text tooltips; Asset Observed and CVE Last seen
+sorts expose the shared hidden-sort indicator and column reveal. CVE names receive
+more width, preserve digest disclosure and show a truthful missing-title fallback.
+Compliance source evidence uses a short count line, with semantics in its existing
+disclosure; Controls KPIs and verdict no longer appear over the Source evidence
+or Schedules tabs. These final refinements pass **210 focused tests** (Asset 45,
+Node 34, CVE 62, Compliance 69), production build/typecheck and full lint.
+Helm revision **67** runs frontend `evidence-layout-20261012` with the same API,
+migration and schema; all seven deployments are ready. Live checks confirm the
+short source-evidence caption, Controls-only metrics, title fallback, expanded
+image-name width and hidden Last seen sort indicator. Saved column preferences
+remain honored; Reset table preferences restores the new defaults.
+
 The remaining UI-3 matrix includes baseline/file-profile workload inventories
 and CSVs, plus applicable workload asset/finding exports. Image/repository/cloud/
 node records must not invent workload roles. Dormant SSE remains unqualified
 and disabled. The live cluster has no discovered custom-namespace installation
 candidate; a real isolated chart installation and discovery proof remains
-outstanding. CVE/Compliance/asset evidence caps, other cross-page filter/export
-contracts, named saved views and the full accessibility/cross-dataset acceptance
-matrix remain open.
+outstanding. Network conversation/session sorting and matching CSV, threat
+matching export, runtime history continuation, named saved views and the full
+accessibility/cross-dataset acceptance matrix remain open. The legacy bounded
+detail payloads are compatibility surfaces; primary Asset/Node/CVE/raw Compliance
+inventories now have independent full-cohort contracts as qualified above.
 
 The admission-engine continuation adds migration **172** and persists normalized
 engine outcomes atomically with image scan completion. The built-in vulnerability

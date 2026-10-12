@@ -19,7 +19,7 @@ export function AssetImageAcceptanceFormPage({ action = "create" }: { action?: "
   const { acceptanceId } = useParams({ strict: false });
   const { clusterId, aid, resolved, q } = scope;
   const backPath = clusterId && aid ? `/clusters/${encodeURIComponent(clusterId)}/assets/${encodeURIComponent(aid)}?tab=acceptance` : "/clusters";
-  const context = `${clusterId}:${aid}:${action}:${acceptanceId ?? "new"}`;
+  const context = `${scope.owner}:${clusterId}:${aid}:${action}:${acceptanceId ?? "new"}`;
   const [captured, setCaptured] = useState<{ context: string; data: AssetDetail }>();
   useEffect(() => {
     if (resolved && q.isSuccess && q.fetchStatus === "idle" && q.data?.image?.digest) {
@@ -34,15 +34,15 @@ export function AssetImageAcceptanceFormPage({ action = "create" }: { action?: "
       : q.isPending || q.isFetching ? <LoadingState label="Loading exact image digest…" />
       : !q.data?.image?.digest ? <ErrorState title="This asset has no image digest that can be accepted." />
       : <LoadingState label="Preparing image risk decision…" />
-      : <ImageAcceptanceEditor key={context} action={action} acceptanceId={acceptanceId} initial={initial} clusterId={clusterId!} backPath={backPath} available={resolved && q.isSuccess && q.fetchStatus === "idle"} refreshing={scope.clusterLoading || q.isFetching} sourceError={scope.clusterError ?? q.error} recheck={scope.recheck} refresh={() => { scope.retryCluster(); if (resolved) void q.refetch(); }} />}
+      : <ImageAcceptanceEditor owner={scope.owner} key={context} action={action} acceptanceId={acceptanceId} initial={initial} clusterId={clusterId!} backPath={backPath} available={resolved && q.isSuccess && q.fetchStatus === "idle"} refreshing={scope.clusterLoading || q.isFetching} sourceError={scope.clusterError ?? q.error} recheck={scope.recheck} refresh={() => { scope.retryCluster(); if (resolved) void q.refetch(); }} />}
     <a href={backPath} className="inline-flex text-sm text-muted-foreground hover:text-foreground">Cancel</a>
   </PageContainer>;
 }
 
 function acceptanceIdentity(item: ImageAcceptance | undefined) { return item ? JSON.stringify([item.id, item.image_digest, item.rationale, item.accepted_until, item.status]) : ""; }
 
-function ImageAcceptanceEditor({ action, acceptanceId, initial, clusterId, backPath, available, refreshing, sourceError, recheck, refresh }: {
-  action: "create" | "revoke"; acceptanceId?: string; initial: AssetDetail; clusterId: string; backPath: string;
+function ImageAcceptanceEditor({ owner, action, acceptanceId, initial, clusterId, backPath, available, refreshing, sourceError, recheck, refresh }: {
+  owner: string; action: "create" | "revoke"; acceptanceId?: string; initial: AssetDetail; clusterId: string; backPath: string;
   available: boolean; refreshing: boolean; sourceError: unknown; recheck: () => AssetDetail | undefined; refresh: () => void;
 }) {
   const qc = useQueryClient();
@@ -89,7 +89,7 @@ function ImageAcceptanceEditor({ action, acceptanceId, initial, clusterId, backP
       return "Image risk acceptance revoked for this organization-wide digest.";
     },
     onSuccess: (message) => {
-      void qc.invalidateQueries({ queryKey: assetDetailKey(clusterId, initial.asset.id), exact: true });
+      void qc.invalidateQueries({ queryKey: assetDetailKey(clusterId, initial.asset.id, owner), exact: true });
       void qc.invalidateQueries({ queryKey: ["assets"] });
       if (active.current) setResult(message);
     },

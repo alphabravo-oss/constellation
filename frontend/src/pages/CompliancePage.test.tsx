@@ -86,3 +86,18 @@ it("preserves reported custom frameworks and rejects invalid status without fetc
  vi.mocked(compliance.checks).mockImplementation(async params=>response(params as ComplianceChecksParams,[row(1,"fail","custom")]));await render("?framework=custom");await settle(()=>expect(rows()).toHaveLength(1));expect(host.querySelector<HTMLSelectElement>("#compliance-framework")!.value).toBe("custom");
  await act(async()=>history.push("/clusters/cluster/compliance?status=invalid"));await settle(()=>expect(host.textContent).toContain("Choose a supported status or sort"));expect(compliance.checks).toHaveBeenCalledTimes(1);expect(host.textContent).not.toContain("Loading controls");
 });
+
+it("keeps the Controls verdict and metrics scoped to its own tab",async()=>{
+ vi.mocked(compliance.evidence).mockImplementation(async params=>({ ...params, items:[],summary:{total:0,pass:0,fail:0,manual:0,exempted:0,not_applicable:0},total:0,limit:100,offset:0,has_more:false }));
+ await render("?tab=evidence&status=graded");
+ await settle(()=>expect(host.textContent).toContain("0 source evidence rows match these filters"));
+ expect(host.querySelector('[data-testid="compliance-summary"]')).toBeNull();
+ expect(host.textContent).not.toContain("failing evidence rows need review");
+ await act(async()=>button("Controls").dispatchEvent(new window.MouseEvent("mousedown",{bubbles:true,button:0})));
+ await settle(()=>expect(host.querySelector('[data-testid="compliance-summary"]')).not.toBeNull());
+ expect(host.textContent).toContain("1 failing evidence rows need review");
+ expect(host.querySelector('[data-testid="compliance-summary"]')!.textContent).toContain("Matching evidence rows3");
+ await act(async()=>history.back());
+ await settle(()=>expect(host.querySelector('[data-testid="compliance-evidence-panel"]')).not.toBeNull());
+ expect(host.querySelector('[data-testid="compliance-summary"]')).toBeNull();
+});

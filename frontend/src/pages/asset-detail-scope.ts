@@ -1,9 +1,10 @@
 import { useIsFetching, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
 import { assets, type AssetDetail } from "@/api/client";
+import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
 import { useCluster } from "@/hooks/useCluster";
 
-export const assetDetailKey = (clusterId: string | undefined, assetId: string | undefined) => ["asset", clusterId, assetId] as const;
+export const assetDetailKey = (clusterId: string | undefined, assetId: string | undefined, owner?: string) => ["asset", clusterId, assetId, owner] as const;
 
 export function assertAssetScope(data: AssetDetail, clusterId: string, assetId: string) {
   if (data.asset.id !== assetId || data.asset.cluster_id !== clusterId) {
@@ -16,10 +17,12 @@ export function useAssetDetailScope() {
   const { aid } = useParams({ strict: false });
   const { clusterId, cluster, isLoading, error } = useCluster();
   const qc = useQueryClient();
+  const identity = useTablePreferencesIdentity();
+  const owner = identity?.org_id && identity.user_id ? `${identity.org_id}:${identity.user_id}` : "";
   const registryFetching = useIsFetching({ queryKey: ["clusters"], exact: true });
   const detailFetching = useIsFetching({ queryKey: ["cluster", clusterId], exact: true });
   const clusterReady = () => {
-    if (!clusterId || cluster?.id !== clusterId || isLoading || error) return false;
+    if (!owner || !clusterId || cluster?.id !== clusterId || isLoading || error) return false;
     const registry = qc.getQueryState<{ clusters: Array<{ id: string }> }>(["clusters"]);
     const detail = qc.getQueryState<{ id: string }>(["cluster", clusterId]);
     if (registry && (registry.status !== "success" || registry.fetchStatus !== "idle")) return false;
@@ -29,7 +32,7 @@ export function useAssetDetailScope() {
     return !registry && !detail || (registry?.data?.clusters.find((item) => item.id === clusterId) ?? detail?.data)?.id === clusterId;
   };
   const resolved = !registryFetching && !detailFetching && clusterReady();
-  const key = assetDetailKey(clusterId, aid);
+  const key = assetDetailKey(clusterId, aid, owner);
   const q = useQuery({
     queryKey: key,
     queryFn: async () => assertAssetScope(await assets.get(aid!), clusterId!, aid!),
@@ -37,14 +40,14 @@ export function useAssetDetailScope() {
   });
   const recheck = () => {
     const current = qc.getQueryState<AssetDetail>(key);
-    return clusterReady() && current?.status === "success" && current.fetchStatus === "idle" &&
+    return clusterReady() && current?.status === "success" && current.fetchStatus === "idle" && !current.isInvalidated &&
       current.data?.asset.id === aid && current.data?.asset.cluster_id === clusterId ? current.data : undefined;
   };
   const retryCluster = () => {
     void qc.invalidateQueries({ queryKey: ["clusters"], exact: true });
     void qc.invalidateQueries({ queryKey: ["cluster", clusterId], exact: true });
   };
-  return { clusterId, aid, resolved, clusterLoading: isLoading || !!registryFetching || !!detailFetching, clusterError: error, q, recheck, retryCluster };
+  return { owner, clusterId, aid, resolved, clusterLoading: isLoading || !!registryFetching || !!detailFetching, clusterError: error, q, recheck, retryCluster };
 }
 
 export function assetErrorMessage(error: unknown) {

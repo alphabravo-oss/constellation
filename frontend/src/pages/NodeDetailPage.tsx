@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Boxes, ChevronLeft, Database, Layers, Server, ShieldAlert, ShieldCheck, TerminalSquare, RefreshCw } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
-import { nodes as nodesApi, type HostVulnerability, type NodeSummary, type NodeDetail } from "@/api/client";
+import { nodes as nodesApi, type NodeVulnerability, type NodeVulnerabilityParams, type NodeVulnerabilityResponse, type NodeSummary, type NodeDetail } from "@/api/client";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { StatCard, StatGrid } from "@/components/ui/stat-card";
@@ -14,6 +14,10 @@ import { cn } from "@/lib/cn";
 import { fmtBytes } from "@/lib/format";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
+import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
+import { StatusPill as SharedStatusPill } from "@/components/ui/status-pill";
+import { Pager } from "@/components/ui/pager";
+import { useInventoryRoute, ScanInventoryExport, scanInventoryResponseValid } from "./inventory-workspace";
 import { Collapse } from "@/components/ui/collapse";
 import { ErrorState, LoadingState } from "@/components/ui/states";
 import { entityDetailError, useEntityClusterScope } from "./entity-detail-scope";
@@ -22,27 +26,31 @@ export function NodeDetailPage() {
   const { nodeName = "" } = useParams({ strict: false });
   const scope = useEntityClusterScope();
   const { clusterId } = scope;
-  const key = ["node-detail", clusterId, nodeName];
+  const identity = useTablePreferencesIdentity();
+  const owner = identity?.org_id && identity.user_id ? `${identity.org_id}:${identity.user_id}` : "";
+  const qc = useQueryClient();
+  const key = ["node-detail", clusterId, nodeName, owner];
   const q = useQuery({
     queryKey: key,
     queryFn: async () => {
       const data = await nodesApi.get(clusterId!, nodeName);
-      if (data.node.node !== nodeName || data.node.cluster_id !== clusterId || data.vulnerabilities.some((item) => item.cluster_id && item.cluster_id !== clusterId)) throw new Error("The node evidence does not match the requested node and cluster.");
+      if (data.node.node !== nodeName || data.node.cluster_id !== clusterId) throw new Error("The node evidence does not match the requested node and cluster.");
       return data;
     },
-    enabled: scope.ready && !!nodeName,
+    enabled: scope.ready && !!nodeName && !!owner,
   });
   const backPath = clusterId ? `/clusters/${encodeURIComponent(clusterId)}/nodes` : "/clusters";
   const header = <PageHeader title="Node evidence" description="Review reported host vulnerabilities, inventory and benchmark results for an exact cluster node." backLink={<a href={backPath}>Nodes</a>} />;
   if (!scope.ready) return <div className="space-y-4">{header}{scope.loading ? <LoadingState label="Resolving node cluster…" /> : <ErrorState title="The requested node cluster could not be resolved." error={scope.error} action={<Button onClick={scope.retry}>Retry cluster</Button>} />}</div>;
+  if (!owner) return <div className="space-y-4">{header}<LoadingState label="Resolving node organization…" /></div>;
   if (!nodeName) return <div className="space-y-4">{header}<ErrorState title="An exact node name is required." /></div>;
   if (q.isError) return <div className="space-y-4">{header}<VerdictBanner status="degraded" title="Node evidence is unavailable" detail="Previously loaded evidence is hidden after a failed refresh." /><ErrorState title="Node evidence could not be loaded or refreshed." error={entityDetailError(q.error)} action={<Button onClick={() => void q.refetch()}>Retry node</Button>} /></div>;
-  if (q.data && (q.data.node.node !== nodeName || q.data.node.cluster_id !== clusterId || q.data.vulnerabilities.some((item) => item.cluster_id && item.cluster_id !== clusterId))) return <div className="space-y-4">{header}<ErrorState title="The node evidence does not match the requested node and cluster." action={<Button onClick={() => void q.refetch()}>Retry node</Button>} /></div>;
+  if (q.data && (q.data.node.node !== nodeName || q.data.node.cluster_id !== clusterId)) return <div className="space-y-4">{header}<ErrorState title="The node evidence does not match the requested node and cluster." action={<Button onClick={() => void q.refetch()}>Retry node</Button>} /></div>;
   if (!q.isSuccess || !q.data) return <div className="space-y-4">{header}<LoadingState label="Loading node evidence…" /></div>;
-  return <NodeEvidence key={`${clusterId}:${nodeName}`} detail={q.data} clusterId={clusterId!} backPath={backPath} refreshing={q.isFetching} refresh={() => void q.refetch()} scopeReady={scope.recheck} />;
+  return <NodeEvidence key={`${owner}:${clusterId}:${nodeName}`} owner={owner} detail={q.data} clusterId={clusterId!} backPath={backPath} refreshing={q.isFetching} refresh={() => { void q.refetch(); void qc.invalidateQueries({ queryKey: ["node-vulnerabilities", owner, clusterId, nodeName] }); }} scopeReady={scope.recheck} />;
 }
 
-function NodeEvidence({ detail, clusterId, backPath, refreshing, refresh, scopeReady }: { detail: NodeDetail; clusterId: string; backPath: string; refreshing: boolean; refresh: () => void; scopeReady: () => boolean }) {
+function NodeEvidence({ owner, detail, clusterId, backPath, refreshing, refresh, scopeReady }: { owner: string; detail: NodeDetail; clusterId: string; backPath: string; refreshing: boolean; refresh: () => void; scopeReady: () => boolean; }) {
   const node = detail.node;
   const exportScope = `node-${clusterId}-${encodeURIComponent(node.node)}`;
   const qc = useQueryClient();
@@ -55,7 +63,7 @@ function NodeEvidence({ detail, clusterId, backPath, refreshing, refresh, scopeR
     mutationFn: async () => {
       const target = node.scan_target_id;
       const current = () => {
-        const state = qc.getQueryState<NodeDetail>(["node-detail", clusterId, node.node]);
+        const state = qc.getQueryState<NodeDetail>(["node-detail", clusterId, node.node, owner]);
         return active.current && scopeCheck.current() && state?.status === "success" && state.fetchStatus === "idle" && state.data?.node.node === node.node && state.data.node.cluster_id === clusterId && state.data.node.scan_target_id === target;
       };
       if (!target || !current()) throw new Error("Current node evidence is unavailable or refreshing. Reload before queuing a scan.");
@@ -63,7 +71,7 @@ function NodeEvidence({ detail, clusterId, backPath, refreshing, refresh, scopeR
       if (!current() || latest.node.node !== node.node || latest.node.cluster_id !== clusterId || latest.node.scan_target_id !== target) throw new Error("The node or scan target changed before the scan could be queued.");
       return nodesApi.scan(target);
     },
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["node-detail", clusterId, node.node], exact: true }); },
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["node-detail", clusterId, node.node, owner], exact: true }); },
     onSettled: () => { submitting.current = false; },
   });
   const [requestedTab, setTab] = useTabParam("tab", "vulnerabilities");
@@ -75,9 +83,9 @@ function NodeEvidence({ detail, clusterId, backPath, refreshing, refresh, scopeR
       description={`${displayOS(node)} · kernel ${node.kernel_release || "unknown"} · ${node.arch || "arch unknown"} — reported evidence for this exact node and cluster.`}
       badges={<><NodeBadge item={node} />{node.coverage_gaps?.length ? <Pill tone="warn">{node.coverage_gaps.length} coverage gaps</Pill> : null}</>}
       actions={<div className="flex flex-wrap gap-2"><Button onClick={refresh} disabled={refreshing}>{refreshing ? "Refreshing…" : "Refresh evidence"}</Button>{node.scan_target_id && <Button variant="outline" disabled={refreshing || scanMut.isPending} onClick={() => { if (!submitting.current) { submitting.current = true; scanMut.mutate(); } }}><RefreshCw className="h-3.5 w-3.5" />{scanMut.isPending ? "Queuing…" : "Scan node"}</Button>}</div>} />
-    <VerdictBanner status={attention ? "degraded" : "info"} title={incomplete ? "Node evidence has collection or scan gaps" : attention ? "Reported node findings need review" : "No open node vulnerabilities or failed CIS checks reported"} detail="Counts reflect the latest reported node evidence, not proof of complete coverage or current enforcement. Host vulnerability detail is capped at 2,000 rows." />
+    <VerdictBanner status={attention ? "degraded" : "info"} title={incomplete ? "Node evidence has collection or scan gaps" : attention ? "Reported node findings need review" : "No open node vulnerabilities or failed CIS checks reported"} detail="Counts reflect the latest reported node evidence, not proof of complete coverage or current enforcement. Host vulnerability inventory counts finding instances, with server filters, continuation and matching CSV." />
     <StatGrid data-testid="node-stats">
-      <StatCard label="Open CVEs reported" value={node.last_scanned_at ? node.open_vulns : "Not scanned"} valueKind={node.last_scanned_at ? "number" : "text"} tone={node.open_vulns > 0 ? "high" : "neutral"} icon={<ShieldAlert className="h-3.5 w-3.5" />} />
+      <StatCard label="Open host findings" value={node.last_scanned_at ? node.open_vulns : "Not scanned"} valueKind={node.last_scanned_at ? "number" : "text"} tone={node.open_vulns > 0 ? "high" : "neutral"} icon={<ShieldAlert className="h-3.5 w-3.5" />} />
       <StatCard label="Packages reported" value={node.packages_observed_at ? node.package_count : "Not collected"} valueKind={node.packages_observed_at ? "number" : "text"} icon={<Database className="h-3.5 w-3.5" />} />
       <StatCard label="Containers reported" value={node.containers_observed_at ? node.container_count : "Not collected"} valueKind={node.containers_observed_at ? "number" : "text"} icon={<Layers className="h-3.5 w-3.5" />} />
       <StatCard label="Processes reported" value={node.processes_observed_at ? node.process_count : "Not collected"} valueKind={node.processes_observed_at ? "number" : "text"} icon={<TerminalSquare className="h-3.5 w-3.5" />} />
@@ -87,7 +95,7 @@ function NodeEvidence({ detail, clusterId, backPath, refreshing, refresh, scopeR
     {scanMut.isError && <p role="alert" className="text-sm text-status-error">Scan request failed: {entityDetailError(scanMut.error)}</p>}
     {scanMut.isSuccess && <p role="status" className="text-sm">Scan queued. Completion will be reported separately.</p>}
     <Tabs value={tab} onValueChange={setTab} items={[
-      { value: "vulnerabilities", label: "Host vulnerabilities", content: <HostVulnerabilitiesTable vulnerabilities={detail.vulnerabilities} exportScope={exportScope} /> },
+      { value: "vulnerabilities", label: "Host vulnerabilities", content: <HostVulnerabilitiesTable clusterId={clusterId} nodeName={node.node} owner={owner} nodeRefreshing={refreshing} /> },
       { value: "cis", label: "CIS benchmark", content: <CisBenchmarkTable cis={detail.cis} observedAt={node.cis_observed_at} exportScope={exportScope} /> },
       { value: "containers", label: "Containers", content: <NodeContainersTable containers={detail.containers} observedAt={node.containers_observed_at} clusterId={clusterId} exportScope={exportScope} /> },
       { value: "processes", label: "Processes", content: <NodeProcessesTable processes={detail.processes} observedAt={node.processes_observed_at} exportScope={exportScope} /> },
@@ -97,7 +105,7 @@ function NodeEvidence({ detail, clusterId, backPath, refreshing, refresh, scopeR
   </div>;
 }
 
-function HostPosture({ node }: { node: NodeSummary }) {
+function HostPosture({ node }: { node: NodeSummary; }) {
   return (
     <section className="rounded-lg border border-border bg-card p-4">
       <h2 className="text-sm font-semibold">Host posture</h2>
@@ -124,7 +132,7 @@ function HostPosture({ node }: { node: NodeSummary }) {
   );
 }
 
-function ScanState({ node }: { node: NodeSummary }) {
+function ScanState({ node }: { node: NodeSummary; }) {
   return (
     <section className="rounded-lg border border-border bg-card p-4">
       <h2 className="text-sm font-semibold">Scan and agent state</h2>
@@ -156,96 +164,91 @@ function ScanState({ node }: { node: NodeSummary }) {
   );
 }
 
-function HostVulnerabilitiesTable({ vulnerabilities, exportScope }: { vulnerabilities: HostVulnerability[]; exportScope: string }) {
-  const columns: Column<HostVulnerability>[] = [
-    {
-      id: "cve",
-      header: "CVE", kind: "name", wrap: true,
-      exportValue: (vulnerability) => vulnerability.vuln_id,
-      cell: (vulnerability) => (
-        <>
-          {vulnerability.vuln_id ? (
-            <a href={`/cve/${encodeURIComponent(vulnerability.vuln_id)}`} className="font-mono text-xs font-medium hover:underline">
-              {vulnerability.vuln_id}
-            </a>
-          ) : (
-            <span className="font-mono text-xs">-</span>
-          )}
-          <div className="mt-1 text-xs text-muted-foreground">{vulnerability.summary || vulnerability.aliases?.join(", ") || "-"}</div>
-        </>
-      ),
-    },
-    {
-      id: "package",
-      header: "Package", kind: "text", code: true, wrap: true, size: 200, minSize: 144, maxSize: 280,
-      cell: (vulnerability) => (
-        <>
-          <div className="font-mono text-xs">{vulnerability.package_name || "-"}</div>
-          <div className="mt-1 font-mono text-[11px] text-muted-foreground">{vulnerability.package_version || "-"}</div>
-        </>
-      ),
-    },
-    {
-      id: "severity",
-      header: "Severity", kind: "status",
-      cell: (vulnerability) => <SeverityPill severity={vulnerability.severity || "unknown"} />,
-    },
-    {
-      id: "fix",
-      header: "Fix", kind: "version", size: 160, minSize: 112, maxSize: 224, wrap: true,
-      cell: (vulnerability) => <span className="font-mono text-xs">{vulnerability.fixed_version || "-"}</span>,
-    },
-    {
-      id: "observed",
-      header: "Observed", kind: "date", size: 224, minSize: 208, maxSize: 240, wrap: true,
-      cell: (vulnerability) => (
-        <div className="text-xs">
-          <div>{formatDate(vulnerability.observed_at)}</div>
-          <div className="mt-1 text-muted-foreground">{vulnerability.source}</div>
-        </div>
-      ),
-    },
-  ];
+function nodeFindingResponseMatches(data: NodeVulnerabilityResponse | undefined, clusterId: string, nodeName: string, request: NodeVulnerabilityParams) {
+  if (!data || data.node !== nodeName || data.cluster_id !== clusterId || !Array.isArray(data.items)) return false;
+  if (!scanInventoryResponseValid(data, data.items.length, request.offset || 0, request.sort || "risk", request.order || "desc", ["critical", "high", "fixable", "unique_cves"])) return false;
+  if (data.q !== (request.q || "") || data.severity !== (request.severity || "") || data.fixable !== (request.fixable || "") || data.source !== (request.source || "")) return false;
+  if (Object.values(data.summary).some(count => count > data.total) || data.summary.critical + data.summary.high > data.total) return false;
+  return data.items.every(item => item.id && item.row_id?.startsWith(`${item.id}:`) && /^-?\d+(?:\.\d+)?$/.test(item.row_id.slice(item.id.length + 1)) && item.node === nodeName && (item.source_cluster_id === clusterId || item.cluster_id === clusterId)
+    && ["critical", "high", "medium", "low", "info", "unknown"].includes(item.severity || "") && Number.isFinite(item.risk_score) && typeof item.fixable === "boolean"
+    && (!request.severity || item.severity === request.severity) && (!request.fixable || item.fixable === (request.fixable === "true")) && (!request.source || item.source === request.source))
+    && new Set(data.items.map(item => item.row_id)).size === data.items.length;
+}
 
-  return (
-    <section className="space-y-2" data-testid="node-vulnerabilities">
-      <div>
-        <h2 className="text-sm font-semibold">Host vulnerabilities</h2>
-        <p className="mt-1 text-xs text-muted-foreground">Package vulnerabilities returned for this node. The server returns at most 2,000 rows; table filters and CSV export cover loaded rows only. The reported open-CVE summary can exceed this detail limit.</p>
-      </div>
-      <DataTable
-        rows={vulnerabilities}
-        sourceLimit={2000}
-        sourceCount={vulnerabilities.length}
-        preferencesKey="node-host-vulnerabilities"
-        exportFileName={`${exportScope}-host-vulnerabilities-loaded`}
-        columns={columns}
-        rowKey={(vulnerability) => `${vulnerability.vuln_id}:${vulnerability.package_name}:${vulnerability.package_version}`}
-        emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">No host vulnerability rows returned. This does not establish a successful or complete scan.</div>}
-      />
-    </section>
-  );
+function hostFindingSummary(item: NodeVulnerability) {
+  const primary = item.vuln_id.trim().toLowerCase();
+  const summary = item.summary?.trim();
+  if (summary && summary.toLowerCase() !== primary) return summary;
+  return [...new Set((item.aliases || []).map(alias => alias.trim()).filter(alias => alias && alias.toLowerCase() !== primary))].join(", ");
+}
+
+function HostVulnerabilitiesTable({ clusterId, nodeName, owner, nodeRefreshing }: { clusterId: string; nodeName: string; owner: string; nodeRefreshing: boolean; }) {
+  const route = useInventoryRoute();
+  const severity = route.params.get("severity") || "";
+  const fixable = route.params.get("fixable") || "";
+  const source = route.params.get("source")?.trim() || "";
+  const sort = route.params.get("sort") || "risk";
+  const order = route.params.get("order") || "desc";
+  const rawPage = route.params.get("page");
+  const invalid = Boolean(severity && !["critical", "high", "medium", "low", "info", "unknown"].includes(severity) || fixable && !["true", "false"].includes(fixable) || !["risk", "cve", "package", "version", "severity", "fix", "source", "observed"].includes(sort) || !["asc", "desc"].includes(order) || rawPage !== null && (!/^\d+$/.test(rawPage) || !Number.isSafeInteger(Number(rawPage)) || Number(rawPage) < 1 || Number(rawPage) > 10000));
+  const request = { q: route.debouncedQuery.trim() || undefined, severity: severity || undefined, fixable: fixable as "true" | "false" || undefined, source: source || undefined, sort, order: order as "asc" | "desc", limit: 100, offset: route.offset };
+  const key = ["node-vulnerabilities", owner, clusterId, nodeName, request];
+  const context = JSON.stringify([key, route.query]);
+  const matches = (data: NodeVulnerabilityResponse | undefined) => nodeFindingResponseMatches(data, clusterId, nodeName, request);
+  const q = useQuery({ queryKey: key, enabled: !invalid && !route.debouncing && !nodeRefreshing, queryFn: async () => { const data = await nodesApi.vulnerabilities(clusterId, nodeName, request); if (!matches(data)) throw new Error("Node host finding inventory does not match the requested scope or page."); return data; } });
+  const valid = q.data && matches(q.data);
+  const available = q.isSuccess && valid && !invalid && !route.debouncing;
+  const rows = available ? q.data.items : [];
+  const selected = rows.find(item => item.row_id === route.selectedID);
+  const setPage = (page: number) => route.update({ page: page ? String(page + 1) : null }, false);
+  const columns: Column<NodeVulnerability>[] = [
+    { id: "cve", header: "CVE / advisory", kind: "name", wrap: true, sort: () => 0, exportValue: item => item.vuln_id, cell: item => <>{item.vuln_id ? <a href={`/clusters/${encodeURIComponent(clusterId)}/cve/${encodeURIComponent(item.vuln_id)}`} className="font-mono text-xs hover:underline">{item.vuln_id}</a> : <span>Not reported</span>}{hostFindingSummary(item) && <div className="mt-1 text-xs text-muted-foreground">{hostFindingSummary(item)}</div>}</> },
+    { id: "package", header: "Package", kind: "text", code: true, wrap: true, size: 200, minSize: 144, maxSize: 280, sort: () => 0, cell: item => item.package_name || "Not reported" },
+    { id: "version", header: "Version", kind: "version", wrap: true, sort: () => 0, cell: item => item.package_version || "Not reported" },
+    { id: "severity", header: "Severity", kind: "status", sort: () => 0, exportValue: item => item.severity || "unknown", cell: item => <SharedStatusPill label={item.severity || "unknown"} tone={item.severity === "critical" ? "error" : item.severity === "high" || item.severity === "medium" ? "warning" : "neutral"} /> },
+    { id: "risk", header: "Risk", kind: "count", sort: () => 0, cell: item => item.risk_score },
+    { id: "fix", header: "Fixed version", kind: "version", size: 160, minSize: 112, maxSize: 224, wrap: true, sort: () => 0, cell: item => item.fixable ? item.fixed_version || "Reported fix" : "No reported fix" },
+    { id: "source", header: "Source", kind: "text", wrap: true, size: 144, maxSize: 240, sort: () => 0, cell: item => item.source },
+    { id: "observed", header: "Observed", kind: "date", size: 224, minSize: 208, maxSize: 240, sort: () => 0, exportValue: item => item.observed_at, cell: item => formatDate(item.observed_at) },
+    { id: "row_id", header: "Instance row ID", kind: "id", size: 288, maxSize: 432, code: true, wrap: true, cell: item => item.row_id },
+    { id: "id", header: "Finding ID", kind: "id", size: 240, maxSize: 360, code: true, wrap: true, cell: item => item.id },
+  ];
+  return <section className="space-y-3" data-testid="node-vulnerabilities">
+    <div><h2 className="text-sm font-semibold">Host vulnerability finding instances</h2><Collapse label="Inventory details"><p className="text-xs text-muted-foreground">Open host findings attributed to this node by their source cluster or effective target cluster. Instances can repeat a CVE across packages or scanners. Filters, totals and sorting cover all matching instances; matching CSV exports up to 100,000 rows.</p></Collapse></div>
+    <div className="flex flex-wrap gap-2"><input aria-label="Search node host findings" className="min-w-0 basis-64 flex-1 rounded-md border border-border bg-background p-2 text-sm" placeholder="Search CVE, package, scanner or finding ID" value={route.query} onChange={event => route.setQuery(event.target.value)} /><select aria-label="Host finding severity" className="rounded-md border border-border bg-background p-2 text-sm" value={severity} onChange={event => route.update({ severity: event.target.value })}><option value="">All severities</option>{["critical", "high", "medium", "low", "info", "unknown"].map(value => <option key={value}>{value}</option>)}</select><select aria-label="Host finding fixability" className="rounded-md border border-border bg-background p-2 text-sm" value={fixable} onChange={event => route.update({ fixable: event.target.value })}><option value="">All fix states</option><option value="true">Fix reported</option><option value="false">No reported fix</option></select><input aria-label="Host finding source" className="rounded-md border border-border bg-background p-2 text-sm" placeholder="Exact scanner source" value={route.params.get("source") || ""} onChange={event => route.update({ source: event.target.value }, true, true)} /><Button variant="outline" onClick={() => route.update({ q: null, severity: null, fixable: null, source: null, sort: null, order: null, page: null })}>Reset host finding filters</Button></div>
+    {invalid ? <ErrorState title="Choose supported host finding filters, sorting and page." /> : q.isError || q.data && !valid ? <ErrorState title="Host finding inventory could not be loaded or refreshed." action={<Button onClick={() => void q.refetch()}>Retry host findings</Button>} /> : !available ? <LoadingState label="Loading host findings…" /> : <>
+      <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs text-muted-foreground">{q.data.total.toLocaleString()} matching finding instances · {q.data.summary.unique_cves.toLocaleString()} unique CVE / advisory IDs · {q.data.summary.critical.toLocaleString()} critical · {q.data.summary.high.toLocaleString()} high · {q.data.summary.fixable.toLocaleString()} with a reported fix</p><ScanInventoryExport context={context} disabled={q.isFetching || nodeRefreshing} download={() => nodesApi.exportVulnerabilitiesCSV(clusterId, nodeName, request)} /></div>
+      {q.isFetching && <p role="status" className="text-sm text-muted-foreground">Refreshing host findings; matching export is paused until the request settles.</p>}
+      <DataTable rows={rows} columns={columns} rowKey={item => item.row_id} preferencesKey="node-host-vulnerabilities" defaultHiddenColumnIds={["row_id", "id"]} testId="node-host-findings-table" pagination={false} manualSorting sort={{ id: sort, dir: order as "asc" | "desc" }} onSortChange={next => route.update({ sort: next?.id || null, order: next?.dir || null })} selected={new Set(selected ? [selected.row_id] : [])} onRowClick={item => route.setSelectedID(item.row_id)} exportFileName={`node-${clusterId}-${encodeURIComponent(nodeName)}-host-findings-page.csv`} exportLabel="Export this page CSV" emptyState={<p className="p-6 text-sm text-muted-foreground">No matching host finding instances returned for this page. This does not establish a successful or complete scan.</p>} />
+      {route.page > 0 && rows.length === 0 && <Button onClick={() => setPage(0)}>First page</Button>}<Pager page={route.page} pageSize={100} total={q.data.total} rowsOnPage={rows.length} onPage={setPage} />
+      {route.selectedID && <div className="space-y-2"><Button variant="outline" size="sm" onClick={() => route.setSelectedID(null)}>Clear host finding selection</Button>{selected ? <dl className="grid gap-2 rounded-md border border-border p-3 text-sm sm:grid-cols-2"><Field label="Finding ID" value={selected.id} /><Field label="First seen" value={formatDate(selected.first_seen_at)} /><Field label="Source cluster ID" value={selected.source_cluster_id || "Not reported"} /><Field label="Effective target cluster ID" value={selected.cluster_id || "Not reported"} /><Field label="References" value={selected.references || "Not reported"} wide /></dl> : <p role="status" className="text-sm text-muted-foreground">The selected finding instance is outside this page or filter; no other finding has been substituted.</p>}</div>}
+    </>}
+  </section>;
 }
 
 // NodeContainersTable renders the node's running containers as a table (name · pod ·
 // image · state) linked to workloads — replacing the old raw-JSON dump.
-function NodeContainersTable({ containers, observedAt, clusterId, exportScope }: { containers?: unknown; observedAt?: string; clusterId?: string; exportScope: string }) {
+function NodeContainersTable({ containers, observedAt, clusterId, exportScope }: { containers?: unknown; observedAt?: string; clusterId?: string; exportScope: string; }) {
   const items = useMemo(() => {
-    const raw = (containers as { items?: Array<Record<string, unknown>> } | undefined)?.items;
+    const raw = (containers as { items?: Array<Record<string, unknown>>; } | undefined)?.items;
     return Array.isArray(raw) ? raw : [];
   }, [containers]);
   const columns: Column<Record<string, unknown>>[] = [
     { id: "name", header: "Container", kind: "name", wrap: true, cell: (c) => <span className="text-xs font-medium">{String(c.name ?? "—")}</span>, sort: (a, b) => String(a.name ?? "").localeCompare(String(b.name ?? "")) },
-    { id: "pod", header: "Pod", kind: "text", code: true, wrap: true, size: 240, minSize: 176, maxSize: 360, cell: (c) => (
+    {
+      id: "pod", header: "Pod", kind: "text", code: true, wrap: true, size: 240, minSize: 176, maxSize: 360, cell: (c) => (
         clusterId && c.pod_name
           ? <a href={`/clusters/${clusterId}/deployments?q=${encodeURIComponent(String(c.pod_name).replace(/-[a-z0-9]+-[a-z0-9]+$/, ""))}`} className="text-mono text-[11px] text-[color:var(--color-primary)] hover:underline">{String(c.pod_namespace ?? "")}/{String(c.pod_name ?? "")}</a>
           : <span className="text-mono text-[11px] text-muted-foreground">{String(c.pod_namespace ?? "")}/{String(c.pod_name ?? "—")}</span>
-      ) },
+      )
+    },
     { id: "image", header: "Image", kind: "text", code: true, wrap: true, size: 240, minSize: 176, maxSize: 360, cell: (c) => <span className="text-mono text-[11px] text-muted-foreground block" title={String(c.image_ref ?? c.image ?? "")}>{String(c.image_ref ?? c.image ?? "—")}</span> },
-    { id: "state", header: "State", kind: "status",  cell: (c) => {
+    {
+      id: "state", header: "State", kind: "status", cell: (c) => {
         const st = String(c.state ?? "").replace("CONTAINER_", "").toLowerCase();
         return <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", st === "running" ? "bg-[color-mix(in_oklab,var(--color-severity-low)_16%,transparent)] text-[color:var(--color-severity-low)]" : "bg-muted text-muted-foreground")}>{st || "—"}</span>;
-      }, sort: (a, b) => String(a.state ?? "").localeCompare(String(b.state ?? "")) },
+      }, sort: (a, b) => String(a.state ?? "").localeCompare(String(b.state ?? ""))
+    },
   ];
   return (
     <section className="overflow-hidden rounded-lg border border-border bg-card">
@@ -260,15 +263,15 @@ function NodeContainersTable({ containers, observedAt, clusterId, exportScope }:
 }
 
 // NodeProcessesTable renders the node's process inventory as a table — replacing raw JSON.
-function NodeProcessesTable({ processes, observedAt, exportScope }: { processes?: unknown; observedAt?: string; exportScope: string }) {
+function NodeProcessesTable({ processes, observedAt, exportScope }: { processes?: unknown; observedAt?: string; exportScope: string; }) {
   const items = useMemo(() => {
-    const raw = (processes as { items?: Array<Record<string, unknown>> } | undefined)?.items;
+    const raw = (processes as { items?: Array<Record<string, unknown>>; } | undefined)?.items;
     return Array.isArray(raw) ? raw : [];
   }, [processes]);
   const columns: Column<Record<string, unknown>>[] = [
-    { id: "pid", header: "PID", kind: "count",  numeric: true, cell: (p) => <span className="text-mono text-[11px]">{String(p.pid ?? "—")}</span>, sort: (a, b) => Number(a.pid ?? 0) - Number(b.pid ?? 0) },
-    { id: "comm", header: "Process", kind: "name", wrap: true, code: true,  cell: (p) => <span className="text-xs font-medium">{String(p.comm ?? "—")}</span>, sort: (a, b) => String(a.comm ?? "").localeCompare(String(b.comm ?? "")) },
-    { id: "uid", header: "User", kind: "text", wrap: true, size: 104, minSize: 88, maxSize: 144,  cell: (p) => <span className={cn("text-mono text-[11px]", Number(p.uid) === 0 && "text-[color:var(--color-severity-high)]")}>{Number(p.uid) === 0 ? "root" : String(p.uid ?? "—")}</span>, sort: (a, b) => Number(a.uid ?? 0) - Number(b.uid ?? 0) },
+    { id: "pid", header: "PID", kind: "count", numeric: true, cell: (p) => <span className="text-mono text-[11px]">{String(p.pid ?? "—")}</span>, sort: (a, b) => Number(a.pid ?? 0) - Number(b.pid ?? 0) },
+    { id: "comm", header: "Process", kind: "name", wrap: true, code: true, cell: (p) => <span className="text-xs font-medium">{String(p.comm ?? "—")}</span>, sort: (a, b) => String(a.comm ?? "").localeCompare(String(b.comm ?? "")) },
+    { id: "uid", header: "User", kind: "text", wrap: true, size: 104, minSize: 88, maxSize: 144, cell: (p) => <span className={cn("text-mono text-[11px]", Number(p.uid) === 0 && "text-[color:var(--color-severity-high)]")}>{Number(p.uid) === 0 ? "root" : String(p.uid ?? "—")}</span>, sort: (a, b) => Number(a.uid ?? 0) - Number(b.uid ?? 0) },
     { id: "cmdline", header: "Command line", kind: "text", code: true, wrap: true, size: 320, minSize: 240, maxSize: 640, grow: true, cell: (p) => <span className="text-mono text-[10px] text-muted-foreground block" title={String(p.cmdline ?? "")}>{String(p.cmdline ?? "—")}</span> },
   ];
   return (
@@ -286,17 +289,19 @@ function NodeProcessesTable({ processes, observedAt, exportScope }: { processes?
 // CisBenchmarkTable renders CIS host-benchmark checks as a real, sortable table (fails
 // first) with per-control remediation detail — replacing the old raw-JSON dump and
 // matching NeuVector's compliance list.
-function CisBenchmarkTable({ cis, observedAt, exportScope }: { cis?: unknown; observedAt?: string; exportScope: string }) {
+function CisBenchmarkTable({ cis, observedAt, exportScope }: { cis?: unknown; observedAt?: string; exportScope: string; }) {
   const checks = useMemo(() => {
-    const raw = (cis as { checks?: Array<{ id?: string; title?: string; result?: string; detail?: string }> } | undefined)?.checks;
+    const raw = (cis as { checks?: Array<{ id?: string; title?: string; result?: string; detail?: string; }>; } | undefined)?.checks;
     return Array.isArray(raw) ? raw : [];
   }, [cis]);
   const rank: Record<string, number> = { fail: 0, warn: 1, info: 2, note: 2, pass: 3, skip: 4 };
-  const columns: Column<{ id?: string; title?: string; result?: string; detail?: string }>[] = [
-    { id: "result", header: "Result", kind: "status",
+  const columns: Column<{ id?: string; title?: string; result?: string; detail?: string; }>[] = [
+    {
+      id: "result", header: "Result", kind: "status",
       cell: (c) => <CisResultBadge result={c.result} />,
-      sort: (a, b) => (rank[(a.result || "").toLowerCase()] ?? 9) - (rank[(b.result || "").toLowerCase()] ?? 9) },
-    { id: "id", header: "Control", kind: "id", size: 144, minSize: 112, maxSize: 192,  cell: (c) => <span className="text-mono text-xs">{c.id || "—"}</span>, sort: (a, b) => (a.id || "").localeCompare(b.id || "") },
+      sort: (a, b) => (rank[(a.result || "").toLowerCase()] ?? 9) - (rank[(b.result || "").toLowerCase()] ?? 9)
+    },
+    { id: "id", header: "Control", kind: "id", size: 144, minSize: 112, maxSize: 192, cell: (c) => <span className="text-mono text-xs">{c.id || "—"}</span>, sort: (a, b) => (a.id || "").localeCompare(b.id || "") },
     { id: "title", header: "Title", kind: "name", wrap: true, cell: (c) => <span className="text-xs">{c.title || "—"}</span>, sort: (a, b) => (a.title || "").localeCompare(b.title || "") },
     { id: "detail", header: "Remediation / detail", kind: "text", wrap: true, size: 320, minSize: 240, maxSize: 560, grow: true, cell: (c) => <span className="block text-[11px] text-muted-foreground" title={c.detail}>{c.detail || "—"}</span> },
   ];
@@ -318,8 +323,8 @@ function CisBenchmarkTable({ cis, observedAt, exportScope }: { cis?: unknown; ob
   );
 }
 
-function NodePackagesTable({ payload, observedAt, exportScope }: { payload: unknown; observedAt?: string; exportScope: string }) {
-  const value = payload as { items?: unknown; packages?: unknown } | undefined;
+function NodePackagesTable({ payload, observedAt, exportScope }: { payload: unknown; observedAt?: string; exportScope: string; }) {
+  const value = payload as { items?: unknown; packages?: unknown; } | undefined;
   const rows = Array.isArray(payload) ? payload : Array.isArray(value?.packages) ? value.packages : Array.isArray(value?.items) ? value.items : [];
   const records = rows.filter((item): item is Record<string, unknown> => !!item && typeof item === "object" && !Array.isArray(item)).map((item, index) => ({ item, rowId: index }));
   return <section className="space-y-3" data-testid="node-package-inventory"><div><h2 className="text-sm font-semibold">Reported package inventory</h2><p className="text-xs text-muted-foreground">Latest collected payload · {observedAt ? formatDate(observedAt) : "collection time not reported"}. CSV covers structured rows returned in this payload, not an independent inventory scan.</p></div><DataTable rows={records} rowKey={(row) => row.rowId} preferencesKey="node-package-inventory" exportFileName={`${exportScope}-package-inventory-loaded`} columns={[
@@ -330,13 +335,13 @@ function NodePackagesTable({ payload, observedAt, exportScope }: { payload: unkn
   ]} emptyState={<p className="p-6 text-sm text-muted-foreground">No structured package rows returned. Inspect the raw payload for other inventory formats.</p>} /><Collapse label="Raw package payload"><JsonPanel title="Package inventory payload" payload={payload} observedAt={observedAt} icon={Database} /></Collapse></section>;
 }
 
-function CisResultBadge({ result }: { result?: string }) {
+function CisResultBadge({ result }: { result?: string; }) {
   const r = (result || "").toLowerCase();
   const color = r === "fail" ? "var(--color-severity-critical)" : r === "warn" ? "var(--color-severity-high)" : r === "pass" ? "var(--color-severity-low)" : "var(--color-severity-medium)";
   return <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase" style={{ background: `color-mix(in oklab, ${color} 16%, transparent)`, color }}>{result || "—"}</span>;
 }
 
-function JsonPanel({ title, payload, observedAt, icon: Icon }: { title: string; payload: unknown; observedAt?: string; icon: LucideIcon }) {
+function JsonPanel({ title, payload, observedAt, icon: Icon }: { title: string; payload: unknown; observedAt?: string; icon: LucideIcon; }) {
   const preview = useMemo(() => renderPayload(payload), [payload]);
   return (
     <section className="rounded-lg border border-border bg-card p-4">
@@ -358,7 +363,7 @@ function JsonPanel({ title, payload, observedAt, icon: Icon }: { title: string; 
   );
 }
 
-function StatusMetric({ label, value, tone }: { label: string; value: number; tone: "neutral" | "ok" | "warn" | "danger" }) {
+function StatusMetric({ label, value, tone }: { label: string; value: number; tone: "neutral" | "ok" | "warn" | "danger"; }) {
   return (
     <div className={cn("rounded-md border border-border p-2", tone === "ok" && "border-status-ok/30 bg-status-ok/10", tone === "warn" && "border-status-warn/30 bg-status-warn/10", tone === "danger" && "border-status-error/30 bg-status-error/10")}>
       <div className="text-lg font-semibold">{value.toLocaleString()}</div>
@@ -367,7 +372,7 @@ function StatusMetric({ label, value, tone }: { label: string; value: number; to
   );
 }
 
-function Field({ label, value, wide }: { label: string; value: ReactNode; wide?: boolean }) {
+function Field({ label, value, wide }: { label: string; value: ReactNode; wide?: boolean; }) {
   return (
     <div className={cn("grid gap-1", wide && "sm:col-span-2")}>
       <dt className="text-[10px] uppercase text-muted-foreground">{label}</dt>
@@ -376,7 +381,7 @@ function Field({ label, value, wide }: { label: string; value: ReactNode; wide?:
   );
 }
 
-function NodeBadge({ item }: { item: NodeSummary }) {
+function NodeBadge({ item }: { item: NodeSummary; }) {
   const healthy = item.runtime_agent_status === "healthy" && item.scan_status === "completed" && !(item.coverage_gaps?.length);
   return (
     <Pill tone={healthy ? "ok" : item.runtime_agent_status === "missing" ? "danger" : "warn"}>
@@ -385,7 +390,7 @@ function NodeBadge({ item }: { item: NodeSummary }) {
   );
 }
 
-function StatusPill({ status }: { status: string }) {
+function StatusPill({ status }: { status: string; }) {
   const normalized = status || "missing";
   return (
     <Pill tone={normalized === "healthy" || normalized === "completed" ? "ok" : normalized === "missing" || normalized === "failed" ? "danger" : "warn"}>
@@ -394,16 +399,7 @@ function StatusPill({ status }: { status: string }) {
   );
 }
 
-function SeverityPill({ severity }: { severity: string }) {
-  const normalized = severity.toLowerCase();
-  return (
-    <Pill tone={normalized === "critical" ? "danger" : normalized === "high" || normalized === "medium" ? "warn" : "neutral"}>
-      {normalized}
-    </Pill>
-  );
-}
-
-function Pill({ tone, children }: { tone: "neutral" | "ok" | "warn" | "danger"; children: ReactNode }) {
+function Pill({ tone, children }: { tone: "neutral" | "ok" | "warn" | "danger"; children: ReactNode; }) {
   return (
     <span
       className={cn(

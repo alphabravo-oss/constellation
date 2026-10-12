@@ -3,26 +3,36 @@ import { createRoot, type Root } from "react-dom/client";
 import { createMemoryHistory, type RouterHistory } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { assets, sbom, type AssetDetail } from "@/api/client";
+import { assets, sbom, type AssetDetail, type AssetFindingInventoryResponse } from "@/api/client";
 import { TestRouter } from "@/test/router";
 import { AssetDetailPage } from "./AssetDetailPage";
 
+const identity = vi.hoisted(() => ({ org_id: "org-a", user_id: "user-a" }));
+vi.mock("@/contexts/TablePreferencesContext", () => ({ useTablePreferencesIdentity: () => identity }));
 const scope = vi.hoisted(() => ({ available: true, resolvedId: "", loading: false, error: null as Error | null }));
 vi.mock("@/hooks/useCluster", async () => {
   const router = await vi.importActual<typeof import("@tanstack/react-router")>("@tanstack/react-router");
   return { useCluster: () => { const { id } = router.useParams({ strict: false }); return { clusterId: id, cluster: scope.available ? { id: scope.resolvedId || id } : undefined, isLoading: scope.loading, error: scope.error }; } };
 });
-vi.mock("@/api/client", () => ({ assets: { get: vi.fn(), createImageAcceptance: vi.fn(), revokeImageAcceptance: vi.fn() }, sbom: { downloadSpdx: vi.fn(), downloadCyclonedx: vi.fn(), downloadMbom: vi.fn() } }));
+vi.mock("@/api/client", () => ({ assets: { get: vi.fn(), findings: vi.fn(), findingsCSV: vi.fn(), createImageAcceptance: vi.fn(), revokeImageAcceptance: vi.fn() }, sbom: { downloadSpdx: vi.fn(), downloadCyclonedx: vi.fn(), downloadMbom: vi.fn() } }));
 const detail = (asset = "asset-a", cluster = "cluster-a"): AssetDetail => ({
   asset: { id: asset, cluster_id: cluster, name: `Image ${asset}`, kind: "image", criticality: "high", digest: "sha256:exact", labels: { owner: "inventory-team" }, ai_workload: false, finding_count: 999, critical_findings: 999, high_findings: 999, open_findings: 999, sbom_count: 999, first_seen_at: "2026-10-10T12:00:00Z", last_seen_at: "2026-10-12T12:00:00Z" },
   image: { registry: "registry.example", repository: `team/${asset}`, tag: "v1", digest: "sha256:exact", layers: [{ digest: "sha256:layer" }], architectures: ["amd64"], signed: true, signature_info: { signer: "reported-key" }, pulled_at: "2026-10-12T12:00:00Z" },
   findings: [{ id: `${asset}-finding`, kind: "vulnerability", title: `${asset} vulnerable package`, external_id: "CVE-example", severity: "high", risk_score: 70, lifecycle: "open", last_seen_at: "2026-10-12T12:00:00Z" }],
   sboms: [{ id: "document-a", format: "spdx-2.3", sha256: "sha256:inventory", created_at: "2026-10-12T12:00:00Z" }], image_acceptances: [],
 });
+function findingPage(id = "asset-a", params: Parameters<typeof assets.findings>[1] = {}): AssetFindingInventoryResponse {
+  const all = detail(id).findings.map(f => ({ ...f, row_id: `asset:${f.id}:1791842400.000000`, source: "asset" as const }));
+  const offset = params.offset ?? 0, limit = params.limit ?? 100;
+  return { asset_id: id, cluster_id: params.cluster_id ?? "cluster-a", items: all.slice(offset, offset + limit), total: all.length, summary: { total: all.length, high: all.length, critical: 0, open: all.length, asset_findings: all.length, image_scan_findings: 0 }, limit, offset, has_more: all.length > offset + limit, sort: params.sort ?? "risk", order: params.order ?? "desc", q: params.q ?? "", severity: params.severity ?? "", lifecycle: params.lifecycle ?? "", source: params.source ?? "" };
+}
 let root: Root; let host: HTMLDivElement; let client: QueryClient; let history: RouterHistory;
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  identity.org_id = "org-a"; identity.user_id = "user-a";
   scope.available = true; scope.resolvedId = ""; scope.loading = false; scope.error = null;
+  vi.mocked(assets.findings).mockImplementation(async (id, params) => findingPage(id, params));
+  vi.mocked(assets.findingsCSV).mockResolvedValue({ total: 1, exported: 1, truncated: false, limit: 100000 });
   vi.mocked(assets.get).mockImplementation(async (id) => detail(id, id === "asset-b" ? "cluster-b" : "cluster-a"));
 });
 afterEach(() => { act(() => root?.unmount()); host?.remove(); client?.clear(); vi.resetAllMocks(); });
@@ -36,10 +46,10 @@ async function tab(label: string) { const trigger = [...host.querySelectorAll<HT
 const stats = () => [...host.querySelectorAll('[data-testid="asset-stats"] .app-stat-value')].map((item) => item.textContent);
 const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent === label)!;
 
-it("shows a bounded evidence verdict, four loaded KPIs and findings as the sole primary workspace", async () => {
+it("shows a complete evidence verdict, four matching KPIs and findings as the sole primary workspace", async () => {
   await render(); await settled(() => expect(host.querySelector('[data-testid="asset-findings-table"]')).not.toBeNull());
   expect(stats()).toEqual(["1", "1", "1", "1"]); expect(host.querySelector('[data-testid="asset-stats"]')!.children).toHaveLength(4);
-  expect(host.textContent).toContain("1 high or critical findings in loaded evidence"); expect(host.textContent).toContain("up to 100 asset findings");
+  expect(host.textContent).toContain("1 high or critical matching findings"); expect(host.textContent).toContain("1 matching findings");
   expect(host.querySelector('[data-testid="asset-image-card"]')).toBeNull(); expect(host.querySelector('[data-testid="image-acceptance-card"]')).toBeNull(); expect(host.querySelector('[data-testid="asset-sbom-card"]')).toBeNull();
   expect(host.querySelector('textarea')).toBeNull(); expect(host.querySelector<HTMLAnchorElement>('a[href*="/findings/"]')?.getAttribute('href')).toBe('/clusters/cluster-a/findings/asset-a-finding');
 });
@@ -57,10 +67,10 @@ it("keeps pending reads distinct from zero findings and exposes a retryable fetc
   await act(async () => reject(new Error("Asset API unavailable"))); await settled(() => expect(host.textContent).toContain("Asset API unavailable")); expect(stats()).toEqual([]);
   await act(async () => button("Retry asset").click()); await settled(() => expect(stats()[0]).toBe("1"));
 });
-it("retains current rows during refresh then hides all invalid evidence on refresh failure", async () => {
+it("pauses findings during refresh then hides all invalid evidence on refresh failure", async () => {
   await render(); await settled(() => expect(stats()[0]).toBe("1")); let reject!: (error: Error) => void; vi.mocked(assets.get).mockImplementationOnce(() => new Promise((_, fail) => { reject = fail; }));
   let fetch!: Promise<void>; await act(async () => { fetch = client.refetchQueries({ queryKey: ["asset", "cluster-a", "asset-a"] }); });
-  await settled(() => expect(host.textContent).toContain("Refreshing asset evidence")); expect(host.textContent).toContain("asset-a vulnerable package"); expect(stats()[0]).toBe("1");
+  await settled(() => expect(host.textContent).toContain("Refreshing asset evidence")); expect(host.textContent).not.toContain("asset-a vulnerable package"); expect(stats()[0]).toBe("—");
   await act(async () => { reject(new Error("Refresh failed")); await fetch; }); await settled(() => expect(host.textContent).toContain("Refresh failed")); expect(host.querySelector('[data-testid="asset-findings-table"]')).toBeNull(); expect(stats()).toEqual([]);
 });
 it("deep-links peer evidence and preserves URL context through tab and history changes", async () => {
@@ -79,9 +89,9 @@ it("pauses evidence when a cached cluster registry starts refreshing and hides i
   await act(async () => { fetch = client.fetchQuery({ queryKey: ["clusters"], queryFn: () => new Promise((_, fail) => { reject = fail; }) }).catch(() => {}); }); await settled(() => expect(host.textContent).toContain("Resolving asset cluster")); expect(stats()).toEqual([]);
   await act(async () => { reject(new Error("Registry refresh failed")); await fetch; }); await settled(() => expect(host.textContent).toContain("cluster could not be resolved")); expect(host.querySelector('[data-testid="asset-findings-table"]')).toBeNull();
 });
-it("reports capped generic findings separately from shared digest findings", async () => {
-  const data = detail(); data.findings = Array.from({ length: 100 }, (_, index) => ({ ...data.findings[0], id: `finding-${index}` })); data.findings.push({ ...data.findings[0], id: 'scan-only', title: 'Shared digest finding', image_scan_result_id: 'scan-a' }); vi.mocked(assets.get).mockResolvedValue(data);
-  await render(); await settled(() => expect(stats()[0]).toBe('101')); expect(host.textContent).toContain("100 asset-finding limit was reached"); expect(host.textContent).toContain("table exports cover loaded evidence");
+it("reports full matching summaries independently of bounded legacy detail findings", async () => {
+  vi.mocked(assets.findings).mockImplementation(async (id, params) => { const page = findingPage(id, params); return { ...page, items: Array.from({ length: 100 }, (_, n) => ({ ...page.items[0], id: `f-${n}`, row_id: `asset:f-${n}:1791842400.000000` })), total: 1205, has_more: true, summary: { total: 1205, high: 1000, critical: 205, open: 1205, asset_findings: 1000, image_scan_findings: 205 } }; });
+  await render(); await settled(() => expect(stats()[0]).toBe('1205')); expect(stats()[1]).toBe('1205'); expect(host.textContent).toContain("1,205 matching findings"); expect(host.textContent).not.toContain("100 asset-finding limit");
 });
 it("reports missing image metadata truthfully and never exposes image acceptance authoring", async () => {
   const data = detail(); delete data.image; data.findings = []; vi.mocked(assets.get).mockResolvedValue(data);
@@ -99,4 +109,56 @@ it('accepts a settled registry match when the unused single-cluster fallback que
   qc.getQueryCache().build(qc, { queryKey: ['cluster', 'cluster-a'], queryFn: () => Promise.resolve({ id: 'cluster-a' }) });
  });
  await settled(() => expect(host.querySelector('[data-testid="asset-findings-table"]')).not.toBeNull()); expect(assets.get).toHaveBeenCalledWith('asset-a');
+});
+
+it.each([
+  (p: AssetFindingInventoryResponse) => ({ ...p, items: null as unknown as AssetFindingInventoryResponse["items"] }),
+  (p: AssetFindingInventoryResponse) => ({ ...p, items: [null] as unknown as AssetFindingInventoryResponse["items"] }),
+  (p: AssetFindingInventoryResponse) => ({ ...p, asset_id: "another" }),
+  (p: AssetFindingInventoryResponse) => ({ ...p, cluster_id: "another" }),
+  (p: AssetFindingInventoryResponse) => ({ ...p, offset: 100 }),
+  (p: AssetFindingInventoryResponse) => ({ ...p, total: 200 }),
+  (p: AssetFindingInventoryResponse) => ({ ...p, source: "image_scan" }),
+  (p: AssetFindingInventoryResponse) => ({ ...p, items: [{ ...p.items[0], row_id: "unstable" }] }),
+])("rejects mismatched finding evidence and suppresses exports", async (alter) => {
+  vi.mocked(assets.findings).mockImplementation(async (id, params) => alter(findingPage(id, params)));
+  await render(); await settled(() => expect(host.textContent).toContain("Asset findings are unavailable")); expect(stats()[0]).toBe("—"); expect(button("Export matching CSV")).toBeUndefined();
+});
+it("uses matching CSV and preserves filters and page through URL history", async () => {
+  await render('/clusters/cluster-a/assets/asset-a?tab=findings&severity=high&page=2&context=keep');
+  await settled(() => expect(host.querySelector('[data-testid="asset-findings-table"]')).not.toBeNull()); expect(assets.findings).toHaveBeenLastCalledWith("asset-a", expect.objectContaining({ severity: "high", offset: 100 }));
+  expect(host.textContent).toContain("No findings match"); await act(async () => button("First page").click()); await settled(() => expect(host.textContent).toContain("asset-a vulnerable package")); expect(history.location.search).toContain("context=keep");
+  await act(async () => button("Export matching CSV").click()); await settled(() => expect(assets.findingsCSV).toHaveBeenCalledWith("asset-a", expect.objectContaining({ cluster_id: "cluster-a", severity: "high", offset: 0 })));
+  await act(async () => history.back()); await settled(() => expect(assets.findings).toHaveBeenLastCalledWith("asset-a", expect.objectContaining({ offset: 100 })));
+});
+it("keeps a failed inventory refresh distinct from an empty result and recovers", async () => {
+ await render(); await settled(() => expect(stats()[0]).toBe("1")); vi.mocked(assets.findings).mockRejectedValueOnce(new Error("offline"));
+ await act(async () => { await client.refetchQueries({ queryKey: ["asset-findings"] }); }); await settled(() => expect(host.textContent).toContain("Asset findings are unavailable")); expect(stats()[0]).toBe("—");
+ await act(async () => button("Retry findings").click()); await settled(() => expect(stats()[0]).toBe("1"));
+});
+
+it("isolates parent asset metadata and findings across account changes", async () => {
+  await render(); await settled(() => expect(stats()[0]).toBe("1"));
+  identity.user_id = "user-b"; vi.mocked(assets.get).mockImplementationOnce(() => new Promise(() => {}));
+  await act(async () => history.push('/clusters/cluster-a/assets/asset-a?context=account-switch'));
+  await settled(() => expect(host.textContent).toContain("Loading asset evidence")); expect(stats()).toEqual([]); expect(button("Export matching CSV")).toBeUndefined();
+  expect(client.getQueryData(["asset", "cluster-a", "asset-a", "org-a:user-a"])).toBeDefined();
+  expect(client.getQueryData(["asset", "cluster-a", "asset-a", "org-a:user-b"])).toBeUndefined();
+});
+it("hides malformed cached inventory data without crashing the detail page", async () => {
+ await render(); await settled(() => expect(stats()[0]).toBe("1"));
+ await act(async () => { client.setQueriesData({ queryKey: ["asset-findings"] }, (previous: AssetFindingInventoryResponse | undefined) => previous ? { ...previous, items: null } : previous); });
+ await settled(() => expect(host.textContent).toContain("Asset findings are unavailable")); expect(stats()[0]).toBe("—"); expect(button("Export matching CSV")).toBeUndefined();
+});
+it("keeps distinct historical instances sharing a finding UUID", async () => {
+ vi.mocked(assets.findings).mockImplementation(async (id, params) => { const p=findingPage(id,params); return { ...p, total: 2, items: [p.items[0], { ...p.items[0], row_id: `asset:${p.items[0].id}:1791842500.000000`, title: "Historical second instance" }], summary: { ...p.summary, total: 2, high: 2, open: 2, asset_findings: 2 } }; });
+ await render(); await settled(() => expect(stats()[0]).toBe("2")); expect(host.textContent).toContain("Historical second instance"); expect(host.querySelector('[data-testid="asset-findings-table"]')).not.toBeNull();
+});
+
+it("identifies a URL sort on the hidden observed column and lets it be revealed", async () => {
+  await render('/clusters/cluster-a/assets/asset-a?sort=observed&order=asc');
+  await settled(() => expect(host.textContent).toContain("Sorted by Observed (ascending) · hidden column"));
+  expect([...host.querySelectorAll('th')].some(th => th.textContent === "Observed")).toBe(false);
+  await act(async () => button("Show sort column").click());
+  expect([...host.querySelectorAll('th')].some(th => th.textContent === "Observed")).toBe(true);
 });

@@ -952,3 +952,44 @@ func TestOpenAPIRegistryAndJobInventoryContracts(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenAPIDetailEvidenceInventories(t *testing.T) {
+	for _, path := range []string{"/api/v1/assets/{id}/findings", "/api/v1/clusters/{id}/nodes/{node}/vulnerabilities", "/api/v1/cve/{id}/affected/{view}", "/api/v1/compliance/evidence"} {
+		list := openAPISchemaAt(t, "paths", path, "get")
+		export := openAPISchemaAt(t, "paths", path+".csv", "get")
+		parameters := func(op map[string]any) map[string]any {
+			out := map[string]any{}
+			for _, raw := range op["parameters"].([]any) {
+				p := raw.(map[string]any)
+				out[p["name"].(string)] = p
+			}
+			return out
+		}
+		lp, ep := parameters(list), parameters(export)
+		for name, p := range lp {
+			if name == "limit" || name == "offset" {
+				continue
+			}
+			if !reflect.DeepEqual(p, ep[name]) {
+				t.Errorf("%s CSV must retain %s filter", path, name)
+			}
+		}
+		if ep["limit"] != nil || ep["offset"] != nil {
+			t.Errorf("%s export must not advertise page clipping", path)
+		}
+		response := openAPISchemaAt(t, "paths", path, "get", "responses", "200", "content", "application/json", "schema")
+		name := strings.TrimPrefix(response["$ref"].(string), "#/components/schemas/")
+		schema := openAPISchemaAt(t, "components", "schemas", name, "properties")
+		for _, key := range []string{"total", "items", "summary", "has_more", "limit", "offset", "sort", "order"} {
+			if schema[key] == nil {
+				t.Errorf("%s missing %s", path, key)
+			}
+		}
+		headers := openAPISchemaAt(t, "paths", path+".csv", "get", "responses", "200", "headers")
+		for _, key := range []string{"X-Export-Total", "X-Export-Limit", "X-Export-Truncated"} {
+			if headers[key] == nil {
+				t.Errorf("%s export missing %s", path, key)
+			}
+		}
+	}
+}
