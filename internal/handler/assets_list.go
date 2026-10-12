@@ -55,7 +55,7 @@ const assetInventorySQL = `WITH generic_finding_rollup AS (
                ) sb
               GROUP BY asset_id
            )
-           SELECT a.id, a.cluster_id, a.kind, a.name, a.digest, a.labels, a.ai_workload, a.criticality,
+           SELECT a.id, a.cluster_id, a.kind, a.name, ` + assetDisplayNameSQL + `, a.digest, a.labels, a.ai_workload, a.criticality,
                   COALESCE(fr.finding_count, 0), COALESCE(fr.critical_findings, 0),
                   COALESCE(fr.high_findings, 0), COALESCE(fr.open_findings, 0),
                   COALESCE(sr.sbom_count, 0), i.signed, COALESCE(i.registry, ''),
@@ -96,7 +96,7 @@ func assetInventoryDefinition(r *http.Request) (inventorylist.Definition, invent
 	if err != nil {
 		return inventorylist.Definition{}, inventorylist.Options{}, err
 	}
-	o, err := inventorylist.Parse(values, map[string]string{"risk": "ROW(critical_findings,high_findings,finding_count,last_seen_at)", "asset": "lower(name)", "kind": "kind", "criticality": "CASE criticality WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END", "last-seen": "last_seen_at", "supply-chain": "sbom_count"}, "risk")
+	o, err := inventorylist.Parse(values, map[string]string{"risk": "ROW(critical_findings,high_findings,finding_count,last_seen_at)", "asset": "lower(display_name)", "kind": "kind", "criticality": "CASE criticality WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END", "last-seen": "last_seen_at", "supply-chain": "sbom_count"}, "risk")
 	if err != nil {
 		return inventorylist.Definition{}, o, err
 	}
@@ -128,7 +128,7 @@ func assetInventoryDefinition(r *http.Request) (inventorylist.Definition, invent
 	}
 	if search := strings.TrimSpace(values.Get("search")); search != "" {
 		args = append(args, search)
-		sql += " AND strpos(lower(concat_ws(' ',a.name,a.kind,a.digest,i.registry,i.repository,i.tag,a.labels::text)),lower($" + strconv.Itoa(len(args)) + "::text))>0"
+		sql += " AND strpos(lower(concat_ws(' ',a.name,(" + assetDisplayNameSQL + "),a.kind,a.digest,i.registry,i.repository,i.tag,a.labels::text)),lower($" + strconv.Itoa(len(args)) + "::text))>0"
 	}
 	where := []string{"true"}
 	bind := func(value any) string { args = append(args, value); return "$" + strconv.Itoa(len(args)) }
@@ -145,13 +145,13 @@ func assetInventoryDefinition(r *http.Request) (inventorylist.Definition, invent
 		}
 		where = append(where, "ai_workload="+bind(ai))
 	}
-	return inventorylist.Definition{SQL: sql, Columns: "id,cluster_id,kind,name,digest,labels,ai_workload,criticality,finding_count,critical_findings,high_findings,open_findings,sbom_count,image_signed,registry,repository,tag,size_bytes,first_seen_at,last_seen_at", Where: strings.Join(where, " AND "), Args: args, Summary: `jsonb_build_object('total',count(*),'images',count(*) FILTER(WHERE kind='image'),'workloads',count(*) FILTER(WHERE kind='workload'),'critical_high',COALESCE(sum(critical_findings+high_findings),0),'open_findings',COALESCE(sum(open_findings),0),'signed_images',count(*) FILTER(WHERE kind='image' AND image_signed=true),'unsigned_images',count(*) FILTER(WHERE kind='image' AND image_signed=false),'signature_unknown',count(*) FILTER(WHERE kind='image' AND image_signed IS NULL),'with_sbom',count(*) FILTER(WHERE sbom_count>0),'missing_sbom',count(*) FILTER(WHERE kind='image' AND sbom_count=0),'ai',count(*) FILTER(WHERE ai_workload))`}, o, nil
+	return inventorylist.Definition{SQL: sql, Columns: "id,cluster_id,kind,name,display_name,digest,labels,ai_workload,criticality,finding_count,critical_findings,high_findings,open_findings,sbom_count,image_signed,registry,repository,tag,size_bytes,first_seen_at,last_seen_at", Where: strings.Join(where, " AND "), Args: args, Summary: `jsonb_build_object('total',count(*),'images',count(*) FILTER(WHERE kind='image'),'workloads',count(*) FILTER(WHERE kind='workload'),'critical_high',COALESCE(sum(critical_findings+high_findings),0),'open_findings',COALESCE(sum(open_findings),0),'signed_images',count(*) FILTER(WHERE kind='image' AND image_signed=true),'unsigned_images',count(*) FILTER(WHERE kind='image' AND image_signed=false),'signature_unknown',count(*) FILTER(WHERE kind='image' AND image_signed IS NULL),'with_sbom',count(*) FILTER(WHERE sbom_count>0),'missing_sbom',count(*) FILTER(WHERE kind='image' AND sbom_count=0),'ai',count(*) FILTER(WHERE ai_workload))`}, o, nil
 }
 
 func scanAssetInventoryRow(row inventorylist.Row) (assetDTO, error) {
 	var item assetDTO
 	var labels []byte
-	err := row.Scan(&item.ID, &item.ClusterID, &item.Kind, &item.Name, &item.Digest, &labels, &item.AIWorkload, &item.Criticality, &item.FindingCount, &item.CriticalFindings, &item.HighFindings, &item.OpenFindings, &item.SBOMCount, &item.ImageSigned, &item.Registry, &item.Repository, &item.Tag, &item.SizeBytes, &item.FirstSeenAt, &item.LastSeenAt)
+	err := row.Scan(&item.ID, &item.ClusterID, &item.Kind, &item.Name, &item.DisplayName, &item.Digest, &labels, &item.AIWorkload, &item.Criticality, &item.FindingCount, &item.CriticalFindings, &item.HighFindings, &item.OpenFindings, &item.SBOMCount, &item.ImageSigned, &item.Registry, &item.Repository, &item.Tag, &item.SizeBytes, &item.FirstSeenAt, &item.LastSeenAt)
 	item.Labels = json.RawMessage(labels)
 	return item, err
 }
@@ -209,7 +209,7 @@ func (a *Assets) ExportCSV(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 400, err.Error())
 		return
 	}
-	body, meta, err := inventorylist.CSV(r.Context(), a.db.Pool(), d, o, scanAssetInventoryRow, []string{"ID", "Cluster ID", "Kind", "Name", "Digest", "Criticality", "AI workload", "Findings", "Critical findings", "High findings", "Open findings", "SBOM formats", "Image signed", "Registry", "Repository", "Tag", "Size bytes", "First seen", "Last seen", "Labels"}, func(item assetDTO) []string {
+	body, meta, err := inventorylist.CSV(r.Context(), a.db.Pool(), d, o, scanAssetInventoryRow, []string{"ID", "Cluster ID", "Kind", "Name", "Display name", "Digest", "Criticality", "AI workload", "Findings", "Critical findings", "High findings", "Open findings", "SBOM formats", "Image signed", "Registry", "Repository", "Tag", "Size bytes", "First seen", "Last seen", "Labels"}, func(item assetDTO) []string {
 		cluster, digest, signed, size := "", "", "", ""
 		if item.ClusterID != nil {
 			cluster = item.ClusterID.String()
@@ -223,7 +223,7 @@ func (a *Assets) ExportCSV(w http.ResponseWriter, r *http.Request) {
 		if item.SizeBytes != nil {
 			size = strconv.FormatInt(*item.SizeBytes, 10)
 		}
-		return []string{item.ID.String(), cluster, item.Kind, item.Name, digest, item.Criticality, strconv.FormatBool(item.AIWorkload), strconv.Itoa(item.FindingCount), strconv.Itoa(item.CriticalFindings), strconv.Itoa(item.HighFindings), strconv.Itoa(item.OpenFindings), strconv.Itoa(item.SBOMCount), signed, item.Registry, item.Repository, item.Tag, size, item.FirstSeenAt.UTC().Format(time.RFC3339Nano), item.LastSeenAt.UTC().Format(time.RFC3339Nano), string(item.Labels)}
+		return []string{item.ID.String(), cluster, item.Kind, item.Name, item.DisplayName, digest, item.Criticality, strconv.FormatBool(item.AIWorkload), strconv.Itoa(item.FindingCount), strconv.Itoa(item.CriticalFindings), strconv.Itoa(item.HighFindings), strconv.Itoa(item.OpenFindings), strconv.Itoa(item.SBOMCount), signed, item.Registry, item.Repository, item.Tag, size, item.FirstSeenAt.UTC().Format(time.RFC3339Nano), item.LastSeenAt.UTC().Format(time.RFC3339Nano), string(item.Labels)}
 	})
 	if err != nil {
 		jsonError(w, 500, err.Error())

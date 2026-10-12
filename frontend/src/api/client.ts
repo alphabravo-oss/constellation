@@ -232,6 +232,7 @@ export interface Asset {
   cluster_id?: string;
   kind: string;
   name: string;
+  display_name?: string;
   digest?: string;
   labels: Record<string, string>;
   ai_workload: boolean;

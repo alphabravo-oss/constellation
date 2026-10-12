@@ -15,7 +15,7 @@ vi.mock("@/hooks/useCluster", async () => {
 vi.mock("@/api/client", () => ({ assets: { get: vi.fn(), createImageAcceptance: vi.fn(), revokeImageAcceptance: vi.fn() }, sbom: { downloadSpdx: vi.fn(), downloadCyclonedx: vi.fn(), downloadMbom: vi.fn() } }));
 const detail = (asset = "asset-a", cluster = "cluster-a"): AssetDetail => ({
   asset: { id: asset, cluster_id: cluster, name: `Image ${asset}`, kind: "image", criticality: "high", digest: "sha256:exact", labels: { owner: "inventory-team" }, ai_workload: false, finding_count: 999, critical_findings: 999, high_findings: 999, open_findings: 999, sbom_count: 999, first_seen_at: "2026-10-10T12:00:00Z", last_seen_at: "2026-10-12T12:00:00Z" },
-  image: { registry: "registry.example", repository: "team/api", tag: "v1", digest: "sha256:exact", layers: [{ digest: "sha256:layer" }], architectures: ["amd64"], signed: true, signature_info: { signer: "reported-key" }, pulled_at: "2026-10-12T12:00:00Z" },
+  image: { registry: "registry.example", repository: `team/${asset}`, tag: "v1", digest: "sha256:exact", layers: [{ digest: "sha256:layer" }], architectures: ["amd64"], signed: true, signature_info: { signer: "reported-key" }, pulled_at: "2026-10-12T12:00:00Z" },
   findings: [{ id: `${asset}-finding`, kind: "vulnerability", title: `${asset} vulnerable package`, external_id: "CVE-example", severity: "high", risk_score: 70, lifecycle: "open", last_seen_at: "2026-10-12T12:00:00Z" }],
   sboms: [{ id: "document-a", format: "spdx-2.3", sha256: "sha256:inventory", created_at: "2026-10-12T12:00:00Z" }], image_acceptances: [],
 });
@@ -71,7 +71,7 @@ it("deep-links peer evidence and preserves URL context through tab and history c
 });
 it("changes entity and cluster without leaking old evidence or navigation targets", async () => {
   await render('/clusters/cluster-a/assets/asset-a?tab=acceptance'); await settled(() => expect(host.querySelector('[data-testid="image-acceptance-card"]')).not.toBeNull());
-  await act(async () => history.push('/clusters/cluster-b/assets/asset-b?tab=acceptance')); await settled(() => expect(host.textContent).toContain("Image asset-b")); expect(host.textContent).not.toContain("Image asset-a"); expect(host.querySelector<HTMLAnchorElement>('a[href$="/image-acceptance/new"]')?.getAttribute('href')).toBe('/clusters/cluster-b/assets/asset-b/image-acceptance/new');
+  await act(async () => history.push('/clusters/cluster-b/assets/asset-b?tab=acceptance')); await settled(() => expect(host.textContent).toContain("registry.example/team/asset-b:v1")); expect(host.textContent).not.toContain("registry.example/team/asset-a:v1"); expect(host.querySelector<HTMLAnchorElement>('a[href$="/image-acceptance/new"]')?.getAttribute('href')).toBe('/clusters/cluster-b/assets/asset-b/image-acceptance/new');
 });
 it("pauses evidence when a cached cluster registry starts refreshing and hides it on registry failure", async () => {
   await render(undefined, (qc) => qc.setQueryData(["clusters"], { clusters: [{ id: "cluster-a" }] })); await settled(() => expect(stats()[0]).toBe("1"));

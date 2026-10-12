@@ -22,6 +22,7 @@ type assetDTO struct {
 	ClusterID        *uuid.UUID      `json:"cluster_id,omitempty"`
 	Kind             string          `json:"kind"`
 	Name             string          `json:"name"`
+	DisplayName      string          `json:"display_name"`
 	Digest           *string         `json:"digest,omitempty"`
 	Labels           json.RawMessage `json:"labels"`
 	AIWorkload       bool            `json:"ai_workload"`
@@ -50,9 +51,9 @@ func (a *Assets) Get(w http.ResponseWriter, r *http.Request) {
 	var d assetDTO
 	var labels []byte
 	err = a.db.Pool().QueryRow(r.Context(),
-		`SELECT id, cluster_id, kind, name, digest, labels, ai_workload, criticality, first_seen_at, last_seen_at
-           FROM assets WHERE id = $1 AND org_id = $2`, id, subj.OrgID).
-		Scan(&d.ID, &d.ClusterID, &d.Kind, &d.Name, &d.Digest, &labels, &d.AIWorkload,
+		`SELECT a.id, a.cluster_id, a.kind, a.name, `+assetDisplayNameSQL+`, a.digest, a.labels, a.ai_workload, a.criticality, a.first_seen_at, a.last_seen_at
+           FROM assets a LEFT JOIN images i ON i.asset_id=a.id WHERE a.id = $1 AND a.org_id = $2`, id, subj.OrgID).
+		Scan(&d.ID, &d.ClusterID, &d.Kind, &d.Name, &d.DisplayName, &d.Digest, &labels, &d.AIWorkload,
 			&d.Criticality, &d.FirstSeenAt, &d.LastSeenAt)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})

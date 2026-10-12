@@ -30,3 +30,16 @@ it("reports full-export failure without a success claim",async()=>{vi.mocked(ass
 it("does not fetch an asset inventory while cached cluster membership is refreshing",async()=>{let finish!:(value:{clusters:{id:string}[]})=>void;await render("/clusters/cluster/assets",qc=>{qc.setQueryData(["clusters"],{clusters:[{id:"cluster"}]});void qc.fetchQuery({queryKey:["clusters"],queryFn:()=>new Promise<{clusters:{id:string}[]}>(resolve=>{finish=resolve;})}).catch(()=>{});});expect(assets.list).not.toHaveBeenCalled();expect(host.textContent).toContain("Loading cluster");await act(async()=>finish({clusters:[{id:"cluster"}]}));});
 
 it.each(["host", "repository", "serverless"])("labels supported %s kind deep links",async kind=>{await render(`/clusters/cluster/assets?kind=${kind}`);await settled(()=>expect(assets.list).toHaveBeenLastCalledWith(expect.objectContaining({kind})));const filter=host.querySelector<HTMLSelectElement>('[data-testid="asset-kind-filter"]')!;expect(filter.value).toBe(kind);expect(filter.selectedOptions[0]?.textContent).toBe(kind);});
+
+it("shows image names and reveals their digest only on request",async()=>{
+  const image={...row(),kind:"image",name:"sha256:raw",digest:"sha256:raw",labels:{image_ref_normalized:"docker.io/team/api:v2@sha256:raw"}};
+  vi.mocked(assets.list).mockResolvedValue(response([image],1));
+  await render("/clusters/cluster/assets");await settled(()=>expect(host.querySelector('[data-testid="asset-row"] a')?.textContent).toBe("docker.io/team/api:v2"));
+  const cell=host.querySelector('[data-testid="asset-row"] td')!;
+  const disclosure=cell.querySelector("details")!;
+  expect(disclosure.open).toBe(false);expect(disclosure.querySelector("code")?.textContent).toBe("sha256:raw");
+  expect(cell.querySelector("a")?.textContent).not.toContain("sha256");
+  await act(async()=>disclosure.querySelector("summary")!.click());expect(disclosure.open).toBe(true);
+  expect(host.querySelector('[data-testid="asset-preview"] h2')?.textContent).toBe("docker.io/team/api:v2");
+  expect(host.querySelector('[data-testid="asset-preview"] details')?.open).toBe(false);
+});

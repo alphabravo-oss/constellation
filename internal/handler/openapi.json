@@ -4018,13 +4018,13 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "description": "Matching asset inventory with server filtering, deterministic ordering and continuation. Rows, total and aggregate summary share one read-only snapshot. Image vulnerability counts use latest persisted scan evidence; other kinds use generic findings. q retains the structured search DSL; search is a separate literal case-insensitive inventory search."
+        "description": "Matching asset inventory with server filtering, deterministic ordering and continuation. Rows, total and aggregate summary share one read-only snapshot. Image vulnerability counts use latest persisted scan evidence; other kinds use generic findings. q retains the structured search DSL; search is a separate literal case-insensitive inventory search. Image assets expose display_name as the reported repository/tag reference without its digest suffix; raw name and digest remain unchanged. Asset-name sorting and literal search use this display identity. Matching CSV includes Display name alongside raw Name and Digest."
       }
     },
     "/api/v1/assets.csv": {
       "get": {
         "summary": "Export matching asset inventory CSV",
-        "description": "Same filters and ordering as asset inventory; pagination does not restrict export. Explicit100000-record cap and metadata headers.",
+        "description": "Same filters and ordering as asset inventory; pagination does not restrict export. Explicit100000-record cap and metadata headers. Image assets expose display_name as the reported repository/tag reference without its digest suffix; raw name and digest remain unchanged. Asset-name sorting and literal search use this display identity. Matching CSV includes Display name alongside raw Name and Digest.",
         "parameters": [
           {
             "name": "cluster_id",
@@ -4181,7 +4181,8 @@
     },
     "/api/v1/assets/{id}": {
       "get": {
-        "summary": "Get one asset with image, findings, SBOM context, and image accept-risk history"
+        "summary": "Get one asset with image, findings, SBOM context, and image accept-risk history",
+        "description": " Image assets expose display_name as the reported repository/tag reference without its digest suffix; raw name and digest remain unchanged. Asset-name sorting and literal search use this display identity. Matching CSV includes Display name alongside raw Name and Digest."
       }
     },
     "/api/v1/assets/{id}/image-acceptances": {

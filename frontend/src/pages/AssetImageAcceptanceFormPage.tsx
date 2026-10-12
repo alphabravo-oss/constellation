@@ -1,3 +1,5 @@
+import { assetDisplayName } from "@/lib/asset-identity";
+import { DigestDisclosure } from "@/components/ui/digest-disclosure";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
@@ -99,7 +101,7 @@ function ImageAcceptanceEditor({ action, acceptanceId, initial, clusterId, backP
     {!result && available && !unchanged && <ErrorState title={action === "create" ? "The image digest changed or an active acceptance already exists. Review the asset before accepting risk." : "The requested active acceptance is missing or changed. No other acceptance has been substituted."} />}
     <Card title={action === "create" ? "Image risk decision" : "Review acceptance revocation"} description="Review the immutable cluster, asset and image digest before saving.">
       <form className="space-y-5" onSubmit={(event) => { event.preventDefault(); if (ready && !submitting.current && !save.isPending && !result) { submitting.current = true; save.mutate(); } }}>
-        <dl className="space-y-3 text-sm"><div><dt className="text-muted-foreground">Cluster</dt><dd>{clusterId}</dd></div><div><dt className="text-muted-foreground">Asset</dt><dd>{initial.asset.name}</dd></div><div><dt className="text-muted-foreground">Image digest · organization-wide scope</dt><dd className="break-all font-mono">{digest}</dd></div></dl>
+        <dl className="space-y-3 text-sm"><div><dt className="text-muted-foreground">Cluster</dt><dd>{clusterId}</dd></div><div><dt className="text-muted-foreground">Asset</dt><dd>{assetDisplayName(initial.asset, initial.image)}</dd></div><div><dt className="text-muted-foreground">Image digest · organization-wide scope</dt><dd><DigestDisclosure digest={digest} /></dd></div></dl>
         {action === "create" ? <fieldset className="space-y-5" disabled={save.isPending || !!result}>
           <Field label="Rationale" htmlFor="image-accept-rationale" required hint="At least 12 characters. Include a compensating control, ticket or deployment justification."><Textarea id="image-accept-rationale" required minLength={12} value={rationale} onChange={(event) => setRationale(event.target.value)} /></Field>
           <Field label="Accepted until" htmlFor="image-accept-until" required hint="Expires at the end of the selected UTC day, capped at 30 days from saving."><TextInput id="image-accept-until" type="date" required min={dateInputDaysFromNow(0)} max={dateInputDaysFromNow(30)} value={until} onChange={(event) => setUntil(event.target.value)} /></Field>

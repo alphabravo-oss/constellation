@@ -1,3 +1,5 @@
+import { assetDisplayName } from "@/lib/asset-identity";
+import { DigestDisclosure } from "@/components/ui/digest-disclosure";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { BadgeCheck, Boxes, FileJson, Search, ShieldAlert, ShieldCheck } from "lucide-react";
@@ -75,7 +77,7 @@ export function AssetsPage() {
   const columns: Column<Asset>[] = [
     {
       id: "asset",
-      header: "Asset", sort: () => 0, exportValue: (asset) => asset.name, kind: "name", wrap: true, size: 360, minSize: 280,
+      header: "Asset", sort: () => 0, exportValue: (asset) => assetDisplayName(asset), kind: "name", wrap: true, size: 360, minSize: 280,
       cell: (asset) => (
         <>
           <div className="flex flex-wrap items-center gap-2">
@@ -83,9 +85,9 @@ export function AssetsPage() {
             {asset.ai_workload ? <span className="rounded-md bg-primary/10 px-2 py-0.5 text-xs text-primary">AI</span> : null}
           </div>
           <a href={`/clusters/${clusterId}/assets/${asset.id}`} className="mt-2 block break-all font-mono text-xs font-medium hover:underline">
-            {asset.name}
+            {assetDisplayName(asset)}
           </a>
-          <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{asset.digest ?? asset.repository ?? "-"}</div>
+          <DigestDisclosure digest={asset.digest} />
         </>
       ),
     },
@@ -201,7 +203,7 @@ function AssetPreview({ asset, clusterId }: { asset: Asset | null; clusterId?: s
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <KindBadge kind={asset.kind} />
-            <h2 className="mt-2 break-all font-mono text-sm font-semibold">{asset.name}</h2>
+            <h2 className="mt-2 break-all font-mono text-sm font-semibold">{assetDisplayName(asset)}</h2>
             <p className="mt-1 text-xs text-muted-foreground">{asset.criticality} criticality · first seen {formatDate(asset.first_seen_at)}</p>
           </div>
           <div className="flex items-center gap-2">
@@ -230,12 +232,12 @@ function AssetPreview({ asset, clusterId }: { asset: Asset | null; clusterId?: s
           <Field label="Repository" value={asset.repository || "-"} />
           <Field label="Tag" value={asset.tag || "-"} />
           <Field label="Size" value={asset.size_bytes ? formatBytes(asset.size_bytes) : "-"} />
-          <Field label="Digest" value={asset.digest ?? "-"} wide />
+          <div className="sm:col-span-2"><DigestDisclosure digest={asset.digest} /></div>
         </dl>
       </div>
 
       <div className="rounded-lg border border-border bg-card p-4">
-        <h3 className="text-sm font-semibold">Labels</h3>
+        <details><summary className="cursor-pointer text-sm font-semibold">Show asset labels</summary>
         {labelEntries.length > 0 ? (
           <div className="mt-3 flex flex-wrap gap-2">
             {labelEntries.map(([key, value]) => (
@@ -246,7 +248,7 @@ function AssetPreview({ asset, clusterId }: { asset: Asset | null; clusterId?: s
           </div>
         ) : (
           <p className="mt-2 text-xs text-muted-foreground">No labels reported.</p>
-        )}
+        )}</details>
       </div>
     </aside>
   );

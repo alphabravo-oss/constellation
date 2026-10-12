@@ -1,3 +1,4 @@
+import { assetDisplayName } from "@/lib/asset-identity";
 import { useParams } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useRouteSearchParams } from "@/lib/route-search";
@@ -66,7 +67,7 @@ export type RiskWorkspace = ReturnType<typeof useRiskWorkspace>;
 export type RiskTabProps = { workspace: RiskWorkspace };
 
 export function entityIdentity(entity: RiskEntity) {
-  if (entity.type === "asset") return { id: entity.data.asset.id, clusterId: entity.data.asset.cluster_id, name: entity.data.asset.name, lastSeen: entity.data.asset.last_seen_at };
+  if (entity.type === "asset") return { id: entity.data.asset.id, clusterId: entity.data.asset.cluster_id, name: assetDisplayName(entity.data.asset, entity.data.image), lastSeen: entity.data.asset.last_seen_at };
   if (entity.type === "node") return { id: entity.data.node.node, clusterId: entity.data.node.cluster_id, name: entity.data.node.node, lastSeen: entity.data.node.last_seen_at };
   return { id: entity.data.id, clusterId: entity.data.cluster_id, name: entity.type === "deployment" ? `${entity.data.namespace}/${entity.data.name}` : entity.data.title, lastSeen: entity.data.last_seen_at };
 }
