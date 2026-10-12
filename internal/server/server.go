@@ -663,6 +663,7 @@ func (s *Server) buildRouter() chi.Router {
 			// RBAC-NS-24: requireVerbNS so a namespace-scoped subject can list and is
 			// row-filtered to its namespaces (deps.List honors NamespaceFilterFrom).
 			r.Get("/deployments", s.requireVerbNS(rbac.VerbReadFindings, deps.List))
+			r.Get("/deployments.csv", s.requireVerbNS(rbac.VerbReadFindings, deps.ExportCSV))
 			r.Get("/deployments/{id}", s.requireVerb(rbac.VerbReadFindings, deps.Get))
 			r.Get("/violations", s.requireVerb(rbac.VerbReadFindings, deps.Violations))
 

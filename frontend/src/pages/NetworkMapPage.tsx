@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import {
   Background,
   Controls,
@@ -76,7 +77,6 @@ import {
   groupsApi,
   network,
   policies,
-  quarantine,
   runtimePcap,
   runtimeThreats,
   type NetworkConversation,
@@ -228,6 +228,7 @@ export function NetworkMapPage() {
 
 function NetworkMapInner() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const initialParams = useMemo(() => new URLSearchParams(window.location.search), []);
   // B1: cluster scoping. We're mounted under /clusters/:id/network, so the
   // active cluster comes from the route param via useCluster() — NOT from a
@@ -432,18 +433,6 @@ function NetworkMapInner() {
       void queryClient.invalidateQueries({ queryKey: ["network-map"] });
     },
   });
-
-  // Quarantine the selected workload directly from the graph — NeuVector surfaces
-  // quarantine as a per-node incident-response action. Reuses the audited quarantine model.
-  const quarantineMut = useMutation({
-    mutationFn: ({ workload, reason }: { workload: string; reason: string }) =>
-      quarantine.create({ cluster_id: clusterID, scope: "workload", match_key: workload, reason, expires_in_hours: 24 }),
-    onSuccess: () => { toast.success("Workload quarantined"); void queryClient.invalidateQueries({ queryKey: ["network-map"] }); },
-    onError: () => toast.error("Failed to quarantine workload"),
-  });
-  // Phase-1 CNI enforcement (isolate workload / block IP) — the network-enforced
-  // sibling of quarantine (which only blocks re-admission via the webhook).
-  const enforceMut = useEnforce(clusterID);
 
   const workloads = q.data?.workloads ?? EMPTY_WORKLOADS;
   const platformWorkloads = useMemo(() => new Map(workloads.map((workload) => [
@@ -730,9 +719,9 @@ function NetworkMapInner() {
   // (no 5-tile row), no right-rail (the L2 edge-popover replaces it),
   // single-row filter strip. Canvas fills the viewport.
   const workloadCount = visibleWorkloads.length;
-  // Whether this cluster's CNI can enforce a per-IP deny (Cilium/Calico). Gates the
+  // The existing single-IP action emits a Cilium policy. Gates the
   // "Block IP" affordance — on flannel/native it can't apply, so we hide it.
-  const denyCapable = q.data?.summary.deny_capable_cni ?? false;
+  const denyCapable = !!q.data?.summary.cni?.toLowerCase().includes("cilium");
   const flowCount = flows.length;
   const volume = fmtBytes(flows.reduce((total, flow) => total + flow.bytes, 0));
   const blocked = flows.filter((f) => f.state === "denied").length;
@@ -1133,24 +1122,16 @@ function NetworkMapInner() {
                 <div className="flex items-center gap-1.5">
                   <button
                     type="button"
-                    disabled={enforceMut.isPending}
                     title="Cut this workload off the network with a default-deny NetworkPolicy (CNI-enforced)"
-                    onClick={() => {
-                      const reason = window.prompt(`Isolate ${selectedWorkload.id}?\nApplies a default-deny NetworkPolicy over its pods (blocks all ingress + egress). Enter a reason:`, "manual isolation from network map");
-                      if (reason) enforceMut.mutate({ kind: "isolate", target: selectedWorkload.id, reason });
-                    }}
+                    onClick={() => navigate({ href: networkActionHref(clusterID, "isolate", selectedWorkload.id) })}
                     className="inline-flex items-center gap-1 rounded border border-[color:var(--color-severity-critical)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--color-severity-critical)] hover:bg-[color:color-mix(in_oklab,var(--color-severity-critical)_12%,transparent)] disabled:opacity-40"
                   >
                     <Lock className="h-3 w-3" /> Isolate
                   </button>
                   <button
                     type="button"
-                    disabled={quarantineMut.isPending}
                     title="Add to the admission-webhook deny list (blocks re-admission / reschedule)"
-                    onClick={() => {
-                      const reason = window.prompt(`Quarantine ${selectedWorkload.id}? Enter a reason:`, "manual isolation from network map");
-                      if (reason) quarantineMut.mutate({ workload: selectedWorkload.id, reason });
-                    }}
+                    onClick={() => navigate({ href: networkActionHref(clusterID, "quarantine", selectedWorkload.id) })}
                     className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-[10px] font-medium text-muted-foreground hover:bg-muted disabled:opacity-40"
                   >
                     <Ban className="h-3 w-3" /> Quarantine
@@ -2469,6 +2450,7 @@ function FlowInspectorPopover({
   onOpenChange: (open: boolean) => void;
   onStep: (delta: number) => void;
 }) {
+  const navigate = useNavigate();
   const [tab, setTab] = useState("flow");
 
   // History sparkline: bin observed samples for this flow_id into 12 buckets.
@@ -2597,22 +2579,10 @@ function FlowInspectorPopover({
             <Button
               size="sm"
               variant="primary"
-              onClick={() => {
-                // POSTs to existing preview endpoint — see PolicyTab for the
-                // YAML used; rate-limit is the network policy lifecycle queue.
-                // Capture a real approval reason; abort if the user cancels or
-                // leaves it blank rather than sending a fabricated one.
-                const reason = window.prompt("Reason for converting to NetworkPolicy?")?.trim();
-                if (!reason) return;
-                void network
-                  .policyAction(flow.src, "approve", { reason })
-                  .catch(() => {
-                    /* surfaced through query invalidation */
-                  });
-              }}
+              onClick={() => navigate({ href: networkActionHref(clusterID, "approve-policy", flow.src === "external" || flow.src.startsWith("external/") ? flow.dst : flow.src, { flow: flow.id }) })}
               data-testid="network-flow-inspector-convert"
             >
-              Convert to NetworkPolicy
+              Review network policy
             </Button>
           </footer>
         </Dialog.Content>
@@ -2674,29 +2644,12 @@ function appName(id: number): string {
   return DP_APP_NAMES[id] ?? `app ${id}`;
 }
 
-// useEnforce drives Phase-1 CNI enforcement from the map: isolate a workload
-// (native default-deny NetworkPolicy) or block a workload's traffic to one IP
-// (Cilium egress/ingress deny). The network-policy-applier reconciles within ~15s.
-function useEnforce(clusterID: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (body: { kind: "isolate" | "block_ip"; target: string; workload?: string; direction?: "egress" | "ingress" | "both"; reason: string }) =>
-      network.enforcement.create(body, { cluster_id: clusterID || undefined }),
-    onSuccess: (a) => {
-      toast.success(a.kind === "isolate"
-        ? `Isolate policy queued for ${shortName(a.target)} — applies within ~15s`
-        : `Block queued: ${a.workload ? shortName(a.workload) + " ✕ " : ""}${a.target} — applies within ~15s`);
-      void queryClient.invalidateQueries({ queryKey: ["network-enforcement"] });
-    },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    onError: (e: any) => toast.error(e?.response?.data?.error || "Enforcement action failed"),
-  });
-}
-
-// blockPeer prompts for a reason and blocks a workload's traffic to one external IP.
-function blockPeer(enforce: ReturnType<typeof useEnforce>, workload: string, ip: string, direction: "ingress" | "egress") {
-  const reason = window.prompt(`Block ${shortName(workload)} ${direction === "egress" ? "→" : "←"} ${ip}?\nAdds a Cilium ${direction} deny for just this IP. Enter a reason:`, "manual block from network map");
-  if (reason) enforce.mutate({ kind: "block_ip", target: ip, workload, direction, reason });
+// Authoring keeps the selected target and return context in a dedicated URL.
+function networkActionHref(clusterID: string, action: string, workload: string, extra: Record<string, string> = {}) {
+  const params = new URLSearchParams({ workload, ...extra });
+  const back = new URLSearchParams(window.location.search).toString();
+  if (back) params.set("back", back);
+  return `/clusters/${encodeURIComponent(clusterID)}/network/actions/${action}?${params}`;
 }
 
 // EnforcementCard lists active block/isolate actions with a lift (✕) control — the
@@ -2759,7 +2712,7 @@ function EdgePeersTab({ flow, clusterID, hours, denyCapable, active }: { flow: N
   if (isAgg(flow.dst)) { workload = flow.src; direction = "egress"; peerIsExternal = true; }
   else if (isAgg(flow.src)) { workload = flow.dst; direction = "ingress"; peerIsExternal = true; }
   else { workload = flow.src; direction = "egress"; }
-  const enforce = useEnforce(clusterID);
+  const navigate = useNavigate();
   const q = useQuery({
     queryKey: ["edge-peers", clusterID, workload, hours],
     queryFn: () => network.peers({ workload, cluster_id: clusterID || undefined, hours }),
@@ -2788,7 +2741,7 @@ function EdgePeersTab({ flow, clusterID, hours, denyCapable, active }: { flow: N
                 {p.protocols.length ? <span className="text-[9px] uppercase text-muted-foreground/70">{p.protocols[0]}</span> : null}
                 {p.external && clusterID && denyCapable ? (
                   <button type="button" title={`Block ${shortName(workload)} ${direction === "egress" ? "→" : "←"} ${p.peer_ip}`}
-                    onClick={() => blockPeer(enforce, workload, p.peer_ip, direction)}
+                    onClick={() => navigate({ href: networkActionHref(clusterID, "block-ip", workload, { ip: p.peer_ip, direction }) })}
                     className="rounded p-0.5 text-muted-foreground hover:text-[color:var(--color-severity-critical)]">
                     <Ban className="h-3 w-3" />
                   </button>
@@ -3097,7 +3050,7 @@ function HistoryTab({ data, samples }: { data: number[]; samples: NetworkRecentF
 
 function WorkloadDrilldown({ workload, flows, clusterID, hours, denyCapable, onSelectFlow }: { workload: NetworkWorkload; flows: NetworkFlow[]; clusterID: string; hours: number; denyCapable: boolean; onSelectFlow: (flowID: string) => void }) {
   const [tab, setTab] = useState<"ingress" | "egress" | "peers">("egress");
-  const enforce = useEnforce(clusterID);
+  const navigate = useNavigate();
   const related = flows.filter((f) => f.src === workload.id || f.dst === workload.id);
   const ingressFlows = related.filter((f) => f.dst === workload.id);
   const egressFlows = related.filter((f) => f.src === workload.id);
@@ -3165,7 +3118,7 @@ function WorkloadDrilldown({ workload, flows, clusterID, hours, denyCapable, onS
                       <span className="rounded bg-muted px-1 text-[9px] uppercase text-muted-foreground">{p.direction === "ingress" ? "in" : "out"}</span>
                       {p.external && clusterID && denyCapable ? (
                         <button type="button" title={`Block ${shortName(workload.id)} ${p.direction === "egress" ? "→" : "←"} ${p.peer_ip}`}
-                          onClick={() => blockPeer(enforce, workload.id, p.peer_ip, p.direction)}
+                          onClick={() => navigate({ href: networkActionHref(clusterID, "block-ip", workload.id, { ip: p.peer_ip, direction: p.direction }) })}
                           className="rounded p-0.5 text-muted-foreground hover:text-[color:var(--color-severity-critical)]">
                           <Ban className="h-3 w-3" />
                         </button>

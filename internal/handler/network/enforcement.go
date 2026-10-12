@@ -2,6 +2,7 @@ package network
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
@@ -107,6 +109,12 @@ func (h *Network) EnforcementCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	tx, err := h.db.Pool().Begin(r.Context())
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not begin enforcement write"})
+		return
+	}
+	defer tx.Rollback(r.Context())
 	var (
 		ns, name, flavor, manifest, ref, workload, direction, target string
 	)
@@ -117,7 +125,17 @@ func (h *Network) EnforcementCreate(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "target must be 'namespace/name'"})
 			return
 		}
-		labels := h.workloadLabels(r, subj.OrgID, clusterID, ns, name)
+		labels, err := h.workloadLabels(r, tx, subj.OrgID, clusterID, ns, name)
+		if err != nil {
+			status := http.StatusInternalServerError
+			message := "could not resolve workload labels"
+			if errors.Is(err, pgx.ErrNoRows) {
+				status = http.StatusNotFound
+				message = "workload not found in the selected cluster"
+			}
+			httpx.WriteJSON(w, status, map[string]string{"error": message})
+			return
+		}
 		flavor = "native"
 		manifest, ref = isolateManifest(ns, name, labels)
 		target = req.Target
@@ -129,12 +147,12 @@ func (h *Network) EnforcementCreate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// A single-IP block ("allow all except this IP") is only expressible in a
-		// deny-capable CNI (Cilium/Calico). Native NetworkPolicy (flannel/k3s) is
+		// Cilium policy. Native NetworkPolicy (flannel/k3s) is
 		// allow-list only — reject with a clear alternative rather than applying a
-		// CRD the cluster can't enforce.
-		if cni := h.clusterCNI(r, subj.OrgID, clusterID); !denyCapableCNI(cni) {
+		// CRD the cluster can't enforce; Calico manifest generation is not implemented.
+		if cni := h.clusterCNI(r, subj.OrgID, clusterID); !strings.Contains(strings.ToLower(cni), "cilium") {
 			httpx.WriteJSON(w, http.StatusUnprocessableEntity, map[string]string{
-				"error": fmt.Sprintf("this cluster's CNI (%s) can't block a single IP — that needs a deny-capable CNI (Cilium/Calico). Isolate the workload, or kill the live session, instead.", cniLabel(cni)),
+				"error": fmt.Sprintf("single-IP blocking currently generates a Cilium policy; this cluster's CNI (%s) is unsupported. Isolate the workload, or kill the live session, instead.", cniLabel(cni)),
 			})
 			return
 		}
@@ -144,7 +162,17 @@ func (h *Network) EnforcementCreate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		direction = normalizeDirection(req.Direction)
-		labels := h.workloadLabels(r, subj.OrgID, clusterID, ns, name)
+		labels, err := h.workloadLabels(r, tx, subj.OrgID, clusterID, ns, name)
+		if err != nil {
+			status := http.StatusInternalServerError
+			message := "could not resolve workload labels"
+			if errors.Is(err, pgx.ErrNoRows) {
+				status = http.StatusNotFound
+				message = "workload not found in the selected cluster"
+			}
+			httpx.WriteJSON(w, status, map[string]string{"error": message})
+			return
+		}
 		flavor = "cilium" // per-IP deny needs a deny-capable policy; native NetworkPolicy is allow-list only
 		workload = req.Workload
 		target = ip
@@ -156,7 +184,7 @@ func (h *Network) EnforcementCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var id string
-	err = h.db.Pool().QueryRow(r.Context(), `
+	err = tx.QueryRow(r.Context(), `
 INSERT INTO network_enforcement_actions
     (org_id, cluster_id, kind, target, namespace, workload, direction, manifest_flavor, manifest, resource_ref, reason, created_by)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
@@ -165,6 +193,10 @@ RETURNING id::text`,
 		Scan(&id)
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not persist enforcement action"})
 		return
 	}
 	httpx.WriteJSON(w, http.StatusCreated, enforcementDTO{
@@ -201,20 +233,23 @@ UPDATE network_enforcement_actions
 // workloadLabels resolves a workload's pod-selector labels from the deployments
 // inventory, falling back to {"app": name} — the same seed the netpolicy candidate
 // generator uses, so isolate selects the same pods a learned policy would.
-func (h *Network) workloadLabels(r *http.Request, orgID uuid.UUID, clusterID *uuid.UUID, ns, name string) map[string]string {
+func (h *Network) workloadLabels(r *http.Request, tx pgx.Tx, orgID uuid.UUID, clusterID *uuid.UUID, ns, name string) (map[string]string, error) {
 	labels := map[string]string{"app": name}
 	var raw []byte
-	err := h.db.Pool().QueryRow(r.Context(), `
+	err := tx.QueryRow(r.Context(), `
 SELECT labels FROM deployments
  WHERE org_id = $1 AND ($2::uuid IS NULL OR cluster_id = $2) AND namespace = $3 AND name = $4
- LIMIT 1`, orgID, clusterID, ns, name).Scan(&raw)
-	if err == nil && len(raw) > 0 {
+ LIMIT 1 FOR SHARE`, orgID, clusterID, ns, name).Scan(&raw)
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > 0 {
 		var parsed map[string]string
 		if json.Unmarshal(raw, &parsed) == nil && len(parsed) > 0 {
 			labels = parsed
 		}
 	}
-	return labels
+	return labels, nil
 }
 
 // clusterCNI returns the most-recently observed CNI name for the cluster (from

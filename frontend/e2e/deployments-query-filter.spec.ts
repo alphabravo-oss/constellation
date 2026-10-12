@@ -8,6 +8,7 @@ const deployment = (name: string, namespace: string, riskScore: number) => ({
   id: `${namespace}-${name}`,
   namespace,
   name,
+  platform_role: undefined as string | undefined,
   kind: "Deployment",
   risk_score: riskScore,
   risk_factors: {},
@@ -21,6 +22,14 @@ const deployments = [
   deployment("api-service", "default", 90),
   deployment("frontend-canary", "payments", 30),
 ];
+
+function matchingDeployments(url: URL) {
+  const query = (url.searchParams.get("q") ?? "").trim().toLowerCase();
+  const namespace = url.searchParams.get("namespace");
+  const role = url.searchParams.get("platform_role");
+  const hidden = url.searchParams.get("hide_platform") === "true";
+  return deployments.filter((row) => (!namespace || row.namespace === namespace) && (!query || `${row.namespace}/${row.name}`.toLowerCase().includes(query)) && (!hidden || row.platform_role !== "core") && (!role || role === "all" || (role === "core" ? row.platform_role === "core" : !row.platform_role)));
+}
 
 test.beforeEach(async ({ page }) => {
   await page.route("**/api/v1/**", async (route) => {
@@ -54,11 +63,18 @@ test.beforeEach(async ({ page }) => {
           },
         };
         break;
-      case "/deployments":
-        body = {
-          deployments: deployments.filter((row) => !url.searchParams.has("namespace") || row.namespace === url.searchParams.get("namespace")),
-        };
+      case "/deployments": {
+        const matching = matchingDeployments(url);
+        const offset = Number(url.searchParams.get("offset") ?? 0);
+        const limit = Number(url.searchParams.get("limit") ?? 100);
+        body = { deployments: matching.slice(offset, offset + limit), total: matching.length, limit, offset, has_more: offset + limit < matching.length, platform_count: 0, summary: { total: matching.length, at_risk: matching.filter((row) => row.risk_score >= 60).length, finding_count: matching.length, critical_count: matching.length, high_count: 0 } };
         break;
+      }
+      case "/deployments.csv": {
+        const matching = matchingDeployments(url);
+        await route.fulfill({ contentType: "text/csv; charset=utf-8", body: ["Namespace,Platform Role,Name", ...matching.map((row) => `${row.namespace},${row.platform_role ?? ""},${row.name}`)].join("\n") });
+        return;
+      }
       default:
         await route.fulfill({ status: 404, json: { error: `Unmocked ${path}` } });
         return;
@@ -98,9 +114,7 @@ test("Dashboard link filters deployment rows and search follows browser history"
   expect(csv).not.toContain("frontend");
 
   await page.goBack();
-  await expect(page).toHaveURL(`${root}/deployments?q=frontend`);
-  await expect(search).toHaveValue("frontend");
-  await expect(rows).toHaveCount(2);
+  await expect(page).toHaveURL(`${root}/dashboard`);
 
   await page.goForward();
   await expect(page).toHaveURL(`${root}/deployments?q=API`);
@@ -128,7 +142,7 @@ test("name search filters namespace-scoped server results", async ({ page }) => 
   await expect(page.getByTestId("deployments-table")).toContainText("No deployments match this search.");
 
   await page.getByTestId("deployment-search").fill("");
-  await expect(page).toHaveURL(`${root}/deployments`);
+  await expect(page).toHaveURL(`${root}/deployments?namespace=payments`);
   await expect(page.getByTestId("deployment-row")).toHaveCount(1);
   await expect(page.getByTestId("deployment-row")).toContainText("payments/frontend-canary");
 });

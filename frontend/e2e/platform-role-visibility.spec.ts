@@ -16,10 +16,13 @@ test("platform roles hide custom install namespaces and appear in inventory expo
         { id: "app", name: "customer-app", namespace: "payments", node: "node", pod_name: "app-pod", image: "app:1", state: "CONTAINER_RUNNING", privileged: false, run_as_root: false, risk_score: 0, critical: 0, high: 0, observed_at: "2026-09-26T00:00:00Z" },
       ], summary: { total: 2, running: 2, privileged: 0, run_as_root: 0 } } });
     } else if (path === "/deployments") {
-      await route.fulfill({ json: { deployments: [
+      const url = new URL(route.request().url());
+      const inventory = [
         { id: "platform", namespace: "custom-install", platform_role: "core", name: "platform-agent", kind: "Deployment", risk_score: 0, risk_factors: {}, finding_count: 0, critical_count: 0, high_count: 0, last_seen_at: "2026-09-26T00:00:00Z" },
-        { id: "app", namespace: "payments", name: "customer-app", kind: "Deployment", risk_score: 0, risk_factors: {}, finding_count: 0, critical_count: 0, high_count: 0, last_seen_at: "2026-09-26T00:00:00Z" },
-      ] } });
+        { id: "app", namespace: "payments", platform_role: "", name: "customer-app", kind: "Deployment", risk_score: 0, risk_factors: {}, finding_count: 0, critical_count: 0, high_count: 0, last_seen_at: "2026-09-26T00:00:00Z" },
+      ];
+      const matching = inventory.filter((row) => url.searchParams.get("hide_platform") !== "true" || !row.platform_role);
+      await route.fulfill({ json: { deployments: matching, total: matching.length, limit: 100, offset: 0, has_more: false, platform_count: 1, summary: { total: matching.length, at_risk: 0, finding_count: 0, critical_count: 0, high_count: 0 } } });
     } else {
       await route.fulfill({ status: 404, json: { error: "Unexpected fixture request" } });
     }

@@ -67,6 +67,9 @@ const EffectiveConfigPage = lazy(() => import("./pages/EffectiveConfigPage").the
 const DashboardPage         = lazy(() => import("./pages/DashboardPage").then((m) => ({ default: m.DashboardPage })));
 const FindingsPage          = lazy(() => import("./pages/FindingsPage").then((m) => ({ default: m.FindingsPage })));
 const FindingDetailPage     = lazy(() => import("./pages/FindingDetailPage").then((m) => ({ default: m.FindingDetailPage })));
+const FindingAcceptRiskFormPage = lazy(() => import("./pages/FindingActionFormPage").then(m => ({default:m.FindingAcceptRiskFormPage})));
+const FindingSuppressFormPage = lazy(() => import("./pages/FindingActionFormPage").then(m => ({default:m.FindingSuppressFormPage})));
+const FindingCommentFormPage = lazy(() => import("./pages/FindingActionFormPage").then(m => ({default:m.FindingCommentFormPage})));
 const NodesPage             = lazy(() => import("./pages/NodesPage").then((m) => ({ default: m.NodesPage })));
 const NodeDetailPage        = lazy(() => import("./pages/NodeDetailPage").then((m) => ({ default: m.NodeDetailPage })));
 const ImageScansPage        = lazy(() => import("./pages/ImageScansPage").then((m) => ({ default: m.ImageScansPage })));
@@ -102,6 +105,7 @@ const GroupDetailPage       = lazy(() => import("./pages/GroupDetailPage").then(
 const FileMonitorPage       = lazy(() => import("./pages/FileMonitorPage").then((m) => ({ default: m.FileMonitorPage })));
 const TimelinePage          = lazy(() => import("./pages/TimelinePage").then((m) => ({ default: m.TimelinePage })));
 const NetworkMapPage        = lazy(() => import("./pages/NetworkMapPage").then((m) => ({ default: m.NetworkMapPage })));
+const NetworkActionFormPage = lazy(() => import("./pages/NetworkActionFormPage").then(m=>({default:m.NetworkActionFormPage})));
 const RuntimePoliciesPage   = lazy(() => import("./pages/RuntimePoliciesPage").then((m) => ({ default: m.RuntimePoliciesPage })));
 const RuntimeDLPPage        = lazy(() => import("./pages/RuntimeDLPPage").then((m) => ({ default: m.RuntimeDLPPage })));
 const RuntimeSignaturesPage = lazy(() => import("./pages/RuntimeSignaturesPage").then((m) => ({ default: m.RuntimeSignaturesPage })));
@@ -203,8 +207,12 @@ const app_clusters_idRoute = createRoute({ getParentRoute: () => authenticatedRo
 const cluster_indexRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "/", component: () => (<Navigate to="/clusters/$id/dashboard" params={(prev) => ({ id: prev.id! })} replace />) });
 const cluster_dashboardRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "dashboard", component: () => (<SuspenseRoute><DashboardPage /></SuspenseRoute>) });
 const cluster_neuvectorRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "neuvector", component: () => (<SuspenseRoute><NeuVectorSwitchboardPage /></SuspenseRoute>) });
+const cluster_network_actionRoute = createRoute({getParentRoute:()=>app_clusters_idRoute,path:"network/actions/$action",component:()=><SuspenseRoute><NetworkActionFormPage /></SuspenseRoute>});
 const cluster_findingsRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "findings", component: () => (<SuspenseRoute><FindingsPage /></SuspenseRoute>) });
 const cluster_findings_fidRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "findings/$fid", component: () => (<SuspenseRoute><FindingDetailPage /></SuspenseRoute>) });
+const cluster_finding_acceptRoute = createRoute({getParentRoute:()=>app_clusters_idRoute,path:"findings/$fid/accept-risk",component:()=><SuspenseRoute><FindingAcceptRiskFormPage /></SuspenseRoute>});
+const cluster_finding_suppressRoute = createRoute({getParentRoute:()=>app_clusters_idRoute,path:"findings/$fid/suppress",component:()=><SuspenseRoute><FindingSuppressFormPage /></SuspenseRoute>});
+const cluster_finding_commentRoute = createRoute({getParentRoute:()=>app_clusters_idRoute,path:"findings/$fid/comments/new",component:()=><SuspenseRoute><FindingCommentFormPage /></SuspenseRoute>});
 const cluster_cve_cveIdRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "cve/$cveId", component: () => (<SuspenseRoute><CVEDetailPage /></SuspenseRoute>) });
 const cluster_nodesRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "nodes", component: () => (<SuspenseRoute><NodesPage /></SuspenseRoute>) });
 const cluster_hosts_splatRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "hosts/$", beforeLoad: aliasRedirect({ to: "nodes", cluster: true, from: "hosts" }) });
@@ -424,7 +432,11 @@ authenticatedRoute.addChildren([
   cluster_dashboardRoute,
   cluster_neuvectorRoute,
   cluster_findingsRoute,
+  cluster_network_actionRoute,
   cluster_findings_fidRoute,
+  cluster_finding_acceptRoute,
+  cluster_finding_suppressRoute,
+  cluster_finding_commentRoute,
   cluster_cve_cveIdRoute,
   cluster_nodesRoute,
   cluster_hosts_splatRoute,

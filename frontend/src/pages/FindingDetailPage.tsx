@@ -1,70 +1,35 @@
-import { useState } from "react";
-import { Link, useParams } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { useParams } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 
 import { findings, type AffectedRange, type Finding } from "@/api/client";
-import { dateInputDaysFromNow, dateInputEndOfDayWithinDays } from "@/lib/format";
 import { severityBg } from "@/lib/severity";
 import { useCluster } from "@/hooks/useCluster";
 import { PageHeader, PageContainer } from "@/components/ui/page";
+import { FindingScope } from "./FindingActionFormPage";
+import { Button } from "@/components/ui/button";
+import { ErrorState, LoadingState } from "@/components/ui/states";
+import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { StatCard } from "@/components/ui/stat-card";
+import { Collapse } from "@/components/ui/collapse";
 import { DataTable, type Column } from "@/components/ui/data-table";
 
 type ReconSignal = NonNullable<Finding["reconciliation"]>[number];
-const ACCEPT_RISK_MAX_DAYS = 30;
 
 export function FindingDetailPage() {
-  // Route param is :fid (see App.tsx). Alias to `id` for the queries below.
-  const { fid: id } = useParams({ strict: false });
-  const { clusterId } = useCluster();
-  const qc = useQueryClient();
-  const q = useQuery({ queryKey: ["finding", id], queryFn: () => findings.get(id!), enabled: !!id });
-  const comments = useQuery({
-    queryKey: ["finding-comments", id],
-    queryFn: () => findings.listComments(id!),
-    enabled: !!id,
-  });
+  const { fid } = useParams({ strict: false });
+  const { clusterId, cluster, isLoading, error } = useCluster();
+  const listPath = clusterId ? `/clusters/${clusterId}/findings` : "/findings";
+  return <PageContainer>
+    {!clusterId || !fid ? <><PageHeader title="Finding" description="Review this finding and its history." backLink={<a href={listPath}>Findings</a>} /><ErrorState title="Select an available cluster and finding to continue." /></>
+      : <FindingScope key={`${clusterId}:${fid}`} clusterId={clusterId} findingId={fid} resolvedClusterId={cluster?.id} clusterLoading={isLoading} clusterError={Boolean(error)}>
+          {(finding, unavailable) => <FindingDetail finding={finding} clusterId={clusterId} listPath={listPath} unavailable={unavailable} />}
+        </FindingScope>}
+  </PageContainer>;
+}
 
-  const suppress = useMutation({
-    mutationFn: () => findings.suppress(id!, { reason: "manual" }),
-    onSuccess: () => {
-      toast.success("Suppressed");
-      qc.invalidateQueries({ queryKey: ["finding", id] });
-    },
-  });
-
-  const [showAccept, setShowAccept] = useState(false);
-  const [rationale, setRationale] = useState("");
-  const [acceptedUntil, setAcceptedUntil] = useState(
-    () => dateInputDaysFromNow(ACCEPT_RISK_MAX_DAYS),
-  );
-  const acceptRisk = useMutation({
-    mutationFn: () =>
-      findings.acceptRisk(id!, {
-        reason: rationale,
-        accepted_until: dateInputEndOfDayWithinDays(acceptedUntil, ACCEPT_RISK_MAX_DAYS),
-      }),
-    onSuccess: () => {
-      toast.success("Risk accepted");
-      setShowAccept(false);
-      setRationale("");
-      qc.invalidateQueries({ queryKey: ["finding", id] });
-    },
-    onError: () => toast.error("Accept-risk failed"),
-  });
-
-  const [commentBody, setCommentBody] = useState("");
-  const addComment = useMutation({
-    mutationFn: () => findings.addComment(id!, { body: commentBody }),
-    onSuccess: () => {
-      setCommentBody("");
-      qc.invalidateQueries({ queryKey: ["finding-comments", id] });
-    },
-  });
-
-  if (q.isPending) return <p className="text-sm text-muted-foreground">Loading…</p>;
-  if (!q.data) return <p className="text-sm text-destructive">Not found.</p>;
-  const f = q.data;
+function FindingDetail({ finding: f, clusterId, listPath, unavailable }: { finding: Finding; clusterId: string; listPath: string; unavailable: boolean }) {
+  const detailPath = `${listPath}/${encodeURIComponent(f.id)}`;
+  const comments = useQuery({ queryKey: ["finding-comments", clusterId, f.id], queryFn: () => findings.listComments(f.id), enabled: !unavailable });
   const score = cvssScore(f);
   const hasVulnerabilityMetadata =
     typeof score === "number" || Boolean(f.cvss_vector) || Boolean(f.kev) || typeof f.epss === "number";
@@ -77,10 +42,11 @@ export function FindingDetailPage() {
   ];
 
   return (
-    <PageContainer>
+    <div className="space-y-6">
       <PageHeader
         eyebrow={<span className="font-mono font-normal normal-case tracking-normal">{f.external_id}</span>}
         title={f.title}
+        backLink={<a href={listPath}>Findings</a>}
         description={
           <span className="flex flex-wrap items-center gap-2 text-xs">
             <span className={`rounded-md px-2 py-0.5 ${severityBg[f.severity]}`}>{f.severity}</span>
@@ -89,35 +55,20 @@ export function FindingDetailPage() {
             <span>· {f.kind}</span>
             <span>· {f.lifecycle}</span>
             {isExceptionLifecycle(f.lifecycle) ? (
-              <Link
-                to="." href={exceptionHref(f.lifecycle, f.id)}
+              <a
+                href={exceptionHref(clusterId, f.lifecycle, f.id)}
                 className="rounded-md border border-border px-2 py-0.5 text-foreground hover:bg-accent"
                 data-testid="finding-exception-link"
               >
                 {exceptionLabel(f)}
-              </Link>
+              </a>
             ) : null}
           </span>
         }
-        actions={
-          <>
-            <button
-              type="button"
-              onClick={() => suppress.mutate()}
-              className="rounded-md border border-border bg-card px-3 py-1.5 text-sm hover:bg-accent"
-            >
-              Suppress
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowAccept((s) => !s)}
-              className="rounded-md border border-border bg-card px-3 py-1.5 text-sm hover:bg-accent"
-            >
-              Accept risk
-            </button>
-          </>
-        }
+        actions={!unavailable ? <><a href={`${detailPath}/suppress`} className="rounded-md border border-border bg-card px-3 py-1.5 text-sm hover:bg-accent">Suppress</a><a href={`${detailPath}/accept-risk`} className="rounded-md border border-border bg-card px-3 py-1.5 text-sm hover:bg-accent">Accept risk</a></> : undefined}
       />
+      <VerdictBanner status={f.lifecycle === "open" ? "degraded" : "info"} title={`This finding is ${f.lifecycle}`} detail={f.accepted_until ? `Risk acceptance expires ${new Date(f.accepted_until).toLocaleString()}.` : "Review the evidence and recorded history before changing its lifecycle."} />
+      <div className="grid gap-3 sm:grid-cols-3"><StatCard label="Risk score" value={f.risk_score} /><StatCard label="CVSS base" value={typeof score === "number" ? score.toFixed(1) : "—"} /><StatCard label="Lifecycle" value={f.lifecycle} /></div>
 
       {f.asset_id ? (
         <section
@@ -127,72 +78,23 @@ export function FindingDetailPage() {
           <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Affected asset</span>
           <span className="font-mono">{f.asset_id.slice(0, 24)}</span>
           <div className="ml-auto flex items-center gap-2">
-            <Link
-              to="." href={`/clusters/${clusterId}/risk/asset/${encodeURIComponent(f.asset_id)}`}
+            <a
+              href={`/clusters/${clusterId}/risk/asset/${encodeURIComponent(f.asset_id)}`}
               className="rounded-md border border-border px-2 py-1 text-foreground hover:bg-accent"
               data-testid="finding-affected-asset-risk"
             >
               Risk workspace
-            </Link>
-            <Link
-              to="." href={`/clusters/${clusterId}/assets/${encodeURIComponent(f.asset_id)}`}
+            </a>
+            <a
+              href={`/clusters/${clusterId}/assets/${encodeURIComponent(f.asset_id)}`}
               className="rounded-md border border-border px-2 py-1 text-foreground hover:bg-accent"
               data-testid="finding-affected-asset-detail"
             >
               Asset detail
-            </Link>
+            </a>
           </div>
         </section>
       ) : null}
-
-      {showAccept && (
-        <section
-          className="rounded-lg border border-border bg-card p-4"
-          data-testid="accept-risk-modal"
-        >
-          <h2 className="mb-2 text-sm font-medium">Accept Risk</h2>
-          <p className="mb-3 text-xs text-muted-foreground">
-            Accepting risk silences this finding org-wide until the expiry date. The action is
-            audited with rationale + approver.
-          </p>
-          <label className="mb-2 block text-xs font-medium">Rationale</label>
-          <textarea
-            value={rationale}
-            onChange={(e) => setRationale(e.target.value)}
-            placeholder="Why is this risk acceptable? (e.g. compensating controls)"
-            className="mb-3 w-full rounded-md border border-border bg-background p-2 text-sm"
-            rows={3}
-            data-testid="accept-risk-rationale"
-          />
-          <label className="mb-2 block text-xs font-medium">Accepted Until</label>
-          <input
-            type="date"
-            value={acceptedUntil}
-            max={dateInputDaysFromNow(ACCEPT_RISK_MAX_DAYS)}
-            onChange={(e) => setAcceptedUntil(e.target.value)}
-            className="mb-3 rounded-md border border-border bg-background p-2 text-sm"
-            data-testid="accept-risk-until"
-          />
-          <div className="flex gap-2">
-            <button
-              type="button"
-              disabled={!rationale.trim() || acceptRisk.isPending}
-              onClick={() => acceptRisk.mutate()}
-              className="rounded-md bg-foreground px-3 py-1.5 text-sm text-background hover:opacity-90 disabled:opacity-50"
-              data-testid="accept-risk-submit"
-            >
-              Submit
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowAccept(false)}
-              className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent"
-            >
-              Cancel
-            </button>
-          </div>
-        </section>
-      )}
 
       {f.attack_techniques?.length ? (
         <section>
@@ -261,20 +163,22 @@ export function FindingDetailPage() {
         </section>
       ) : null}
 
-      <section className="rounded-lg border border-border bg-card p-4">
-        <h2 className="mb-2 text-sm font-medium">Raw Risk Inputs</h2>
+      <Collapse label="Raw risk inputs">
         <pre className="overflow-x-auto rounded-md bg-muted p-3 text-xs">
 {JSON.stringify(f.risk_inputs ?? {}, null, 2)}
         </pre>
-      </section>
+      </Collapse>
 
       <section
         className="rounded-lg border border-border bg-card p-4"
         data-testid="comments-section"
       >
-        <h2 className="mb-3 text-sm font-medium">Comments</h2>
+        <div className="mb-3 flex items-center justify-between gap-3"><h2 className="text-sm font-medium">Comment history</h2>{!unavailable && <a href={`${detailPath}/comments/new`} className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent">Add comment</a>}</div>
+        {comments.isError && <ErrorState title="Comment history could not be loaded." action={<Button onClick={() => void comments.refetch()}>Retry comments</Button>} />}
+        {comments.isPending && <LoadingState label="Loading comment history…" />}
+        {comments.isFetching && !comments.isPending && <p className="mb-3 text-xs text-muted-foreground">Refreshing comment history…</p>}
         <ul className="mb-3 space-y-2" data-testid="comments-list">
-          {(comments.data?.comments ?? []).length === 0 && (
+          {comments.isSuccess && !comments.isFetching && (comments.data?.comments ?? []).length === 0 && (
             <li className="text-xs text-muted-foreground">No comments yet.</li>
           )}
           {(comments.data?.comments ?? []).map((c) => (
@@ -291,25 +195,9 @@ export function FindingDetailPage() {
             </li>
           ))}
         </ul>
-        <textarea
-          value={commentBody}
-          onChange={(e) => setCommentBody(e.target.value)}
-          placeholder="Add a comment…"
-          className="mb-2 w-full rounded-md border border-border bg-background p-2 text-sm"
-          rows={2}
-          data-testid="comment-input"
-        />
-        <button
-          type="button"
-          disabled={!commentBody.trim() || addComment.isPending}
-          onClick={() => addComment.mutate()}
-          className="rounded-md bg-foreground px-3 py-1.5 text-sm text-background hover:opacity-90 disabled:opacity-50"
-          data-testid="comment-submit"
-        >
-          Post Comment
-        </button>
+
       </section>
-    </PageContainer>
+    </div>
   );
 }
 
@@ -317,10 +205,10 @@ function isExceptionLifecycle(lifecycle: string) {
   return lifecycle === "accepted" || lifecycle === "suppressed";
 }
 
-function exceptionHref(lifecycle: string, query: string) {
+function exceptionHref(clusterId: string, lifecycle: string, query: string) {
   const status = lifecycle === "suppressed" ? "suppressed" : "approved";
   const params = new URLSearchParams({ status, target: "finding", finding: query });
-  return `/exceptions?${params.toString()}`;
+  return `/clusters/${clusterId}/exceptions?${params.toString()}`;
 }
 
 function exceptionLabel(f: { lifecycle: string; accepted_until?: string }) {

@@ -170,12 +170,12 @@ func (f *Findings) Get(w http.ResponseWriter, r *http.Request) {
 	var inputs, factors, enginesRaw, detailRaw []byte
 	var techniques []string
 	err = f.db.Pool().QueryRow(r.Context(), `
-SELECT id, kind, external_id, title, severity, risk_score, lifecycle, asset_id,
+SELECT id, kind, external_id, title, severity, risk_score, lifecycle, asset_id, cluster_id,
        attack_techniques, accepted_until, first_seen_at, last_seen_at, risk_inputs,
        COALESCE(risk_factors,'[]'::jsonb), COALESCE(canonical_engine, ''), engines, detail_json
   FROM findings WHERE id = $1 AND org_id = $2 LIMIT 1`, id, subj.OrgID).
 		Scan(&d.ID, &d.Kind, &d.ExternalID, &d.Title, &d.Severity, &d.RiskScore,
-			&d.Lifecycle, &d.AssetID, &techniques, &d.AcceptedUntil, &d.FirstSeen, &d.LastSeen, &inputs, &factors,
+			&d.Lifecycle, &d.AssetID, &d.ClusterID, &techniques, &d.AcceptedUntil, &d.FirstSeen, &d.LastSeen, &inputs, &factors,
 			&d.CanonicalEngine, &enginesRaw, &detailRaw)
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
@@ -198,6 +198,7 @@ SELECT id, kind, external_id, title, severity, risk_score, lifecycle, asset_id,
 		"risk_score":        d.RiskScore,
 		"lifecycle":         d.Lifecycle,
 		"asset_id":          d.AssetID,
+		"cluster_id":        d.ClusterID,
 		"attack_techniques": d.AttackIDs,
 		"accepted_until":    d.AcceptedUntil,
 		"first_seen_at":     d.FirstSeen,

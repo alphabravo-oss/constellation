@@ -426,6 +426,51 @@ Components' two tables, Findings, and scanner queue/jobs have matching header/bo
 geometry at 1280px and 640px with no document overflow or clipped actions. The
 viewport was restored. These checks do not close remaining UI-1/2/3/4 acceptance.
 
+The action/workload continuation adds dedicated finding accept-risk, suppression
+and comment pages plus Network Map isolation, admission quarantine, peer-IP block
+and policy-approval forms. Editors require settled exact scope, preserve drafts
+through refresh failures, and recheck current targets before submission. Policy
+approval verifies both cached and freshly fetched candidate hashes and preserves
+idempotency for an unchanged draft. Enforcement/quarantine writes resolve and lock
+existing cluster-owned workloads; single-IP blocking is Cilium-only because no
+Calico manifest generator is implemented. Queued policy, admission quarantine and
+approval are described separately from confirmed traffic enforcement.
+
+Deployment search, namespace/platform filters and classification now run before
+pagination. A repeatable-read snapshot supplies the page, full filtered totals and
+risk summary; CSV streams all matching permitted rows in the same stable order.
+URL filters/pages survive navigation; text changes replace history while explicit
+selections/pages push it. The shared DataTable supplies density and column controls.
+
+Exceptions is one shared inventory with URL filters and explicit selection, scoped
+to the active cluster. Missing audit evidence remains missing: no invented actors,
+timestamps, acceptance reasons, controls or revokers. Image audit events match the
+exact acceptance ID, and shared digest associations retain their observed clusters.
+Finding scope uses the recorded finding cluster, consistent with detail/list APIs.
+Legacy review metadata is explicitly advisory; the legacy approved status denotes
+a recorded active acceptance, not proof of an independent approval workflow.
+
+Validation: Helm revision **43** runs frontend/API `action-console-20261012`, with
+migration image `audit-lookup-20261012` and schema 173 unchanged. All seven deployments
+are ready. **675 frontend tests**, production build/type-check, changed-file lint,
+OpenAPI, endpoint mapping, plan and whitespace checks pass. Fresh seeded PostgreSQL
+runs **52 selected backend test executions** with race detection/shuffling and no
+skips, covering more than 500 deployment rows, SQL/Go platform-classification parity,
+namespace restrictions, target ownership, missing audit evidence and exact revokers.
+Thirteen affected browser cases were discovered; the full browser runner was not run.
+
+Live readonly checks confirm deployment totals and full CSV agree: 17 overall,
+6 customer and 11 platform workloads; a qualified-name query finds its matching
+rows. Dedicated finding forms and all four network action pages load by URL;
+Cancel preserves network tab context, empty reasons disable submit, and Flannel
+correctly blocks the Cilium-only action. The approval page reports no proposed mode
+change for the inspected workload and remains disabled. No live finding or network
+mutations were submitted. Deployment header/body geometry matches at 1280px and
+640px without document overflow or clipped actions; the empty Exceptions table also
+stays contained, but has no live rows for a body-alignment assertion. Missing linked
+exceptions stay explicit, and the viewport was restored. Remaining UI-1/2/3/4 work
+includes Runtime/Components scope/error/disclosure cleanup and Dashboard Operations.
+
 The admission-engine continuation adds migration **172** and persists normalized
 engine outcomes atomically with image scan completion. The built-in vulnerability
 profiles now require successful Trivy and Grype results rather than retired

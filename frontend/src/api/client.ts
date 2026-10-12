@@ -950,8 +950,10 @@ export interface DeploymentDetail extends Deployment {
 }
 
 export const deployments = {
-  list: (params: { namespace?: string; cluster_id?: string; limit?: number } = {}) =>
-    api.get<{ deployments: Deployment[] }>("/deployments", { params }).then((r) => r.data),
+  list: (params: { q?: string; name?: string; namespace?: string; cluster_id?: string; hide_platform?: boolean; platform_role?: string; limit?: number; offset?: number } = {}) =>
+    api.get<{ deployments: Deployment[]; total: number; limit: number; offset: number; has_more: boolean; platform_count: number; summary: { total: number; at_risk: number; finding_count: number; critical_count: number; high_count: number } }>("/deployments", { params }).then((r) => r.data),
+  exportCsv: (params: { q?: string; name?: string; namespace?: string; cluster_id?: string; hide_platform?: boolean; platform_role?: string } = {}) =>
+    api.get<Blob>("/deployments.csv", { params, responseType: "blob" }).then((r) => r.data),
   get: (id: string) =>
     api.get<DeploymentDetail>(`/deployments/${id}`).then((r) => r.data),
 };
@@ -1586,7 +1588,7 @@ export interface VulnerabilityExceptionsResponse {
 }
 
 export const vulnerabilityExceptions = {
-  list: () => api.get<VulnerabilityExceptionsResponse>("/vulnerability-exceptions").then((r) => r.data),
+  list: (params: { cluster_id?: string } = {}) => api.get<VulnerabilityExceptionsResponse>("/vulnerability-exceptions", { params }).then((r) => r.data),
 };
 
 export interface ScannerEngineDbRevision {

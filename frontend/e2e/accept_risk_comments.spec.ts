@@ -24,16 +24,18 @@ async function openFindingOfKind(page: Page, kind: "ml-model" | "compliance") {
 }
 
 // Use an open ML finding untouched by the suppression tests.
-test("Accept Risk modal records rationale + expiry", async ({ page }) => {
+test("Accept risk form records rationale + expiry", async ({ page }) => {
   await openFindingOfKind(page, "ml-model");
 
-  await expect(page.getByRole("button", { name: /^Accept risk$/i })).toBeVisible();
-  await page.getByRole("button", { name: /^Accept risk$/i }).click();
-  await expect(page.getByTestId("accept-risk-modal")).toBeVisible();
+  await expect(page.getByRole("link", { name: /^Accept risk$/i })).toBeVisible();
+  await page.getByRole("link", { name: /^Accept risk$/i }).click();
+  await expect(page).toHaveURL(/\/findings\/[^/]+\/accept-risk$/);
+  await expect(page.getByTestId("finding-action-form-page")).toBeVisible();
 
-  await page.getByTestId("accept-risk-rationale").fill("compensating control: vendor patch ETA 30 days");
-  await page.getByTestId("accept-risk-submit").click();
-  await expect(page.getByText(/Risk accepted/i).first()).toBeVisible({ timeout: 5000 });
+  await page.getByLabel("Reason", { exact: true }).fill("compensating control: vendor patch ETA 30 days");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page).toHaveURL(/\/findings\/[^/]+$/);
+  await expect(page.getByTestId("finding-exception-link")).toContainText("Accepted");
 });
 
 test("Comment thread accepts and renders a new comment", async ({ page }) => {
@@ -41,8 +43,11 @@ test("Comment thread accepts and renders a new comment", async ({ page }) => {
 
   await expect(page.getByTestId("comments-section")).toBeVisible();
   const body = `e2e-test comment ${Date.now()}`;
-  await page.getByTestId("comment-input").fill(body);
-  await page.getByTestId("comment-submit").click();
+  await page.getByRole("link", { name: "Add comment", exact: true }).click();
+  await expect(page).toHaveURL(/\/findings\/[^/]+\/comments\/new$/);
+  await page.getByLabel("Comment", { exact: true }).fill(body);
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page).toHaveURL(/\/findings\/[^/]+$/);
 
   await expect(page.getByTestId("comment-item").last()).toContainText(body, { timeout: 5000 });
 });

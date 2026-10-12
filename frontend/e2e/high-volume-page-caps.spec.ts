@@ -91,36 +91,43 @@ test("assets continue beyond the first server page and label incomplete CSV", as
   expect(requests.map((url) => url.searchParams.get("offset"))).toEqual(["0", "250"]);
 });
 
-test("deployments expose their 500-row server cap and bound table rendering", async ({ page }) => {
-  const inventory = Array.from({ length: 500 }, (_, index) => ({
+test("deployments page and search beyond the old cap with platform filtering before LIMIT", async ({ page }) => {
+  const inventory = Array.from({ length: 805 }, (_, index) => ({
     id: `deployment-${index + 1}`,
-    namespace: "apps",
-    name: `workload-${String(index + 1).padStart(3, "0")}`,
+    namespace: index < 200 ? "custom-install" : "apps",
+    name: index < 200 ? `platform-${index + 1}` : `workload-${String(index - 199).padStart(3, "0")}`,
     kind: "Deployment",
-    labels: {},
-    risk_score: 0,
-    risk_factors: {},
-    finding_count: 0,
-    critical_count: 0,
-    high_count: 0,
-    first_seen_at: at,
-    last_seen_at: at,
+    platform_role: index < 200 ? "core" : undefined,
+    labels: {}, risk_score: index < 200 ? 99 : 0, risk_factors: {}, finding_count: 0,
+    critical_count: 0, high_count: 0, first_seen_at: at, last_seen_at: at,
   }));
-  const requests = await mockInventory(page, "/deployments", { deployments: inventory, limit: 500 });
+  const requests = await mockInventory(page, "/deployments", (url: URL) => {
+    const query = (url.searchParams.get("q") ?? "").toLowerCase();
+    const base = inventory.filter((row) => !query || row.name.toLowerCase().includes(query));
+    const matching = base.filter((row) => url.searchParams.get("hide_platform") !== "true" || !row.platform_role);
+    const offset = Number(url.searchParams.get("offset") ?? 0);
+    const limit = Number(url.searchParams.get("limit") ?? 100);
+    return { deployments: matching.slice(offset, offset + limit), total: matching.length, limit, offset, has_more: offset + limit < matching.length, platform_count: base.filter((row) => row.platform_role).length, summary: { total: matching.length, at_risk: matching.filter((row) => row.risk_score >= 60).length, finding_count: 0, critical_count: 0, high_count: 0 } };
+  });
   await page.goto(`/clusters/${clusterId}/deployments`);
-
   const table = page.getByTestId("deployments-table");
   await expect(table.getByTestId("deployment-row")).toHaveCount(100);
-  await expect(page.getByTestId("deployments-table-page-scope")).toContainText("Server fetch limit: 500 rows (500 loaded)");
-  await expect(table.getByRole("button", { name: "Next" })).toBeEnabled();
-  expect(requests).toHaveLength(1);
-  expect(requests[0].searchParams.get("limit")).toBe("500");
+  await expect(page.getByTestId("deployment-page-scope")).toContainText("1–100 of 605 matching deployments");
+  await expect(page.getByTestId("platform-visibility-toggle")).toContainText("200");
+  await expect(table).not.toContainText("platform-");
+  await expect(page.getByTestId("deployments-table-page-scope")).toHaveCount(0);
+  expect(requests[0].searchParams.get("limit")).toBe("100");
   expect(requests[0].searchParams.get("cluster_id")).toBe(clusterId);
-
-  await page.getByTestId("deployment-search").fill("workload-500");
+  expect(requests[0].searchParams.get("hide_platform")).toBe("true");
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(page.getByTestId("deployment-page-scope")).toContainText("101–200 of 605");
+  expect(requests.at(-1)?.searchParams.get("offset")).toBe("100");
+  await page.getByTestId("deployment-search").fill("workload-605");
   await expect(table.getByTestId("deployment-row")).toHaveCount(1);
-  await expect(page.getByTestId("deployments-table-page-scope")).toContainText("1–1 of 1 matching loaded rows");
-  await expect(page.getByTestId("deployments-table-page-scope")).toContainText("500 loaded");
+  await expect(table).toContainText("workload-605");
+  await expect(page.getByTestId("deployment-page-scope")).toContainText("1–1 of 1 matching deployments");
+  expect(requests.at(-1)?.searchParams.get("q")).toBe("workload-605");
+  expect(requests.at(-1)?.searchParams.get("offset")).toBe("0");
 });
 
 test("image scans page a full 500-row server response without hiding the cap", async ({ page }) => {

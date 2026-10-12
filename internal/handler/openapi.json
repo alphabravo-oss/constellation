@@ -1047,7 +1047,7 @@
           },
           "duration_s": {
             "type": "integer",
-            "description": "Defaults to 30 seconds; clamped to 5–300 seconds."
+            "description": "Defaults to 30 seconds; clamped to 5\u2013300 seconds."
           },
           "src_ip": {
             "type": "string"
@@ -6052,13 +6052,275 @@
       "get": {
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Matching deployment page and full filtered counts. platform_count counts matching platform rows before hide_platform.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "deployments": {
+                      "items": {
+                        "properties": {
+                          "cluster_id": {
+                            "type": "string"
+                          },
+                          "critical_count": {
+                            "type": "integer"
+                          },
+                          "finding_count": {
+                            "type": "integer"
+                          },
+                          "first_seen_at": {
+                            "type": "string"
+                          },
+                          "high_count": {
+                            "type": "integer"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string"
+                          },
+                          "last_seen_at": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "namespace": {
+                            "type": "string"
+                          },
+                          "platform_role": {
+                            "type": "string"
+                          },
+                          "risk_score": {
+                            "type": "integer"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    },
+                    "limit": {
+                      "type": "integer"
+                    },
+                    "offset": {
+                      "type": "integer"
+                    },
+                    "platform_count": {
+                      "type": "integer"
+                    },
+                    "summary": {
+                      "properties": {
+                        "at_risk": {
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "critical_count": {
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "finding_count": {
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "high_count": {
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "total": {
+                          "minimum": 0,
+                          "type": "integer"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "deployments",
+                    "total",
+                    "has_more",
+                    "summary"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "400": {
+            "description": "Invalid cluster, platform role or hide_platform filter."
+          }
+        },
+        "summary": "List server-filtered deployments",
+        "description": "Tenant and namespace permissions, literal search, and platform classification apply before LIMIT. Stable order is risk descending, last seen descending, then ID ascending. Page and matching summary share a read snapshot. Visibility does not change collection or enforcement.",
+        "parameters": [
+          {
+            "description": "Filter to this cluster within the authenticated organization.",
+            "in": "query",
+            "name": "cluster_id",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exact namespace; namespace RBAC also applies.",
+            "in": "query",
+            "name": "namespace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Literal case-insensitive name or namespace/name substring. Takes precedence over name.",
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Compatibility alias for q when q is empty.",
+            "in": "query",
+            "name": "name",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exclude core platform deployments after classification, before paging.",
+            "in": "query",
+            "name": "hide_platform",
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Classified role filter; independent of hide_platform.",
+            "in": "query",
+            "name": "platform_role",
+            "schema": {
+              "enum": [
+                "all",
+                "core",
+                "none"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Invalid or omitted values use 100.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Invalid or negative values use 0.",
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/deployments.csv": {
+      "get": {
+        "description": "Uses the same tenant, namespace RBAC, search and platform predicates and stable order as deployment listing. Exports all matching rows; list limit/offset do not bound export. CSV includes Namespace, Platform Role, Name, Kind, Risk, Findings, Critical, High, Privileged, RunAsRoot, HostNetwork and LastSeen. A terminal database or stream error aborts the response rather than presenting a successful partial export.",
+        "parameters": [
+          {
+            "description": "Filter to this cluster within the authenticated organization.",
+            "in": "query",
+            "name": "cluster_id",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exact namespace; namespace RBAC also applies.",
+            "in": "query",
+            "name": "namespace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Literal case-insensitive name or namespace/name substring. Takes precedence over name.",
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Compatibility alias for q when q is empty.",
+            "in": "query",
+            "name": "name",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exclude core platform deployments after classification, before paging.",
+            "in": "query",
+            "name": "hide_platform",
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Classified role filter; independent of hide_platform.",
+            "in": "query",
+            "name": "platform_role",
+            "schema": {
+              "enum": [
+                "all",
+                "core",
+                "none"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "CSV of all matching rows."
+          },
+          "400": {
+            "description": "Invalid query filters."
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Get deployments"
+        "summary": "Export all matching deployments as CSV"
       }
     },
     "/api/v1/deployments/{id}": {
@@ -6157,7 +6419,7 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard — the target host is never caller-supplied).",
+            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard \u2014 the target host is never caller-supplied).",
             "schema": {
               "type": "string"
             }
@@ -6198,7 +6460,7 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard — the target host is never caller-supplied).",
+            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard \u2014 the target host is never caller-supplied).",
             "schema": {
               "type": "string"
             }
@@ -6239,7 +6501,7 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard — the target host is never caller-supplied).",
+            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard \u2014 the target host is never caller-supplied).",
             "schema": {
               "type": "string"
             }
@@ -6291,7 +6553,7 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard — the target host is never caller-supplied).",
+            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard \u2014 the target host is never caller-supplied).",
             "schema": {
               "type": "string"
             }
@@ -6343,7 +6605,7 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard — the target host is never caller-supplied).",
+            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard \u2014 the target host is never caller-supplied).",
             "schema": {
               "type": "string"
             }
@@ -6391,7 +6653,7 @@
     "/api/v1/federation/join": {
       "post": {
         "summary": "Exchange a federation join token for a per-cluster sync secret",
-        "description": "Anonymous exchange endpoint (D1/D2). A joining cluster presents a join token (a signed, master-minted token or the pre-shared fixed GitOps token) plus its cluster id/name and receives a per-cluster signed sync ticket it then presents on every /federation/sync poll. Only the sha256 of the ticket is persisted by the master (like api_tokens). Authenticated by the join token itself, so it carries no bearer security. When per-joint mTLS (D2) is enabled the response also includes a per-joint client certificate, its private key (shown once), and the master CA: the joint presents the client cert on every /sync poll and the master verifies it against the CA, so a leaked bearer ticket alone — without the matching client key — is rejected.",
+        "description": "Anonymous exchange endpoint (D1/D2). A joining cluster presents a join token (a signed, master-minted token or the pre-shared fixed GitOps token) plus its cluster id/name and receives a per-cluster signed sync ticket it then presents on every /federation/sync poll. Only the sha256 of the ticket is persisted by the master (like api_tokens). Authenticated by the join token itself, so it carries no bearer security. When per-joint mTLS (D2) is enabled the response also includes a per-joint client certificate, its private key (shown once), and the master CA: the joint presents the client cert on every /sync poll and the master verifies it against the CA, so a leaked bearer ticket alone \u2014 without the matching client key \u2014 is rejected.",
         "security": [],
         "requestBody": {
           "required": true,
@@ -7391,7 +7653,53 @@
     },
     "/api/v1/findings/{id}": {
       "get": {
-        "summary": "Get one finding"
+        "summary": "Get one finding",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "cluster_id": {
+                      "format": "uuid",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "id": {
+                      "format": "uuid",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "cluster_id"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Finding in the authenticated organization with explicit nullable cluster scope."
+          },
+          "404": {
+            "description": "Finding not found in this organization."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/api/v1/findings/{id}/accept-risk": {
@@ -8978,9 +9286,16 @@
           },
           "default": {
             "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "description": "Cluster or workload not found in the authenticated organization and requested scope."
+          },
+          "422": {
+            "description": "The cluster does not support the generated Cilium single-IP policy."
           }
         },
-        "summary": "Create enforcement"
+        "summary": "Create enforcement",
+        "description": "Queues network enforcement for an existing workload in the selected organization/cluster. Isolation generates native NetworkPolicy. Single-IP blocking generates CiliumNetworkPolicy and rejects non-Cilium CNIs with 422. Queued records do not prove successful cluster reconciliation."
       }
     },
     "/api/v1/network/enforcement/{id}": {
@@ -9469,9 +9784,13 @@
           },
           "default": {
             "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "description": "Cluster or workload not found in the authenticated organization and requested scope."
           }
         },
-        "summary": "Create quarantine"
+        "summary": "Create quarantine",
+        "description": "Records an admission quarantine in an organization-owned cluster. Workload scope requires an existing deployment matching namespace/name in that cluster. Quarantine affects admission and rescheduling, not running pod traffic."
       }
     },
     "/api/v1/quarantine/{id}": {
@@ -13320,7 +13639,75 @@
     },
     "/api/v1/vulnerability-exceptions": {
       "get": {
-        "summary": "List DB-backed vulnerability exceptions with workflow guardrails and audit events"
+        "summary": "List recorded finding and image acceptances",
+        "description": "Returns accepted/suppressed findings and image digest acceptances, including expired/revoked state. Optional cluster scope restricts findings to their recorded finding cluster and image records to matching cluster assets or image-workload digest links. scope.clusters contains observed cluster IDs. The legacy workflow/guardrail metadata describes review guidance, not proof that a separate approval or enforcement workflow ran. Results and summary cover the same loaded records.",
+        "parameters": [
+          {
+            "description": "Exact organization-owned cluster UUID.",
+            "in": "query",
+            "name": "cluster_id",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "exceptions": {
+                      "items": {
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "summary": {
+                      "properties": {
+                        "approved": {
+                          "type": "integer"
+                        },
+                        "expired": {
+                          "type": "integer"
+                        },
+                        "pending": {
+                          "type": "integer"
+                        },
+                        "revoked": {
+                          "type": "integer"
+                        },
+                        "suppressed": {
+                          "type": "integer"
+                        },
+                        "total": {
+                          "type": "integer"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "exceptions",
+                    "summary"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Recorded exceptions, matching scope summary and descriptive review metadata."
+          },
+          "400": {
+            "description": "Invalid cluster UUID."
+          },
+          "404": {
+            "description": "Cluster is not owned by this organization."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/api/v1/workload-packages:report": {
