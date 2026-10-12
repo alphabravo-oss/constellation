@@ -94,11 +94,17 @@ func StartBrowserSession(ctx context.Context, pool *pgxpool.Pool, signer *Signer
 		expires = time.Now().Add(min(RefreshLifetime, policy.SessionTTL(RefreshLifetime)))
 	}
 	result, err := pool.Exec(ctx, `
+WITH extended AS (
+ UPDATE user_sessions sessions SET expires_at=GREATEST(sessions.expires_at, $2)
+ FROM users
+ WHERE sessions.session_id=$3 AND sessions.user_id=users.id
+   AND users.id=$4 AND users.org_id=$5
+   AND users.session_epoch=$6 AND NOT users.disabled
+   AND (sessions.expires_at IS NULL OR sessions.expires_at > clock_timestamp())
+ RETURNING sessions.session_id, users.session_epoch
+)
 INSERT INTO browser_refresh_tokens(token_hash, session_id, session_epoch, expires_at)
-SELECT $1, sessions.session_id, users.session_epoch, $2
-FROM user_sessions sessions JOIN users ON users.id = sessions.user_id
-WHERE sessions.session_id=$3 AND users.id=$4 AND users.org_id=$5
-  AND users.session_epoch=$6 AND NOT users.disabled`,
+SELECT $1, session_id, session_epoch, $2 FROM extended`,
 		digest, expires, claims.SessionID(), claims.UserID, claims.OrgID, claims.Epoch)
 	if err != nil {
 		return nil, err

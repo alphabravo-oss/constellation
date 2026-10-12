@@ -20,6 +20,7 @@ import (
 	"github.com/alphabravocompany/constellation/internal/handler/findings"
 	"github.com/alphabravocompany/constellation/internal/handler/network"
 	"github.com/alphabravocompany/constellation/internal/handler/runtime"
+	"github.com/alphabravocompany/constellation/internal/lifecycle"
 	"github.com/alphabravocompany/constellation/internal/syscfg"
 	"github.com/alphabravocompany/constellation/pkg/backup"
 	regsecrets "github.com/alphabravocompany/constellation/pkg/registry/secrets"
@@ -45,6 +46,7 @@ func (s *Server) startBackgroundWork(ctx context.Context) {
 // already exits when its context is canceled, so a single ctx governs all of
 // them. This is the set of loops that must NOT be duplicated across replicas.
 func (s *Server) startSingletonLoops(ctx context.Context) {
+	go lifecycle.RunSessionCleanup(ctx, s.db.Pool(), s.tel.Logger, s.sessionCleanupMetrics)
 	// Live CVE-intelligence: CISA KEV + FIRST EPSS straight from the public feeds
 	// (the live replacement for the dropped vulndb bundle). Fills cve_records with
 	// known-exploited flags + exploit-probability scores; NVD base catalog is a

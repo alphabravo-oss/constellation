@@ -2019,6 +2019,7 @@ export interface NetworkSessionKillTarget {
 }
 
 export interface NetworkSessionKillResponse {
+  expires_at?: string;
   ok: boolean;
   queued: boolean;
   session_id: number;

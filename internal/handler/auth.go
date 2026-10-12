@@ -513,7 +513,7 @@ func (a *Auth) issueSession(ctx context.Context, userID, orgID uuid.UUID, email 
 		return "", time.Time{}, errors.New("session changed during login")
 	}
 	if _, err := tx.Exec(ctx,
-		`INSERT INTO user_sessions (session_id, user_id, created_at, last_seen_at) VALUES ($1, $2, clock_timestamp(), clock_timestamp())`, sessionID, userID); err != nil {
+		`INSERT INTO user_sessions (session_id, user_id, created_at, last_seen_at, expires_at) VALUES ($1, $2, clock_timestamp(), clock_timestamp(), $3)`, sessionID, userID, expiresAt); err != nil {
 		return "", time.Time{}, err
 	}
 	if _, err := tx.Exec(ctx, `

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -75,6 +76,7 @@ VALUES
 		ClusterID   string `json:"cluster_id"`
 		AuditID     int64  `json:"audit_id"`
 		RequestedAt string `json:"requested_at"`
+		ExpiresAt   string `json:"expires_at"`
 		Target      struct {
 			WorkloadID  string `json:"workload_id"`
 			Application string `json:"application"`
@@ -92,6 +94,11 @@ VALUES
 	}
 	if !got.OK || !got.Queued || got.SessionID != sessionID || got.Node != node || got.ClusterID != clusterID.String() || got.AuditID == 0 || got.RequestedAt == "" {
 		t.Fatalf("unexpected response: %+v", got)
+	}
+	requested, requestErr := time.Parse(time.RFC3339Nano, got.RequestedAt)
+	expires, expireErr := time.Parse(time.RFC3339Nano, got.ExpiresAt)
+	if requestErr != nil || expireErr != nil || expires.Sub(requested) != 5*time.Minute {
+		t.Fatalf("invalid kill expiry: %s", got.ExpiresAt)
 	}
 	if got.Target.WorkloadID != "payments/frontend" || got.Target.Application != "HTTPS" || got.Target.IPProto != "TCP" ||
 		got.Target.ClientIP != "10.42.0.10" || got.Target.ClientPort != 44120 || got.Target.ServerIP != "3.18.12.8" || got.Target.ServerPort != 443 ||

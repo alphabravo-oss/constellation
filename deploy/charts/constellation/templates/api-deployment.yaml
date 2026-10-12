@@ -32,16 +32,11 @@ spec:
       {{- end }}
       initContainers:
         - name: wait-for-migrations
-          image: {{ .Values.migrate.psqlImage }}
-          {{- include "constellation.helperContainerSecurityContext" . | nindent 10 }}
-          command:
-            - /bin/sh
-            - -ec
-            - |
-              until psql "$DATABASE_URL" -Atc "select 1 from session_signing_keys limit 1" >/dev/null 2>&1; do
-                echo "waiting for database migrations"
-                sleep 2
-              done
+          image: {{ include "constellation.roleImage" (dict "ctx" . "role" "api") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- include "constellation.containerSecurityContext" . | nindent 10 }}
+          command: ["/usr/local/bin/constellation-api"]
+          args: ["--check-schema"]
           env:
             - name: HOME
               value: /tmp

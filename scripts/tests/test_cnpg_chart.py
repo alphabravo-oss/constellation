@@ -21,6 +21,19 @@ class CNPGChartTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return result.stdout
 
+    def test_api_waits_for_its_own_schema_requirement(self):
+        for mode in ("statefulset", "cnpg", "external"):
+            with self.subTest(mode=mode):
+                rendered = self.render("postgres.mode=" + mode,
+                    "postgres.dsn=postgres://fixture.invalid/constellation",
+                    "api.image.repository=example.invalid/api",
+                    "api.image.tag=schema-test", template="api-deployment.yaml")
+                init = rendered.split("initContainers:", 1)[1].split("      containers:", 1)[0]
+                self.assertIn('args: ["--check-schema"]', init)
+                self.assertIn('command: ["/usr/local/bin/constellation-api"]', init)
+                self.assertIn("example.invalid/api:schema-test", init)
+                self.assertNotIn("session_signing_keys", init)
+
     def test_plugin_backup(self):
         values = ("postgres.mode=cnpg", "postgres.cloudnativepg.barmanCloud.enabled=true",
                   "postgres.cloudnativepg.barmanCloud.objectStoreName=archive",

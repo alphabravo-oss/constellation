@@ -17,6 +17,7 @@ import (
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
 	"github.com/alphabravocompany/constellation/internal/handler/netutil"
+	"github.com/alphabravocompany/constellation/internal/lifecycle"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 )
 
@@ -189,7 +190,8 @@ ON CONFLICT (org_id, cluster_id, node, id) DO UPDATE SET
 	// The agent issues dp ctrl_clear_session for each id it gets back.
 	kills := []int64{}
 	if kr, err := h.db.Pool().Query(r.Context(),
-		`DELETE FROM network_session_kills WHERE org_id = $1 AND cluster_id = $2 AND node = $3 RETURNING session_id`,
+		`DELETE FROM network_session_kills WHERE org_id = $1 AND cluster_id = $2 AND node = $3
+ AND requested_at >= statement_timestamp() - interval '5 minutes' RETURNING session_id`,
 		tok.OrgID, clusterID, node); err == nil {
 		defer kr.Close()
 		for kr.Next() {
@@ -267,6 +269,7 @@ ON CONFLICT (org_id, cluster_id, node, session_id) DO UPDATE SET requested_by = 
 		"node":         node,
 		"cluster_id":   clusterID.String(),
 		"requested_at": requestedAt,
+		"expires_at":   requestedAt.Add(lifecycle.SessionKillLifetime),
 	}
 	if target != nil {
 		response["target"] = target
@@ -285,6 +288,7 @@ ON CONFLICT (org_id, cluster_id, node, session_id) DO UPDATE SET requested_by = 
 				"node":         node,
 				"session_id":   id,
 				"requested_at": requestedAt,
+				"expires_at":   requestedAt.Add(lifecycle.SessionKillLifetime),
 				"target":       target,
 			},
 		})

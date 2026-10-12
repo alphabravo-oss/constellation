@@ -8149,13 +8149,14 @@
       "delete": {
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Queued termination with requested_at and expires_at timestamps, and audit_id when recorded."
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Delete sessions"
+        "summary": "Queue a live network session termination",
+        "description": "Queues a termination for the scoped cluster and node. The command expires after five minutes and is never delivered after its deadline. Queued status does not confirm data-plane execution; the original audit receipt is retained."
       }
     },
     "/api/v1/onboarding": {

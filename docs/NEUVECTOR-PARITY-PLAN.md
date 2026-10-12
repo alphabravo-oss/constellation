@@ -65,6 +65,33 @@ and 99 open items. Counts describe acceptance items, not a percentage of code
 implemented. The complete scope and remaining gates are retained below; do not
 convert partially implemented items into checked boxes.
 
+The latest session-lifecycle increment adds migration 171, bounded leader-owned
+cleanup for expired browser/session records and five-minute network snapshots and
+kill requests. It preserves unexpired refresh reuse evidence, legacy unknown
+session deadlines and audit receipts. The API now refuses an older schema before
+service initialization; Helm runs the same image's `--check-schema` gate instead
+of checking only the old signing-key table. See the [session cleanup contract](browser-sessions.md#operational-cleanup)
+and [database backlog](database-lifecycle-backlog.md).
+
+Qualification: **642 repeated race-test executions** across database, lifecycle,
+auth, server, network and API packages; **13 production-image browser tests** for
+authentication, two-tab refresh/reuse and network workflows; **143 frontend unit
+tests**, TypeScript, **81 tooling tests**, formatting, ShellCheck and plan/endpoint
+checks passed. Changed Go code has zero new lint findings. The production API
+image's schema command accepts the restored migration-171 database and rejects a
+migration-169 fixture. The restored-volume 171 down/up rehearsal preserves all
+four flow/rollup/event/audit counts. Evidence is under
+`/tmp/constellation-session-schema-{tests,browser}/`,
+`/tmp/constellation-session-static-checks.log`, and
+`/tmp/constellation-schema-check-{restored171,old_fixture169}.log`.
+
+Hosted run [38195286549](https://github.com/alphabravo-oss/constellation/actions/runs/38195286549)
+for `96eb1c4` passed Go unit/integration, browser, frontend, FIPS and dependency
+checks; lint, gosec and historical secret findings failed. The current increment
+still needs its hosted result. Main deployment remains schema 167 on its existing
+StatefulSet; this increment does not close the CNPG/live, fleet-capacity, durable
+action-delivery or full security acceptance gates.
+
 The separately requested [ClickHouse plan](CLICKHOUSE-PLAN.md) defines evaluation,
 transactional export, tenancy, schema, duplicate-safe aggregates, retention/holds,
 RustFS test recovery, benchmark targets, canary and rollback. It is subordinate

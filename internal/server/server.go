@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -36,6 +37,7 @@ import (
 	"github.com/alphabravocompany/constellation/internal/handler/policy"
 	"github.com/alphabravocompany/constellation/internal/handler/runtime"
 	"github.com/alphabravocompany/constellation/internal/handler/scanning"
+	"github.com/alphabravocompany/constellation/internal/lifecycle"
 	"github.com/alphabravocompany/constellation/internal/syscfg"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/livegraph"
@@ -131,12 +133,16 @@ type Server struct {
 	bootstrapOrgID uuid.UUID
 	// sealer is the install-KEK cipher (H2) the auth-server CRUD handler seals IdP secret fields
 	// with before persisting them to auth_servers.config. nil when no KEK is available.
-	sealer            auth.Sealer
-	supportBundleJobs *handler.SupportBundleJobs
+	sealer                auth.Sealer
+	supportBundleJobs     *handler.SupportBundleJobs
+	sessionCleanupMetrics *lifecycle.Metrics
 }
 
 // New constructs the server. Caller must Run() and Shutdown().
 func New(ctx context.Context, cfg Config, tel *observability.Telemetry, database *db.DB) (*Server, error) {
+	if err := database.RequireSchema(ctx); err != nil {
+		return nil, err
+	}
 	// A5: session JWTs are signed RS256 by default. When no JWT_KEYS env secret is
 	// provided we load (or first-boot generate + persist) a shared RSA keypair from the
 	// session_signing_keys table so every replica signs with the same key and a rotation
@@ -273,6 +279,10 @@ func New(ctx context.Context, cfg Config, tel *observability.Telemetry, database
 		syscfg:              sysCfgProvider,
 		authProviders:       authProviders,
 		sealer:              sealer,
+	}
+	s.sessionCleanupMetrics, err = lifecycle.NewMetrics(tel.Registry)
+	if err != nil {
+		return nil, fmt.Errorf("register session cleanup metrics: %w", err)
 	}
 	s.supportBundleJobs = handler.NewSupportBundleJobs(database, s.auditLog)
 	// B1: seed each existing org's system_config from env BOOTSTRAP DEFAULTS on first

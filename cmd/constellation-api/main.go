@@ -25,12 +25,17 @@ func main() {
 	listenAddr := flag.String("listen", env("LISTEN_ADDR", ":8080"), "HTTP listen address")
 	rotateJWT := flag.Bool("rotate-jwt-key", false,
 		"A5: mint a new RS256 session-signing keypair, demote the previous to verify-only, then exit")
+	checkSchemaOnly := flag.Bool("check-schema", false, "verify the required database migration, then exit without starting services")
 	flag.Parse()
 
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
 		slog.Error("DATABASE_URL required")
 		os.Exit(2)
+	}
+
+	if *checkSchemaOnly {
+		os.Exit(checkSchema(context.Background(), databaseURL))
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
@@ -294,4 +299,23 @@ func parseJWTKeys(raw string) ([][]byte, error) {
 		return nil, fmt.Errorf("no key is at least 32 bytes")
 	}
 	return out, nil
+}
+
+// checkSchema is also the Helm init-container gate. It uses the API image's own
+// requirement, so an old table or a mismatched chart cannot admit a new binary.
+func checkSchema(ctx context.Context, databaseURL string) int {
+	bounded, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	database, err := db.Connect(bounded, databaseURL)
+	if err != nil {
+		slog.Error("schema check connection failed", "error", err)
+		return 1
+	}
+	defer database.Close()
+	if err := database.RequireSchema(bounded); err != nil {
+		slog.Error("schema check failed", "error", err)
+		return 1
+	}
+	slog.Info("database schema ready", "required_version", db.RequiredSchemaVersion)
+	return 0
 }

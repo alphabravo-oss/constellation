@@ -1723,6 +1723,7 @@ function NetworkSessionsWorkspaceTab({
             </div>
             <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
               {sessionKillTargetLabel(lastKill)} on {lastKill.node || "unknown node"} at {formatKillRequestedAt(lastKill.requested_at)}
+              {lastKill.expires_at && <> · Delivery expires {formatKillRequestedAt(lastKill.expires_at)}</>}
             </div>
           </div>
           {lastKill.audit_id ? (
@@ -4067,6 +4068,7 @@ function LiveSessionsCard({
           {lastKill && (
             <div className="mb-1 rounded border border-[color:var(--color-status-success)]/40 bg-[color-mix(in_oklab,var(--color-status-success)_10%,transparent)] px-2 py-1 text-[10px] text-muted-foreground" data-testid="network-session-card-kill-result">
               Queued session {lastKill.session_id}
+              {lastKill.expires_at ? ` · Delivery expires ${formatKillRequestedAt(lastKill.expires_at)}` : ""}
               {lastKill.audit_id ? ` - audit #${lastKill.audit_id}` : ""}
             </div>
           )}

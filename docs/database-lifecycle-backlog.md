@@ -33,6 +33,22 @@ failure alerts, audit-chain and encrypted-credential recovery remain unproved.
 The table below retains the original failure/acceptance definitions so the
 remaining deployment gates are not mistaken for new implementation work.
 
+## October 12 session lifecycle implementation
+
+Migration 171 adds explicit session expiry and cleanup indexes. The API leader
+runs bounded, lock-skipping cleanup; browser-family expiry is recorded atomically
+with refresh creation. New binaries reject schemas older than their required
+migration before initializing services; Helm uses that same binary as its gate.
+The guard reads Goose's latest up/down state per version, so a rolled-back
+migration cannot satisfy startup with an old successful entry.
+
+An independent restored-volume database applied migrations 169–171, then rolled
+171 down and up. Counts remained 2,723,972 raw flows, 153,178 rollups, 3,020,985
+events and 1,905,903 audit entries. This is migration preservation evidence, not
+production tuning or a CNPG cutover. Logs:
+`/tmp/constellation-session-restored-{before,migrations,after}.log`.
+The live database remains on migration 167.
+
 ## October 11 live measurement and assessment
 
 Read-only measurements at 23:42–23:46 UTC on the existing
@@ -187,7 +203,7 @@ lock and additional rewrite space ([PostgreSQL 16 maintenance guidance](https://
 | DB-13 | **Open — decision + fix** | Define lifecycle-aware retention for `findings`. All current findings land in a DEFAULT child despite time partitioning; open findings and triage must not vanish by age alone (`db/migrations/004_findings_partitioned.sql`). | Resolved/orphaned findings archive by policy; open/suppressed/accepted decisions remain visible; partitions or another bounded layout avoid default-child bloat. |
 | DB-14 | **Open — decision + fix** | Set separate policies for terminal versus stuck `scan_jobs`, attempts, named `image_scan_results`, registry results, and repository targets. Existing job TTL and orphan-digest cleanup do not bound all named results or verification history (`internal/handler/events_retention.go`, `internal/handler/repository_retention.go`). | Current/latest results and referenced attestations survive; stale jobs recover; historical results expire only after evidence and dependency checks. |
 | DB-15 | **Open — decision + fix** | Classify large `scan_evidence`, SBOM documents, image artifacts, scan attestations and verification records as current cache or durable evidence (`db/migrations/063_scan_evidence.sql`, `db/migrations/003_assets_and_images.sql`, `db/migrations/084_scan_result_attestations.sql`). | A reference graph and restore test protect live decisions; size/age caps bound replaceable payloads. |
-| DB-16 | **Open — fix** | Reap stale network sessions/kill requests, expired browser sessions and consumed refresh tokens, and other short operational histories without weakening reuse detection (`internal/handler/network/sessions.go`, `internal/auth/browser_sessions.go`). | Time-travel tests show stale rows are removed while active sessions and security evidence remain. |
+| DB-16 | **Session families implemented; live/other histories open** | Migration 171 and the leader worker bound expired refresh/session rows and five-minute network snapshots/kill requests. Consumed unexpired digests, unknown legacy deadlines and audit receipts survive. See [cleanup contract](browser-sessions.md#operational-cleanup). Other operational histories remain DB-17. | Real PostgreSQL expiry, lock-skip, cascade-bound, composite-key and browser reuse tests; production-image browser validation. Live rollout, backlog/failure alarms and sustainable cleanup throughput remain open. |
 | DB-17 | **Open — decision + fix** | Set retention for receiver deliveries, compliance runs, support-bundle job metadata, restart events, and admission dry-run history; distinguish operational logs from evidence (`db/migrations/020_settings_receivers_role_bindings.sql`, `db/migrations/039_compliance_schedules.sql`). | Every high-rate history table has an owner, window, cleanup job, and an evidence exception where needed. |
 
 ## P1/P2: CVE, cache, and operations
