@@ -59,23 +59,52 @@ Wave H3.
 The old TLS Secret remains exposed in Git history. Removing the capture does
 not revoke that key or make the full-history scanner pass. The current default
 cluster has no `constellation-system/e2e-admission-tls` Secret. The owner is unsure
-whether this fixture was used outside local development. A read-only October 12
-inventory compared the historical leaf and CA certificate DER SHA-256 fingerprints
-against public certificates in every `kubernetes.io/tls` Secret and all validating
-and mutating admission webhook CA bundles in the two accessible environments:
+whether this fixture was used outside local development.
 
-| Environment | TLS certificates checked | Webhook CA bundles checked | Matches |
-| --- | ---: | ---: | ---: |
-| Main local cluster | 2 | 4 | 0 |
-| Isolated CNPG test cluster | 14 | 11 | 0 |
+A wider all-local-refs scan also found **both the CA and server private keys** in
+commit `4333d28b2d92be35c8c4b198d6b73f6d6d3945c0`. Public-key comparison confirms
+that they match the historical certificates. That commit is reachable from local
+branches, but no current `origin` ref contains it and GitHub's commit lookup
+reported no commit found. Its publication status is **unconfirmed**; this is not
+proof that no copy was shared. The server key is also in the known published
+Secret capture. Any environment using these keys needs a fresh CA and server key,
+replacement certificates, and removal of old CA trust after the replacement
+webhook works. Reissuing a leaf certificate under the old CA is insufficient.
 
-The inventory did not read private keys. Its non-secret result is retained locally
-at `/tmp/constellation-historical-tls-inventory.json`. This check does not cover
-Opaque Secrets, external trust stores or other clusters and does not establish
-global revocation. The historical certificate is valid
-until May 9, 2036; treat any deployment using it as compromised, replace the key
-and certificate, and remove obsolete CA trust. That deployment inventory and
-revocation evidence remain release blockers.
+The read-only `scripts/audit-admission-tls-trust.py` compares both certificate
+DER and public-key SPKI SHA-256 fingerprints. Public-key matching also detects
+reissued certificates that reuse either exposed key. The October 12 run checked
+named certificate fields (`ca.crt`, `tls.crt`, `ca-bundle.crt`, `root-cert.pem`,
+`cert.pem`) in Secrets of **all types** and ConfigMaps, plus every validating and
+mutating admission webhook CA bundle in the two accessible environments:
+
+| Environment | Secret fields / certificates | ConfigMap fields / certificates | Webhook bundles / certificates | Certificate or key matches | Errors |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Main local cluster | 6 / 9 | 7 / 7 | 4 / 4 | 0 | 0 |
+| Isolated CNPG test cluster | 24 / 25 | 9 / 9 | 11 / 11 | 0 | 0 |
+
+Counts include repeated certificates in chains or multiple resources. No private
+key values are emitted or persisted: kubectl emits only the selected certificate
+fields. Its API client necessarily receives the selected Kubernetes resources.
+The non-secret reports are retained locally at
+`/tmp/constellation-admission-trust-{main,cnpg}-expanded.json`.
+
+Reproduce for each cluster that could have used the scenario:
+
+```sh
+python3 -B scripts/audit-admission-tls-trust.py --context CLUSTER_CONTEXT --label CLUSTER_NAME
+```
+
+Exit 0 means no match in the stated scope, 1 means a historical certificate or
+public key matched, and 2 means at least one inventory or certificate could not
+be verified. Errors never mean a clean result. Resource/field identifiers and
+public fingerprints identify matches without disclosing key material.
+
+Other certificate field names, mounted files, external trust stores, APIService
+and CRD conversion trust, and inaccessible clusters remain outside this check.
+The historical certificates are valid until May 9, 2036. Zero scoped matches do
+not establish global revocation; deployment inventory and replacement evidence
+remain release blockers. The audit itself makes no cluster changes.
 
 New runs generate fresh one-day test certificates even when historical public
 captures exist. They retain only public certificates, never a serialized Secret

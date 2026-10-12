@@ -147,6 +147,18 @@ successful session-cleanup pass. API image
 is qualified by `/tmp/constellation-parent-stats-browser/`. This is a measured
 maintenance improvement, not deployed tuning, fleet capacity or completed DB-23.
 
+
+Historical admission TLS remediation remains open because use outside local
+development is unknown. The expanded read-only inventory found no historical
+certificate **or public-key** matches and no errors across 20 certificate
+occurrences in the main local cluster and 45 in the isolated CNPG cluster. It
+covers named certificate fields in Secrets of all types, ConfigMaps and admission
+webhook CA bundles. A wider local-history scan also found the matching CA private
+key, whose publication status is unconfirmed; affected deployments need both CA
+and server-key replacement. The [remediation record](../deploy/e2e/threat-scenarios/04-admission-tls/EVIDENCE.md#october-12-credential-remediation)
+provides the repeatable inventory and its limits. No global revocation, scanner
+exception or additional parity acceptance is claimed.
+
 The latest session-lifecycle increment adds migration 171, bounded leader-owned
 cleanup for expired browser/session records and five-minute network snapshots and
 kill requests. It preserves unexpired refresh reuse evidence, legacy unknown
@@ -167,10 +179,11 @@ four flow/rollup/event/audit counts. Evidence is under
 `/tmp/constellation-session-static-checks.log`, and
 `/tmp/constellation-schema-check-{restored171,old_fixture169}.log`.
 
-Hosted run [38195286549](https://github.com/alphabravo-oss/constellation/actions/runs/38195286549)
-for `96eb1c4` passed Go unit/integration, browser, frontend, FIPS and dependency
-checks; lint, gosec and historical secret findings failed. The current increment
-still needs its hosted result. Main deployment remains schema 167 on its existing
+Hosted run [38201453229](https://github.com/alphabravo-oss/constellation/actions/runs/38201453229)
+for `659104c` passed Go unit/integration, browser, frontend, FIPS and dependency
+checks; lint, gosec and historical secret findings failed. The subsequent
+read-only trust-inventory increment passes all **91 tooling tests** locally and
+has no application source changes. Main deployment remains schema 167 on its existing
 StatefulSet; this increment does not close the CNPG/live, fleet-capacity, durable
 action-delivery or full security acceptance gates.
 

@@ -152,7 +152,7 @@ including directory entries. This intentionally rejects ambiguous duplicate-path
 packages that previously overwrote an earlier entry. Symlink-escape and package
 permission regression tests exercise the actual filesystem.
 
-A full current scan reports 256 gosec findings (previously 261), with no Go load
+A later full scan reports 253 gosec findings (previously 261), with no Go load
 errors. This remains a failing gate, not security acceptance. The archive changes
 do not close the separately documented serverless DNS-rebinding or scanner
 isolation requirements.
@@ -165,12 +165,55 @@ a private temporary directory, streams the Secret to kubectl, and deletes privat
 material on success or failure. Regression tests exercise both paths using real
 certificate generation and a fake Kubernetes boundary; no live scenario is run.
 
-The historical private key is still exposed in Git history, with a certificate
-valid until May 2036. The current default cluster does not contain the named test
-Secret. That observation does not establish revocation across other clusters or
-remove old CA trust. The [scenario remediation record](../deploy/e2e/threat-scenarios/04-admission-tls/EVIDENCE.md#october-12-credential-remediation)
-keeps those acceptance requirements open. No gitleaks suppression, history rewrite
-or security-review exception was added; the full-history finding still blocks.
+The historical server key is still exposed in Git history, with a certificate
+valid until May 2036. A wider local-ref scan also found its matching CA private
+key; publication of that older commit is unconfirmed. The owner is unsure about
+use outside local development. Both CA and server keys must be replaced wherever
+used, together with the corresponding trust. The repeatable read-only
+`scripts/audit-admission-tls-trust.py` compares certificate and public-key
+fingerprints in named certificate fields in Secrets of all types, ConfigMaps and
+admission webhook CA bundles. It found zero matches and zero verification errors
+across 20 certificate occurrences in the main local cluster and 45 in the
+isolated CNPG cluster. Other fields, trust stores and clusters remain unverified.
+The [scenario remediation record](../deploy/e2e/threat-scenarios/04-admission-tls/EVIDENCE.md#october-12-credential-remediation)
+records scope, commands, counts and unresolved revocation requirements. No
+gitleaks suppression, history rewrite or security-review exception was added.
+
+### Historical secret finding triage
+
+The ten detections in the earlier retained redacted scan were inspected at their scanned
+commits without reproducing credential values. Eight have evidence of prose,
+browser storage identifiers or synthetic test data; one is an expired JWT and
+one is the exposed admission private key. These assessments prepare review;
+they do not waive the scanner or supply the reviewed exception records required
+above. No signing-key safety conclusion follows from an expired JWT alone.
+
+| Scanned location | Assessment and evidence |
+| --- | --- |
+| `docs/NEUVECTOR-PARITY-PLAN.md:268` at `e51a69a2` (`generic-api-key`) | Documentation prose about recovering keys and sessions, with no credential assignment. |
+| `internal/migration/neuvector/testdata/remaining_families.yaml:75` at `800b0ef1` (`kubernetes-secret-yaml`) | Synthetic Kubernetes Secret in the migration fixture; its password is an uppercase `SECRET_` placeholder, and `TestRemainingCanonicalFixture` checks that serialized conversion omits those markers. |
+| `deploy/e2e/threat-scenarios/04-admission-tls/captures/secret.yaml:4` at `3b15b3ea` (`private-key`) | Actual exposed leaf private key; source capture removed, deployment/trust inventory and revocation remain unresolved as above. |
+| `docs/deployment-helm.md:266` at `3b15b3ea` (`generic-api-key`) | NetworkPolicy documentation prose listing allowed component-to-component traffic. |
+| `docs/e2e-results.md:210` at `3b15b3ea` (`jwt`) | Actual HS256 JWT recorded in historical results; decoded expiry is **2026-05-12 15:15:32 UTC**, before the initial public commit and this review. The token value and signature are not reproduced. |
+| `frontend/src/components/CommandPalette.tsx:41` at `3b15b3ea` (`generic-api-key`) | `RECENT_KEY` is a localStorage namespace for recent command items, not an authentication key. |
+| `frontend/src/components/ScopeBar.tsx:14` at `3b15b3ea` (`generic-api-key`) | `STORAGE_KEY` is a localStorage namespace for UI scope selection. |
+| `internal/handler/auth_security_review_test.go:240` at `3b15b3ea` (`generic-api-key`) | Deliberately wrong password in a test asserting HTTP 401 for a fixture user. |
+| `internal/handler/password_change_test.go:68` at `3b15b3ea` (`generic-api-key`) | Synthetic current/new password inputs in a fixture test asserting HTTP 401. |
+| `pkg/redact/redact_test.go:60` at `3b15b3ea` (`generic-api-key`) | Synthetic input to the redaction test, followed by an assertion on redacted output. |
+
+
+A subsequent `--all` scan at `659104c` inspected **434 commits** reachable from
+local refs and reported **20 detections**, including older branches absent from
+the fetched PR history. The additional ten comprise seven earlier detections in
+the same prose, storage-identifier, synthetic-password/redaction and expired-JWT
+families, and three actual private-key detections (`ca.key`, `tls.key` and the
+serialized Secret at `4333d28b`). The CA key is a distinct compromised key, not a
+false-positive fixture. The matching leaf key and certificates are the same
+identities described above. Current GitHub refs did not contain that older
+commit; its publication cannot be established from this inventory. The redacted
+all-ref report is `/tmp/constellation-659104c-gitleaks/gitleaks.sarif`. Counts are
+scope-dependent; do not substitute a narrower hosted scan for this local-ref
+inventory or treat repeated findings as newly introduced credentials.
 
 ## Scope and remaining acceptance
 
