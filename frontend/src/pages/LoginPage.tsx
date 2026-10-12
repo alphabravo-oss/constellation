@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import { useRouteSearchParams } from "@/lib/route-search";
 import { toast } from "sonner";
 import { ArrowRight, Database, Eye, EyeOff, Network, ShieldCheck } from "lucide-react";
@@ -33,6 +34,12 @@ export function LoginPage() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const { data: providers } = useQuery({
+    queryKey: ["auth", "providers"],
+    queryFn: authApi.providers,
+    retry: false,
+  });
+  const hasSSO = providers?.oidc || providers?.saml;
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -55,7 +62,7 @@ export function LoginPage() {
       const r = await authApi.oidcStart();
       window.location.href = r.authorize_url;
     } catch {
-      toast.error("OIDC not configured for this deployment");
+      toast.error("Unable to start SSO. Please try again.");
     }
   }
 
@@ -119,25 +126,38 @@ export function LoginPage() {
 
           <div className="space-y-2 text-center lg:text-left">
             <h2 className="text-2xl font-semibold text-foreground">Sign in to Constellation</h2>
-            <p className="text-sm text-muted-foreground">Enter your credentials or use SSO to continue.</p>
+            <p className="text-sm text-muted-foreground">{hasSSO ? "Enter your credentials or use SSO to continue." : "Enter your credentials to continue."}</p>
           </div>
 
-          <button
-            type="button"
-            onClick={onOIDC}
-            className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 text-sm font-medium text-foreground transition-colors hover:bg-accent"
-          >
-            Continue with SSO
-          </button>
-
-          <div className="relative">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-border" />
-            </div>
-            <div className="relative flex justify-center text-xs">
-              <span className="bg-background px-3 text-muted-foreground">continue with password</span>
-            </div>
-          </div>
+          {hasSSO && (
+            <>
+              {providers?.oidc && (
+                <button
+                  type="button"
+                  onClick={onOIDC}
+                  className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+                >
+                  {providers?.saml ? "Continue with OIDC" : "Continue with SSO"}
+                </button>
+              )}
+              {providers?.saml && (
+                <a
+                  href="/api/v1/auth/saml/login"
+                  className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+                >
+                  {providers?.oidc ? "Continue with SAML" : "Continue with SSO"}
+                </a>
+              )}
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-border" />
+                </div>
+                <div className="relative flex justify-center text-xs">
+                  <span className="bg-background px-3 text-muted-foreground">continue with password</span>
+                </div>
+              </div>
+            </>
+          )}
 
           <form onSubmit={onSubmit} className="space-y-4">
             <div className="space-y-1.5">

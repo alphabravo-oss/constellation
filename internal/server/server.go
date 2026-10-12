@@ -614,6 +614,7 @@ func (s *Server) buildRouter() chi.Router {
 				httprate.WithLimitHandler(rateLimited),
 			))
 			r.Post("/auth/login", auth.Login)
+			r.Get("/auth/providers", auth.Providers)
 			r.Get("/auth/oidc/start", auth.OIDCStart)
 			r.Get("/auth/oidc/callback", auth.OIDCCallback)
 			r.Get("/auth/saml/login", auth.SAMLLogin)

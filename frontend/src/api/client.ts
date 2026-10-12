@@ -5499,6 +5499,7 @@ export const runtimeEvents = {
 };
 
 export const auth = {
+  providers: () => api.get<{ oidc: boolean; saml: boolean }>("/auth/providers").then((r) => r.data),
   login: (email: string, password: string) =>
     api.post<{ expires_at: string }>(`/auth/login`, { email, password }).then((r) => r.data),
   me:    () => api.get<{ user_id: string; org_id: string; email: string; roles: string[] }>("/auth/me").then((r) => r.data),

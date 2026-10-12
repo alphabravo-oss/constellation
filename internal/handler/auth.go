@@ -76,9 +76,7 @@ func (a *Auth) WithProviderSet(ps *auth.ProviderSet) *Auth {
 // static env-wired one.
 func (a *Auth) providerOIDC() *auth.OIDCClient {
 	if a.providers != nil {
-		if p := a.providers.OIDC(); p != nil {
-			return p
-		}
+		return a.providers.OIDC()
 	}
 	return a.oidc
 }
@@ -86,9 +84,7 @@ func (a *Auth) providerOIDC() *auth.OIDCClient {
 // providerSAML returns the live SAML provider (set snapshot, else static).
 func (a *Auth) providerSAML() *auth.SAMLProvider {
 	if a.providers != nil {
-		if p := a.providers.SAML(); p != nil {
-			return p
-		}
+		return a.providers.SAML()
 	}
 	return a.saml
 }
@@ -96,11 +92,19 @@ func (a *Auth) providerSAML() *auth.SAMLProvider {
 // providerLDAP returns the live LDAP provider (set snapshot, else static).
 func (a *Auth) providerLDAP() *auth.LDAPProvider {
 	if a.providers != nil {
-		if p := a.providers.LDAP(); p != nil {
-			return p
-		}
+		return a.providers.LDAP()
 	}
 	return a.ldap
+}
+
+// Providers exposes only available browser SSO methods, never provider configuration.
+// Resolve the same live providers used by the login endpoints, including disabled states.
+func (a *Auth) Providers(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]bool{
+		"oidc": a.providerOIDC() != nil,
+		"saml": a.providerSAML() != nil,
+	})
 }
 
 // providerSAMLParse returns the SAML ACS identity resolver to use for this request. A test-set

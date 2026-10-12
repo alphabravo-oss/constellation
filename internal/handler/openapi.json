@@ -4393,6 +4393,40 @@
         "security": []
       }
     },
+    "/api/v1/auth/providers": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "oidc",
+                    "saml"
+                  ],
+                  "properties": {
+                    "oidc": {
+                      "type": "boolean"
+                    },
+                    "saml": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many unauthenticated requests"
+          }
+        },
+        "security": [],
+        "summary": "List available browser SSO methods",
+        "description": "Returns live OIDC and SAML availability without exposing provider configuration. No authentication required."
+      }
+    },
     "/api/v1/auth/refresh": {
       "post": {
         "summary": "Rotate browser session",

@@ -27,6 +27,7 @@ var publicRoutes = map[string]bool{
 	"GET /version":                   true,
 	"GET /openapi.json":              true,
 	"POST /api/v1/auth/login":        true,
+	"GET /api/v1/auth/providers":     true,
 	"POST /api/v1/auth/ldap/login":   true,
 	"GET /api/v1/auth/saml/login":    true,
 	"POST /api/v1/auth/saml/acs":     true,

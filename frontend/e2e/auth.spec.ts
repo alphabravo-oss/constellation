@@ -32,9 +32,11 @@ test.describe("Authentication", () => {
     await expect(page.getByText(/GlobalAdmin/)).toBeVisible();
   });
 
-  test("OIDC button shows graceful error (OIDC not configured)", async ({ page }) => {
+  test("hides SSO when no provider is configured", async ({ page }) => {
+    const providers = page.waitForResponse("**/api/v1/auth/providers");
     await page.goto("/auth/login");
-    await page.getByRole("button", { name: /Continue with SSO/ }).click();
-    await expect(page.getByText(/OIDC not configured/i)).toBeVisible();
+    expect(await (await providers).json()).toEqual({ oidc: false, saml: false });
+    await expect(page.getByText("Enter your credentials to continue.")).toBeVisible();
+    await expect(page.getByText(/Continue with SSO|continue with password/i)).toHaveCount(0);
   });
 });
