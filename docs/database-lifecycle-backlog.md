@@ -194,7 +194,7 @@ lock and additional rewrite space ([PostgreSQL 16 maintenance guidance](https://
 
 | ID | Status | Required fix or decision | Acceptance gate |
 | --- | --- | --- | --- |
-| DB-18 | **Open — fix** | Stop unnecessary `cve_records` rewrites. KEV/EPSS compares its process-local marker only after importing; the upsert updates conflicts even if values are unchanged (`internal/handler/findings/cve_intel_import.go`, `internal/handler/findings/cve_records_writer.go`). | Persist feed checkpoints, conditionally update changed rows, and measure lower WAL/dead-tuple growth across repeat imports and pod restarts. |
+| DB-18 | **Open — fix** | Conditional merged-row updates now skip identical/sparse repeats (October 12 PostgreSQL xmin regression test). Still persist feed checkpoints: KEV/EPSS compares its process-local marker only after importing (`internal/handler/findings/cve_intel_import.go`, `internal/handler/findings/cve_records_writer.go`). | Persist feed checkpoints, conditionally update changed rows, and measure lower WAL/dead-tuple growth across repeat imports and pod restarts. |
 | DB-19 | **Open — decision + fix** | Define whether CVE `sources` and KEV flags are current membership or historical observations. The upsert can replace `sources` and only sets `kev_listed` true; NVD is opt-in and scans only a trailing 120-day modified window (`internal/handler/findings/cve_records_writer.go`, `internal/handler/findings/nvd_import.go`). | Feed withdrawal/update tests, full-bootstrap path, offline recovery, and published catalog-completeness/freshness semantics. |
 | DB-20 | **Open — decision** | Keep the current PG `cve_records` API catalog unless a measured reason justifies a new format. Another PG database on the same storage does not save space; first profile wide descriptions/TOAST and index use, then evaluate a rebuildable compact projection (`internal/handler/findings/cve.go`). | Search, detail, CVSS/KEV/EPSS filters, stats, and restore behavior meet a size and latency budget without resurrecting retired VulnDB. |
 | DB-21 | **Open — decision + fix** | Choose scanner-cache topology: one 8 GiB PVC-backed replica or multiple replicas with pod-local caches. Today's local cache uses about 5.7 GB; chart default multi-replica topology does not share the RWO cache (`deploy/charts/constellation/templates/scanner-cache-pvc.yaml`). | Cache free-space and DB-freshness alerts, restart/refresh/offline tests, and a capacity margin for both Trivy and Grype. |
@@ -220,3 +220,14 @@ lock and additional rewrite space ([PostgreSQL 16 maintenance guidance](https://
 No additional audit, CVE, scan, or evidence rows were deleted during this
 review. DB-01 is a confirmed active correctness defect, not a hypothetical
 storage optimization.
+
+## October 12 implementation update
+
+Migration 169 adds persistent ordered producer cursors. Event/flow agents now use
+bounded node disk queues, matching durable acknowledgements and Retry-After;
+ingestion batches PostgreSQL writes and commits flow rule hits with the raw rows.
+See [telemetry delivery](telemetry-delivery.md) for exact guarantees and gaps.
+Independent rollup progress, byte/rate quotas, durable side effects, 24-hour fleet
+qualification and live rollout remain open. The separately requested
+[ClickHouse plan](CLICKHOUSE-PLAN.md) specifies a measured analytical-store
+evaluation, not an installed second database.

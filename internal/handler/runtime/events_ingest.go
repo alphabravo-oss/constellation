@@ -32,12 +32,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
 	"github.com/alphabravocompany/constellation/internal/handler/sqlx"
+	"github.com/alphabravocompany/constellation/internal/telemetryingest"
 	"github.com/alphabravocompany/constellation/pkg/attack"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/notify"
@@ -320,6 +322,16 @@ func (h *EventsIngest) Bulk(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, status, err.Error())
 		return
 	}
+	// Older agents discard 429 responses. Apply the new concurrency budget
+	// only to receipt-aware producers until the fleet has upgraded.
+	if r.Header.Get(telemetryingest.ProducerHeader) != "" || r.Header.Get(telemetryingest.SequenceHeader) != "" {
+		release, admitted := telemetryingest.Admit(w, tok.OrgID, clusterID)
+		if !admitted {
+			return
+		}
+		defer release()
+	}
+
 	fileRules, err := h.loadFileProfileRuleSet(r.Context(), tok.OrgID, clusterID, events)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, "file profile rules: "+err.Error())
@@ -332,6 +344,17 @@ func (h *EventsIngest) Bulk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
+	receipt, replay, err := telemetryingest.Begin(r.Context(), tx, r, tok.OrgID, clusterID, "events", events)
+	if err != nil {
+		telemetryingest.WriteError(w, err)
+		return
+	}
+	if replay != nil {
+		receipt.Acknowledge(w)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(replay)
+		return
+	}
 
 	const insertSQL = `
 INSERT INTO events (org_id, cluster_id, node_id, workload_id, namespace, container_id,
@@ -349,6 +372,7 @@ VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),'ebpf',$7,$8,$9,$10,$11,$12)`
 		}
 	}
 
+	var writes pgx.Batch
 	var alerts, inserted int
 	classifications := make([]eventClassification, len(events))
 	// ruleActions holds the ordered E1 response-rule actions matched for each event (only the
@@ -410,22 +434,28 @@ VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),'ebpf',$7,$8,$9,$10,$11,$12)`
 			storedKind = "file_modified"
 		}
 
-		if _, err := tx.Exec(r.Context(), insertSQL,
+		writes.Queue(insertSQL,
 			tok.OrgID, clusterID, ev.Node, ev.WorkloadID, ev.Namespace, ev.ContainerID,
 			storedKind, cls.Severity, cls.Verdict, techniques, payload, ev.At,
-		); err != nil {
-			jsonError(w, http.StatusInternalServerError, "insert: "+err.Error())
-			return
-		}
+		)
 		inserted++
 		if cls.Severity == "high" || cls.Severity == "critical" {
 			alerts++
 		}
 	}
+	if err := tx.SendBatch(r.Context(), &writes).Close(); err != nil {
+		jsonError(w, http.StatusInternalServerError, "event batch insert failed")
+		return
+	}
+	if err := receipt.Complete(r.Context(), tx, IngestResponse{Accepted: inserted, Alerts: alerts}); err != nil {
+		telemetryingest.WriteError(w, err)
+		return
+	}
 	if err := tx.Commit(r.Context()); err != nil {
 		jsonError(w, http.StatusInternalServerError, "commit: "+err.Error())
 		return
 	}
+	receipt.Acknowledge(w)
 
 	// Audit-log the high-severity events outside the events txn so an audit-chain
 	// failure doesn't roll back the ingest.

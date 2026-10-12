@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 
 	"github.com/alphabravocompany/constellation/internal/runtime/dp"
+	"github.com/alphabravocompany/constellation/internal/telemetryspool"
 )
 
 // metricsSource bundles every atomic counter we expose. Built in main() and
@@ -64,6 +65,14 @@ func metricsHandler(m *metricsSource) http.HandlerFunc {
 		var sb strings.Builder
 
 		nodeLabel := fmt.Sprintf("node=%q", m.Node)
+		for _, stream := range []string{"events", "flows"} {
+			if value, ok := telemetryQueues.Load(stream); ok {
+				pending, bytes := value.(*telemetryspool.Queue).Stats()
+				labels := nodeLabel + fmt.Sprintf(",stream=%q", stream)
+				emitGauge(&sb, "constellation_runtime_agent_spool_batches", "Durable batches awaiting acknowledgement.", labels, uint64(pending))
+				emitGauge(&sb, "constellation_runtime_agent_spool_bytes", "Bytes awaiting durable acknowledgement.", labels, uint64(bytes))
+			}
+		}
 
 		emitCounter(&sb, "constellation_runtime_agent_bpf_events_total",
 			"BPF events observed by the agent since start.", nodeLabel,

@@ -36,6 +36,9 @@ type cveImportRow struct {
 // COALESCE so a sparser duplicate (e.g. a distro advisory) never clobbers a
 // richer existing row (e.g. NVD).
 func upsertCVERows(ctx context.Context, pool *pgxpool.Pool, rows []cveImportRow) error {
+	if len(rows) == 0 {
+		return nil
+	}
 	const cols = 13
 	args := make([]any, 0, len(rows)*cols)
 	var sb strings.Builder
@@ -64,7 +67,20 @@ func upsertCVERows(ctx context.Context, pool *pgxpool.Pool, rows []cveImportRow)
         aliases=CASE WHEN cardinality(EXCLUDED.aliases)>0 THEN EXCLUDED.aliases ELSE cve_records.aliases END,
         sources=CASE WHEN cardinality(EXCLUDED.sources)>0 THEN EXCLUDED.sources ELSE cve_records.sources END,
         published_at=COALESCE(EXCLUDED.published_at,cve_records.published_at),
-        modified_at=COALESCE(EXCLUDED.modified_at,cve_records.modified_at)`)
+        modified_at=COALESCE(EXCLUDED.modified_at,cve_records.modified_at)
+    WHERE (cve_records.title, cve_records.description, cve_records.cvss_base, cve_records.cvss_vector, cve_records.kev_listed, cve_records.kev_added, cve_records.epss_probability, cve_records.epss_updated_at, cve_records.aliases, cve_records.sources, cve_records.published_at, cve_records.modified_at)
+    IS DISTINCT FROM (COALESCE(NULLIF(EXCLUDED.title,''),cve_records.title),
+        COALESCE(NULLIF(EXCLUDED.description,''),cve_records.description),
+        COALESCE(EXCLUDED.cvss_base,cve_records.cvss_base),
+        COALESCE(NULLIF(EXCLUDED.cvss_vector,''),cve_records.cvss_vector),
+        cve_records.kev_listed OR EXCLUDED.kev_listed,
+        COALESCE(EXCLUDED.kev_added,cve_records.kev_added),
+        COALESCE(EXCLUDED.epss_probability,cve_records.epss_probability),
+        COALESCE(EXCLUDED.epss_updated_at,cve_records.epss_updated_at),
+        CASE WHEN cardinality(EXCLUDED.aliases)>0 THEN EXCLUDED.aliases ELSE cve_records.aliases END,
+        CASE WHEN cardinality(EXCLUDED.sources)>0 THEN EXCLUDED.sources ELSE cve_records.sources END,
+        COALESCE(EXCLUDED.published_at,cve_records.published_at),
+        COALESCE(EXCLUDED.modified_at,cve_records.modified_at))`)
 	_, err := pool.Exec(ctx, sb.String(), args...)
 	return err
 }

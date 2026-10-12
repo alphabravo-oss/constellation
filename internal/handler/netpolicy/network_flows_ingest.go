@@ -43,26 +43,27 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/flowrollup"
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
+	"github.com/alphabravocompany/constellation/internal/telemetryingest"
 	"github.com/alphabravocompany/constellation/pkg/livegraph"
 	netpolicy "github.com/alphabravocompany/constellation/pkg/netpolicy"
 )
 
 // NetworkFlowsIngest handles POST /api/v1/network-flows:bulk.
 type NetworkFlowsIngest struct {
-	db      *db.DB
-	live    *livegraph.Store // optional hot cache (plan B5); nil when disabled
-	matches *MatchStatsStore // A7: per-rule match telemetry
-	nbe     *NBEStore        // B6: cross-namespace boundary enforcement
+	db   *db.DB
+	live *livegraph.Store // optional hot cache (plan B5); nil when disabled
+	nbe  *NBEStore        // B6: cross-namespace boundary enforcement
 }
 
 // NewNetworkFlowsIngest constructs the handler.
 func NewNetworkFlowsIngest(d *db.DB) *NetworkFlowsIngest {
-	return &NetworkFlowsIngest{db: d, matches: NewMatchStatsStore(d), nbe: NewNBEStore(d)}
+	return &NetworkFlowsIngest{db: d, nbe: NewNBEStore(d)}
 }
 
 // WithLiveGraph attaches the in-memory conversation-graph cache so accepted
@@ -127,6 +128,16 @@ func (h *NetworkFlowsIngest) Bulk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Older agents discard 429 responses. Apply the new concurrency budget
+	// only to receipt-aware producers until the fleet has upgraded.
+	if r.Header.Get(telemetryingest.ProducerHeader) != "" || r.Header.Get(telemetryingest.SequenceHeader) != "" {
+		release, admitted := telemetryingest.Admit(w, tok.OrgID, *boundCluster)
+		if !admitted {
+			return
+		}
+		defer release()
+	}
+
 	// Wave M2: batched IP resolution. Build the set of distinct addresses in
 	// this batch and look them up against pod_ips + cluster_services in two
 	// queries total, then use the maps to rewrite "cluster/<ip>" workloads
@@ -141,12 +152,25 @@ func (h *NetworkFlowsIngest) Bulk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
+	receipt, replay, err := telemetryingest.Begin(r.Context(), tx, r, tok.OrgID, *boundCluster, "flows", rows)
+	if err != nil {
+		telemetryingest.WriteError(w, err)
+		return
+	}
+	if replay != nil {
+		receipt.Acknowledge(w)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(replay)
+		return
+	}
 	watermark, _, err := flowrollup.Lock(r.Context(), tx, false)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, "rollup state unavailable")
 		return
 	}
 	var lateIDs []uuid.UUID
+	var writes pgx.Batch
+	var lateRows []bool
 
 	const insertSQL = `
 INSERT INTO network_flows
@@ -170,8 +194,8 @@ VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),
 	var pending []livegraph.Flow
 
 	// A7: accumulate per-(cluster,rule) match increments across the batch so a
-	// batch of flows for the same rule costs one UPSERT after commit, not one
-	// per row. Written best-effort post-commit (see below).
+	// batch of flows for the same rule costs one UPSERT per batch. Committed
+	// atomically with flows and producer progress.
 	ruleHits := map[uuid.UUID]map[int64]ruleHit{}
 	var ruleMatches int
 	// B6: per-cluster NBE mode maps, loaded lazily once per cluster seen in the
@@ -276,8 +300,7 @@ VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),
 				policyAction = "violate"
 			}
 		}
-		var flowID uuid.UUID
-		if err := tx.QueryRow(r.Context(), insertSQL,
+		writes.Queue(insertSQL,
 			tok.OrgID, cid,
 			row.SrcWorkload, row.DstWorkload,
 			row.SrcAddr, row.DstAddr,
@@ -290,13 +313,8 @@ VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),
 			int64(row.PolicyID), int32(row.ThreatID), int16(row.Severity),
 			strings.ToLower(strings.TrimSpace(row.EPMAC)),
 			strings.ToLower(strings.TrimSpace(row.Fqdn)),
-		).Scan(&flowID); err != nil {
-			jsonError(w, http.StatusInternalServerError, "insert: "+err.Error())
-			return
-		}
-		if !row.At.After(watermark) {
-			lateIDs = append(lateIDs, flowID)
-		}
+		)
+		lateRows = append(lateRows, !row.At.After(watermark))
 		accepted++
 		// A7: attribute this flow to the rule that produced its verdict.
 		// network_flows.policy_id carries the matched dp rule id (NeuVector
@@ -337,27 +355,46 @@ VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),
 		}
 	}
 
+	results := tx.SendBatch(r.Context(), &writes)
+	for _, late := range lateRows {
+		var flowID uuid.UUID
+		if err := results.QueryRow().Scan(&flowID); err != nil {
+			_ = results.Close()
+			jsonError(w, http.StatusInternalServerError, "flow batch insert failed")
+			return
+		}
+		if late {
+			lateIDs = append(lateIDs, flowID)
+		}
+	}
+	if err := results.Close(); err != nil {
+		jsonError(w, http.StatusInternalServerError, "flow batch insert failed")
+		return
+	}
+	for cluster, hits := range ruleHits {
+		if err := recordMatches(r.Context(), tx, tok.OrgID, cluster, hits); err != nil {
+			jsonError(w, http.StatusInternalServerError, "rule match update failed")
+			return
+		}
+	}
 	if err := flowrollup.FoldLate(r.Context(), tx, lateIDs, watermark); err != nil {
 		jsonError(w, http.StatusInternalServerError, "late flow aggregation failed")
+		return
+	}
+	if err := receipt.Complete(r.Context(), tx, FlowIngestResponse{Accepted: accepted, Rejected: rejected, RuleMatches: ruleMatches, NBEFlagged: nbeFlagged, NBEDenied: nbeDenied}); err != nil {
+		telemetryingest.WriteError(w, err)
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
 		jsonError(w, http.StatusInternalServerError, "commit: "+err.Error())
 		return
 	}
+	receipt.Acknowledge(w)
+
 	// Commit succeeded — now safe to publish the buffered rows to the hot graph.
 	if h.live != nil {
 		for i := range pending {
 			h.live.Publish(pending[i])
-		}
-	}
-	// A7: flush accumulated per-rule match counters, best-effort and outside the
-	// flow-insert tx (already committed) so a stats write can never roll back
-	// accepted flows. A failure here is telemetry loss, not data loss.
-	for cluster, hits := range ruleHits {
-		if err := h.matches.RecordMatches(r.Context(), tok.OrgID, cluster, hits); err != nil {
-			slog.Default().Warn("network_rule_match_stats upsert failed",
-				slog.String("err", err.Error()), slog.String("cluster", cluster.String()))
 		}
 	}
 	slog.Default().Debug("network_flows ingest",

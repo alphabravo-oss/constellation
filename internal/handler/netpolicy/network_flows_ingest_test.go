@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -21,7 +22,7 @@ import (
 // the legacy field is omitted, and store every column.
 func TestNetworkFlowsIngest_DPFields(t *testing.T) {
 	d := openTestDB(t)
-	defer d.Close()
+	t.Cleanup(d.Close)
 	ctx := context.Background()
 	pool := d.Pool()
 
@@ -82,6 +83,33 @@ func TestNetworkFlowsIngest_DPFields(t *testing.T) {
 	handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(h.Bulk)).ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	// An acknowledged replay must not insert data or increment rule hits again.
+	producer := uuid.NewString()
+	// The original legacy upload remains a separate observation. Replay a new
+	// identified batch twice and count only its distinct EP MAC.
+	identity := uuid.MustParse(producer)
+	replayMAC := net.HardwareAddr(append([]byte{0x7a}, identity[:5]...)).String()
+	replayBody := bytes.ReplaceAll(body, []byte("76:0d:1e:a2:58:a1"), []byte(replayMAC))
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM network_flows WHERE org_id=$1 AND ep_mac=$2`, orgID, replayMAC)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM telemetry_producers WHERE producer_id=$1`, producer)
+	})
+	for range 2 {
+		request := httptest.NewRequest("POST", "/api/v1/network-flows:bulk", bytes.NewReader(replayBody))
+		request.Header.Set("Authorization", "Bearer "+raw)
+		request.Header.Set("X-Constellation-Producer", producer)
+		request.Header.Set("X-Constellation-Sequence", "1")
+		recorder := httptest.NewRecorder()
+		handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(h.Bulk)).ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusOK || recorder.Header().Get("X-Constellation-Ack") != "1" {
+			t.Fatalf("replay: %d %s", recorder.Code, recorder.Body.String())
+		}
+	}
+	var copies int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM network_flows WHERE org_id=$1 AND ep_mac=$2`, orgID, replayMAC).Scan(&copies); err != nil || copies != 1 {
+		t.Fatalf("replay copies=%d err=%v", copies, err)
 	}
 
 	// Verify the row landed with every dp field populated and `bytes` was

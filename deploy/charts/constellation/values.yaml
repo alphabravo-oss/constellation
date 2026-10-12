@@ -528,6 +528,11 @@ scanner:
 #     of inspected traffic in TAP mode; bump for higher-throughput nodes.
 runtimeAgent:
   enabled: true
+  # Persistent event/flow queues, each bounded independently. Survives pod
+  # replacement on the same node; node/disk loss requires external replication.
+  telemetrySpool:
+    hostPath: /var/lib/constellation/telemetry
+    bytesPerStream: 268435456
   image: {}
   args: []
   resources:

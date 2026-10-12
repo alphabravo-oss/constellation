@@ -27,6 +27,10 @@ spec:
       dnsPolicy: ClusterFirstWithHostNet
       tolerations: {{- toYaml .Values.runtimeAgent.tolerations | nindent 8 }}
       volumes:
+        - name: telemetry-spool
+          hostPath:
+            path: {{ .Values.runtimeAgent.telemetrySpool.hostPath | quote }}
+            type: DirectoryOrCreate
         - name: sys
           hostPath: { path: /sys, type: Directory }
         - name: bpf-fs
@@ -140,6 +144,10 @@ spec:
             # Wave 9: liveness + readiness HTTP server.
             - name: CONSTELLATION_HEALTH_ADDR
               value: ":{{ .Values.runtimeAgent.healthPort | default 9404 }}"
+            - name: CONSTELLATION_TELEMETRY_SPOOL_DIR
+              value: /var/lib/constellation/telemetry
+            - name: CONSTELLATION_TELEMETRY_SPOOL_BYTES
+              value: {{ .Values.runtimeAgent.telemetrySpool.bytesPerStream | int64 | quote }}
             {{- if .Values.runtimeAgent.dp.enabled }}
             - name: CONSTELLATION_DP_ENABLED
               value: "true"
@@ -214,6 +222,8 @@ spec:
           readinessProbe: {{- toYaml . | nindent 12 }}
           {{- end }}
           volumeMounts:
+            - name: telemetry-spool
+              mountPath: /var/lib/constellation/telemetry
             - name: sys
               mountPath: /sys
               readOnly: true

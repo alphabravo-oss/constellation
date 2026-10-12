@@ -11,9 +11,9 @@
 // elapses (whichever happens first), then POSTs the array as JSON to the control-plane
 // at $CONSTELLATION_API_URL/api/v1/events:bulk with Bearer $RUNTIME_AGENT_TOKEN.
 //
-// The POST is retried with exponential backoff up to 3 times (100ms, 400ms, 1.6s). After
-// the final failure the batch is dropped and the agent's `dropped` counter is bumped, so
-// operators can alarm on `constellation_runtime_agent_dropped_total > 0`.
+// Events and flows are persisted to a bounded node-local spool and replayed in
+// producer order until the API acknowledges durable commit. Queue overflow
+// increments dropped counters; upstream kernel/channel buffers remain volatile.
 //
 // Configuration env vars (* required for upload):
 //
@@ -36,12 +36,9 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/netip"
@@ -50,6 +47,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -381,11 +379,21 @@ func main() {
 	}
 
 	// Upload goroutine — single writer; events are pushed onto `toUpload` channel.
+	var telemetryUploads sync.WaitGroup
 	var toUpload chan ingestEvent
 	if uploadEnabled {
 		toUpload = make(chan ingestEvent, batchSize*4)
-		go uploadLoop(ctx, logger, withClusterID(apiURL+"/api/v1/events:bulk", clusterID), apiToken, batchSize,
-			time.Duration(batchIntervalMs)*time.Millisecond, toUpload, &nUploaded, &nDropped)
+		target := withClusterID(apiURL+"/api/v1/events:bulk", clusterID)
+		queue, err := openTelemetryQueue("events", target)
+		if err != nil {
+			logger.Error("open event spool", slog.String("error", err.Error()))
+			os.Exit(2)
+		}
+		telemetryUploads.Add(1)
+		go func() {
+			defer telemetryUploads.Done()
+			durableUploadLoop(ctx, logger, queue, target, apiToken, batchSize, time.Duration(batchIntervalMs)*time.Millisecond, toUpload, &nUploaded, &nDropped)
+		}()
 	}
 
 	// Network-flows lane: every dp.EventConnection becomes one row on this
@@ -402,8 +410,17 @@ func main() {
 	if uploadEnabled {
 		flowOut = make(chan flowIngestRow, 8192)
 
-		go flowUploadLoop(ctx, logger, apiURL+"/api/v1/network-flows:bulk", apiToken,
-			200, 5*time.Second, flowOut, &nFlowsUploaded, &nFlowsDropped)
+		target := withClusterID(apiURL+"/api/v1/network-flows:bulk", clusterID)
+		queue, err := openTelemetryQueue("flows", target)
+		if err != nil {
+			logger.Error("open flow spool", slog.String("error", err.Error()))
+			os.Exit(2)
+		}
+		telemetryUploads.Add(1)
+		go func() {
+			defer telemetryUploads.Done()
+			durableUploadLoop(ctx, logger, queue, target, apiToken, 200, 5*time.Second, flowOut, &nFlowsUploaded, &nFlowsDropped)
+		}()
 
 		// Wave 5: threat upload. Only starts when dp is enabled — the BPF
 		// path doesn't produce DPI threat detections.
@@ -1095,16 +1112,16 @@ func main() {
 		logger.Error("runtime-agent: Run returned", slog.String("err", err.Error()))
 	}
 
-	// Drain the upload channel so the last partial batch flushes before exit.
-	if toUpload != nil {
-		close(toUpload)
-	}
+	// Stop producers and let each lane persist its already-buffered records.
+	// Do not close channels while cancellation is propagating to producers.
+	cancel()
 	if flowOut != nil {
 		// Aggregator's Run() exits on ctx cancel; closing flowOut here would
 		// race with that goroutine, so we just leave it for the GC.
 		_ = flowOut
 	}
-	// Give the upload loops a brief window to drain.
+	telemetryUploads.Wait()
+	// Give the remaining best-effort lanes a brief window to drain.
 	if uploadEnabled {
 		time.Sleep(time.Duration(batchIntervalMs)*time.Millisecond + 500*time.Millisecond)
 	}
@@ -1115,112 +1132,8 @@ func main() {
 		nFlowsUploaded.Load(), nFlowsDropped.Load())
 }
 
-// flowUploadLoop drains bucketed flows into batches and POSTs them to
-// /api/v1/network-flows:bulk. Mirrors uploadLoop above but for flowIngestRow.
-func flowUploadLoop(
-	ctx context.Context,
-	logger *slog.Logger,
-	url, token string,
-	size int,
-	interval time.Duration,
-	in <-chan flowIngestRow,
-	uploaded, dropped *atomic.Uint64,
-) {
-	client := sharedUploadClient
-	sem := make(chan struct{}, maxInFlightUploads)
-	buf := make([]flowIngestRow, 0, size)
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	flush := func() {
-		if len(buf) == 0 {
-			return
-		}
-		batch := buf
-		buf = make([]flowIngestRow, 0, size)
-		// Bound in-flight POSTs: block briefly for a slot so a wedged API
-		// can't leak an unbounded number of upload goroutines + batches.
-		select {
-		case sem <- struct{}{}:
-		case <-ctx.Done():
-			return
-		}
-		go func() {
-			defer func() { <-sem }()
-			if err := postFlowBatch(ctx, client, url, token, batch); err != nil {
-				logger.Warn("flow upload failed; dropping",
-					slog.Int("batch", len(batch)),
-					slog.String("err", err.Error()))
-				dropped.Add(uint64(len(batch)))
-				return
-			}
-			uploaded.Add(uint64(len(batch)))
-		}()
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			flush()
-			return
-		case row, ok := <-in:
-			if !ok {
-				flush()
-				return
-			}
-			buf = append(buf, row)
-			if len(buf) >= size {
-				flush()
-				ticker.Reset(interval)
-			}
-		case <-ticker.C:
-			flush()
-		}
-	}
-}
-
-// postFlowBatch posts a batch of flow rows with the same retry semantics as
-// postBatch.
 func postFlowBatch(ctx context.Context, client *http.Client, url, token string, batch []flowIngestRow) error {
-	body, err := json.Marshal(batch)
-	if err != nil {
-		return fmt.Errorf("marshal: %w", err)
-	}
-	delays := []time.Duration{0, 100 * time.Millisecond, 400 * time.Millisecond, 1600 * time.Millisecond}
-	var lastErr error
-	for _, delay := range delays {
-		if delay > 0 {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(delay):
-			}
-		}
-		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
-		if err != nil {
-			return fmt.Errorf("new request: %w", err)
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+token)
-		resp, err := client.Do(req)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		_ = resp.Body.Close()
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			return nil
-		}
-		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
-			return fmt.Errorf("server %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
-		}
-		lastErr = fmt.Errorf("server %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
-	}
-	if lastErr == nil {
-		lastErr = errors.New("unknown flow upload failure")
-	}
-	return lastErr
+	return postLegacyBatch(ctx, client, url, token, batch)
 }
 
 // ingestEvent is the wire shape sent to POST /api/v1/events:bulk. Kept here as a private
@@ -1288,121 +1201,8 @@ type ingestEvent struct {
 	ZeroDriftReason string `json:"zero_drift_reason,omitempty"`
 }
 
-// uploadLoop is the single writer that drains `in` into batches and POSTs each batch.
-// Flush triggers: batch reaches `size`, or `interval` elapses since the last flush.
-//
-// Failures retry up to 3 times with exponential backoff (100ms, 400ms, 1.6s). After the
-// final failure the batch is dropped and `dropped` is bumped by len(batch).
-func uploadLoop(
-	ctx context.Context,
-	logger *slog.Logger,
-	url, token string,
-	size int,
-	interval time.Duration,
-	in <-chan ingestEvent,
-	uploaded, dropped *atomic.Uint64,
-) {
-	client := sharedUploadClient
-	sem := make(chan struct{}, maxInFlightUploads)
-	buf := make([]ingestEvent, 0, size)
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	flush := func() {
-		if len(buf) == 0 {
-			return
-		}
-		// Try POST + retries. Avoid blocking the loop forever on a wedged API: the total
-		// retry budget is ~2.1s.
-		batch := buf
-		buf = make([]ingestEvent, 0, size)
-		// Bound in-flight POSTs: block briefly for a slot so a wedged API
-		// can't leak an unbounded number of upload goroutines + batches.
-		select {
-		case sem <- struct{}{}:
-		case <-ctx.Done():
-			return
-		}
-		go func() {
-			defer func() { <-sem }()
-			if err := postBatch(ctx, client, url, token, batch); err != nil {
-				logger.Warn("upload batch failed; dropping",
-					slog.Int("batch", len(batch)),
-					slog.String("err", err.Error()))
-				dropped.Add(uint64(len(batch)))
-				return
-			}
-			uploaded.Add(uint64(len(batch)))
-		}()
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			flush()
-			return
-		case ev, ok := <-in:
-			if !ok {
-				flush()
-				return
-			}
-			buf = append(buf, ev)
-			if len(buf) >= size {
-				flush()
-				ticker.Reset(interval)
-			}
-		case <-ticker.C:
-			flush()
-		}
-	}
-}
-
-// postBatch marshals + POSTs the batch, with up to 3 retries on transient failures.
-// A non-2xx response is treated as terminal — there's no point retrying a 400. A network
-// error or 5xx is retried.
 func postBatch(ctx context.Context, client *http.Client, url, token string, batch []ingestEvent) error {
-	body, err := json.Marshal(batch)
-	if err != nil {
-		return fmt.Errorf("marshal: %w", err)
-	}
-	delays := []time.Duration{0, 100 * time.Millisecond, 400 * time.Millisecond, 1600 * time.Millisecond}
-	var lastErr error
-	for attempt, delay := range delays {
-		if delay > 0 {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(delay):
-			}
-		}
-		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
-		if err != nil {
-			return fmt.Errorf("new request: %w", err)
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+token)
-		resp, err := client.Do(req)
-		if err != nil {
-			lastErr = err
-			continue // retry
-		}
-		// Drain the body so the connection can be reused.
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		_ = resp.Body.Close()
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			return nil
-		}
-		// 4xx -> terminal, no point retrying with the same body.
-		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
-			return fmt.Errorf("server %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
-		}
-		lastErr = fmt.Errorf("server %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
-		_ = attempt
-	}
-	if lastErr == nil {
-		lastErr = errors.New("unknown upload failure")
-	}
-	return lastErr
+	return postLegacyBatch(ctx, client, url, token, batch)
 }
 
 // selectTapProvider picks how the dp supervisor will discover interfaces to

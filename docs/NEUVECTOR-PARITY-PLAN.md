@@ -1,7 +1,7 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-11** (source/stack and live infrastructure review;
+Last reconciled: **2026-10-12** (source/stack and live infrastructure review;
 prior feature acceptance evidence remains dated below)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
@@ -57,6 +57,52 @@ Parity and switchability are release-ready only when:
 - Every applicable Technology Selection Guide requirement has implementation and
   acceptance evidence, or an explicitly reviewed deviation with rationale, owner,
   risk, and review date. Report deviations separately from strict conformance.
+
+## October 12 implementation continuation
+
+**Parity is not release-complete.** The feature checklist still has 53 checked
+and 100 open items. Counts describe acceptance items, not a percentage of code
+implemented. The complete scope and remaining gates are retained below; do not
+convert partially implemented items into checked boxes.
+
+The separately requested [ClickHouse plan](CLICKHOUSE-PLAN.md) defines evaluation,
+transactional export, tenancy, schema, duplicate-safe aggregates, retention/holds,
+RustFS test recovery, benchmark targets, canary and rollback. It is subordinate
+to OPS-2; ClickHouse is neither deployed nor required for initial streaming.
+
+This implementation adds migration 169 and durable ordered event/flow upload:
+private bounded node spools, stable producer/sequence, receipt+data in the same
+transaction, matching acknowledgement, restart replay, 429/Retry-After, bounded
+per-cluster concurrent ingestion, batched PostgreSQL inserts, and transactional
+rule-hit counters. Legacy upload callers remain compatible. API/migration must
+roll out before agents; an older API cannot acknowledge/dequeue the new spool.
+See [telemetry delivery](telemetry-delivery.md) for limits and remaining work.
+
+CI remains a release blocker. The October 11 run reported 2,299 lint findings,
+263 standalone gosec findings, 10 historical secret-scanner findings, formatting,
+shell lint, reachable dependency vulnerabilities, and browser login throttling.
+The SARIF normalizer, login setup honoring Retry-After, and shell fixes address
+specific failures. The production browser auth/session/migration batch now passes
+all 11 tests, and shell lint and 13 security-tooling tests pass. Go is updated to
+1.26.9 with the identified x/net/x/text and OpenTelemetry fixes. A new full
+govulncheck run reports zero reachable vulnerabilities (five other package/module
+advisories remain reported without reachable calls), and all Go packages compile.
+These fixes do not establish green CI. Historical secret findings need
+classification/remediation and any genuine credentials revoked; do not broadly
+allowlist them or rewrite shared history without a reviewed recovery plan.
+
+Still required before claiming OPS-2 or full parity: durable response-action
+outbox, remaining telemetry lanes, producer-registration budgets/lifecycle,
+cluster-fair scheduling and rate/byte budgets, independent rollup progress,
+regional ownership/transfer, simultaneous ingest/read/prune/backup failure and
+capacity tests, live deployment smoke, and the complete A–K acceptance matrix.
+Unchanged CVE import rows now skip UPDATE after comparing the fully merged row;
+a real PostgreSQL test verifies unchanged/sparse input preserves xmin and changed
+input still updates. DB-18 remains open for persistent feed checkpoints and measured
+WAL/dead-tuple improvement.
+
+The existing global rollup lock and global control-audit chain remain scaling
+constraints; this change does not claim to remove them.
 
 ## Current baseline
 
