@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 const CLUSTER_ID = "11111111-1111-4111-8111-111111111111";
-const SCOPES = ["Organization", "Platform", "Integrations", "Cluster"];
+const SCOPES = ["Clusters", "Organization", "Platform", "Integrations"];
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("constellation.sidebar.collapsed", "0"));
@@ -50,7 +50,7 @@ test("scope navigation keeps the same order and canonical routes", async ({ page
   const settingsScopes = page.locator('main section[aria-label]');
   await expect(settingsScopes).toHaveCount(4);
   expect(await settingsScopes.evaluateAll((elements) => elements.map((element) => element.getAttribute("aria-label")))).toEqual(SCOPES);
-  await expect(page.getByRole("region", { name: "Cluster" }).getByRole("link", { name: /Connect a cluster/ })).toHaveAttribute("href", "/settings/clusters/new");
+  await expect(page.getByRole("region", { name: "Clusters" }).getByRole("link", { name: /Connect a cluster/ })).toHaveAttribute("href", "/settings/clusters/new");
 
   await page.goto("/settings/api-tokens");
   await expect(organization.getByRole("button", { name: "Organization" })).toHaveAttribute("aria-expanded", "true");
@@ -58,8 +58,8 @@ test("scope navigation keeps the same order and canonical routes", async ({ page
 
   await page.goto(`/clusters/${CLUSTER_ID}/dashboard`);
   await expectScopeOrder(page);
-  const cluster = nav.getByRole("group", { name: "Cluster", exact: true });
-  await expect(cluster.getByRole("button", { name: "Cluster", exact: true })).toHaveAttribute("aria-expanded", "true");
+  const cluster = nav.getByRole("group", { name: "Clusters", exact: true });
+  await expect(cluster.getByRole("link", { name: "Clusters", exact: true })).toBeVisible();
   await expect(cluster.getByRole("link", { name: "Clusters" })).toHaveAttribute("href", "/clusters");
   await expect(cluster.getByRole("button", { name: "Switch cluster" })).toBeVisible();
   await expect(cluster.getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", `/clusters/${CLUSTER_ID}/dashboard`);

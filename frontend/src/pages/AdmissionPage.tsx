@@ -1,17 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import {
   Download,
   FileCheck2,
   FileText,
   ListChecks,
   Plus,
+  Pencil,
   Power,
   PowerOff,
   ShieldAlert,
   ShieldCheck,
-  Sparkles,
   Trash2,
   UploadCloud,
 } from "lucide-react";
@@ -24,7 +24,6 @@ import {
   type AdmissionProfileImportPolicy,
   type AdmissionRuleRow,
   type AdmissionState,
-  type AdmissionStateInput,
 } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { PageHeader } from "@/components/ui/page";
@@ -34,6 +33,8 @@ import { Switch, Field, Select, TextInput } from "@/components/ui/form";
 import { VerdictBanner, type VerdictStatus } from "@/components/ui/verdict-banner";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { StatCard } from "@/components/ui/stat-card";
+import { Tabs, useTabParam } from "@/components/ui/tabs";
+import { ErrorState, LoadingState } from "@/components/ui/states";
 import { StatusPill } from "@/components/ui/status-pill";
 import {
   admissionDryRunHistoryKey,
@@ -49,8 +50,14 @@ import {
 
 type ProfileMode = "monitor" | "enforce";
 
-export function AdmissionPage() {
+export function AdmissionPage({ view }: { view?: "import" }) {
   const { clusterId } = useCluster();
+  return <AdmissionWorkspace key={clusterId ?? "none"} clusterId={clusterId} view={view} />;
+}
+
+function AdmissionWorkspace({ clusterId, view }: { clusterId?: string; view?: "import" }) {
+  const [requestedTab, setTab] = useTabParam("tab", "rules");
+  const tab = ["rules", "assessment", "catalog", "webhook"].includes(requestedTab) ? requestedTab : "rules";
   const navigate = useNavigate();
   const qc = useQueryClient();
   const params = { cluster_id: clusterId };
@@ -78,13 +85,8 @@ export function AdmissionPage() {
     enabled: !!clusterId,
   });
 
-  const saveState = useMutation({
-    mutationFn: (patch: Partial<AdmissionStateInput>) => policiesApi.updateAdmissionState(patch, params),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["admission-state", clusterId] }),
-  });
-
   const invalidateRules = () => {
-    void qc.invalidateQueries({ queryKey: ["admission-rules", clusterId] });
+    void qc.invalidateQueries({ queryKey: ["admission-rules"] });
     void qc.invalidateQueries({ queryKey: ["policies"] });
   };
   const toggleRule = useMutation({
@@ -126,6 +128,7 @@ export function AdmissionPage() {
     onSuccess: (result) => {
       invalidateRules();
       setProfileMessage(`Imported ${result.imported} admission rules from ${result.profile_id}.`);
+      previewProfile.reset();
     },
   });
   const exportProfile = useMutation({
@@ -178,7 +181,6 @@ export function AdmissionPage() {
   const webhookHealth = useMemo(() => admissionWebhookHealth(admissionComponents), [admissionComponents]);
   const groupedCriteria = useMemo(() => groupCriteria(criteria), [criteria]);
   const ruleStats = useMemo(() => summarizeRules(rules), [rules]);
-  const profileStats = useMemo(() => summarizeProfiles(profiles), [profiles]);
   const serverDryRunHistory = useMemo(
     () => (serverDryRunHistoryQ.data?.history ?? []).map(admissionDryRunHistoryEntryFromRow),
     [serverDryRunHistoryQ.data?.history],
@@ -191,7 +193,7 @@ export function AdmissionPage() {
     () => summarizeProfile(selectedProfile),
     [selectedProfile],
   );
-  const verdict = admissionVerdict(state);
+  const verdict = stateQ.isError ? { status: "degraded" as const, title: "Admission state could not be refreshed", detail: "Retry before relying on the displayed configuration." } : admissionVerdict(state);
   const dryRunOutcome = state && assess.data ? admissionOutcome(state, assess.data.decision) : null;
 
   const ruleColumns = useMemo<Column<AdmissionRuleRow>[]>(
@@ -266,6 +268,7 @@ export function AdmissionPage() {
           const busy = toggleRule.isPending || deleteRule.isPending;
           return (
             <div className="flex items-center justify-end gap-1">
+              <Link to="." href={`/clusters/${clusterId}/policies/${rule.id}?from=admission`} aria-label={`Edit ${rule.name}`} className="rounded p-1 hover:bg-accent"><Pencil className="h-3.5 w-3.5" /></Link>
               <button
                 type="button"
                 title={rule.enabled ? "Disable" : "Enable"}
@@ -289,7 +292,7 @@ export function AdmissionPage() {
         },
       },
     ],
-    [deleteRule, toggleRule],
+    [clusterId, deleteRule, toggleRule],
   );
 
   const criteriaColumns = useMemo<Column<AdmissionCriterionOption>[]>(
@@ -417,130 +420,8 @@ export function AdmissionPage() {
     [],
   );
 
-  return (
-    <div className="space-y-5">
-      <PageHeader
-        title="Admission Control"
-        description="Cluster admission state, rules, criteria, profile templates, and dry-run results in one workspace."
-      />
-
-      <VerdictBanner status={verdict.status} title={verdict.title} detail={verdict.detail} />
-
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6" data-testid="admission-summary">
-        <StatCard
-          label="Webhook"
-          value={admissionComponentsQ.isPending ? "..." : webhookHealth.label}
-          tone={state?.enabled === false ? "medium" : webhookHealth.statTone}
-          icon={<ShieldCheck className="h-3.5 w-3.5" />}
-          hint={state ? `${state.enabled ? "enabled" : "disabled"} · ${webhookHealth.detail}` : "loading"}
-        />
-        <StatCard
-          label="Mode"
-          value={state?.mode ? labelCase(state.mode) : "..."}
-          tone={state?.mode === "protect" ? "low" : "accent"}
-          icon={<ShieldAlert className="h-3.5 w-3.5" />}
-          hint={state?.default_action ? `default ${state.default_action}` : "cluster posture"}
-        />
-        <StatCard
-          label="Rules"
-          value={rulesQ.isPending ? "..." : ruleStats.total.toLocaleString()}
-          icon={<ListChecks className="h-3.5 w-3.5" />}
-          hint={`${ruleStats.enabled} enabled / ${ruleStats.disabled} disabled`}
-        />
-        <StatCard
-          label="Enforcing"
-          value={rulesQ.isPending ? "..." : ruleStats.enforce.toLocaleString()}
-          tone={ruleStats.enforce > 0 ? "low" : "neutral"}
-          icon={<Power className="h-3.5 w-3.5" />}
-          hint={`${ruleStats.monitor} monitor`}
-        />
-        <StatCard
-          label="Criteria"
-          value={optionsQ.isPending ? "..." : criteria.length.toLocaleString()}
-          icon={<FileCheck2 className="h-3.5 w-3.5" />}
-          hint={`${groupedCriteria.length} families`}
-        />
-        <StatCard
-          label="Profiles"
-          value={profilesQ.isPending ? "..." : profiles.length.toLocaleString()}
-          icon={<Sparkles className="h-3.5 w-3.5" />}
-          hint={`${profileStats.rules} template rules`}
-        />
-      </div>
-
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <Card title="State" description="Global admission-control posture for the selected cluster.">
-          {stateQ.isPending || !state ? (
-            <p className="text-sm text-muted-foreground">Loading...</p>
-          ) : (
-            <div className="space-y-4" data-testid="admission-state-panel">
-              <Switch
-                checked={state.enabled}
-                disabled={saveState.isPending}
-                onCheckedChange={(enabled) => saveState.mutate({ enabled })}
-                label="Enable admission control"
-                description="When off, workloads are admitted even if rules would match."
-              />
-              <div className="grid gap-4 sm:grid-cols-3">
-                <Field label="Mode" hint="Monitor observes; Protect blocks deny decisions.">
-                  <Select
-                    value={state.mode}
-                    disabled={!state.enabled || saveState.isPending}
-                    onChange={(event) => saveState.mutate({ mode: event.target.value as "monitor" | "protect" })}
-                  >
-                    <option value="monitor">Monitor</option>
-                    <option value="protect">Protect</option>
-                  </Select>
-                </Field>
-                <Field label="Default action" hint="Verdict when no rule matches.">
-                  <Select
-                    value={state.default_action}
-                    disabled={!state.enabled || saveState.isPending}
-                    onChange={(event) => saveState.mutate({ default_action: event.target.value as "allow" | "deny" })}
-                  >
-                    <option value="allow">Allow</option>
-                    <option value="deny">Deny</option>
-                  </Select>
-                </Field>
-                <Field label="Failure policy" hint="API-server behavior when the webhook is unreachable.">
-                  <Select
-                    value={state.failure_policy}
-                    disabled={!state.enabled || saveState.isPending}
-                    onChange={(event) => saveState.mutate({ failure_policy: event.target.value as "ignore" | "fail" })}
-                  >
-                    <option value="ignore">Ignore (fail-open)</option>
-                    <option value="fail">Fail (fail-closed)</option>
-                  </Select>
-                </Field>
-              </div>
-              {saveState.isError ? <p className="text-sm text-status-error">{errorMessage(saveState.error)}</p> : null}
-            </div>
-          )}
-        </Card>
-
-        <Card title="Webhook Details" description="Current admission-control fields." bodyClassName="p-5">
-          {state ? (
-            <dl className="divide-y divide-border">
-              <DetailRow label="Cluster" mono>{state.cluster_id}</DetailRow>
-              <DetailRow label="Liveness"><StatusPill label={webhookHealth.label} tone={webhookHealth.tone} /></DetailRow>
-              <DetailRow label="Instances">{webhookHealth.instances} observed / {webhookHealth.healthy} healthy</DetailRow>
-              <DetailRow label="Last heartbeat">{formatDateTime(webhookHealth.latestSeenAt)}</DetailRow>
-              <DetailRow label="Applied revision" mono>{webhookHealth.appliedRevision || "-"}</DetailRow>
-              {webhookHealth.lastError ? <DetailRow label="Last component error">{webhookHealth.lastError}</DetailRow> : null}
-              <DetailRow label="Enabled"><StatusPill label={state.enabled ? "enabled" : "disabled"} tone={state.enabled ? "success" : "neutral"} /></DetailRow>
-              <DetailRow label="Mode"><RuleModePill mode={state.mode} /></DetailRow>
-              <DetailRow label="Default action"><ActionPill action={state.default_action} /></DetailRow>
-              <DetailRow label="Failure policy">
-                <StatusPill label={state.failure_policy === "fail" ? "fail closed" : "fail open"} tone={state.failure_policy === "fail" ? "success" : "warning"} />
-              </DetailRow>
-              <DetailRow label="Updated">{formatDateTime(state.updated_at)}</DetailRow>
-            </dl>
-          ) : (
-            <p className="text-sm text-muted-foreground">Loading...</p>
-          )}
-        </Card>
-      </div>
-
+  const resetProfilePreview = () => { previewProfile.reset(); importProfile.reset(); setProfileMessage(""); };
+  const rulesView = (
       <Card
         title="Admission Rules"
         description="Admission policies compiled for the webhook."
@@ -551,23 +432,25 @@ export function AdmissionPage() {
           </Button>
         }
       >
-        <DataTable<AdmissionRuleRow>
+        {(toggleRule.isError || deleteRule.isError) && <ErrorState title="Could not update this admission rule. Try again." />}
+        {rulesQ.isError ? <ErrorState title="Could not load admission rules." action={<Button onClick={() => void rulesQ.refetch()}>Retry</Button>} /> : rulesQ.isPending ? <LoadingState label="Loading admission rules…" /> : <DataTable<AdmissionRuleRow>
           rows={rules}
           columns={ruleColumns}
           rowKey={(rule) => rule.id}
-          density="compact"
-          showDensityToggle={false}
+          preferencesKey="admission-rules"
           testId="admission-rule-table"
           emptyState={
             <div className="px-6 py-10 text-center text-xs text-muted-foreground">
               No admission rules yet. Use the profile templates or create a custom rule.
             </div>
           }
-        />
+        />}
       </Card>
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+  );
+  const catalogView = (
         <Card title="Criteria Catalog" description="Supported rule-builder criteria." padded={false}>
+          {optionsQ.isError && <ErrorState title="Could not load criteria." action={<Button onClick={() => void optionsQ.refetch()}>Retry</Button>} />}
           <div className="border-b border-border p-4" data-testid="admission-options-catalog">
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
               {groupedCriteria.map((group) => (
@@ -588,9 +471,35 @@ export function AdmissionPage() {
           />
         </Card>
 
+  );
+  const webhookView = (
+        <Card title="Webhook Details" description="Current admission-control fields." bodyClassName="p-5">
+          {stateQ.isError ? <ErrorState title="Could not load admission state." action={<Button onClick={() => void stateQ.refetch()}>Retry</Button>} /> : state ? (
+            <dl className="divide-y divide-border">
+              <DetailRow label="Cluster" mono>{state.cluster_id}</DetailRow>
+              {admissionComponentsQ.isError && <DetailRow label="Status">Component health could not be loaded.</DetailRow>}
+              <DetailRow label="Liveness"><StatusPill label={webhookHealth.label} tone={webhookHealth.tone} /></DetailRow>
+              <DetailRow label="Instances">{webhookHealth.instances} observed / {webhookHealth.healthy} healthy</DetailRow>
+              <DetailRow label="Last heartbeat">{formatDateTime(webhookHealth.latestSeenAt)}</DetailRow>
+              <DetailRow label="Applied revision" mono>{webhookHealth.appliedRevision || "-"}</DetailRow>
+              {webhookHealth.lastError ? <DetailRow label="Last component error">{webhookHealth.lastError}</DetailRow> : null}
+              <DetailRow label="Enabled"><StatusPill label={state.enabled ? "enabled" : "disabled"} tone={state.enabled ? "success" : "neutral"} /></DetailRow>
+              <DetailRow label="Mode"><RuleModePill mode={state.mode} /></DetailRow>
+              <DetailRow label="Default action"><ActionPill action={state.default_action} /></DetailRow>
+              <DetailRow label="Failure policy">
+                <StatusPill label={state.failure_policy === "fail" ? "fail closed" : "fail open"} tone={state.failure_policy === "fail" ? "success" : "warning"} />
+              </DetailRow>
+              <DetailRow label="Updated">{formatDateTime(state.updated_at)}</DetailRow>
+            </dl>
+          ) : (
+            <p className="text-sm text-muted-foreground">Loading...</p>
+          )}
+        </Card>
+  );
+  const profileView = (
         <Card
-          title="Profile Templates"
-          description="Built-in admission bundles for NeuVector-style rollout."
+          title="Import profile"
+          description="Import organization-wide admission rules. These templates apply across clusters; review the preview before importing."
           action={
             <Button
               size="sm"
@@ -602,23 +511,24 @@ export function AdmissionPage() {
             </Button>
           }
         >
-          <div className="space-y-4" data-testid="admission-profile-templates">
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_160px_120px]">
-              <Field label="Profile">
-                <Select value={selectedProfileId} onChange={(event) => setProfileSelection(event.target.value)}>
+          {profilesQ.isError && <ErrorState title="Could not load profiles." action={<Button onClick={() => void profilesQ.refetch()}>Retry</Button>} />}
+          <fieldset disabled={previewProfile.isPending || importProfile.isPending || profilesQ.isPending || profilesQ.isError} className="space-y-4" data-testid="admission-profile-templates">
+            <div className="grid gap-4 lg:grid-cols-3">
+              <Field label="Profile" htmlFor="admission-profile">
+                <Select id="admission-profile" value={selectedProfileId} onChange={(event) => { resetProfilePreview(); setProfileSelection(event.target.value); }}>
                   {profiles.map((profile) => (
                     <option key={profile.id} value={profile.id}>{profile.name}</option>
                   ))}
                 </Select>
               </Field>
-              <Field label="Import mode">
-                <Select value={profileMode} onChange={(event) => setProfileMode(event.target.value as ProfileMode)}>
+              <Field label="Import mode" htmlFor="admission-profile-mode">
+                <Select id="admission-profile-mode" value={profileMode} onChange={(event) => { resetProfilePreview(); setProfileMode(event.target.value as ProfileMode); }}>
                   <option value="monitor">Monitor</option>
                   <option value="enforce">Enforce</option>
                 </Select>
               </Field>
               <div className="pt-5">
-                <Switch checked={profileEnabled} onCheckedChange={setProfileEnabled} label="Enabled" />
+                <Switch checked={profileEnabled} onCheckedChange={(enabled) => { resetProfilePreview(); setProfileEnabled(enabled); }} label="Enabled" />
               </div>
             </div>
 
@@ -638,7 +548,7 @@ export function AdmissionPage() {
                 type="button"
                 variant="primary"
                 size="sm"
-                disabled={!selectedProfileId || importProfile.isPending}
+                disabled={!selectedProfileId || importProfile.isPending || !previewProfile.data || previewProfile.isError}
                 onClick={() => importProfile.mutate()}
               >
                 <UploadCloud className="h-3.5 w-3.5" /> {importProfile.isPending ? "Importing..." : "Import profile"}
@@ -646,9 +556,9 @@ export function AdmissionPage() {
               {profileMessage ? <span className="text-xs text-status-success">{profileMessage}</span> : null}
             </div>
 
-            {previewProfile.isError ? <p className="text-sm text-status-error">{errorMessage(previewProfile.error)}</p> : null}
-            {importProfile.isError ? <p className="text-sm text-status-error">{errorMessage(importProfile.error)}</p> : null}
-            {exportProfile.isError ? <p className="text-sm text-status-error">{errorMessage(exportProfile.error)}</p> : null}
+            {previewProfile.isError ? <p className="text-sm text-status-error">{errorMessage()}</p> : null}
+            {importProfile.isError ? <p className="text-sm text-status-error">{errorMessage()}</p> : null}
+            {exportProfile.isError ? <p className="text-sm text-status-error">{errorMessage()}</p> : null}
 
             {previewProfile.data ? (
               <div data-testid="admission-profile-preview">
@@ -665,25 +575,25 @@ export function AdmissionPage() {
                 />
               </div>
             ) : null}
-          </div>
+          </fieldset>
         </Card>
-      </div>
-
+  );
+  const assessmentView = (
       <Card title="Dry-run Assessment" description="Evaluate an image against the current admission ruleset.">
         <form
           className="flex flex-wrap items-end gap-2"
           onSubmit={(event) => {
             event.preventDefault();
-            if (image.trim()) assess.mutate();
+            if (image.trim() && !assess.isPending) assess.mutate();
           }}
         >
           <div className="min-w-[260px] flex-1">
-            <label className="mb-1 block text-[10px] uppercase tracking-wide text-muted-foreground">Image</label>
-            <TextInput placeholder="ghcr.io/org/app:1.2.3" value={image} onChange={(event) => setImage(event.target.value)} />
+            <label className="mb-1 block text-[10px] uppercase tracking-wide text-muted-foreground" htmlFor="admission-assess-image">Image</label>
+            <TextInput id="admission-assess-image" placeholder="ghcr.io/org/app:1.2.3" value={image} disabled={assess.isPending} onChange={(event) => { assess.reset(); setImage(event.target.value); }} />
           </div>
           <div className="w-[180px]">
-            <label className="mb-1 block text-[10px] uppercase tracking-wide text-muted-foreground">Namespace</label>
-            <TextInput placeholder="default" value={namespace} onChange={(event) => setNamespace(event.target.value)} />
+            <label className="mb-1 block text-[10px] uppercase tracking-wide text-muted-foreground" htmlFor="admission-assess-namespace">Namespace</label>
+            <TextInput id="admission-assess-namespace" placeholder="default" value={namespace} disabled={assess.isPending} onChange={(event) => { assess.reset(); setNamespace(event.target.value); }} />
           </div>
           <Button type="submit" variant="primary" size="sm" disabled={!image.trim() || assess.isPending}>
             {assess.isPending ? "Assessing..." : "Assess"}
@@ -745,7 +655,8 @@ export function AdmissionPage() {
             )}
           </div>
         ) : null}
-        {assess.isError ? <p className="mt-3 text-sm text-status-error">{errorMessage(assess.error)}</p> : null}
+        {assess.isError ? <p className="mt-3 text-sm text-status-error">{errorMessage()}</p> : null}
+        {(serverDryRunHistoryQ.isError || clearDryRunHistory.isError) && <ErrorState title="Assessment history could not be refreshed." action={<Button onClick={() => void serverDryRunHistoryQ.refetch()}>Retry</Button>} />}
         {mergedDryRunHistory.length > 0 ? (
           <div className="mt-5 border-t border-border pt-4" data-testid="admission-dry-run-history">
             <div className="mb-2 flex items-center justify-between gap-3">
@@ -781,6 +692,68 @@ export function AdmissionPage() {
           </div>
         ) : null}
       </Card>
+  );
+  if (view === "import") return <div className="space-y-6">
+    <PageHeader title="Import admission profile" description="Review an organization-wide template before adding its rules."
+      backLink={<Link to="." href={`/clusters/${clusterId}/admission`}>Back to Admission Control</Link>} />
+    {profileView}
+    <Button disabled={importProfile.isPending} onClick={() => navigate({ href: `/clusters/${clusterId}/admission` })}>Cancel</Button>
+  </div>;
+
+  return (
+    <div className="space-y-5">
+      <PageHeader
+        title="Admission Control"
+        description="Review admission rules and assess which deployments they would block."
+        actions={<div className="flex gap-2"><Button onClick={() => navigate({ href: `/clusters/${clusterId}/admission/settings` })}>Edit admission settings</Button><Button onClick={() => navigate({ href: `/clusters/${clusterId}/admission/import` })}>Import profile</Button></div>}
+      />
+
+      <VerdictBanner status={verdict.status} title={verdict.title} detail={verdict.detail} />
+
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5" data-testid="admission-summary">
+        <StatCard
+          label="Webhook"
+          value={!admissionComponentsQ.data ? "—" : webhookHealth.label}
+          tone={state?.enabled === false ? "medium" : webhookHealth.statTone}
+          icon={<ShieldCheck className="h-3.5 w-3.5" />}
+          hint={admissionComponentsQ.isError ? "Component health unavailable" : state ? `${state.enabled ? "enabled" : "disabled"} · ${webhookHealth.detail}` : "State unavailable"}
+        />
+        <StatCard
+          label="Mode"
+          value={state?.mode ? labelCase(state.mode) : "—"}
+          tone={state?.mode === "protect" ? "low" : "accent"}
+          icon={<ShieldAlert className="h-3.5 w-3.5" />}
+          hint={state?.default_action ? `default ${state.default_action}` : "cluster posture"}
+        />
+        <StatCard
+          label="Rules"
+          value={!rulesQ.data ? "—" : ruleStats.total.toLocaleString()}
+          icon={<ListChecks className="h-3.5 w-3.5" />}
+          hint={rulesQ.data ? `${ruleStats.enabled} enabled / ${ruleStats.disabled} disabled` : "Rules unavailable"}
+        />
+        <StatCard
+          label="Enforce configured"
+          value={!rulesQ.data ? "—" : ruleStats.enforce.toLocaleString()}
+          tone={ruleStats.enforce > 0 ? "low" : "neutral"}
+          icon={<Power className="h-3.5 w-3.5" />}
+          hint={rulesQ.data ? `${ruleStats.monitor} monitor` : "Rules unavailable"}
+        />
+        <StatCard
+          label="Criteria"
+          value={!optionsQ.data ? "—" : criteria.length.toLocaleString()}
+          icon={<FileCheck2 className="h-3.5 w-3.5" />}
+          hint={`${groupedCriteria.length} families`}
+        />
+
+      </div>
+
+
+      <Tabs value={tab} onValueChange={setTab} items={[
+        { value: "rules", label: "Rules", content: rulesView },
+        { value: "assessment", label: "Assessment", content: assessmentView },
+        { value: "catalog", label: "Criteria", content: catalogView },
+        { value: "webhook", label: "Webhook status", content: webhookView },
+      ]} />
     </div>
   );
 }
@@ -799,13 +772,13 @@ function admissionVerdict(state?: AdmissionState): { status: VerdictStatus; titl
   if (state.mode === "protect") {
     return {
       status: "ok",
-      title: "Protecting - admission is enforcing",
-      detail: `Violating workloads are blocked at admission. Default action: ${state.default_action}, on webhook failure: ${state.failure_policy}.`,
+      title: "Admission is configured to protect",
+      detail: `Check webhook health and applied revision to confirm delivery. Default action: ${state.default_action}, on webhook failure: ${state.failure_policy}.`,
     };
   }
   return {
     status: "info",
-    title: "Monitoring - admission is observing",
+    title: "Admission is configured to monitor",
     detail: `Violations are logged but not blocked. Switch to Protect to enforce. On webhook failure: ${state.failure_policy}.`,
   };
 }
@@ -821,16 +794,6 @@ function summarizeRules(rules: AdmissionRuleRow[]) {
       return acc;
     },
     { total: 0, enabled: 0, disabled: 0, enforce: 0, monitor: 0, deny: 0, allow: 0 },
-  );
-}
-
-function summarizeProfiles(profiles: AdmissionProfile[]) {
-  return profiles.reduce(
-    (acc, profile) => {
-      acc.rules += profile.rules.length;
-      return acc;
-    },
-    { rules: 0 },
   );
 }
 
@@ -947,10 +910,8 @@ function formatDateTime(value?: string) {
   return date.toLocaleString();
 }
 
-function errorMessage(error: unknown) {
-  return (error as { response?: { data?: { error?: string } } })?.response?.data?.error
-    ?? (error as Error)?.message
-    ?? "Request failed";
+function errorMessage() {
+  return "Request failed. Your inputs are preserved. Try again.";
 }
 
 function downloadJSON(filename: string, value: unknown) {

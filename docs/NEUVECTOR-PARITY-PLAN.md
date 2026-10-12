@@ -220,6 +220,29 @@ A temporary disabled rule retained priority -10 after editing, Cancel left its s
 comment unchanged, and the fixture was removed. No active traffic rule was changed.
 UI-1 and the broader console audit remain open; acceptance totals remain 56/97.
 
+The admission/response console continuation is deployed at Helm revision **32**.
+Admission opens with five summary metrics and the rules table. Assessment, criteria,
+and webhook status use URL-linked tabs. Settings and organization-wide profile
+imports have dedicated pages. Admission settings and policy mode/YAML changes now
+wait for Save; Cancel performs no write. Admission rules link to the shared policy
+editor and return to Admission Control. Failed/missing policy and response loads
+cannot open blank editors, and background refresh cannot overwrite loaded drafts.
+Rule creation validates required criterion values; errors preserve inputs without
+exposing raw transport details. Profile import requires a fresh preview after each
+option change and explicitly describes its organization-wide scope. Response lists
+use a verdict, shared table controls/export, and explicit failures.
+
+Clusters-first ordering now also applies to the command palette and Settings hub;
+old scope-order prose and browser fixtures have been updated. Validation: **196
+frontend tests**, production build, changed-file lint, endpoint mapping, plan and
+whitespace checks pass. Live shared-browser checks cover admission default rules,
+criteria tab selection and reload, dedicated settings Cancel with the server state
+unchanged, profile preview gating, and matching sidebar/Settings/palette order.
+A temporary disabled response rule passed edit/save/cancel with disabled status and
+namespace retained; it was removed, then its direct link showed a non-editable error.
+No profile import or live enforcement change was performed. The updated full
+browser specs were not rerun; these checks do not close UI-1 or broader acceptance.
+
 The admission-engine continuation adds migration **172** and persists normalized
 engine outcomes atomically with image scan completion. The built-in vulnerability
 profiles now require successful Trivy and Grype results rather than retired
@@ -913,7 +936,7 @@ coverage remain open.
 | IAM-1 local-user recovery | PostgreSQL/router tests prove scoped unlock and force reset with atomic audit receipts; a deterministic production-browser test exercises the local-only operator controls. Other IAM-1 items remain open. |
 | UI-3 platform-role classification | Source API tests and a deterministic production-browser test prove custom-namespace `core` classification and visibility behavior. The complete API/export and live-install matrix remains open. |
 | UI-2 YAML contract discipline | The six enterprise-table YAML controls (network, DLP, signatures, response, groups, vulnerability profiles) each pair export with a registered import route and typed client call. Generated cluster-init and Kubernetes policy YAML are deployment artifacts, not table configuration imports. The response-rule control has deterministic production-browser coverage; the other families have existing import tests. This closes only the YAML discipline row, not shared-table completeness. |
-| UI-1 scope order | The sidebar, command palette, and Settings hub present Organization, Platform, Integrations, Cluster in that order without changing canonical destinations. Three deterministic production-build browser cases cover ordered groups, route targets, keyboard navigation, and cluster context. Other UI-1 navigation and page-contract items remain open. |
+| UI-1 scope order | The October 12 user decision makes Clusters the first persistent entry, followed by Organization, Platform and Integrations, across the sidebar, command palette and Settings hub. Navigation fixtures now follow that order, and live browser checks confirm sidebar, Settings and palette agreement. Prior deterministic browser evidence covers canonical route targets, keyboard navigation and cluster context; the revised full specs have not been rerun. Other UI-1 items remain open. |
 | UI-1 duplicate entry points | Generic health and system-health aliases now redirect to platform health, while cluster sensor/registration health remains intentionally distinct at its cluster URL. Token, attestation, access-control, integration and Settings aliases preserve deep paths, filters and fragments. Cluster health selection follows its URL rather than silently displaying the first cluster; three API-backed cluster browser cases and deterministic alias/settings cases pass. Other feature-home and page-contract rows remain open. |
 
 New bounded evidence without a checklist closure: network sessions and
@@ -1781,9 +1804,10 @@ progressive disclosure, while retaining Constellation's security vocabulary.
   duplicate surface. DLP/WAF legacy routes now redirect to their canonical
   runtime pages and forms, and common aliases retain deep paths, filters and
   fragments. Other duplicate feature routes still need audit.
-- [x] Order scope consistently: Organization, Platform, Integrations, Cluster.
-  Sidebar, command palette, and Settings hub agree; deterministic browser
-  tests cover route targets, keyboard operation, and cluster context.
+- [x] Keep Clusters first as the primary workspace, followed by Organization,
+  Platform, and Integrations (updated by the October 12 user decision). Sidebar,
+  command palette, and Settings hub agree. Clusters remains a direct link;
+  secondary scopes use accordions. Navigation fixtures follow this order.
 - [x] Resolve remaining duplicate health/settings/token/attestation entry points.
   Generic health resolves to platform health; cluster health remains the distinct
   sensor/registration surface and follows its URL-scoped cluster. Token,

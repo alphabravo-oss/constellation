@@ -38,10 +38,10 @@ async function clickNav(page: Page, linkLabel: string) {
     "Response Rules": "Response", "Policy Center": "Policy", Policies: "Policy", "Admission Control": "Policy",
     "Audit Log": "Settings & Activity",
   };
-  const scope = clusterGroups[linkLabel] || linkLabel === "Clusters" ? "Cluster" : linkLabel === "Settings" ? "Platform" : "Organization";
+  const scope = clusterGroups[linkLabel] || linkLabel === "Clusters" ? "Clusters" : linkLabel === "Settings" ? "Platform" : "Organization";
   const scopeGroup = nav.getByRole("group", { name: scope, exact: true });
   const scopeButton = scopeGroup.getByRole("button", { name: scope, exact: true });
-  if (await scopeButton.getAttribute("aria-expanded") !== "true") await scopeButton.click();
+  if (scope !== "Clusters" && await scopeButton.getAttribute("aria-expanded") !== "true") await scopeButton.click();
   const clusterGroupName = clusterGroups[linkLabel];
   if (clusterGroupName) {
     const clusterGroup = scopeGroup.getByRole("group", { name: clusterGroupName, exact: true });
@@ -329,9 +329,12 @@ test("Admission Control exposes rules, criteria, and profile rollout panels", as
   await expect(page.getByRole("heading", { name: /^Admission Control$/i })).toBeVisible();
 
   await expect(page.getByTestId("admission-summary")).toBeVisible();
-  await expect(page.getByTestId("admission-state-panel")).toBeVisible();
   await expect(page.getByTestId("admission-rule-table")).toBeVisible();
+  await page.getByRole("tab", { name: "Criteria", exact: true }).click();
+  await expect(page).toHaveURL(/tab=catalog/);
   await expect(page.getByTestId("admission-options-catalog")).toBeVisible();
+  await page.getByRole("button", { name: "Import profile", exact: true }).click();
+  await expect(page).toHaveURL(/admission\/import$/);
   await expect(page.getByTestId("admission-profile-templates")).toBeVisible();
   await expect(page.getByTestId("admission-profile-templates")).toContainText(/Rules/i);
 

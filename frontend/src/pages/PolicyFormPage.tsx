@@ -1,208 +1,64 @@
-// Routes: /clusters/:id/policies/new (create) and
-// /clusters/:id/policies/:policyId (edit).
-//
-// Dedicated form page (the Astronomer add/edit-as-a-page pattern, replacing the
-// old drawer YAML editor). Edit an existing policy's mode + spec YAML, or author a
-// new one. The AdmissionRule builder generates spec YAML for constellation-admission
-// policies.
-import { useEffect, useState } from "react";
+// Existing policies are edited here; /policies/new uses PolicyWizardPage.
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { toast } from "sonner";
-import { ArrowLeft, FileJson } from "lucide-react";
+import { FileJson } from "lucide-react";
 import Editor from "@monaco-editor/react";
-
 import { policies, type Policy } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
+import { useRouteSearchParams } from "@/lib/route-search";
 import { PageHeader } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Field, Select } from "@/components/ui/form";
+import { Collapse } from "@/components/ui/collapse";
+import { ErrorState, LoadingState } from "@/components/ui/states";
 
 export function PolicyFormPage() {
-  const navigate = useNavigate();
-  const qc = useQueryClient();
-  // cluster_id comes from the /clusters/:id parent route.
-  const { clusterId, isLoading: clusterLoading } = useCluster();
+  const { clusterId } = useCluster();
   const { policyId } = useParams({ strict: false });
-  const isEdit = Boolean(policyId);
-  const backTo = `/clusters/${clusterId ?? ""}/policies`;
+  const [params] = useRouteSearchParams();
+  const fromAdmission = params.get("from") === "admission";
+  const backTo = clusterId ? `/clusters/${clusterId}/${fromAdmission ? "admission" : "policies"}` : "/clusters";
+  const q = useQuery({ queryKey: ["policy-editor", clusterId, policyId], queryFn: () => policies.list({ cluster_id: clusterId }), enabled: !!clusterId && !!policyId, gcTime: 0 });
+  const active = q.data?.policies.find((policy) => policy.id === policyId);
+  return <div className="space-y-6" data-testid="policies-page" data-cluster-id={clusterId ?? ""}>
+    <PageHeader title={active?.name ?? "Edit policy"} description="Review the policy mode and YAML. Both changes apply when you save."
+      backLink={<Link to="." href={backTo}>Back to {fromAdmission ? "Admission Control" : "Policies"}</Link>} />
+    {!clusterId || !policyId ? <ErrorState title="Select a policy in its cluster." />
+      : q.isPending ? <LoadingState label="Loading policy…" />
+      : !active ? <ErrorState title="This policy could not be loaded for the selected cluster." action={<Button onClick={() => void q.refetch()}>Retry</Button>} />
+      : <>
+        {q.isError && <p role="alert" className="text-sm text-status-error">Could not refresh this policy. Your draft is preserved.</p>}
+        <PolicyEditor key={`${clusterId}:${policyId}`} initial={active} backTo={backTo} />
+      </>}
+  </div>;
+}
 
-  // No single-policy endpoint — load the list and find the one being edited.
-  const q = useQuery({
-    queryKey: ["policies", clusterId],
-    queryFn: () => policies.list({ cluster_id: clusterId }),
-    enabled: isEdit,
-  });
-  const active: Policy | null = q.data?.policies.find((p) => p.id === policyId) ?? null;
-
-  // create-mode form state (edit mode reads from `active`).
-  const [name, setName] = useState("");
-  const [engine, setEngine] = useState("constellation-admission");
-  const [category, setCategory] = useState("");
-  const [createMode, setCreateMode] = useState<"monitor" | "enforce">("monitor");
-  const [yaml, setYaml] = useState("");
-
-  useEffect(() => {
-    if (isEdit && active) setYaml(active.spec_yaml);
-  }, [isEdit, active?.id, active?.spec_yaml, active]);
-
-  // Live-update of mode on an existing policy (mirrors the old drawer's inline toggle).
-  const modeUpdate = useMutation({
-    mutationFn: (body: Partial<Policy>) => policies.update(active!.id, body),
-    onSuccess: () => {
-      toast.success("Policy updated");
-      qc.invalidateQueries({ queryKey: ["policies", clusterId] });
-    },
-    onError: () => toast.error("Update failed"),
-  });
-
+function PolicyEditor({ initial, backTo }: { initial: Policy; backTo: string }) {
+  const [yaml, setYaml] = useState(initial.spec_yaml);
+  const [mode, setMode] = useState(initial.mode);
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const changed = yaml !== initial.spec_yaml || mode !== initial.mode;
   const save = useMutation({
-    mutationFn: () => {
-      if (isEdit) return policies.update(active!.id, { spec_yaml: yaml });
-      return policies.create({
-        name: name.trim(),
-        engine: engine.trim(),
-        category: category.trim() || undefined,
-        mode: createMode,
-        spec_yaml: yaml,
-        enabled: true,
-      });
-    },
-    onSuccess: () => {
-      toast.success(isEdit ? "Policy updated" : "Policy created");
-      qc.invalidateQueries({ queryKey: ["policies", clusterId] });
-      qc.invalidateQueries({ queryKey: ["policies"] });
-      navigate({ href: backTo });
-    },
-    onError: () => toast.error("Save failed"),
+    mutationFn: () => policies.update(initial.id, { spec_yaml: yaml, mode }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["policies"] }); void qc.invalidateQueries({ queryKey: ["admission-rules"] }); void navigate({ href: backTo }); },
   });
-
-  const activeEngine = isEdit ? active?.engine : engine;
-  const builderName = isEdit ? active?.name ?? "" : name;
-  const saveDisabled = save.isPending || (isEdit ? yaml === active?.spec_yaml : !name.trim());
-  const notFound = isEdit && !clusterLoading && !q.isLoading && !q.error && !active;
-
-  return (
-    <div className="space-y-6" data-testid="policies-page" data-cluster-id={clusterId ?? ""}>
-      <PageHeader
-        backLink={
-          <Link to="." href={backTo} className="inline-flex items-center gap-1 hover:text-foreground">
-            <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Policies
-          </Link>
-        }
-        title={isEdit ? active?.name ?? "Policy" : "Create Policy"}
-        description={
-          isEdit
-            ? active?.description
-            : "Author a policy — its engine, mode, and spec YAML. Run it in monitor mode before enforcing."
-        }
-      />
-
-      {isEdit && (clusterLoading || q.isLoading) ? (
-        <Card title="Policy">
-          <div className="text-sm text-muted-foreground">Loading policy…</div>
-        </Card>
-      ) : notFound ? (
-        <Card title="Policy">
-          <div className="text-sm text-destructive">Policy not found.</div>
-        </Card>
-      ) : (
-        <Card title="Policy" description="Mode, spec YAML, and (for admission policies) a guided rule builder.">
-          <div data-testid="policy-editor">
-            {!isEdit && (
-              <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <label className="text-xs">
-                  <div className="mb-1 text-muted-foreground">Name</div>
-                  <input
-                    className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    data-testid="policy-name-input"
-                  />
-                </label>
-                <label className="text-xs">
-                  <div className="mb-1 text-muted-foreground">Engine</div>
-                  <input
-                    className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-                    value={engine}
-                    onChange={(e) => setEngine(e.target.value)}
-                    data-testid="policy-engine-input"
-                  />
-                </label>
-                <label className="text-xs">
-                  <div className="mb-1 text-muted-foreground">Category</div>
-                  <input
-                    className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-                    value={category}
-                    onChange={(e) => setCategory(e.target.value)}
-                    data-testid="policy-category-input"
-                  />
-                </label>
-              </div>
-            )}
-
-            <div className="mb-3 flex items-center justify-end gap-2 text-xs">
-              <label className="flex items-center gap-1">
-                mode
-                <select
-                  value={isEdit ? active!.mode : createMode}
-                  onChange={(e) => {
-                    const mode = e.target.value as "monitor" | "enforce";
-                    if (isEdit) modeUpdate.mutate({ mode });
-                    else setCreateMode(mode);
-                  }}
-                  className="rounded-md border border-border bg-background px-1.5 py-0.5 text-xs"
-                  data-testid="policy-mode-select"
-                >
-                  <option value="monitor">monitor</option>
-                  <option value="enforce">enforce</option>
-                </select>
-              </label>
-              <button
-                type="button"
-                disabled={saveDisabled}
-                onClick={() => save.mutate()}
-                className="rounded-md bg-foreground px-2.5 py-1 text-xs text-background hover:opacity-90 disabled:opacity-40"
-                data-testid="policy-save"
-              >
-                {isEdit ? "Save YAML" : "Create policy"}
-              </button>
-            </div>
-            {activeEngine === "constellation-admission" && (
-              <AdmissionRuleBuilder
-                policyName={builderName}
-                onApply={setYaml}
-              />
-            )}
-            <div className="overflow-hidden rounded-md border border-border">
-              <Editor
-                height="520px"
-                language="yaml"
-                theme="vs-dark"
-                value={yaml}
-                onChange={(v) => setYaml(v ?? "")}
-                options={{
-                  fontSize: 12,
-                  minimap: { enabled: false },
-                  tabSize: 2,
-                  automaticLayout: true,
-                }}
-              />
-            </div>
-
-            <div className="mt-4 flex justify-end">
-              <button
-                type="button"
-                onClick={() => navigate({ href: backTo })}
-                className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </Card>
-      )}
-    </div>
-  );
+  return <Card title="Policy" description="Monitor records policy decisions. Enforce can block matching workloads.">
+    <form data-testid="policy-editor" onSubmit={(event) => { event.preventDefault(); if (changed && yaml.trim() && !save.isPending) save.mutate(); }}>
+      <fieldset disabled={save.isPending} className="space-y-5">
+        <Field label="Mode" htmlFor="policy-mode"><Select id="policy-mode" data-testid="policy-mode-select" value={mode} onChange={(e) => setMode(e.target.value as Policy["mode"])}><option value="monitor">Monitor</option><option value="enforce">Enforce</option></Select></Field>
+        {initial.engine === "constellation-admission" && <Collapse label="Advanced rule builder"><AdmissionRuleBuilder policyName={initial.name} onApply={setYaml} /></Collapse>}
+        <div className="overflow-hidden rounded-md border border-border">
+          <Editor height="520px" language="yaml" theme="vs-dark" value={yaml} onChange={(value) => setYaml(value ?? "")}
+            options={{ fontSize: 12, minimap: { enabled: false }, tabSize: 2, automaticLayout: true, readOnly: save.isPending, ariaLabel: "Policy YAML" }} />
+        </div>
+        {save.isError && <p role="alert" className="text-sm text-status-error">Could not save this policy. Your draft is preserved. Check the YAML and try again.</p>}
+        <div className="flex gap-3"><Button type="submit" variant="primary" disabled={!changed || !yaml.trim()} data-testid="policy-save">{save.isPending ? "Saving…" : "Save changes"}</Button><Button type="button" variant="ghost" onClick={() => navigate({ href: backTo })}>Cancel</Button></div>
+      </fieldset>
+    </form>
+  </Card>;
 }
 
 function AdmissionRuleBuilder({

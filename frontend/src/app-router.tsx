@@ -76,6 +76,7 @@ const AssetDetailPage       = lazy(() => import("./pages/AssetDetailPage").then(
 const PolicyCenterPage      = lazy(() => import("./pages/PolicyCenterPage").then((m) => ({ default: m.PolicyCenterPage })));
 const PoliciesPage          = lazy(() => import("./pages/PoliciesPage").then((m) => ({ default: m.PoliciesPage })));
 const AdmissionPage         = lazy(() => import("./pages/AdmissionPage").then((m) => ({ default: m.AdmissionPage })));
+const AdmissionSettingsPage = lazy(() => import("./pages/AdmissionSettingsPage").then((m) => ({ default: m.AdmissionSettingsPage })));
 const AdmissionRuleFormPage = lazy(() => import("./pages/AdmissionRuleFormPage").then((m) => ({ default: m.AdmissionRuleFormPage })));
 const PolicyWizardPage      = lazy(() => import("./pages/PolicyWizardPage").then((m) => ({ default: m.PolicyWizardPage })));
 const RiskDetailPage        = lazy(() => import("./pages/RiskDetailPage").then((m) => ({ default: m.RiskDetailPage })));
@@ -253,6 +254,8 @@ const cluster_runtime_signatures_newRoute = createRoute({ getParentRoute: () => 
 const cluster_runtime_signatures_sigIdRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "runtime-signatures/$sigId", component: () => (<SuspenseRoute><RuntimeSignatureFormPage /></SuspenseRoute>) });
 const cluster_admissionRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "admission", component: () => (<SuspenseRoute><AdmissionPage /></SuspenseRoute>) });
 const cluster_admission_control_splatRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "admission-control/$", beforeLoad: aliasRedirect({ to: "admission", cluster: true, from: "admission-control" }) });
+const cluster_admission_settingsRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "admission/settings", component: () => (<SuspenseRoute><AdmissionSettingsPage /></SuspenseRoute>) });
+const cluster_admission_importRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "admission/import", component: () => (<SuspenseRoute><AdmissionPage view="import" /></SuspenseRoute>) });
 const cluster_admission_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "admission/new", component: () => (<SuspenseRoute><AdmissionRuleFormPage /></SuspenseRoute>) });
 const cluster_policyRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "policy", component: () => (<SuspenseRoute><PolicyCenterPage /></SuspenseRoute>) });
 const cluster_policiesRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "policies", component: () => (<SuspenseRoute><PoliciesPage /></SuspenseRoute>) });
@@ -458,6 +461,8 @@ authenticatedRoute.addChildren([
   cluster_admissionRoute,
   cluster_admission_control_splatRoute,
   cluster_admission_newRoute,
+  cluster_admission_settingsRoute,
+  cluster_admission_importRoute,
   cluster_policyRoute,
   cluster_policiesRoute,
   cluster_policies_newRoute,

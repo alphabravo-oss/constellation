@@ -13,6 +13,8 @@ import { PageHeader } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Field, TextInput, Select } from "@/components/ui/form";
+import { Collapse } from "@/components/ui/collapse";
+import { ErrorState, LoadingState } from "@/components/ui/states";
 import { GroupPicker } from "@/components/GroupPicker";
 import {
   ADMISSION_RISK_SHORTCUTS,
@@ -24,6 +26,10 @@ interface Row { key: string; value: string }
 
 export function AdmissionRuleFormPage() {
   const { clusterId } = useCluster();
+  return <AdmissionRuleEditor key={clusterId ?? "none"} clusterId={clusterId} />;
+}
+
+function AdmissionRuleEditor({ clusterId }: { clusterId?: string }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const listPath = clusterId ? `/clusters/${clusterId}/admission` : "/admission";
@@ -69,7 +75,16 @@ export function AdmissionRuleFormPage() {
   });
 
   const validRows = rows.filter((r) => r.key);
-  const canSave = name.trim().length > 0 && validRows.length > 0 && !save.isPending;
+  const validValue = (row: Row) => {
+    const option = byKey(row.key);
+    if (!option) return false;
+    if (option.value_type === "none") return true;
+    if (!row.value.trim()) return false;
+    if (option.value_type === "int") return /^-?\d+$/.test(row.value.trim()) && Number.isSafeInteger(Number(row.value));
+    if (option.value_type === "float") return Number.isFinite(Number(row.value));
+    return true;
+  };
+  const canSave = !!clusterId && !!options && !optionsQ.isError && name.trim().length > 0 && validRows.length > 0 && rows.every(validValue) && !save.isPending;
 
   // Render the value input appropriate to the selected criterion's value_type.
   function valueInput(row: Row, i: number) {
@@ -77,7 +92,7 @@ export function AdmissionRuleFormPage() {
     if (!opt || opt.value_type === "none") return <span className="text-xs text-muted-foreground">no value needed</span>;
     if (opt.value_type === "severity") {
       return (
-        <Select value={row.value} onChange={(e) => setRow(i, { value: e.target.value })}>
+        <Select aria-label={`Criterion ${i + 1} value`} required value={row.value} onChange={(e) => setRow(i, { value: e.target.value })}>
           <option value="">choose…</option>
           {(options?.severities ?? []).map((s) => <option key={s} value={s}>{s}</option>)}
         </Select>
@@ -85,24 +100,27 @@ export function AdmissionRuleFormPage() {
     }
     if (opt.value_type === "pss") {
       return (
-        <Select value={row.value} onChange={(e) => setRow(i, { value: e.target.value })}>
+        <Select aria-label={`Criterion ${i + 1} value`} required value={row.value} onChange={(e) => setRow(i, { value: e.target.value })}>
           <option value="">choose…</option>
           {(options?.pss_levels ?? []).map((s) => <option key={s} value={s}>{s}</option>)}
         </Select>
       );
     }
-    return <TextInput placeholder={opt.placeholder ?? ""} value={row.value} onChange={(e) => setRow(i, { value: e.target.value })} inputMode={opt.value_type === "int" || opt.value_type === "float" ? "decimal" : "text"} />;
+    return <TextInput aria-label={`Criterion ${i + 1} value`} required placeholder={opt.placeholder ?? ""} value={row.value} onChange={(e) => setRow(i, { value: e.target.value })} inputMode={opt.value_type === "int" || opt.value_type === "float" ? "decimal" : "text"} />;
   }
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Add admission rule"
-        description="Build a deny rule from criteria — the server compiles it to the engine's policy spec and validates it before saving."
+        description="Choose the conditions that flag or block a workload when it is deployed."
         backLink={<Link to="." href={listPath} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Admission Control</Link>}
       />
-      <Card title="Rule" description="A workload is denied when it matches all of the criteria below.">
+      {optionsQ.isPending ? <LoadingState label="Loading admission criteria…" /> : optionsQ.isError ? <ErrorState title="Could not load admission criteria." action={<Button onClick={() => void optionsQ.refetch()}>Retry</Button>} /> : null}
+      <Card title="Rule" description="All criteria must match. Monitor records the decision; Enforce can block a matching deployment when cluster admission is protecting.">
         <form className="space-y-5" onSubmit={(e) => { e.preventDefault(); if (canSave) save.mutate(); }}>
+          <fieldset disabled={save.isPending || optionsQ.isPending || optionsQ.isError || !clusterId} className="space-y-5">
+          <Collapse label="Risk shortcuts">
           <section className="space-y-2" data-testid="admission-risk-shortcuts">
             <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
               <ShieldAlert className="h-3.5 w-3.5 text-[color:var(--color-severity-high)]" />
@@ -127,18 +145,20 @@ export function AdmissionRuleFormPage() {
               })}
             </div>
           </section>
+          </Collapse>
 
-          <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_160px_minmax(220px,0.9fr)]">
-            <Field label="Rule name" required>
-              <TextInput autoFocus placeholder="block-privileged-prod" value={name} onChange={(e) => setName(e.target.value)} required />
+          <div className="grid gap-5 md:grid-cols-3">
+            <Field label="Rule name" htmlFor="admission-rule-name" required>
+              <TextInput id="admission-rule-name" autoFocus placeholder="block-privileged-prod" value={name} onChange={(e) => setName(e.target.value)} required />
             </Field>
-            <Field label="Mode" hint="Enforce denies; Monitor logs the would-be deny only.">
-              <Select value={mode} onChange={(e) => setMode(e.target.value)}>
+            <Field label="Mode" htmlFor="admission-rule-mode" hint="Enforce denies; Monitor logs the would-be deny only.">
+              <Select id="admission-rule-mode" value={mode} onChange={(e) => setMode(e.target.value)}>
                 {(options?.rule_modes ?? ["monitor", "enforce"]).map((m) => <option key={m} value={m}>{m}</option>)}
               </Select>
             </Field>
-            <Field label="Group" hint="Optional workload group scope.">
+            <Field label="Group" htmlFor="admission-rule-group" hint="Optional workload group scope.">
               <GroupPicker
+                inputId="admission-rule-group"
                 clusterId={clusterId}
                 value={group}
                 onChange={setGroup}
@@ -156,7 +176,7 @@ export function AdmissionRuleFormPage() {
               return (
                 <div key={i} className="space-y-1">
                   <div className="flex items-start gap-2">
-                    <Select className="w-1/2" value={row.key} onChange={(e) => setRow(i, { key: e.target.value, value: "" })}>
+                    <Select aria-label={`Criterion ${i + 1} type`} required className="w-1/2" value={row.key} onChange={(e) => setRow(i, { key: e.target.value, value: "" })}>
                       <option value="">Select a criterion…</option>
                       {catalog.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
                     </Select>
@@ -170,11 +190,13 @@ export function AdmissionRuleFormPage() {
             <button type="button" onClick={addRow} className="inline-flex items-center gap-1 text-xs text-[color:var(--color-primary)] hover:underline"><Plus className="h-3.5 w-3.5" /> Add criterion</button>
           </div>
 
-          {save.isError && <p className="text-sm text-status-error">{(save.error as { response?: { data?: { error?: string } } })?.response?.data?.error ?? (save.error as Error).message}</p>}
+          {save.isError && <p role="alert" className="text-sm text-status-error">Could not create this admission rule. Your draft is preserved. Check the criteria and try again.</p>}
           <div className="flex items-center gap-3">
             <Button type="submit" variant="primary" size="lg" disabled={!canSave}>{save.isPending ? "Saving…" : "Create rule"}</Button>
-            <Button type="button" variant="ghost" size="lg" onClick={() => navigate({ href: listPath })}>Cancel</Button>
+
           </div>
+          </fieldset>
+          <Button type="button" variant="ghost" size="lg" disabled={save.isPending} onClick={() => navigate({ href: listPath })}>Cancel</Button>
         </form>
       </Card>
     </div>

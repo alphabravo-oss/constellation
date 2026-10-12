@@ -427,14 +427,14 @@ const NAV_ITEMS: NavSearchItem[] = [
   { icon: <Settings />,        label: "Settings",    href: "/settings", keywords: ["system", "configuration", "admin"] },
 ];
 
-const NAV_SCOPES = ["Organization", "Platform", "Integrations", "Cluster"] as const;
+const NAV_SCOPES = ["Clusters", "Organization", "Platform", "Integrations"] as const;
 
 function navScope(href: string): typeof NAV_SCOPES[number] {
   if (href === "/cve" || href === "/posture" || href === "/federation") return "Organization";
   if (href.startsWith("/settings/integrations") || href.startsWith("/settings/connectors")) return "Integrations";
   if (["/settings/access", "/settings/api-tokens", "/settings/security-policy"].includes(href)) return "Organization";
   if (href.startsWith("/settings")) return "Platform";
-  return "Cluster";
+  return "Clusters";
 }
 
 function navItemSearchValue(item: NavSearchItem) {

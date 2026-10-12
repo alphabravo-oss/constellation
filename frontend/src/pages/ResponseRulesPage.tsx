@@ -8,6 +8,8 @@ import { useCluster } from "@/hooks/useCluster";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { StatCard } from "@/components/ui/stat-card";
+import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { ErrorState, LoadingState } from "@/components/ui/states";
 import { ImportExportButtons } from "@/components/ImportExportButtons";
 
 export function ResponseRulesPage() {
@@ -21,6 +23,7 @@ export function ResponseRulesPage() {
   const q = useQuery({
     queryKey: ["response-rules-v2", clusterId],
     queryFn: () => responseRulesV2.list({ cluster_id: clusterId }),
+    enabled: !!clusterId,
   });
   const rules = useMemo(() => q.data?.rules ?? [], [q.data]);
 
@@ -32,6 +35,7 @@ export function ResponseRulesPage() {
     mutationFn: (orderedIds: string[]) => responseRulesV2.reorder(orderedIds, { cluster_id: clusterId }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["response-rules-v2", clusterId] }),
   });
+  const busy = delMut.isPending || reorderMut.isPending || q.isError;
   // Move a rule one slot up/down in the evaluation order and persist the new order.
   const move = (index: number, dir: -1 | 1) => {
     const target = index + dir;
@@ -44,6 +48,7 @@ export function ResponseRulesPage() {
   const columns: Column<ResponseRuleV2>[] = [
     {
       id: "order",
+      exportValue: (r) => rules.findIndex((x) => x.id === r.id) + 1,
       header: "Order",
       cell: (r) => {
         const i = rules.findIndex((x) => x.id === r.id);
@@ -51,25 +56,27 @@ export function ResponseRulesPage() {
           <div className="flex items-center gap-1">
             <span className="w-5 text-right tabular-nums text-xs text-muted-foreground">{i + 1}</span>
             <div className="flex flex-col">
-              <button type="button" title="Move up" disabled={i <= 0 || reorderMut.isPending} onClick={() => move(i, -1)} className="rounded p-0.5 hover:bg-accent disabled:opacity-30"><ChevronUp className="h-3 w-3" /></button>
-              <button type="button" title="Move down" disabled={i >= rules.length - 1 || reorderMut.isPending} onClick={() => move(i, 1)} className="rounded p-0.5 hover:bg-accent disabled:opacity-30"><ChevronDown className="h-3 w-3" /></button>
+              <button type="button" title="Move up" disabled={i <= 0 || busy} onClick={() => move(i, -1)} className="rounded p-0.5 hover:bg-accent disabled:opacity-30"><ChevronUp className="h-3 w-3" /></button>
+              <button type="button" title="Move down" disabled={i >= rules.length - 1 || busy} onClick={() => move(i, 1)} className="rounded p-0.5 hover:bg-accent disabled:opacity-30"><ChevronDown className="h-3 w-3" /></button>
             </div>
           </div>
         );
       },
     },
-    { id: "name", header: "Name", cell: (r) => <span className="font-medium">{r.name}</span> },
-    { id: "event_type", header: "Event type", cell: (r) => <span className="text-xs">{r.event_type}</span> },
-    { id: "conditions", header: "Conditions", cell: (r) => <span className="text-xs text-muted-foreground">{r.conditions.length} clause(s)</span> },
-    { id: "actions", header: "Actions", cell: (r) => <span className="text-xs text-muted-foreground">{r.actions.map((a) => a.kind).join(", ")}</span> },
-    { id: "enabled", header: "Enabled", cell: (r) => <span className="text-xs">{r.enabled ? "yes" : "no"}</span> },
+    { id: "name", exportValue: (r) => r.name, header: "Name", cell: (r) => <span className="font-medium">{r.name}</span> },
+    { id: "event_type", exportValue: (r) => r.event_type, header: "Event type", cell: (r) => <span className="text-xs">{r.event_type}</span> },
+    { id: "conditions", exportValue: (r) => r.conditions.map((c) => `${c.type}: ${c.value}`).join("; "), header: "Conditions", cell: (r) => <span className="text-xs text-muted-foreground">{r.conditions.length} clause(s)</span> },
+    { id: "actions", exportValue: (r) => r.actions.map((a) => a.kind).join(", "), header: "Actions", cell: (r) => <span className="text-xs text-muted-foreground">{r.actions.map((a) => a.kind).join(", ")}</span> },
+    { id: "enabled", exportValue: (r) => r.enabled ? "yes" : "no", header: "Enabled", cell: (r) => <span className="text-xs">{r.enabled ? "yes" : "no"}</span> },
     {
       id: "row-actions",
+      hideable: false, exportable: false,
       header: "",
       cell: (r) => (
         <div className="flex items-center justify-end gap-1">
           <button
             type="button"
+            aria-label={`Edit ${r.name}`}
             onClick={() => navigate({ href: `${rulesBase}/${r.id}` })}
             className="rounded-md px-2 py-1 text-xs hover:bg-accent"
           >
@@ -81,7 +88,8 @@ export function ResponseRulesPage() {
               if (window.confirm(`Delete rule "${r.name}"?`)) delMut.mutate(r.id);
             }}
             className="rounded-md p-1 text-xs hover:bg-accent"
-            aria-label="Delete"
+            disabled={busy}
+            aria-label={`Delete ${r.name}`}
           >
             <Trash2 className="h-3.5 w-3.5" />
           </button>
@@ -119,19 +127,24 @@ export function ResponseRulesPage() {
         }
       />
 
+      <VerdictBanner status={q.isError ? "degraded" : "info"} title={q.isError ? "Response rules could not be refreshed" : q.isPending ? "Loading response rules" : `${rules.length} response rules apply to this cluster`}
+        detail="Rules run in evaluation order. Enabled rules describe configured automation; delivery and workload actions still depend on their receivers and agents." />
       <p className="text-xs text-muted-foreground">YAML export includes cluster-owned rules only; organization-wide rules remain separate.</p>
 
       <section className="grid grid-cols-3 gap-3">
-        <StatCard label="Rules" value={rules.length} />
-        <StatCard label="Enabled" value={rules.filter((r) => r.enabled).length} tone="accent" />
-        <StatCard label="Disabled" value={rules.filter((r) => !r.enabled).length} />
+        <StatCard label="Rules" value={q.data ? rules.length : "—"} />
+        <StatCard label="Enabled" value={q.data ? rules.filter((r) => r.enabled).length : "—"} tone="accent" />
+        <StatCard label="Disabled" value={q.data ? rules.filter((r) => !r.enabled).length : "—"} />
       </section>
 
-      <DataTable
+      {(delMut.isError || reorderMut.isError) && <p role="alert" className="text-sm text-status-error">Could not update response rules. Try the action again.</p>}
+      {q.isError && <ErrorState title="Could not load response rules." action={<button type="button" onClick={() => void q.refetch()}>Retry</button>} />}
+      {q.isPending ? <LoadingState label="Loading response rules…" /> : q.data ? <DataTable
         rows={rules}
         columns={columns}
         rowKey={(r) => r.id}
-        showDensityToggle={false}
+        preferencesKey="response-rules"
+        exportFileName="constellation-response-rules"
         emptyState={
           q.isPending ? (
             <div className="py-6" />
@@ -141,7 +154,7 @@ export function ResponseRulesPage() {
             </div>
           )
         }
-      />
+      /> : null}
     </div>
   );
 }
