@@ -85,8 +85,16 @@ The SARIF normalizer, login setup honoring Retry-After, and shell fixes address
 specific failures. The production browser auth/session/migration batch now passes
 all 11 tests, and shell lint and 13 security-tooling tests pass. Go is updated to
 1.26.9 with the identified x/net/x/text and OpenTelemetry fixes. A new full
-govulncheck run reports zero reachable vulnerabilities (five other package/module
-advisories remain reported without reachable calls), and all Go packages compile.
+govulncheck run reports zero reachable vulnerabilities (two imported-package and
+three required-module advisories remain reported without reachable calls), and all
+Go packages compile.
+The rebuilt API/frontend production-container harness also passed all 11 selected
+browser tests with migration 169 applied. Seven affected packages passed twice
+against a fresh disposable database, with focused race and vet checks passing.
+The lost-acknowledgement/restart test verifies exactly one raw flow, late aggregate
+and rule-hit contribution. Source is pushed to draft PR #2; live remains migration
+167, and the broader hosted release gates remain pending/failing as recorded.
+
 These fixes do not establish green CI. Historical secret findings need
 classification/remediation and any genuine credentials revoked; do not broadly
 allowlist them or rewrite shared history without a reviewed recovery plan.

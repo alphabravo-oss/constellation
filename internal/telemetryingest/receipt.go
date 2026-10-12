@@ -53,6 +53,12 @@ func Begin(ctx context.Context, tx pgx.Tx, r *http.Request, org, cluster uuid.UU
 		return nil, nil, err
 	}
 	receipt.producer, receipt.sequence, receipt.hash, receipt.enabled = id, seq, sha256.Sum256(body), true
+	// A durable acknowledgement must not inherit asynchronous commit from a
+	// connection/database tuning override. Replica/failover durability remains
+	// governed by the deployment's synchronous replication configuration.
+	if _, err = tx.Exec(ctx, "SET LOCAL synchronous_commit = 'on'"); err != nil {
+		return nil, nil, err
+	}
 	// An insertion and the first batch commit together. Concurrent first uploads
 	// wait on the unique constraint, then read the committed cursor below.
 	tag, err := tx.Exec(ctx, `INSERT INTO telemetry_producers

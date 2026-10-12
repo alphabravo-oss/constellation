@@ -51,9 +51,16 @@ func TestReceiptConcurrentReplayRollbackAndScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err = tx.Exec(ctx, "SET LOCAL synchronous_commit = 'off'"); err != nil {
+		t.Fatal(err)
+	}
 	receipt, _, err := Begin(ctx, tx, request(1), org, cluster, "events", []int{1})
 	if err != nil {
 		t.Fatal(err)
+	}
+	var commitMode string
+	if err = tx.QueryRow(ctx, "SHOW synchronous_commit").Scan(&commitMode); err != nil || commitMode != "on" {
+		t.Fatalf("durable receipt inherited asynchronous commit: %q %v", commitMode, err)
 	}
 	if err = receipt.Complete(ctx, tx, map[string]int{"accepted": 1}); err != nil {
 		t.Fatal(err)

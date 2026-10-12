@@ -16,7 +16,9 @@ with pending data fail closed instead of silently sending queued data elsewhere.
 comes from the authenticated runtime-agent token and resolved cluster, not those
 headers. PostgreSQL stores one cursor per `(org, cluster, stream, producer)` in
 `telemetry_producers`; the cursor, event/flow rows, late-flow aggregation, and flow
-rule-hit counters commit atomically. Only then does the API acknowledge with
+rule-hit counters commit atomically. Receipt-aware transactions force local
+`synchronous_commit=on`; replica/failover durability still depends on the CNPG
+replication policy. Only then does the API acknowledge with
 `X-Constellation-Ack`. A replay returns the stored response without inserting or
 publishing again. Reusing the latest sequence with changed content returns 409.
 Older sequences return 409 because they indicate out-of-order delivery or
