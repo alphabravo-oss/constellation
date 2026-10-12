@@ -14,15 +14,21 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CAP="$HERE/captures"
-TLS="$CAP/tls"
-mkdir -p "$TLS"
-KCFG=/tmp/kubeconfig-constellation.yaml
+CAP="${CONSTELLATION_E2E_CAPTURE_DIR:-$HERE/captures}"
+# Keys never enter the evidence directory. Always generate fresh short-lived
+# material; checked-in public certificates are historical evidence, not inputs.
+umask 077
+TLS="$(mktemp -d "${TMPDIR:-/tmp}/constellation-admission-tls.XXXXXX")"
+cleanup() { rm -rf -- "$TLS"; }
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+mkdir -p "$CAP/tls"
+KCFG="${KUBECONFIG:-/tmp/kubeconfig-constellation.yaml}"
 
 echo "==> [1/5] mint TLS material"
-if [ ! -s "$TLS/tls.crt" ]; then
   openssl genrsa -out "$TLS/ca.key" 2048 2>/dev/null
-  openssl req -x509 -new -key "$TLS/ca.key" -days 3650 \
+  openssl req -x509 -new -key "$TLS/ca.key" -days 1 \
     -subj '/CN=constellation-admission-ca' -out "$TLS/ca.crt" 2>/dev/null
   openssl genrsa -out "$TLS/tls.key" 2048 2>/dev/null
   cat > "$TLS/csr.cnf" <<'EOF'
@@ -42,15 +48,14 @@ DNS.4 = e2e-admission.constellation-system.svc.cluster.local
 EOF
   openssl req -new -key "$TLS/tls.key" -out "$TLS/tls.csr" -config "$TLS/csr.cnf" 2>/dev/null
   openssl x509 -req -in "$TLS/tls.csr" -CA "$TLS/ca.crt" -CAkey "$TLS/ca.key" -CAcreateserial \
-    -out "$TLS/tls.crt" -days 3650 -extensions v3_req -extfile "$TLS/csr.cnf" 2>/dev/null
-fi
-ls -la "$TLS"/
+    -out "$TLS/tls.crt" -days 1 -extensions v3_req -extfile "$TLS/csr.cnf" 2>/dev/null
+# Only public evidence is retained after the private working directory is removed.
+cp "$TLS/ca.crt" "$TLS/tls.crt" "$CAP/tls/"
 
 echo "==> [2/5] kubectl create secret tls"
 KUBECONFIG=$KCFG kubectl create secret tls e2e-admission-tls \
   -n constellation-system --cert="$TLS/tls.crt" --key="$TLS/tls.key" \
-  --dry-run=client -o yaml > "$CAP/secret.yaml"
-KUBECONFIG=$KCFG kubectl apply -f "$CAP/secret.yaml"
+  --dry-run=client -o yaml | KUBECONFIG=$KCFG kubectl apply -f -
 
 echo "==> [3/5] register ValidatingWebhookConfiguration"
 CA_B64=$(base64 -w0 < "$TLS/ca.crt")
@@ -99,7 +104,7 @@ KUBECONFIG=$KCFG kubectl rollout status -n constellation-system deployment/e2e-a
 KUBECONFIG=$KCFG kubectl get pods -n constellation-system -l app.kubernetes.io/component=admission
 
 echo "==> [5/5] kubectl apply privileged pod — apiserver should deny via VWC"
-cat > /tmp/priv-pod-tls.yaml <<'EOF'
+cat > "$TLS/priv-pod-tls.yaml" <<'EOF'
 apiVersion: v1
 kind: Pod
 metadata: { name: tls-priv-test, namespace: default }
@@ -110,7 +115,7 @@ spec:
       command: ["sleep","3600"]
       securityContext: { privileged: true }
 EOF
-( KUBECONFIG=$KCFG kubectl apply -f /tmp/priv-pod-tls.yaml 2>&1 || true ) \
+( KUBECONFIG=$KCFG kubectl apply -f "$TLS/priv-pod-tls.yaml" 2>&1 || true ) \
   | tee "$CAP/kubectl-apply-output.txt"
 
 echo "==> snapshot artefacts"

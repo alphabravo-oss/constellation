@@ -9,12 +9,14 @@ VWC with caBundle → apiserver-driven deny).
 
 ## What got built
 
-1. **CA + server cert** under `captures/tls/`:
-   - `ca.crt`, `ca.key` — self-signed CA (CN=`constellation-admission-ca`).
-   - `tls.crt`, `tls.key` — server cert with SANs:
+1. **Public CA + server certificates** under `captures/tls/`:
+   - `ca.crt` — self-signed CA (CN=`constellation-admission-ca`).
+   - `tls.crt` — server cert with SANs:
      `e2e-admission{,.constellation-system{,.svc{,.cluster.local}}}`.
 2. **Secret**: `secret/e2e-admission-tls` in `constellation-system`, type
-   `kubernetes.io/tls`. Manifest in `captures/secret.yaml`.
+   `kubernetes.io/tls`. The historical Secret capture was removed because it
+   contained a private key. Current runs stream the Secret directly to kubectl;
+   private keys live in a mode-0700 temporary directory and are deleted on exit.
 3. **ValidatingWebhookConfiguration** `constellation-admission` with:
    - `clientConfig.service.{name,namespace,path,port}` →
      `e2e-admission/constellation-system/validate/443`.
@@ -51,6 +53,22 @@ This scenario deliberately scales the operator to 0. For a permanent fix the
 operator should learn to consume a `tlsSecretRef` field on
 `ConstellationCluster.spec` and stop hard-coding `--insecure`. Tracked outside
 Wave H3.
+
+## October 12 credential remediation
+
+The old TLS Secret remains exposed in Git history. Removing the capture does
+not revoke that key or make the full-history scanner pass. The current default
+cluster has no `constellation-system/e2e-admission-tls` Secret, but other copies
+and trust stores have not been inventoried. The historical certificate is valid
+until May 9, 2036; treat any deployment using it as compromised, replace the key
+and certificate, and remove obsolete CA trust. That deployment inventory and
+revocation evidence remain release blockers.
+
+New runs generate fresh one-day test certificates even when historical public
+captures exist. They retain only public certificates, never a serialized Secret
+or private key. `CONSTELLATION_E2E_CAPTURE_DIR` can redirect captures and
+`KUBECONFIG` selects the test cluster. Do not point this disruptive scenario at
+production: it scales the operator down and changes the admission configuration.
 
 ## Reproduce
 

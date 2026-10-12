@@ -141,6 +141,21 @@ disable scanners, lower exit-code enforcement, add broad path/rule exclusions,
 or baseline the existing findings to make CI green. No new finding exceptions
 are introduced here. Existing inline exclusions still need review.
 
+## Admission TLS capture remediation
+
+The October 12 continuation removes the historical admission TLS Secret capture
+from the current tree. The scenario now generates fresh one-day certificates in
+a private temporary directory, streams the Secret to kubectl, and deletes private
+material on success or failure. Regression tests exercise both paths using real
+certificate generation and a fake Kubernetes boundary; no live scenario is run.
+
+The historical private key is still exposed in Git history, with a certificate
+valid until May 2036. The current default cluster does not contain the named test
+Secret. That observation does not establish revocation across other clusters or
+remove old CA trust. The [scenario remediation record](../deploy/e2e/threat-scenarios/04-admission-tls/EVIDENCE.md#october-12-credential-remediation)
+keeps those acceptance requirements open. No gitleaks suppression, history rewrite
+or security-review exception was added; the full-history finding still blocks.
+
 ## Scope and remaining acceptance
 
 This is a tooling gate, not a claim that the current application passes every
