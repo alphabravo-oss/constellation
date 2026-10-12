@@ -21,7 +21,7 @@ func TestAuthProviders(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			tc.a.Providers(w, httptest.NewRequest(http.MethodGet, "/api/v1/auth/providers", nil))
+			tc.a.Providers(w, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/auth/providers", nil))
 			if w.Code != http.StatusOK || w.Body.String() != tc.want+"\n" {
 				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 			}
@@ -33,7 +33,7 @@ func TestAuthProviders(t *testing.T) {
 					t.Fatal("disabled LDAP fell back to environment provider")
 				}
 				w = httptest.NewRecorder()
-				tc.a.OIDCStart(w, httptest.NewRequest(http.MethodGet, "/api/v1/auth/oidc/start", nil))
+				tc.a.OIDCStart(w, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/auth/oidc/start", nil))
 				if w.Code != http.StatusNotImplemented {
 					t.Fatalf("disabled OIDC start status=%d", w.Code)
 				}
