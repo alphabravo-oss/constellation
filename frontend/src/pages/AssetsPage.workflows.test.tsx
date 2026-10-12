@@ -41,5 +41,5 @@ it("shows image names and reveals their digest only on request",async()=>{
   expect(cell.querySelector("a")?.textContent).not.toContain("sha256");
   await act(async()=>disclosure.querySelector("summary")!.click());expect(disclosure.open).toBe(true);
   expect(host.querySelector('[data-testid="asset-preview"] h2')?.textContent).toBe("docker.io/team/api:v2");
-  expect(host.querySelector('[data-testid="asset-preview"] details')?.open).toBe(false);
+  expect(host.querySelector('[data-testid="asset-preview"] details')?.hasAttribute("open")).toBe(false);
 });
