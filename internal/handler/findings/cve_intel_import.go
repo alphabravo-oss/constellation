@@ -210,17 +210,12 @@ func importCVEIntel(ctx context.Context, conn *pgxpool.Conn, cfg CVEIntelConfig)
 	if err != nil {
 		return 0, "", err
 	}
-	marker := contentHash
+	rows := mergeCVEIntelRows(kev, epss, scoreDate)
+	total, err := writeCVEIntelSnapshot(ctx, conn, sourceHash, contentHash, rows)
+	return total, contentHash, err
+}
 
-	tx, err := conn.Begin(ctx)
-	if err != nil {
-		return 0, marker, err
-	}
-	defer rollbackCVEImport(tx)
-	if _, err := tx.Exec(ctx, `SET LOCAL synchronous_commit=on`); err != nil {
-		return 0, marker, err
-	}
-
+func mergeCVEIntelRows(kev *kevFeed, epss map[string]epssScore, scoreDate string) map[string]*cveImportRow {
 	// Merge into one row per CVE: KEV entries carry name/description/kev flag; every
 	// EPSS score is applied (creating a bare row for EPSS-only CVEs).
 	byID := make(map[string]*cveImportRow, len(epss)+len(kev.Vulnerabilities))
@@ -258,6 +253,19 @@ func importCVEIntel(ctx context.Context, conn *pgxpool.Conn, cfg CVEIntelConfig)
 		row.epssAt = &epssAt
 	}
 
+	return byID
+}
+
+func writeCVEIntelSnapshot(ctx context.Context, conn *pgxpool.Conn, sourceHash, contentHash string, byID map[string]*cveImportRow) (int, error) {
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer rollbackCVEImport(ctx, tx)
+	if _, err := tx.Exec(ctx, `SET LOCAL synchronous_commit=on`); err != nil {
+		return 0, err
+	}
+
 	// Batched upserts (reuses the bundle importer's COALESCE-merge writer).
 	const batch = 1000
 	rows := make([]cveImportRow, 0, batch)
@@ -277,22 +285,22 @@ func importCVEIntel(ctx context.Context, conn *pgxpool.Conn, cfg CVEIntelConfig)
 		rows = append(rows, *r)
 		if len(rows) >= batch {
 			if err := flush(); err != nil {
-				return 0, marker, err
+				return 0, err
 			}
 		}
 	}
 	if err := flush(); err != nil {
-		return 0, marker, err
+		return 0, err
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO cve_feed_checkpoints(feed,source_hash,content_hash,row_count)
         VALUES ('kev-epss',$1,$2,$3) ON CONFLICT(feed) DO UPDATE SET source_hash=EXCLUDED.source_hash,
         content_hash=EXCLUDED.content_hash,row_count=EXCLUDED.row_count,updated_at=now()`, sourceHash, contentHash, total); err != nil {
-		return 0, marker, err
+		return 0, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return 0, marker, err
+		return 0, err
 	}
-	return total, marker, nil
+	return total, nil
 }
 
 func fetchEPSSBytes(ctx context.Context, cfg CVEIntelConfig) ([]byte, error) {

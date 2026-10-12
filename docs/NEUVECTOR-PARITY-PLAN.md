@@ -117,8 +117,24 @@ query refresh/conflicts, omits blank replacement keys, sanitizes save errors and
 blocks accidental navigation. Eight component cases and two production browser
 cases cover validation, secret handling, save and explicit discard.
 
+The configuration API now accepts a quoted revision in `If-Match`. Conditional
+NVD/retention saves reject stale or concurrently superseded drafts with HTTP 412;
+rejected writes do not advance revisions or emit success audit events. Older
+clients without the header retain compatible merge/retry behavior. Both editors
+preserve drafts during conflicts and background refresh failures, and require an
+explicit reload to discard them. OpenAPI and CORS describe/support the header.
+The accepted [stack ADR](decisions/0001-astronomer-console-stack.md) records the
+user's Router/Form/REST direction and its limits; it does not close all of TSG-1.
+
 Additional security fixes in this continuation:
 
+- Stored Argon2 hashes are validated before deriving a key: format, decoding,
+  memory, passes, lanes and key/salt sizes are bounded. All locally issued hashes
+  retain their existing parameters; imported hashes above the verification budget
+  now fail format validation and need a separately reviewed reset/import path.
+- Kafka header parsing respects the declared frame boundary, preserves signed
+  correlation IDs and rejects invalid client lengths/UTF-8. Plugin example HTTP
+  servers now have explicit header/read/write/idle deadlines.
 - Compliance email validates header inputs and mailbox syntax, and uses MIME
   encoding for Unicode subjects, attachment names and base64 line wrapping.
   Injection and MIME round-trip tests pass with races.
@@ -139,6 +155,32 @@ Additional security fixes in this continuation:
   and crypto-module logs now exist; [FIPS documentation](fips.md) removes earlier
   unsupported whole-product, CLI and native-library claims. Workflow validation
   and the hosted FIPS job pass; deployed cryptographic qualification remains open.
+
+Latest local evidence supersedes the earlier small samples: the immutable
+`3944e02` full seeded Go suite passed **5,572 executions** with repetition,
+shuffle, races and zero skips/failures. The following conditional-save/auth/DPI
+slice passed **586 executions** across four affected packages; the extracted
+CVE fixture helper then passed **40 findings-package executions**. The frontend
+suite passes **143 tests**, and changed Go code since `3b2f2aa` has zero new lint
+issues. Migration 170 also passes 170 → 169 → 170 with CVE data preserved.
+
+The security/format runners now use the module's package list so ignored local
+reference checkouts do not enter the scan. Gosec uses two workers, a 2 GiB runtime
+soft budget and owned disk scratch; the full 120-package run completes in 15.64
+seconds with 284,376 KiB measured peak RSS, and still blocks on **261 findings**.
+The unrelated scratch left by the interrupted recursive scan was removed. These
+resource fixes do not add scanner exclusions or change native failure statuses.
+Hosted run 38191094639 passed Go unit/integration, frontend, FIPS and dependency
+audits, but failed quality, gosec, historical secrets and one Accept Risk browser
+race. That test now waits for the filtered result and matching finding. All eight
+focused production-browser cases pass, including real-API stale retention edits.
+The final full production-container suite passes **194/194**, zero retries, with
+the migration apply/idempotency/rollback recipe enabled. All **78 tooling tests**,
+module formatting, ShellCheck and endpoint/plan checks pass. Evidence:
+`/tmp/constellation-resource-fixed-full-browser/`,
+`/tmp/constellation-resource-fixed-full-browser.log`,
+`/tmp/constellation-fixed-packages/` and
+`/tmp/constellation-fixed-tooling-final.log`. New hosted acceptance remains pending.
 
 These fixes do not establish green CI. Historical secret findings need
 classification/remediation and any genuine credentials revoked; do not broadly
@@ -1612,7 +1654,7 @@ compatibility, supported runtime versions, and upstream changes before pinning.
 | [07 Testing](https://technology-selection-guide.aws.ablabs.io/07-testing/) | Go/Vitest/Playwright tests, disposable PostgreSQL repeat/race/JUnit gate and production-container browser gate pass locally. Playwright browser auth coverage uses zero PR retries. | Partial: most DB tests lack integration tags and share a DB; no pgtestdb/testcontainers harness found. Seed-dependent skips, CNI/kernel/cloud matrix, hosted CI evidence, and full isolated integration contracts remain open. | TSG-4 |
 | [08 Discipline](https://technology-selection-guide.aws.ablabs.io/08-discipline/) | Canonical evidence-driven plan and real DB tests provide a foundation. | Partial: codify ADR/deviation review, root-cause and transport-boundary testing, layer/enum discipline, offline-first acceptance and contributor commands. | TSG-1, TSG-2, TSG-7 |
 | [09 Air-gap](https://technology-selection-guide.aws.ablabs.io/09-airgap/) | Scanner DB preload/airgap image support and signed release artifacts exist. | Partial: complete signed offline deployment BOM/loader, local-first OCI resolver, closed-egress first boot and all-feature upgrade/restore proof are not established; release images are deliberately amd64-only versus the guide's dual-architecture requirement. | TSG-7 |
-| [10 TypeScript](https://technology-selection-guide.aws.ablabs.io/10-typescript/) | React 19, strict TypeScript, Vite, Tailwind 4, Radix, TanStack Query, lucide, Vitest and Playwright exist. Node is pinned and browser auth/session regressions pass locally. | Partial: TanStack Router owns routing and the shared TanStack Form/Zod layer is used by Data Retention and NVD configuration. The user chose these Astronomer-aligned alternatives to the guide's router/form choices; record the deviation. No Connect-Web pipeline or root session-loader contract is established. Mutation invalidation, inline field errors and version-review obligations need broader acceptance tests. | TSG-5 |
+| [10 TypeScript](https://technology-selection-guide.aws.ablabs.io/10-typescript/) | React 19, strict TypeScript, Vite, Tailwind 4, Radix, TanStack Query, lucide, Vitest and Playwright exist. Node is pinned and browser auth/session regressions pass locally. | Partial: TanStack Router owns routing and the shared TanStack Form/Zod layer is used by Data Retention and NVD configuration. The user chose these Astronomer-aligned alternatives to the guide's router/form choices; ADR 0001 records the deviation. No Connect-Web pipeline or root session-loader contract is established. Mutation invalidation, inline field errors and version-review obligations need broader acceptance tests. | TSG-5 |
 | [11 Multi-language](https://technology-selection-guide.aws.ablabs.io/11-multi-language/) | Go/TypeScript, native/eBPF runtime code, Python test tooling, shell and Helm coexist. Go/Node/Python CI runtimes are pinned, npm lockfiles are audited, and ShellCheck is a blocking gate. | Partial: language ADRs/ownership, native exceptions, Python type/lint coverage, per-language SBOM/signing and cross-language telemetry remain open. | TSG-1, TSG-4, TSG-7 |
 
 ### TSG-1 Requirement inventory and deliberate adoption
@@ -1631,6 +1673,9 @@ compatibility, supported runtime versions, and upstream changes before pinning.
   logging/transport choices, privileged/native dataplane images, amd64-only
   release support and any other retained departures; deviations need explicit
   approval, rationale, residual risk, compensating controls and a review date.
+  The [accepted console-stack ADR](decisions/0001-astronomer-console-stack.md)
+  now records the user's Router/Form/REST direction and review date. Other
+  departures remain individually open; this is not a blanket waiver.
 - [ ] Resolve guide inconsistencies explicitly: chapters 03/06 disallow browser
   localStorage tokens, while chapter 10 tolerates a transition; use the stronger
   security requirement as the target. Reconcile dated version/router/Helm advice
@@ -1705,7 +1750,10 @@ custody, threat-model or external-provider release matrix.
   The full suite and migration apply/rollback fixture are now the CI default.
   The distinct FIPS build/runtime job passes locally and in hosted CI. Hosted
   [run 38190053858](https://github.com/alphabravo-oss/constellation/actions/runs/38190053858)
-  passes both browser and FIPS jobs. This closes this bounded CI/browser item;
+  passes both browser and FIPS jobs. Later run 38191094639 exposed an Accept Risk
+  filter/click race; the repaired full local suite passes 194/194 with zero
+  retries, with updated hosted proof pending. This closes the bounded CI wiring
+  item based on the recorded successful run;
   overall CI remains blocked by quality/gosec/history-secret findings, and the
   separate deployed FIPS qualification remains open. Production rate limiting
   remains enabled in browser tests.
@@ -1730,7 +1778,7 @@ custody, threat-model or external-provider release matrix.
   production builds, API/WebSocket dev proxies, version stamps and Node/tooling
   pins against the guide, with ADRs for deliberate alternatives.
   TanStack Router now owns the entry point and all route consumers. Record this
-  guide departure; complete generated route checks, domain-typed search and
+  guide departure in ADR 0001; complete generated route checks, domain-typed search and
   release-wide session/scope/browser acceptance beyond the focused tests.
   Tailwind v4 and TanStack Table are already wired;
   remaining frontend alignment is compatibility and workflow depth, including

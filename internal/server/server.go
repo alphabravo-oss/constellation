@@ -537,7 +537,7 @@ func (s *Server) buildRouter() chi.Router {
 	corsOpts := cors.Options{
 		AllowedOrigins:   corsAllowedOrigins(s.cfg.CORSOrigins),
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Authorization", "Content-Type", "X-Request-Id", "Idempotency-Key", auth.BrowserHeader},
+		AllowedHeaders:   []string{"Authorization", "Content-Type", "If-Match", "X-Request-Id", "Idempotency-Key", auth.BrowserHeader},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}

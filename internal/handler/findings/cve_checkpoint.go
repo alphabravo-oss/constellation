@@ -29,7 +29,7 @@ func withCVEImportConnection(ctx context.Context, pool *pgxpool.Pool, run func(*
 		return nil // Another replica owns this cycle; next scheduled sync retries.
 	}
 	defer func() {
-		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		var unlocked bool
 		if err := conn.QueryRow(cleanup, `SELECT pg_advisory_unlock(1735292486, 1)`).Scan(&unlocked); err != nil || !unlocked {
@@ -40,8 +40,8 @@ func withCVEImportConnection(ctx context.Context, pool *pgxpool.Pool, run func(*
 	return run(conn)
 }
 
-func rollbackCVEImport(tx pgx.Tx) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func rollbackCVEImport(parent context.Context, tx pgx.Tx) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
 	defer cancel()
 	_ = tx.Rollback(ctx)
 }

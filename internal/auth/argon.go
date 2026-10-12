@@ -47,13 +47,18 @@ var ErrInvalidHashFormat = errors.New("auth: invalid hash format")
 
 // VerifyPassword constant-time compares `password` against `encoded`.
 func VerifyPassword(encoded, password string) error {
+	// Stored/restore-supplied hashes are untrusted input. Bound decoding and KDF
+	// cost before allocation, and reject zero parameters that make IDKey panic.
+	if len(encoded) > 256 {
+		return ErrInvalidHashFormat
+	}
 	parts := strings.Split(encoded, "$")
-	if len(parts) != 6 || parts[1] != "argon2id" {
+	if len(parts) != 6 || parts[0] != "" || parts[1] != "argon2id" {
 		return ErrInvalidHashFormat
 	}
 
 	var version int
-	if _, err := fmt.Sscanf(parts[2], "v=%d", &version); err != nil || version != argon2.Version {
+	if _, err := fmt.Sscanf(parts[2], "v=%d", &version); err != nil || version != argon2.Version || parts[2] != fmt.Sprintf("v=%d", version) {
 		return ErrInvalidHashFormat
 	}
 
@@ -62,17 +67,27 @@ func VerifyPassword(encoded, password string) error {
 	if _, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &m, &t, &p); err != nil {
 		return ErrInvalidHashFormat
 	}
-
-	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
-	if err != nil {
-		return ErrInvalidHashFormat
-	}
-	expected, err := base64.RawStdEncoding.DecodeString(parts[5])
-	if err != nil {
+	// All locally issued hashes use 64 MiB / 3 passes / 4 lanes. Permit smaller
+	// historical costs without letting a corrupt record request unbounded work.
+	if m > argonMemory || p == 0 || p > 16 || m < 8*uint32(p) || t == 0 || t > 10 ||
+		parts[3] != fmt.Sprintf("m=%d,t=%d,p=%d", m, t, p) {
 		return ErrInvalidHashFormat
 	}
 
-	got := argon2.IDKey([]byte(password), salt, t, m, p, uint32(len(expected)))
+	salt, err := base64.RawStdEncoding.Strict().DecodeString(parts[4])
+	if err != nil || len(salt) < 8 || len(salt) > 64 {
+		return ErrInvalidHashFormat
+	}
+	expected, err := base64.RawStdEncoding.Strict().DecodeString(parts[5])
+	if err != nil {
+		return ErrInvalidHashFormat
+	}
+	keyLen := len(expected)
+	if keyLen < 16 || keyLen > 64 {
+		return ErrInvalidHashFormat
+	}
+
+	got := argon2.IDKey([]byte(password), salt, t, m, p, uint32(keyLen))
 	if subtle.ConstantTimeCompare(got, expected) != 1 {
 		return ErrInvalidPassword
 	}

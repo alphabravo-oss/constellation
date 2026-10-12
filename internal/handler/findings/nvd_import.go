@@ -220,42 +220,12 @@ func importNVDWindow(ctx context.Context, conn *pgxpool.Conn, cfg nvdConfig, sou
 		if err != nil {
 			return total, err
 		}
-		if expected >= 0 && expected != count {
-			return total, fmt.Errorf("nvd result count changed during pagination; retry window")
-		}
-		expected = count
-		if len(rows) == 0 && index < count {
-			return total, fmt.Errorf("nvd empty page before end of results")
-		}
-		for _, row := range rows {
-			if seen[row.id] {
-				return total, fmt.Errorf("nvd duplicate CVE across pages; retry window")
-			}
-			seen[row.id] = true
-		}
-		index += len(rows)
-		tx, err := conn.Begin(ctx)
-		if err != nil {
+		if err := validateNVDPageProgress(expected, index, count, rows, seen); err != nil {
 			return total, err
 		}
-		err = func() error {
-			defer rollbackCVEImport(tx)
-			if err := upsertCVERows(ctx, tx, rows); err != nil {
-				return err
-			}
-			if index == count {
-				if _, err := tx.Exec(ctx, `SET LOCAL synchronous_commit=on`); err != nil {
-					return err
-				}
-				if _, err := tx.Exec(ctx, `INSERT INTO cve_feed_checkpoints(feed,source_hash,completed_through,row_count)
-                    VALUES ('nvd',$1,$2,$3) ON CONFLICT(feed) DO UPDATE SET source_hash=EXCLUDED.source_hash,
-                    completed_through=EXCLUDED.completed_through,row_count=EXCLUDED.row_count,updated_at=now()`, sourceHash, end, index); err != nil {
-					return err
-				}
-			}
-			return tx.Commit(ctx)
-		}()
-		if err != nil {
+		expected = count
+		index += len(rows)
+		if err := commitNVDPage(ctx, conn, sourceHash, end, index, count, rows); err != nil {
 			return total, err
 		}
 		total += len(rows)
@@ -264,6 +234,44 @@ func importNVDWindow(ctx context.Context, conn *pgxpool.Conn, cfg nvdConfig, sou
 		}
 	}
 	return total, fmt.Errorf("nvd page budget exhausted before completing window")
+}
+
+func validateNVDPageProgress(expected, index, count int, rows []cveImportRow, seen map[string]bool) error {
+	if expected >= 0 && expected != count {
+		return fmt.Errorf("nvd result count changed during pagination; retry window")
+	}
+	if len(rows) == 0 && index < count {
+		return fmt.Errorf("nvd empty page before end of results")
+	}
+	for _, row := range rows {
+		if seen[row.id] {
+			return fmt.Errorf("nvd duplicate CVE across pages; retry window")
+		}
+		seen[row.id] = true
+	}
+	return nil
+}
+
+func commitNVDPage(ctx context.Context, conn *pgxpool.Conn, sourceHash string, end time.Time, index, count int, rows []cveImportRow) error {
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer rollbackCVEImport(ctx, tx)
+	if err := upsertCVERows(ctx, tx, rows); err != nil {
+		return err
+	}
+	if index == count {
+		if _, err := tx.Exec(ctx, `SET LOCAL synchronous_commit=on`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO cve_feed_checkpoints(feed,source_hash,completed_through,row_count)
+            VALUES ('nvd',$1,$2,$3) ON CONFLICT(feed) DO UPDATE SET source_hash=EXCLUDED.source_hash,
+            completed_through=EXCLUDED.completed_through,row_count=EXCLUDED.row_count,updated_at=now()`, sourceHash, end, index); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
 }
 
 func parseNVDTime(value string) (time.Time, error) {
@@ -276,8 +284,8 @@ func parseNVDTime(value string) (time.Time, error) {
 
 func fetchNVDPage(ctx context.Context, cfg nvdConfig, startIndex int, start, end time.Time) ([]cveImportRow, int, error) {
 	base, err := url.Parse(cfg.base())
-	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" {
-		return nil, 0, fmt.Errorf("nvd base URL must be HTTP(S), without credentials, query or fragment")
+	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" || base.RawQuery != "" || base.Fragment != "" {
+		return nil, 0, fmt.Errorf("nvd base URL must be HTTP(S), without query or fragment")
 	}
 	query := base.Query()
 	query.Set("resultsPerPage", fmt.Sprint(nvdPageSize))

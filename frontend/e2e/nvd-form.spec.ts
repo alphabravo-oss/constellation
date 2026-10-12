@@ -9,6 +9,7 @@ test("NVD form validates, preserves the stored key, and saves without a discard 
     } else if (path.endsWith("/system/config")) {
       if (route.request().method() === "PATCH") {
         patches++;
+        expect(route.request().headers()["if-match"]).toBe('"1"');
         expect(route.request().postDataJSON()).toEqual({ nvd_enabled: true, nvd_mirror_url: "https://mirror.test/api" });
       }
       await route.fulfill({ json: { revision: patches + 1, config: { nvd_enabled: patches > 0, nvd_api_key: "***REDACTED***", nvd_mirror_url: patches ? "https://mirror.test/api" : "" } } });

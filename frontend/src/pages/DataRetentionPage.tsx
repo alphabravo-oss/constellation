@@ -30,9 +30,9 @@ export function DataRetentionPage() {
   const query = useQuery({ queryKey: ["system-config"], queryFn: () => systemConfigApi.get() });
   return <div className="space-y-6">
     <PageHeader title="Data Retention" description="Control how long raw network flows, runtime events, and finished scan jobs are kept." />
-    {query.isPending ? <p role="status">Loading retention settings…</p> : query.isError ?
+    {query.isPending ? <p role="status">Loading retention settings…</p> : query.isError && !query.data ?
       <div role="alert">Could not load retention settings. <Button onClick={() => void query.refetch()}>Retry</Button></div> :
-      <RetentionForm data={query.data} />}
+      <RetentionForm data={query.data!} />}
   </div>;
 }
 
@@ -45,16 +45,20 @@ function RetentionForm({ data }: { data: SystemConfigResponse }) {
     defaultValues: savedValues,
     validators: { onChange: retentionSchema, onSubmit: retentionSchema },
     onSubmit: async ({ value }) => {
+      if (loadedRevision !== data.revision) {
+        setSaveError("Settings changed elsewhere. Your edits are preserved; reload current settings before saving.");
+        return;
+      }
       setSaveError("");
       try {
-        const saved = await systemConfigApi.patch(value);
+        const saved = await systemConfigApi.patch(value, loadedRevision);
         qc.setQueryData(["system-config"], saved);
         form.reset(valuesFrom(saved));
         setLoadedRevision(saved.revision);
         toast.success("Retention settings saved");
       } catch (error) {
         const status = (error as { response?: { status?: number } })?.response?.status;
-        if (status === 409) {
+        if (status === 409 || status === 412) {
           setSaveError("Config changed elsewhere. Your edits are preserved; reload current settings before trying again.");
           void qc.invalidateQueries({ queryKey: ["system-config"] });
         } else {

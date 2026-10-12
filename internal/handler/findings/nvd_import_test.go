@@ -1,6 +1,13 @@
 package findings
 
-import "testing"
+import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+)
 
 func TestParseNVDPage(t *testing.T) {
 	const fixture = `{
@@ -48,5 +55,22 @@ func TestParseNVDPage(t *testing.T) {
 	// v3.0 fallback + lower-case id normalized.
 	if rows[1].id != "CVE-2014-0160" || rows[1].cvssBase == nil || *rows[1].cvssBase != 7.5 {
 		t.Fatalf("row1: %+v", rows[1])
+	}
+}
+
+func TestNVDCredentialedMirrorRemainsSupported(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, password, ok := r.BasicAuth()
+		if !ok || user != "fixture" || password != "fixture" {
+			http.Error(w, "missing mirror authentication", http.StatusUnauthorized)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"resultsPerPage":0,"startIndex":0,"totalResults":0,"vulnerabilities":[]}`)
+	}))
+	defer server.Close()
+	base := strings.Replace(server.URL, "http://", "http://fixture:fixture@", 1)
+	_, _, err := fetchNVDPage(t.Context(), nvdConfig{BaseURL: base, Client: server.Client()}, 0, time.Now().Add(-time.Hour), time.Now())
+	if err != nil {
+		t.Fatal(err)
 	}
 }

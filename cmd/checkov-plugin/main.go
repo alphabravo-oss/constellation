@@ -129,7 +129,14 @@ func main() {
 		Scanner: checkov{},
 	}
 	logger.Info("listening", "addr", *listen)
-	if err := http.ListenAndServe(*listen, srv.Mux()); err != nil {
+	httpServer := &http.Server{
+		Addr: *listen, Handler: srv.Mux(),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      11 * time.Minute, // Scanner execution is bounded to 10 minutes.
+		IdleTimeout:       time.Minute,
+	}
+	if err := httpServer.ListenAndServe(); err != nil {
 		logger.Error("serve", "err", err.Error())
 		os.Exit(1)
 	}

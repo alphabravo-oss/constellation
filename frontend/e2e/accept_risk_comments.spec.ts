@@ -1,18 +1,31 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { login } from "./utils";
 
 test.beforeEach(async ({ page }) => {
   await login(page);
 });
 
-// These specs target an "open" finding so suppress/accept don't fight prior state. After
-// the spec runs the suppress-test from findings.spec.ts may have already touched the
-// first finding, so we navigate to a runtime-kind finding which is never suppressed by
-// the other specs.
-test("Accept Risk modal records rationale + expiry", async ({ page }) => {
+// Select a row from the completed filtered response: the old CVE table can remain
+// visible briefly while the Kind control switches to the instance view.
+async function openFindingOfKind(page: Page, kind: "ml-model" | "compliance") {
   await page.goto("/findings");
-  await page.getByLabel("Kind").selectOption("ml-model");
-  await page.locator("tbody tr").first().click();
+  const filtered = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname === "/api/v1/findings" && url.searchParams.get("kind") === kind && response.request().method() === "GET";
+  });
+  await page.getByLabel("Kind").selectOption(kind);
+  const response = await filtered;
+  expect(response.ok()).toBeTruthy();
+  const { findings } = await response.json();
+  const finding = findings.find((item: { lifecycle: string }) => item.lifecycle === "open");
+  expect(finding, `seeded open ${kind} finding`).toBeTruthy();
+  await page.locator("tbody tr").filter({ has: page.getByText(finding.title, { exact: true }) }).first().click();
+  await expect(page).toHaveURL(new RegExp(`/findings/${finding.id}$`));
+}
+
+// Use an open ML finding untouched by the suppression tests.
+test("Accept Risk modal records rationale + expiry", async ({ page }) => {
+  await openFindingOfKind(page, "ml-model");
 
   await expect(page.getByRole("button", { name: /^Accept risk$/i })).toBeVisible();
   await page.getByRole("button", { name: /^Accept risk$/i }).click();
@@ -24,9 +37,7 @@ test("Accept Risk modal records rationale + expiry", async ({ page }) => {
 });
 
 test("Comment thread accepts and renders a new comment", async ({ page }) => {
-  await page.goto("/findings");
-  await page.getByLabel("Kind").selectOption("compliance");
-  await page.locator("tbody tr").first().click();
+  await openFindingOfKind(page, "compliance");
 
   await expect(page.getByTestId("comments-section")).toBeVisible();
   const body = `e2e-test comment ${Date.now()}`;

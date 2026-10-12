@@ -54,20 +54,7 @@ func TestCVEFeedCheckpointRestartCorrectionAndRollback(t *testing.T) {
 	var probability atomic.Value
 	probability.Store("0.10")
 	var invalid atomic.Bool
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/kev" {
-			_, _ = fmt.Fprint(w, `{"catalogVersion":"fixed-version","count":1,"vulnerabilities":[{"cveID":"CVE-2026-10001","vulnerabilityName":"test"}]}`)
-			return
-		}
-		if invalid.Load() {
-			_, _ = fmt.Fprint(w, "not a feed")
-			return
-		}
-		_, _ = fmt.Fprintln(w, "#score_date:2026-10-12T00:00:00+0000\ncve,epss,percentile")
-		for i := 0; i < 1200; i++ {
-			_, _ = fmt.Fprintf(w, "CVE-2026-%d,%s,0.8\n", 10001+i, probability.Load().(string))
-		}
-	}))
+	server := httptest.NewServer(cveSnapshotFixture(&probability, &invalid))
 	defer server.Close()
 	cfg := CVEIntelConfig{KEVURL: server.URL + "/kev", EPSSURL: server.URL + "/epss", Client: server.Client()}
 	n, marker, err := ImportCVEIntel(t.Context(), pool, cfg)
@@ -75,69 +62,8 @@ func TestCVEFeedCheckpointRestartCorrectionAndRollback(t *testing.T) {
 		t.Fatalf("initial import: %d %v", n, err)
 	}
 	first := checkpointVersion(t, pool, "kev-epss")
-	var baselineStart string
-	if err := pool.QueryRow(t.Context(), `SELECT pg_current_wal_insert_lsn()::text`).Scan(&baselineStart); err != nil {
-		t.Fatal(err)
-	}
-	// Reproduce the previous unconditional conflict-update cost for comparison.
-	tx, err := pool.Begin(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tx.Exec(t.Context(), `UPDATE cve_records SET epss_probability=epss_probability`); err != nil {
-		_ = tx.Rollback(t.Context())
-		t.Fatal(err)
-	}
-	var rewritten int64
-	if err := tx.QueryRow(t.Context(), `SELECT pg_stat_get_xact_tuples_updated('cve_records'::regclass)`).Scan(&rewritten); err != nil {
-		_ = tx.Rollback(t.Context())
-		t.Fatal(err)
-	}
-	if err := tx.Commit(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	var baselineWAL int64
-	if err := pool.QueryRow(t.Context(), `SELECT pg_wal_lsn_diff(pg_current_wal_insert_lsn(),$1::pg_lsn)::bigint`, baselineStart).Scan(&baselineWAL); err != nil {
-		t.Fatal(err)
-	}
-	if rewritten != 1200 {
-		t.Fatalf("unconditional baseline rewrites=%d", rewritten)
-	}
-	t.Logf("one unconditional 1200-row replay: WAL delta=%d bytes, rewritten tuples=%d", baselineWAL, rewritten)
-	var rowVersion, before string
-	if err := pool.QueryRow(t.Context(), `SELECT xmin::text FROM cve_records WHERE cve_id='CVE-2026-10001'`).Scan(&rowVersion); err != nil {
-		t.Fatal(err)
-	}
-	if err := pool.QueryRow(t.Context(), `SELECT pg_current_wal_insert_lsn()::text`).Scan(&before); err != nil {
-		t.Fatal(err)
-	}
-	// A new pool has no process-local checkpoint state.
-	restarted, err := pgxpool.NewWithConfig(t.Context(), pool.Config().Copy())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer restarted.Close()
-	for i := 0; i < 3; i++ {
-		n, got, err := ImportCVEIntel(t.Context(), restarted, cfg)
-		if err != nil || n != 0 || got != marker {
-			t.Fatalf("restart replay: %d %q %v", n, got, err)
-		}
-	}
-	var wal int64
-	if err := pool.QueryRow(t.Context(), `SELECT pg_wal_lsn_diff(pg_current_wal_insert_lsn(),$1::pg_lsn)::bigint`, before).Scan(&wal); err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("three identical 1200-row feed replays: WAL delta=%d bytes (cluster-wide, includes background activity)", wal)
-	if checkpointVersion(t, pool, "kev-epss") != first {
-		t.Fatal("identical feed rewrote checkpoint")
-	}
-	var replayVersion string
-	if err := pool.QueryRow(t.Context(), `SELECT xmin::text FROM cve_records WHERE cve_id='CVE-2026-10001'`).Scan(&replayVersion); err != nil {
-		t.Fatal(err)
-	}
-	if replayVersion != rowVersion {
-		t.Fatal("identical feed rewrote CVE row")
-	}
+	measureUnconditionalCVEReplay(t, pool)
+	assertUnchangedCVEReplay(t, pool, cfg, marker, first)
 	// Upstreams sometimes correct content without changing version/date labels.
 	probability.Store("0.25")
 	if n, _, err := ImportCVEIntel(t.Context(), pool, cfg); err != nil || n != 1200 {
@@ -229,7 +155,7 @@ func TestNVDCheckpointResumeAndIncompleteWindow(t *testing.T) {
 			return
 		}
 		if failSecond.Load() {
-			http.Error(w, "unavailable", 503)
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		_, _ = fmt.Fprint(w, `{"resultsPerPage":1,"startIndex":1,"totalResults":2,"vulnerabilities":[{"cve":{"id":"CVE-2026-20002","descriptions":[{"lang":"en","value":"second"}]}}]}`)
@@ -354,12 +280,103 @@ func TestNVDFetchRejectsInconsistentPaginationAndRedirects(t *testing.T) {
 	var leaked atomic.Bool
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { leaked.Store(true) }))
 	defer target.Close()
-	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, target.URL, 307) }))
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
 	defer source.Close()
 	if _, _, err := fetchNVDPage(t.Context(), nvdConfig{BaseURL: source.URL, Client: source.Client(), APIKey: "fixture"}, 0, time.Now().Add(-time.Hour), time.Now()); err == nil {
 		t.Fatal("redirect accepted")
 	}
 	if leaked.Load() {
 		t.Fatal("NVD API key request followed redirect")
+	}
+}
+
+func measureUnconditionalCVEReplay(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	var baselineStart string
+	if err := pool.QueryRow(t.Context(), `SELECT pg_current_wal_insert_lsn()::text`).Scan(&baselineStart); err != nil {
+		t.Fatal(err)
+	}
+	// Reproduce the previous unconditional conflict-update cost for comparison.
+	tx, err := pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(t.Context(), `UPDATE cve_records SET epss_probability=epss_probability`); err != nil {
+		_ = tx.Rollback(t.Context())
+		t.Fatal(err)
+	}
+	var rewritten int64
+	if err := tx.QueryRow(t.Context(), `SELECT pg_stat_get_xact_tuples_updated('cve_records'::regclass)`).Scan(&rewritten); err != nil {
+		_ = tx.Rollback(t.Context())
+		t.Fatal(err)
+	}
+	if err := tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var baselineWAL int64
+	if err := pool.QueryRow(t.Context(), `SELECT pg_wal_lsn_diff(pg_current_wal_insert_lsn(),$1::pg_lsn)::bigint`, baselineStart).Scan(&baselineWAL); err != nil {
+		t.Fatal(err)
+	}
+	if rewritten != 1200 {
+		t.Fatalf("unconditional baseline rewrites=%d", rewritten)
+	}
+	t.Logf("one unconditional 1200-row replay: WAL delta=%d bytes, rewritten tuples=%d", baselineWAL, rewritten)
+
+}
+func assertUnchangedCVEReplay(t *testing.T, pool *pgxpool.Pool, cfg CVEIntelConfig, marker, first string) {
+	t.Helper()
+	var rowVersion, before string
+	if err := pool.QueryRow(t.Context(), `SELECT xmin::text FROM cve_records WHERE cve_id='CVE-2026-10001'`).Scan(&rowVersion); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(t.Context(), `SELECT pg_current_wal_insert_lsn()::text`).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	// A new pool has no process-local checkpoint state.
+	restarted, err := pgxpool.NewWithConfig(t.Context(), pool.Config().Copy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Close()
+	for i := 0; i < 3; i++ {
+		n, got, err := ImportCVEIntel(t.Context(), restarted, cfg)
+		if err != nil || n != 0 || got != marker {
+			t.Fatalf("restart replay: %d %q %v", n, got, err)
+		}
+	}
+	var wal int64
+	if err := pool.QueryRow(t.Context(), `SELECT pg_wal_lsn_diff(pg_current_wal_insert_lsn(),$1::pg_lsn)::bigint`, before).Scan(&wal); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("three identical 1200-row feed replays: WAL delta=%d bytes (cluster-wide, includes background activity)", wal)
+	if checkpointVersion(t, pool, "kev-epss") != first {
+		t.Fatal("identical feed rewrote checkpoint")
+	}
+	var replayVersion string
+	if err := pool.QueryRow(t.Context(), `SELECT xmin::text FROM cve_records WHERE cve_id='CVE-2026-10001'`).Scan(&replayVersion); err != nil {
+		t.Fatal(err)
+	}
+	if replayVersion != rowVersion {
+		t.Fatal("identical feed rewrote CVE row")
+	}
+
+}
+
+func cveSnapshotFixture(probability *atomic.Value, invalid *atomic.Bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/kev" {
+			_, _ = fmt.Fprint(w, `{"catalogVersion":"fixed-version","count":1,"vulnerabilities":[{"cveID":"CVE-2026-10001","vulnerabilityName":"test"}]}`)
+			return
+		}
+		if invalid.Load() {
+			_, _ = fmt.Fprint(w, "not a feed")
+			return
+		}
+		_, _ = fmt.Fprintln(w, "#score_date:2026-10-12T00:00:00+0000\ncve,epss,percentile")
+		for i := 0; i < 1200; i++ {
+			_, _ = fmt.Fprintf(w, "CVE-2026-%d,%s,0.8\n", 10001+i, probability.Load().(string))
+		}
 	}
 }

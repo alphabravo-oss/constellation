@@ -42,9 +42,9 @@ export function NvdConfigPage() {
     <PageHeader title="NVD CVE enrichment"
       description="Import descriptions and CVSS for recently modified CVEs from the NVD 2.0 feed. An API key raises the rate limit."
       backLink={<Link to="/settings/scanner" className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Scanner &amp; CVE Sources</Link>} />
-    {query.isPending ? <p role="status">Loading current NVD settings…</p> : query.isError ?
+    {query.isPending ? <p role="status">Loading current NVD settings…</p> : query.isError && !query.data ?
       <div role="alert">Could not load NVD settings. <Button onClick={() => void query.refetch()}>Retry</Button></div> :
-      <NvdConfigForm data={query.data} onClose={() => void navigate({ href: "/settings/scanner" })} />}
+      <NvdConfigForm data={query.data!} onClose={() => void navigate({ href: "/settings/scanner" })} />}
   </div>;
 }
 
@@ -65,7 +65,7 @@ function NvdConfigForm({ data, onClose }: { data: SystemConfigResponse; onClose:
       const body: Record<string, unknown> = { nvd_enabled: value.nvd_enabled, nvd_mirror_url: value.nvd_mirror_url.trim() };
       if (value.apiKey.trim()) body.nvd_api_key = value.apiKey.trim();
       try {
-        const saved = await systemConfigApi.patch(body);
+        const saved = await systemConfigApi.patch(body, loadedRevision);
         form.reset(valuesFrom(saved));
         setLoadedRevision(saved.revision);
         qc.setQueryData(["system-config"], saved);
@@ -73,9 +73,9 @@ function NvdConfigForm({ data, onClose }: { data: SystemConfigResponse; onClose:
         onClose();
       } catch (error) {
         const status = (error as { response?: { status?: number } })?.response?.status;
-        setSaveError(status === 409 ? "Config changed elsewhere. Your edits are preserved; reload current settings before trying again." :
+        setSaveError(status === 409 || status === 412 ? "Config changed elsewhere. Your edits are preserved; reload current settings before trying again." :
           "Could not save NVD settings. Your edits are preserved; please retry.");
-        if (status === 409) void qc.invalidateQueries({ queryKey: ["system-config"] });
+        if (status === 409 || status === 412) void qc.invalidateQueries({ queryKey: ["system-config"] });
       }
     },
   });

@@ -49,10 +49,10 @@ describe("NVD settings form", () => {
     await render();
     expect(host.querySelector<HTMLInputElement>('input[name="apiKey"]')!.value).toBe("");
     await change("nvd_mirror_url", "https://mirror.test/api"); await submit();
-    expect(systemConfigApi.patch).toHaveBeenCalledWith({ nvd_enabled: false, nvd_mirror_url: "https://mirror.test/api" });
+    expect(systemConfigApi.patch).toHaveBeenCalledWith({ nvd_enabled: false, nvd_mirror_url: "https://mirror.test/api" }, 1);
   });
   it("preserves edited key and mirror through a conflict without echoing backend errors", async () => {
-    vi.mocked(systemConfigApi.patch).mockRejectedValue({ response: { status: 409, data: { error: "sensitive-backend-value" } } });
+    vi.mocked(systemConfigApi.patch).mockRejectedValue({ response: { status: 412, data: { error: "sensitive-backend-value" } } });
     vi.mocked(systemConfigApi.get).mockResolvedValue(config(2, "https://remote.test/api"));
     await render(); await change("apiKey", "replacement-test-value"); await change("nvd_mirror_url", "https://draft.test/api"); await submit();
     expect(systemConfigApi.patch).toHaveBeenCalledOnce();
@@ -77,5 +77,12 @@ describe("NVD settings form", () => {
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
     expect(host.querySelector("form")).toBeNull();
     expect(host.textContent).toContain("Could not load NVD settings");
+  });
+  it("keeps the key draft mounted when a background refresh fails", async () => {
+    await render(); await change("apiKey", "replacement-test-value");
+    vi.mocked(systemConfigApi.get).mockRejectedValue(new Error("unavailable"));
+    await act(async () => { await client.invalidateQueries({ queryKey: ["system-config"] }); await new Promise((resolve) => setTimeout(resolve, 10)); });
+    expect(host.querySelector<HTMLInputElement>('input[name="apiKey"]')!.value).toBe("replacement-test-value");
+    expect(host.textContent).not.toContain("replacement-test-value");
   });
 });

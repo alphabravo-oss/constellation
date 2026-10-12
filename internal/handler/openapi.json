@@ -11875,6 +11875,14 @@
                   }
                 }
               }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Quoted configuration revision for a subsequent conditional PATCH.",
+                "schema": {
+                  "type": "string"
+                }
+              }
             }
           },
           "401": {
@@ -11887,7 +11895,7 @@
       },
       "patch": {
         "summary": "Update system configuration",
-        "description": "Applies a partial, validated update to the org's system configuration and bumps the revision so in-process consumers hot-reload without a restart. Only the keys present in the body are changed; unknown keys are rejected. A ca_bundle_pem or credentialed egress proxy echoed back as the redaction marker is left unchanged. Requires the manage_system_config verb.",
+        "description": "Applies a partial, validated update to the org's system configuration and bumps the revision so in-process consumers hot-reload without a restart. Only the keys present in the body are changed; unknown keys are rejected. A ca_bundle_pem or credentialed egress proxy echoed back as the redaction marker is left unchanged. Requires the manage_system_config verb. Editors should supply If-Match with the quoted loaded revision. A stale conditional edit fails without writing; clients omitting it retain field-level merge/retry behavior.",
         "requestBody": {
           "required": true,
           "content": {
@@ -11922,6 +11930,14 @@
                   }
                 }
               }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Quoted configuration revision for a subsequent conditional PATCH.",
+                "schema": {
+                  "type": "string"
+                }
+              }
             }
           },
           "400": {
@@ -11942,8 +11958,23 @@
           },
           "409": {
             "description": "The configuration was changed concurrently; retry with the latest revision."
+          },
+          "412": {
+            "description": "The loaded revision is stale. No configuration update was applied; reload before saving."
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "description": "One quoted nonnegative config revision returned by GET. Wildcards, weak tags and tag lists are rejected.",
+            "schema": {
+              "type": "string",
+              "example": "\"12\""
+            }
+          }
+        ]
       }
     },
     "/api/v1/users": {

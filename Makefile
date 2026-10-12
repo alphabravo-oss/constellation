@@ -75,9 +75,7 @@ tools:
 	bash scripts/install-ci-tools.sh
 
 fmt:
-	@mkdir -p "$${ARTIFACT_DIR:-test-results/tooling}"
-	$(GOLANGCI_LINT) fmt --diff ./... > "$${ARTIFACT_DIR:-test-results/tooling}/format.diff"
-	@test ! -s "$${ARTIFACT_DIR:-test-results/tooling}/format.diff" || { cat "$${ARTIFACT_DIR:-test-results/tooling}/format.diff"; exit 1; }
+	GOLANGCI_LINT="$(GOLANGCI_LINT)" bash scripts/check-go-format.sh
 
 lint-shell:
 	bash scripts/lint-shell.sh

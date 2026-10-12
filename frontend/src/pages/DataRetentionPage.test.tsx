@@ -19,7 +19,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   window.history.replaceState({}, "", "/");
   history = createBrowserHistory();
-  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   client.setQueryData(["system-config"], config());
   vi.mocked(systemConfigApi.get).mockResolvedValue(config());
   host = document.createElement("div");
@@ -55,7 +55,7 @@ describe("retention form", () => {
     await render();
     await change("0");
     await submit();
-    expect(systemConfigApi.patch).toHaveBeenCalledWith({ network_flow_retention_days: 0, events_retention_days: 30, scan_job_retention_days: 7 });
+    expect(systemConfigApi.patch).toHaveBeenCalledWith({ network_flow_retention_days: 0, events_retention_days: 30, scan_job_retention_days: 7 }, 1);
     expect(host.querySelector<HTMLInputElement>("input")!.value).toBe("0");
     const event = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(event);
@@ -74,12 +74,19 @@ describe("retention form", () => {
     expect(host.querySelector<HTMLInputElement>("input")!.value).toBe("21");
   });
   it("preserves edits after a conflict", async () => {
-    vi.mocked(systemConfigApi.patch).mockRejectedValue({ response: { status: 409 } });
+    vi.mocked(systemConfigApi.patch).mockRejectedValue({ response: { status: 412 } });
     vi.mocked(systemConfigApi.get).mockResolvedValue(config(2, 21));
     await render();
     await change("45");
     await submit();
+    expect(systemConfigApi.patch).toHaveBeenCalledOnce();
     expect(host.querySelector<HTMLInputElement>("input")!.value).toBe("45");
     expect(host.textContent).toContain("Config changed elsewhere. Your edits are preserved");
+  });
+  it("keeps the retention draft mounted when a background refresh fails", async () => {
+    await render(); await change("45");
+    vi.mocked(systemConfigApi.get).mockRejectedValue(new Error("unavailable"));
+    await act(async () => { await client.invalidateQueries({ queryKey: ["system-config"] }); await new Promise((resolve) => setTimeout(resolve, 10)); });
+    expect(host.querySelector<HTMLInputElement>("input")!.value).toBe("45");
   });
 });

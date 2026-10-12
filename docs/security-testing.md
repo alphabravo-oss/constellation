@@ -33,7 +33,8 @@ complexity checks; no standard linter is disabled. The guide's complexity
 thresholds and readonly module loading are configured. `make fmt` verifies
 gofmt/goimports without rewriting files. Generated Go is excluded using strict
 generated-file markers; vendored `third_party/` code is not reformatted/linted.
-ShellCheck scans tracked and new first-party shell scripts, including deployment
+The formatter uses the module package list so ignored reference checkouts do not
+change local results. ShellCheck scans tracked and new first-party shell scripts, including deployment
 helpers, rather than silently restricting itself to the newly added scripts.
 
 `scripts/test-go.sh unit|integration [package patterns]` runs uncached, shuffled
@@ -56,6 +57,24 @@ Isolation is **per suite**, not per test; this does not prove fixture isolation.
 | pip-audit | Resolves and audits the integration harness requirements; any advisory or scanner error blocks |
 | Go/frontend tests | JUnit and JSON, uploaded even after a failed test step |
 | Lint/format | golangci-lint JSON, ShellCheck JSON, formatter diff |
+
+The gosec runner enumerates package directories with `go list ./...` before
+scanning. This matches the module's build scope and avoids recursively compiling
+ignored, nested reference repositories such as the local Rancher checkout.
+Package-discovery failures and empty results fail closed. All discovered packages
+retain the full rule set and native finding/error exit status. A single scan
+emits JSON and SARIF from the same issue list. The normalizer verifies each
+finding's identity before restoring repository-relative SARIF paths from JSON;
+otherwise package-local roots would flatten distinct files such as `main.go`.
+Mismatched or missing reports fail rather than producing misleading annotations.
+
+Defaults are two scan workers, `GOMAXPROCS=2` and `GOMEMLIMIT=2GiB`. Override with
+`GOSEC_CONCURRENCY`, `GOSEC_GOMAXPROCS` and `GOSEC_GOMEMLIMIT` when sizing a dedicated
+runner. The memory limit is a Go runtime soft budget, not a hard RSS cap. Unless
+`GOTMPDIR` is supplied, each scan creates and cleans its own scratch directory
+under `${XDG_CACHE_HOME:-$HOME/.cache}/constellation`, avoiding memory-backed `/tmp`.
+Caller-owned scratch directories are preserved. Run full scans separately from
+browser/capacity benchmarks on shared hosts.
 
 govulncheck's JSON/SARIF modes deliberately return success even with findings;
 the subsequent text conversion is essential. Load/parse/network errors also
@@ -271,3 +290,40 @@ JUnit/JSON are in `/tmp/constellation-parity-seeded-race/`. New federation redir
 Repository Go formatting and ShellCheck pass locally. The remaining strict lint
 and security findings still block release; they have not been suppressed.
 See [the canonical tracker](NEUVECTOR-PARITY-PLAN.md) for current gate evidence.
+
+## Resource and conditional-editor fixes — 2026-10-12
+
+The first local full gosec attempt recursively entered the ignored Rancher
+reference checkout, exhausted memory/swap and filled the 16 GiB memory-backed
+`/tmp` with abandoned compiler scratch. The runner now discovers this module's
+packages, uses two workers and a 2 GiB runtime soft memory budget, and owns disk
+scratch. The completed rescan covered 120 packages in 15.64 seconds; GNU time
+reported 284,376 KiB maximum resident set size. This is observed process usage,
+not an aggregate host-memory cap; the final run used warmed build caches. All
+261 SARIF paths resolve to repository files and the JSON reports no Go load errors.
+It exited 1 with **261 findings**, down from
+268 in hosted run 38191094639; no rule/path allowlist was added. Evidence:
+`/tmp/constellation-bounded-full-gosec-final.log` and
+`/tmp/constellation-bounded-full-security/gosec.sarif`.
+
+The configuration API rejects stale conditional edits without writing, and both
+shared forms preserve drafts after conflicts or failed background refreshes.
+Argon verification bounds stored-hash work without changing locally generated
+parameters; imported hashes above those bounds fail format validation. Kafka
+header parsing is frame-bounded, and plugin example HTTP servers have deadlines.
+Latest affected-package validation passed 586 executions (twice, shuffled, race
+detector, fresh migration-170 PostgreSQL, zero skips/failures), followed by 40
+findings-package executions after extracting a fixture helper. Full immutable
+`3944e02` validation passed 5,572 executions. Frontend component/unit tests pass
+143/143. The new-code lint check against `3b2f2aa` reports zero issues; this does
+not clear the full repository's existing lint backlog.
+
+The repaired Accept Risk/comment tests wait for their filtered response and the
+corresponding row. Eight focused production-container browser cases pass without
+retries, including real API HTTP 412/draft recovery. The final rebuilt full
+suite passes 194/194 with zero retries and the migration apply/rollback recipe
+enabled; all 78 tooling tests, ShellCheck and module formatting pass. Evidence:
+`/tmp/constellation-resource-fixed-full-browser.log` and
+`/tmp/constellation-fixed-tooling-final.log`. The failed hosted browser
+run 38191094639 predates this repair; subsequent full/hosted evidence is recorded
+in the canonical tracker. Reports remain local artifacts and are not committed.

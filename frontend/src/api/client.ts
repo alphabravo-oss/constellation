@@ -4839,8 +4839,10 @@ export interface SystemConfigResponse {
 export const systemConfigApi = {
   get: () =>
     api.get<SystemConfigResponse>("/system/config").then((r) => r.data),
-  patch: (body: Record<string, unknown>) =>
-    api.patch<SystemConfigResponse>("/system/config", body).then((r) => r.data),
+  patch: (body: Record<string, unknown>, revision?: number) =>
+    api.patch<SystemConfigResponse>("/system/config", body, revision === undefined ? undefined : {
+      headers: { "If-Match": `"${revision}"` },
+    }).then((r) => r.data),
   refreshScanner: () =>
     api.post<{ refresh_now: number; revision: number }>("/scanner/refresh", {}).then((r) => r.data),
 };
