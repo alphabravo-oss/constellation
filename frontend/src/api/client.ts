@@ -2670,7 +2670,7 @@ export interface DPIGroupBinding {
 
 export const dpiGroupBindings = {
   list: () =>
-    api.get<{ bindings: DPIGroupBinding[] }>("/runtime/dpi-sensor-bindings").then((r) => r.data.bindings),
+    api.get<{ bindings: DPIGroupBinding[] | null }>("/runtime/dpi-sensor-bindings").then((r) => r.data.bindings ?? []),
   bind: (body: { group_id: string; sensor_kind: DPISensorKind; sensor_id?: string }) =>
     api.post<DPIGroupBinding>("/runtime/dpi-sensor-bindings", body).then((r) => r.data),
   unbind: (id: string) =>

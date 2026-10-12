@@ -243,7 +243,7 @@ namespace retained; it was removed, then its direct link showed a non-editable e
 No profile import or live enforcement change was performed. The updated full
 browser specs were not rerun; these checks do not close UI-1 or broader acceptance.
 
-The group/DPI/file-monitor console continuation is deployed at Helm revision **33**.
+The group/DPI/file-monitor console continuation is deployed at Helm revision **34**.
 Groups and new-service defaults now use dedicated forms; the dashboard links to
 those canonical workflows instead of saving default modes inline. DLP/WAF group
 scope has dedicated add pages. Rule editors validate loaded identity/scope and
@@ -262,6 +262,11 @@ server platform role, and the executive report states its organization-wide scop
 Shared table density/column preferences are partitioned by organization and user;
 identity changes remount table state, legacy ownerless entries are not adopted, and
 stale column IDs are pruned. The header reads Constellation with by Alphabravo below.
+
+Live scope-form verification caught a successful empty API response containing
+`bindings: null`. The client now normalizes that collection to an empty array so
+new scope forms can load; two transport-level regression tests cover null and
+populated responses. The focused DPI/transport suite passes **28 tests**.
 
 Validation: **288 frontend tests**, production type-check/build, changed-file lint,
 endpoint mapping and whitespace checks pass. Live browser checks confirm the brand,
