@@ -87,7 +87,7 @@ export function FileMonitorPage() {
       : listQ.isPending ? <LoadingState label="Loading file profiles…" />
       : !listQ.data ? <ErrorState title="Could not load file profiles for this cluster." action={<Button onClick={() => void listQ.refetch()}>Retry</Button>} />
       : <>
-        <VerdictBanner status={listQ.isError ? "degraded" : "info"} title={listQ.isError ? "File profiles could not be refreshed" : profiles.length ? `${profiles.length} workloads have file profiles` : "No file profiles reported"} detail={listQ.isError ? "Showing the last loaded profiles. Refresh before changing rules." : "Profile configuration and recent activity are shown below. Enabled rules alone do not confirm that monitoring is active on a workload."} />
+        <VerdictBanner detailMode={listQ.isError ? "inline" : "disclosure"} status={listQ.isError ? "degraded" : "info"} title={listQ.isError ? "File profiles could not be refreshed" : profiles.length ? `${profiles.length} workloads have file profiles` : "No file profiles reported"} detail={listQ.isError ? "Showing the last loaded profiles. Refresh before changing rules." : "Profile configuration and recent activity are shown below. Enabled rules alone do not confirm that monitoring is active on a workload."} />
         <StatGrid>
           <StatCard label="Reported workloads" value={profiles.length} icon={<FolderTree className="h-4 w-4" />} />
           <StatCard label="Configured rules" value={profiles.reduce((n, p) => n + p.rule_count, 0)} icon={<ListChecks className="h-4 w-4" />} />

@@ -91,7 +91,7 @@ function FileMonitorRuleEditor({ clusterId, workload, ruleId, initial, profile, 
     },
   });
   return <>
-    <VerdictBanner status="info" title={`Rule for ${profile.name || workload}`} detail={`Workload profile mode: ${profile.mode}. Saving configures the rule; enforcement depends on the workload's profile mode and monitoring agent.`} />
+    <VerdictBanner detailMode={behavior === "block_access" ? "inline" : "disclosure"} status="info" title={`Rule for ${profile.name || workload}`} detail={`Workload profile mode: ${profile.mode}. Saving configures the rule; enforcement depends on the workload's profile mode and monitoring agent.`} />
     <Card title="File monitoring rule" description="Watch a path for changes. Open Advanced to change blocking behavior or rule status.">
       <form className="space-y-6" onSubmit={(e) => { e.preventDefault(); if (canSave && filter.trim() && reason.trim() && !save.isPending) save.mutate(); }}>
         <fieldset disabled={save.isPending} className="space-y-5">

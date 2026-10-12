@@ -141,7 +141,7 @@ export function RuntimeSignaturesPage() {
       />
 
 
-      <VerdictBanner status={q.isError ? "degraded" : "info"}
+      <VerdictBanner detailMode={q.isError && q.data ? "inline" : "disclosure"} status={q.isError ? "degraded" : "info"}
         title={q.isError ? "Signatures could not be refreshed" : !q.data ? "Loading signatures configuration" : rules.length === 0 ? "No signatures configured" : `${enforceCount} signatures configured for enforcement`}
         detail={q.isError && q.data ? "Showing the last loaded configuration. Retry to see current settings. Deployment status is not available here." : "Configured modes describe intended behavior. Group scope and successful detector deployment determine what is inspected or blocked."}
       />

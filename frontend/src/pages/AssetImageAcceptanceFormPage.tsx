@@ -96,7 +96,7 @@ function ImageAcceptanceEditor({ action, acceptanceId, initial, clusterId, backP
     onSettled: () => { submitting.current = false; },
   });
   return <>
-    <VerdictBanner status="info" title={action === "create" ? "Accepting risk does not remove findings" : "Revocation ends this risk decision"} detail="This decision is digest scoped and organization wide. It does not verify the image, resolve vulnerabilities or change network enforcement." />
+    <VerdictBanner detailMode="inline" status="info" title={action === "create" ? "Accepting risk does not remove findings" : "Revocation ends this risk decision"} detail="This decision is digest scoped and organization wide. It does not verify the image, resolve vulnerabilities or change network enforcement." />
     {!result && !available && (refreshing ? <p role="status" className="text-sm text-muted-foreground">Refreshing the current cluster or image. Your draft is preserved; wait before saving.</p> : <ErrorState title="The cluster or image could not be refreshed. Your draft is preserved; retry before saving." error={sourceError ? assetErrorMessage(sourceError) : undefined} />)}
     {!result && available && !unchanged && <ErrorState title={action === "create" ? "The image digest changed or an active acceptance already exists. Review the asset before accepting risk." : "The requested active acceptance is missing or changed. No other acceptance has been substituted."} />}
     <Card title={action === "create" ? "Image risk decision" : "Review acceptance revocation"} description="Review the immutable cluster, asset and image digest before saving.">

@@ -1,15 +1,8 @@
-import { type ReactNode } from "react";
-import { CheckCircle2, AlertTriangle, XCircle, Info } from "lucide-react";
+import { useId, useState, type ReactNode } from "react";
+import { CheckCircle2, AlertTriangle, XCircle, Info, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/cn";
 
-/**
- * VerdictBanner — the verdict-first primitive (pattern P1).
- *
- * The single top-line answer to a page's one question ("Is the platform healthy?",
- * "Is my supply chain trusted?"). Renders a colored status strip with an icon, a
- * bold title, and optional supporting detail + actions. Everything else on the page
- * lives below it, behind progressive disclosure.
- */
+/** Compact page status. Supporting context is available on demand. */
 export type VerdictStatus = "ok" | "degraded" | "critical" | "info";
 
 const STATUS = {
@@ -23,33 +16,35 @@ export function VerdictBanner({
   status,
   title,
   detail,
+  detailMode = "disclosure",
   actions,
   className,
 }: {
   status: VerdictStatus;
   title: ReactNode;
   detail?: ReactNode;
+  /** Keep essential action consequences visible in decision forms. */
+  detailMode?: "disclosure" | "inline";
   actions?: ReactNode;
   className?: string;
 }) {
   const { icon: Icon, color } = STATUS[status];
+  const [expanded, setExpanded] = useState(false);
+  const detailId = useId();
+  const hasDetail = detail !== undefined && detail !== null && detail !== false && detail !== "";
   return (
-    <div
-      className={cn(
-        "flex items-center gap-3 rounded-md border bg-card px-4 py-3",
-        className,
+    <div className={cn("flex flex-wrap items-center gap-x-2 gap-y-1 text-sm", className)} data-slot="page-status">
+      <Icon aria-hidden="true" className="h-4 w-4 shrink-0" style={{ color }} />
+      <div className="min-w-0 flex-1 font-medium text-foreground">{title}</div>
+      {hasDetail && detailMode === "disclosure" && (
+        <button type="button" aria-expanded={expanded} aria-controls={detailId}
+          onClick={() => setExpanded(value => !value)}
+          className="inline-flex min-h-8 shrink-0 items-center gap-1 rounded px-1 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+          Details<ChevronDown aria-hidden="true" className={cn("h-3 w-3", expanded && "rotate-180")} />
+        </button>
       )}
-      style={{
-        borderColor: `color-mix(in oklab, ${color} 40%, var(--color-border))`,
-        background: `color-mix(in oklab, ${color} 6%, var(--color-card))`,
-      }}
-    >
-      <Icon className="h-5 w-5 shrink-0" style={{ color }} />
-      <div className="min-w-0 flex-1">
-        <div className="text-sm font-semibold text-foreground">{title}</div>
-        {detail && <div className="mt-0.5 text-xs text-muted-foreground">{detail}</div>}
-      </div>
-      {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+      {hasDetail && <div id={detailId} hidden={detailMode !== "inline" && !expanded} className="basis-full pl-6 text-xs leading-relaxed text-muted-foreground">{detail}</div>}
     </div>
   );
 }

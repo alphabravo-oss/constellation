@@ -107,7 +107,7 @@ export function NetworkProxyPage() {
         description="Outbound connectivity for the platform — how Constellation reaches the internet and where it mirrors audit events."
       />
 
-      <VerdictBanner
+      <VerdictBanner detailMode={!tlsVerify ? "inline" : "disclosure"}
         status={httpsProxy ? "info" : "ok"}
         title={httpsProxy ? "Egress routed through a proxy" : "Direct egress (no proxy configured)"}
         detail={tlsVerify ? "Upstream TLS verification is on." : "Upstream TLS verification is OFF — connections are not authenticated."}
