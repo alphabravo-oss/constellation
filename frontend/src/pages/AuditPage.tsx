@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { useRouteSearchParams } from "@/lib/route-search";
 import { api } from "@/api/client";
+import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
 import { useCluster } from "@/hooks/useCluster";
 import { LoadingState, ErrorState, EmptyState } from "@/components/ui/states";
 import { PageHeader } from "@/components/ui/page";
@@ -15,6 +16,7 @@ const PAGE = 100;
 
 interface AuditEvent {
   id: number;
+  event_id?: string;
   actor_id?: string;
   action: string;
   target_kind?: string;
@@ -24,7 +26,21 @@ interface AuditEvent {
   at: string;
 }
 
+function validAuditID(id: unknown): id is string {
+  return typeof id === "string" && /^[1-9]\d*$/.test(id) && BigInt(id) <= 9223372036854775807n;
+}
+function validAuditEvent(value: unknown): value is AuditEvent {
+  if (!value || typeof value !== "object") return false;
+  const row = value as Partial<AuditEvent>;
+  return typeof row.id === "number" && Number.isInteger(row.id) && row.id > 0 &&
+    (row.event_id !== undefined ? validAuditID(row.event_id) : Number.isSafeInteger(row.id)) &&
+    typeof row.at === "string" && Number.isFinite(Date.parse(row.at)) &&
+    typeof row.action === "string" && typeof row.prev_hash === "string" && typeof row.chain_hash === "string" &&
+    [row.actor_id, row.target_kind, row.target_id].every(field => field === undefined || typeof field === "string");
+}
+
 const auditColumns: Column<AuditEvent>[] = [
+  { id: "record", header: "Record ID", kind: "id", size: 112, minSize: 88, exportValue: e => e.event_id ?? String(e.id), cell: e => e.event_id ?? String(e.id) },
   { id: "when", header: "When", kind: "date", size: 190, minSize: 160, maxSize: 240, exportValue: (e) => e.at, cell: (e) => new Date(e.at).toLocaleString(), className: "text-xs text-muted-foreground" },
   { id: "actor", header: "Actor", kind: "id", size: 128, minSize: 112, maxSize: 160, exportValue: (e) => e.actor_id ?? "", cell: (e) => e.actor_id ?? "—", className: "font-mono text-xs" },
   { id: "action", header: "Action", kind: "text", code: true, size: 240, minSize: 160, grow: true, wrap: true, exportValue: (e) => e.action, cell: (e) => e.action, className: "font-mono text-xs" },
@@ -32,7 +48,8 @@ const auditColumns: Column<AuditEvent>[] = [
   { id: "chain", header: "Chain Hash", kind: "id", size: 180, maxSize: 220, exportValue: (e) => e.chain_hash, cell: (e) => e.chain_hash, className: "truncate font-mono text-xs" },
 ];
 
-export function AuditPage() {
+export function AuditPage({ scope = "cluster" }: { scope?: "cluster" | "organization" }) {
+  const identity = useTablePreferencesIdentity();
   // Cluster-scoped: the backend joins target_id against findings/assets/
   // deployments/compliance_checks/policies rows of the active cluster so we only
   // surface events that touched something inside this cluster.
@@ -40,19 +57,24 @@ export function AuditPage() {
   const clusterReady = !!clusterId && cluster?.id === clusterId && !clusterLoading && !clusterError;
   const [searchParams, setParams] = useRouteSearchParams();
   const eventID = searchParams.get("event_id");
+  const cohortSet = searchParams.has("event_ids");
+  const cohortRaw = searchParams.get("event_ids") ?? "";
+  const cohortParts = cohortRaw ? cohortRaw.split(",") : [];
+  const cohort = Array.from(new Set(cohortParts));
+  const invalidCohort = cohortSet && (searchParams.getAll("event_ids").length !== 1 || cohortParts.length > 20 || cohort.some(id => !validAuditID(id)) || ["event_id", "support_bundle_job_id", "cluster_id", "action", "framework", "control"].some(key => !!searchParams.get(key)));
   const supportBundleJobID = searchParams.get("support_bundle_job_id");
   const rawPage = Number(searchParams.get("page"));
-  const pageIndex = eventID ? 0 : Number.isSafeInteger(rawPage) && rawPage >= 1 && rawPage <= Math.floor(Number.MAX_SAFE_INTEGER / PAGE) ? rawPage - 1 : 0;
+  const pageIndex = eventID || cohortSet ? 0 : Number.isSafeInteger(rawPage) && rawPage >= 1 && rawPage <= Math.floor(Number.MAX_SAFE_INTEGER / PAGE) ? rawPage - 1 : 0;
   const setPage = (page: number) => setParams(current => { if (page) current.set("page", String(page + 1)); else current.delete("page"); return current; });
-  const orgFilter = !!eventID || !!supportBundleJobID;
-  const scopeReady = orgFilter || clusterReady;
+  const orgFilter = scope === "organization" || cohortSet || !!eventID || !!supportBundleJobID;
+  const scopeReady = !invalidCohort && (orgFilter || clusterReady);
   const q = useQuery({
-    queryKey: ["audit", clusterId, eventID, supportBundleJobID, pageIndex],
+    queryKey: ["audit", identity?.org_id, identity?.user_id, scope, clusterId, eventID, cohortSet ? cohortRaw : null, supportBundleJobID, pageIndex],
     enabled: scopeReady,
     queryFn: () =>
       api
-        .get<{ events: AuditEvent[]; has_more: boolean }>("/audit/events", { params: { limit: eventID ? 1 : PAGE, offset: pageIndex * PAGE, cluster_id: eventID || supportBundleJobID ? undefined : clusterId, event_id: eventID || undefined, support_bundle_job_id: supportBundleJobID || undefined } })
-        .then((r) => { if (typeof r.data.has_more !== "boolean" || (eventID && r.data.events.some(event => String(event.id) !== eventID))) throw new Error("Audit evidence does not match the requested page or event"); return r.data; }),
+        .get<{ events: AuditEvent[]; has_more: boolean }>("/audit/events", { params: { limit: eventID ? 1 : cohortSet ? 20 : PAGE, offset: pageIndex * PAGE, cluster_id: orgFilter ? undefined : clusterId, event_id: eventID || undefined, ...(cohortSet ? { event_ids: cohortRaw } : {}), support_bundle_job_id: supportBundleJobID || undefined } })
+        .then((r) => { if (!Array.isArray(r.data.events) || !r.data.events.every(validAuditEvent) || new Set(r.data.events.map(event => event.event_id ?? String(event.id))).size !== r.data.events.length || typeof r.data.has_more !== "boolean" || (eventID && r.data.events.some(event => (event.event_id ?? String(event.id)) !== eventID)) || (cohortSet && (r.data.has_more || r.data.events.some(event => !cohort.includes(event.event_id ?? String(event.id)))) )) throw new Error("Audit evidence does not match the requested page or event"); return r.data; }),
   });
   const ready = scopeReady && q.isSuccess;
   const events = ready ? q.data.events : [];
@@ -64,30 +86,31 @@ export function AuditPage() {
   return (
     <div className="space-y-4" data-testid="audit-page" data-cluster-id={clusterId ?? ""}>
       <PageHeader
-        title="Audit Log"
+        title={orgFilter ? "Organization Audit Log" : "Audit Log"}
         actions={<Button variant="outline" disabled={!scopeReady || q.isFetching} onClick={() => void q.refetch()}>Refresh</Button>}
-        description={supportBundleJobID ? <>Audit history for support-bundle job {supportBundleJobID}.</> : eventID ? <>Audit event #{eventID}, scoped to your organization.</> : <>Append-only, hash-chained. Verify integrity with <code className="font-mono">constellationctl audit verify</code>.</>}
+        description={cohortSet ? "The exact audit records selected from Dashboard activity, across your organization." : scope === "organization" && !eventID && !supportBundleJobID ? "Recorded actions across your organization, including organization settings and all clusters." : supportBundleJobID ? <>Audit history for support-bundle job {supportBundleJobID}.</> : eventID ? <>Audit event #{eventID}, scoped to your organization.</> : <>Append-only, hash-chained. Verify integrity with <code className="font-mono">constellationctl audit verify</code>.</>}
       />
       <VerdictBanner status={!scopeReady || q.isError ? "degraded" : "info"}
-        title={!scopeReady ? "Cluster scope unavailable" : q.isError ? "Audit evidence unavailable" : q.isPending ? "Loading audit evidence" : `${events.length} audit events on this page`}
-        detail={orgFilter ? "This explicit event or support-bundle lookup is organization-scoped. Displayed hashes do not establish chain integrity." : "Events are resolved to this cluster by their recorded target. Displayed hashes do not establish chain integrity."} />
+        title={invalidCohort ? "Invalid activity selection" : !scopeReady ? "Cluster scope unavailable" : q.isError ? "Audit evidence unavailable" : q.isPending ? "Loading audit evidence" : `${events.length} audit events on this page`}
+        detail={cohortSet ? `Showing ${ready ? events.length : "—"} of ${cohort.length} selected organization records. Missing or inaccessible records are not replaced by newer activity. Displayed hashes do not establish chain integrity.` : orgFilter ? "This view covers organization-scoped audit records. Displayed hashes do not establish chain integrity." : "Events are resolved to this cluster by their recorded target. Displayed hashes do not establish chain integrity."} />
       <StatGrid><StatCard label="Events (page)" value={ready ? events.length : "—"} /><StatCard label="Page" value={pageIndex + 1} /><StatCard label="More pages" valueKind="text" value={ready ? q.data.has_more ? "Available" : "None reported" : "—"} /></StatGrid>
-      {!scopeReady ? <ErrorState title="Resolve the selected cluster before loading audit events" error={clusterError} /> : q.isPending ? (
+      {cohortSet && <a href="/organization/audit" className="text-sm text-primary hover:underline">View full organization audit history</a>}
+      {!scopeReady ? <ErrorState title={invalidCohort ? "Select at most 20 valid audit record IDs" : "Resolve the selected cluster before loading audit events"} error={clusterError} /> : q.isPending ? (
         <LoadingState label="Loading audit events…" />
       ) : q.isError ? (
         <ErrorState error={q.error} action={<Button onClick={() => void q.refetch()}>Retry</Button>} />
       ) : events.length === 0 ? (
         <>
-          <EmptyState title={pageIndex > 0 ? "No events on this page" : "No audit events"} hint="Actions taken in this cluster will appear here." />
+          <EmptyState title={pageIndex > 0 ? "No events on this page" : "No audit events"} hint={cohortSet ? "None of the selected records are available in your organization." : orgFilter ? "Recorded organization actions will appear here." : "Actions taken in this cluster will appear here."} />
           {pageIndex > 0 && <button type="button" onClick={() => setPage(pageIndex - 1)} className="text-sm text-primary hover:underline">Previous page</button>}
         </>
       ) : (
         <>
-          <DataTable rows={events} columns={auditColumns} rowKey={(e) => e.id} pagination={false} preferencesKey="audit-events" exportFileName={`audit-events-page-${pageIndex + 1}`} exportLabel="Export this page CSV" />
+          <DataTable rows={events} columns={auditColumns} rowKey={(e) => e.event_id ?? e.id} pagination={false} preferencesKey={orgFilter ? "organization-audit-events" : "audit-events"} exportFileName={`audit-events-page-${pageIndex + 1}`} exportLabel="Export this page CSV" />
           <p className="text-xs text-muted-foreground" data-testid="audit-page-scope">
             Showing audit events {pageIndex * PAGE + 1}–{pageIndex * PAGE + events.length} on page {pageIndex + 1}. {q.data?.has_more ? "More pages available." : "No more pages."}
           </p>
-          {!eventID && <Pager page={pageIndex} pageSize={PAGE} hasMore={q.data?.has_more} rowsOnPage={events.length} onPage={setPage} />}
+          {!eventID && !cohortSet && <Pager page={pageIndex} pageSize={PAGE} hasMore={q.data?.has_more} rowsOnPage={events.length} onPage={setPage} />}
         </>
       )}
     </div>

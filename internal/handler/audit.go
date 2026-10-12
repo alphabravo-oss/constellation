@@ -20,6 +20,7 @@ type Audit struct {
 func NewAudit(database *db.DB) *Audit { return &Audit{db: database} }
 
 type auditDTO struct {
+	EventID    string                    `json:"event_id"`
 	ID         int64                     `json:"id"`
 	OrgID      *uuid.UUID                `json:"org_id,omitempty"`
 	ActorID    *uuid.UUID                `json:"actor_id,omitempty"`
@@ -36,6 +37,11 @@ func (a *Audit) List(w http.ResponseWriter, r *http.Request) {
 	subj, ok := SubjectFrom(r.Context())
 	if !ok {
 		jsonError(w, http.StatusUnauthorized, "no subject")
+		return
+	}
+	cohort, cohortSet, err := auditEventCohort(r)
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	action := r.URL.Query().Get("action")
@@ -112,6 +118,10 @@ func (a *Audit) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	query, args := auditListQuery(subj.OrgID, clusterArg, action, controlPrefixes, eventID, supportBundleJobID, fetch, offset)
+	if cohortSet {
+		query = `SELECT a.id, a.org_id, a.actor_id, a.action, COALESCE(a.target_kind,''), COALESCE(a.target_id,''), a.prev_hash, a.chain_hash, a.at FROM audit_events a WHERE a.org_id=$1 AND a.id=ANY($2::bigint[]) ORDER BY a.at DESC,a.id DESC LIMIT $3 OFFSET $4`
+		args = []any{subj.OrgID, cohort, fetch, offset}
+	}
 	rows, err := a.db.Pool().Query(r.Context(), query, args...)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -222,6 +232,7 @@ func readAuditListRows(rows auditListRows, limit int, withControls bool) ([]audi
 			&d.PrevHash, &d.ChainHash, &d.At); err != nil {
 			return nil, err
 		}
+		d.EventID = strconv.FormatInt(d.ID, 10)
 		if withControls {
 			d.Controls = auditlog.ControlIDsFor(d.Action)
 		}

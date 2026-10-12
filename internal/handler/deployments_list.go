@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/handler/sqlx"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -58,6 +59,13 @@ func deploymentListFilters(r *http.Request, orgID uuid.UUID) (deploymentListFilt
 		default:
 			return filter, fmt.Errorf("invalid risk_fact")
 		}
+	}
+	mode, err := sqlx.GroupModeRank(values.Get("group_mode"))
+	if err != nil {
+		return filter, err
+	}
+	if mode != 0 {
+		parts = append(parts, "EXISTS (SELECT 1 FROM ("+sqlx.GroupModesSQL("d.org_id", "d.cluster_id")+") mode_group WHERE mode_group.cluster_id IS NOT DISTINCT FROM d.cluster_id AND mode_group.workload_id=d.namespace||'/'||d.name AND mode_group.rank="+bind(mode)+")")
 	}
 	filter.base = "WITH classified AS (SELECT d.*, " + platformRoleSQL("d.namespace", "d.labels") + " AS platform_role FROM deployments d WHERE " + strings.Join(parts, " AND ") + ") "
 	filter.role = "true"

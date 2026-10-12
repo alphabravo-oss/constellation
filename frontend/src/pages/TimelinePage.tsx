@@ -5,11 +5,16 @@
 // single time-ordered stream with type + severity filters. Backed by
 // GET /api/v1/security/timeline.
 import { useLocation, useNavigate } from "@tanstack/react-router";
-import { useMemo, useState, type ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMemo, useState, useEffect, useRef, type ReactNode } from "react";
+import { useQuery, useQueryClient, useIsFetching } from "@tanstack/react-query";
 import { Bookmark, Save, SlidersHorizontal } from "lucide-react";
 
-import { securityTimeline, type TimelineItem, type TimelineSource } from "@/api/client";
+import {
+  securityTimeline,
+  type TimelineItem,
+  type TimelineSource,
+} from "@/api/client";
+import { clusterCacheReady } from "@/lib/cluster-evidence";
 import { useCluster } from "@/hooks/useCluster";
 import { useSavedViews } from "@/hooks/useSavedViews";
 import { PageHeader } from "@/components/ui/page";
@@ -28,6 +33,9 @@ import { downloadCsv } from "@/lib/csv";
 import {
   compactTimelineFilters,
   timelineDateParam,
+  timelineAfterParam,
+  sameTimelineBoundary,
+  TIMELINE_VERDICTS,
   timelineSavedViewSummary,
   timelineSeverityParam,
   timelineSourceParam,
@@ -35,7 +43,10 @@ import {
   type TimelineFilterPayload,
 } from "@/lib/timeline-filters";
 
-const SOURCE_META: Record<TimelineSource, { label: string; tone: "error" | "warning" | "accent" | "info" }> = {
+const SOURCE_META: Record<
+  TimelineSource,
+  { label: string; tone: "error" | "warning" | "accent" | "info" }
+> = {
   dpi_threat: { label: "DPI Threat", tone: "error" },
   runtime_event: { label: "Runtime", tone: "warning" },
   network_violation: { label: "Violation", tone: "accent" },
@@ -46,68 +57,197 @@ const ALL_SOURCES = Object.keys(SOURCE_META) as TimelineSource[];
 const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const;
 const TIMELINE_PAGE = 100;
 
-const CATEGORY_TABS: Array<{ id: string; label: string; sources: TimelineSource[] }> = [
+const CATEGORY_TABS: Array<{
+  id: string;
+  label: string;
+  sources: TimelineSource[];
+}> = [
   { id: "all", label: "All", sources: ALL_SOURCES },
   { id: "activity", label: "Activity", sources: ["runtime_event", "audit"] },
   { id: "audit", label: "Audit", sources: ["audit"] },
   { id: "event", label: "Event", sources: ["runtime_event"] },
-  { id: "incident", label: "Incident", sources: ["dpi_threat", "runtime_event", "network_violation"] },
+  {
+    id: "incident",
+    label: "Incident",
+    sources: ["dpi_threat", "runtime_event", "network_violation"],
+  },
   { id: "threat", label: "Threat", sources: ["dpi_threat", "runtime_event"] },
   { id: "violation", label: "Violation", sources: ["network_violation"] },
-  { id: "security", label: "Security", sources: ["dpi_threat", "runtime_event", "network_violation"] },
+  {
+    id: "security",
+    label: "Security",
+    sources: ["dpi_threat", "runtime_event", "network_violation"],
+  },
 ];
 
-import { TIMELINE_VIEWS_KEY, isTimelineSavedView, inventoryViewHref, type TimelineSavedView } from "@/lib/inventory-saved-views";
+import {
+  TIMELINE_VIEWS_KEY,
+  isTimelineSavedView,
+  inventoryViewHref,
+  type TimelineSavedView,
+} from "@/lib/inventory-saved-views";
 
 export function TimelinePage() {
-  const { clusterId, cluster, isLoading: clusterLoading, error: clusterError } = useCluster();
-  const scopeReady = !!clusterId && cluster?.id === clusterId && !clusterLoading && !clusterError;
+  const {
+    clusterId,
+    cluster,
+    isLoading: clusterLoading,
+    error: clusterError,
+  } = useCluster();
+  const qc = useQueryClient();
+  const registryFetching = useIsFetching({
+    queryKey: ["clusters"],
+    exact: true,
+  });
+  const detailFetching = useIsFetching({
+    queryKey: ["cluster", clusterId],
+    exact: true,
+  });
+  const scopeReady =
+    !!clusterId &&
+    cluster?.id === clusterId &&
+    !clusterLoading &&
+    !clusterError &&
+    !registryFetching &&
+    !detailFetching &&
+    clusterCacheReady(qc, clusterId);
   const [params, setParams] = useRouteSearchParams();
   const navigate = useNavigate();
-  const locationHash = useLocation({ select: location => location.hash });
+  const locationHash = useLocation({ select: (location) => location.hash });
   const category = params.get("tab") ?? "all";
-  const activeCategory = category === "custom" || CATEGORY_TABS.some(tab => tab.id === category) ? category : "all";
-  const sources = useMemo(() => new Set<TimelineSource>(activeCategory === "custom"
-    ? params.has("type") ? ALL_SOURCES.filter(source => params.get("type")!.split(",").includes(source)) : ALL_SOURCES
-    : (CATEGORY_TABS.find(tab => tab.id === activeCategory) ?? CATEGORY_TABS[0]).sources), [activeCategory, params]);
-  const severities = useMemo(() => new Set<string>(SEVERITIES.filter(value => params.get("severity")?.split(",").includes(value))), [params]);
+  const activeCategory =
+    category === "custom" || CATEGORY_TABS.some((tab) => tab.id === category)
+      ? category
+      : "all";
+  const sources = useMemo(
+    () =>
+      new Set<TimelineSource>(
+        activeCategory === "custom"
+          ? params.has("type")
+            ? ALL_SOURCES.filter((source) =>
+                params.get("type")!.split(",").includes(source),
+              )
+            : ALL_SOURCES
+          : (
+              CATEGORY_TABS.find((tab) => tab.id === activeCategory) ??
+              CATEGORY_TABS[0]
+            ).sources,
+      ),
+    [activeCategory, params],
+  );
+  const severities = useMemo(
+    () =>
+      new Set<string>(
+        SEVERITIES.filter((value) =>
+          params.get("severity")?.split(",").includes(value),
+        ),
+      ),
+    [params],
+  );
   const query = params.get("q") ?? "";
   const namespace = params.get("namespace") ?? "";
   const workload = params.get("workload") ?? "";
   const reference = params.get("ref") ?? "";
   const from = params.get("from") ?? "";
   const to = params.get("to") ?? "";
+  const after = params.get("after") ?? "";
+  const requestedHours = params.has("hours")
+    ? Number(params.get("hours"))
+    : undefined;
+  const afterExclusive = params.has("after_exclusive")
+    ? params.get("after_exclusive") === "true"
+    : undefined;
+  const verdict = params.get("verdict") ?? "";
+  const exportPending = useRef(false);
+  const [exportState, setExportState] = useState<{
+    owner: string;
+    pending: boolean;
+    error?: string;
+    result?: string;
+  }>();
   const requestedPage = Number(params.get("page") ?? "1");
-  const page = Number.isSafeInteger(requestedPage) && requestedPage > 0 && requestedPage <= Math.floor(Number.MAX_SAFE_INTEGER / TIMELINE_PAGE) ? requestedPage - 1 : 0;
+  const page =
+    Number.isSafeInteger(requestedPage) &&
+    requestedPage > 0 &&
+    requestedPage <= 1000000 / TIMELINE_PAGE + 1
+      ? requestedPage - 1
+      : 0;
   const selectedID = params.get("event");
-  const updateFilters = (changes: Record<string, string | null>, replace = false, resetPage = true) => setParams(current => {
-    for (const [key,value] of Object.entries(changes)) {
-      if (value === null || value === "") current.delete(key); else current.set(key,value);
-    }
-    if (resetPage) { current.delete("page"); current.delete("event"); }
-    return current;
-  }, {replace});
-  const setQuery = (value: string) => updateFilters({q:value}, true);
-  const setNamespace = (value: string) => updateFilters({namespace:value}, true);
-  const setWorkload = (value: string) => updateFilters({workload:value}, true);
-  const setReference = (value: string) => updateFilters({ref:value}, true);
-  const setFrom = (value: string) => updateFilters({from:value}, true);
-  const setTo = (value: string) => updateFilters({to:value}, true);
-  const setPage = (value: number) => updateFilters({page:value ? String(value+1) : null,event:null}, false, false);
-  const setSelected = (value: TimelineItem | null) => updateFilters({event:value ? `${value.source}:${value.id}` : null},false,false);
-  const { views, deleteView, persistenceError } = useSavedViews<TimelineSavedView>(TIMELINE_VIEWS_KEY, { validate: isTimelineSavedView });
+  const updateFilters = (
+    changes: Record<string, string | null>,
+    replace = false,
+    resetPage = true,
+  ) =>
+    setParams(
+      (current) => {
+        for (const [key, value] of Object.entries(changes)) {
+          if (value === null || value === "") current.delete(key);
+          else current.set(key, value);
+        }
+        if (resetPage) {
+          current.delete("page");
+          current.delete("event");
+        }
+        return current;
+      },
+      { replace },
+    );
+  const setQuery = (value: string) => updateFilters({ q: value }, true);
+  const setNamespace = (value: string) =>
+    updateFilters({ namespace: value }, true);
+  const setWorkload = (value: string) =>
+    updateFilters({ workload: value }, true);
+  const setReference = (value: string) => updateFilters({ ref: value }, true);
+  const setPage = (value: number) =>
+    updateFilters(
+      { page: value ? String(value + 1) : null, event: null },
+      false,
+      false,
+    );
+  const setSelected = (value: TimelineItem | null) =>
+    updateFilters(
+      { event: value ? `${value.source}:${value.id}` : null },
+      false,
+      false,
+    );
+  const { views, deleteView, persistenceError } =
+    useSavedViews<TimelineSavedView>(TIMELINE_VIEWS_KEY, {
+      validate: isTimelineSavedView,
+    });
 
-  const filters = useMemo(() => compactTimelineFilters({
-    category: activeCategory,
-    sources: [...sources],
-    severities: [...severities],
-    query,
-    namespace,
-    workload,
-    reference,
-    from,
-    to,
-  }), [activeCategory, sources, severities, query, namespace, workload, reference, from, to]);
+  const filters = useMemo(
+    () =>
+      compactTimelineFilters({
+        category: activeCategory,
+        sources: [...sources],
+        severities: [...severities],
+        query,
+        namespace,
+        workload,
+        reference,
+        from,
+        to,
+        ...(after ? { after } : {}),
+        ...(requestedHours !== undefined ? { hours: requestedHours } : {}),
+        ...(afterExclusive !== undefined ? { afterExclusive } : {}),
+        ...(verdict ? { verdicts: verdict.split(",") } : {}),
+      }),
+    [
+      activeCategory,
+      sources,
+      severities,
+      query,
+      namespace,
+      workload,
+      reference,
+      from,
+      to,
+      after,
+      requestedHours,
+      afterExclusive,
+      verdict,
+    ],
+  );
 
   const typeParam = timelineSourceParam(filters.sources);
   const sevParam = timelineSeverityParam(filters.severities);
@@ -118,41 +258,175 @@ export function TimelinePage() {
   const workloadParam = timelineTextParam(filters.workload);
   const refParam = timelineTextParam(filters.reference);
 
-  const invalidWindow = Boolean((from && !fromParam) || (to && !toParam) || (fromParam && toParam && fromParam > toParam));
+  const afterParam = timelineAfterParam(after);
+  const invalidCohort = Boolean(
+    (after && !afterParam) ||
+      (requestedHours !== undefined &&
+        (!Number.isInteger(requestedHours) ||
+          requestedHours < 1 ||
+          requestedHours > 2160)) ||
+      (after && requestedHours !== undefined) ||
+      ((after || requestedHours !== undefined) && (from || to)) ||
+      (params.has("after_exclusive") &&
+        (!["true", "false"].includes(params.get("after_exclusive")!) ||
+          (!after && requestedHours === undefined))) ||
+      (verdict &&
+        (verdict
+          .split(",")
+          .some((value) => !TIMELINE_VERDICTS.includes(value)) ||
+          sources.size !== 1 ||
+          !sources.has("runtime_event"))) ||
+      !Number.isSafeInteger(requestedPage) ||
+      requestedPage < 1 ||
+      requestedPage > 1000000 / TIMELINE_PAGE + 1,
+  );
+  const invalidWindow =
+    invalidCohort ||
+    Boolean(
+      (from && !fromParam) ||
+        (to && !toParam) ||
+        (fromParam && toParam && fromParam > toParam),
+    );
+  const readParams = {
+    cluster_id: clusterId,
+    type: typeParam,
+    severity: sevParam,
+    from: fromParam,
+    to: toParam,
+    q: queryParam,
+    namespace: namespaceParam,
+    workload: workloadParam,
+    ref: refParam,
+    ...(afterParam ? { after: afterParam } : {}),
+    ...(requestedHours !== undefined ? { hours: requestedHours } : {}),
+    ...(afterExclusive !== undefined
+      ? { after_exclusive: afterExclusive }
+      : {}),
+    ...(verdict ? { verdict } : {}),
+    limit: TIMELINE_PAGE,
+    offset: page * TIMELINE_PAGE,
+  };
+  const owner = JSON.stringify([clusterId, readParams]);
   const q = useQuery({
-    queryKey: ["security-timeline", clusterId, sources.size === 0 ? "none" : typeParam, sevParam, fromParam, toParam, queryParam, namespaceParam, workloadParam, refParam, page],
-    queryFn: () =>
-      securityTimeline.list({
-        cluster_id: clusterId,
-        type: typeParam,
-        severity: sevParam,
-        from: fromParam,
-        to: toParam,
-        q: queryParam,
-        namespace: namespaceParam,
-        workload: workloadParam,
-        ref: refParam,
-        limit: TIMELINE_PAGE,
-        offset: page * TIMELINE_PAGE,
-      }),
+    queryKey: [
+      "security-timeline",
+      clusterId,
+      sources.size === 0 ? "none" : typeParam,
+      sevParam,
+      fromParam,
+      toParam,
+      queryParam,
+      namespaceParam,
+      workloadParam,
+      refParam,
+      page,
+      afterParam,
+      requestedHours,
+      afterExclusive,
+      verdict,
+    ],
+    queryFn: () => securityTimeline.list(readParams),
     // No source selected ⇒ nothing to fetch.
     enabled: scopeReady && sources.size > 0 && !invalidWindow,
   });
 
-  const items = useMemo<TimelineItem[]>(() => scopeReady && !q.isError && !invalidWindow && sources.size > 0 ? q.data?.items ?? [] : [], [q.data, q.isError, scopeReady, invalidWindow, sources]);
-  const selected = items.find(item => `${item.source}:${item.id}` === selectedID) ?? null;
+  const scopeMismatch = Boolean(
+    q.data &&
+      (q.data.offset !== page * TIMELINE_PAGE ||
+        q.data.limit !== TIMELINE_PAGE ||
+        q.data.items.some(
+          (item) =>
+            item.cluster_id !== clusterId ||
+            !sources.has(item.source) ||
+            (severities.size > 0 && !severities.has(item.severity)) ||
+            (verdict && !verdict.split(",").includes(item.verdict ?? "")),
+        )),
+  );
+  const cohortMismatch = Boolean(
+    q.data &&
+      (after || requestedHours !== undefined) &&
+      (!q.data.lower_only ||
+        q.data.after_exclusive !== Boolean(afterExclusive) ||
+        (afterParam && !sameTimelineBoundary(q.data.from, afterParam))),
+  );
+  const available =
+    scopeReady &&
+    q.isSuccess &&
+    !q.isError &&
+    !invalidWindow &&
+    !scopeMismatch &&
+    !cohortMismatch;
+  // Pin an older Dashboard's rolling-window fallback after its first successful
+  // response, so later pages and exports retain the exact lower boundary.
+  useEffect(() => {
+    if (
+      !available ||
+      requestedHours === undefined ||
+      !q.data ||
+      !timelineAfterParam(q.data.from)
+    )
+      return;
+    const boundary = q.data.from;
+    setParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete("hours");
+        next.set("after", boundary);
+        return next;
+      },
+      { replace: true },
+    );
+  }, [available, requestedHours, q.data, setParams]);
+  const items = useMemo<TimelineItem[]>(
+    () => (available && sources.size > 0 ? (q.data?.items ?? []) : []),
+    [q.data, available, sources],
+  );
+  const selected =
+    items.find((item) => `${item.source}:${item.id}` === selectedID) ?? null;
 
   const selectCategory = (tabID: string, nextSources: TimelineSource[]) => {
-    updateFilters({tab:tabID === "all" ? null : tabID,type:nextSources.length === ALL_SOURCES.length ? null : nextSources.join(",")});
+    updateFilters({
+      tab: tabID === "all" ? null : tabID,
+      type:
+        nextSources.length === ALL_SOURCES.length
+          ? null
+          : nextSources.join(","),
+      verdict: tabID === "event" ? verdict : null,
+    });
   };
 
-  const applyView = (view: TimelineSavedView) => updateFilters({
-    tab:view.category || "custom",type:view.sources.length ? view.sources.join(",") : "none",
-    severity:(view.severities ?? []).join(","),q:view.query ?? "",namespace:view.namespace ?? "",
-    workload:view.workload ?? "",ref:view.reference ?? "",from:view.from ?? "",to:view.to ?? "",
-  });
+  const applyView = (view: TimelineSavedView) =>
+    updateFilters({
+      tab: view.category || "custom",
+      type: view.sources.length ? view.sources.join(",") : "none",
+      severity: (view.severities ?? []).join(","),
+      q: view.query ?? "",
+      namespace: view.namespace ?? "",
+      workload: view.workload ?? "",
+      ref: view.reference ?? "",
+      from: view.from ?? "",
+      to: view.to ?? "",
+      after: view.after ?? null,
+      hours: view.hours !== undefined ? String(view.hours) : null,
+      after_exclusive:
+        view.afterExclusive !== undefined ? String(view.afterExclusive) : null,
+      verdict: view.verdicts?.join(",") ?? null,
+    });
 
-  const clearAdvancedFilters = () => updateFilters({severity:null,q:null,namespace:null,workload:null,ref:null,from:null,to:null});
+  const clearAdvancedFilters = () =>
+    updateFilters({
+      severity: null,
+      q: null,
+      namespace: null,
+      workload: null,
+      ref: null,
+      from: null,
+      to: null,
+      after: null,
+      hours: null,
+      after_exclusive: null,
+      verdict: null,
+    });
 
   const toggle = <T,>(set: Set<T>, v: T): Set<T> => {
     const next = new Set(set);
@@ -165,18 +439,53 @@ export function TimelinePage() {
   };
 
   if (clusterLoading) return <LoadingState label="Loading cluster…" />;
-  if (!scopeReady) return <ErrorState title="Cluster could not be resolved." error={clusterError} />;
+  if (!scopeReady)
+    return (
+      <ErrorState title="Cluster could not be resolved." error={clusterError} />
+    );
 
   return (
-    <div className="space-y-4" data-testid="timeline-page" data-cluster-id={clusterId ?? ""}>
+    <div
+      className="space-y-4"
+      data-testid="timeline-page"
+      data-cluster-id={clusterId ?? ""}
+    >
       <PageHeader
         title="Incident Timeline"
         description={`DPI threats, runtime events, network violations and audit for ${cluster?.name || clusterId}, in time order.`}
         actions={
           <>
-            <Button variant="outline" disabled={q.isFetching || sources.size === 0 || invalidWindow} onClick={() => void q.refetch()}>Refresh</Button>
-            {views.length > 0 && <TimelineSavedViewsMenu views={views} onApply={applyView} onDelete={deleteView} />}
-            <Button type="button" size="sm" variant="outline" onClick={() => { if (clusterId) void navigate({ href: inventoryViewHref(clusterId, "timeline", params, locationHash, true) }); }}>
+            <Button
+              variant="outline"
+              disabled={q.isFetching || sources.size === 0 || invalidWindow}
+              onClick={() => void q.refetch()}
+            >
+              Refresh
+            </Button>
+            {views.length > 0 && (
+              <TimelineSavedViewsMenu
+                views={views}
+                onApply={applyView}
+                onDelete={deleteView}
+              />
+            )}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                if (clusterId)
+                  void navigate({
+                    href: inventoryViewHref(
+                      clusterId,
+                      "timeline",
+                      params,
+                      locationHash,
+                      true,
+                    ),
+                  });
+              }}
+            >
               <Save className="h-3.5 w-3.5" aria-hidden /> Save view
             </Button>
             <Button
@@ -184,27 +493,134 @@ export function TimelinePage() {
               size="sm"
               variant="outline"
               disabled={items.length === 0 || q.isFetching}
-              onClick={() => downloadCsv("constellation-security-events", ["Time", "Source", "Severity", "Title", "Namespace", "Workload", "Reference"],
-                items.map((it) => [it.at, it.source, it.severity, it.title, it.namespace ?? "", it.workload_id ?? "", it.ref ?? ""]))}
+              onClick={() =>
+                downloadCsv(
+                  "constellation-security-events",
+                  [
+                    "Time",
+                    "Source",
+                    "Severity",
+                    "Verdict",
+                    "Title",
+                    "Namespace",
+                    "Workload",
+                    "Reference",
+                  ],
+                  items.map((it) => [
+                    it.at,
+                    it.source,
+                    it.severity,
+                    it.verdict ?? "",
+                    it.title,
+                    it.namespace ?? "",
+                    it.workload_id ?? "",
+                    it.ref ?? "",
+                  ]),
+                )
+              }
             >
               Export current page CSV
+            </Button>
+            <Button
+              disabled={
+                !available || q.isFetching || Boolean(exportState?.pending)
+              }
+              onClick={() => {
+                if (
+                  exportPending.current ||
+                  !available ||
+                  !clusterId ||
+                  !clusterCacheReady(qc, clusterId)
+                )
+                  return;
+                exportPending.current = true;
+                const exportOwner = owner;
+                setExportState({ owner: exportOwner, pending: true });
+                void securityTimeline
+                  .exportCSV(readParams)
+                  .then((result) =>
+                    setExportState({
+                      owner: exportOwner,
+                      pending: false,
+                      result: result.truncated
+                        ? `Exported ${result.exported.toLocaleString()} of ${result.total.toLocaleString()} matching records; export cap ${result.limit.toLocaleString()}.`
+                        : `Exported all ${result.total.toLocaleString()} matching event records.`,
+                    }),
+                  )
+                  .catch((error: Error) =>
+                    setExportState({
+                      owner: exportOwner,
+                      pending: false,
+                      error: error.message || "Event export failed. Retry.",
+                    }),
+                  )
+                  .finally(() => {
+                    exportPending.current = false;
+                  });
+              }}
+            >
+              Export matching events (up to 10,000)
             </Button>
           </>
         }
       />
 
       {persistenceError && <ErrorState title={persistenceError} />}
-      <VerdictBanner status={q.isError || invalidWindow ? "degraded" : "info"}
-        title={invalidWindow ? "Invalid timeline window" : q.isError ? "Timeline is unavailable" : sources.size === 0 ? "Choose an event source" : q.isPending ? "Loading timeline" : `${items.length} events on this page`}
-        detail="Investigate one ordered page of matching events. Page counts and CSV describe this page; filters and selection are saved in the URL." />
-      {!q.isPending && !q.isError && !invalidWindow && <StatGrid data-testid="timeline-summary">
-        <StatCard label="On this page" value={items.length} />
-        <StatCard label="Critical on page" value={items.filter(item => item.severity === "critical").length} />
-        <StatCard label="High on page" value={items.filter(item => item.severity === "high").length} />
-        <StatCard label="Sources on page" value={new Set(items.map(item => item.source)).size} />
-      </StatGrid>}
+      {exportState?.owner === owner && exportState.error && (
+        <ErrorState
+          title="Matching event export failed."
+          error={exportState.error}
+        />
+      )}
+      {exportState?.owner === owner && exportState.result && (
+        <p role="status">{exportState.result}</p>
+      )}
+      <VerdictBanner
+        status={q.isError || invalidWindow ? "degraded" : "info"}
+        title={
+          invalidWindow
+            ? "Invalid timeline window"
+            : q.isError
+              ? "Timeline is unavailable"
+              : sources.size === 0
+                ? "Choose an event source"
+                : q.isPending
+                  ? "Loading timeline"
+                  : q.data?.total !== undefined
+                    ? `${q.data.total.toLocaleString()} matching event records`
+                    : `${items.length} events on this page`
+        }
+        detail="Investigate reported event records. Event-only totals cover all matches; mixed-source browsing uses has-more paging. Current-page CSV and full matching CSV have separate scopes. Filters and selection are saved in the URL."
+      />
+      {available && (
+        <StatGrid data-testid="timeline-summary">
+          <StatCard
+            label={
+              q.data?.total !== undefined
+                ? "Matching event records"
+                : "On this page"
+            }
+            value={q.data?.total ?? items.length}
+          />
+          <StatCard
+            label="Critical on page"
+            value={items.filter((item) => item.severity === "critical").length}
+          />
+          <StatCard
+            label="High on page"
+            value={items.filter((item) => item.severity === "high").length}
+          />
+          <StatCard
+            label="Sources on page"
+            value={new Set(items.map((item) => item.source)).size}
+          />
+        </StatGrid>
+      )}
 
-      <div className="flex flex-wrap gap-1 rounded-md border border-border bg-card p-1" data-testid="timeline-category-tabs">
+      <div
+        className="flex flex-wrap gap-1 rounded-md border border-border bg-card p-1"
+        data-testid="timeline-category-tabs"
+      >
         {CATEGORY_TABS.map((tab) => (
           <button
             key={tab.id}
@@ -222,9 +638,15 @@ export function TimelinePage() {
         ))}
       </div>
 
-      <div className="space-y-3 rounded-md border border-border bg-card px-3 py-3" data-testid="timeline-advanced-filters">
+      <div
+        className="space-y-3 rounded-md border border-border bg-card px-3 py-3"
+        data-testid="timeline-advanced-filters"
+      >
         <div className="flex items-center gap-2 text-xs font-semibold">
-          <SlidersHorizontal className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+          <SlidersHorizontal
+            className="h-3.5 w-3.5 text-muted-foreground"
+            aria-hidden
+          />
           Filters
         </div>
         <div className="grid gap-2 lg:grid-cols-[minmax(260px,1.4fr)_repeat(3,minmax(130px,1fr))]">
@@ -235,96 +657,307 @@ export function TimelinePage() {
             placeholder="search title, id, workload, namespace, ref"
             size="sm"
           />
-          <FilterTextInput label="Namespace" value={namespace} onChange={setNamespace} placeholder="prod" />
-          <FilterTextInput label="Workload" value={workload} onChange={setWorkload} placeholder="api" />
-          <FilterTextInput label="Reference" value={reference} onChange={setReference} placeholder="policy or target" />
+          <FilterTextInput
+            label="Namespace"
+            value={namespace}
+            onChange={setNamespace}
+            placeholder="prod"
+          />
+          <FilterTextInput
+            label="Workload"
+            value={workload}
+            onChange={setWorkload}
+            placeholder="api"
+          />
+          <FilterTextInput
+            label="Reference"
+            value={reference}
+            onChange={setReference}
+            placeholder="policy or target"
+          />
         </div>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          <DateFilterInput label="From" value={from} onChange={setFrom} />
-          <DateFilterInput label="To" value={to} onChange={setTo} />
+          <DateFilterInput
+            label="From"
+            value={from}
+            onChange={(value) =>
+              updateFilters({
+                from: value,
+                after: null,
+                hours: null,
+                after_exclusive: null,
+              })
+            }
+          />
+          <DateFilterInput
+            label="To"
+            value={to}
+            onChange={(value) =>
+              updateFilters({
+                to: value,
+                after: null,
+                hours: null,
+                after_exclusive: null,
+              })
+            }
+          />
           <div className="lg:col-span-2 flex items-end">
-            <Button type="button" size="sm" variant="ghost" onClick={clearAdvancedFilters} data-testid="timeline-clear-filters">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={clearAdvancedFilters}
+              data-testid="timeline-clear-filters"
+            >
               Clear filters
             </Button>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] font-medium text-muted-foreground mr-1">Type</span>
+          <span className="text-[11px] font-medium text-muted-foreground mr-1">
+            Type
+          </span>
           {ALL_SOURCES.map((s) => (
-            <FilterChip key={s} active={sources.has(s)} onClick={() => updateFilters({tab:"custom",type:[...toggle(sources,s)].join(",") || "none"})}>
+            <FilterChip
+              key={s}
+              active={sources.has(s)}
+              onClick={() =>
+                updateFilters({
+                  tab: "custom",
+                  type: [...toggle(sources, s)].join(",") || "none",
+                  verdict: null,
+                })
+              }
+            >
               {SOURCE_META[s].label}
             </FilterChip>
           ))}
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] font-medium text-muted-foreground mr-1">Severity</span>
+          <span className="text-[11px] font-medium text-muted-foreground mr-1">
+            Severity
+          </span>
           {SEVERITIES.map((s) => (
-            <FilterChip key={s} active={severities.has(s)} onClick={() => updateFilters({severity:[...toggle(severities,s)].join(",")})}>
+            <FilterChip
+              key={s}
+              active={severities.has(s)}
+              onClick={() =>
+                updateFilters({
+                  severity: [...toggle(severities, s)].join(","),
+                })
+              }
+            >
               {s}
             </FilterChip>
           ))}
         </div>
-        <TimelineActiveFilters filters={filters} onClear={clearAdvancedFilters} />
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="space-y-1 text-xs">
+            <span>Rolling window</span>
+            <select
+              aria-label="Timeline rolling window"
+              value={requestedHours ?? ""}
+              onChange={(event) =>
+                updateFilters({
+                  hours: event.target.value,
+                  after: null,
+                  from: null,
+                  to: null,
+                  after_exclusive: event.target.value
+                    ? String(Boolean(afterExclusive))
+                    : null,
+                })
+              }
+              className="block rounded border border-input bg-background px-2 py-1"
+            >
+              <option value="">Custom or pinned boundary</option>
+              <option value="24">24 hours</option>
+              <option value="336">14 days</option>
+              <option value="168">7 days</option>
+            </select>
+          </label>
+          {after && (
+            <p className="text-xs text-muted-foreground">
+              {afterExclusive ? "Strictly after" : "Since"} <code>{after}</code>
+              ; no upper time bound.
+            </p>
+          )}
+          {sources.size === 1 && sources.has("runtime_event") && (
+            <label className="space-y-1 text-xs">
+              <span>Runtime event verdicts</span>
+              <select
+                aria-label="Runtime event verdicts"
+                value={verdict}
+                onChange={(event) =>
+                  updateFilters({ verdict: event.target.value })
+                }
+                className="block rounded border border-input bg-background px-2 py-1"
+              >
+                <option value="">All verdicts</option>
+                <option value="alert,block,quarantine">
+                  Alert, block or quarantine
+                </option>
+                {TIMELINE_VERDICTS.map((value) => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
+        <TimelineActiveFilters
+          filters={filters}
+          onClear={clearAdvancedFilters}
+        />
       </div>
 
-      {q.isFetching && !q.isPending && <p role="status" className="text-xs text-muted-foreground">Refreshing timeline…</p>}
-      {!q.isError && !invalidWindow && q.data && sources.size > 0 && <p className="text-xs text-muted-foreground">Window: {new Date(q.data.from).toLocaleString()} – {new Date(q.data.to).toLocaleString()}</p>}
-      {invalidWindow ? <ErrorState title="Choose valid dates with From no later than To." /> : q.isPending && sources.size > 0 ? (
+      {q.isFetching && !q.isPending && (
+        <p role="status" className="text-xs text-muted-foreground">
+          Refreshing timeline…
+        </p>
+      )}
+      {available && q.data && sources.size > 0 && (
+        <p className="text-xs text-muted-foreground">
+          {q.data.lower_only
+            ? `${q.data.after_exclusive ? "Strictly after" : "Since"} ${q.data.from}; no upper time bound.`
+            : `Window: ${new Date(q.data.from).toLocaleString()} – ${new Date(q.data.to).toLocaleString()}`}
+        </p>
+      )}
+      {invalidWindow ? (
+        <ErrorState title="Choose valid dates and event filters. Use either after/rolling hours or From/To, and a supported page." />
+      ) : scopeMismatch || cohortMismatch ? (
+        <ErrorState
+          title="Timeline evidence does not match the selected cluster and event window."
+          action={<Button onClick={() => void q.refetch()}>Retry</Button>}
+        />
+      ) : q.isPending && sources.size > 0 ? (
         <LoadingState label="Loading timeline…" />
       ) : q.isError ? (
-        <ErrorState title="Failed to load the incident timeline." error={q.error} action={<Button onClick={() => void q.refetch()}>Retry</Button>} />
+        <ErrorState
+          title="Failed to load the incident timeline."
+          error={q.error}
+          action={<Button onClick={() => void q.refetch()}>Retry</Button>}
+        />
       ) : items.length === 0 ? (
         <>
-          <EmptyState title={page > 0 ? "No events on this page" : "No events"} hint="No events match the current filters in the selected window." />
-          {page > 0 && <Button type="button" size="sm" variant="outline" onClick={() => setPage(page - 1)}>Previous page</Button>}
+          <EmptyState
+            title={page > 0 ? "No events on this page" : "No events"}
+            hint="No events match the current filters in the selected window."
+          />
+          {page > 0 && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setPage(page - 1)}
+            >
+              Previous page
+            </Button>
+          )}
         </>
       ) : (
         <>
-        <ol className="relative space-y-1 border-l border-border pl-4" data-testid="timeline-list">
-          {items.map((it) => (
-            <li key={`${it.source}:${it.id}`} className="relative">
-              <span className="absolute -left-[21px] top-3 h-2 w-2 rounded-full bg-border" aria-hidden />
-              <button
-                type="button"
-                onClick={() => setSelected(it)}
-                className="flex w-full items-start gap-2 rounded-md border border-border bg-card px-3 py-2 text-left transition-colors hover:border-[color:var(--color-primary)]/40 hover:bg-accent/40"
-                data-testid="timeline-event-row"
-              >
-                <SeverityBadge severity={it.severity} size="xs" />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <StatusPill label={SOURCE_META[it.source].label} tone={SOURCE_META[it.source].tone} />
-                    <span className="truncate text-xs font-medium">{it.title}</span>
+          <ol
+            className="relative space-y-1 border-l border-border pl-4"
+            data-testid="timeline-list"
+          >
+            {items.map((it) => (
+              <li key={`${it.source}:${it.id}`} className="relative">
+                <span
+                  className="absolute -left-[21px] top-3 h-2 w-2 rounded-full bg-border"
+                  aria-hidden
+                />
+                <button
+                  type="button"
+                  onClick={() => setSelected(it)}
+                  className="flex w-full items-start gap-2 rounded-md border border-border bg-card px-3 py-2 text-left transition-colors hover:border-[color:var(--color-primary)]/40 hover:bg-accent/40"
+                  data-testid="timeline-event-row"
+                >
+                  <SeverityBadge severity={it.severity} size="xs" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <StatusPill
+                        label={SOURCE_META[it.source].label}
+                        tone={SOURCE_META[it.source].tone}
+                      />
+                      <span className="truncate text-xs font-medium">
+                        {it.title}
+                      </span>
+                    </div>
+                    <div className="text-[10px] font-mono text-muted-foreground">
+                      {[it.namespace, it.workload_id, it.ref]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </div>
                   </div>
-                  <div className="text-[10px] font-mono text-muted-foreground">
-                    {[it.namespace, it.workload_id, it.ref].filter(Boolean).join(" · ")}
-                  </div>
-                </div>
-                <span className="shrink-0 text-[10px] text-muted-foreground" title={it.at}>
-                  {fmtRelative(it.at)}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ol>
-        <p className="text-xs text-muted-foreground" data-testid="timeline-page-scope">
-          Showing timeline events {page * TIMELINE_PAGE + 1}–{page * TIMELINE_PAGE + items.length} on page {page + 1}. {q.data?.has_more ? "More pages available." : "No more pages."}
-        </p>
-        <Pager page={page} pageSize={TIMELINE_PAGE} hasMore={q.data?.has_more} rowsOnPage={items.length} onPage={setPage} />
-        <TimelineDetailDrawer item={selected} onClose={() => setSelected(null)} />
+                  <span
+                    className="shrink-0 text-[10px] text-muted-foreground"
+                    title={it.at}
+                  >
+                    {fmtRelative(it.at)}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ol>
+          <p
+            className="text-xs text-muted-foreground"
+            data-testid="timeline-page-scope"
+          >
+            Showing timeline events {page * TIMELINE_PAGE + 1}–
+            {page * TIMELINE_PAGE + items.length} on page {page + 1}.{" "}
+            {q.data?.total !== undefined
+              ? `Of ${q.data.total.toLocaleString()} matching records. `
+              : ""}
+            {q.data?.has_more ? "More pages available." : "No more pages."}
+          </p>
+          <Pager
+            page={page}
+            pageSize={TIMELINE_PAGE}
+            hasMore={q.data?.has_more}
+            total={q.data?.total}
+            rowsOnPage={items.length}
+            onPage={setPage}
+          />
+          <TimelineDetailDrawer
+            item={selected}
+            onClose={() => setSelected(null)}
+          />
         </>
       )}
-      {selectedID && !q.isPending && !q.isError && !selected && <EmptyState title="Selected event is unavailable" hint="It is absent from this page or the active filters." />}
+      {selectedID && !q.isPending && !q.isError && !selected && (
+        <EmptyState
+          title="Selected event is unavailable"
+          hint="It is absent from this page or the active filters."
+        />
+      )}
     </div>
   );
 }
 
-function TimelineSavedViewsMenu({ views, onApply, onDelete }: { views: TimelineSavedView[]; onApply: (view: TimelineSavedView) => void; onDelete: (id: string) => void }) {
+function TimelineSavedViewsMenu({
+  views,
+  onApply,
+  onDelete,
+}: {
+  views: TimelineSavedView[];
+  onApply: (view: TimelineSavedView) => void;
+  onDelete: (id: string) => void;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <div className="relative">
-      <Button type="button" size="sm" variant="outline" onClick={() => setOpen((current) => !current)}>
-        <Bookmark className="h-3.5 w-3.5" aria-hidden /> Views <span className="font-mono text-muted-foreground">({views.length})</span>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={() => setOpen((current) => !current)}
+      >
+        <Bookmark className="h-3.5 w-3.5" aria-hidden /> Views{" "}
+        <span className="font-mono text-muted-foreground">
+          ({views.length})
+        </span>
       </Button>
       {open ? (
         <div
@@ -337,11 +970,16 @@ function TimelineSavedViewsMenu({ views, onApply, onDelete }: { views: TimelineS
               <li key={view.id} className="flex items-center gap-1">
                 <button
                   type="button"
-                  onClick={() => { onApply(view); setOpen(false); }}
+                  onClick={() => {
+                    onApply(view);
+                    setOpen(false);
+                  }}
                   className="min-w-0 flex-1 rounded px-2 py-1 text-left text-xs hover:bg-accent"
                 >
                   <div className="font-medium">{view.name}</div>
-                  <div className="truncate font-mono text-[10px] text-muted-foreground">{timelineSavedViewSummary(view)}</div>
+                  <div className="truncate font-mono text-[10px] text-muted-foreground">
+                    {timelineSavedViewSummary(view)}
+                  </div>
                 </button>
                 <button
                   type="button"
@@ -360,10 +998,22 @@ function TimelineSavedViewsMenu({ views, onApply, onDelete }: { views: TimelineS
   );
 }
 
-function FilterTextInput({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string }) {
+function FilterTextInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+}) {
   return (
     <label className="block text-xs">
-      <span className="mb-1 block font-medium text-muted-foreground">{label}</span>
+      <span className="mb-1 block font-medium text-muted-foreground">
+        {label}
+      </span>
       <input
         value={value}
         onChange={(event) => onChange(event.target.value)}
@@ -374,10 +1024,20 @@ function FilterTextInput({ label, value, onChange, placeholder }: { label: strin
   );
 }
 
-function DateFilterInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+function DateFilterInput({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
   return (
     <label className="block text-xs">
-      <span className="mb-1 block font-medium text-muted-foreground">{label}</span>
+      <span className="mb-1 block font-medium text-muted-foreground">
+        {label}
+      </span>
       <input
         type="datetime-local"
         value={value}
@@ -388,7 +1048,13 @@ function DateFilterInput({ label, value, onChange }: { label: string; value: str
   );
 }
 
-function TimelineActiveFilters({ filters, onClear }: { filters: TimelineFilterPayload; onClear: () => void }) {
+function TimelineActiveFilters({
+  filters,
+  onClear,
+}: {
+  filters: TimelineFilterPayload;
+  onClear: () => void;
+}) {
   const chips = [
     filters.query ? `q:${filters.query}` : "",
     filters.namespace ? `ns:${filters.namespace}` : "",
@@ -400,26 +1066,47 @@ function TimelineActiveFilters({ filters, onClear }: { filters: TimelineFilterPa
   if (chips.length === 0) return null;
   return (
     <div className="flex flex-wrap items-center gap-1.5 border-t border-border pt-2">
-      <span className="mr-1 text-[11px] font-medium text-muted-foreground">Active</span>
+      <span className="mr-1 text-[11px] font-medium text-muted-foreground">
+        Active
+      </span>
       {chips.map((chip) => (
-        <span key={chip} className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 font-mono text-[11px] text-primary">
+        <span
+          key={chip}
+          className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 font-mono text-[11px] text-primary"
+        >
           {chip}
         </span>
       ))}
-      <button type="button" onClick={onClear} className="rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted">
+      <button
+        type="button"
+        onClick={onClear}
+        className="rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted"
+      >
         clear
       </button>
     </div>
   );
 }
 
-function TimelineDetailDrawer({ item, onClose }: { item: TimelineItem | null; onClose: () => void }) {
+function TimelineDetailDrawer({
+  item,
+  onClose,
+}: {
+  item: TimelineItem | null;
+  onClose: () => void;
+}) {
   return (
     <Drawer
       open={Boolean(item)}
-      onOpenChange={(open) => { if (!open) onClose(); }}
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
       title={item ? item.title : "Event detail"}
-      description={item ? `${SOURCE_META[item.source].label} · ${item.severity}` : undefined}
+      description={
+        item
+          ? `${SOURCE_META[item.source].label} · ${item.severity}`
+          : undefined
+      }
       width="lg"
     >
       {item ? <TimelineDetail item={item} /> : null}
@@ -432,21 +1119,42 @@ function TimelineDetail({ item }: { item: TimelineItem }) {
     <div className="space-y-4" data-testid="timeline-detail-drawer">
       <div className="flex flex-wrap items-center gap-2">
         <SeverityBadge severity={item.severity} size="xs" />
-        <StatusPill label={SOURCE_META[item.source].label} tone={SOURCE_META[item.source].tone} />
-        <span className="text-xs text-muted-foreground" title={item.at}>{fmtRelative(item.at)}</span>
+        <StatusPill
+          label={SOURCE_META[item.source].label}
+          tone={SOURCE_META[item.source].tone}
+        />
+        <span className="text-xs text-muted-foreground" title={item.at}>
+          {fmtRelative(item.at)}
+        </span>
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
         <DetailField label="Source" value={SOURCE_META[item.source].label} />
         <DetailField label="Event ID" value={item.id} mono />
-        <DetailField label="Observed" value={new Date(item.at).toLocaleString()} />
-        <DetailField label="Cluster" value={item.cluster_id || "org-level"} mono />
+        <DetailField
+          label="Observed"
+          value={new Date(item.at).toLocaleString()}
+        />
+        <DetailField
+          label="Cluster"
+          value={item.cluster_id || "org-level"}
+          mono
+        />
         <DetailField label="Namespace" value={item.namespace || "-"} mono />
         <DetailField label="Workload" value={item.workload_id || "-"} mono />
-        <DetailField label={referenceLabel(item.source)} value={item.ref || "-"} mono />
+        {item.source === "runtime_event" && (
+          <DetailField label="Verdict" value={item.verdict || "Not reported"} />
+        )}
+        <DetailField
+          label={referenceLabel(item.source)}
+          value={item.ref || "-"}
+          mono
+        />
       </div>
       <section className="rounded-md border border-border p-3">
         <h3 className="text-xs font-semibold">Source context</h3>
-        <p className="mt-2 text-xs text-muted-foreground">{sourceDetailText(item)}</p>
+        <p className="mt-2 text-xs text-muted-foreground">
+          {sourceDetailText(item)}
+        </p>
       </section>
       <section className="rounded-md border border-border p-3">
         <h3 className="text-xs font-semibold">Raw timeline record</h3>
@@ -458,11 +1166,23 @@ function TimelineDetail({ item }: { item: TimelineItem }) {
   );
 }
 
-function DetailField({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+function DetailField({
+  label,
+  value,
+  mono,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
   return (
     <div className="rounded-md border border-border p-2">
       <dt className="text-[11px] text-muted-foreground">{label}</dt>
-      <dd className={`mt-1 break-all text-xs ${mono ? "font-mono" : "font-medium"}`}>{value}</dd>
+      <dd
+        className={`mt-1 break-all text-xs ${mono ? "font-mono" : "font-medium"}`}
+      >
+        {value}
+      </dd>
     </div>
   );
 }
@@ -493,11 +1213,21 @@ function sourceDetailText(item: TimelineItem) {
     case "audit":
       return "Audit entries are org-level control-plane activity from the tamper-evident audit chain; cluster-scoped timeline views omit audit rows.";
     default:
-      return item.ref ? `Reference: ${item.ref}` : "No additional source context.";
+      return item.ref
+        ? `Reference: ${item.ref}`
+        : "No additional source context.";
   }
 }
 
-function FilterChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+function FilterChip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
   return (
     <button
       type="button"

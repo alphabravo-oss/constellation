@@ -31,3 +31,17 @@ it("captures exact target cohorts and rejects malformed target filters without b
  expect(findingViewPayload(new URLSearchParams("target_type=image-workload-extra"))).toBeNull();
  expect(isFindingSavedView({ kind: "", lifecycle: "open", query: "", targetType: [] })).toBe(false);
 });
+
+it("captures strongest-mode and all-ID cohorts while rejecting invalid saved selectors", () => {
+ const payload = findingViewPayload(new URLSearchParams("group_mode=protect&id_scope=all&target_type=image-workload&view=cve&lifecycle=open"));
+ expect(payload).toMatchObject({ groupMode: "protect", idScope: "all", targetType: "image-workload", view: "cve" });
+ expect(isFindingSavedView(payload)).toBe(true);
+ for (const raw of ["group_mode=unknown", "id_scope=unknown"]) expect(findingViewPayload(new URLSearchParams(raw))).toBeNull();
+ expect(isFindingSavedView({ kind: "vulnerability", lifecycle: "open", query: "", groupMode: [], idScope: "all" })).toBe(false);
+});
+
+it("captures precise Timeline event cohorts and rejects contradictory saved windows",()=>{
+ const after="2026-10-10T12:34:56.123456Z";
+ const payload=timelineViewPayload(new URLSearchParams({tab:"event",after,verdict:"alert,block,quarantine",after_exclusive:"false"}));expect(payload).toMatchObject({sources:["runtime_event"],after,verdicts:["alert","block","quarantine"],afterExclusive:false});expect(isTimelineSavedView(payload)).toBe(true);
+ for(const raw of ["hours=0","hours=2161","after=invalid","tab=audit&verdict=alert","hours=24&from=2026-10-10","after_exclusive=true","verdict=unknown"]){expect(timelineViewPayload(new URLSearchParams(raw))).toBeNull();}
+});

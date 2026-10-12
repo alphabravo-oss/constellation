@@ -697,6 +697,7 @@ func (s *Server) buildRouter() chi.Router {
 			// Read-only aggregation over existing tables (same auth as findings).
 			securityTimeline := handler.NewSecurityTimeline(s.db)
 			r.Get("/security/timeline", s.requireVerb(rbac.VerbReadFindings, securityTimeline.List))
+			r.Get("/security/timeline.csv", s.requireVerb(rbac.VerbReadFindings, securityTimeline.ExportCSV))
 			// B8: score what-if. Recomputes the projected risk score if a set of
 			// findings were resolved. Read-only projection; never mutates state.
 			scorePredict := handler.NewScorePredict(s.db)
@@ -1083,6 +1084,7 @@ func (s *Server) buildRouter() chi.Router {
 			)
 			r.Get("/compliance/frameworks", s.requireVerb(rbac.VerbReadFindings, compl.Frameworks))
 			r.Get("/compliance/checks", s.requireVerb(rbac.VerbReadFindings, compl.Checks))
+			r.Get("/compliance/checks/export.csv", s.requireVerb(rbac.VerbReadFindings, compl.ChecksCSV))
 			r.Get("/compliance/summary", s.requireVerb(rbac.VerbReadFindings, compl.Summary))
 			r.Get("/compliance/evidence", s.requireVerb(rbac.VerbReadFindings, compl.Evidence))
 			r.Get("/compliance/nodes", s.requireVerb(rbac.VerbReadFindings, compl.NodeEvidence))

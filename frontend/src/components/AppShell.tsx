@@ -166,6 +166,7 @@ const SCOPE_NAV: NavGroup[] = [
     items: [
       { path: "/cve",          icon: Database,        label: "CVE Database" },
       { path: "/posture",      icon: ClipboardCheck,  label: "Posture" },
+      { path: "/organization/audit", icon: ScrollText, label: "Audit Log" },
       { path: "/federation",   icon: Globe2,          label: "Federation" },
       { path: "/settings/access", icon: UsersRound, label: "Access Control" },
       { path: "/settings/api-tokens", icon: FileText, label: "API Tokens" },
@@ -806,7 +807,7 @@ function useCrumbs(pathname: string, clusterId: string | null): Array<{ label: s
   const parts = pathname.split("/").filter(Boolean);
   if (parts.length === 0) return [{ label: "Clusters" }];
   const out: Array<{ label: string; to?: string }> = [];
-  out.push({ label: toTitle(parts[0]), to: `/${parts[0]}` });
+  out.push({ label: toTitle(parts[0]), to: parts[0] === "organization" ? undefined : `/${parts[0]}` });
   for (let i = 1; i < parts.length; i++) {
     const seg = parts[i];
     const isId = seg.includes("-") || seg.length >= 8;

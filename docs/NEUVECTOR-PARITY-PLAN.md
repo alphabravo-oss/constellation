@@ -837,6 +837,65 @@ focusable; full keyboard-scrolling and broader accessibility acceptance remain
 open. Temporary table preferences were restored. No live policy, scan, migration,
 acceptance, capture or saved-view writes were submitted.
 
+The next Dashboard destination increment preserves the source predicates in the
+linked inventory. Runtime alerts use the exact inclusive 24-hour lower timestamp
+and alert/block/quarantine verdicts; the high/critical event chart uses its exact
+exclusive 14-day lower timestamp. Both deliberately retain the source's lack of
+an upper bound. Event-only Timeline reads return matching totals from the same
+snapshot as rows, and matching CSV states its 10,000-record cap. Window/verdict
+filters survive URL history and scoped saved views.
+
+Policy-mode vulnerability IDs and exposed workloads share one strongest-mode
+resolver keyed by organization, cluster and workload. This prevents same-named
+workloads in sibling clusters from merging. The all-ID Findings rollup includes
+advisory identifiers because the Dashboard source counts every non-null external
+identifier, while the ordinary CVE view retains its CVE-only default. Workloads
+without group membership remain outside the mode cohorts.
+
+Compliance now exposes graded records across all frameworks, with server filters,
+stable sorting, continuation, aggregate metadata and a matching 100,000-record
+CSV export. Summary and inventory reuse effective-status logic, excluding active
+exemptions from graded failures. Exact control lookup removes the exemption
+form's first-500-row lookup limit. Dashboard recent activity links to the returned
+organization audit IDs, so newer activity cannot replace the selected records;
+missing or inaccessible records stay missing and an empty selection stays empty.
+Organization Audit Log has persistent navigation and a lossless record-ID column.
+All destination tables use the shared DataTable and global sizing/alignment rules.
+
+Frozen frontend validation passed **1,408 tests across 108 files**, production
+build/typecheck and changed-source lint. **80 focused fresh PostgreSQL
+race/shuffle executions** passed with no skips: six Audit, ten policy-mode,
+14 Timeline and 50 Compliance. A further two policy-mode executions verify the
+final fixture cleanup correction. Handler vet, OpenAPI contract tests, generated
+specification and all 107 endpoint mappings pass. These qualify the changed
+workflows, not the full repository's independent release gates.
+
+Helm revision **58** runs frontend/API `dashboard-cohorts-20261012`, migration
+`audit-lookup-20261012`, schema 173 and all seven deployments ready. Read-only live
+API checks reconcile **20 selected audit IDs**, **80 discover-mode vulnerability
+IDs**, **17 discover-mode exposed workloads**, and **52 graded compliance rows**
+(0 passing, 52 failing) with their source counts. Monitor/protect cohorts are
+empty live and nonempty in database fixtures. Runtime source/destination/CSV agree
+at **8,455** records; the 14-day source/destination agree at **25,654**, with CSV
+correctly reporting **10,000 exported and truncation**. Both event inventories
+have nonoverlapping continuation pages in the bounded live check.
+
+Browser checks follow Dashboard links to all-framework graded Compliance,
+selected organization audit, runtime verdicts, high/critical event Timeline and
+discover-mode vulnerability IDs. Compliance displays and exports all 52 matches;
+Audit retains all 20 selected IDs through refresh. Timeline preserves the precise
+lower bound, severity and exclusive predicate through Next and Back, and displays
+its matching-export cap explicitly. Counts can change between requests as live
+events arrive or expire: pinned bounds are not immutable dataset snapshots.
+
+Populated Compliance, Audit and Findings tables have matching header/body
+boundaries and semantic widths at desktop; Compliance and Audit also pass 640px
+checks with no document overflow or clipped actions. Timeline keeps its
+chronological event list and responsive shared controls; its narrow layout and
+filters stay contained. The viewport is restored to 1280px. No live policy,
+exemption, scan, migration, acceptance, capture or saved-view writes were submitted.
+All-page, larger-dataset, saved-state and accessibility acceptance remains open.
+
 The admission-engine continuation adds migration **172** and persists normalized
 engine outcomes atomically with image scan completion. The built-in vulnerability
 profiles now require successful Trivy and Grype results rather than retired
@@ -2501,10 +2560,12 @@ are not counted as inline authoring.
   deny/block cohort before server pagination. Top-vulnerable deployment links and
   the source/destination matrix now use exact deployment IDs and explicit cohort
   units. Fixable findings share the source predicate. Complete live matrix
-  acceptance across datasets remains open. Remaining exact-cohort destinations
-  include 24-hour runtime alert verdicts, cross-framework graded compliance,
-  organization-wide recent audit activity, strongest-policy-mode CVE/exposure
-  groups, and the 14-day high/critical event chart.
+  acceptance across datasets remains open. Exact destinations now also cover
+  24-hour runtime alert verdicts, cross-framework graded compliance, the returned
+  organization audit IDs, strongest-policy-mode vulnerability-ID/exposure groups,
+  and the 14-day high/critical event chart. Source bounds, effective exemption
+  status and distinct-ID units remain explicit; broader dataset, concurrent-change
+  and all-tile acceptance are still required.
 - [ ] Prefer downloadable HTML/CSV/JSON evidence; add PDF only when it materially
   improves a customer workflow.
 

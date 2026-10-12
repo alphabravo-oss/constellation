@@ -20,6 +20,21 @@ func findingFilter(orgID uuid.UUID, values url.Values, includeLifecycle, include
 		args = append(args, value)
 		parts = append(parts, fmt.Sprintf("%s = $%d", column, len(args)))
 	}
+	if scope := values.Get("id_scope"); scope != "" {
+		if scope != "all" {
+			return "", nil, fmt.Errorf("invalid id_scope")
+		}
+		// Dashboard distinct-ID counters ignore NULL IDs; preserve advisories.
+		parts = append(parts, "external_id IS NOT NULL")
+	}
+	mode, err := sqlx.GroupModeRank(values.Get("group_mode"))
+	if err != nil {
+		return "", nil, err
+	}
+	if mode != 0 {
+		args = append(args, mode)
+		parts = append(parts, "kind='vulnerability' AND target_type='image-workload' AND EXISTS (SELECT 1 FROM image_workload_links mode_link JOIN ("+sqlx.GroupModesSQL("findings.org_id", "findings.cluster_id")+") mode_group ON mode_group.org_id=mode_link.org_id AND mode_group.cluster_id=mode_link.cluster_id AND mode_group.workload_id=mode_link.workload_id WHERE mode_link.org_id=findings.org_id AND mode_link.cluster_id=findings.cluster_id AND mode_link.image_digest=findings.target_ref AND mode_group.rank=$"+strconv.Itoa(len(args))+")")
+	}
 	if target := values.Get("target_type"); target != "" {
 		switch target {
 		case "image", "image-workload", "host", "platform", "workload", "registry", "repository", "serverless":

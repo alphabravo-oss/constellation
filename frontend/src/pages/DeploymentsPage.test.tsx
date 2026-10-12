@@ -107,3 +107,16 @@ it("restores a fact cohort through history and applies it to pages and full CSV"
  await act(async () => history.back());
  await vi.waitFor(() => expect(deployments.list).toHaveBeenLastCalledWith(expect.objectContaining({ risk_fact: "privileged", offset: 200 })));
 });
+
+it("preserves exact exposure-mode filters across CSV, URL paging and back/forward", async () => {
+ vi.mocked(deployments.exportCsv).mockResolvedValue(new Blob(["CSV"])); vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:export"); vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {}); vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+ await render("/clusters/cluster/deployments?hide_platform=false&risk_fact=net_exposure&group_mode=protect&page=2"); await settled();
+ expect(deployments.list).toHaveBeenLastCalledWith(expect.objectContaining({ risk_fact: "net_exposure", group_mode: "protect", hide_platform: false, offset: 100 }));
+ expect(host.textContent).toContain("Unmatched workloads are excluded"); expect(host.textContent).toContain("including zero or null values");
+ await act(async () => button("Export CSV").click()); expect(deployments.exportCsv).toHaveBeenCalledWith(expect.objectContaining({ risk_fact: "net_exposure", group_mode: "protect", hide_platform: false }));
+ const mode = host.querySelector<HTMLSelectElement>('[aria-label="Strongest group mode"]')!;
+ await act(async () => { mode.value="discover"; mode.dispatchEvent(new Event("change",{bubbles:true})); });
+ await vi.waitFor(() => { expect(history.location.search).not.toContain("page="); expect(deployments.list).toHaveBeenLastCalledWith(expect.objectContaining({ group_mode:"discover", offset:0 })); });
+ await act(async () => history.back()); await vi.waitFor(() => expect(deployments.list).toHaveBeenLastCalledWith(expect.objectContaining({ group_mode:"protect", offset:100 })));
+ await act(async () => history.forward()); await vi.waitFor(() => expect(deployments.list).toHaveBeenLastCalledWith(expect.objectContaining({ group_mode:"discover", offset:0 })));
+});

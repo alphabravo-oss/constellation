@@ -12,6 +12,7 @@ import { Collapse } from "@/components/ui/collapse";
 import { Button } from "@/components/ui/button";
 import { ErrorState, LoadingState } from "@/components/ui/states";
 import { useRouteSearchParams } from "@/lib/route-search";
+import { timelineAfterParam } from "@/lib/timeline-filters";
 import { useCluster } from "@/hooks/useCluster";
 
 const WINDOWS = [1, 6, 24, 72, 168];
@@ -179,6 +180,7 @@ export function RuntimePage() {
     <VerdictBanner status={incomplete ? "degraded" : !summary || refreshing ? "info" : summary.alerts > 0 ? "degraded" : "info"}
       title={incomplete ? "Runtime evidence is unavailable" : !summary || refreshing ? "Runtime evidence is loading or refreshing" : summary.events === 0 ? `No runtime events reported in the selected ${hours}h window` : `${summary.alerts} alerting events in the selected ${hours}h window`}
       detail="Window totals reflect reported events, not proof of agent coverage. The latest-events feed covers available history separately." />
+    {summary && clusterId && <p className="text-sm"><a data-testid="runtime-alert-events-link" className="text-primary hover:underline" href={`/clusters/${encodeURIComponent(clusterId)}/timeline?${new URLSearchParams({tab:"event",verdict:"alert,block,quarantine",...(summary.window_start && timelineAfterParam(summary.window_start)?{after:summary.window_start}:{hours:String(hours)})})}`}>Browse all {hours}h alerting event records</a> <span className="text-muted-foreground">Alert, block and quarantine verdicts; full counts and matching export.</span></p>}
     <StatGrid data-testid="runtime-summary">
       <StatCard label="Events" value={summary?.events ?? "—"} icon={<Activity className="h-3.5 w-3.5" />} />
       <StatCard label="Alerts" value={summary?.alerts ?? "—"} tone={(summary?.alerts ?? 0) > 0 ? "medium" : "neutral"} icon={<Skull className="h-3.5 w-3.5" />} />

@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -60,109 +59,7 @@ func (c *Compliance) Frameworks(w http.ResponseWriter, _ *http.Request) {
 // Checks returns persisted compliance check rows for the calling org. Supports both
 // the legacy ?framework= filter (single framework match) and the bench-v2
 // ?profile= filter (matches the JSONB tags_v2 column).
-func (c *Compliance) Checks(w http.ResponseWriter, r *http.Request) {
-	subj, _ := authctx.SubjectFrom(r.Context())
-	framework := r.URL.Query().Get("framework")
-	profile := r.URL.Query().Get("profile")
-	clusterArg, err := sqlx.ParseClusterIDParam(r)
-	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-	if clusterArg != nil {
-		var owned bool
-		if err := c.db.Pool().QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM clusters WHERE id = $1 AND org_id = $2)`, clusterArg, subj.OrgID).Scan(&owned); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		if !owned {
-			httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found"})
-			return
-		}
-	}
-
-	rows, err := c.db.Pool().Query(r.Context(), `
-SELECT cc.framework, cc.control_id, cc.title, COALESCE(cc.description,''), cc.status, cc.severity,
-       COALESCE(cc.evidence,''), cc.evaluated_at, COALESCE(cc.tags_v2, '{}'::jsonb),
-       COALESCE(cc.remediation,''),
-       ce.id::text, ce.reason, ce.expires_at
-  FROM compliance_checks cc
-  LEFT JOIN LATERAL (
-        SELECT id, reason, expires_at, cluster_id, created_at
-          FROM compliance_exemptions ce
-         WHERE ce.org_id = cc.org_id
-           AND ce.framework = cc.framework
-           AND ce.control_id = cc.control_id
-           AND (ce.cluster_id IS NULL OR ce.cluster_id = cc.cluster_id)
-           AND (ce.cluster_id IS NULL OR EXISTS (SELECT 1 FROM clusters WHERE id = ce.cluster_id AND org_id = cc.org_id))
-           AND ce.revoked_at IS NULL
-           AND ce.expires_at > NOW()
-         ORDER BY (ce.cluster_id IS NULL), ce.created_at DESC
-         LIMIT 1
-       ) ce ON TRUE
- WHERE cc.org_id = $1
-   AND (cc.cluster_id IS NULL OR EXISTS (SELECT 1 FROM clusters WHERE id = cc.cluster_id AND org_id = cc.org_id))
-   AND ($2::text = '' OR cc.framework = $2)
-   AND ($3::text = '' OR cc.tags_v2 ? $3)
-   AND ($4::uuid IS NULL OR cc.cluster_id = $4)
- ORDER BY cc.framework, cc.control_id
- LIMIT 500`, subj.OrgID, framework, profile, clusterArg)
-	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	defer rows.Close()
-
-	out := []map[string]any{}
-	for rows.Next() {
-		var row struct {
-			Framework, ControlID, Title, Description, Status, Severity, Evidence, Remediation string
-		}
-		// evaluated_at is a timestamptz; scan into time.Time then format. Scanning
-		// into a string fails the pgx binary path (OID 1184).
-		var when time.Time
-		var exemptionID, exemptionReason *string
-		var exemptionExpiresAt *time.Time
-		var tags []byte
-		if err := rows.Scan(&row.Framework, &row.ControlID, &row.Title, &row.Description,
-			&row.Status, &row.Severity, &row.Evidence, &when, &tags, &row.Remediation, &exemptionID, &exemptionReason, &exemptionExpiresAt); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		var tagsParsed map[string]any
-		_ = json.Unmarshal(tags, &tagsParsed)
-		effectiveStatus := row.Status
-		var exemption map[string]any
-		if exemptionID != nil && exemptionReason != nil && exemptionExpiresAt != nil {
-			exemption = map[string]any{
-				"id":         *exemptionID,
-				"reason":     *exemptionReason,
-				"expires_at": exemptionExpiresAt.UTC().Format(time.RFC3339),
-			}
-			if row.Status == "fail" {
-				effectiveStatus = "exempted"
-			}
-		}
-		item := map[string]any{
-			"framework":        row.Framework,
-			"control_id":       row.ControlID,
-			"title":            row.Title,
-			"description":      row.Description,
-			"status":           row.Status,
-			"effective_status": effectiveStatus,
-			"severity":         row.Severity,
-			"evidence":         row.Evidence,
-			"remediation":      row.Remediation,
-			"evaluated_at":     when.UTC().Format(time.RFC3339),
-			"tags_v2":          tagsParsed,
-		}
-		if exemption != nil {
-			item["exemption"] = exemption
-		}
-		out = append(out, item)
-	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"checks": out})
-}
+func (c *Compliance) Checks(w http.ResponseWriter, r *http.Request) { c.checksInventory(w, r, false) }
 
 // Summary returns pass% + counts per framework.
 func (c *Compliance) Summary(w http.ResponseWriter, r *http.Request) {
@@ -183,35 +80,13 @@ func (c *Compliance) Summary(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	rows, err := c.db.Pool().Query(r.Context(), `
-WITH checks AS (
-    SELECT cc.framework,
-           cc.status,
-           ce.id IS NOT NULL AS exempted
-      FROM compliance_checks cc
-      LEFT JOIN LATERAL (
-            SELECT id, cluster_id, created_at
-              FROM compliance_exemptions ce
-             WHERE ce.org_id = cc.org_id
-               AND ce.framework = cc.framework
-               AND ce.control_id = cc.control_id
-               AND (ce.cluster_id IS NULL OR ce.cluster_id = cc.cluster_id)
-               AND (ce.cluster_id IS NULL OR EXISTS (SELECT 1 FROM clusters WHERE id = ce.cluster_id AND org_id = cc.org_id))
-               AND ce.revoked_at IS NULL
-               AND ce.expires_at > NOW()
-             ORDER BY (ce.cluster_id IS NULL), ce.created_at DESC
-             LIMIT 1
-           ) ce ON TRUE
-     WHERE cc.org_id = $1
-       AND (cc.cluster_id IS NULL OR EXISTS (SELECT 1 FROM clusters WHERE id = cc.cluster_id AND org_id = cc.org_id))
-       AND ($2::uuid IS NULL OR cc.cluster_id = $2)
-)
+	rows, err := c.db.Pool().Query(r.Context(), `WITH checks(id,cluster_id,asset_id,framework,control_id,title,description,status,effective_status,severity,evidence,evaluated_at,tags_v2,remediation,exemption_id,exemption_reason,exemption_expires_at) AS (`+complianceEffectiveRowsSQL+`)
 SELECT framework,
        COUNT(*) FILTER (WHERE status = 'pass') AS passes,
-       COUNT(*) FILTER (WHERE status = 'fail' AND NOT exempted) AS fails,
+       COUNT(*) FILTER (WHERE effective_status = 'fail') AS fails,
        COUNT(*) FILTER (WHERE status = 'manual') AS manuals,
        COUNT(*) FILTER (WHERE status = 'not_applicable') AS not_applicable,
-       COUNT(*) FILTER (WHERE status = 'fail' AND exempted) AS exempted,
+       COUNT(*) FILTER (WHERE effective_status = 'exempted') AS exempted,
        COUNT(*) AS total
   FROM checks
  GROUP BY framework
@@ -226,7 +101,8 @@ SELECT framework,
 		var fw string
 		var pass, fail, manual, notApplicable, exempted, total int
 		if err := rows.Scan(&fw, &pass, &fail, &manual, &notApplicable, &exempted, &total); err != nil {
-			continue
+			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
 		}
 		pct := 0
 		effectivePct := 0
@@ -245,6 +121,10 @@ SELECT framework,
 			"pass_pct":           pct,
 			"effective_pass_pct": effectivePct,
 		})
+	}
+	if err := rows.Err(); err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"frameworks": out})
 }

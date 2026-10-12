@@ -204,6 +204,7 @@ const app_admission_splatRoute = createRoute({ getParentRoute: () => authenticat
 const app_admission_control_splatRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: "admission-control/$", component: () => (<LegacyClusterRedirect />) });
 const app_policyRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: "policy", component: () => (<LegacyClusterRedirect />) });
 const app_policies_splatRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: "policies/$", component: () => (<LegacyClusterRedirect />) });
+const organization_auditRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: "organization/audit", component: () => (<SuspenseRoute><AuditPage scope="organization" /></SuspenseRoute>) });
 const app_auditRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: "audit", component: () => (<LegacyClusterRedirect />) });
 const app_audit_logRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: "audit-log", component: () => (<LegacyClusterRedirect />) });
 const app_componentsRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: "components", component: () => (<LegacyClusterRedirect />) });
@@ -441,6 +442,7 @@ authenticatedRoute.addChildren([
   app_admission_control_splatRoute,
   app_policyRoute,
   app_policies_splatRoute,
+  organization_auditRoute,
   app_auditRoute,
   app_audit_logRoute,
   app_componentsRoute,

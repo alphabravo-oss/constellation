@@ -193,12 +193,12 @@ export interface CVERollup {
 }
 
 export const findings = {
-  list: (params: { kind?: FindingKind; lifecycle?: Lifecycle; cluster_id?: string; target_type?: string; q?: string; limit?: number; offset?: number; fixable?: boolean; sort?: string; order?: "asc" | "desc" } = {}) =>
+  list: (params: { kind?: FindingKind; lifecycle?: Lifecycle; cluster_id?: string; target_type?: string; group_mode?: string; id_scope?: "all"; q?: string; limit?: number; offset?: number; fixable?: boolean; sort?: string; order?: "asc" | "desc" } = {}) =>
     api.get<{ findings: Finding[]; limit: number; offset: number; total: number; has_more: boolean; lifecycle_counts?: Record<Lifecycle, number> }>("/findings", { params: { ...params, fixable: params.fixable ? "1" : undefined } }).then((r) => r.data),
   // NeuVector-style rollup: one row per CVE with its blast radius (affected images/clusters).
-  byCVE: (params: { cluster_id?: string; target_type?: string; lifecycle?: Lifecycle; limit?: number; offset?: number; fixable?: boolean; q?: string } = {}) =>
+  byCVE: (params: { cluster_id?: string; target_type?: string; group_mode?: string; id_scope?: "all"; lifecycle?: Lifecycle; limit?: number; offset?: number; fixable?: boolean; q?: string } = {}) =>
     api.get<{ cves: CVERollup[]; limit: number; offset: number; total: number }>("/findings/by-cve", { params: { ...params, fixable: params.fixable ? "true" : undefined, q: params.q || undefined } }).then((r) => r.data),
-  exportCSV: (params: { kind?: FindingKind; lifecycle?: Lifecycle; cluster_id?: string; target_type?: string; q?: string; limit?: number; offset?: number; fixable?: boolean; sort?: string; order?: "asc" | "desc" } = {}) => {
+  exportCSV: (params: { kind?: FindingKind; lifecycle?: Lifecycle; cluster_id?: string; target_type?: string; group_mode?: string; id_scope?: "all"; q?: string; limit?: number; offset?: number; fixable?: boolean; sort?: string; order?: "asc" | "desc" } = {}) => {
     const query = new URLSearchParams();
     for (const [key, value] of Object.entries(params)) if (value !== undefined && value !== false && value !== "") query.set(key, value === true ? "1" : String(value));
     return downloadAPIFile(`/findings.csv?${query}`, "constellation-findings-instances.csv");
@@ -482,6 +482,9 @@ export const nodes = {
 
 export interface Framework { id: string; name: string; category: string }
 export interface ComplianceCheck {
+  id?: string;
+  cluster_id?: string;
+  asset_id?: string;
   framework: string;
   control_id: string;
   title: string;
@@ -616,10 +619,21 @@ export interface ComplianceRunDB {
   error_message?: string;
 }
 
+export interface ComplianceChecksParams { framework?: string; cluster_id?: string; profile?: string; control_id?: string; status?: string; q?: string; sort?: string; order?: "asc" | "desc"; limit?: number; offset?: number }
+export interface ComplianceChecksResponse { checks: ComplianceCheck[]; cluster_id?: string | null; framework?: string; profile?: string; control_id?: string; status?: string; q?: string; sort?: string; order?: "asc" | "desc"; limit?: number; offset?: number; total?: number; has_more?: boolean; summary?: Record<string, number> }
+
 export const compliance = {
   frameworks: () => api.get<{ frameworks: Framework[] }>("/compliance/frameworks").then((r) => r.data),
-  checks:     (framework?: string, cluster_id?: string) =>
-    api.get<{ checks: ComplianceCheck[] }>("/compliance/checks", { params: { framework, cluster_id } }).then((r) => r.data),
+  checks: (framework?: string | ComplianceChecksParams, cluster_id?: string, options?: Omit<ComplianceChecksParams, "framework" | "cluster_id">) =>
+    api.get<ComplianceChecksResponse>("/compliance/checks", { params: typeof framework === "object" ? framework : { framework, cluster_id, ...options } }).then((r) => r.data),
+  exportChecksCSV: async (params: ComplianceChecksParams) => {
+    const filters = { ...params }; delete filters.limit; delete filters.offset;
+    const response = await api.get<Blob>("/compliance/checks/export.csv", { params: filters, responseType: "blob" });
+    const total = Number(response.headers["x-export-total"]), limit = Number(response.headers["x-export-limit"]), truncated = response.headers["x-export-truncated"];
+    if (!/^\d+$/.test(String(response.headers["x-export-total"])) || !Number.isSafeInteger(total) || total < 0 || limit !== 100000 || !["true", "false"].includes(String(truncated)) || (truncated === "true") !== (total > limit)) throw new Error("Compliance export scope could not be confirmed.");
+    const blob = response.data instanceof Blob ? response.data : new Blob([response.data]); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = "constellation-compliance-checks.csv"; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
+    return { total, exported: Math.min(total, limit), limit, truncated: truncated === "true" };
+  },
   summary:    (cluster_id?: string) =>
     api.get<{ frameworks: ComplianceSummary[] }>("/compliance/summary", { params: { cluster_id } }).then((r) => r.data),
   evidence: (params: { cluster_id?: string; scope?: string; framework?: string; namespace?: string; limit?: number } = {}) =>
@@ -952,7 +966,7 @@ export interface DeploymentDetail extends Deployment {
 }
 
 export const deployments = {
-  list: (params: { q?: string; name?: string; namespace?: string; cluster_id?: string; hide_platform?: boolean; platform_role?: string; risk_fact?: string; limit?: number; offset?: number } = {}) =>
+  list: (params: { q?: string; name?: string; namespace?: string; cluster_id?: string; hide_platform?: boolean; platform_role?: string; risk_fact?: string; group_mode?: string; limit?: number; offset?: number } = {}) =>
     api.get<{ deployments: Deployment[]; total: number; limit: number; offset: number; has_more: boolean; platform_count: number; summary: { total: number; at_risk: number; finding_count: number; critical_count: number; high_count: number } }>("/deployments", { params }).then((r) => r.data),
   exportCsv: (params: { q?: string; name?: string; namespace?: string; cluster_id?: string; hide_platform?: boolean; platform_role?: string; risk_fact?: string } = {}) =>
     api.get<Blob>("/deployments.csv", { params, responseType: "blob" }).then((r) => r.data),
@@ -2842,6 +2856,7 @@ export interface TimelineItem {
   namespace?: string;
   cluster_id?: string;
   ref?: string;
+  verdict?: string;
 }
 
 export interface TimelineResponse {
@@ -2849,26 +2864,74 @@ export interface TimelineResponse {
   limit: number;
   offset: number;
   has_more: boolean;
+  total?: number;
+  lower_only?: boolean;
+  after_exclusive?: boolean;
   from: string;
   to: string;
 }
 
+export interface TimelineReadParams {
+  type?: string;
+  severity?: string;
+  from?: string;
+  to?: string;
+  q?: string;
+  namespace?: string;
+  workload?: string;
+  ref?: string;
+  limit?: number;
+  offset?: number;
+  cluster_id?: string;
+  after?: string;
+  hours?: number;
+  after_exclusive?: boolean;
+  verdict?: string;
+}
 export const securityTimeline = {
-  list: (
-    params: {
-      type?: string; // comma list of TimelineSource
-      severity?: string; // comma list of Severity
-      from?: string;
-      to?: string;
-      q?: string;
-      namespace?: string;
-      workload?: string;
-      ref?: string;
-      limit?: number;
-      offset?: number;
-      cluster_id?: string;
-    } = {},
-  ) => api.get<TimelineResponse>("/security/timeline", { params }).then((r) => r.data),
+  exportCSV: async (params: TimelineReadParams = {}) => {
+    const filters = { ...params };
+    delete filters.limit;
+    delete filters.offset;
+    const response = await api.get<Blob>("/security/timeline.csv", {
+      params: filters,
+      responseType: "blob",
+    });
+    const total = Number(response.headers["x-export-total"]),
+      limit = Number(response.headers["x-export-limit"]),
+      truncated = response.headers["x-export-truncated"];
+    if (
+      !/^\d+$/.test(String(response.headers["x-export-total"])) ||
+      !Number.isSafeInteger(total) ||
+      total < 0 ||
+      limit !== 10000 ||
+      !["true", "false"].includes(String(truncated)) ||
+      (truncated === "true") !== total > limit
+    )
+      throw new Error(
+        "Event export scope could not be confirmed. Retry the export.",
+      );
+    const blob =
+      response.data instanceof Blob ? response.data : new Blob([response.data]);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "constellation-security-events.csv";
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    return {
+      total,
+      exported: Math.min(total, limit),
+      limit,
+      truncated: truncated === "true",
+    };
+  },
+  list: (params: TimelineReadParams = {}) =>
+    api
+      .get<TimelineResponse>("/security/timeline", { params })
+      .then((r) => r.data),
 };
 
 // B8 — Score what-if / prediction.
@@ -2916,6 +2979,7 @@ export interface RuntimeOverview {
   rules: Array<{ id: string; name: string; source: string; severity: string; techniques: string[]; mode: string; event_count: number; affected_workloads: number; last_triggered_at?: string }>;
   summary: {
     window_hours: number;
+    window_start?: string;
     events: number;
     alerts: number;
     blocks: number;
@@ -4806,6 +4870,7 @@ export interface DashboardSummary {
   assets_total: number;
   scan_queue_depth: number;
   recent_activity: Array<{
+    id?: string;
     at: string;
     action: string;
     target_kind: string;
@@ -4849,7 +4914,7 @@ export const dashboard = {
   // NV Security Events timeline: kept separate from summary — it scans the large events
   // partition (~6s) and must not slow the primary summary.
   eventsTimeline: (params: { cluster_id?: string } = {}) =>
-    api.get<{ events_timeline: Array<{ date: string; total: number; critical: number }> }>("/dashboard/events-timeline", { params }).then((r) => r.data),
+    api.get<{ events_timeline: Array<{ date: string; total: number; critical: number }>; window_start?: string }>("/dashboard/events-timeline", { params }).then((r) => r.data),
 };
 
 export const settingsApi = {

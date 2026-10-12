@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   compactTimelineFilters,
   timelineDateParam,
+  timelineAfterParam,
+  sameTimelineBoundary,
   timelineSavedViewSummary,
   timelineSeverityParam,
   timelineSourceParam,
@@ -49,4 +51,8 @@ describe("timeline filter serialization", () => {
     });
     expect(timelineSavedViewSummary(payload)).toBe("2 sources · high/critical · exec · ns:prod · workload:api");
   });
+});
+
+it("retains microsecond lower bounds and detects mismatched evidence within one millisecond",()=>{
+ const after="2026-10-10T12:34:56.123456Z";expect(timelineAfterParam(after)).toBe(after);expect(sameTimelineBoundary(after,"2026-10-10T12:34:56.123455Z")).toBe(false);expect(sameTimelineBoundary(after,"2026-10-10T18:04:56.123456000+05:30")).toBe(true);
 });

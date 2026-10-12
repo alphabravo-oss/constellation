@@ -30,7 +30,9 @@ func (f *Findings) ByCVE(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	where += " AND external_id LIKE 'CVE-%'"
+	if values.Get("id_scope") != "all" {
+		where += " AND external_id LIKE 'CVE-%'"
+	}
 	limit := 200
 	if value, err := strconv.Atoi(values.Get("limit")); err == nil && value > 0 && value <= 2000 {
 		limit = value

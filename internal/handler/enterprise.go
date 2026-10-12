@@ -65,13 +65,14 @@ type runtimeWorkloadEvidenceDTO struct {
 }
 
 type runtimeEvidenceSummaryDTO struct {
-	WindowHours       int `json:"window_hours"`
-	Events            int `json:"events"`
-	Alerts            int `json:"alerts"`
-	Blocks            int `json:"blocks"`
-	Quarantines       int `json:"quarantines"`
-	AffectedWorkloads int `json:"affected_workloads"`
-	Techniques        int `json:"techniques"`
+	WindowStart       string `json:"window_start,omitempty"`
+	WindowHours       int    `json:"window_hours"`
+	Events            int    `json:"events"`
+	Alerts            int    `json:"alerts"`
+	Blocks            int    `json:"blocks"`
+	Quarantines       int    `json:"quarantines"`
+	AffectedWorkloads int    `json:"affected_workloads"`
+	Techniques        int    `json:"techniques"`
 }
 
 type runtimeRuleOverviewDTO struct {
@@ -147,6 +148,7 @@ func runtimeWindowHours(r *http.Request) int {
 func (h *Enterprise) attachRuntimeEvidence(r *http.Request, out map[string]any, orgID string, clusterArg any) error {
 	hours := runtimeWindowHours(r)
 	var summary runtimeEvidenceSummaryDTO
+	var windowStart time.Time
 	if err := h.db.Pool().QueryRow(r.Context(), `
 WITH scoped AS (
     SELECT *
@@ -160,12 +162,14 @@ SELECT COUNT(*)::int,
        COUNT(*) FILTER (WHERE verdict = 'block')::int,
        COUNT(*) FILTER (WHERE verdict = 'quarantine')::int,
        COUNT(DISTINCT workload_id)::int,
-       COALESCE((SELECT COUNT(DISTINCT technique)::int FROM scoped, LATERAL unnest(attack_techniques) AS technique), 0)
+       COALESCE((SELECT COUNT(DISTINCT technique)::int FROM scoped, LATERAL unnest(attack_techniques) AS technique), 0),
+ NOW() - ($2::text || ' hours')::interval
   FROM scoped`, orgID, strconv.Itoa(hours), clusterArg).
-		Scan(&summary.Events, &summary.Alerts, &summary.Blocks, &summary.Quarantines, &summary.AffectedWorkloads, &summary.Techniques); err != nil {
+		Scan(&summary.Events, &summary.Alerts, &summary.Blocks, &summary.Quarantines, &summary.AffectedWorkloads, &summary.Techniques, &windowStart); err != nil {
 		return err
 	}
 	summary.WindowHours = hours
+	summary.WindowStart = windowStart.UTC().Format(time.RFC3339Nano)
 	out["summary"] = summary
 
 	rows, err := h.db.Pool().Query(r.Context(), `
@@ -176,10 +180,10 @@ SELECT e.id::text, e.at, e.cluster_id::text, COALESCE(c.name, ''), e.workload_id
   FROM events e
   LEFT JOIN clusters c ON c.id = e.cluster_id
  WHERE e.org_id = $1
-   AND e.at >= NOW() - ($2::text || ' hours')::interval
+   AND e.at >= $2::timestamptz
    AND ($3::uuid IS NULL OR e.cluster_id = $3)
  ORDER BY e.at DESC
- LIMIT 20`, orgID, strconv.Itoa(hours), clusterArg)
+ LIMIT 20`, orgID, windowStart, clusterArg)
 	if err != nil {
 		return err
 	}
@@ -212,11 +216,11 @@ SELECT workload_id,
   FROM events
   LEFT JOIN LATERAL unnest(attack_techniques) AS technique ON TRUE
  WHERE org_id = $1
-   AND at >= NOW() - ($2::text || ' hours')::interval
+   AND at >= $2::timestamptz
    AND ($3::uuid IS NULL OR cluster_id = $3)
  GROUP BY workload_id
  ORDER BY COUNT(DISTINCT id) FILTER (WHERE verdict IN ('alert','block','quarantine')) DESC, COUNT(DISTINCT id) DESC, workload_id
- LIMIT 10`, orgID, strconv.Itoa(hours), clusterArg)
+ LIMIT 10`, orgID, windowStart, clusterArg)
 	if err != nil {
 		return err
 	}
@@ -235,13 +239,13 @@ SELECT workload_id,
 		return err
 	}
 	out["workloads"] = workloads
-	if err := h.attachRuntimeRuleEvidence(r, out, orgID, hours, clusterArg); err != nil {
+	if err := h.attachRuntimeRuleEvidence(r, out, orgID, windowStart, clusterArg); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (h *Enterprise) attachRuntimeRuleEvidence(r *http.Request, out map[string]any, orgID string, hours int, clusterArg any) error {
+func (h *Enterprise) attachRuntimeRuleEvidence(r *http.Request, out map[string]any, orgID string, windowStart time.Time, clusterArg any) error {
 	rules, ok := out["rules"].([]runtimeRuleOverviewDTO)
 	if !ok {
 		return nil
@@ -257,10 +261,10 @@ SELECT payload->>'rule_id' AS rule_id,
        MAX(at)
   FROM events
  WHERE org_id = $1
-   AND at >= NOW() - ($2::text || ' hours')::interval
+   AND at >= $2::timestamptz
    AND COALESCE(payload->>'rule_id', '') <> ''
    AND ($3::uuid IS NULL OR cluster_id = $3)
- GROUP BY payload->>'rule_id'`, orgID, strconv.Itoa(hours), clusterArg)
+ GROUP BY payload->>'rule_id'`, orgID, windowStart, clusterArg)
 	if err != nil {
 		return err
 	}

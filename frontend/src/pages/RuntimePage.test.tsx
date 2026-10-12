@@ -145,3 +145,9 @@ it("retains table rows and focus during a routine poll, then hides them on refre
   expect(host.querySelector('[data-testid="runtime-live-table"]')).toBe(table); expect(host.textContent).toContain("cluster-a/raw"); expect(document.activeElement).toBe(control); expect(summaryValues()[0]).toBe("42");
   await act(async () => { fail(new Error("Poll failed")); await refresh; }); await settled(() => expect(host.textContent).toContain("Poll failed")); expect(host.querySelector('[data-testid="runtime-live-table"]')).toBeNull();
 });
+
+it("links the complete alerting cohort with the source's precise lower boundary",async()=>{
+ const data=overview();data.summary.window_start="2026-10-11T12:34:56.123456Z";vi.mocked(enterprise.runtime).mockResolvedValue(data);
+ await render("/clusters/cluster-a/runtime?tab=evidence&hours=24");await settled(()=>expect(host.querySelector('[data-testid="runtime-alert-events-link"]')).not.toBeNull());
+ const url=new URL(host.querySelector<HTMLAnchorElement>('[data-testid="runtime-alert-events-link"]')!.getAttribute("href")!,"https://example.com");expect(url.pathname).toBe("/clusters/cluster-a/timeline");expect(url.searchParams.get("tab")).toBe("event");expect(url.searchParams.get("after")).toBe(data.summary.window_start);expect(url.searchParams.get("verdict")).toBe("alert,block,quarantine");expect(url.searchParams.has("hours")).toBe(false);
+});

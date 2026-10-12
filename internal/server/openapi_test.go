@@ -574,7 +574,7 @@ func TestOpenAPIEventsExportContract(t *testing.T) {
 func TestOpenAPIPcapContracts(t *testing.T) {
 	capture := openAPISchemaAt(t, "components", "schemas", "PcapCapture")
 	assertOpenAPIFields(t, capture,
-		[]string{"id", "org_id", "cluster_id", "workload", "namespace", "requested_by", "requested_at", "duration_s", "src_ip", "dst_ip", "dst_port", "protocol", "bpf_filter", "interface", "file_count", "file_size_mb", "status", "claimed_by_node", "claimed_at", "completed_at", "error_message", "file_size_bytes", "sha256", "packet_count", "expires_at"},
+		[]string{"id", "org_id", "cluster_id", "workload", "namespace", "platform_role", "requested_by", "requested_at", "duration_s", "src_ip", "dst_ip", "dst_port", "protocol", "bpf_filter", "interface", "file_count", "file_size_mb", "status", "claimed_by_node", "claimed_at", "completed_at", "error_message", "file_size_bytes", "sha256", "packet_count", "expires_at"},
 		[]string{"id", "org_id", "cluster_id", "workload", "namespace", "requested_by", "requested_at", "duration_s", "status", "expires_at"})
 	assertOpenAPIFields(t, openAPISchemaAt(t, "components", "schemas", "PcapStartRequest"),
 		[]string{"cluster_id", "workload", "namespace", "duration_s", "src_ip", "dst_ip", "dst_port", "protocol", "bpf_filter", "interface", "file_count", "file_size_mb"},

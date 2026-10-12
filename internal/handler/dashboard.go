@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/alphabravocompany/constellation/internal/db"
+	"github.com/alphabravocompany/constellation/internal/handler/sqlx"
 )
 
 // Dashboard aggregates a one-shot summary the home page renders: severity counts,
@@ -70,6 +71,7 @@ type topVulnerableWorkloadDTO struct {
 }
 
 type dashboardEventDT struct {
+	ID         string `json:"id"`
 	At         string `json:"at"`
 	Action     string `json:"action"`
 	TargetKind string `json:"target_kind"`
@@ -113,6 +115,11 @@ func (h *Dashboard) EventsTimeline(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	var windowStart time.Time
+	if err := h.db.Pool().QueryRow(r.Context(), `SELECT NOW() - INTERVAL '14 days'`).Scan(&windowStart); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	out := []eventsTimelineDT{}
 	rows, err := h.db.Pool().Query(r.Context(), `
 SELECT date_trunc('day', at)::date AS d,
@@ -122,8 +129,8 @@ SELECT date_trunc('day', at)::date AS d,
  WHERE org_id = $1
    AND ($2::uuid IS NULL OR cluster_id = $2)
    AND severity IN ('critical','high')
-   AND at > now() - interval '14 days'
- GROUP BY 1 ORDER BY 1`, subj.OrgID, clusterArg)
+   AND at > $3
+ GROUP BY 1 ORDER BY 1`, subj.OrgID, clusterArg, windowStart)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, fmt.Sprintf("events timeline: %v", err))
 		return
@@ -139,7 +146,11 @@ SELECT date_trunc('day', at)::date AS d,
 		t.Date = d.Format("2006-01-02")
 		out = append(out, t)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"events_timeline": out})
+	if err := rows.Err(); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"events_timeline": out, "window_start": windowStart.UTC().Format(time.RFC3339Nano)})
 }
 
 func (h *Dashboard) aggregate(ctx context.Context, orgID uuid.UUID, clusterArg any) (dashboardSummaryDTO, error) {
@@ -207,22 +218,13 @@ SELECT COUNT(*) FILTER (WHERE lifecycle = 'open')::int,
 		return out, fmt.Errorf("queue: %w", err)
 	}
 
-	// Recent audit-log activity (most recent 20 for the org), ordered by `at`
-	// so the (org_id, at DESC) index serves it in ~1ms.
-	//
-	// Previously this filtered to the cluster via `target_id IN (SELECT id FROM
-	// findings/assets/deployments/compliance_checks WHERE cluster_id=$2)` and
-	// ordered by `id DESC`. audit_events has no cluster_id column, so that
-	// correlated filter matched only a handful of 1.3M+ rows and forced a full
-	// table scan (~23s) on every dashboard load. Showing recent org activity is
-	// a fast, acceptable proxy for this widget. To restore precise per-cluster
-	// scoping without the scan, denormalize cluster_id onto audit_events at
-	// write time and index (org_id, cluster_id, at DESC).
+	// Organization activity uses the (org_id, at DESC) index. Numeric ID breaks
+	// timestamp ties, and returned IDs let Audit reopen this exact bounded set.
 	evRows, err := h.db.Pool().Query(ctx, `
-SELECT at, action, target_kind, target_id, COALESCE(actor_id::text, '')
+SELECT id::text, at, action, COALESCE(target_kind,''), COALESCE(target_id,''), COALESCE(actor_id::text, '')
   FROM audit_events
  WHERE org_id = $1
- ORDER BY at DESC LIMIT 20`, orgID)
+ ORDER BY audit_events.at DESC, audit_events.id DESC LIMIT 20`, orgID)
 	if err != nil {
 		return out, fmt.Errorf("audit: %w", err)
 	}
@@ -230,13 +232,16 @@ SELECT at, action, target_kind, target_id, COALESCE(actor_id::text, '')
 	for evRows.Next() {
 		var ev dashboardEventDT
 		var at time.Time
-		if err := evRows.Scan(&at, &ev.Action, &ev.TargetKind, &ev.TargetID, &ev.ActorID); err != nil {
+		if err := evRows.Scan(&ev.ID, &at, &ev.Action, &ev.TargetKind, &ev.TargetID, &ev.ActorID); err != nil {
 			return out, err
 		}
-		ev.At = at.UTC().Format(time.RFC3339)
+		ev.At = at.UTC().Format(time.RFC3339Nano)
 		out.RecentActivity = append(out.RecentActivity, ev)
 	}
 
+	if err := evRows.Err(); err != nil {
+		return out, fmt.Errorf("audit rows: %w", err)
+	}
 	if err := h.computePosture(ctx, orgID, clusterArg, &out); err != nil {
 		return out, fmt.Errorf("posture: %w", err)
 	}
@@ -330,20 +335,15 @@ SELECT COUNT(*)::int,
 	// sit on workloads we aren't protecting".
 	var cDiscover, cMonitor, cProtect, cPlatform, cHost int
 	if err := h.db.Pool().QueryRow(ctx, `
-WITH wl_mode AS (
-  SELECT jsonb_array_elements_text(g.members) AS wl,
-         MAX(CASE g.policy_mode WHEN 'protect' THEN 3 WHEN 'monitor' THEN 2 ELSE 1 END) AS r
-    FROM groups g
-   WHERE g.org_id = $1 AND ($2::uuid IS NULL OR g.cluster_id = $2)
-   GROUP BY 1)
+WITH wl_mode AS (`+sqlx.GroupModesSQL("$1", "$2")+`)
 SELECT
-  COUNT(DISTINCT f.external_id) FILTER (WHERE m.r = 1)::int,
-  COUNT(DISTINCT f.external_id) FILTER (WHERE m.r = 2)::int,
-  COUNT(DISTINCT f.external_id) FILTER (WHERE m.r = 3)::int
+  COUNT(DISTINCT f.external_id) FILTER (WHERE m.rank = 1)::int,
+  COUNT(DISTINCT f.external_id) FILTER (WHERE m.rank = 2)::int,
+  COUNT(DISTINCT f.external_id) FILTER (WHERE m.rank = 3)::int
   FROM findings f
   JOIN image_workload_links l
     ON l.image_digest = f.target_ref AND l.org_id = f.org_id AND l.cluster_id = f.cluster_id
-  LEFT JOIN wl_mode m ON m.wl = l.workload_id
+  LEFT JOIN wl_mode m ON m.org_id=l.org_id AND m.cluster_id=l.cluster_id AND m.workload_id=l.workload_id
  WHERE f.org_id = $1 AND f.kind = 'vulnerability' AND f.lifecycle = 'open'
    AND f.target_type = 'image-workload' AND ($2::uuid IS NULL OR f.cluster_id = $2)`,
 		orgID, clusterArg).Scan(&cDiscover, &cMonitor, &cProtect); err != nil {
@@ -366,18 +366,13 @@ SELECT COUNT(DISTINCT external_id) FILTER (WHERE target_type = 'platform')::int,
 	// discover is unprotected attack surface.
 	var eDiscover, eMonitor, eProtect int
 	if err := h.db.Pool().QueryRow(ctx, `
-WITH wl_mode AS (
-  SELECT jsonb_array_elements_text(g.members) AS wl,
-         MAX(CASE g.policy_mode WHEN 'protect' THEN 3 WHEN 'monitor' THEN 2 ELSE 1 END) AS r
-    FROM groups g
-   WHERE g.org_id = $1 AND ($2::uuid IS NULL OR g.cluster_id = $2)
-   GROUP BY 1)
+WITH wl_mode AS (`+sqlx.GroupModesSQL("$1", "$2")+`)
 SELECT
-  COUNT(*) FILTER (WHERE m.r = 1)::int,
-  COUNT(*) FILTER (WHERE m.r = 2)::int,
-  COUNT(*) FILTER (WHERE m.r = 3)::int
+  COUNT(*) FILTER (WHERE m.rank = 1)::int,
+  COUNT(*) FILTER (WHERE m.rank = 2)::int,
+  COUNT(*) FILTER (WHERE m.rank = 3)::int
   FROM deployments d
-  LEFT JOIN wl_mode m ON m.wl = d.namespace || '/' || d.name
+  LEFT JOIN wl_mode m ON m.org_id=d.org_id AND m.cluster_id IS NOT DISTINCT FROM d.cluster_id AND m.workload_id=d.namespace || '/' || d.name
  WHERE d.org_id = $1 AND d.risk_factors ? 'net_exposure'
    AND ($2::uuid IS NULL OR d.cluster_id = $2)`,
 		orgID, clusterArg).Scan(&eDiscover, &eMonitor, &eProtect); err != nil {

@@ -4152,6 +4152,15 @@
               "type": "integer",
               "minimum": 0
             }
+          },
+          {
+            "name": "event_ids",
+            "in": "query",
+            "required": false,
+            "description": "Comma-separated bounded set of at most 20 positive decimal int64 IDs. Presence with an empty value selects no rows. Duplicate IDs are deduplicated. Organization-scoped, ordered by timestamp descending then numeric ID descending. Cannot combine with cluster_id, event_id, support_bundle_job_id, action, framework or control; other-organization and missing IDs are omitted.",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -4169,7 +4178,17 @@
                     "events": {
                       "type": "array",
                       "items": {
-                        "type": "object"
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer",
+                            "format": "int64"
+                          },
+                          "event_id": {
+                            "type": "string",
+                            "description": "Lossless decimal record ID, including IDs beyond JavaScript safe-integer precision."
+                          }
+                        }
                       }
                     },
                     "has_more": {
@@ -4181,7 +4200,7 @@
             }
           },
           "400": {
-            "$ref": "#/components/responses/Error"
+            "description": "Invalid query, malformed selected IDs, more than 20 IDs, or incompatible filters."
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -5620,13 +5639,325 @@
       "get": {
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Matching compliance evidence and exact summary.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "checks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "total": {
+                      "type": "integer"
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    },
+                    "summary": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "integer"
+                      }
+                    },
+                    "limit": {
+                      "type": "integer"
+                    },
+                    "offset": {
+                      "type": "integer"
+                    },
+                    "sort": {
+                      "type": "string"
+                    },
+                    "order": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
           },
           "default": {
             "$ref": "#/components/responses/Error"
+          },
+          "400": {
+            "description": "Invalid filter/sort/query or cluster ID."
+          },
+          "404": {
+            "description": "Cluster not owned by the calling organization."
           }
         },
-        "summary": "Get checks"
+        "summary": "Get checks",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "description": "Optional owned cluster filter.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "framework",
+            "in": "query",
+            "required": false,
+            "description": "Exact framework, or all/omitted for every framework.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "profile",
+            "in": "query",
+            "required": false,
+            "description": "Exact tags_v2 profile key.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "control_id",
+            "in": "query",
+            "required": false,
+            "description": "Exact control ID before paging, including duplicate evidence records.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Case-insensitive literal substring across framework, control, title, description and evidence.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Effective status after active valid exemptions. graded=pass/fail; ungraded excludes pass/fail. Rows remain distinct evidence records.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "pass",
+                "fail",
+                "manual",
+                "not_applicable",
+                "exempted",
+                "graded",
+                "ungraded"
+              ]
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "description": "Trusted global sort, UUID ties ascending.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "framework",
+                "control",
+                "title",
+                "status",
+                "severity",
+                "evaluated"
+              ],
+              "default": "framework"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "description": "Global sort direction.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "asc"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size; defaults to 500 for legacy callers.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 500
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "description": "Nonnegative current-state offset.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
+        "description": "Filter effective compliance evidence before paging. Matching total, status summary and stable ordered rows share one read-only repeatable-read snapshot. Active exemptions convert failing evidence to exempted; manual/exempted/not_applicable records do not enter graded compliance. Repeated control IDs across evidence records/frameworks remain distinct."
+      }
+    },
+    "/api/v1/compliance/checks/export.csv": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Matching compliance CSV, including evidence and exemption identities.",
+            "headers": {
+              "X-Export-Total": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Export-Limit": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Export-Truncated": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "400": {
+            "description": "Invalid filter/sort/query or cluster ID."
+          },
+          "404": {
+            "description": "Cluster not owned by the calling organization."
+          }
+        },
+        "summary": "Export matching compliance evidence",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "description": "Optional owned cluster filter.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "framework",
+            "in": "query",
+            "required": false,
+            "description": "Exact framework, or all/omitted for every framework.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "profile",
+            "in": "query",
+            "required": false,
+            "description": "Exact tags_v2 profile key.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "control_id",
+            "in": "query",
+            "required": false,
+            "description": "Exact control ID before paging, including duplicate evidence records.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Case-insensitive literal substring across framework, control, title, description and evidence.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Effective status after active valid exemptions. graded=pass/fail; ungraded excludes pass/fail. Rows remain distinct evidence records.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "pass",
+                "fail",
+                "manual",
+                "not_applicable",
+                "exempted",
+                "graded",
+                "ungraded"
+              ]
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "description": "Trusted global sort, UUID ties ascending.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "framework",
+                "control",
+                "title",
+                "status",
+                "severity",
+                "evaluated"
+              ],
+              "default": "framework"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "description": "Global sort direction.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "asc"
+            }
+          }
+        ],
+        "description": "Same filters, effective statuses and order as Checks, across matching pages up to 100,000 rows. limit/offset are ignored. Count and rows share a read-only repeatable-read snapshot.",
+        "operationId": "get_api_v1_compliance_checks_export_csv"
       }
     },
     "/api/v1/compliance/cloud": {
@@ -6185,13 +6516,56 @@
       "get": {
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "High/critical event counts since the exact exclusive lower bound. No upper bound is imposed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "window_start": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "events_timeline": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "date": {
+                            "type": "string",
+                            "format": "date"
+                          },
+                          "total": {
+                            "type": "integer"
+                          },
+                          "critical": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Get events-timeline"
+        "summary": "Get events-timeline",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "description": "Optional owned cluster filter.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
       }
     },
     "/api/v1/dashboard/summary": {
@@ -6237,6 +6611,35 @@
                                 "type": "integer"
                               }
                             }
+                          }
+                        }
+                      }
+                    },
+                    "recent_activity": {
+                      "type": "array",
+                      "maxItems": 20,
+                      "description": "Organization-wide activity ordered by timestamp and numeric ID descending, independent of selected cluster. IDs allow reopening the exact returned set.",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "at": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "action": {
+                            "type": "string"
+                          },
+                          "target_kind": {
+                            "type": "string"
+                          },
+                          "target_id": {
+                            "type": "string"
+                          },
+                          "actor_id": {
+                            "type": "string"
                           }
                         }
                       }
@@ -6470,6 +6873,20 @@
                 "host_network"
               ]
             }
+          },
+          {
+            "name": "group_mode",
+            "in": "query",
+            "required": false,
+            "description": "Strongest configured group mode for the exact organization/cluster/workload. Unmatched workloads are excluded; combines with risk_fact and platform visibility.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "discover",
+                "monitor",
+                "protect"
+              ]
+            }
           }
         ]
       }
@@ -6545,6 +6962,20 @@
                 "run_as_root",
                 "net_exposure",
                 "host_network"
+              ]
+            }
+          },
+          {
+            "name": "group_mode",
+            "in": "query",
+            "required": false,
+            "description": "Strongest configured group mode for the exact organization/cluster/workload. Unmatched workloads are excluded; combines with risk_fact and platform visibility.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "discover",
+                "monitor",
+                "protect"
               ]
             }
           }
@@ -7306,6 +7737,32 @@
                 "serverless"
               ]
             }
+          },
+          {
+            "name": "group_mode",
+            "in": "query",
+            "required": false,
+            "description": "Strongest configured group mode of an image-workload finding via exact organization/cluster/digest/workload membership. Workloads without matching groups are excluded. Does not assert applied enforcement.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "discover",
+                "monitor",
+                "protect"
+              ]
+            }
+          },
+          {
+            "name": "id_scope",
+            "in": "query",
+            "required": false,
+            "description": "all retains every non-null vulnerability identifier, including advisories and empty strings. By-CVE defaults to CVE-prefixed identifiers when omitted; the all-ID view counts distinct external IDs.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all"
+              ]
+            }
           }
         ],
         "responses": {
@@ -7682,6 +8139,32 @@
                 "serverless"
               ]
             }
+          },
+          {
+            "name": "group_mode",
+            "in": "query",
+            "required": false,
+            "description": "Strongest configured group mode of an image-workload finding via exact organization/cluster/digest/workload membership. Workloads without matching groups are excluded. Does not assert applied enforcement.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "discover",
+                "monitor",
+                "protect"
+              ]
+            }
+          },
+          {
+            "name": "id_scope",
+            "in": "query",
+            "required": false,
+            "description": "all retains every non-null vulnerability identifier, including advisories and empty strings. By-CVE defaults to CVE-prefixed identifiers when omitted; the all-ID view counts distinct external IDs.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all"
+              ]
+            }
           }
         ],
         "responses": {
@@ -7824,6 +8307,32 @@
                 "registry",
                 "repository",
                 "serverless"
+              ]
+            }
+          },
+          {
+            "name": "group_mode",
+            "in": "query",
+            "required": false,
+            "description": "Strongest configured group mode of an image-workload finding via exact organization/cluster/digest/workload membership. Workloads without matching groups are excluded. Does not assert applied enforcement.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "discover",
+                "monitor",
+                "protect"
+              ]
+            }
+          },
+          {
+            "name": "id_scope",
+            "in": "query",
+            "required": false,
+            "description": "all retains every non-null vulnerability identifier, including advisories and empty strings. By-CVE defaults to CVE-prefixed identifiers when omitted; the all-ID view counts distinct external IDs.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all"
               ]
             }
           }
@@ -13538,7 +14047,32 @@
     },
     "/api/v1/runtime/overview": {
       "get": {
-        "summary": "Runtime subsystem readiness, rule overview, recent event evidence, and affected workload rollups"
+        "summary": "Runtime subsystem readiness, rule overview, recent event evidence, and affected workload rollups",
+        "description": "Runtime readiness and evidence. summary.window_start is the exact inclusive lower timestamp reused by 24-hour runtime event counts; no upper timestamp is imposed. Follow security/timeline with type=runtime_event, after=window_start and verdict=alert,block,quarantine for the alert cohort.",
+        "responses": {
+          "200": {
+            "description": "Runtime overview with exact source window",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "summary": {
+                      "type": "object",
+                      "properties": {
+                        "window_start": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "Inclusive lower timestamp for runtime evidence; preserves subsecond precision."
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/runtime/policies:bundle": {
@@ -14185,6 +14719,45 @@
               "minimum": 0,
               "default": 0
             }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "description": "Precise RFC3339 lower-only bound; preserves sub-second precision and imposes no upper bound. Mutually exclusive with from, to and hours.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "hours",
+            "in": "query",
+            "required": false,
+            "description": "Rolling lower-only window in hours, mutually exclusive with after/from/to.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2160
+            }
+          },
+          {
+            "name": "after_exclusive",
+            "in": "query",
+            "required": false,
+            "description": "Use strict > lower-bound comparison; requires after or hours. Otherwise lower-only bounds are inclusive.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "verdict",
+            "in": "query",
+            "required": false,
+            "description": "Comma-separated exact event verdicts. Requires runtime_event as the only requested source; combines with severity and existing text filters.",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -14249,6 +14822,9 @@
                           },
                           "ref": {
                             "type": "string"
+                          },
+                          "verdict": {
+                            "type": "string"
                           }
                         }
                       }
@@ -14269,6 +14845,16 @@
                     "to": {
                       "type": "string",
                       "format": "date-time"
+                    },
+                    "total": {
+                      "type": "integer",
+                      "description": "Exact matching total for event-only reads; absent for mixed-source browsing."
+                    },
+                    "lower_only": {
+                      "type": "boolean"
+                    },
+                    "after_exclusive": {
+                      "type": "boolean"
                     }
                   }
                 }
@@ -14279,6 +14865,161 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      }
+    },
+    "/api/v1/security/timeline.csv": {
+      "get": {
+        "summary": "Export matching security timeline records",
+        "description": "Uses the same filters and stable order as timeline reads, ignoring limit/offset; up to 10,000 matching records. Count and exported rows share a read-only repeatable-read snapshot.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Optional cluster scope. Audit rows are org-level and omitted when this is set."
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated timeline sources: dpi_threat,runtime_event,network_violation,audit."
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated normalized severities: critical,high,medium,low,info."
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Inclusive lower RFC3339 time bound. Defaults to seven days before now."
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Exclusive upper RFC3339 time bound. Defaults to now plus one minute."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Free-text match against normalized title, id, workload, namespace, and reference fields."
+          },
+          {
+            "name": "namespace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Namespace substring filter."
+          },
+          {
+            "name": "workload",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Workload substring filter."
+          },
+          {
+            "name": "ref",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Source reference substring filter, such as threat id, verdict, policy, or audit target kind."
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "description": "Precise RFC3339 lower-only bound; preserves sub-second precision and imposes no upper bound. Mutually exclusive with from, to and hours.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "hours",
+            "in": "query",
+            "required": false,
+            "description": "Rolling lower-only window in hours, mutually exclusive with after/from/to.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2160
+            }
+          },
+          {
+            "name": "after_exclusive",
+            "in": "query",
+            "required": false,
+            "description": "Use strict > lower-bound comparison; requires after or hours. Otherwise lower-only bounds are inclusive.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "verdict",
+            "in": "query",
+            "required": false,
+            "description": "Comma-separated exact event verdicts. Requires runtime_event as the only requested source; combines with severity and existing text filters.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching CSV with explicit total, cap and truncation state.",
+            "headers": {
+              "X-Export-Total": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Export-Limit": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Export-Truncated": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "operationId": "get_api_v1_security_timeline_csv"
       }
     },
     "/api/v1/serverless-functions": {

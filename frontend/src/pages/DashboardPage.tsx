@@ -221,6 +221,8 @@ export function DashboardPage() {
   const trends = useMemo(() => fourteenDayBySeverity(allItems), [allItems]);
   const topActions = useMemo(() => prioritizeActionItems(openItems), [openItems]);
   const recent = summaryData?.recent_activity ?? [];
+  const activityCohortAvailable = recent.every(row => row.id && /^[1-9]\d*$/.test(row.id));
+  const activityPath = activityCohortAvailable ? `/organization/audit?event_ids=${encodeURIComponent(recent.map(row => row.id).join(","))}` : "/organization/audit";
   const componentHealth = useMemo(
     () => summarizeComponentHealth(healthData?.heartbeats ?? []),
     [healthData?.heartbeats],
@@ -253,14 +255,16 @@ export function DashboardPage() {
   }, [complianceData]);
   // Runtime threats in the last 24h: alerting/blocking events from the overview.
   const runtimeThreats = runtimeData?.summary;
+  const runtimeEvidencePath = clusterPath(`/timeline?${new URLSearchParams({ tab: "event", ...(runtimeThreats?.window_start ? { after: runtimeThreats.window_start } : { hours: "24" }), verdict: "alert,block,quarantine" })}`);
+  const eventEvidencePath = clusterPath(`/timeline?${new URLSearchParams({ tab: "event", ...(eventsTimelineQ.data?.window_start ? { after: eventsTimelineQ.data.window_start } : { hours: "336" }), severity: "high,critical", after_exclusive: "true" })}`);
   const countFrom = (query: {isError:boolean;isPending:boolean},value: number|string|undefined) => !scopeReady ? "Scope unavailable" : query.isError ? "Unavailable" : query.isPending ? "Loading" : value ?? "Not reported";
   const evidenceSources = [
     {id:"risk",metric:"Risk score",count:countFrom(sum,posture?.security_score),source:"Dashboard summary",population:"Cluster posture model, capped at 100; higher is worse",destination:clusterPath("/dashboard?tab=posture"),destinationLabel:"Review score factors"},
     ...(["critical","high"] as const).map(severity=>({id:severity,metric:`${severity} open records`,count:countFrom(sum,summaryData?.findings_by_severity?.[severity]),source:"Dashboard summary",population:"Cluster open finding records; canonical vulnerability set excludes workload duplicates",destination:clusterPath(`/findings?view=instances&severity=${severity}&lifecycle=open`),destinationLabel:`Exact ${severity} open record cohort`})),
     {id:"open",metric:"Open records",count:countFrom(sum,summaryData?.open_findings),source:"Dashboard summary",population:"All cluster open finding records; canonical vulnerability deduplication",destination:clusterPath("/findings?view=instances&lifecycle=open"),destinationLabel:"Exact open record cohort"},
     {id:"accepted",metric:"Accepted records",count:countFrom(sum,summaryData?.accepted_risks),source:"Dashboard summary",population:"All cluster accepted finding records; canonical vulnerability deduplication",destination:clusterPath("/findings?view=instances&lifecycle=accepted"),destinationLabel:"Exact accepted record cohort"},
-    {id:"compliance",metric:"Compliance pass percentage",count:countFrom(complianceSum,compliancePosture.pct==null?undefined:`${compliancePosture.pct}%`),source:"Compliance summary",population:"Cluster pass / (pass + fail) across reported frameworks; manual and exempted controls excluded",destination:clusterPath("/compliance"),destinationLabel:"Review reported framework results"},
-    {id:"runtime",metric:"Runtime alert records · 24h",count:countFrom(runtimeToday,runtimeThreats?.alerts),source:"Runtime overview · hours=24",population:"Cluster server alert count; destination also includes other runtime evidence kinds",destination:clusterPath("/runtime?tab=evidence&hours=24"),destinationLabel:"Browse runtime evidence in the same 24-hour window"},
+    {id:"compliance",metric:"Compliance pass percentage",count:countFrom(complianceSum,compliancePosture.pct==null?undefined:`${compliancePosture.pct}%`),source:"Compliance summary",population:"Cluster pass / (pass + fail) across reported frameworks; manual and exempted controls excluded",destination:clusterPath("/compliance?tab=controls&framework=all&status=graded"),destinationLabel:"Exact graded records across frameworks"},
+    {id:"runtime",metric:"Runtime alert records · 24h",count:countFrom(runtimeToday,runtimeThreats?.alerts),source:"Runtime overview · hours=24",population:"Cluster event records with alert, block or quarantine verdict; precise source lower bound is retained when reported",destination:runtimeEvidencePath,destinationLabel:"Exact runtime alert event cohort"},
     {id:"image",metric:"Open image CVE records",count:countFrom(sum,posture?.vulns_by_location?.image),source:"Dashboard summary",population:"Cluster open vulnerability records with exact image-workload target",destination:clusterPath("/findings?view=instances&kind=vulnerability&lifecycle=open&target_type=image-workload"),destinationLabel:"Exact open image CVE record cohort"},
     {id:"host",metric:"Open host CVE records",count:countFrom(sum,posture?.vulns_by_location?.host),source:"Dashboard summary",population:"Cluster open vulnerability records with exact host target, including unnamed nodes",destination:clusterPath("/findings?view=instances&kind=vulnerability&lifecycle=open&target_type=host"),destinationLabel:"Exact open host CVE record cohort"},
     {id:"fixable",metric:"Fixable open CVE records",count:countFrom(sum,posture?.vuln_signals?.fixable),source:"Dashboard summary",population:"Cluster canonical open vulnerabilities with supported fixed-version metadata",destination:clusterPath("/findings?view=instances&kind=vulnerability&lifecycle=open&fixable=true"),destinationLabel:"Exact fixable open vulnerability cohort"},
@@ -273,8 +277,8 @@ export function DashboardPage() {
     {id:"scanner",metric:"Returned scanner workers",count:countFrom(scannerWorkers,scannerUnavailable?undefined:scannerWorkers.data?.length),source:"Scanner worker inventory",population:"Organization-wide worker reports; capacity is broader than the selected cluster",destination:"/settings/scanner",destinationLabel:"Review organization scanner capacity"},
     {id:"federation",metric:"Returned federation members",count:federationUnavailable?"Unavailable":federationState.data?.state!=="master"?countFrom(federationState,"Not master; member inventory not requested"):countFrom(federationMembers,federationMembers.data?.members.length),source:"Federation state / members",population:"Organization-wide membership; member inventory is requested only on the master",destination:"/federation",destinationLabel:"Review organization federation state"},
     {id:"platform",metric:"Returned platform package records",count:countFrom(platform,platformData?.evidence?.packages?.length),source:"Cluster platform facts",population:"Current cluster's returned platform evidence; package count and returned rows can differ",destination:clusterPath("/dashboard?tab=operations"),destinationLabel:"Review platform evidence, source status and scan job"},
-    {id:"events-14d",metric:"Security event records · 14d",count:countFrom(eventsTimelineQ,eventsTimelineQ.data?.events_timeline?.reduce((total,row)=>total+row.total,0)),source:"Dashboard event timeline",population:"Cluster aggregate of high/critical events over fourteen days, distinct from the loaded finding first-seen chart",destination:clusterPath("/dashboard?tab=overview"),destinationLabel:"Review daily security event counts"},
-    {id:"activity",metric:"Returned organization audit records",count:countFrom(sum,summaryData?.recent_activity?.length),source:"Dashboard summary · recent activity",population:"Organization-wide latest 20 audit rows; landing panel displays up to eight. Cluster Audit is a narrower source",destination:clusterPath("/audit"),destinationLabel:"Browse selected-cluster Audit (narrower scope)"},
+    {id:"events-14d",metric:"Security event records · 14d",count:countFrom(eventsTimelineQ,eventsTimelineQ.data?.events_timeline?.reduce((total,row)=>total+row.total,0)),source:"Dashboard event timeline",population:"Cluster aggregate of high/critical events over fourteen days, distinct from the loaded finding first-seen chart",destination:eventEvidencePath,destinationLabel:"Exact high/critical event cohort"},
+    {id:"activity",metric:"Returned organization audit records",count:countFrom(sum,summaryData?.recent_activity?.length),source:"Dashboard summary · recent activity",population:"Organization-wide latest 20 audit rows; landing panel displays up to eight. Selected record IDs preserve the returned cohort",destination:activityPath,destinationLabel:activityCohortAvailable ? "Exact returned organization audit records" : "Browse organization audit history"},
   ];
   const sourceColumns: Column<typeof evidenceSources[number]>[] = [
     {id:"metric",header:"Metric or view",kind:"name",wrap:true,cell:row=>row.metric,exportValue:row=>row.metric},
@@ -326,6 +330,7 @@ export function DashboardPage() {
 
         <Panel
           title="Security Events"
+          rightSlot={<a href={eventEvidencePath} className="text-xs text-primary hover:underline">View matching events</a>}
           subtitle="High + critical alerts · last 14 days"
           icon={<AlertTriangle className="h-3.5 w-3.5" />}
         >
@@ -354,6 +359,7 @@ export function DashboardPage() {
 
         <Panel
           title="Organization Recent Activity"
+          rightSlot={<a href={activityPath} className="text-xs text-primary hover:underline">{activityCohortAvailable ? "View selected activity" : "View organization audit history"}</a>}
           subtitle="Latest 20 organization audit records; showing up to eight"
           icon={<Activity className="h-3.5 w-3.5" />}
         >
@@ -364,7 +370,7 @@ export function DashboardPage() {
               {recent.slice(0, 8).map((r, i) => (
                 <li key={i} className="px-3 py-2 text-xs">
                   <div className="flex items-center gap-1.5">
-                    <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-mono">{r.action}</span>
+                    <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-mono">{r.id ? <a href={`/organization/audit?event_id=${encodeURIComponent(r.id)}`} className="hover:underline">{r.action}</a> : r.action}</span>
                     <span className="text-muted-foreground text-[10px]">{r.target_kind}</span>
                   </div>
                   <div className="mt-0.5 text-mono text-[10px] text-muted-foreground truncate">
@@ -425,10 +431,10 @@ export function DashboardPage() {
       <StatGrid className="c-rise c-rise-2">
         <StatCard label="Compliance" value={complianceSum.isPending ? "…" : compliancePosture.pct == null ? "—" : `${compliancePosture.pct}%`}
           tone={compliancePosture.pct == null ? "neutral" : compliancePosture.pct >= 90 ? "low" : compliancePosture.pct >= 70 ? "medium" : "high"}
-          icon={<ShieldCheck className="h-3 w-3" />} href={clusterPath("/compliance")}
+          icon={<ShieldCheck className="h-3 w-3" />} href={clusterPath("/compliance?tab=controls&framework=all&status=graded")}
           hint={complianceSum.isError ? "Unavailable" : compliancePosture.pct == null ? "no graded controls" : `${compliancePosture.fail} failing`} />
         <StatCard label="Runtime · 24h" value={runtimeToday.isPending ? "…" : (runtimeThreats?.alerts ?? "—")}
-          tone={(runtimeThreats?.alerts ?? 0) > 0 ? "critical" : "neutral"} icon={<ShieldAlert className="h-3 w-3" />} href={clusterPath("/runtime?tab=evidence&hours=24")}
+          tone={(runtimeThreats?.alerts ?? 0) > 0 ? "critical" : "neutral"} icon={<ShieldAlert className="h-3 w-3" />} href={runtimeEvidencePath}
           hint={runtimeThreats ? `${runtimeThreats.blocks} blocked` : "Unavailable"} />
         <StatCard label="Image CVEs" value={posture?.vulns_by_location?.image ?? "—"} tone="accent" icon={<AlertTriangle className="h-3 w-3" />} href={clusterPath("/findings?view=instances&kind=vulnerability&lifecycle=open&target_type=image-workload")} hint="Open image CVE records" />
         <StatCard label="Host CVEs" value={posture?.vulns_by_location?.host ?? "—"} tone={(posture?.vulns_by_location?.host ?? 0) > 0 ? "high" : "neutral"} icon={<AlertTriangle className="h-3 w-3" />} href={clusterPath("/findings?view=instances&kind=vulnerability&lifecycle=open&target_type=host")} hint="Open host CVE records" />
@@ -516,11 +522,11 @@ export function DashboardPage() {
                     const cm = posture?.cves_by_mode ?? {};
                     const em = posture?.exposed_by_mode ?? {};
                     const modeRows = ["discover", "monitor", "protect"].map(mode => ({ mode, cves: cm[mode], exposed: em[mode] }));
-                    return <div className="border-t border-border pt-3 space-y-2"><p className="text-xs text-muted-foreground">Reported risk by configured group mode · these counters are not applier health. CVE IDs are deduplicated within each mode and may occur in more than one mode. Workloads use their strongest configured group mode; workloads without a matching group are excluded. Exposure counts workloads reporting a net_exposure risk-factor key, including zero or null values.</p><DataTable rows={modeRows} columns={[
+                    return <div className="border-t border-border pt-3 space-y-2"><p className="text-xs text-muted-foreground">Reported risk by configured group mode · these counters are not applier health. Vulnerability IDs are deduplicated within each mode and may occur in more than one mode. Workloads use their strongest configured group mode; workloads without a matching group are excluded. Exposure counts workloads reporting a net_exposure risk-factor key, including zero or null values.</p><DataTable rows={modeRows} columns={[
                       { id: "mode", header: "Configured mode", kind: "name", cell: row => row.mode },
-                      { id: "cves", header: "Distinct open CVE IDs", kind: "count", cell: row => row.cves ?? "Not reported" },
-                      { id: "exposed", header: "Exposed workloads", kind: "count", cell: row => row.exposed ?? "Not reported" },
-                    ]} rowKey={row => row.mode} showDensityToggle={false} showColumnChooser={false} pagination={false} testId="dashboard-risk-by-mode"/><p className="text-xs text-muted-foreground">Platform / Host distinct open CVE IDs: {cm.platform ?? "Not reported"} / {cm.host ?? "Not reported"}.</p></div>;
+                      { id: "cves", header: "Distinct open vulnerability IDs", kind: "count", cell: row => row.cves == null ? "Not reported" : <a className="text-primary hover:underline" href={clusterPath(`/findings?view=cve&kind=vulnerability&lifecycle=open&target_type=image-workload&group_mode=${row.mode}&id_scope=all`)}>{row.cves}</a> },
+                      { id: "exposed", header: "Exposed workloads", kind: "count", cell: row => row.exposed == null ? "Not reported" : <a className="text-primary hover:underline" href={clusterPath(`/deployments?hide_platform=false&risk_fact=net_exposure&group_mode=${row.mode}`)}>{row.exposed}</a> },
+                    ]} rowKey={row => row.mode} showDensityToggle={false} showColumnChooser={false} pagination={false} testId="dashboard-risk-by-mode"/><p className="text-xs text-muted-foreground">Platform / Host distinct open vulnerability IDs: {cm.platform == null ? "Not reported" : <a href={clusterPath("/findings?view=cve&kind=vulnerability&lifecycle=open&target_type=platform&id_scope=all")} className="text-primary hover:underline">{cm.platform}</a>} / {cm.host == null ? "Not reported" : <a href={clusterPath("/findings?view=cve&kind=vulnerability&lifecycle=open&target_type=host&id_scope=all")} className="text-primary hover:underline">{cm.host}</a>}.</p></div>;
                   })()}
                   <div className="flex flex-wrap gap-4 border-t border-border pt-3 text-xs">
                     <a href={clusterPath("/groups")} className="text-primary hover:underline">Manage group modes</a>

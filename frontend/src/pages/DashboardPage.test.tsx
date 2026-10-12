@@ -213,7 +213,7 @@ it.each(["registry", "registry-invalidated", "detail", "platform-invalidated", "
 
 it("keeps the runtime posture drilldown on its evidence window", async () => {
   route.params = new URLSearchParams("tab=posture"); await renderPage();
-  expect(host.querySelector('a[href="/clusters/cluster/runtime?tab=evidence&hours=24"]')).not.toBeNull();
+  expect(host.querySelector('a[href="/clusters/cluster/timeline?tab=event&hours=24&verdict=alert%2Cblock%2Cquarantine"]')).not.toBeNull();
 });
 
 it("links denied pairs and exposure to exact directed server-filtered conversations", async () => {
@@ -259,8 +259,25 @@ it("renders the risk-by-mode matrix through canonical table headers and truthful
  route.params = new URLSearchParams("tab=network");
  vi.mocked(dashboard.summary).mockResolvedValue({ findings_by_severity: {}, recent_activity: [], posture: {security_score: 5,enforcement:{groups:3,discover:1,monitor:1,protect:1},cves_by_mode:{discover:4,monitor:5,protect:6},exposed_by_mode:{discover:1,monitor:2,protect:3}} } as unknown as Awaited<ReturnType<typeof dashboard.summary>>);
  await renderPage();await settled(()=>expect(host.querySelector('[data-testid="dashboard-risk-by-mode"]')).not.toBeNull());
- const table=host.querySelector('[data-testid="dashboard-risk-by-mode"]')!;expect([...table.querySelectorAll("thead th")].map(th=>th.textContent?.trim())).toEqual(["Configured mode","Distinct open CVE IDs","Exposed workloads"]);expect(table.querySelectorAll("tbody tr")).toHaveLength(3);expect(host.textContent).toContain("not applier health");
+ const table=host.querySelector('[data-testid="dashboard-risk-by-mode"]')!;expect([...table.querySelectorAll("thead th")].map(th=>th.textContent?.trim())).toEqual(["Configured mode","Distinct open vulnerability IDs","Exposed workloads"]);expect(table.querySelectorAll("tbody tr")).toHaveLength(3);expect(host.textContent).toContain("not applier health");
  expect(host.textContent).toContain("deduplicated within each mode and may occur in more than one mode");
  expect(host.textContent).toContain("strongest configured group mode"); expect(host.textContent).toContain("workloads without a matching group are excluded");
- expect(host.textContent).toContain("including zero or null values"); expect(host.textContent).toContain("Platform / Host distinct open CVE IDs:");
+ expect(host.textContent).toContain("including zero or null values"); expect(host.textContent).toContain("Platform / Host distinct open vulnerability IDs:");
+});
+
+it("links returned organization activity IDs without narrowing to the active cluster", async () => {
+ const activity=Array.from({length:20},(_,i)=>({id:String(100-i),at:"2026-10-12T00:00:00Z",action:`selected-${i}`,target_kind:"settings",target_id:"org"}));
+ vi.mocked(dashboard.summary).mockResolvedValue({findings_by_severity:{},recent_activity:activity,posture:{security_score:0}} as unknown as Awaited<ReturnType<typeof dashboard.summary>>);
+ await renderPage();await settled(()=>expect(host.textContent).toContain("selected-0"));
+ const link=[...host.querySelectorAll("a")].find(a=>a.textContent==="View selected activity")!; const target=new URL(link.href,"http://localhost");expect(target.pathname).toBe("/organization/audit");expect(target.searchParams.get("event_ids")).toBe(activity.map(r=>r.id).join(","));expect(target.searchParams.has("cluster")).toBe(false);expect(host.querySelector('a[href="/organization/audit?event_id=100"]')).not.toBeNull();expect(host.textContent).not.toContain("selected-8");
+});
+
+it("carries source time bounds to exact event-only destinations and graded compliance", async () => {
+ const start="2026-10-11T20:00:00.123456Z";
+ vi.mocked(enterprise.runtime).mockResolvedValue({summary:{window_start:start,alerts:3,blocks:1}} as Awaited<ReturnType<typeof enterprise.runtime>>);
+ vi.mocked(dashboard.eventsTimeline).mockResolvedValue({window_start:"2026-09-28T20:00:00.654321Z",events_timeline:[{date:"2026-10-11",total:8,critical:2}]});
+ await renderPage();await settled(()=>expect(host.querySelector('a[href*="after="]')).not.toBeNull());
+ const links=[...host.querySelectorAll("a")].map(a=>new URL(a.href,"http://localhost"));const runtime=links.find(u=>u.searchParams.get("verdict")==="alert,block,quarantine")!;expect(runtime.pathname).toBe("/clusters/cluster/timeline");expect(runtime.searchParams.get("tab")).toBe("event");expect(runtime.searchParams.get("after")).toBe(start);expect(runtime.searchParams.has("before")).toBe(false);
+ const events=links.find(u=>u.searchParams.get("after_exclusive")==="true")!;expect(events.searchParams.get("after")).toBe("2026-09-28T20:00:00.654321Z");expect(events.searchParams.get("severity")).toBe("high,critical");
+ expect(links.some(u=>u.pathname==="/clusters/cluster/compliance"&&u.searchParams.get("framework")==="all"&&u.searchParams.get("status")==="graded")).toBe(true);
 });

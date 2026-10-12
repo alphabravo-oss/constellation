@@ -1,10 +1,13 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { Download, PlayCircle, Plus, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
-import { compliance, type ComplianceCheck, type ComplianceEvidenceItem, type ComplianceEvidenceResponse, type ComplianceExemption, type ComplianceScheduleDB } from "@/api/client";
-import { useCluster } from "@/hooks/useCluster";
+import { compliance, type ComplianceCheck, type ComplianceChecksParams, type ComplianceChecksResponse, type ComplianceEvidenceItem, type ComplianceEvidenceResponse, type ComplianceExemption, type ComplianceScheduleDB } from "@/api/client";
+import { useEntityClusterScope } from "./entity-detail-scope";
+import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
+import { useInventoryRoute, ScanInventoryExport } from "./inventory-workspace";
+import { Pager } from "@/components/ui/pager";
 import { useRouteSearchParams } from "@/lib/route-search";
 import { LoadingState, ErrorState, EmptyState } from "@/components/ui/states";
 import { PageHeader } from "@/components/ui/page";
@@ -15,7 +18,6 @@ import { Button } from "@/components/ui/button";
 import { Field, Select } from "@/components/ui/form";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { DataTable, type Column } from "@/components/ui/data-table";
-import { downloadCsv } from "@/lib/csv";
 
 // regLabel shortens a compliance standard id to a compact badge label.
 function regLabel(std: string): string {
@@ -33,52 +35,63 @@ function regLabel(std: string): string {
 }
 
 export function CompliancePage() {
-  const { clusterId, cluster, isLoading: clusterLoading, error: clusterError } = useCluster();
-  const resolvedScope = !!clusterId && cluster?.id === clusterId;
-  const scopeReady = resolvedScope && !clusterLoading && !clusterError;
-  const navigate = useNavigate();
-  const [search, setSearch] = useRouteSearchParams();
-  const [requestedTab, setTab] = useTabParam("tab", "frameworks");
-  const tab = ["frameworks", "evidence", "schedules"].includes(requestedTab) ? requestedTab : "frameworks";
+  const scope = useEntityClusterScope();
+  const { clusterId } = scope;
+  const scopeReady = scope.ready;
+  const identity = useTablePreferencesIdentity();
+  const owner = `${identity?.org_id}:${identity?.user_id}`;
+  const navigate = useNavigate(); const qc = useQueryClient();
+  const route = useInventoryRoute(); const search = route.params;
+  const [requestedTab, setTab] = useTabParam("tab", "controls");
+  const tab = ["controls", "evidence", "schedules"].includes(requestedTab) ? requestedTab : "controls";
   const listPath = `/clusters/${encodeURIComponent(clusterId ?? "")}/compliance`;
+  const active = search.get("framework") || "all";
+  const status = search.get("status") || "all";
+  const sort = search.get("sort") || "framework";
+  const order = search.get("order") || "asc";
+  const validFilters = ["all", "graded", "ungraded", "pass", "fail", "manual", "not_applicable", "exempted"].includes(status) && ["framework", "control", "title", "status", "severity", "evaluated"].includes(sort) && ["asc", "desc"].includes(order);
+  const request: ComplianceChecksParams = { framework: active, cluster_id: clusterId, profile: search.get("profile") || undefined, control_id: search.get("control_id") || undefined, status: status === "all" ? undefined : status, q: route.debouncedQuery || undefined, sort, order: order as "asc" | "desc", limit: 100, offset: route.offset };
+  const queryKey = ["compliance", "checks", owner, clusterId, request];
+  const context = JSON.stringify(queryKey);
+  const currentContext = useRef(context); currentContext.current = context;
+  const currentReady = useRef(scopeReady); currentReady.current = scopeReady;
   const fws = useQuery({ queryKey: ["compliance", "frameworks"], queryFn: () => compliance.frameworks(), enabled: scopeReady });
   const summary = useQuery({ queryKey: ["compliance", "summary", clusterId], queryFn: () => compliance.summary(clusterId!), enabled: scopeReady });
-  const active = search.get("framework") ?? fws.data?.frameworks[0]?.id ?? null;
-  const validFramework = !!active && !!fws.data?.frameworks.some((framework) => framework.id === active);
-  const checks = useQuery({ queryKey: ["compliance", "checks", active, clusterId], queryFn: () => compliance.checks(active!, clusterId!), enabled: scopeReady && validFramework && tab === "frameworks" });
-  const checkRows = useMemo(() => {
-    const occurrences = new Map<string, number>();
-    return (checks.data?.checks ?? []).map((check) => {
-      // The checks endpoint returns evidence rows without a server row ID;
-      // several rows can legitimately share the same framework/control tuple.
-      const identity = JSON.stringify([check.framework, check.control_id, check.title, check.evidence, check.evaluated_at]);
-      const occurrence = occurrences.get(identity) ?? 0;
-      occurrences.set(identity, occurrence + 1);
-      return { ...check, evidenceRowKey: JSON.stringify([identity, occurrence]) };
-    });
-  }, [checks.data]);
-  const exemptions = useQuery({ queryKey: ["compliance", "exemptions", active, clusterId], queryFn: () => compliance.listExemptions({ framework: active!, cluster_id: clusterId! }), enabled: scopeReady && validFramework && tab === "frameworks" });
+  const checks = useQuery({ queryKey, queryFn: () => compliance.checks(request), enabled: scopeReady && validFilters && !route.debouncing });
+  const invalid = Boolean(checks.data && !checksResponseMatches(checks.data, request));
+  const available = scopeReady && checks.isSuccess && !route.debouncing && validFilters && !invalid;
+  const checkRows = available ? checks.data!.checks : [];
+  const totals = available ? checks.data!.summary! : undefined;
+  const graded = totals ? totals.pass + totals.fail : 0;
+  const percentage = totals && graded > 0 ? Math.round(totals.pass * 100 / graded) : undefined;
+  const frameworks = useMemo(() => {
+    const options = new Map((fws.isSuccess ? fws.data.frameworks : []).map(item => [item.id, item]));
+    for (const item of summary.isSuccess ? summary.data.frameworks : []) if (!options.has(item.framework)) options.set(item.framework, { id: item.framework, name: `Reported framework: ${item.framework}`, category: "Reported evidence" });
+    return [...options.values()];
+  }, [fws.isSuccess, fws.data, summary.isSuccess, summary.data]);
+  const validFramework = active === "all" || frameworks.some(item => item.id === active);
+  const exemptions = useQuery({ queryKey: ["compliance", "exemptions", active, clusterId], queryFn: () => compliance.listExemptions({ framework: active === "all" ? undefined : active, cluster_id: clusterId! }), enabled: scopeReady && tab === "controls" });
   const evidence = useQuery({ queryKey: ["compliance", "evidence", clusterId], queryFn: () => compliance.evidence({ cluster_id: clusterId!, limit: 500 }), enabled: scopeReady && tab === "evidence" });
-  const schedules = useQuery({ queryKey: ["compliance", "db-schedules", clusterId], queryFn: () => compliance.listDBSchedules(clusterId!), enabled: scopeReady && tab === "schedules" });
-  const qc = useQueryClient();
-  const retryScope = () => { void qc.invalidateQueries({ queryKey: ["clusters"] }); void qc.invalidateQueries({ queryKey: ["cluster", clusterId] }); };
-  const totals = useMemo(() => (summary.data?.frameworks ?? []).reduce((acc, item) => ({ total: acc.total + item.total, pass: acc.pass + item.pass, fail: acc.fail + item.fail, manual: acc.manual + item.manual, exempted: acc.exempted + (item.exempted ?? 0) }), { total: 0, pass: 0, fail: 0, manual: 0, exempted: 0 }), [summary.data]);
-  const invalidate = () => {
-    for (const family of ["summary", "checks", "evidence", "exemptions"]) void qc.invalidateQueries({ queryKey: ["compliance", family] });
-  };
-  const revokeExemption = useMutation({ mutationFn: (id: string) => compliance.revokeExemption(id), onSuccess: invalidate });
-  const selectFramework = (value: string) => { const next = new URLSearchParams(search); next.set("framework", value); setSearch(next); };
-  const selectedSummary = summary.data?.frameworks.find((item) => item.framework === active);
-  const workspaceFailed = !scopeReady || summary.isError || fws.isError || (tab === "frameworks" && checks.isError) || (tab === "evidence" && evidence.isError) || (tab === "schedules" && schedules.isError);
+  const invalidate = () => { for (const family of ["summary", "checks", "evidence", "exemptions"]) void qc.invalidateQueries({ queryKey: ["compliance", family] }); };
+  const revokeExemption = useMutation({ mutationFn: (id: string) => {
+    const state = qc.getQueryState<ComplianceChecksResponse>(queryKey);
+    const history = qc.getQueryState<{ exemptions: ComplianceExemption[] }>(["compliance", "exemptions", active, clusterId]);
+    const historyCurrent = history?.status === "success" && history.fetchStatus === "idle" && !history.isInvalidated && history.data?.exemptions.some(item => item.id === id && (!item.cluster_id || item.cluster_id === clusterId) && (active === "all" || item.framework === active) && item.status === "active" && Date.parse(item.expires_at) > Date.now());
+    if (!currentReady.current || currentContext.current !== context || !scope.recheck() || state?.status !== "success" || state.fetchStatus !== "idle" || state.isInvalidated || !historyCurrent && !state.data?.checks.some(item => item.exemption?.id === id && item.cluster_id === clusterId && item.effective_status === "exempted")) throw new Error("Refresh this exact control before revoking its exemption.");
+    return compliance.revokeExemption(id);
+  }, onSuccess: invalidate });
+  const selectFramework = (value: string) => route.update({ framework: value, control_id: null });
+  const refreshControls = () => { void checks.refetch(); void summary.refetch(); void fws.refetch(); if (tab === "controls") void exemptions.refetch(); };
   const checkColumns: Column<ComplianceCheck>[] = [
+    { id: "framework", header: "Framework", kind: "text", wrap: true, size: 200, minSize: 160, sort: () => 0, exportValue: item => item.framework, cell: item => frameworks.find(framework => framework.id === item.framework)?.name || item.framework },
     {
-      id: "control", kind: "id", size: 160, minSize: 128, wrap: true,
+      id: "control", sort: () => 0, kind: "id", size: 160, minSize: 128, wrap: true,
       hideable: false, exportValue: (c) => c.control_id,
       header: "Control",
       cell: (c) => <span className="font-mono text-xs">{c.control_id}</span>,
     },
     {
-      id: "title", kind: "text", grow: true, minSize: 280, wrap: true,
+      id: "title", sort: () => 0, kind: "text", grow: true, minSize: 280, wrap: true,
       exportValue: (c) => c.title,
       header: "Title",
       cell: (c) => (
@@ -115,7 +128,7 @@ export function CompliancePage() {
       ),
     },
     {
-      id: "status", kind: "status", size: 120, minSize: 104,
+      id: "status", sort: () => 0, kind: "status", size: 120, minSize: 104,
       exportValue: (c) => c.effective_status ?? c.status,
       header: "Status",
       cell: (c) => {
@@ -128,11 +141,12 @@ export function CompliancePage() {
       },
     },
     {
-      id: "severity", kind: "badge", size: 112, minSize: 104,
+      id: "severity", sort: () => 0, kind: "badge", size: 112, minSize: 104,
       exportValue: (c) => c.severity,
       header: "Severity",
       cell: (c) => <span className="text-xs text-muted-foreground">{c.severity}</span>,
     },
+    { id: "evaluated", header: "Evaluated", kind: "date", size: 224, minSize: 208, maxSize: 240, sort: () => 0, cell: item => formatDateTime(item.evaluated_at), exportValue: item => item.evaluated_at },
     {
       id: "action", kind: "actions", size: 136, minSize: 128,
       hideable: false, exportable: false,
@@ -143,7 +157,7 @@ export function CompliancePage() {
           <button
             type="button"
             onClick={() => revokeExemption.mutate(c.exemption!.id)}
-            disabled={!scopeReady || revokeExemption.isPending || checks.isError || checks.isFetching || exemptions.isError || exemptions.isFetching}
+            disabled={!available || revokeExemption.isPending || checks.isError || checks.isFetching || exemptions.isError || exemptions.isFetching}
             className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-accent disabled:opacity-50"
           >
             <Trash2 className="h-3 w-3" aria-hidden />
@@ -153,10 +167,10 @@ export function CompliancePage() {
           <button
             type="button"
             onClick={() => {
-              const next = new URLSearchParams(search); next.set("framework", c.framework); next.set("control_id", c.control_id); next.set("tab", "frameworks");
+              const next = new URLSearchParams(search); next.set("framework", c.framework); next.set("control_id", c.control_id); next.set("tab", "controls");
               navigate({ href: `${listPath}/exemptions/new?${next}` });
             }}
-            disabled={!scopeReady || checks.isError || checks.isFetching}
+            disabled={!available || checks.isFetching}
             className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-accent"
           >
             <ShieldAlert className="h-3 w-3" aria-hidden />
@@ -170,51 +184,58 @@ export function CompliancePage() {
   ];
 
   return <div className="space-y-6" data-testid="compliance-page" data-cluster-id={clusterId ?? ""}>
-    <PageHeader title="Compliance" description="Review evaluated security controls, inspect supporting evidence, and configure recurring reports for this cluster." />
-    {clusterLoading && !resolvedScope ? <LoadingState label="Loading cluster…" /> : !clusterId ? <ErrorState title="Select a cluster to review compliance." /> : !resolvedScope ? <ErrorState title="The selected cluster could not be resolved. Review its registration and retry." action={<Button onClick={retryScope}>Retry cluster</Button>} /> : <>
-      {!scopeReady && <ErrorState title="Current cluster scope is unavailable. Showing the last loaded results; actions are paused." action={<Button onClick={retryScope}>Retry cluster</Button>} />}
-      <VerdictBanner status={workspaceFailed ? "degraded" : !summary.data || totals.total === 0 ? "info" : totals.fail > 0 ? "degraded" : "ok"}
-        title={workspaceFailed ? "Compliance data could not be refreshed" : !summary.data ? "Loading evaluated compliance checks" : totals.total === 0 ? "No compliance checks evaluated" : totals.fail > 0 ? `${totals.fail} compliance checks need review` : "Evaluated checks have no active failures"}
-        detail="Results describe collected evidence. Exemptions are time-bound acceptances; schedules describe report configuration and do not confirm execution or delivery." />
+    <PageHeader title="Compliance" description="Review persisted control evidence across frameworks, inspect supporting sources and configure recurring reports for this cluster." />
+    {!scopeReady ? scope.loading ? <LoadingState label="Loading cluster…" /> : <ErrorState title="The selected cluster could not be resolved. Review its registration and retry." action={<Button onClick={scope.retry}>Retry cluster</Button>} /> : <>
+      <VerdictBanner status={!validFilters || checks.isError || invalid ? "degraded" : !available || percentage === undefined ? "info" : totals!.fail > 0 ? "degraded" : "ok"}
+        title={!validFilters ? "The requested compliance filter or sort is invalid" : checks.isError || invalid ? "Compliance evidence is unavailable" : !available ? "Loading compliance evidence" : !totals!.total ? "No evidence rows match these filters" : totals!.fail > 0 ? `${totals!.fail} failing evidence rows need review` : graded > 0 ? "Graded evidence has no active failures" : "No graded controls in this cohort"}
+        detail="Graded pass percentage is passing / (passing + failing). Active exemptions, manual review, not applicable and unrecognized statuses are excluded. Evidence rows and framework mappings are counted separately; these counts do not deduplicate controls." />
       <StatGrid data-testid="compliance-summary">
-        <StatCard label="Evaluated checks" value={summary.data ? totals.total : "—"} />
-        <StatCard label="Passing" value={summary.data ? totals.pass : "—"} icon={<ShieldCheck className="h-3.5 w-3.5" />} />
-        <StatCard label="Failing" value={summary.data ? totals.fail : "—"} tone={summary.data && totals.fail > 0 ? "high" : "neutral"} />
-        <StatCard label="Manual review" value={summary.data ? totals.manual : "—"} />
-        <StatCard label="Exempted" value={summary.data ? totals.exempted : "—"} />
+        <StatCard label="Graded pass" value={!totals ? "—" : percentage === undefined ? "—" : `${percentage}%`} icon={<ShieldCheck className="h-3.5 w-3.5" />} />
+        <StatCard label="Passing" value={totals?.pass ?? "—"} />
+        <StatCard label="Failing" value={totals?.fail ?? "—"} tone={totals && totals.fail > 0 ? "high" : "neutral"} />
+        <StatCard label="Matching evidence rows" value={totals?.total ?? "—"} />
+        <StatCard label="Ungraded" value={totals?.ungraded ?? "—"} hint="outside pass / fail denominator" />
       </StatGrid>
-      {summary.isError && <ErrorState title={summary.data ? "Could not refresh totals. Showing the last loaded summary." : "Compliance totals are unavailable."} action={<Button onClick={() => void summary.refetch()}>Retry</Button>} />}
       <Tabs value={tab} onValueChange={setTab} items={[
-        { value: "frameworks", label: "Frameworks", count: fws.data?.frameworks.length, content: <div className="space-y-5">
-          {fws.isPending && <LoadingState label="Loading frameworks…" />}
-          {fws.isError && <ErrorState title="Current compliance frameworks could not be loaded." action={<Button onClick={() => void fws.refetch()}>Retry</Button>} />}
-          {fws.data && fws.data.frameworks.length === 0 && <EmptyState title="No compliance frameworks" hint="No frameworks are available for this cluster." />}
-          {fws.data && fws.data.frameworks.length > 0 && <>
-            <Field label="Framework" htmlFor="compliance-framework">
-              <Select id="compliance-framework" value={active ?? ""} onChange={(event) => selectFramework(event.target.value)}>{!validFramework && <option value={active ?? ""}>Unknown framework</option>}{Object.entries(groupBy(fws.data.frameworks, (framework) => framework.category)).map(([category, items]) => <optgroup key={category} label={category}>{items!.map((framework) => <option key={framework.id} value={framework.id}>{framework.name}</option>)}</optgroup>)}</Select>
-            </Field>
-            {!validFramework ? <ErrorState title="This framework is unavailable. Select an available framework." /> : <section className="space-y-4 rounded-lg border border-border bg-card p-4" data-testid="framework-detail">
-              <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-medium">{fws.data.frameworks.find((framework) => framework.id === active)?.name}</h2><p className="text-xs text-muted-foreground">{selectedSummary ? `${selectedSummary.fail} failing · ${selectedSummary.total} evaluated · ${selectedSummary.effective_pass_pct ?? selectedSummary.pass_pct}% effective pass` : "Framework summary unavailable"}</p></div><Button variant="outline" size="sm" disabled={!scopeReady || checks.isFetching} onClick={() => { void checks.refetch(); void exemptions.refetch(); }}>Refresh controls</Button></div>
-              {checks.isPending && <LoadingState label="Loading controls…" />}
-              {checks.isError && <ErrorState title={checks.data ? "Could not refresh controls. Showing the last loaded results." : "Controls could not be loaded."} action={<Button onClick={() => void checks.refetch()}>Retry</Button>} />}
+        { value: "controls", label: "Controls", content: <div className="space-y-5">
+          <div className="flex flex-wrap items-end gap-3">
+            <Field label="Framework" htmlFor="compliance-framework" className="min-w-56 flex-1"><Select id="compliance-framework" value={active} onChange={event => selectFramework(event.target.value)}><option value="all">All frameworks</option>{!validFramework && <option value={active}>Reported framework: {active}</option>}{Object.entries(groupBy(frameworks, framework => framework.category)).map(([category, items]) => <optgroup key={category} label={category}>{items!.map(framework => <option key={framework.id} value={framework.id}>{framework.name}</option>)}</optgroup>)}</Select></Field>
+            <Field label="Status cohort" htmlFor="compliance-status"><Select id="compliance-status" value={status} onChange={event => route.update({ status: event.target.value === "all" ? null : event.target.value })}>{["all", "graded", "ungraded", "pass", "fail", "manual", "not_applicable", "exempted"].map(value => <option key={value} value={value}>{value === "all" ? "All evidence statuses" : value === "graded" ? "Graded: pass or fail" : value.replaceAll("_", " ")}</option>)}</Select></Field>
+            <Field label="Search control evidence" htmlFor="compliance-search" className="min-w-64 flex-1"><input id="compliance-search" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={route.query} onChange={event => route.setQuery(event.target.value)} placeholder="Framework, control, title or evidence" /></Field>
+            <Button disabled={checks.isFetching || !validFilters || route.debouncing} onClick={refreshControls}>Refresh controls</Button>
+          </div>
+          {search.get("profile") && <p className="text-sm text-muted-foreground">Profile mapping filter: {search.get("profile")} <Button size="sm" onClick={() => route.update({ profile: null })}>Clear profile</Button></p>}
+          {search.get("control_id") && <p className="text-sm text-muted-foreground">Exact control filter: {search.get("control_id")} <Button size="sm" onClick={() => route.update({ control_id: null })}>Clear control</Button></p>}
+          {(fws.isError || summary.isError) && <ErrorState title="Framework labels or the source summary could not be refreshed. The control table uses its own scoped source." action={<Button onClick={() => { void fws.refetch(); void summary.refetch(); }}>Retry framework sources</Button>} />}
+          {!validFilters ? <ErrorState title="Choose a supported status or sort before loading controls." action={<Button onClick={() => route.update({ status: null, sort: null, order: null })}>Reset filters and sort</Button>} /> : checks.isError || invalid ? <ErrorState title="Controls could not be loaded or refreshed. Evidence and export are unavailable." action={<Button onClick={() => void checks.refetch()}>Retry controls</Button>} /> : !available ? <LoadingState label="Loading controls…" /> : <>
+            {checks.isFetching && <p role="status" className="text-sm text-muted-foreground">Refreshing control evidence…</p>}
+            <section className="space-y-4" data-testid="framework-detail">
+              <p className="text-sm text-muted-foreground">{totals!.total.toLocaleString()} evidence rows match the server filters across {active === "all" ? "all reported frameworks" : active}. Metrics cover all matches. Matching CSV covers up to 100,000 rows across pages, independent of visible columns.</p>
+              <ScanInventoryExport context={context} disabled={checks.isFetching} download={() => compliance.exportChecksCSV(request)} />
               {revokeExemption.isError && <p role="alert" className="text-sm text-status-error">Could not revoke this exemption. Refresh the controls and try again.</p>}
-              {checks.data && <>
-                <div className="flex justify-end"><Button variant="outline" size="sm" onClick={() => downloadCsv(`constellation-compliance-${active}`, ["Framework", "Control", "Title", "Status", "Severity", "Standards", "Evidence"], checks.data!.checks.map((check) => [check.framework, check.control_id, check.title, check.effective_status ?? check.status, check.severity, Object.keys(check.tags_v2 ?? {}).map(regLabel).join(" "), check.evidence]))}>Export controls CSV</Button></div>
-                <DataTable<ComplianceCheck & { evidenceRowKey: string }> rows={checkRows} columns={checkColumns} rowKey={(check) => check.evidenceRowKey} preferencesKey="compliance-controls" testId="compliance-controls-table" emptyState={<EmptyState title="No evaluated controls" hint="Collected results will appear here after this framework runs." />} />
-              </>}
-              <Collapse label="Advanced: exemption history">
-                {exemptions.isPending && <LoadingState label="Loading exemptions…" />}
-                {exemptions.isError && <ErrorState title="Exemption history could not be refreshed." action={<Button onClick={() => void exemptions.refetch()}>Retry</Button>} />}
-                {exemptions.data && (exemptions.data.exemptions.length > 0 ? <ComplianceExemptionsList exemptions={exemptions.data.exemptions.filter((item) => !item.cluster_id || item.cluster_id === clusterId)} onRevoke={(id) => revokeExemption.mutate(id)} pending={!scopeReady || revokeExemption.isPending || exemptions.isError} /> : <EmptyState title="No exemption history" />)}
+              <DataTable rows={checkRows} columns={checkColumns} rowKey={item => item.id!} preferencesKey="compliance-controls" testId="compliance-controls-table" pagination={false} manualSorting sort={{ id: sort, dir: order as "asc" | "desc" }} onSortChange={next => route.update({ sort: next?.id ?? null, order: next?.dir ?? null })} emptyState={<EmptyState title="No evaluated controls match these filters" hint="This is a filtered evidence cohort, not a claim that the cluster has no compliance checks." />} />
+              {route.page > 0 && checkRows.length === 0 && <Button onClick={() => route.setPage(0)}>First page</Button>}
+              <Pager page={route.page} pageSize={100} rowsOnPage={checkRows.length} total={totals!.total} onPage={route.setPage} />
+              <Collapse label="Advanced: status counts and exemption history">
+                <p className="text-sm text-muted-foreground">Within the selected filters: {totals!.manual} manual · {totals!.exempted} exempted · {totals!.not_applicable} not applicable. Exemption history describes decisions and does not change this cohort’s denominator.</p>
+                {exemptions.isPending ? <LoadingState label="Loading exemptions…" /> : exemptions.isError ? <ErrorState title="Exemption history could not be refreshed." action={<Button onClick={() => void exemptions.refetch()}>Retry exemptions</Button>} /> : exemptions.isSuccess && (exemptions.data.exemptions.length ? <ComplianceExemptionsList exemptions={exemptions.data.exemptions.filter(item => !item.cluster_id || item.cluster_id === clusterId)} onRevoke={id => revokeExemption.mutate(id)} pending={checks.isFetching || exemptions.isFetching || revokeExemption.isPending} /> : <EmptyState title="No exemption history" />)}
               </Collapse>
-            </section>}
+            </section>
           </>}
         </div> },
-        { value: "evidence", label: "Evidence", content: <EvidencePanel data={evidence.data} isPending={evidence.isPending} isError={evidence.isError} onRetry={() => void evidence.refetch()} /> },
-        { value: "schedules", label: "Schedules", content: <SchedulesManager clusterId={clusterId} listPath={listPath} scopeReady={scopeReady} /> },
+        { value: "evidence", label: "Source evidence", content: <EvidencePanel data={evidence.isSuccess ? evidence.data : undefined} isPending={evidence.isPending} isError={evidence.isError} onRetry={() => void evidence.refetch()} /> },
+        { value: "schedules", label: "Schedules", content: <SchedulesManager clusterId={clusterId!} listPath={listPath} scopeReady={scopeReady} /> },
       ]} />
     </>}
   </div>;
+}
+
+function checksResponseMatches(data: ComplianceChecksResponse, request: ComplianceChecksParams) {
+  const total = data.total, rows = data.checks;
+  const keys = ["total", "pass", "fail", "manual", "exempted", "not_applicable", "graded", "ungraded"];
+  if (!Array.isArray(rows) || data.cluster_id !== request.cluster_id || data.framework !== (request.framework === "all" ? "" : request.framework || "") || data.status !== (request.status || "") || data.profile !== (request.profile || "") || data.control_id !== (request.control_id || "") || data.q !== (request.q || "").trim() || data.limit !== 100 || data.offset !== request.offset || data.sort !== request.sort || data.order !== request.order || !Number.isSafeInteger(total) || total! < 0 || !keys.every(key => Number.isSafeInteger(data.summary?.[key]) && data.summary![key] >= 0) || data.summary!.total !== total || data.summary!.graded !== data.summary!.pass + data.summary!.fail || total !== data.summary!.graded + data.summary!.ungraded || rows.length !== Math.min(100, Math.max(0, total! - request.offset!)) || data.has_more !== (total! > request.offset! + rows.length)) return false;
+  const ids = new Set<string>();
+  return rows.every(row => { if (!row.id?.trim() || ids.has(row.id) || row.cluster_id !== request.cluster_id || request.framework && request.framework !== "all" && row.framework !== request.framework || request.control_id && row.control_id !== request.control_id || request.status === "graded" && !["pass", "fail"].includes(row.effective_status) || request.status === "ungraded" && ["pass", "fail"].includes(row.effective_status) || request.status && !["graded", "ungraded"].includes(request.status) && row.effective_status !== request.status) return false; ids.add(row.id); return true; });
 }
 
 const evidenceColumns: Column<ComplianceEvidenceItem>[] = [
@@ -309,7 +330,8 @@ function ComplianceExemptionsList({
           <div key={item.id} className="flex items-start justify-between gap-3 rounded-md border border-border/70 p-2 text-xs">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-1.5">
-                <span className="font-mono">{item.control_id}</span>
+                <span className="font-mono">{item.framework} · {item.control_id}</span>
+                <span className="text-muted-foreground">{item.cluster_id ? "Cluster exemption" : "Organization-wide exemption"}</span>
                 <span className={`rounded-md px-1.5 py-0.5 ${statusClass(item.status === "active" ? "exempted" : "manual")}`}>
                   {item.status}
                 </span>

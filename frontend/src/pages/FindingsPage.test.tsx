@@ -253,3 +253,28 @@ it("applies saved target cohorts and clears them when applying a legacy view", a
  await click("Views (2)"); await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent?.startsWith("All targets"))!.click());
  await settled(() => { expect(params().has("target_type")).toBe(false); expect(findings.list).toHaveBeenLastCalledWith(expect.not.objectContaining({ target_type: expect.anything() })); });
 });
+
+it("loads an exact strongest-mode ID cohort and exports advisories without adding a CVE-only restriction", async () => {
+ route.initial = "view=cve&kind=vulnerability&target_type=image-workload&group_mode=protect&id_scope=all&page=2";
+ vi.mocked(findings.byCVE).mockResolvedValue({ cves: [{ cve: "GHSA-advisory", severity: "high", risk_score: 80, instances: 3, affected_images: 1, affected_clusters: 1, images: ["image"], last_seen_at: "2026-01-01T00:00:00Z", kev: false } as CVERollup], total: 101, limit: 100, offset: 100 });
+ await renderPage(); await settled(() => expect(host.textContent).toContain("GHSA-advisory"));
+ expect(findings.byCVE).toHaveBeenLastCalledWith(expect.objectContaining({ cluster_id: "cluster", group_mode: "protect", id_scope: "all", target_type: "image-workload", offset: 100 }));
+ expect(findings.list).toHaveBeenLastCalledWith(expect.objectContaining({ group_mode: "protect", id_scope: "all" }));
+ expect(host.textContent).toContain("101 matching vulnerability IDs"); expect(host.textContent).toContain("By vulnerability ID");
+ expect(host.textContent).toContain("an ID may appear in more than one mode"); expect(host.querySelector('a[href*="/cve/GHSA"]')).toBeNull();
+ await click("Export filtered instances CSV"); expect(findings.exportCSV).toHaveBeenCalledWith(expect.objectContaining({ group_mode: "protect", id_scope: "all", q: undefined, offset: 0 }));
+ await selectFilter("Strongest group mode", "monitor"); await settled(() => expect(findings.byCVE).toHaveBeenLastCalledWith(expect.objectContaining({ group_mode: "monitor", offset: 0 })));
+ expect(params().get("page")).toBeNull();
+});
+it("clears selected instances after a mode change and restores a saved exact mode cohort", async () => {
+ const key = operatorStorageKey("constellation.findings.views.v1", identity)!;
+ localStorage.setItem(key, JSON.stringify([{ id: "mode", name: "Discover ID cohort", kind: "vulnerability", lifecycle: "open", query: "", targetType: "image-workload", groupMode: "discover", idScope: "all", view: "instances" }, { id: "legacy", name: "Legacy cohort", kind: "vulnerability", lifecycle: "open", query: "", view: "instances" }]));
+ route.initial = "view=instances&group_mode=protect&id_scope=all&page=6";
+ await renderPage(); await settled(() => expect(host.textContent).toContain("Finding 500")); await selectFirst();
+ await selectFilter("Strongest group mode", "monitor"); await settled(() => expect(host.textContent).toContain("Finding 0"));
+ expect(host.querySelector<HTMLInputElement>('[data-testid="findings-table"] tbody input[type="checkbox"]')?.checked).toBe(false);
+ await click("Views (2)"); await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(b=>b.textContent?.startsWith("Discover ID cohort"))!.click());
+ await settled(() => expect(findings.list).toHaveBeenLastCalledWith(expect.objectContaining({ group_mode: "discover", id_scope: "all", offset: 0 })));
+ await click("Views (2)"); await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(b=>b.textContent?.startsWith("Legacy cohort"))!.click());
+ await settled(() => { expect(params().has("group_mode")).toBe(false); expect(params().has("id_scope")).toBe(false); });
+});

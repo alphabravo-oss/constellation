@@ -77,6 +77,10 @@ export function FindingsPage() {
   const locationHash = useLocation({ select: location => location.hash });
   const severity = (["critical", "high", "medium", "low", "info"] as const).find((value) => value === searchParams.get("severity")) ?? "";
   const kind = (["vulnerability", "iac", "license", "cloud-config", "drift", "signature", "ml-model", "compliance", "runtime"] as const).find((value) => value === searchParams.get("kind")) ?? "";
+  const groupMode = searchParams.get("group_mode") ?? "";
+  const idScope = searchParams.get("id_scope") ?? "";
+  const allIds = idScope === "all";
+  const idLabel = allIds ? "vulnerability IDs" : "CVEs";
   const targetType = searchParams.get("target_type") ?? "";
   const lifecycleValue = searchParams.get("lifecycle");
   const lifecycle: Lifecycle | "" = lifecycleValue === "all" ? "" : (["open", "triaged", "in_progress", "accepted", "suppressed", "resolved"] as const).find((value) => value === lifecycleValue) ?? "open";
@@ -111,11 +115,11 @@ export function FindingsPage() {
   const { views, deleteView, persistenceError } = useSavedViews<SavedView>(FINDING_VIEWS_KEY, { validate: isFindingSavedView });
   const navigate = useNavigate();
   const openFinding = (finding: Finding) => navigate({ href: clusterId ? `/clusters/${clusterId}/findings/${finding.id}` : `/findings/${finding.id}` });
-  const request: NonNullable<Parameters<typeof findings.list>[0]> = { kind: activeView === "cve" ? "vulnerability" as const : kind || undefined, lifecycle: lifecycle || undefined, cluster_id: clusterId, ...(targetType ? { target_type: targetType } : {}), q: serverQuery || undefined, fixable: fixableOnly || undefined, sort: activeView === "cve" ? "risk" : sort, order: activeView === "cve" ? "desc" as const : order };
+  const request: NonNullable<Parameters<typeof findings.list>[0]> = { kind: activeView === "cve" ? "vulnerability" as const : kind || undefined, lifecycle: lifecycle || undefined, cluster_id: clusterId, ...(groupMode ? { group_mode: groupMode } : {}), ...(idScope ? { id_scope: idScope as "all" } : {}), ...(targetType ? { target_type: targetType } : {}), q: serverQuery || undefined, fixable: fixableOnly || undefined, sort: activeView === "cve" ? "risk" : sort, order: activeView === "cve" ? "desc" as const : order };
   const instanceKey = ["findings", request, activeView, activeView === "instances" ? page : 0];
   // The rollup needs a single instance solely for its lifecycle counts.
   const q = useQuery({ queryKey: instanceKey, queryFn: () => findings.list({ ...request, limit: activeView === "instances" ? PAGE_SIZE : 1, offset: activeView === "instances" ? page * PAGE_SIZE : 0 }), enabled: scopeReady && querySettled, placeholderData: keepPreviousData });
-  const cveQ = useQuery({ queryKey: ["findings-cve", request, page], queryFn: () => findings.byCVE({ cluster_id: clusterId, ...(targetType ? { target_type: targetType } : {}), lifecycle: lifecycle || undefined, q: serverQuery || undefined, fixable: fixableOnly || undefined, limit: PAGE_SIZE, offset: page * PAGE_SIZE }), enabled: activeView === "cve" && scopeReady && querySettled, placeholderData: keepPreviousData });
+  const cveQ = useQuery({ queryKey: ["findings-cve", request, page], queryFn: () => findings.byCVE({ cluster_id: clusterId, ...(groupMode ? { group_mode: groupMode } : {}), ...(idScope ? { id_scope: idScope as "all" } : {}), ...(targetType ? { target_type: targetType } : {}), lifecycle: lifecycle || undefined, q: serverQuery || undefined, fixable: fixableOnly || undefined, limit: PAGE_SIZE, offset: page * PAGE_SIZE }), enabled: activeView === "cve" && scopeReady && querySettled, placeholderData: keepPreviousData });
   const activeQ = activeView === "cve" ? cveQ : q;
   const ready = scopeReady && querySettled && activeQ.isSuccess && !activeQ.isFetching && !activeQ.isPlaceholderData;
   const rows = useMemo(() => q.data?.findings ?? [], [q.data]);
@@ -123,24 +127,26 @@ export function FindingsPage() {
   const total = ready ? activeQ.data?.total ?? 0 : undefined;
   const outOfRange = ready && page > 0 && page * PAGE_SIZE >= (total ?? 0);
   const grouped = useMemo(() => groupRows(rows, groupBy), [rows, groupBy]);
-  const selectionScope = JSON.stringify([clusterId, targetType, kind, lifecycle, severity, query, fixableOnly, activeView, groupBy, page, sort, order]);
+  const selectionScope = JSON.stringify([clusterId, groupMode, idScope, targetType, kind, lifecycle, severity, query, fixableOnly, activeView, groupBy, page, sort, order]);
   const [selection, setSelection] = useState<{ scope: string; ids: Set<React.Key> }>({ scope: selectionScope, ids: new Set() });
   const selected = ready && activeView === "instances" && selection.scope === selectionScope ? selection.ids : new Set<React.Key>();
   const setSelected = (ids: Set<React.Key>) => setSelection({ scope: selectionScope, ids });
   useEffect(() => { setSelection({ scope: selectionScope, ids: new Set() }); }, [selectionScope, ready]);
   const activeChips: Array<{ label: string; value: string; onRemove: () => void }> = [];
   if (kind) activeChips.push({ label: "kind", value: kind, onRemove: () => setUrlFilter("kind", "") });
+  if (groupMode) activeChips.push({ label: "strongest group mode", value: groupMode, onRemove: () => setUrlFilter("group_mode", "") });
+  if (allIds) activeChips.push({ label: "ID scope", value: "all non-null vulnerability IDs", onRemove: () => setUrlFilter("id_scope", "") });
   if (targetType) activeChips.push({ label: "target", value: targetType, onRemove: () => setUrlFilter("target_type", "") });
   if (severity) activeChips.push({ label: "severity", value: severity, onRemove: () => setUrlFilter("severity", "") });
   if (lifecycle !== "open") activeChips.push({ label: "lifecycle", value: lifecycle || "all", onRemove: () => setUrlFilter("lifecycle", "open") });
   if (query) activeChips.push({ label: "q", value: query, onRemove: () => setQuery("") });
   if (fixableOnly) activeChips.push({ label: "fixable", value: "true", onRemove: () => setUrlFilter("fixable", "") });
   function applyView(value: SavedView) {
-    setFilters({ target_type: value.targetType ?? "", kind: value.kind, lifecycle: value.lifecycle || "all", q: value.query, severity: value.severity ?? "", fixable: value.fixable ? "true" : "", view: value.view ?? ((value.kind && value.kind !== "vulnerability") || (value.lifecycle && value.lifecycle !== "open") || value.severity ? "instances" : "cve"), group: value.group ?? "none", sort: value.sort ?? "risk", order: value.order ?? "desc" });
+    setFilters({ group_mode: value.groupMode ?? "", id_scope: value.idScope ?? "", target_type: value.targetType ?? "", kind: value.kind, lifecycle: value.lifecycle || "all", q: value.query, severity: value.severity ?? "", fixable: value.fixable ? "true" : "", view: value.view ?? ((value.kind && value.kind !== "vulnerability") || (value.lifecycle && value.lifecycle !== "open") || value.severity ? "instances" : "cve"), group: value.group ?? "none", sort: value.sort ?? "risk", order: value.order ?? "desc" });
   }
   const exportCSV = useMutation({ mutationFn: () => {
     if (!ready) throw new Error("Current results are unavailable");
-    return findings.exportCSV({ ...request, q: activeView === "cve" ? [serverQuery, "cve:CVE-"].filter(Boolean).join(" ") : request.q, limit: 100000, offset: 0 });
+    return findings.exportCSV({ ...request, q: activeView === "cve" && !allIds ? [serverQuery, "cve:CVE-"].filter(Boolean).join(" ") : request.q, limit: 100000, offset: 0 });
   } });
 
   const columns: Column<Finding>[] = [
@@ -291,9 +297,9 @@ export function FindingsPage() {
       />
 
       {persistenceError && <ErrorState title={persistenceError} />}
-      <VerdictBanner status={activeQ.isError || !scopeReady ? "degraded" : "info"} title={ready ? `${total?.toLocaleString()} matching ${activeView === "cve" ? "CVEs" : "finding instances"}` : "Finding results are unavailable or updating"} detail={activeView === "cve" ? "Rollups are ordered by highest risk across all matching CVEs." : "Search and ordering apply to the complete matching inventory."} />
+      <VerdictBanner status={activeQ.isError || !scopeReady ? "degraded" : "info"} title={ready ? `${total?.toLocaleString()} matching ${activeView === "cve" ? idLabel : "finding instances"}` : "Finding results are unavailable or updating"} detail={activeView === "cve" ? `Rollups are ordered by highest risk across all matching ${idLabel}.` : "Search and ordering apply to the complete matching inventory."} />
       <StatGrid className="gap-3">
-        <StatCard label={activeView === "cve" ? "Matching CVEs" : "Matching instances"} value={total?.toLocaleString() ?? "—"} />
+        <StatCard label={activeView === "cve" ? allIds ? "Matching vulnerability IDs" : "Matching CVEs" : "Matching instances"} value={total?.toLocaleString() ?? "—"} />
         <StatCard label="Rows on this page" value={ready ? activeView === "cve" ? cveRows.length : rows.length : "—"} />
         <StatCard label="Selected on this page" value={totalSelected} />
       </StatGrid>
@@ -311,6 +317,8 @@ export function FindingsPage() {
             options={[["", "any kind"], ["vulnerability","vulnerability"], ["iac","iac"], ["license","license"],
                       ["cloud-config","cloud-config"], ["drift","drift"], ["signature","signature"],
                       ["ml-model","ml-model"], ["compliance","compliance"], ["runtime","runtime"]]} />
+          <Select label="Strongest group mode" value={groupMode} onChange={(value) => setUrlFilter("group_mode", value)} options={[["", "any group mode"], ["discover", "discover"], ["monitor", "monitor"], ["protect", "protect"], ...(!["", "discover", "monitor", "protect"].includes(groupMode) ? [[groupMode, `invalid mode: ${groupMode}`] as [string, string]] : [])]} />
+          <Select label="Vulnerability IDs" value={idScope} onChange={(value) => setUrlFilter("id_scope", value)} options={[["", "CVE-only rollups"], ["all", "All non-null IDs"], ...(!["", "all"].includes(idScope) ? [[idScope, `invalid scope: ${idScope}`] as [string, string]] : [])]} />
           <Select label="Target type" value={targetType} onChange={(value) => setUrlFilter("target_type", value)} options={[["", "any target"], ["image-workload", "image workload"], ["host", "host"], ["platform", "platform"], ["image", "image"], ["registry", "registry"], ["repository", "repository"], ["serverless", "serverless"], ["workload", "workload"], ...(!["", "image-workload", "host", "platform", "image", "registry", "repository", "serverless", "workload"].includes(targetType) ? [[targetType, `invalid target: ${targetType}`] as [string, string]] : [])]} />
           <Select label="Severity" value={severity} onChange={(value) => setUrlFilter("severity", value)}
             options={[["", "any severity"], ["critical", "critical"], ["high", "high"], ["medium", "medium"], ["low", "low"], ["info", "info"]]} />
@@ -337,6 +345,8 @@ export function FindingsPage() {
         </div>
       </div>
 
+      {groupMode && <p className="text-xs text-muted-foreground" data-testid="findings-mode-scope">Image-workload vulnerabilities linked by image digest to workloads whose strongest configured group mode is {groupMode}. Unmatched workloads are excluded; an ID may appear in more than one mode through different workloads. This describes cached group membership, not applied protection.</p>}
+      {allIds && <p className="text-xs text-muted-foreground">All non-null vulnerability IDs, including advisories without a CVE prefix. Instances without an ID are excluded from this cohort.</p>}
       {/* State tabs */}
       <section className="grid grid-cols-1 gap-2 md:grid-cols-3" data-testid="finding-state-tabs">
         {STATE_TABS.map((tab) => {
@@ -370,7 +380,7 @@ export function FindingsPage() {
       {/* View: per-instance rows vs NeuVector-style CVE rollup */}
       <div className="flex items-center gap-1.5">
         <span className="text-[10px] uppercase tracking-wider text-muted-foreground">View</span>
-        {([["instances", "Instances"], ["cve", "By CVE"]] as Array<["instances" | "cve", string]>).map(([v, l]) => (
+        {([["instances", "Instances"], ["cve", allIds ? "By vulnerability ID" : "By CVE"]] as Array<["instances" | "cve", string]>).map(([v, l]) => (
           <button
             key={v}
             type="button"
@@ -388,7 +398,7 @@ export function FindingsPage() {
           >{l}</button>
         ))}
         <span className="ml-2 text-[10px] text-muted-foreground">
-          {activeView === "cve" ? "one row per CVE with its blast radius" : "one row per CVE × workload"}
+          {activeView === "cve" ? `one row per ${allIds ? "vulnerability ID" : "CVE"} with its blast radius` : "one row per finding instance"}
         </span>
         <button
           type="button"
@@ -403,7 +413,7 @@ export function FindingsPage() {
         >{fixableOnly ? "✓ " : ""}Fixable only</button>
         {activeView === "cve" && (
           <span className="rounded h-6 px-2 text-[11px] border border-border bg-card text-muted-foreground">
-            {ready ? cveRows.length : "—"} of {total ?? "—"} CVEs
+            {ready ? cveRows.length : "—"} of {total ?? "—"} {idLabel}
           </span>
         )}
       </div>
@@ -433,9 +443,9 @@ export function FindingsPage() {
 
       <div className="flex flex-wrap items-center gap-3">
         <Button variant="outline" disabled={!ready || exportCSV.isPending} onClick={() => exportCSV.mutate()}>{exportCSV.isPending ? "Exporting…" : "Export filtered instances CSV"}</Button>
-        <span className="text-xs text-muted-foreground">Up to 100,000 matching instances, across all pages.{activeView === "cve" ? " CVE table exports contain only the rollups on this page." : " Table exports and selections contain only this page."}</span>
+        <span className="text-xs text-muted-foreground">Up to 100,000 matching instances, across all pages.{activeView === "cve" ? ` ${allIds ? "Vulnerability ID" : "CVE"} table exports contain only the rollups on this page.` : " Table exports and selections contain only this page."}</span>
       </div>
-      {activeView === "cve" && fixableOnly && <p className="text-xs text-muted-foreground">Fixable CVE rollups count all matching instances of a CVE with an available fix. The filtered instance CSV includes only instances with an available fix.</p>}
+      {activeView === "cve" && fixableOnly && <p className="text-xs text-muted-foreground">Fixable {allIds ? "vulnerability ID" : "CVE"} rollups count all matching instances of an ID with an available fix. The filtered instance CSV includes only instances with an available fix.</p>}
       {exportCSV.isError && <ErrorState title="Could not export matching instances. Try again." />}
       {bulkAction.isError && <ErrorState title="Some selected findings could not be updated. Refresh and review their current states before retrying." />}
       {activeView === "cve" && q.isError && <ErrorState title="Lifecycle counts could not be loaded." action={<Button onClick={() => void q.refetch()}>Retry counts</Button>} />}
@@ -444,14 +454,14 @@ export function FindingsPage() {
         : !ready ? <LoadingState label={activeQ.isPending ? "Loading findings…" : "Updating findings…"} />
         : outOfRange ? <EmptyState title="This page is outside the current results" hint="The inventory may have changed. Return to the first page to review matching results." action={<Button onClick={() => setPage(0)}>First page</Button>} />
         : <>
-          {activeView === "cve" ? <CVETable rows={cveRows} clusterId={clusterId} />
+          {activeView === "cve" ? <CVETable rows={cveRows} clusterId={clusterId} allIds={allIds} targetType={targetType} />
             : groupBy === "none" ? <DataTable
                 rows={rows} columns={columns} rowKey={(finding) => finding.id}
                 density={density} onDensityChange={setDensity} selectable selected={selected} onSelectedChange={setSelected}
                 onRowClick={openFinding} sort={{ id: sort === "last_seen" ? "age" : sort, dir: order }} onSortChange={onSortChange} manualSorting pagination={false}
                 preferencesKey={INSTANCE_TABLE_KEY} defaultHiddenColumnIds={["package", "fixed"]}
                 exportFileName="constellation-findings-page" exportLabel="Export this page CSV" testId="findings-table"
-                emptyState={<EmptyState title="No findings match" hint="Adjust your filters or clear the query." icon={<Tag className="h-8 w-8" />} action={<Button variant="outline" onClick={() => setFilters({ q: "", kind: "", target_type: "", severity: "", lifecycle: "open", fixable: "", page: "" })}>Reset filters</Button>} />}
+                emptyState={<EmptyState title="No findings match" hint="Adjust your filters or clear the query." icon={<Tag className="h-8 w-8" />} action={<Button variant="outline" onClick={() => setFilters({ q: "", kind: "", group_mode: "", id_scope: "", target_type: "", severity: "", lifecycle: "open", fixable: "", page: "" })}>Reset filters</Button>} />}
               />
             : <div className="space-y-3">
                 <p className="text-xs text-muted-foreground" data-testid="findings-group-scope">{grouped.length} groups from {rows.length} instances on this server page. Group counts, selection, and table CSV cover this page only.</p>
@@ -478,15 +488,16 @@ export function FindingsPage() {
 
 // CVETable — the NeuVector-style rollup: one row per CVE with its blast radius
 // (how many images / clusters it hits and total instances), sorted by risk.
-function CVETable({ rows, clusterId }: { rows: CVERollup[]; clusterId?: string }) {
+function CVETable({ rows, clusterId, allIds = false, targetType }: { rows: CVERollup[]; clusterId?: string; allIds?: boolean; targetType?: string }) {
+  const referenceLabel = targetType === "host" ? "host reference" : targetType === "platform" ? "platform reference" : "image";
   const columns: Column<CVERollup>[] = [
     { id: "severity", kind: "badge", size: 120, minSize: 112, header: "Severity",
       cell: (c) => <SeverityBadge severity={c.severity} />,
       exportValue: (c) => c.severity },
-    { id: "cve", kind: "id", size: 176, minSize: 160, header: "CVE",
+    { id: "cve", kind: "id", size: 176, minSize: 160, header: allIds ? "Vulnerability ID" : "CVE",
       cell: (c) => (
         <span className="flex items-center gap-1.5">
-          <Link to="." href={clusterId ? `/clusters/${clusterId}/cve/${c.cve}` : `/cve/${c.cve}`} className="text-mono text-xs hover:text-[color:var(--color-primary)]">{c.cve}</Link>
+          <span className="text-mono text-xs">{c.cve.startsWith("CVE-") ? <a href={clusterId ? `/clusters/${clusterId}/cve/${encodeURIComponent(c.cve)}` : `/cve/${encodeURIComponent(c.cve)}`} className="hover:text-[color:var(--color-primary)]">{c.cve}</a> : c.cve || "(empty external ID)"}</span>
           {c.kev && <span className="rounded px-1 py-px text-[9px] font-semibold text-white" style={{ background: "var(--color-severity-critical)" }} title="CISA Known-Exploited">KEV</span>}
         </span>
       ),
@@ -513,11 +524,11 @@ function CVETable({ rows, clusterId }: { rows: CVERollup[]; clusterId?: string }
     { id: "affected", kind: "count", size: 176, minSize: 144, maxSize: 200, wrap: true, header: "Affected", numeric: true,
       cell: (c) => (
         <span className="text-xs" title={c.images.join("\n")}>
-          {c.affected_images} image{c.affected_images === 1 ? "" : "s"}
+          {c.affected_images} {referenceLabel}{c.affected_images === 1 ? "" : "s"}
           {c.affected_clusters > 1 ? ` · ${c.affected_clusters} clusters` : ""}
         </span>
       ),
-      exportValue: (c) => `${c.affected_images} images; ${c.affected_clusters} clusters` },
+      exportValue: (c) => `${c.affected_images} ${referenceLabel}s; ${c.affected_clusters} clusters` },
     { id: "instances", kind: "count", size: 112, minSize: 96, header: "Instances", numeric: true,
       cell: (c) => <span className="text-mono text-xs">{c.instances}</span>,
       exportValue: (c) => c.instances },
@@ -535,10 +546,10 @@ function CVETable({ rows, clusterId }: { rows: CVERollup[]; clusterId?: string }
       rowKey={(c) => c.cve}
       pagination={false}
       preferencesKey={CVE_TABLE_KEY}
-      exportFileName="constellation-cves-page"
-      exportLabel="Export this CVE page CSV"
+      exportFileName={allIds ? "constellation-vulnerability-ids-page" : "constellation-cves-page"}
+      exportLabel={allIds ? "Export this vulnerability ID page CSV" : "Export this CVE page CSV"}
       testId="findings-cve-table"
-      emptyState={<EmptyState title="No CVEs match" hint="Adjust your filters or clear the query." icon={<Tag className="h-8 w-8" />} />}
+      emptyState={<EmptyState title={allIds ? "No vulnerability IDs match" : "No CVEs match"} hint="Adjust your filters or clear the query." icon={<Tag className="h-8 w-8" />} />}
     />
   );
 }

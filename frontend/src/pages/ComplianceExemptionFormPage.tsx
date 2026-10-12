@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
 import { compliance, type ComplianceCheck } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
@@ -25,8 +25,8 @@ export function ComplianceExemptionFormPage() {
   backSearch.delete("control_id"); backSearch.set("tab", "frameworks");
   const backTo = clusterId ? `/clusters/${encodeURIComponent(clusterId)}/compliance?${backSearch}` : "/clusters";
   const checks = useQuery({
-    queryKey: ["compliance", "checks", framework, clusterId],
-    queryFn: () => compliance.checks(framework, clusterId!),
+    queryKey: ["compliance", "checks", framework, clusterId, controlID],
+    queryFn: () => compliance.checks(framework, clusterId!, { control_id: controlID }),
     enabled: scopeReady && !!framework && !!controlID,
   });
   // Each row represents collected evidence, not a unique control. Exemptions
@@ -35,14 +35,14 @@ export function ComplianceExemptionFormPage() {
   const scopeKey = `${clusterId ?? ""}:${framework}:${controlID}`;
   const [snapshot, setSnapshot] = useState<{ scope: string; checks: ComplianceCheck[] } | null>(null);
   useEffect(() => {
-    setSnapshot((previous) => previous?.scope === scopeKey ? previous : currentChecks.length ? { scope: scopeKey, checks: currentChecks } : null);
-  }, [scopeKey, currentChecks]);
+    setSnapshot((previous) => previous?.scope === scopeKey ? previous : scopeReady && checks.isSuccess && !checks.isFetching && currentChecks.length ? { scope: scopeKey, checks: currentChecks } : null);
+  }, [scopeKey, currentChecks, scopeReady, checks.isSuccess, checks.isFetching]);
   const controlChecks = currentChecks.length ? currentChecks : snapshot?.scope === scopeKey ? snapshot.checks : [];
   const controlAvailable = controlChecks.length > 0;
-  const eligible = currentChecks.some((check) => check.status === "fail" && (check.effective_status ?? check.status) === "fail");
+  const eligible = (checks.data?.summary?.fail ?? 0) > 0 || currentChecks.some((check) => check.status === "fail" && (check.effective_status ?? check.status) === "fail");
   return <div className="space-y-6">
     <PageHeader title="New compliance exemption" description="Accept a failing control for this cluster until a specific date. The original evidence remains available and the decision is audited."
-      backLink={<Link to="." href={backTo} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Compliance controls</Link>} />
+      backLink={<a href={backTo} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Compliance controls</a>} />
     {clusterLoading && !resolvedScope ? <LoadingState label="Loading cluster…" />
       : !clusterId ? <ErrorState title="Select a cluster to create an exemption." />
       : !resolvedScope || (clusterError && !controlAvailable) ? <ErrorState title="The selected cluster could not be resolved. Review its registration and retry." action={<Button onClick={retryScope}>Retry cluster</Button>} />
@@ -55,12 +55,12 @@ export function ComplianceExemptionFormPage() {
         {checks.isFetching && <p role="status" className="text-sm text-muted-foreground">Refreshing this control before saving…</p>}
         {currentChecks.length === 0 && <p role="alert" className="text-sm text-status-error">This control is no longer available in the current results. Your draft is preserved; saving is paused. <Button variant="outline" onClick={() => void checks.refetch()}>Retry</Button></p>}
         {currentChecks.length > 0 && !eligible && <p role="alert" className="text-sm text-muted-foreground">This control is no longer eligible for a new exemption. Review its current status before proceeding.</p>}
-        <ExemptionEditor key={`${clusterId}:${framework}:${controlID}`} clusterId={clusterId} clusterLabel={cluster?.name || clusterId} framework={framework} controlID={controlID} controlChecks={controlChecks} lastLoaded={currentChecks.length === 0 || checks.isError || checks.isFetching || !scopeReady} backTo={backTo} canSave={scopeReady && eligible && !checks.isError && !checks.isFetching} />
+        <ExemptionEditor key={`${clusterId}:${framework}:${controlID}`} clusterId={clusterId} clusterLabel={cluster?.name || clusterId} framework={framework} controlID={controlID} controlChecks={controlChecks} total={checks.data?.total} fullFailures={checks.data?.summary?.fail} lastLoaded={currentChecks.length === 0 || checks.isError || checks.isFetching || !scopeReady} backTo={backTo} canSave={scopeReady && eligible && !checks.isError && !checks.isFetching} />
       </>}
   </div>;
 }
 
-function ExemptionEditor({ clusterId, clusterLabel, framework, controlID, controlChecks, lastLoaded, backTo, canSave }: { clusterId: string; clusterLabel: string; framework: string; controlID: string; controlChecks: ComplianceCheck[]; lastLoaded: boolean; backTo: string; canSave: boolean }) {
+function ExemptionEditor({ clusterId, clusterLabel, framework, controlID, controlChecks, total, fullFailures, lastLoaded, backTo, canSave }: { clusterId: string; clusterLabel: string; framework: string; controlID: string; controlChecks: ComplianceCheck[]; total?: number; fullFailures?: number; lastLoaded: boolean; backTo: string; canSave: boolean }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [reason, setReason] = useState("");
@@ -89,6 +89,7 @@ function ExemptionEditor({ clusterId, clusterLabel, framework, controlID, contro
           <h2 className="text-sm font-semibold">Entire control in {clusterLabel}</h2>
           <p className="text-sm text-muted-foreground">This exemption covers all matching evidence for {framework} control {controlID} in this cluster, including future results until expiry. It is not limited to a single workload or evidence row.</p>
           <p className="text-xs text-muted-foreground">{lastLoaded ? "Last loaded evidence: " : "Evidence preview: "}{controlChecks.length} loaded evidence {controlChecks.length === 1 ? "row" : "rows"} · {failingCount} unexempted {failingCount === 1 ? "failure" : "failures"}. Counts cover the loaded results; the exemption covers the entire control.</p>
+          {total !== undefined && <p className="text-xs text-muted-foreground">Server totals for this exact control: {total.toLocaleString()} evidence rows · {fullFailures?.toLocaleString() ?? "Unavailable"} unexempted failures. The evidence preview is limited to the first 500 rows; eligibility uses the full matching failure count.</p>}
         </section>
         <Field label="Reason" htmlFor="exemption-reason" required hint="Include the owner, compensating control, or approval ticket. At least 12 characters.">
           <Textarea id="exemption-reason" value={reason} onChange={(event) => setReason(event.target.value)} minLength={12} required />

@@ -422,6 +422,7 @@ const NAV_ITEMS: NavSearchItem[] = [
   { icon: <Plug />,            label: "Integrations & Routing", href: "/settings/integrations", keywords: ["alerts", "receivers", "routing", "webhooks"] },
   { icon: <Server />,          label: "System Health", href: "/settings/health", keywords: ["controllers", "enforcers", "scanners", "components", "license", "heartbeat"] },
   { icon: <HeartPulse />,      label: "Sensor Health", href: "/health", keywords: ["cluster", "sensor", "registration", "health gates"] },
+  { icon: <ClipboardCheck />,  label: "Organization Audit Log", href: "/organization/audit", keywords: ["activity", "audit", "organization history"] },
   { icon: <ClipboardCheck />,  label: "Posture",     href: "/posture", keywords: ["coverage", "configuration posture", "security posture"] },
   { icon: <Sparkles />,        label: "Federation",  href: "/federation", keywords: ["multi cluster", "fed", "remote cluster"] },
   { icon: <Settings />,        label: "Settings",    href: "/settings", keywords: ["system", "configuration", "admin"] },
@@ -430,7 +431,7 @@ const NAV_ITEMS: NavSearchItem[] = [
 const NAV_SCOPES = ["Clusters", "Organization", "Platform", "Integrations"] as const;
 
 function navScope(href: string): typeof NAV_SCOPES[number] {
-  if (href === "/cve" || href === "/posture" || href === "/federation") return "Organization";
+  if (href === "/cve" || href === "/posture" || href === "/federation" || href === "/organization/audit") return "Organization";
   if (href.startsWith("/settings/integrations") || href.startsWith("/settings/connectors")) return "Integrations";
   if (["/settings/access", "/settings/api-tokens", "/settings/security-policy"].includes(href)) return "Organization";
   if (href.startsWith("/settings")) return "Platform";
