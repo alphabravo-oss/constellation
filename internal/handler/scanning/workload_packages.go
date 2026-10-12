@@ -420,24 +420,6 @@ func firstResolvedWorkloadImageIdentity(ctx context.Context, tx pgx.Tx, orgID uu
 	return "", ""
 }
 
-func firstWorkloadImageRef(body WorkloadPackagesPayload) string {
-	for _, container := range body.Containers {
-		if ref := workloadContainerImageRef(container); ref != "" {
-			return ref
-		}
-	}
-	return ""
-}
-
-func firstWorkloadImageDigest(body WorkloadPackagesPayload) string {
-	for _, container := range body.Containers {
-		if digest := workloadContainerImageDigest(container); digest != "" {
-			return digest
-		}
-	}
-	return ""
-}
-
 func resolvedWorkloadContainerImageIdentity(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, clusterID *uuid.UUID, namespace string, container WorkloadPackageContainer) (string, string) {
 	ref := workloadContainerImageRef(container)
 	digest := workloadContainerImageDigest(container)

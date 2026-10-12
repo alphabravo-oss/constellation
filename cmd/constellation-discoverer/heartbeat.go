@@ -1,16 +1,12 @@
 // Wave N6: heartbeat side-car for constellation-discoverer.
 //
-// We deliberately keep this in a separate file so the reconciler logic in
-// main.go is owned by Wave M2. The init() below schedules a goroutine using
-// the same os.Signal context the main reconcile loop uses, so the heartbeat
-// stops when the discoverer shuts down.
+// main calls startHeartbeat after resolving cluster ownership and supplies its
+// signal context, so the heartbeat stops when the discoverer shuts down.
 package main
 
 import (
 	"context"
 	"log/slog"
-	"os/signal"
-	"syscall"
 
 	"github.com/alphabravocompany/constellation/pkg/version"
 )
@@ -35,12 +31,4 @@ func startHeartbeat(parent context.Context, logger *slog.Logger, clusterID strin
 		ClusterID:  clusterID,
 		Logger:     logger,
 	})
-}
-
-// signalContext returns a context that is canceled on SIGINT/SIGTERM. Used by
-// the heartbeat goroutine when main.go hasn't already exposed its own context.
-// Currently unused (main.go threads its own ctx), but kept available for tests
-// that exercise the heartbeat in isolation.
-func signalContext() (context.Context, context.CancelFunc) {
-	return signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 }

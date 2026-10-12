@@ -114,9 +114,8 @@ type Supervisor struct {
 	fqdnMu     sync.Mutex
 	fqdnPushed map[string][]net.IP
 
-	mu     sync.Mutex
-	cmd    *exec.Cmd
-	stopCh chan struct{}
+	mu  sync.Mutex
+	cmd *exec.Cmd
 
 	// State counters surfaced via Stats(). dp lifecycle counters; the
 	// IPC byte counters live on ipcServer and are merged in Stats().

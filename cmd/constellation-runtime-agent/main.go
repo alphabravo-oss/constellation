@@ -41,7 +41,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"os"
 	"os/signal"
@@ -1132,10 +1131,6 @@ func main() {
 		nFlowsUploaded.Load(), nFlowsDropped.Load())
 }
 
-func postFlowBatch(ctx context.Context, client *http.Client, url, token string, batch []flowIngestRow) error {
-	return postLegacyBatch(ctx, client, url, token, batch)
-}
-
 // ingestEvent is the wire shape sent to POST /api/v1/events:bulk. Kept here as a private
 // copy of handler.IngestEvent so this binary does not pull in the entire HTTP handler
 // dependency graph. Field tags MUST match handler.IngestEvent exactly.
@@ -1348,13 +1343,4 @@ func withClusterID(rawURL, clusterID string) string {
 		sep = "&"
 	}
 	return rawURL + sep + "cluster_id=" + url.QueryEscape(clusterID)
-}
-
-// formatAddrPort renders a netip.AddrPort safely. The zero value formats as "invalid
-// AddrPort"; we want the empty string in that case so the server doesn't try to parse it.
-func formatAddrPort(a netip.AddrPort) string {
-	if !a.IsValid() {
-		return ""
-	}
-	return a.String()
 }

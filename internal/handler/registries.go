@@ -1402,20 +1402,6 @@ VALUES ($1, $2, $3, 'pending', $4, $5, NULLIF($6,''))`,
 	return jobsEnqueued, nil
 }
 
-func diffTags(prev, curr []string) []string {
-	seen := map[string]bool{}
-	for _, t := range prev {
-		seen[t] = true
-	}
-	out := []string{}
-	for _, t := range curr {
-		if !seen[t] {
-			out = append(out, t)
-		}
-	}
-	return out
-}
-
 func filterImagesByScanPolicy(in []registry.Image, policy registryScanPolicy, now time.Time) []registry.Image {
 	out := make([]registry.Image, 0, len(in))
 	for _, im := range in {
@@ -1522,19 +1508,6 @@ SELECT status, requested_at
 		}
 	}
 	return false, "", nil
-}
-
-func filterImages(in []registry.Image, globs []string) []registry.Image {
-	if len(globs) == 0 {
-		return in
-	}
-	out := make([]registry.Image, 0, len(in))
-	for _, im := range in {
-		if matchesAnyGlob(im.Repository, globs) {
-			out = append(out, im)
-		}
-	}
-	return out
 }
 
 // matchesAnyGlob does very simple glob matching: `*` matches any run of chars

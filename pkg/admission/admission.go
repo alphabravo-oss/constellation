@@ -23,7 +23,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/alphabravocompany/constellation/pkg/quarantine"
 )
@@ -1510,6 +1509,3 @@ func explicitImageTag(image string) (string, bool) {
 	}
 	return ref[lastColon+1:], true
 }
-
-// runtimeScheme is exported only so the webhook server can register types when wiring TLS.
-var runtimeScheme = runtime.NewScheme()

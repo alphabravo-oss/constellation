@@ -65,6 +65,27 @@ and 99 open items. Counts describe acceptance items, not a percentage of code
 implemented. The complete scope and remaining gates are retained below; do not
 convert partially implemented items into checked boxes.
 
+The subsequent security/recovery increment confines serverless ZIP extraction
+with `os.Root`, private permissions, exclusive file creation and entry/byte
+budgets; fixes wrapped-error handling; and removes unused implementations and
+fixtures. It does not close the separate serverless DNS-rebinding gap. Short
+private Unix-socket fixtures now work independently of the compiler scratch path.
+The final full seeded PostgreSQL suite passed **5,662 repeated, shuffled race-test
+executions**, with no test skips or failures, including the removed-code cleanup
+(`/tmp/constellation-security-final-full/`). **84 tooling tests**, formatting,
+ShellCheck and plan/endpoint checks passed. Full lint remains blocking at **1,654
+findings** (unused and errorlint categories are zero); standalone gosec remains
+blocking at **256 findings**, with zero package-load errors and no new exclusions.
+
+The [CNPG/RustFS recovery repeat](cnpg-recovery.md) passed at schema 171 using the
+session/schema image built for `103bf74`, including source and restored API schema
+gates. This is local single-host recovery evidence, not later-build or production
+HA qualification. The exposed admission test Secret capture is removed and fresh
+test private keys are no longer captured. The owner is unsure of external use;
+the two accessible clusters have no matching historical certificate or webhook
+CA in the checked scope. [Inventory limitations and outstanding revocation](../deploy/e2e/threat-scenarios/04-admission-tls/EVIDENCE.md#october-12-credential-remediation)
+remain recorded; historical secret findings are not suppressed.
+
 The latest session-lifecycle increment adds migration 171, bounded leader-owned
 cleanup for expired browser/session records and five-minute network snapshots and
 kill requests. It preserves unexpired refresh reuse evidence, legacy unknown

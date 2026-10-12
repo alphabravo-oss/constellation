@@ -1087,11 +1087,6 @@ func restoreAuditEvents(ctx context.Context, pool Querier, body []byte, orgID st
 
 // ---- column / row helpers ----
 
-func tableColumns(ctx context.Context, pool Querier, table string) ([]string, error) {
-	cols, _, err := tableColumnTypes(ctx, pool, table)
-	return cols, err
-}
-
 // tableColumnTypes returns (column names in ordinal order, map of column->data_type).
 // data_type is e.g. "jsonb", "uuid", "text", "ARRAY".
 func tableColumnTypes(ctx context.Context, pool Querier, table string) ([]string, map[string]string, error) {
@@ -1218,40 +1213,6 @@ func encodeForColumn(v any, dataType string) any {
 			return nil
 		}
 		return v
-	default:
-		return v
-	}
-}
-
-// normalizeForInsert coerces a value freshly unmarshaled from JSON into a form that pgx
-// can map to a Postgres column. json.RawMessage stays as []byte; []any becomes a []string
-// when all elements are strings (Postgres text[] friendly); other types pass through.
-func normalizeForInsert(v any) any {
-	switch x := v.(type) {
-	case nil:
-		return nil
-	case json.RawMessage:
-		return []byte(x)
-	case []any:
-		// Try to coerce to []string for text[] columns.
-		out := make([]string, 0, len(x))
-		allStr := true
-		for _, e := range x {
-			if s, ok := e.(string); ok {
-				out = append(out, s)
-			} else {
-				allStr = false
-				break
-			}
-		}
-		if allStr {
-			return out
-		}
-		b, _ := json.Marshal(x)
-		return b
-	case map[string]any:
-		b, _ := json.Marshal(x)
-		return b
 	default:
 		return v
 	}

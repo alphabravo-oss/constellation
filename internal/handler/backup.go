@@ -505,10 +505,3 @@ ON CONFLICT (org_id) DO UPDATE
 	})
 	writeJSON(w, 200, s)
 }
-
-// extractFromArchive walks a tar.gz reader and returns manifest.json + .sig + .cert
-// bytes. Used by Verify above; mirrors the helper inside cmd/constellation-backup so the
-// API doesn't have to reach into a private package symbol.
-func extractFromArchive(r io.Reader) (manifest, sig, cert []byte, err error) {
-	return extractTarTriplet(r, "manifest.json", "manifest.json.sig", "manifest.json.cert")
-}

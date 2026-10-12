@@ -878,55 +878,6 @@ func parseNetworkSourceExports(raw []byte) ([]networkSourceExport, error) {
 	return out, nil
 }
 
-func sourceExportEmpty(doc SourceExport) bool {
-	return len(doc.Admission.Rules) == 0 &&
-		len(doc.Rules) == 0 &&
-		doc.Rule == nil &&
-		len(doc.Response.Rules) == 0 &&
-		doc.FileMonitor.Profile == nil &&
-		len(doc.FileMonitor.Profiles) == 0 &&
-		len(doc.FileMonitor.Rules) == 0 &&
-		len(doc.FileProfiles) == 0 &&
-		doc.Profile == nil &&
-		len(doc.Profiles) == 0 &&
-		doc.Process.Profile == nil &&
-		len(doc.Process.Profiles) == 0 &&
-		doc.ProcessProfile == nil &&
-		len(doc.ProcessProfiles) == 0 &&
-		doc.Group == nil &&
-		doc.Config == nil &&
-		len(doc.Groups) == 0 &&
-		len(doc.Configs) == 0 &&
-		doc.DLP.Sensor == nil &&
-		len(doc.DLP.Sensors) == 0 &&
-		len(doc.DLP.Rules) == 0 &&
-		doc.WAF.Sensor == nil &&
-		len(doc.WAF.Sensors) == 0 &&
-		len(doc.WAF.Rules) == 0 &&
-		len(doc.DLPSensors) == 0 &&
-		len(doc.WAFSensors) == 0 &&
-		len(doc.DLPGroups) == 0 &&
-		len(doc.WAFGroups) == 0 &&
-		doc.Sensor == nil &&
-		len(doc.Sensors) == 0 &&
-		doc.Policy.Rule == nil &&
-		len(doc.Policy.Rules) == 0 &&
-		doc.Network.Rule == nil &&
-		len(doc.Network.Rules) == 0 &&
-		len(doc.NetworkRules) == 0 &&
-		len(doc.PolicyRules) == 0 &&
-		len(doc.Items) == 0 &&
-		strings.TrimSpace(doc.Kind) == "" &&
-		len(doc.Spec.FileRule) == 0 &&
-		len(doc.Spec.ProcessRule) == 0 &&
-		doc.Spec.ProcessProfile == nil &&
-		len(doc.Spec.IngressRule) == 0 &&
-		len(doc.Spec.EgressRule) == 0 &&
-		doc.Spec.Sensor == nil &&
-		emptyGroupConfig(doc.Spec.Selector) &&
-		emptyGroupConfig(doc.Spec.Target.Selector)
-}
-
 func networkSourceExportEmpty(doc networkSourceExport) bool {
 	return doc.Policy.Rule == nil &&
 		len(doc.Policy.Rules) == 0 &&
@@ -1944,11 +1895,6 @@ func translateDPISensor(candidate dpiSensorCandidate, category string, names map
 	return out, unsupported
 }
 
-func translateDPIPatterns(patterns []DPICriterion, category string) []DPIPatternSpec {
-	out, _ := translateDPIPatternsDetailed(patterns, category, "", "", "", "", "", false)
-	return out
-}
-
 func translateDPIPatternsDetailed(patterns []DPICriterion, category, sensorName, ruleName, rulePath, sourceCfgType, sourceRuleCfgType string, federated bool) ([]DPIPatternSpec, []UnsupportedObject) {
 	out := make([]DPIPatternSpec, 0, len(patterns))
 	unsupported := []UnsupportedObject{}
@@ -2789,10 +2735,6 @@ func (c *convertedAdmissionCriteria) add(crit AdmissionCriterion) bool {
 		return true
 	}
 	return false
-}
-
-func (c convertedAdmissionCriteria) any() bool {
-	return c.enforceable() || len(c.namespaces) > 0
 }
 
 func (c convertedAdmissionCriteria) enforceable() bool {
