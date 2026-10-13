@@ -1,8 +1,8 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-13** (console/browser acceptance;
-source, infrastructure and prior feature evidence remain dated below)
+Last reconciled: **2026-10-13** (selected console scope complete and live on
+Helm75/schema177; prior feature/infrastructure evidence stays dated)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -1592,6 +1592,107 @@ and chain hashes absent from default columns. Evidence:
 `/tmp/reviewed-inventories-live-results.json` and
 `/tmp/reviewed-inventory-deploy.log`. No live policy writes were performed.
 
+### Final selected-console acceptance — October 13
+
+**Selected console scope complete — Helm75/schema177 deployed and verified.**
+The seven remaining UI-1/2/3/4 rows close against frozen production artifacts,
+source/database qualification, the finite browser matrix and live read-only
+verification. API/frontend/migration use `console-parity-20261013`; migration177
+succeeded and all seven deployments are ready. This does not close the broader
+security, fleet enforcement or infrastructure release.
+
+Live checks validate exact organization/cluster receipts for executive and
+compliance HTML (13 retained compliance checks, untruncated), reject invalid and
+foreign report scope, and confirm identity/roles on six dashboard workload rows
+(two core). Backup inventory and matching CSV agree on zero owned runs; there is
+no successful owned backup, so positive history/latest-success claims remain
+isolated database/browser evidence. Network Rules reconcile 1,712 all matches,
+43 platform-hidden matches and zero search matches with their complete CSVs;
+Audit and positive/empty CVE matching exports pass. Native live Backup has two
+32px collapsed status rows, hidden SHA columns and no document overflow; Network
+Rules displays 100 of 1,712 with server controls and no overflow. No live policy
+or backup writes were performed. Evidence: `/tmp/console-parity-final-deploy.log`,
+`/tmp/console-parity-final-live.log` and
+`/tmp/console-parity-final-inventories-live.log`.
+
+The preceding frozen console source passes **2,284 frontend tests in 153 files**,
+lint and production typecheck/build. The final Backup export-receipt/CORS follow-up
+requires its focused checks and rebuilt frontend/API before deployment; those
+results are not implied by this predecessor suite. The schema177 parent
+production-image browser suite passes **275 cases**, one worker, without retries/skips. The final artifact adds
+**three Backup cases** and **four reviewed runtime/peer cases**, all passing;
+the runtime run requalifies three existing cases plus the new disabled-policy
+re-enable case, so these counts are not added as distinct suite totals. The
+fresh seeded PostgreSQL 16/schema177 affected-handler suite passes **1,346
+race/shuffle/count2 executions**, supplemented by **four Backup inventory
+executions** on a separate fresh database. Evidence:
+`/tmp/console-parity-frontend-tests.log`,
+`/tmp/evidence-workflow-qualified-browser.log`,
+`/tmp/backup-inventory-browser-frozen.log`,
+`/tmp/parity-browser-runtime-enable.log`,
+`/tmp/evidence-workflow-full-handler-db.log` and
+`/tmp/backup-inventory-fresh-db.log`. Browser cases use isolated production
+stacks or deterministic API fixtures; they do not perform live security writes.
+
+The finite source audit covers **110 lazy-routed page sources**: 68 directly use
+the shared verdict, 41 are dedicated or delegated forms, and one is the Settings
+navigation directory. No primary undisclosed `StatGrid` exceeds five metrics;
+no page declares a competing native inventory table. Shared URL tabs, dedicated
+forms and Advanced disclosure provide one primary workspace at a time. The
+Switchboard is now a compact verdict, three metrics and navigation workspace;
+its expert guidance is collapsed and cluster transitions update every link.
+The accepted exceptions are dedicated forms without fabricated metric rows,
+the Settings directory, URL-bound read-only entity peeks and local nested
+inspector tabs within the URL-bound Network workspace. Runtime promotion is a
+confirmation without authoring inputs. Scanner, Timeline and workload finding
+peeks are read-only; they are not duplicate editors. Source evidence:
+`/tmp/console-page-contract-final177.jsonl` and `frontend/CLAUDE.md`.
+
+High-volume console lists now qualify server continuation, matching cohort
+filters/sort/summary/CSV, visible caps and unavailable evidence. The last Backup
+history consumer no longer stops at 50: its inventory pages, filters and sorts
+all owned retained runs, distinguishes matching CSV from current-page CSV, and
+gets latest successful backup evidence independently of the page/filter. Shared
+tables qualify column geometry, keyboard layout controls, hidden-column sorts,
+operator-scoped preferences, stale-column migration and explicit reset. Saved
+views preserve active URL filters, history and scope; storage failures retain
+drafts. Export dispatch rechecks the reviewed operator, source and cache
+identity, including pending-response scope changes and invalidate-to-ready
+cycles. Live SSE, latency budgets and fleet-scale performance remain separate
+unqualified work, not implied by correctness at an explicit 100,000-row cap.
+
+The finite role matrix includes workload/container, asset/generic finding,
+node/deployment evidence, runtime/threat, baseline/file profiles, Network
+map/exposure/session/conversation/stream/PCAP/peer/rule/lifecycle evidence,
+Dashboard workload rows, report workload context and retained finding NDJSON.
+Ambiguous ownership, foreign-cluster identity and IP-only/external peers keep
+explicit unknown roles. JSON, shown/matching CSV and report source evidence
+agree where those formats apply. The genuine custom-namespace chart proof above
+establishes continued discovery while hidden; fresh database and browser cases
+qualify the other role-bearing surfaces. Package/image artifacts, binary PCAP
+and portable authored policy YAML are not invented workload-role inventories.
+
+Dashboard downloads prefer scoped HTML, with organization/cluster receipts
+validated before Blob dispatch; absent or mismatched receipts fail closed.
+Scheduled report forms default to HTML/JSON, retaining optional PDF. Schema177
+records the actual immutable artifact format, MIME and filename, including HTML
+fallback when the optional PDF renderer is missing. Legacy artifacts remain
+unknown instead of borrowing a schedule's current format. Compliance reports
+use full retained effective-exemption summaries and graded pass/fail units;
+executive reports label retained findings, actual names/roles and the separate
+organization-wide MTTR source. CSV uses `encoding/csv`. Command tests generate
+real HTML/CSV artifacts from more than 5,000 checks. There is **no deployed
+compliance-scheduler chart workload proven here**: scheduler command-level
+artifact qualification does not establish scheduled live collection/delivery.
+Existing Network policy writers also do not gain new reviewed-revision CAS from
+this console acceptance.
+
+Hosted commit `ddde1e8`, run **38342409331**, passes browser, integration, Go unit,
+frontend, FIPS and govulncheck jobs. Quality, gosec and gitleaks remain **FAIL**;
+the overall required release gate is not green. This selected-console closure
+does not close broader security, CNI/dataplane enforcement, infrastructure,
+provider, migration, scheduler operation or release requirements.
+
 The admission-engine continuation adds migration **172** and persists normalized
 engine outcomes atomically with image scan completion. The built-in vulnerability
 profiles now require successful Trivy and Grype results rather than retired
@@ -1611,9 +1712,9 @@ has zero findings. The API image is
 `sha256:8382addded7cd3d9d2e74410772f6b64342189a0f82e88ea74abe6e19ded867b`.
 These checks do not close the remaining parity or live cutover acceptance gates.
 
-**Parity is not release-complete.** The feature checklist has 59 checked
-and 94 open items. Counts describe acceptance items, not a percentage of code
-implemented. The complete scope and remaining gates are retained below; do not
+**Parity is not release-complete.** The feature checklist has 66 checked
+and 87 open items. The selected-console closure and live schema177 evidence are
+recorded above. Counts describe acceptance items, not a percentage of code implemented. The complete scope and remaining gates are retained below; do not
 convert partially implemented items into checked boxes.
 
 The owner subsequently authorized main-cluster migration/CNPG cutover and
@@ -2242,16 +2343,18 @@ Unchecked parent items remain open until **all** their acceptance requirements
 are met. Code present is not the same as verified or release-ready. The older
 deficiency ledger includes findings that already have fixes; do not use its
 historical counts as a count of currently open defects.
-Acceptance backlog: **94 open**. Lease-scoped private-registry proof and
+Acceptance backlog: **87 open** (selected console scope qualified and deployed
+on schema177 above). Lease-scoped private-registry proof and
 live scanner revision/capacity visibility close two REG-1 items. The October 12 browser/FIPS CI gate closes one
 bounded item with local and hosted evidence. The September reconciliation reached 98;
 the October 11 fleet review adds two explicit ingestion/isolation gates.
 Since the `800b0ef` baseline of 107 open,
-**eighteen existing items closed** (four OPS-1 items, three SIEM-1 items, one
-POL-1 item, one IAM-1 item, three UI-1 items, one UI-2 item, one UI-3 item, two UI-4 items and two REG-1 items), and four new items were added: vendor interoperability, legacy
+**twenty-five existing items closed** (four OPS-1 items, three SIEM-1 items, one
+POL-1 item, one IAM-1 item, five UI-1 items, four UI-2 items, two UI-3 items,
+three UI-4 items and two REG-1 items), and four new items were added: vendor interoperability, legacy
 DPI binding tenant validation, registration/proof of the unreachable
 group-edge HTTP workflow, and durable storage-growth controls.
-The checklist contains **59 checked bounded rows** (39 at baseline); one new
+The checklist contains **66 checked bounded rows** (39 at baseline); one new
 bounded OPS-2 database-reclaim item was added as complete. Earlier
 rounds added bounded POL-1, POL-2 and API-1 fixes without closing their parent
 acceptance item. Those rounds added an eight-object cutover fixture and opt-in
@@ -2262,15 +2365,15 @@ deterministic browser tests, and a disposable local API/UI smoke are not a
 complete NeuVector fixture or deployed cutover. This round closes local-user
 recovery and backend platform-role classification, and adds bounded response-rule
 YAML portability without closing its composite POL-3 item. Session and
-conversation APIs/CSV now use backend platform roles, and selected non-threat
-ingest sources now emit specific response categories; neither change closes
-the remaining UI-3 or POL-3 parent item.
+conversation APIs/CSV use backend platform roles; the final finite role/export
+matrix now closes UI-3. Selected non-threat ingest sources emit specific response
+categories without closing the separate composite POL-3 requirement.
 Partial scanner, registry and POL-1 fixes are recorded in the review table, not counted as
 closures. A checked child does not close its unchecked parent or replace live
 deployment evidence.
 Audited local-user recovery and backend platform-role classification now close
-their own bounded rows; IAM provider cutover and complete platform-role API/export
-coverage remain open.
+their own bounded rows; IAM provider cutover remains open. Complete relevant
+console role/API/export coverage is qualified in the final UI-3 matrix above.
 
 | Acceptance item closed since `800b0ef` | Closure evidence |
 |---|---|
@@ -2283,12 +2386,20 @@ coverage remain open.
 | SIEM-1 named receiver routing and receipts | A deployed API sent to only the selected SMTP receiver, surfaced a delivered receipt and audit link, and refused paused sends; source tests cover retries and isolation. |
 | POL-1 shared GroupPicker coverage | Editor audit and a response-rule save-path test prove shared group selection; full enforcement remains a separate open item. |
 | IAM-1 local-user recovery | PostgreSQL/router tests prove scoped unlock and force reset with atomic audit receipts; a deterministic production-browser test exercises the local-only operator controls. Other IAM-1 items remain open. |
-| UI-3 platform-role classification | Source API tests, production-browser tests and a genuine isolated custom-namespace chart installation prove `core` classification, visibility and continued discovery. The complete API/export matrix remains open. |
+| UI-3 platform-role classification | Source API tests, production-browser tests and a genuine isolated custom-namespace chart installation prove `core` classification, visibility and continued discovery. The complete relevant console API/export matrix is qualified in the final UI-3 continuation above. |
 | UI-2 YAML contract discipline | The six enterprise-table YAML controls (network, DLP, signatures, response, groups, vulnerability profiles) each pair export with a registered import route and typed client call. Generated cluster-init and Kubernetes policy YAML are deployment artifacts, not table configuration imports. The response-rule control has deterministic production-browser coverage; the other families have existing import tests. This closes only the YAML discipline row, not shared-table completeness. |
-| UI-1 scope order | The October 12 user decision makes Clusters the first persistent entry, followed by Organization, Platform and Integrations, across the sidebar, command palette and Settings hub. Navigation fixtures now follow that order, and live browser checks confirm sidebar, Settings and palette agreement. Prior deterministic browser evidence covers canonical route targets, keyboard navigation and cluster context; the revised full specs have not been rerun. Other UI-1 items remain open. |
-| UI-1 duplicate entry points | Generic health and system-health aliases now redirect to platform health, while cluster sensor/registration health remains intentionally distinct at its cluster URL. Token, attestation, access-control, integration and Settings aliases preserve deep paths, filters and fragments. Cluster health selection follows its URL rather than silently displaying the first cluster; three API-backed cluster browser cases and deterministic alias/settings cases pass. Other feature-home and page-contract rows remain open. |
+| UI-1 scope order | The October 12 user decision makes Clusters the first persistent entry, followed by Organization, Platform and Integrations, across the sidebar, command palette and Settings hub. Navigation fixtures now follow that order, and live browser checks confirm sidebar, Settings and palette agreement. Prior deterministic browser evidence covers canonical route targets, keyboard navigation and cluster context; the revised full production-browser suite also passes. The final UI-1 source/workflow matrix is recorded above. |
+| UI-1 duplicate entry points | Generic health and system-health aliases now redirect to platform health, while cluster sensor/registration health remains intentionally distinct at its cluster URL. Token, attestation, access-control, integration and Settings aliases preserve deep paths, filters and fragments. Cluster health selection follows its URL rather than silently displaying the first cluster; three API-backed cluster browser cases and deterministic alias/settings cases pass. The finite canonical-home and final page/workflow acceptance matrices are recorded above. |
+| UI-1 primary page contract | The finite 110-source router audit finds no primary undisclosed metric row above five or competing native inventory table. Frozen production-browser navigation/smoke plus targeted workspace cases qualify the page families; Settings directory and dedicated-form exceptions are explicit. Final deployment and live checks are recorded above. |
+| UI-1 URL workspaces and dedicated forms | Production-browser cases qualify peer tabs/history, exact scoped forms, Save/Cancel/back, retained failed drafts and Advanced disclosure; read-only peeks and confirmations do not become editing drawers. |
+| UI-2 full inventory controls | Server continuation/filter/sort/summary/matching CSV and visible source caps replace the selected console's secondary bounded consumers, including final Backup history. Shared table controls retain all rows and operator scope. |
+| UI-2 operator preferences and saved views | Browser cases cover URL/history restoration, tenant/user isolation, hidden active filters, stale-column migration, keyboard layout controls, reset and failed-storage draft retention. |
+| UI-2 read-only peeks | `DeploymentFindingsInventory` observation peeks, Timeline event drawers, Scanner job drawers and Network flow/workload inspectors support repetitive inspection without editing. Exact selection is URL-bound; authoring navigates dedicated forms and missing records do not substitute another row. |
+| UI-3 relevant API/export role agreement | The finite endpoint/consumer matrix qualifies actual roles across JSON, applicable CSV/NDJSON and reports, with explicit unknown identity and genuine custom-install discovery/hide-show proof. |
+| UI-4 readable report downloads | HTML/CSV/JSON are preferred; optional PDF keeps actual MIME/filename and fallback. Exact scope receipts, effective source summaries, immutable artifacts and real command-generated reports are qualified. Scheduled runtime deployment is not claimed. |
 
-New bounded evidence without a checklist closure: network sessions and
+Historical bounded continuation (superseded for selected UI-1/2/3/4 acceptance by
+the final source/browser matrix above): network sessions and
 conversations now return tenant/cluster-scoped platform roles, conversation
 detail carries roles for matching flows, and session/conversation CSV exports
 include roles. Source race tests and deterministic browser tests cover a custom
@@ -2428,7 +2539,7 @@ concurrent-ingest cases. This closes only the bounded reclaim item below.
 | MIG-1 bounded cutover fixture | Eight-object PostgreSQL, mock and disposable local API smoke; complete canonical fixture open | A manifest enumerates two groups, one network edge, one vulnerability profile, one DLP rule, one WAF rule and two group bindings with source, converted, unsupported, applied and rolled-back counts. A fresh migration-166 PostgreSQL handler test verifies preview semantics, target rows, apply and rollback. The opt-in loopback-only runner refuses nonempty import history or preexisting targets, checks counts and HTML availability for Migration and Policy Center routes, and attempts rollback cleanup on failure; 11 mock tests pass. Against a disposable local API and separate production-build UI HTML server, preflight, eight-create preview, apply/target reads and eight-delete rollback all passed. A production-build Chromium case with deterministic API fixtures shows DLP/WAF preview/apply, Policy Center links and imported origin/group scope on DLP and WAF/DPI pages; it does not render against the real importing API. The local smoke used a seeded org rather than a genuine new-org cutover, and remaining families are absent, so neither the full fixture nor new-org cutover acceptance item is closed. |
 | POL-1 group workflow | API and production-browser control plane verified; enforcement open | A PostgreSQL-backed server test creates groups, previews/applies a NeuVector fixture containing a network edge and DLP/WAF bindings, checks usage and mode promotion, verifies RBAC/audit, and rejects unsafe delete without losing the group or references. A Chromium Playwright run against both an isolated production stack and a Helm-deployed API with a production frontend build creates a group, uses it in a network rule and DLP/WAF bindings, inspects usage, promotes mode, gets 409 on unsafe delete and cleans up. The UI-authored network rule is a network override, not a `group_rule_edges` row, so the usage blocker count is two (DLP/WAF). Live network and DPI enforcement remain unproven; the item stays open. |
 | IAM-1 local-user recovery | Closed bounded action; other IAM-1 items open | Unlock and force-password-reset routes require manage-users RBAC and scope the target to the caller org. Mutations and audit receipts commit together or roll back on audit failure. Access-control overview exposes local-password, lockout and reset-required state; production-build Chromium verifies local-only controls and the recovery route calls with deterministic API fixtures. Focused handler, router/RBAC, audit and OpenAPI tests pass. LDAP/SAML/OIDC connection tests, role previews, NeuVector identity import and namespace filtering remain open. |
-| UI-3 platform-role classification | Closed backend-classification row; API/export matrix open | Exact platform namespaces plus workload labels and Helm installation identity classify custom platform install namespaces as `core` in deployment list/detail, container inventory, network map, exposure and policy lifecycle. Frontend inventories and map prefer the backend role and retain exact-namespace fallback for legacy responses. Source tests and production-browser inventory/export tests pass. A genuine custom installation proves workload/container API/CSV roles, hide/show and continued discovery while hidden; the complete export surface remains open. |
+| UI-3 platform-role classification | Closed backend classification; finite relevant API/export matrix qualified and deployed | Exact platform namespaces plus workload labels and Helm installation identity classify custom platform install namespaces as `core` in deployment list/detail, container inventory, network map, exposure and policy lifecycle. Frontend inventories and map prefer the backend role and retain exact-namespace fallback for legacy responses. Source tests and production-browser inventory/export tests pass. A genuine custom installation proves workload/container API/CSV roles, hide/show and continued discovery while hidden. The final role/export matrix qualifies the relevant console surface; schema177 report/tuple/NDJSON deployment is verified above. |
 | POL-3 response-rule YAML portability | Bounded control-plane slice; composite POL-3 row open | Org-wide or exact-cluster YAML export/import validates version, scope, media type, size, selectors and conflict policy; import records an attempt before mutation and commits completion audit with successful rows. Unsupported action params fail closed, receiver IDs normalize to names on export, and import requires a matching target-org receiver name. OpenAPI, scoped RBAC, PostgreSQL/race and deterministic production-browser controls are covered. Non-threat event-category wiring plus deployed response-enforcement proof remain open. |
 
 | REG-1 kind validation | Source fix verified; connector matrix open | Registry create rejects unknown kinds with an explicit 400; PATCH rejects any supplied `kind` (including null/empty/non-string) rather than silently ignoring an attempted type change. Unit/HTTP tests cover all 13 accepted kinds, unknown create and immutable update. This does not prove per-kind discovery/auth against real registries or endpoint/credential validation. |
@@ -3167,56 +3278,67 @@ progressive disclosure, while retaining Constellation's security vocabulary.
   attestation, access-control, integration and Settings aliases preserve deep
   paths, filters and fragments with production-build browser coverage. `/tokens`
   is the browser alias because `/api` is reserved by the server.
-- [ ] Every primary page opens with one verdict, no more than five KPIs, and one
-  primary table or workspace.
-- [ ] Use URL-linked tabs for peer views, dedicated `/new` and `/:id/edit` form
+- [x] Every primary page opens with one verdict, no more than five KPIs, and one
+  primary table or workspace. The finite 110-source audit and production-browser
+  family matrix qualify shared compact verdicts, responsive metric rows and one
+  primary workspace. Dedicated forms do not invent KPIs; Settings is a navigation
+  directory. Final schema177 deployment is verified above.
+- [x] Use URL-linked tabs for peer views, dedicated `/new` and `/:id/edit` form
   pages with Save/Cancel/back navigation, and Advanced disclosure for expert-only
-  fields. This follows the established user directive in `frontend/CLAUDE.md`;
-  editing drawers are not the target interaction.
+  fields. Browser cases cover scope/history, failed drafts and review conflicts.
+  Transient read-only peeks and nested Network inspector tabs are accepted only
+  within exact URL-bound selection/workspaces; confirmations have no authoring
+  inputs. Editing drawers are absent from the routed authoring workflows.
 
-The October 12 completion audit narrows the remaining selected console work to
-concrete page families rather than expanding it into infrastructure acceptance:
+The finite family matrix combines source layout verification with production
+browser workflow evidence: navigation/deep-ui for route breadth; Assets,
+Deployments, host-CVE and exact Finding observation cases for entity evidence;
+high-volume inventories and secondary Network cases for continuation; groups,
+reviewed runtime/peer, response, compliance, integration and vulnerability-profile
+cases for dedicated forms and review; migration/connector cases for peer
+workspaces; retention/NVD and canonical settings cases for settings forms.
+`switchboard-scope.spec.ts` qualifies collapsed guidance and cluster-changing
+links. Source audit: `/tmp/console-page-contract-final177.jsonl`; full/final
+browser logs are recorded in the final selected-console continuation above.
+This closes the selected page contract, not every broader feature's side-effect
+or infrastructure acceptance.
 
-1. Cross-page table acceptance: qualify continuation beyond source caps, server
-   filtering/sorting and export agreement for the remaining high-volume surfaces.
-2. Saved-state acceptance: complete stale-column/reset, user/tenant isolation,
-   keyboard and accessibility coverage across the shared table adopters.
-3. Platform-role and dashboard acceptance: finish the relevant API/export matrix,
-   live custom-install proof, and destination/source-total checks across datasets.
 
-Coverage/Posture scope and sample disclosure, Migration peer workspaces, Scanner
-interval forms and attempt ledger, Network secondary forms and the Dashboard
-source/destination matrix are implemented in the workspace/evidence continuation
-above. Bounded component, database and live read-only evidence does not substitute
-for the remaining UI-2/3/4 acceptance matrix.
+| Primary family | Source contract and production-browser evidence |
+|---|---|
+| Clusters, component/coverage/health and Dashboard | `ClustersLandingPage`, `ComponentsPage`, `CoveragePage`, `SystemHealthPage`, `DashboardPage`; `clusters.spec.ts`, `cluster-scope.spec.ts`, `coverage.spec.ts`, `dashboard-operations-reconciliation.spec.ts`, `dashboard-report-download.spec.ts`. |
+| Workloads, nodes, risk and finding/CVE detail | `AssetsPage`, `DeploymentDetailPage`, `NodeDetailPage`, `RiskDetailPage`, `FindingsPage`, `CVEDetailPage`; `assets.spec.ts`, `host-cves-drilldown.spec.ts`, `finding-instances.spec.ts`, `high-volume-page-caps.spec.ts`, `deep-ui.spec.ts`. |
+| Image/repository/serverless scans, registry and scanner/connectors | Shared scan inventories, evidence tabs and dedicated source forms; `high-volume-page-caps.spec.ts`, `connector_coverage.spec.ts`, `navigation.spec.ts`. |
+| Network, groups, runtime, baseline and file profiles | `NetworkMapPage`, `GroupsPage`, `RuntimePoliciesPage`, `BaselinesPage`, `FileMonitorPage`; `network-secondary-inventories.spec.ts`, `network-saved-views.spec.ts`, `network-rule-inventory.spec.ts`, `groups-workflow.spec.ts`, `reviewed-runtime-peer-preferences.spec.ts`, `baselines.spec.ts`, plus `FileMonitorWorkflows.test.tsx` for reviewed-draft transitions. |
+| Policy/admission, DLP/WAF/signatures, response and compliance | Dedicated catalog/rule/profile/exemption/schedule forms and peer workspaces; `policy-precedence.spec.ts`, `migration-dpi-visibility.spec.ts`, `vulnerability-profile-workflow.spec.ts`, `response.spec.ts`, `response-rules-portability.spec.ts`, `compliance_policies.spec.ts`, `compliance_schedules.spec.ts`. |
+| Audit/Timeline, access/tokens/auth, settings and system configuration | `AuditPage`, `TimelinePage`, `AccessControlPage`, `ApiTokensPage`, `EffectiveConfigPage`; `audit-timeline-pagination.spec.ts`, `access_control.spec.ts`, `settings-entry-points.spec.ts`, `retention-form.spec.ts`, `nvd-form.spec.ts`, auth-provider cases. |
+| Integration, migration, federation/backup and navigation directories | Shared URL workspaces and dedicated receiver/routing/SMTP/restoration forms; `integrations.spec.ts`, `migration-remaining.spec.ts`, `migration-dpi-visibility.spec.ts`, `backup-inventory.spec.ts`, `switchboard-scope.spec.ts`, plus `navigation.spec.ts`/`deep-ui.spec.ts` route breadth. |
 
-The baseline, inventory, entity-detail, configuration/health and bounded inventory
-control implementations are recorded in the Helm-53 evidence above. Visible caps,
-page-scoped filters/exports recorded for that earlier batch and fixture-only
-positive paths did not establish full-fleet or all-page acceptance. The subsequent
-scan-inventory increment replaces page-only filtering/export for image, repository
-and serverless inventories; other capped surfaces still need acceptance.
-
-This audit found no additional confirmed duplicate feature-home renderer or
-primary KPI row above five. Those findings do not close the all-page contract or
-replace browser acceptance. Legitimate dedicated settings forms and filter inputs
-are not counted as inline authoring.
+These references distinguish source layout breadth from workflow assertions;
+heading-only smoke does not by itself prove every form, count or side effect.
 
 ### UI-2 Shared enterprise tables
 
-- [ ] Apply visible pagination, server filters, column selection, density,
+- [x] Apply visible pagination, server filters, column selection, density,
   refresh controls, saved views, and CSV export to remaining high-volume pages.
+  The finite inventory matrix covers full matching summaries/exports, stable
+  continuation, explicit caps and failed-refresh evidence. Final Backup history
+  pages beyond 50 and preserves independent latest-success evidence; browser
+  and fresh database cases pass. Page CSV remains distinct from matching CSV.
 - [x] Add YAML only where a matching import contract exists. Audited the six
   enterprise-table YAML control families against registered import routes and
   client methods; generated deployment artifacts are outside this table rule.
-- [ ] Persist operator choices without making saved state hide active filters.
-  Extend the existing density/visibility preferences with explicit URL state
-  and user-scoped saved views where useful. Astronomer's table-view API and
-  state sanitization are reference implementations; require cross-user/tenant
-  isolation, stale-column migration and visible reset behavior before closure.
-- [ ] Add transient read-only detail peeks where justified for repetitive triage;
-  prefer detail pages and keep every add/edit form on its own URL. Never use a
-  detail peek as a second editing surface.
+- [x] Persist operator choices without making saved state hide active filters.
+  Browser cases qualify shared density/visibility/layout, keyboard controls,
+  reset, stale-column migration and operator-scoped saved URL views. Tenant/user
+  changes, reload/history and storage failures preserve truthful scope/drafts.
+  Hidden-column sorts stay visible with a Clear sort action.
+- [x] Add transient read-only detail peeks where justified for repetitive triage;
+  prefer detail pages and keep every add/edit form on its own URL.
+  `DeploymentFindingsInventory` observation peeks, Timeline event drawers,
+  Scanner job drawers and Network workload/flow inspectors remain read-only;
+  off-page or missing selections do not substitute another record. Forms retain scope and
+  reviewed revisions through failed writes and Cancel/back.
 
 ### UI-3 Platform-component visibility
 
@@ -3229,18 +3351,16 @@ are not counted as inline authoring.
   NeuVector's `platform_role=core`. Source API and deterministic browser tests
   cover custom namespaces. A genuine isolated chart installation additionally
   qualifies workload/container discovery, API/CSV roles and browser hide/show.
-- [ ] Expose the same role in all relevant APIs and exports; UI namespace matching
-  remains a compatibility fallback. Deployment, container, network-map, exposure
-  and policy-lifecycle APIs plus session/conversation responses and
-  container/deployment/session/conversation CSV now carry the role. Multi-cluster
-  org-wide conversations omit ambiguous label-derived roles. Conversation
-  detail includes roles for matching flows; the conversation table CSV also
-  includes endpoint roles with browser coverage. Dashboard exposure CSV also includes the server role. Other exports
-  remain open. The subsequent flow/recent-entry, threat and
-  capture increment adds exact identity-derived roles and default page CSV
-  coverage, including explicit unknown values. Retained stream and capture
-  matching exports now preserve role metadata too. The isolated live custom
-  installation qualifies workload/container surfaces, not every export.
+- [x] Expose the same role in all relevant APIs and exports; UI namespace matching
+  remains a compatibility fallback. The finite matrix includes workload/container,
+  asset/generic finding, node/deployment evidence, runtime/threat, baseline/file,
+  Network map/exposure/session/conversation/stream/PCAP/peer/rule/lifecycle,
+  Dashboard workload rows, readable report workloads and finding NDJSON.
+  Applicable matching/page CSV agrees with JSON; ambiguity, IP/external and
+  foreign identity stay explicitly unknown. Shared exact-role database cases,
+  production-browser export/visibility cases and the genuine custom-install
+  proof qualify the matrix. Artifact-only/binary exports do not invent workload
+  roles. Schema177 report/tuple/NDJSON additions are deployed above.
 
 ### UI-4 Dashboard and operational posture
 
@@ -3276,8 +3396,14 @@ are not counted as inline authoring.
   temporal boundaries, missing/pinned audit records, history and reload. Backend
   and recorded live checks supplement those fixtures. Operational health/source
   reconciliation is qualified in the separate item above.
-- [ ] Prefer downloadable HTML/CSV/JSON evidence; add PDF only when it materially
-  improves a customer workflow.
+- [x] Prefer downloadable HTML/CSV/JSON evidence; add PDF only when it materially
+  improves a customer workflow. Dashboard prefers exact scoped HTML and validates
+  organization/cluster receipts before saving; report schedules default to HTML
+  and JSON. Actual immutable artifact metadata preserves PDF-to-HTML fallback;
+  legacy metadata remains unknown. Effective exemptions, full retained source
+  units, real names/roles and CSV escaping have database/command/browser proof.
+  Scheduler command artifact generation is qualified; deployed scheduled
+  collection/delivery is not claimed. Final schema177 deployment is verified above.
 
 ## P2 — supportability and scale
 
