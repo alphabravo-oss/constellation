@@ -785,6 +785,8 @@ func (s *Server) buildRouter() chi.Router {
 			pcap := runtime.NewPcapHTTP(s.db)
 			r.Post("/runtime-pcap/start", s.requireVerb(rbac.VerbManagePolicies, pcap.Start))
 			r.Get("/runtime-pcap", s.requireVerb(rbac.VerbReadFindings, pcap.List))
+			r.Get("/runtime-pcap/inventory", s.requireVerb(rbac.VerbReadFindings, pcap.Inventory))
+			r.Get("/runtime-pcap/inventory.csv", s.requireVerb(rbac.VerbReadFindings, pcap.InventoryCSV))
 			r.Get("/runtime-pcap/{id}", s.requireVerb(rbac.VerbReadFindings, pcap.Get))
 			r.Get("/runtime-pcap/{id}/download", s.requireVerb(rbac.VerbReadFindings, pcap.Download))
 			r.Delete("/runtime-pcap/{id}", s.requireVerb(rbac.VerbManagePolicies, pcap.Delete))
@@ -953,6 +955,8 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/network/conversations", s.requireVerb(rbac.VerbReadFindings, netConv.List))
 			r.Get("/network/conversations.csv", s.requireVerb(rbac.VerbReadFindings, netConv.ListCSV))
 			r.Get("/network/conversations/entries", s.requireVerb(rbac.VerbReadFindings, netConv.Detail))
+			r.Get("/network/conversations/streams", s.requireVerb(rbac.VerbReadFindings, netConv.EntriesInventory))
+			r.Get("/network/conversations/streams.csv", s.requireVerb(rbac.VerbReadFindings, netConv.EntriesCSV))
 			// Plan B5: StreamFlows SSE fallback, only when the hot graph is on.
 			if s.live != nil {
 				streamFlows := network.NewStreamFlows(s.live)

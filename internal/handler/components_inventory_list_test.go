@@ -214,6 +214,42 @@ func TestComponentsInventoryContinuation(t *testing.T) {
 			t.Fatalf("csv rows%d first%v headers%v", len(records), records[1], w.Header())
 		}
 	})
+
+	t.Run("matching CSV carries explicit revisions beyond the first page and blanks unknown metadata", func(t *testing.T) {
+		if _, err := pool.Exec(ctx, `UPDATE component_heartbeats SET metadata = CASE WHEN id=$1 THEN '{"system_config_revision":9}'::jsonb WHEN id=$2 THEN '{"system_config_revision":" 10 "}'::jsonb ELSE metadata END WHERE id IN($1,$2)`, selectedID, healthyID); err != nil {
+			t.Fatal(err)
+		}
+		w := request(h.ExportCSV, base+"&role=enforcer&sort=hostname&order=asc&limit=1&offset=1000")
+		if w.Code != 200 {
+			t.Fatalf("csv %d %s", w.Code, w.Body.String())
+		}
+		records, err := csv.NewReader(w.Body).ReadAll()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(records) != 1007 || records[0][len(records[0])-1] != "System config revision" {
+			t.Fatalf("rows/header: %d %v", len(records), records[0])
+		}
+		revisionByHost := map[string]string{}
+		for _, row := range records[1:] {
+			revisionByHost[row[8]] = row[len(row)-1]
+		}
+		if revisionByHost["bulk-host-0000"] != "9" || revisionByHost["bulk-host-1004"] != "10" || revisionByHost["superseded-agent"] != "" || revisionByHost["bulk-host-0001"] != "" {
+			t.Fatalf("revision evidence: first=%q tail=%q unknown=%q", revisionByHost["bulk-host-0000"], revisionByHost["bulk-host-1004"], revisionByHost["superseded-agent"])
+		}
+		for _, host := range []string{"bulk-host-0000", "bulk-host-1004", "superseded-agent"} {
+			data := read(base + "&q=" + url.QueryEscape(host))
+			if len(data.Components) != 1 || componentReportedConfigRevision(data.Components[0].Metadata) != revisionByHost[host] {
+				t.Fatalf("JSON/CSV revision mismatch for %s: %+v / %q", host, data.Components, revisionByHost[host])
+			}
+		}
+		if _, found := revisionByHost["foreign-org"]; found {
+			t.Fatal("foreign organization exported")
+		}
+		if _, found := revisionByHost["misattributed"]; found {
+			t.Fatal("foreign cluster attribution exported")
+		}
+	})
 	t.Run("scope and invalid filter rejection", func(t *testing.T) {
 		orgRows := read("limit=1000")
 		if orgRows.Total != 1011 {

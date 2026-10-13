@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -232,7 +234,7 @@ func (h *ComponentsInventory) writeInventoryList(w http.ResponseWriter, r *http.
 	if export {
 		var body bytes.Buffer
 		writer := csv.NewWriter(&body)
-		err = writer.Write([]string{"Instance ID", "Cluster ID", "Component", "Display name", "Role", "Console role", "Scope", "Kind", "Hostname", "Status", "Status reason", "Version", "Commit", "Uptime seconds", "Restart count", "First seen", "Last seen"})
+		err = writer.Write([]string{"Instance ID", "Cluster ID", "Component", "Display name", "Role", "Console role", "Scope", "Kind", "Hostname", "Status", "Status reason", "Version", "Commit", "Uptime seconds", "Restart count", "First seen", "Last seen", "System config revision"})
 		end := total
 		if end > inventorylist.ExportLimit {
 			end = inventorylist.ExportLimit
@@ -246,7 +248,7 @@ func (h *ComponentsInventory) writeInventoryList(w http.ResponseWriter, r *http.
 				clusterID = item.ClusterID.String()
 			}
 			_, label := componentListAlias(item)
-			err = writer.Write([]string{item.ID.String(), clusterID, item.Component, item.DisplayName, item.Role, label, item.Scope, item.Kind, item.Hostname, item.Status, item.StatusReason, item.Version, item.Commit, strconv.FormatInt(item.UptimeSeconds, 10), strconv.Itoa(item.RestartCount), item.FirstSeenAt.Format(time.RFC3339), item.LastSeenAt.Format(time.RFC3339)})
+			err = writer.Write([]string{item.ID.String(), clusterID, item.Component, item.DisplayName, item.Role, label, item.Scope, item.Kind, item.Hostname, item.Status, item.StatusReason, item.Version, item.Commit, strconv.FormatInt(item.UptimeSeconds, 10), strconv.Itoa(item.RestartCount), item.FirstSeenAt.Format(time.RFC3339), item.LastSeenAt.Format(time.RFC3339), componentReportedConfigRevision(item.Metadata)})
 		}
 		writer.Flush()
 		if err == nil {
@@ -384,4 +386,54 @@ func (h *ComponentsInventory) loadInventoryHeartbeats(ctx context.Context, org u
 		owned = append(owned, hb)
 	}
 	return owned, names, nil
+}
+
+// componentReportedConfigRevision mirrors the console's explicit revision key.
+// Unrelated metadata, malformed values and unsafe integers are not evidence.
+func componentReportedConfigRevision(metadata map[string]any) string {
+	const maxSafe = 9007199254740991
+	value := metadata["system_config_revision"]
+	var number float64
+	switch typed := value.(type) {
+	case float64:
+		number = typed
+	case int:
+		number = float64(typed)
+	case int64:
+		number = float64(typed)
+	case json.Number:
+		parsed, err := typed.Float64()
+		if err != nil {
+			return ""
+		}
+		number = parsed
+	case string:
+		// ECMAScript String.trim whitespace, matching the console's metadata parser.
+		text := strings.Trim(typed, "\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff")
+		if text == "" {
+			return ""
+		}
+		for _, digit := range text {
+			if digit < '0' || digit > '9' {
+				return ""
+			}
+		}
+		parsed, err := strconv.ParseUint(strings.TrimLeft(text, "0"), 10, 64)
+		if strings.TrimLeft(text, "0") == "" {
+			return "0"
+		}
+		if err != nil || parsed > maxSafe {
+			return ""
+		}
+		return strconv.FormatUint(parsed, 10)
+	default:
+		return ""
+	}
+	if math.IsNaN(number) || math.IsInf(number, 0) || number < 0 || number > maxSafe || math.Trunc(number) != number {
+		return ""
+	}
+	if number == 0 {
+		return "0"
+	}
+	return strconv.FormatFloat(number, 'f', 0, 64)
 }

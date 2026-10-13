@@ -319,3 +319,9 @@ request/response schemas. Prioritize schemas for:
 
 Until those are expanded, use the examples above and the TypeScript client in
 `frontend/src/api/client.ts` as the DTO source of truth.
+
+### Retained stream and capture inventories (October 13)
+
+- `GET /api/v1/network/conversations/streams` and `GET /api/v1/network/conversations/streams.csv` provide an exact owned-cluster, directed-pair inventory of retained rollup tuples. Source filters apply before aggregation; full matching counts, summaries, sorting, page continuation and CSV share that scope. Tuple identities describe aggregates, not physical packets or events.
+- `GET /api/v1/runtime-pcap/inventory` and `GET /api/v1/runtime-pcap/inventory.csv` provide filtered, sorted, paged retained capture requests and matching CSV. Reported packet/file counts preserve null versus zero; this inventory does not establish collection coverage.
+- Both inventories default to 100 rows (maximum 500), expose full matching totals, require read-findings, and reject foreign cluster scope. Matching CSV validates but ignores page selection and reports its 100,000-row limit and truncation. Legacy detail/list routes remain available.

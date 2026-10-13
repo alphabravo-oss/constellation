@@ -792,6 +792,10 @@ func componentPublicMetadata(metadata map[string]any) map[string]any {
 			out[key] = value
 		}
 	}
+	if revision := componentReportedConfigRevision(metadata); revision != "" {
+		value, _ := strconv.ParseInt(revision, 10, 64)
+		out["system_config_revision"] = value
+	}
 	if vuln := safeMetadataSubset(metadataMap(metadata, "vulndb"), []string{"enabled", "ready", "status", "bundle_version", "payload_hash", "exported_at", "record_count"}); len(vuln) > 0 {
 		out["vulndb"] = vuln
 	}
