@@ -1581,8 +1581,8 @@ has zero findings. The API image is
 `sha256:8382addded7cd3d9d2e74410772f6b64342189a0f82e88ea74abe6e19ded867b`.
 These checks do not close the remaining parity or live cutover acceptance gates.
 
-**Parity is not release-complete.** The feature checklist has 58 checked
-and 95 open items. Counts describe acceptance items, not a percentage of code
+**Parity is not release-complete.** The feature checklist has 59 checked
+and 94 open items. Counts describe acceptance items, not a percentage of code
 implemented. The complete scope and remaining gates are retained below; do not
 convert partially implemented items into checked boxes.
 
@@ -2212,16 +2212,16 @@ Unchecked parent items remain open until **all** their acceptance requirements
 are met. Code present is not the same as verified or release-ready. The older
 deficiency ledger includes findings that already have fixes; do not use its
 historical counts as a count of currently open defects.
-Acceptance backlog: **95 open**. Lease-scoped private-registry proof and
+Acceptance backlog: **94 open**. Lease-scoped private-registry proof and
 live scanner revision/capacity visibility close two REG-1 items. The October 12 browser/FIPS CI gate closes one
 bounded item with local and hosted evidence. The September reconciliation reached 98;
 the October 11 fleet review adds two explicit ingestion/isolation gates.
 Since the `800b0ef` baseline of 107 open,
-**seventeen existing items closed** (four OPS-1 items, three SIEM-1 items, one
-POL-1 item, one IAM-1 item, three UI-1 items, one UI-2 item, one UI-3 item, one UI-4 item and two REG-1 items), and four new items were added: vendor interoperability, legacy
+**eighteen existing items closed** (four OPS-1 items, three SIEM-1 items, one
+POL-1 item, one IAM-1 item, three UI-1 items, one UI-2 item, one UI-3 item, two UI-4 items and two REG-1 items), and four new items were added: vendor interoperability, legacy
 DPI binding tenant validation, registration/proof of the unreachable
 group-edge HTTP workflow, and durable storage-growth controls.
-The checklist contains **58 checked bounded rows** (39 at baseline); one new
+The checklist contains **59 checked bounded rows** (39 at baseline); one new
 bounded OPS-2 database-reclaim item was added as complete. Earlier
 rounds added bounded POL-1, POL-2 and API-1 fixes without closing their parent
 acceptance item. Those rounds added an eight-object cutover fixture and opt-in
@@ -3214,9 +3214,17 @@ are not counted as inline authoring.
 
 ### UI-4 Dashboard and operational posture
 
-- [ ] Reconcile component health, policy modes, threats, vulnerability posture,
+- [x] Reconcile component health, policy modes, threats, vulnerability posture,
   exposed services, admission, scanner DB, and federation counts with their
-  source endpoints.
+  source endpoints. The finite dashboard browser matrix covers source units,
+  scope, filtering, missing evidence and exact destination cohorts. Four further
+  operational cases passed against the schema-174 production frontend: component
+  ratios, cluster versus organization scanner capacity, queue counts and DB
+  version precedence, federation master/joint/standalone states, configured group
+  modes and admission states. Unavailable sources withhold healthy counts and
+  recover through Retry. Evidence: `/tmp/dashboard-operations-browser.log`;
+  typecheck and lint passed. These checks qualify displayed posture, not broader
+  enforcement or infrastructure acceptance.
 - [x] Link every tile to the exact filtered source view. Browser tests now cover
   dashboard metric destinations and supported component/network filters.
   Findings filters and server pages now preserve URL state and use matching
@@ -3237,7 +3245,7 @@ are not counted as inline authoring.
   browser matrix now reconciles positive multi-page cohorts, matching exports,
   temporal boundaries, missing/pinned audit records, history and reload. Backend
   and recorded live checks supplement those fixtures. Operational health/source
-  reconciliation remains in the separate item above.
+  reconciliation is qualified in the separate item above.
 - [ ] Prefer downloadable HTML/CSV/JSON evidence; add PDF only when it materially
   improves a customer workflow.
 
