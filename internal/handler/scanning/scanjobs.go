@@ -1535,16 +1535,17 @@ func upsertTargetFinding(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, cluste
 		clusterArg = *clusterID
 	}
 	var existing uuid.UUID
+	var existingFirstSeen time.Time
 	err := tx.QueryRow(ctx, `
-SELECT id
+SELECT id,first_seen_at
   FROM findings
  WHERE org_id = $1
    AND kind = 'vulnerability'
    AND COALESCE(cluster_id, '00000000-0000-0000-0000-000000000000'::uuid) = COALESCE($2::uuid, '00000000-0000-0000-0000-000000000000'::uuid)
    AND scan_target_id = $3
    AND detail_json->>'scan_finding_key' = $4
- ORDER BY last_seen_at DESC
- LIMIT 1`, orgID, clusterArg, target.ID, findingKey).Scan(&existing)
+ ORDER BY last_seen_at DESC,id ASC,first_seen_at ASC
+ LIMIT 1`, orgID, clusterArg, target.ID, findingKey).Scan(&existing, &existingFirstSeen)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return err
 	}
@@ -1578,10 +1579,10 @@ UPDATE findings
                        WHEN accepted_until IS NOT NULL THEN lifecycle
                        WHEN NULLIF($19, '') IS NOT NULL THEN $19
                        ELSE 'open' END
- WHERE id = $1 AND org_id = $17`,
+ WHERE id = $1 AND org_id = $17 AND first_seen_at=$20`,
 			existing, assetID, clusterArg, f.VulnerabilityID, title, f.Description,
 			severity, risk, canonicalEngine, string(engines), string(detail),
-			target.ID, target.Type, target.Ref, target.ClusterID, target.SourceType, orgID, f.Reachable, lifecycleOverride)
+			target.ID, target.Type, target.Ref, target.ClusterID, target.SourceType, orgID, f.Reachable, lifecycleOverride, existingFirstSeen)
 		return err
 	}
 	_, err = tx.Exec(ctx, `

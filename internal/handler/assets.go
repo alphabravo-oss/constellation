@@ -113,7 +113,7 @@ SELECT id FROM image_scan_results
 		}
 	}
 	rows, err := a.db.Pool().Query(r.Context(), `
-SELECT id, kind, COALESCE(external_id,''), title, severity, risk_score, lifecycle, last_seen_at, `+platformrole.FindingPlatformRoleSQL("findings")+`
+SELECT id, kind, COALESCE(external_id,''), title, severity, risk_score, lifecycle, last_seen_at, `+platformrole.FindingPlatformRoleSQL("findings")+`,first_seen_at,revision::text,cluster_id,target_cluster_id,id::text||':'||extract(epoch FROM first_seen_at)::text
   FROM findings
  WHERE org_id = $1 AND asset_id = $2 AND cluster_id IS NOT DISTINCT FROM $3::uuid
  ORDER BY risk_score DESC, last_seen_at DESC, id, first_seen_at
@@ -128,8 +128,11 @@ SELECT id, kind, COALESCE(external_id,''), title, severity, risk_score, lifecycl
 			fid, kind, externalID, title, severity, lifecycle, role string
 			risk                                                    int
 			lastSeen                                                time.Time
+			firstSeen                                               time.Time
+			revision, rowID                                         string
+			sourceCluster, targetCluster                            *uuid.UUID
 		)
-		if err := rows.Scan(&fid, &kind, &externalID, &title, &severity, &risk, &lifecycle, &lastSeen, &role); err != nil {
+		if err := rows.Scan(&fid, &kind, &externalID, &title, &severity, &risk, &lifecycle, &lastSeen, &role, &firstSeen, &revision, &sourceCluster, &targetCluster, &rowID); err != nil {
 			fail()
 			return
 		}
@@ -137,6 +140,8 @@ SELECT id, kind, COALESCE(external_id,''), title, severity, risk_score, lifecycl
 			"id": fid, "kind": kind, "external_id": externalID, "title": title,
 			"severity": severity, "risk_score": risk, "lifecycle": lifecycle,
 			"last_seen_at": lastSeen.UTC().Format(time.RFC3339), "platform_role": role,
+			"first_seen_at": firstSeen.UTC().Format(time.RFC3339Nano), "revision": revision, "row_id": rowID,
+			"source_cluster_id": sourceCluster, "target_cluster_id": targetCluster,
 		})
 	}
 

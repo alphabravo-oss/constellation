@@ -15,7 +15,14 @@ import (
 // Values are always parameters; expressions and sort columns come from allowlists.
 func findingFilter(orgID uuid.UUID, values url.Values, includeLifecycle, includeFixable bool) (string, []any, error) {
 	args := []any{orgID}
-	parts := []string{"org_id = $1", "(kind <> 'vulnerability' OR COALESCE(target_type, '') <> 'workload')"}
+	parts := []string{"org_id = $1"}
+	exactID, instanceChooser := findingExactIDQuery(values.Get("q"))
+	if instanceChooser {
+		args = append(args, exactID)
+		parts = append(parts, "id=$2")
+	} else {
+		parts = append(parts, "(kind <> 'vulnerability' OR COALESCE(target_type, '') <> 'workload')")
+	}
 	add := func(column string, value any) {
 		args = append(args, value)
 		parts = append(parts, fmt.Sprintf("%s = $%d", column, len(args)))
@@ -56,7 +63,13 @@ func findingFilter(orgID uuid.UUID, values url.Values, includeLifecycle, include
 		if err != nil {
 			return "", nil, fmt.Errorf("invalid cluster_id")
 		}
-		add("cluster_id", id)
+		if instanceChooser {
+			args = append(args, id)
+			parameter := "$" + strconv.Itoa(len(args))
+			parts = append(parts, "(cluster_id="+parameter+" OR COALESCE(target_cluster_id,cluster_id)="+parameter+") AND EXISTS(SELECT 1 FROM clusters chooser_cluster WHERE chooser_cluster.org_id=findings.org_id AND chooser_cluster.id="+parameter+")")
+		} else {
+			add("cluster_id", id)
+		}
 	}
 	compiled, err := searchdsl.Compile(values.Get("q"), findingsSearchSchema)
 	if err != nil {
@@ -99,7 +112,7 @@ func findingOrder(values url.Values) (string, error) {
 	}
 	key := values.Get("sort")
 	if key == "" {
-		return "risk_score DESC, last_seen_at DESC, id ASC", nil
+		return "risk_score DESC, last_seen_at DESC, id ASC, first_seen_at ASC", nil
 	}
 	column, ok := columns[key]
 	if !ok {
@@ -112,5 +125,19 @@ func findingOrder(values url.Values) (string, error) {
 	if order != "ASC" && order != "DESC" {
 		return "", fmt.Errorf("invalid order")
 	}
-	return column + " " + order + ", id ASC", nil
+	return column + " " + order + ", id ASC, first_seen_at ASC", nil
+}
+
+// Only an entire canonical UUID field query is an occurrence chooser. A
+// compound/partial/glob search retains the ordinary canonical inventory cohort.
+func findingExactIDQuery(raw string) (uuid.UUID, bool) {
+	query := strings.TrimSpace(raw)
+	if len(query) != 39 || !strings.EqualFold(query[:3], "id:") {
+		return uuid.Nil, false
+	}
+	id, err := uuid.Parse(query[3:])
+	if err != nil || !strings.EqualFold(id.String(), query[3:]) {
+		return uuid.Nil, false
+	}
+	return id, true
 }

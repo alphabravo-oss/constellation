@@ -655,6 +655,15 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/findings/{id}/comments", s.requireVerb(rbac.VerbReadFindings, comments.List))
 			r.Post("/findings/{id}/comments", s.requireVerb(rbac.VerbTriageFindings, comments.Create))
 
+			// Exact occurrence paths are distinct so old replicas fail closed
+			// instead of ignoring a selector during rolling upgrades.
+			r.Get("/finding-instances/{id}", s.requireVerb(rbac.VerbReadFindings, findingsH.Get))
+			r.Post("/finding-instances/{id}/triage", s.requireVerb(rbac.VerbTriageFindings, findingsH.Triage))
+			r.Post("/finding-instances/{id}/suppress", s.requireVerb(rbac.VerbSuppressFindings, findingsH.Suppress))
+			r.Post("/finding-instances/{id}/accept-risk", s.requireVerb(rbac.VerbAcceptRisk, findingsH.AcceptRisk))
+			r.Post("/finding-instances/{id}/reachability", s.requireVerb(rbac.VerbTriageFindings, findingsH.Reachability))
+			r.Get("/finding-instances/{id}/comments", s.requireVerb(rbac.VerbReadFindings, comments.List))
+			r.Post("/finding-instances/{id}/comments", s.requireVerb(rbac.VerbTriageFindings, comments.Create))
 			csv := findings.NewFindingsCSV(s.db)
 			r.Get("/findings.csv", s.requireVerb(rbac.VerbReadFindings, csv.Stream))
 

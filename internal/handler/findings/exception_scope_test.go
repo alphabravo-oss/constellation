@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -203,12 +204,19 @@ func (f *exceptionEvidenceFixture) list(t *testing.T, cluster string) []vulnerab
 }
 func exceptionByID(t *testing.T, items []vulnerabilityExceptionDTO, id string) vulnerabilityExceptionDTO {
 	t.Helper()
+	var matches []vulnerabilityExceptionDTO
 	for _, item := range items {
 		if item.ID == id {
 			return item
 		}
+		if strings.HasPrefix(id, "finding-") && len(item.FindingRefs) == 1 && item.FindingRefs[0] == strings.TrimPrefix(id, "finding-") {
+			matches = append(matches, item)
+		}
 	}
-	t.Fatalf("missing %s in %+v", id, items)
+	if len(matches) == 1 {
+		return matches[0]
+	}
+	t.Fatalf("missing or ambiguous %s in %+v", id, items)
 	return vulnerabilityExceptionDTO{}
 }
 

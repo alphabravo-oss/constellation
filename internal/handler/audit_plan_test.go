@@ -36,7 +36,7 @@ func TestAuditClusterLookupPlan(t *testing.T) {
 	}
 	query, _ := auditListQuery(f.orgA, f.clusterA, "", nil, nil, nil, 101, 0)
 	statement := "audit_cluster_plan_" + strings.ReplaceAll(marker, "-", "")
-	if _, err := tx.Exec(ctx, "PREPARE "+statement+"(uuid,bigint,bigint,uuid,bigint) AS "+query); err != nil {
+	if _, err := tx.Exec(ctx, "PREPARE "+statement+"(uuid,bigint,bigint,uuid,bigint,text) AS "+query); err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _, _ = tx.Exec(context.Background(), "DEALLOCATE "+statement) }()
@@ -44,7 +44,7 @@ func TestAuditClusterLookupPlan(t *testing.T) {
 		if _, err := tx.Exec(ctx, "SET LOCAL plan_cache_mode='"+mode+"'"); err != nil {
 			t.Fatal(err)
 		}
-		explain := fmt.Sprintf("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) EXECUTE %s('%s',101,0,'%s',101)", statement, f.orgA, f.clusterA)
+		explain := fmt.Sprintf("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) EXECUTE %s('%s',101,0,'%s',101,'%s')", statement, f.orgA, f.clusterA, f.clusterA)
 		var raw []byte
 		if err := tx.QueryRow(ctx, explain).Scan(&raw); err != nil {
 			t.Fatal(err)
@@ -69,11 +69,18 @@ func TestAuditClusterLookupPlan(t *testing.T) {
 			t.Fatalf("%s has no audit scan", mode)
 		}
 		for _, node := range auditScans {
-			if node.IndexName != "idx_audit_org_target_id" {
+			lookupKey := "target_id"
+			switch node.IndexName {
+			case "idx_audit_org_target_id":
+			case "idx_audit_finding_source_cluster":
+				lookupKey = "finding_source_cluster_id"
+			case "idx_audit_finding_effective_cluster":
+				lookupKey = "finding_target_cluster_id"
+			default:
 				t.Fatalf("%s scans audit history through %s %s", mode, node.NodeType, node.IndexName)
 			}
-			if !strings.Contains(node.IndexCond, "org_id") || !strings.Contains(node.IndexCond, "target_id") {
-				t.Fatalf("%s lacks both lookup keys", mode)
+			if !strings.Contains(node.IndexCond, "org_id") || !strings.Contains(node.IndexCond, lookupKey) {
+				t.Fatalf("%s lacks both scoped lookup keys for %s: %s", mode, node.IndexName, node.IndexCond)
 			}
 			// Sparse matching targets should visit a few index/heap pages, not read
 			// the 30,000 unrelated receipts. This also catches a scan followed by

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"math"
 	"net/http"
 	"strconv"
@@ -167,7 +168,7 @@ func auditListQuery(orgID uuid.UUID, clusterID any, action string, controlPrefix
 		args = append(args, value)
 		return "$" + strconv.Itoa(len(args))
 	}
-	var clusterParam, targetFetchParam string
+	var clusterParam, targetFetchParam, metadataClusterParam string
 	if clusterID != nil {
 		clusterParam = bind(clusterID)
 		// Keep an accepted maximum offset from overflowing the per-target bound.
@@ -178,6 +179,7 @@ func auditListQuery(orgID uuid.UUID, clusterID any, action string, controlPrefix
 			targetFetch += int64(fetch)
 		}
 		targetFetchParam = bind(targetFetch)
+		metadataClusterParam = bind(fmt.Sprint(clusterID))
 	}
 	filters := []string{"a.org_id = $1"}
 	if action != "" {
@@ -203,6 +205,10 @@ func auditListQuery(orgID uuid.UUID, clusterID any, action string, controlPrefix
 	// audit event or change has_more/page boundaries.
 	return `WITH cluster_targets AS MATERIALIZED (
  SELECT id::text AS target_id FROM findings WHERE org_id = $1 AND cluster_id = ` + clusterParam + `
+ UNION SELECT target_id FROM audit_events WHERE org_id=$1 AND target_kind='finding' AND after ? 'finding_first_seen_at'
+ AND after->>'finding_source_cluster_id'=` + metadataClusterParam + `::text
+ UNION SELECT target_id FROM audit_events WHERE org_id=$1 AND target_kind='finding' AND after ? 'finding_first_seen_at'
+ AND COALESCE(after->>'finding_target_cluster_id',after->>'finding_source_cluster_id')=` + metadataClusterParam + `::text
  UNION SELECT id::text FROM assets WHERE org_id = $1 AND cluster_id = ` + clusterParam + `
  UNION SELECT id::text FROM deployments WHERE org_id = $1 AND cluster_id = ` + clusterParam + `
  UNION SELECT id::text FROM compliance_checks WHERE org_id = $1 AND cluster_id = ` + clusterParam + `
@@ -213,6 +219,11 @@ SELECT page.* FROM cluster_targets t
 CROSS JOIN LATERAL (
  SELECT ` + columns + ` FROM audit_events a
  WHERE a.target_id = t.target_id AND ` + strings.Join(filters, " AND ") + `
+ AND (a.target_kind IS DISTINCT FROM 'finding' OR
+ CASE WHEN a.after ? 'finding_first_seen_at' THEN
+ (a.after->>'finding_source_cluster_id'=` + metadataClusterParam + `::text OR COALESCE(a.after->>'finding_target_cluster_id',a.after->>'finding_source_cluster_id')=` + metadataClusterParam + `::text)
+ ELSE CASE WHEN pg_input_is_valid(a.target_id,'uuid') THEN (SELECT count(*) FROM findings scope_f WHERE scope_f.org_id=$1 AND scope_f.id=a.target_id::uuid)=1 ELSE false END END)
+
  ORDER BY a.id DESC LIMIT ` + targetFetchParam + `
 ) page
 ORDER BY page.id DESC LIMIT $2 OFFSET $3`, args

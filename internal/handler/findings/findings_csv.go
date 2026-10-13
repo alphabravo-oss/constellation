@@ -9,6 +9,7 @@ package findings
 import (
 	"encoding/csv"
 	"fmt"
+	"github.com/google/uuid"
 	"net/http"
 	"strconv"
 	"time"
@@ -49,7 +50,7 @@ func (h *FindingsCSV) Stream(w http.ResponseWriter, r *http.Request) {
 	args = append(args, limit, findingOffset(values))
 	rows, err := h.db.Pool().Query(r.Context(), `
 SELECT id, kind, COALESCE(external_id,'') AS external_id, title, severity, risk_score, lifecycle,
-       asset_id, first_seen_at, last_seen_at, COALESCE(accepted_until, 'epoch'::timestamptz) AS accepted_until, `+platformrole.FindingPlatformRoleSQL("findings")+`
+       asset_id, first_seen_at, last_seen_at, COALESCE(accepted_until, 'epoch'::timestamptz) AS accepted_until, `+platformrole.FindingPlatformRoleSQL("findings")+`, revision::text,cluster_id::text,target_cluster_id::text
   FROM findings WHERE `+where+` ORDER BY `+order+`
  LIMIT $`+strconv.Itoa(len(args)-1)+` OFFSET $`+strconv.Itoa(len(args)), args...)
 	if err != nil {
@@ -65,7 +66,7 @@ SELECT id, kind, COALESCE(external_id,'') AS external_id, title, severity, risk_
 
 	if err := cw.Write([]string{
 		"id", "kind", "external_id", "title", "severity", "risk_score", "lifecycle",
-		"asset_id", "first_seen_at", "last_seen_at", "accepted_until", "platform_role",
+		"asset_id", "first_seen_at", "last_seen_at", "accepted_until", "platform_role", "row_id", "revision", "source_cluster_id", "target_cluster_id",
 	}); err != nil {
 		return // client gone
 	}
@@ -75,10 +76,12 @@ SELECT id, kind, COALESCE(external_id,'') AS external_id, title, severity, risk_
 		risk                                              int
 		assetID, platformRole                             string
 		firstSeen, lastSeen, acceptedUntil                time.Time
+		revision                                          string
+		sourceCluster, targetCluster                      *string
 	)
 	for rows.Next() {
 		if err := rows.Scan(&id, &kindCol, &extID, &title, &severity, &risk, &lifecycleCol,
-			&assetID, &firstSeen, &lastSeen, &acceptedUntil, &platformRole); err != nil {
+			&assetID, &firstSeen, &lastSeen, &acceptedUntil, &platformRole, &revision, &sourceCluster, &targetCluster); err != nil {
 			panic(http.ErrAbortHandler) // Do not deliver a successful partial export.
 		}
 		acc := ""
@@ -87,7 +90,7 @@ SELECT id, kind, COALESCE(external_id,'') AS external_id, title, severity, risk_
 		}
 		if err := cw.Write([]string{
 			id, kindCol, extID, title, severity, fmt.Sprintf("%d", risk), lifecycleCol,
-			assetID, firstSeen.UTC().Format(time.RFC3339), lastSeen.UTC().Format(time.RFC3339), acc, platformRole,
+			assetID, firstSeen.UTC().Format(time.RFC3339Nano), lastSeen.UTC().Format(time.RFC3339), acc, platformRole, findingRowID(uuid.MustParse(id), firstSeen), revision, nullableCSV(sourceCluster), nullableCSV(targetCluster),
 		}); err != nil {
 			panic(http.ErrAbortHandler)
 		}
@@ -99,4 +102,11 @@ SELECT id, kind, COALESCE(external_id,'') AS external_id, title, severity, risk_
 	if err := cw.Error(); err != nil {
 		panic(http.ErrAbortHandler)
 	}
+}
+
+func nullableCSV(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }

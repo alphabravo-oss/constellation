@@ -1051,7 +1051,7 @@
           },
           "duration_s": {
             "type": "integer",
-            "description": "Defaults to 30 seconds; clamped to 5–300 seconds."
+            "description": "Defaults to 30 seconds; clamped to 5\u2013300 seconds."
           },
           "src_ip": {
             "type": "string"
@@ -3716,8 +3716,34 @@
               "core"
             ],
             "description": "Backend-evaluated platform role. Empty means unknown. Only exact same-organization, same-cluster workload ownership can supply an installation-derived role; image, repository, cloud, node and ambiguous identities do not borrow workload roles."
+          },
+          "first_seen_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Exact finding primary-key timestamp with microsecond precision. Preserve the returned string without JavaScript Date rounding."
+          },
+          "revision": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "description": "Positive decimal database row revision; preserve as a string."
+          },
+          "source_cluster_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "target_cluster_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Raw target_cluster_id; null does not imply a missing source cluster. Effective target uses target_cluster_id or source_cluster_id."
           }
-        }
+        },
+        "description": "Generic asset records carry exact first_seen_at/revision/source/raw target identity. Canonical image_scan records omit generic timestamp/revision and return null cluster identity; their IDs must not be used for generic finding actions."
       },
       "AssetFindingInventory": {
         "type": "object",
@@ -7427,6 +7453,266 @@
           "source_complete",
           "summary_scope"
         ]
+      },
+      "FindingInstanceIdentity": {
+        "type": "object",
+        "required": [
+          "id",
+          "row_id",
+          "first_seen_at",
+          "revision",
+          "source_cluster_id",
+          "target_cluster_id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "row_id": {
+            "type": "string",
+            "description": "Opaque stable finding occurrence identity derived from UUID and exact first_seen_at."
+          },
+          "first_seen_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Exact finding primary-key timestamp with microsecond precision. Preserve the returned string without JavaScript Date rounding."
+          },
+          "revision": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "description": "Positive decimal database row revision; preserve as a string."
+          },
+          "source_cluster_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "target_cluster_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Raw target_cluster_id; null does not imply a missing source cluster. Effective target uses target_cluster_id or source_cluster_id."
+          }
+        }
+      },
+      "FindingInstance": {
+        "type": "object",
+        "required": [
+          "id",
+          "row_id",
+          "first_seen_at",
+          "revision",
+          "source_cluster_id",
+          "target_cluster_id",
+          "platform_role",
+          "cluster_id"
+        ],
+        "properties": {
+          "cluster_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "platform_role": {
+            "type": "string",
+            "enum": [
+              "",
+              "core"
+            ],
+            "description": "Backend-evaluated platform role. Empty means unknown. Only exact same-organization, same-cluster workload ownership can supply an installation-derived role; image, repository, cloud, node and ambiguous identities do not borrow workload roles."
+          },
+          "row_id": {
+            "type": "string",
+            "description": "Opaque stable finding occurrence identity derived from UUID and exact first_seen_at."
+          },
+          "first_seen_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Exact finding primary-key timestamp with microsecond precision. Preserve the returned string without JavaScript Date rounding."
+          },
+          "revision": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "description": "Positive decimal database row revision; preserve as a string."
+          },
+          "source_cluster_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "target_cluster_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Raw target_cluster_id; null does not imply a missing source cluster. Effective target uses target_cluster_id or source_cluster_id."
+          },
+          "title": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "lifecycle": {
+            "type": "string"
+          },
+          "asset_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "risk_score": {
+            "type": "integer"
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "FindingActionReceipt": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/FindingInstanceIdentity"
+          },
+          {
+            "type": "object",
+            "required": [
+              "status"
+            ],
+            "properties": {
+              "status": {
+                "const": "ok"
+              },
+              "risk_inputs": {
+                "type": "object"
+              },
+              "risk_score": {
+                "type": "integer"
+              }
+            }
+          }
+        ]
+      },
+      "FindingComment": {
+        "type": "object",
+        "required": [
+          "id",
+          "finding_id",
+          "author_id",
+          "body",
+          "created_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Comment UUID; finding_id is the finding UUID."
+          },
+          "row_id": {
+            "type": "string",
+            "description": "Opaque stable finding occurrence identity derived from UUID and exact first_seen_at."
+          },
+          "first_seen_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Exact finding primary-key timestamp with microsecond precision. Preserve the returned string without JavaScript Date rounding."
+          },
+          "revision": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "description": "Positive decimal database row revision; preserve as a string."
+          },
+          "source_cluster_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "target_cluster_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Raw target_cluster_id; null does not imply a missing source cluster. Effective target uses target_cluster_id or source_cluster_id."
+          },
+          "finding_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "author_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "body": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "FindingCommentThread": {
+        "type": "object",
+        "required": [
+          "comments",
+          "legacy_comments",
+          "legacy_history_scope",
+          "row_id",
+          "first_seen_at",
+          "revision"
+        ],
+        "properties": {
+          "comments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FindingComment"
+            }
+          },
+          "legacy_comments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FindingComment"
+            },
+            "description": "Unattributed legacy UUID-wide history; never presented as comments belonging to this occurrence."
+          },
+          "legacy_history_scope": {
+            "const": "uuid"
+          },
+          "row_id": {
+            "type": "string",
+            "description": "Opaque stable finding occurrence identity derived from UUID and exact first_seen_at."
+          },
+          "first_seen_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Exact finding primary-key timestamp with microsecond precision. Preserve the returned string without JavaScript Date rounding."
+          },
+          "revision": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "description": "Positive decimal database row revision; preserve as a string."
+          }
+        }
       }
     },
     "responses": {
@@ -7966,7 +8252,7 @@
     "/api/v1/assets/{id}": {
       "get": {
         "summary": "Get asset evidence",
-        "description": " Image assets expose display_name as the reported repository/tag reference without its digest suffix; raw name and digest remain unchanged. Asset-name sorting and literal search use this display identity. Matching CSV includes Display name alongside raw Name and Digest.",
+        "description": " Image assets expose display_name as the reported repository/tag reference without its digest suffix; raw name and digest remain unchanged. Asset-name sorting and literal search use this display identity. Matching CSV includes Display name alongside raw Name and Digest. Generic finding preview rows include exact row_id/first_seen_at/revision and source/raw target cluster identity; canonical image scan rows remain a distinct source.",
         "responses": {
           "200": {
             "description": "Owned asset evidence with evaluated platform role.",
@@ -7993,6 +8279,48 @@
                       "required": [
                         "platform_role"
                       ]
+                    },
+                    "findings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "row_id": {
+                            "type": "string",
+                            "description": "Opaque stable finding occurrence identity derived from UUID and exact first_seen_at."
+                          },
+                          "first_seen_at": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "Exact finding primary-key timestamp with microsecond precision. Preserve the returned string without JavaScript Date rounding."
+                          },
+                          "revision": {
+                            "type": "string",
+                            "pattern": "^[1-9][0-9]*$",
+                            "description": "Positive decimal database row revision; preserve as a string."
+                          },
+                          "source_cluster_id": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "format": "uuid"
+                          },
+                          "target_cluster_id": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "format": "uuid",
+                            "description": "Raw target_cluster_id; null does not imply a missing source cluster. Effective target uses target_cluster_id or source_cluster_id."
+                          }
+                        }
+                      },
+                      "description": "Bounded generic finding compatibility preview. Identity is exact; full matching inventory uses the asset findings endpoint. Canonical image findings remain separate."
                     }
                   }
                 }
@@ -14932,7 +15260,7 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard — the target host is never caller-supplied).",
+            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard \u2014 the target host is never caller-supplied).",
             "schema": {
               "type": "string"
             }
@@ -14973,7 +15301,7 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard — the target host is never caller-supplied).",
+            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard \u2014 the target host is never caller-supplied).",
             "schema": {
               "type": "string"
             }
@@ -15014,7 +15342,7 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard — the target host is never caller-supplied).",
+            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard \u2014 the target host is never caller-supplied).",
             "schema": {
               "type": "string"
             }
@@ -15066,7 +15394,7 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard — the target host is never caller-supplied).",
+            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard \u2014 the target host is never caller-supplied).",
             "schema": {
               "type": "string"
             }
@@ -15118,7 +15446,7 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard — the target host is never caller-supplied).",
+            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard \u2014 the target host is never caller-supplied).",
             "schema": {
               "type": "string"
             }
@@ -15166,7 +15494,7 @@
     "/api/v1/federation/join": {
       "post": {
         "summary": "Exchange a federation join token for a per-cluster sync secret",
-        "description": "Anonymous exchange endpoint (D1/D2). A joining cluster presents a join token (a signed, master-minted token or the pre-shared fixed GitOps token) plus its cluster id/name and receives a per-cluster signed sync ticket it then presents on every /federation/sync poll. Only the sha256 of the ticket is persisted by the master (like api_tokens). Authenticated by the join token itself, so it carries no bearer security. When per-joint mTLS (D2) is enabled the response also includes a per-joint client certificate, its private key (shown once), and the master CA: the joint presents the client cert on every /sync poll and the master verifies it against the CA, so a leaked bearer ticket alone — without the matching client key — is rejected.",
+        "description": "Anonymous exchange endpoint (D1/D2). A joining cluster presents a join token (a signed, master-minted token or the pre-shared fixed GitOps token) plus its cluster id/name and receives a per-cluster signed sync ticket it then presents on every /federation/sync poll. Only the sha256 of the ticket is persisted by the master (like api_tokens). Authenticated by the join token itself, so it carries no bearer security. When per-joint mTLS (D2) is enabled the response also includes a per-joint client certificate, its private key (shown once), and the master CA: the joint presents the client cert on every /sync poll and the master verifies it against the CA, so a leaked bearer ticket alone \u2014 without the matching client key \u2014 is rejected.",
         "security": [],
         "requestBody": {
           "required": true,
@@ -15428,10 +15756,606 @@
         }
       }
     },
+    "/api/v1/finding-instances/{id}": {
+      "get": {
+        "summary": "Read one exact historical finding instance",
+        "description": "Requires exact first_seen_at; never follows another recurrence or falls back to a UUID-only lookup. Source cluster and raw target cluster remain distinct.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "first_seen_at",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "description": "Exact finding primary-key timestamp with microsecond precision. Preserve the returned string without JavaScript Date rounding."
+            }
+          },
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Optional exact owned cluster gate: source cluster or effective target cluster must match."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Exact finding-instance result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindingInstance"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed or duplicate selector, body or revision."
+          },
+          "401": {
+            "description": "Authentication required."
+          },
+          "404": {
+            "description": "Exact owned instance or requested cluster not found."
+          },
+          "409": {
+            "description": "Reviewed row revision changed."
+          },
+          "428": {
+            "description": "Exact mutation requires reviewed_revision."
+          }
+        }
+      }
+    },
+    "/api/v1/finding-instances/{id}/accept-risk": {
+      "post": {
+        "summary": "Apply accept-risk to one reviewed finding instance",
+        "description": "Locks and checks the exact row revision. Conflict/missing/precondition failures have no mutation or audit side effects. Successful audit append commits atomically; lifecycle notification uses the returned occurrence after commit. Comments preserve the finding revision.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "first_seen_at",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "description": "Exact finding primary-key timestamp with microsecond precision. Preserve the returned string without JavaScript Date rounding."
+            }
+          },
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Optional exact owned cluster gate: source cluster or effective target cluster must match."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reviewed_revision",
+                  "reason",
+                  "accepted_until"
+                ],
+                "properties": {
+                  "reviewed_revision": {
+                    "type": "string",
+                    "pattern": "^[1-9][0-9]*$",
+                    "description": "Positive decimal database row revision; preserve as a string."
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 12
+                  },
+                  "approver_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "accepted_until": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "Future expiry within 30 days."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Exact finding-instance result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindingActionReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed or duplicate selector, body or revision."
+          },
+          "401": {
+            "description": "Authentication required."
+          },
+          "404": {
+            "description": "Exact owned instance or requested cluster not found."
+          },
+          "409": {
+            "description": "Reviewed row revision changed."
+          },
+          "428": {
+            "description": "Exact mutation requires reviewed_revision."
+          }
+        }
+      }
+    },
+    "/api/v1/finding-instances/{id}/comments": {
+      "get": {
+        "summary": "Read exact comments and separate legacy UUID history",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "first_seen_at",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "description": "Exact finding primary-key timestamp with microsecond precision. Preserve the returned string without JavaScript Date rounding."
+            }
+          },
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Optional exact owned cluster gate: source cluster or effective target cluster must match."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Exact finding-instance result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindingCommentThread"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed or duplicate selector, body or revision."
+          },
+          "401": {
+            "description": "Authentication required."
+          },
+          "404": {
+            "description": "Exact owned instance or requested cluster not found."
+          },
+          "409": {
+            "description": "Reviewed row revision changed."
+          },
+          "428": {
+            "description": "Exact mutation requires reviewed_revision."
+          }
+        }
+      },
+      "post": {
+        "summary": "Apply comments to one reviewed finding instance",
+        "description": "Locks and checks the exact row revision. Conflict/missing/precondition failures have no mutation or audit side effects. Successful audit append commits atomically; lifecycle notification uses the returned occurrence after commit. Comments preserve the finding revision.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "first_seen_at",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "description": "Exact finding primary-key timestamp with microsecond precision. Preserve the returned string without JavaScript Date rounding."
+            }
+          },
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Optional exact owned cluster gate: source cluster or effective target cluster must match."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reviewed_revision",
+                  "body"
+                ],
+                "properties": {
+                  "reviewed_revision": {
+                    "type": "string",
+                    "pattern": "^[1-9][0-9]*$",
+                    "description": "Positive decimal database row revision; preserve as a string."
+                  },
+                  "body": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 16000,
+                    "description": "Trimmed UTF-8 body; byte length must be at most 16000."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Exact finding-instance result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindingComment"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed or duplicate selector, body or revision."
+          },
+          "401": {
+            "description": "Authentication required."
+          },
+          "404": {
+            "description": "Exact owned instance or requested cluster not found."
+          },
+          "409": {
+            "description": "Reviewed row revision changed."
+          },
+          "428": {
+            "description": "Exact mutation requires reviewed_revision."
+          }
+        }
+      }
+    },
+    "/api/v1/finding-instances/{id}/reachability": {
+      "post": {
+        "summary": "Apply reachability to one reviewed finding instance",
+        "description": "Locks and checks the exact row revision. Conflict/missing/precondition failures have no mutation or audit side effects. Successful audit append commits atomically; lifecycle notification uses the returned occurrence after commit. Comments preserve the finding revision.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "first_seen_at",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "description": "Exact finding primary-key timestamp with microsecond precision. Preserve the returned string without JavaScript Date rounding."
+            }
+          },
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Optional exact owned cluster gate: source cluster or effective target cluster must match."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reviewed_revision"
+                ],
+                "properties": {
+                  "reviewed_revision": {
+                    "type": "string",
+                    "pattern": "^[1-9][0-9]*$",
+                    "description": "Positive decimal database row revision; preserve as a string."
+                  },
+                  "runtime_confirmed": {
+                    "type": "boolean"
+                  },
+                  "static_only": {
+                    "type": "boolean"
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "container_id": {
+                    "type": "string"
+                  },
+                  "pid": {
+                    "type": "integer"
+                  },
+                  "symbol": {
+                    "type": "string"
+                  },
+                  "module": {
+                    "type": "string"
+                  },
+                  "call_stack": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Exact finding-instance result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindingActionReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed or duplicate selector, body or revision."
+          },
+          "401": {
+            "description": "Authentication required."
+          },
+          "404": {
+            "description": "Exact owned instance or requested cluster not found."
+          },
+          "409": {
+            "description": "Reviewed row revision changed."
+          },
+          "428": {
+            "description": "Exact mutation requires reviewed_revision."
+          }
+        }
+      }
+    },
+    "/api/v1/finding-instances/{id}/suppress": {
+      "post": {
+        "summary": "Apply suppress to one reviewed finding instance",
+        "description": "Locks and checks the exact row revision. Conflict/missing/precondition failures have no mutation or audit side effects. Successful audit append commits atomically; lifecycle notification uses the returned occurrence after commit. Comments preserve the finding revision.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "first_seen_at",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "description": "Exact finding primary-key timestamp with microsecond precision. Preserve the returned string without JavaScript Date rounding."
+            }
+          },
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Optional exact owned cluster gate: source cluster or effective target cluster must match."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reviewed_revision"
+                ],
+                "properties": {
+                  "reviewed_revision": {
+                    "type": "string",
+                    "pattern": "^[1-9][0-9]*$",
+                    "description": "Positive decimal database row revision; preserve as a string."
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Exact finding-instance result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindingActionReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed or duplicate selector, body or revision."
+          },
+          "401": {
+            "description": "Authentication required."
+          },
+          "404": {
+            "description": "Exact owned instance or requested cluster not found."
+          },
+          "409": {
+            "description": "Reviewed row revision changed."
+          },
+          "428": {
+            "description": "Exact mutation requires reviewed_revision."
+          }
+        }
+      }
+    },
+    "/api/v1/finding-instances/{id}/triage": {
+      "post": {
+        "summary": "Apply triage to one reviewed finding instance",
+        "description": "Locks and checks the exact row revision. Conflict/missing/precondition failures have no mutation or audit side effects. Successful audit append commits atomically; lifecycle notification uses the returned occurrence after commit. Comments preserve the finding revision.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "first_seen_at",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "description": "Exact finding primary-key timestamp with microsecond precision. Preserve the returned string without JavaScript Date rounding."
+            }
+          },
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Optional exact owned cluster gate: source cluster or effective target cluster must match."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reviewed_revision"
+                ],
+                "properties": {
+                  "reviewed_revision": {
+                    "type": "string",
+                    "pattern": "^[1-9][0-9]*$",
+                    "description": "Positive decimal database row revision; preserve as a string."
+                  },
+                  "assignee_id": {
+                    "type": "string"
+                  },
+                  "priority": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Exact finding-instance result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindingActionReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed or duplicate selector, body or revision."
+          },
+          "401": {
+            "description": "Authentication required."
+          },
+          "404": {
+            "description": "Exact owned instance or requested cluster not found."
+          },
+          "409": {
+            "description": "Reviewed row revision changed."
+          },
+          "428": {
+            "description": "Exact mutation requires reviewed_revision."
+          }
+        }
+      }
+    },
     "/api/v1/findings": {
       "get": {
         "summary": "List filtered finding instances",
-        "description": "Organization-scoped finding instances. Vulnerability rows targeted at workloads are excluded to avoid duplicate image findings. Filters, ordering and pagination run on the server; totals are not limited to the returned page.",
+        "description": "Organization-scoped finding instances. Vulnerability rows targeted at workloads are excluded to avoid duplicate image findings. Filters, ordering and pagination run on the server; totals are not limited to the returned page. Each occurrence has a composite row_id plus full-precision first_seen_at and string revision. Stable ordering ties include UUID and first_seen_at. q=id:<UUID> finds retained recurrence candidates. CSV includes source_cluster_id and raw target_cluster_id. A standalone q=id:<canonical UUID> is an exact occurrence chooser: it includes owned workload vulnerability recurrences excluded from ordinary inventory, with typed UUID matching; compound/partial/glob searches retain canonical exclusion. Other explicit filters still apply. Chooser cluster scope accepts an owned source or effective target cluster.",
         "parameters": [
           {
             "name": "q",
@@ -15631,7 +16555,11 @@
                           "attack_techniques",
                           "first_seen_at",
                           "last_seen_at",
-                          "platform_role"
+                          "platform_role",
+                          "row_id",
+                          "revision",
+                          "source_cluster_id",
+                          "target_cluster_id"
                         ],
                         "properties": {
                           "kind": {
@@ -15681,7 +16609,8 @@
                           },
                           "first_seen_at": {
                             "type": "string",
-                            "format": "date-time"
+                            "format": "date-time",
+                            "description": "Exact finding primary-key timestamp with microsecond precision. Preserve the returned string without JavaScript Date rounding."
                           },
                           "last_seen_at": {
                             "type": "string",
@@ -15751,6 +16680,30 @@
                               "core"
                             ],
                             "description": "Backend-evaluated platform role. Empty means unknown. Only exact same-organization, same-cluster workload ownership can supply an installation-derived role; image, repository, cloud, node and ambiguous identities do not borrow workload roles."
+                          },
+                          "row_id": {
+                            "type": "string",
+                            "description": "Opaque stable finding occurrence identity derived from UUID and exact first_seen_at."
+                          },
+                          "revision": {
+                            "type": "string",
+                            "pattern": "^[1-9][0-9]*$",
+                            "description": "Positive decimal database row revision; preserve as a string."
+                          },
+                          "source_cluster_id": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "format": "uuid"
+                          },
+                          "target_cluster_id": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "format": "uuid",
+                            "description": "Raw target_cluster_id; null does not imply a missing source cluster. Effective target uses target_cluster_id or source_cluster_id."
                           }
                         }
                       }
@@ -15842,7 +16795,7 @@
     "/api/v1/findings.csv": {
       "get": {
         "summary": "Export filtered finding instances as CSV",
-        "description": "Organization-scoped instance export using the same q, kind, lifecycle, cluster_id, fixable and allowlisted sort/order semantics as GET /api/v1/findings, including exclusion of workload-targeted vulnerability duplicates. Exports at most the effective limit after skipping offset; this is not an unbounded export and does not emit total, has_more or lifecycle counts. X-Export-Limit reports the effective row cap, not the number of exported rows or whether additional matches exist. CSV columns are id, kind, external_id, title, severity, risk_score, lifecycle, asset_id, first_seen_at, last_seen_at, accepted_until. Timestamps use UTC RFC3339; absent accepted_until is empty. Read/write errors after streaming starts abort the response rather than deliver a successful partial export. Includes the same backend-evaluated platform role as the matching API records. Empty role means unknown; image and other non-workload evidence does not borrow workload classification.",
+        "description": "Organization-scoped instance export using the same q, kind, lifecycle, cluster_id, fixable and allowlisted sort/order semantics as GET /api/v1/findings, including exclusion of workload-targeted vulnerability duplicates. Exports at most the effective limit after skipping offset; this is not an unbounded export and does not emit total, has_more or lifecycle counts. X-Export-Limit reports the effective row cap, not the number of exported rows or whether additional matches exist. CSV columns are id, kind, external_id, title, severity, risk_score, lifecycle, asset_id, first_seen_at, last_seen_at, accepted_until. Timestamps use UTC RFC3339; absent accepted_until is empty. Read/write errors after streaming starts abort the response rather than deliver a successful partial export. Includes the same backend-evaluated platform role as the matching API records. Empty role means unknown; image and other non-workload evidence does not borrow workload classification. Each occurrence has a composite row_id plus full-precision first_seen_at and string revision. Stable ordering ties include UUID and first_seen_at. q=id:<UUID> finds retained recurrence candidates. CSV includes source_cluster_id and raw target_cluster_id. A standalone q=id:<canonical UUID> is an exact occurrence chooser: it includes owned workload vulnerability recurrences excluded from ordinary inventory, with typed UUID matching; compound/partial/glob searches retain canonical exclusion. Other explicit filters still apply. Chooser cluster scope accepts an owned source or effective target cluster.",
         "parameters": [
           {
             "name": "q",
@@ -16062,7 +17015,7 @@
     "/api/v1/findings/by-cve": {
       "get": {
         "summary": "List findings grouped by CVE",
-        "description": "Organization-scoped vulnerability findings with external IDs starting CVE-, grouped after q, lifecycle and cluster filtering. The kind query parameter is overridden to vulnerability; workload-targeted vulnerability rows are excluded. Ordered by maximum risk_score DESC, then CVE ASC; sort/order query parameters are not supported. total counts qualifying CVE groups across all pages. This response does not include has_more or lifecycle_counts.",
+        "description": "Organization-scoped vulnerability findings with external IDs starting CVE-, grouped after q, lifecycle and cluster filtering. The kind query parameter is overridden to vulnerability; workload-targeted vulnerability rows are excluded. Ordered by maximum risk_score DESC, then CVE ASC; sort/order query parameters are not supported. total counts qualifying CVE groups across all pages. This response does not include has_more or lifecycle_counts. A standalone q=id:<canonical UUID> is an exact occurrence chooser: it includes owned workload vulnerability recurrences excluded from ordinary inventory, with typed UUID matching; compound/partial/glob searches retain canonical exclusion. Other explicit filters still apply. Chooser cluster scope accepts an owned source or effective target cluster.",
         "parameters": [
           {
             "name": "q",
@@ -16327,6 +17280,17 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "row_id",
+                    "first_seen_at",
+                    "revision",
+                    "source_cluster_id",
+                    "target_cluster_id",
+                    "platform_role",
+                    "cluster_id"
+                  ],
                   "properties": {
                     "cluster_id": {
                       "format": "uuid",
@@ -16336,8 +17300,8 @@
                       ]
                     },
                     "id": {
-                      "format": "uuid",
-                      "type": "string"
+                      "type": "string",
+                      "format": "uuid"
                     },
                     "platform_role": {
                       "type": "string",
@@ -16346,14 +17310,60 @@
                         "core"
                       ],
                       "description": "Backend-evaluated platform role. Empty means unknown. Only exact same-organization, same-cluster workload ownership can supply an installation-derived role; image, repository, cloud, node and ambiguous identities do not borrow workload roles."
+                    },
+                    "row_id": {
+                      "type": "string",
+                      "description": "Opaque stable finding occurrence identity derived from UUID and exact first_seen_at."
+                    },
+                    "first_seen_at": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "Exact finding primary-key timestamp with microsecond precision. Preserve the returned string without JavaScript Date rounding."
+                    },
+                    "revision": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]*$",
+                      "description": "Positive decimal database row revision; preserve as a string."
+                    },
+                    "source_cluster_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "uuid"
+                    },
+                    "target_cluster_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "uuid",
+                      "description": "Raw target_cluster_id; null does not imply a missing source cluster. Effective target uses target_cluster_id or source_cluster_id."
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "severity": {
+                      "type": "string"
+                    },
+                    "lifecycle": {
+                      "type": "string"
+                    },
+                    "asset_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "risk_score": {
+                      "type": "integer"
+                    },
+                    "last_seen_at": {
+                      "type": "string",
+                      "format": "date-time"
                     }
-                  },
-                  "required": [
-                    "id",
-                    "cluster_id",
-                    "platform_role"
-                  ],
-                  "type": "object"
+                  }
                 }
               }
             },
@@ -16364,13 +17374,23 @@
           },
           "default": {
             "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "UUID identifies multiple owned finding occurrences; choose an exact first_seen_at."
           }
-        }
+        },
+        "description": " Legacy UUID compatibility: succeeds only for one owned occurrence; missing rows return404 and ambiguous UUIDs return409, never latest/all fallback. Optional first_seen_at selects exactly one occurrence. Exact-only routes are required for reviewed writes during rolling upgrades."
       }
     },
     "/api/v1/findings/{id}/accept-risk": {
       "post": {
-        "summary": "Accept-risk a finding with rationale + expiry"
+        "summary": "Accept-risk a finding with rationale + expiry",
+        "description": " Legacy UUID compatibility: succeeds only for one owned occurrence; missing rows return404 and ambiguous UUIDs return409, never latest/all fallback. Optional first_seen_at selects exactly one occurrence. Exact-only routes are required for reviewed writes during rolling upgrades.",
+        "responses": {
+          "409": {
+            "description": "UUID identifies multiple owned finding occurrences; choose an exact first_seen_at."
+          }
+        }
       }
     },
     "/api/v1/findings/{id}/comments": {
@@ -16381,9 +17401,13 @@
           },
           "default": {
             "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "UUID identifies multiple owned finding occurrences; choose an exact first_seen_at."
           }
         },
-        "summary": "Get comments"
+        "summary": "Get comments",
+        "description": " Legacy UUID compatibility: succeeds only for one owned occurrence; missing rows return404 and ambiguous UUIDs return409, never latest/all fallback. Optional first_seen_at selects exactly one occurrence. Exact-only routes are required for reviewed writes during rolling upgrades."
       },
       "post": {
         "responses": {
@@ -16392,9 +17416,13 @@
           },
           "default": {
             "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "UUID identifies multiple owned finding occurrences; choose an exact first_seen_at."
           }
         },
-        "summary": "Create comments"
+        "summary": "Create comments",
+        "description": " Legacy UUID compatibility: succeeds only for one owned occurrence; missing rows return404 and ambiguous UUIDs return409, never latest/all fallback. Optional first_seen_at selects exactly one occurrence. Exact-only routes are required for reviewed writes during rolling upgrades."
       }
     },
     "/api/v1/findings/{id}/reachability": {
@@ -16405,19 +17433,35 @@
           },
           "default": {
             "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "UUID identifies multiple owned finding occurrences; choose an exact first_seen_at."
           }
         },
-        "summary": "Create reachability"
+        "summary": "Create reachability",
+        "description": " Legacy UUID compatibility: succeeds only for one owned occurrence; missing rows return404 and ambiguous UUIDs return409, never latest/all fallback. Optional first_seen_at selects exactly one occurrence. Exact-only routes are required for reviewed writes during rolling upgrades."
       }
     },
     "/api/v1/findings/{id}/suppress": {
       "post": {
-        "summary": "Suppress a finding"
+        "summary": "Suppress a finding",
+        "description": " Legacy UUID compatibility: succeeds only for one owned occurrence; missing rows return404 and ambiguous UUIDs return409, never latest/all fallback. Optional first_seen_at selects exactly one occurrence. Exact-only routes are required for reviewed writes during rolling upgrades.",
+        "responses": {
+          "409": {
+            "description": "UUID identifies multiple owned finding occurrences; choose an exact first_seen_at."
+          }
+        }
       }
     },
     "/api/v1/findings/{id}/triage": {
       "post": {
-        "summary": "Triage a finding"
+        "summary": "Triage a finding",
+        "description": " Legacy UUID compatibility: succeeds only for one owned occurrence; missing rows return404 and ambiguous UUIDs return409, never latest/all fallback. Optional first_seen_at selects exactly one occurrence. Exact-only routes are required for reviewed writes during rolling upgrades.",
+        "responses": {
+          "409": {
+            "description": "UUID identifies multiple owned finding occurrences; choose an exact first_seen_at."
+          }
+        }
       }
     },
     "/api/v1/forensics/{snapshot_id}": {
@@ -19266,13 +20310,13 @@
           }
         },
         "summary": "Get exposure",
-        "description": " Workload platform_role is always explicit: core or empty for evaluated unknown, including namespace-scoped IPs and ambiguous same-name workload kinds. Exact pod ownership and actual source cluster determine custom-install roles. Map rows sharing an identity across clusters cannot borrow one cluster’s labels. Sessions, peers, protocols and ports aggregate from observed flows before MAX vulnerability enrichment, so duplicate workload kinds cannot multiply sessions. Up to50 rows per direction; this bounded exposure response has no continuation."
+        "description": " Workload platform_role is always explicit: core or empty for evaluated unknown, including namespace-scoped IPs and ambiguous same-name workload kinds. Exact pod ownership and actual source cluster determine custom-install roles. Map rows sharing an identity across clusters cannot borrow one cluster\u2019s labels. Sessions, peers, protocols and ports aggregate from observed flows before MAX vulnerability enrichment, so duplicate workload kinds cannot multiply sessions. Up to50 rows per direction; this bounded exposure response has no continuation."
       }
     },
     "/api/v1/network/map": {
       "get": {
         "summary": "Cluster-scoped Network Traffic Map workloads and observed flow edges",
-        "description": " Read responses carry platform-role metadata resolved from exact organization/cluster/workload identity. Network map flows and recent entries use src_platform_role/dst_platform_role; threats and captures use platform_role. Unknown or ambiguous identities return an empty role string; older APIs may omit role fields. Classification does not change collection, detection or enforcement. Workload platform_role is always explicit: core or empty for evaluated unknown, including namespace-scoped IPs and ambiguous same-name workload kinds. Exact pod ownership and actual source cluster determine custom-install roles. Map rows sharing an identity across clusters cannot borrow one cluster’s labels."
+        "description": " Read responses carry platform-role metadata resolved from exact organization/cluster/workload identity. Network map flows and recent entries use src_platform_role/dst_platform_role; threats and captures use platform_role. Unknown or ambiguous identities return an empty role string; older APIs may omit role fields. Classification does not change collection, detection or enforcement. Workload platform_role is always explicit: core or empty for evaluated unknown, including namespace-scoped IPs and ambiguous same-name workload kinds. Exact pod ownership and actual source cluster determine custom-install roles. Map rows sharing an identity across clusters cannot borrow one cluster\u2019s labels."
       }
     },
     "/api/v1/network/peers": {
@@ -28418,7 +29462,7 @@
     "/api/v1/vulnerability-exceptions": {
       "get": {
         "summary": "List recorded finding and image acceptances",
-        "description": "Returns accepted/suppressed findings and image digest acceptances, including expired/revoked state. Optional cluster scope restricts findings to their recorded finding cluster and image records to matching cluster assets or image-workload digest links. scope.clusters contains observed cluster IDs. The legacy workflow/guardrail metadata describes review guidance, not proof that a separate approval or enforcement workflow ran. Results and summary cover the same loaded records.",
+        "description": "Returns accepted/suppressed findings and image digest acceptances, including expired/revoked state. Optional cluster scope restricts findings to their recorded finding cluster and image records to matching cluster assets or image-workload digest links. scope.clusters contains observed cluster IDs. The legacy workflow/guardrail metadata describes review guidance, not proof that a separate approval or enforcement workflow ran. Results and summary cover the same loaded records. Finding exception IDs are composite occurrence identities. finding_refs retains legacy UUIDs; finding_instances supplies exact timestamps/revisions/source/raw target cluster fields for links. Exact audit reasons/history match the occurrence; UUID-only historical evidence is not shared across ambiguous recurrences.",
         "parameters": [
           {
             "description": "Exact organization-owned cluster UUID.",
@@ -28438,7 +29482,26 @@
                   "properties": {
                     "exceptions": {
                       "items": {
-                        "type": "object"
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "description": "Finding exceptions use finding- plus exact row_id; image exceptions retain image acceptance ID."
+                          },
+                          "finding_refs": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "format": "uuid"
+                            }
+                          },
+                          "finding_instances": {
+                            "type": "array",
+                            "items": {
+                              "$ref": "#/components/schemas/FindingInstanceIdentity"
+                            }
+                          }
+                        }
                       },
                       "type": "array"
                     },

@@ -49,7 +49,7 @@ const fedProxyCredentialTTL = 5 * time.Minute
 // limited to clearly read-only resources. The server may override it from config (B1), so it
 // is not a hardcoded policy — operators tune the surface a non-admin can observe cross-cluster.
 var fedProxyDefaultReadPaths = []string{
-	"findings", "scan-results", "scans", "assets", "images", "vulnerabilities",
+	"findings", "finding-instances", "scan-results", "scans", "assets", "images", "vulnerabilities",
 	"compliance", "audit-logs", "dashboards", "reports", "network", "runtime",
 	"federation", "health", "version",
 }

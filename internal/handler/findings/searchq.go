@@ -18,6 +18,7 @@ var findingsSearchSchema = searchdsl.Schema{
 	DefaultField:      "text",
 	LiteralSubstrings: true,
 	Fields: map[string]searchdsl.Field{
+		"id":          {Column: "id::text", Type: searchdsl.FieldString},
 		"text":        {Column: "concat_ws(' ', title, external_id, " + findingPackageSearchSQL + ")", Type: searchdsl.FieldString},
 		"status":      {Column: "lifecycle", Type: searchdsl.FieldString},
 		"asset":       {Column: "asset_id::text", Type: searchdsl.FieldString},

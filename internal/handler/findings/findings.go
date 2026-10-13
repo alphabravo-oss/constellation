@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	"github.com/alphabravocompany/constellation/internal/db"
@@ -38,6 +37,10 @@ func NewFindings(database *db.DB, auditLog *audit.Logger, dispatcher *notify.Dis
 }
 
 type findingDTO struct {
+	RowID               string                         `json:"row_id"`
+	Revision            string                         `json:"revision"`
+	SourceClusterID     *uuid.UUID                     `json:"source_cluster_id"`
+	TargetClusterID     *uuid.UUID                     `json:"target_cluster_id"`
 	PlatformRole        string                         `json:"platform_role"`
 	ID                  uuid.UUID                      `json:"id"`
 	Kind                string                         `json:"kind"`
@@ -97,7 +100,7 @@ func (f *Findings) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := f.db.Pool().Query(r.Context(), `
 SELECT id, kind, external_id, title, severity, risk_score, lifecycle, asset_id, cluster_id,
        attack_techniques, accepted_until, first_seen_at, last_seen_at, risk_inputs,
-       COALESCE(canonical_engine, ''), engines, detail_json, `+platformrole.FindingPlatformRoleSQL("findings")+`
+       COALESCE(canonical_engine, ''), engines, detail_json, `+platformrole.FindingPlatformRoleSQL("findings")+`, revision::text, target_cluster_id
   FROM findings WHERE `+where+` ORDER BY `+order+`
  LIMIT $`+strconv.Itoa(len(args)-1)+` OFFSET $`+strconv.Itoa(len(args)), args...)
 	if err != nil {
@@ -113,10 +116,12 @@ SELECT id, kind, external_id, title, severity, risk_score, lifecycle, asset_id, 
 		var techniques []string
 		if err := rows.Scan(&d.ID, &d.Kind, &d.ExternalID, &d.Title, &d.Severity, &d.RiskScore,
 			&d.Lifecycle, &d.AssetID, &d.ClusterID, &techniques, &d.AcceptedUntil, &d.FirstSeen, &d.LastSeen, &inputs,
-			&d.CanonicalEngine, &enginesRaw, &detailRaw, &d.PlatformRole); err != nil {
+			&d.CanonicalEngine, &enginesRaw, &detailRaw, &d.PlatformRole, &d.Revision, &d.TargetClusterID); err != nil {
 			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
+		d.RowID = findingRowID(d.ID, d.FirstSeen)
+		d.SourceClusterID = d.ClusterID
 		d.AttackIDs = techniques
 		if len(inputs) > 0 {
 			d.RiskInputs = inputs
@@ -164,23 +169,39 @@ SELECT id, kind, external_id, title, severity, risk_score, lifecycle, asset_id, 
 }
 
 func (f *Findings) Get(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+	subj, ok := authctx.SubjectFrom(r.Context())
+	if !ok {
+		writeInstanceError(w, &instanceError{401, "subject_required", "subject required"})
 		return
 	}
-	subj, _ := authctx.SubjectFrom(r.Context())
+	selector, err := parseInstanceSelector(r)
+	if err != nil {
+		writeInstanceError(w, err)
+		return
+	}
+	tx, err := f.db.Pool().BeginTx(r.Context(), pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		writeInstanceError(w, err)
+		return
+	}
+	defer tx.Rollback(context.WithoutCancel(r.Context()))
+	instance, err := resolveInstance(r.Context(), tx, subj.OrgID, selector, false)
+	if err != nil {
+		writeInstanceError(w, err)
+		return
+	}
+	id := instance.ID
 	var d findingDTO
 	var inputs, factors, enginesRaw, detailRaw []byte
 	var techniques []string
-	err = f.db.Pool().QueryRow(r.Context(), `
+	err = tx.QueryRow(r.Context(), `
 SELECT id, kind, external_id, title, severity, risk_score, lifecycle, asset_id, cluster_id,
        attack_techniques, accepted_until, first_seen_at, last_seen_at, risk_inputs,
-       COALESCE(risk_factors,'[]'::jsonb), COALESCE(canonical_engine, ''), engines, detail_json, `+platformrole.FindingPlatformRoleSQL("findings")+`
-  FROM findings WHERE id = $1 AND org_id = $2 LIMIT 1`, id, subj.OrgID).
+       COALESCE(risk_factors,'[]'::jsonb), COALESCE(canonical_engine, ''), engines, detail_json, `+platformrole.FindingPlatformRoleSQL("findings")+`, revision::text, target_cluster_id
+  FROM findings WHERE id = $1 AND org_id = $2 AND first_seen_at=$3`, id, subj.OrgID, instance.FirstSeen).
 		Scan(&d.ID, &d.Kind, &d.ExternalID, &d.Title, &d.Severity, &d.RiskScore,
 			&d.Lifecycle, &d.AssetID, &d.ClusterID, &techniques, &d.AcceptedUntil, &d.FirstSeen, &d.LastSeen, &inputs, &factors,
-			&d.CanonicalEngine, &enginesRaw, &detailRaw, &d.PlatformRole)
+			&d.CanonicalEngine, &enginesRaw, &detailRaw, &d.PlatformRole, &d.Revision, &d.TargetClusterID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
@@ -189,6 +210,8 @@ SELECT id, kind, external_id, title, severity, risk_score, lifecycle, asset_id, 
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "finding evidence unavailable"})
 		return
 	}
+	d.RowID = findingRowID(d.ID, d.FirstSeen)
+	d.SourceClusterID = d.ClusterID
 	d.AttackIDs = techniques
 	if len(inputs) > 0 {
 		d.RiskInputs = inputs
@@ -198,7 +221,8 @@ SELECT id, kind, external_id, title, severity, risk_score, lifecycle, asset_id, 
 	// Risk decomposition: prefer the cached column; if absent, compute from inputs.
 	decomp := loadOrComputeDecomposition(factors, inputs, d.RiskScore)
 	out := map[string]any{
-		"id":                d.ID,
+		"id":     d.ID,
+		"row_id": d.RowID, "revision": d.Revision, "source_cluster_id": d.SourceClusterID, "target_cluster_id": d.TargetClusterID,
 		"kind":              d.Kind,
 		"external_id":       d.ExternalID,
 		"title":             d.Title,
@@ -400,22 +424,23 @@ func loadOrComputeDecomposition(stored, inputsRaw []byte, score int) risk.Decomp
 }
 
 type triageBody struct {
-	AssigneeID string `json:"assignee_id"`
-	Priority   string `json:"priority"`
+	ReviewedRevision string `json:"reviewed_revision"`
+	AssigneeID       string `json:"assignee_id"`
+	Priority         string `json:"priority"`
 }
 
 func (f *Findings) Triage(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
-		return
-	}
 	var body triageBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
-	subj, _ := authctx.SubjectFrom(r.Context())
+	tx, found, subj, err := f.beginMutation(r, body.ReviewedRevision)
+	if err != nil {
+		writeInstanceError(w, err)
+		return
+	}
+	defer tx.Rollback(context.WithoutCancel(r.Context()))
 	var assignee *uuid.UUID
 	if body.AssigneeID != "" {
 		u, err := uuid.Parse(body.AssigneeID)
@@ -423,71 +448,59 @@ func (f *Findings) Triage(w http.ResponseWriter, r *http.Request) {
 			assignee = &u
 		}
 	}
-	if _, err := f.db.Pool().Exec(r.Context(),
+	if _, err := tx.Exec(r.Context(),
 		`UPDATE findings SET lifecycle = 'triaged', assignee_id = $2, priority = $3, last_seen_at = NOW()
-         WHERE id = $1 AND org_id = $4`, id, assignee, body.Priority, subj.OrgID); err != nil {
+         WHERE id = $1 AND org_id = $4 AND first_seen_at=$5`, found.ID, assignee, body.Priority, subj.OrgID, found.FirstSeen); err != nil {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	uid := subj.UserID
-	oid := subj.OrgID
-	_, _, _ = f.auditLog.Log(r.Context(), audit.Event{
-		OrgID: &oid, ActorID: &uid,
-		Action: "finding.triage", TargetKind: "finding", TargetID: id.String(),
-		After: body,
-	})
-	f.dispatchLifecycle(r.Context(), oid, "finding.triage", id, body)
-	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	f.finishMutation(w, r, tx, found, subj, "finding.triage", body)
 }
 
 type suppressBody struct {
-	Reason string `json:"reason"`
+	ReviewedRevision string `json:"reviewed_revision"`
+	Reason           string `json:"reason"`
 }
 
 func (f *Findings) Suppress(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+	var body suppressBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeInstanceError(w, &instanceError{400, "invalid_body", "invalid body"})
 		return
 	}
-	var body suppressBody
-	_ = json.NewDecoder(r.Body).Decode(&body)
-	subj, _ := authctx.SubjectFrom(r.Context())
-	if _, err := f.db.Pool().Exec(r.Context(),
+	tx, found, subj, err := f.beginMutation(r, body.ReviewedRevision)
+	if err != nil {
+		writeInstanceError(w, err)
+		return
+	}
+	defer tx.Rollback(context.WithoutCancel(r.Context()))
+	if _, err := tx.Exec(r.Context(),
 		`UPDATE findings SET lifecycle = 'suppressed', last_seen_at = NOW()
-         WHERE id = $1 AND org_id = $2`, id, subj.OrgID); err != nil {
+         WHERE id = $1 AND org_id = $2 AND first_seen_at=$3`, found.ID, subj.OrgID, found.FirstSeen); err != nil {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	uid := subj.UserID
-	oid := subj.OrgID
-	_, _, _ = f.auditLog.Log(r.Context(), audit.Event{
-		OrgID: &oid, ActorID: &uid,
-		Action: "finding.suppress", TargetKind: "finding", TargetID: id.String(),
-		After: body,
-	})
-	f.dispatchLifecycle(r.Context(), oid, "finding.suppress", id, body)
-	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	f.finishMutation(w, r, tx, found, subj, "finding.suppress", body)
 }
 
 type acceptBody struct {
-	Reason        string    `json:"reason"`
-	ApproverID    string    `json:"approver_id"`
-	AcceptedUntil time.Time `json:"accepted_until"`
+	ReviewedRevision string    `json:"reviewed_revision"`
+	Reason           string    `json:"reason"`
+	ApproverID       string    `json:"approver_id"`
+	AcceptedUntil    time.Time `json:"accepted_until"`
 }
 
 func (f *Findings) AcceptRisk(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
-		return
-	}
 	var body acceptBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.AcceptedUntil.IsZero() {
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "accepted_until required"})
 		return
 	}
-	subj, _ := authctx.SubjectFrom(r.Context())
+	subj, ok := authctx.SubjectFrom(r.Context())
+	if !ok {
+		writeInstanceError(w, &instanceError{401, "subject_required", "subject required"})
+		return
+	}
 
 	// Mirror the image-acceptance guardrails (image_acceptances.go) and the declared
 	// "max-30-day-expiration" blocking guardrail: an acceptance must expire in the future and
@@ -543,55 +556,22 @@ func (f *Findings) AcceptRisk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := f.db.Pool().Exec(r.Context(),
+	tx, found, subj, err := f.beginMutation(r, body.ReviewedRevision)
+	if err != nil {
+		writeInstanceError(w, err)
+		return
+	}
+	defer tx.Rollback(context.WithoutCancel(r.Context()))
+	if _, err := tx.Exec(r.Context(),
 		`UPDATE findings
 		    SET lifecycle = 'accepted', accepted_until = $2,
 		        detail_json = COALESCE(detail_json, '{}'::jsonb) || $4::jsonb,
 		        last_seen_at = NOW()
-         WHERE id = $1 AND org_id = $3`, id, body.AcceptedUntil, subj.OrgID, metaJSON); err != nil {
+         WHERE id = $1 AND org_id = $3 AND first_seen_at=$5`, found.ID, body.AcceptedUntil, subj.OrgID, metaJSON, found.FirstSeen); err != nil {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	uid := subj.UserID
-	oid := subj.OrgID
-	_, _, _ = f.auditLog.Log(r.Context(), audit.Event{
-		OrgID: &oid, ActorID: &uid,
-		Action: "finding.accept_risk", TargetKind: "finding", TargetID: id.String(),
-		After: body,
-	})
-	f.dispatchLifecycle(r.Context(), oid, "finding.accept_risk", id, body)
-	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-// dispatchLifecycle is the fire-and-forget notify hook. Reads finding metadata so
-// receivers see context (severity, asset, kind, title), then fans out via the
-// Dispatcher. Errors are logged at the dispatcher; we don't block the request.
-func (f *Findings) dispatchLifecycle(ctx context.Context, orgID uuid.UUID, kind string, id uuid.UUID, payload any) {
-	if f.dispatcher == nil {
-		return
-	}
-	var (
-		title, severity, fkind string
-		assetID                *uuid.UUID
-		clusterID              *uuid.UUID
-	)
-	_ = f.db.Pool().QueryRow(ctx, `
-SELECT title, severity, kind, asset_id, cluster_id
-  FROM findings WHERE id = $1 AND org_id = $2`, id, orgID).
-		Scan(&title, &severity, &fkind, &assetID, &clusterID)
-	labels := map[string]string{
-		"finding_kind": fkind,
-		"severity":     severity,
-		"lifecycle":    kind,
-	}
-	if _, err := f.dispatcher.Dispatch(ctx, notify.Event{
-		Kind: kind, OrgID: orgID, Severity: severity, Title: title,
-		Workload: id.String(), Labels: labels, Payload: payload,
-		URL: "/findings/" + id.String(),
-	}); err != nil {
-		// best-effort; the dispatcher already logged
-		_ = err
-	}
+	f.finishMutation(w, r, tx, found, subj, "finding.accept_risk", body)
 }
 
 // BulkInsertNotifyEvent is a small hook the scanner-side bulk-insert path can call
