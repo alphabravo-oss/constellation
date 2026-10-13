@@ -14,6 +14,7 @@ import (
 
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
+	"github.com/alphabravocompany/constellation/internal/handler/platformrole"
 )
 
 // EventsExport preserves the existing finding/threat NDJSON objects. Pages keep
@@ -86,7 +87,7 @@ func (e *EventsExport) streamSource(ctx context.Context, tx pgx.Tx, orgID uuid.U
 	const pageSize = 250
 	var before *time.Time
 	var beforeID *uuid.UUID
-	query := `SELECT row_to_json(f),f.first_seen_at,f.id FROM findings f
+	query := `SELECT to_jsonb(f) || jsonb_build_object('platform_role',` + platformrole.FindingPlatformRoleSQL("f") + `),f.first_seen_at,f.id FROM findings f
  WHERE f.org_id=$1 AND f.first_seen_at>$2
  AND ($3::timestamptz IS NULL OR (f.first_seen_at,f.id)<($3,$4::uuid))
  ORDER BY f.first_seen_at DESC,f.id DESC LIMIT 250`

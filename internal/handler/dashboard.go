@@ -63,11 +63,13 @@ type dashboardPostureDTO struct {
 }
 
 type topVulnerableWorkloadDTO struct {
-	ID        string `json:"id"`
-	Namespace string `json:"namespace"`
-	Name      string `json:"name"`
-	Critical  int    `json:"critical"`
-	High      int    `json:"high"`
+	ID           string     `json:"id"`
+	ClusterID    *uuid.UUID `json:"cluster_id"`
+	PlatformRole string     `json:"platform_role"`
+	Namespace    string     `json:"namespace"`
+	Name         string     `json:"name"`
+	Critical     int        `json:"critical"`
+	High         int        `json:"high"`
 }
 
 type dashboardEventDT struct {
@@ -455,7 +457,7 @@ SELECT COUNT(*) FILTER (WHERE enabled AND engine = 'constellation-admission')::i
 	// Top vulnerable workloads (NV "Top Vulnerable Assets"): highest critical+high CVE
 	// workloads in the cluster.
 	twRows, err := h.db.Pool().Query(ctx, `
-SELECT id::text, namespace, name, COALESCE(critical_count,0)::int, COALESCE(high_count,0)::int
+SELECT id::text, cluster_id, `+platformRoleSQL("namespace", "labels")+`, namespace, name, COALESCE(critical_count,0)::int, COALESCE(high_count,0)::int
   FROM deployments
  WHERE org_id = $1
    AND ($2::uuid IS NULL OR cluster_id = $2)
@@ -468,7 +470,7 @@ SELECT id::text, namespace, name, COALESCE(critical_count,0)::int, COALESCE(high
 	defer twRows.Close()
 	for twRows.Next() {
 		var t topVulnerableWorkloadDTO
-		if err := twRows.Scan(&t.ID, &t.Namespace, &t.Name, &t.Critical, &t.High); err != nil {
+		if err := twRows.Scan(&t.ID, &t.ClusterID, &t.PlatformRole, &t.Namespace, &t.Name, &t.Critical, &t.High); err != nil {
 			return err
 		}
 		p.TopVulnerable = append(p.TopVulnerable, t)

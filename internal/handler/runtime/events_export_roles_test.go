@@ -89,6 +89,11 @@ func TestEventsExportPreservesRowsAndEnrichesExactThreatRoles(t *testing.T) {
 		if frame.Data["org_id"] != org.String() {
 			t.Fatal("foreign record exported")
 		}
+		if frame.Event == "finding" {
+			if role, ok := frame.Data["platform_role"].(string); !ok || role != "" {
+				t.Fatalf("finding unknown role omitted or borrowed %#v", frame.Data)
+			}
+		}
 		if frame.Event == "threat" {
 			role, ok := frame.Data["platform_role"].(string)
 			if !ok {

@@ -38,6 +38,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/csv"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -244,25 +245,34 @@ RETURNING id`, s.OrgID, s.ClusterID, s.ID, s.Framework).Scan(&runID); err != nil
 		return fmt.Errorf("insert run row: %w", err)
 	}
 
-	finalize := func(status, artifactURI, sig string, size int64, summary map[string]int, runErr error) {
+	var artifactFormat, artifactMediaType, artifactFilename string
+	finalize := func(status, artifactURI, sig string, size int64, summary map[string]int, runErr error) error {
 		errMsg := ""
 		if runErr != nil {
 			errMsg = runErr.Error()
 		}
 		summaryRaw, _ := json.Marshal(summary)
-		_, _ = d.pool.Exec(ctx, `
+		_, persistErr := d.pool.Exec(ctx, `
 UPDATE compliance_runs
    SET completed_at = NOW(), status = $1, summary = $2::jsonb,
        artifact_uri = NULLIF($3,''), artifact_signature = NULLIF($4,''),
-       artifact_size_bytes = $5, error_message = NULLIF($6,'')
- WHERE id = $7`, status, summaryRaw, artifactURI, sig, size, errMsg, runID)
+       artifact_size_bytes = $5, error_message = NULLIF($6,''),
+ artifact_format=NULLIF($8,''),artifact_media_type=NULLIF($9,''),artifact_filename=NULLIF($10,'')
+ WHERE id = $7`, status, summaryRaw, artifactURI, sig, size, errMsg, runID, artifactFormat, artifactMediaType, artifactFilename)
+		if persistErr != nil {
+			return fmt.Errorf("persist artifact result: %w", persistErr)
+		}
 		// Mirror onto the schedule's last_* columns.
-		_, _ = d.pool.Exec(ctx, `
+		_, persistErr = d.pool.Exec(ctx, `
 UPDATE compliance_schedules
    SET last_run_at = NOW(), last_status = $1, last_artifact_uri = NULLIF($2,''),
        last_error = NULLIF($3,''), updated_at = NOW()
  WHERE id = $4`, status, artifactURI, errMsg, s.ID)
+		if persistErr != nil {
+			return fmt.Errorf("persist schedule result: %w", persistErr)
+		}
 		d.logger.Info("run finished", "schedule", s.Name, "status", status, "artifact", artifactURI, "signature_bytes", len(sig))
+		return nil
 	}
 
 	checks, summary, err := d.loadChecks(ctx, s)
@@ -271,7 +281,11 @@ UPDATE compliance_schedules
 		return err
 	}
 
-	orgName, clusterName := d.resolveNames(ctx, s.OrgID, s.ClusterID)
+	orgName, clusterName, err := d.resolveNames(ctx, s.OrgID, s.ClusterID)
+	if err != nil {
+		_ = finalize("failed", "", "", 0, summary, err)
+		return err
+	}
 	frameworkName := s.Framework
 	for _, fw := range compliance.AllFrameworks() {
 		if fw.ID == s.Framework {
@@ -286,9 +300,10 @@ UPDATE compliance_schedules
 		Framework:     s.Framework,
 		FrameworkName: fmt.Sprintf("%s (cluster: %s)", frameworkName, clusterName),
 		Summary: report.FrameworkSummary{
-			Total: summary["total"], Pass: summary["pass"], Fail: summary["fail"], Manual: summary["manual"],
+			Total: summary["total"], Pass: summary["pass"], Fail: summary["fail"], Manual: summary["manual"], Exempted: summary["exempted"], NotApplicable: summary["not_applicable"],
 		},
-		Checks: checks,
+		Checks:      checks,
+		SourceLabel: "Current retained multi-source evidence; effective exemptions; graded rate excludes manual/exempted/not-applicable", SourceTotal: summary["total"], SourceReturned: len(checks), SourceTruncated: summary["truncated"] == 1,
 	})
 	if err != nil {
 		finalize("failed", "", "", 0, summary, err)
@@ -302,6 +317,7 @@ UPDATE compliance_schedules
 		finalize("failed", "", "", 0, summary, err)
 		return err
 	}
+	artifactFormat, artifactMediaType, artifactFilename = ext, report.ArtifactMediaType(ext), filename
 	size := int64(len(artifact))
 
 	// Sign the artifact bytes (best-effort).
@@ -340,8 +356,7 @@ UPDATE compliance_schedules
 		}
 	}
 
-	finalize("succeeded", primaryURI, sig, size, summary, nil)
-	return nil
+	return finalize("succeeded", primaryURI, sig, size, summary, nil)
 }
 
 // loadChecks pulls the first-class compliance evidence rows for the
@@ -354,7 +369,7 @@ func (d *daemon) loadChecks(ctx context.Context, s dueSchedule) ([]report.Compli
 		OrgID:     s.OrgID,
 		ClusterID: s.ClusterID,
 		Framework: s.Framework,
-		Limit:     5000,
+		Limit:     evidence.ExportLimit,
 	})
 	if err != nil {
 		return nil, summary, fmt.Errorf("load evidence checks: %w", err)
@@ -372,27 +387,27 @@ func (d *daemon) loadChecks(ctx context.Context, s dueSchedule) ([]report.Compli
 			Severity:  item.Severity,
 			Evidence:  item.ReportEvidence(),
 		})
-		summary["total"]++
-		switch strings.ToLower(status) {
-		case "pass", "exempted":
-			summary["pass"]++
-		case "fail":
-			summary["fail"]++
-		case "manual":
-			summary["manual"]++
-		}
+	}
+	summary["total"], summary["pass"], summary["fail"], summary["manual"] = result.Summary.Total, result.Summary.Pass, result.Summary.Fail, result.Summary.Manual
+	summary["exempted"], summary["not_applicable"], summary["returned"] = result.Summary.Exempted, result.Summary.NotApplicable, len(out)
+	if result.HasMore {
+		summary["truncated"] = 1
 	}
 	return out, summary, nil
 }
 
-func (d *daemon) resolveNames(ctx context.Context, orgID uuid.UUID, clusterID *uuid.UUID) (string, string) {
-	orgName := "unknown-org"
-	_ = d.pool.QueryRow(ctx, `SELECT name FROM orgs WHERE id=$1`, orgID).Scan(&orgName)
-	clusterName := "all-clusters"
-	if clusterID != nil {
-		_ = d.pool.QueryRow(ctx, `SELECT name FROM clusters WHERE id=$1`, *clusterID).Scan(&clusterName)
+func (d *daemon) resolveNames(ctx context.Context, orgID uuid.UUID, clusterID *uuid.UUID) (string, string, error) {
+	var orgName string
+	if err := d.pool.QueryRow(ctx, `SELECT COALESCE(NULLIF(display_name,''),name) FROM orgs WHERE id=$1`, orgID).Scan(&orgName); err != nil {
+		return "", "", fmt.Errorf("resolve report organization: %w", err)
 	}
-	return orgName, clusterName
+	clusterName := "all owned clusters"
+	if clusterID != nil {
+		if err := d.pool.QueryRow(ctx, `SELECT name FROM clusters WHERE id=$1 AND org_id=$2`, *clusterID, orgID).Scan(&clusterName); err != nil {
+			return "", "", fmt.Errorf("resolve report cluster: %w", err)
+		}
+	}
+	return orgName, clusterName, nil
 }
 
 // renderArtifact picks the right pkg/report path for the configured format. For
@@ -421,13 +436,23 @@ func renderArtifact(format string, data report.ComplianceData) ([]byte, string, 
 		raw, err := json.MarshalIndent(map[string]any{
 			"org": data.OrgName, "framework": data.Framework, "summary": data.Summary,
 			"checks": data.Checks, "generated_at": data.GeneratedAt,
+			"source": map[string]any{"label": data.SourceLabel, "total": data.SourceTotal, "returned": data.SourceReturned, "truncated": data.SourceTruncated},
 		}, "", "  ")
 		return raw, "json", err
 	case "csv":
 		var buf bytes.Buffer
-		buf.WriteString("control_id,title,status,severity,evidence\n")
+		writer := csv.NewWriter(&buf)
+		if err := writer.Write([]string{"control_id", "title", "status", "severity", "evidence"}); err != nil {
+			return nil, "", err
+		}
 		for _, c := range data.Checks {
-			buf.WriteString(fmt.Sprintf("%q,%q,%q,%q,%q\n", c.ControlID, c.Title, c.Status, c.Severity, c.Evidence))
+			if err := writer.Write([]string{c.ControlID, c.Title, c.Status, c.Severity, c.Evidence}); err != nil {
+				return nil, "", err
+			}
+		}
+		writer.Flush()
+		if err := writer.Error(); err != nil {
+			return nil, "", err
 		}
 		return buf.Bytes(), "csv", nil
 	case "sarif":

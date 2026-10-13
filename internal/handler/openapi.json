@@ -8271,6 +8271,187 @@
             "format": "date-time"
           }
         }
+      },
+      "ComplianceRunArtifactMetadata": {
+        "type": "object",
+        "required": [
+          "artifact_metadata_known"
+        ],
+        "properties": {
+          "artifact_format": {
+            "type": "string",
+            "enum": [
+              "html",
+              "json",
+              "csv",
+              "sarif",
+              "pdf"
+            ]
+          },
+          "artifact_media_type": {
+            "type": "string"
+          },
+          "artifact_filename": {
+            "type": "string",
+            "description": "Immutable actual rendered filename, independent of current schedule format."
+          },
+          "artifact_metadata_known": {
+            "type": "boolean",
+            "description": "False for untouched legacy history; no guessed metadata backfill."
+          }
+        }
+      },
+      "ComplianceRunRecord": {
+        "type": "object",
+        "required": [
+          "id",
+          "org_id",
+          "framework",
+          "started_at",
+          "status",
+          "summary",
+          "triggered_by",
+          "artifact_metadata_known"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "org_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "schedule_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "framework": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "artifact_uri": {
+            "type": "string"
+          },
+          "artifact_signature": {
+            "type": "string"
+          },
+          "artifact_size_bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "triggered_by": {
+            "type": "string"
+          },
+          "error_message": {
+            "type": "string"
+          },
+          "artifact_format": {
+            "type": "string",
+            "enum": [
+              "html",
+              "json",
+              "csv",
+              "sarif",
+              "pdf"
+            ]
+          },
+          "artifact_media_type": {
+            "type": "string"
+          },
+          "artifact_filename": {
+            "type": "string",
+            "description": "Immutable actual rendered filename, independent of current schedule format."
+          },
+          "artifact_metadata_known": {
+            "type": "boolean",
+            "description": "False for untouched legacy history; no guessed metadata backfill."
+          }
+        }
+      },
+      "NetworkPolicyObservedTuple": {
+        "type": "object",
+        "required": [
+          "direction",
+          "peer",
+          "peer_platform_role",
+          "protocol",
+          "port",
+          "verdict",
+          "samples",
+          "bytes",
+          "packets",
+          "first_seen_at",
+          "last_seen_at",
+          "included"
+        ],
+        "properties": {
+          "direction": {
+            "type": "string"
+          },
+          "peer": {
+            "type": "string"
+          },
+          "peer_platform_role": {
+            "type": "string",
+            "description": "Exact actual source-cluster role; empty unknown for mixed, IP, ambiguous or foreign identities. This display field is excluded from approval candidate hashing."
+          },
+          "protocol": {
+            "type": "string"
+          },
+          "l7_protocol": {
+            "type": "string"
+          },
+          "verdict": {
+            "type": "string"
+          },
+          "first_seen_at": {
+            "type": "string"
+          },
+          "last_seen_at": {
+            "type": "string"
+          },
+          "exclude_reason": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "samples": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "packets": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "included": {
+            "type": "boolean"
+          }
+        }
       }
     },
     "responses": {
@@ -13775,13 +13956,136 @@
       "get": {
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Actual file bytes or explicit remote metadata",
+            "headers": {
+              "X-Constellation-Artifact-Metadata": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "recorded",
+                    "legacy_unknown"
+                  ]
+                }
+              },
+              "X-Constellation-Cosign-Signature": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "artifact_uri",
+                        "signature",
+                        "download_kind",
+                        "artifact_metadata_known"
+                      ],
+                      "properties": {
+                        "artifact_uri": {
+                          "type": "string"
+                        },
+                        "signature": {
+                          "type": "string"
+                        },
+                        "download_kind": {
+                          "type": "string",
+                          "enum": [
+                            "metadata"
+                          ]
+                        },
+                        "artifact_format": {
+                          "type": "string",
+                          "enum": [
+                            "",
+                            "html",
+                            "json",
+                            "csv",
+                            "sarif",
+                            "pdf"
+                          ]
+                        },
+                        "artifact_media_type": {
+                          "type": "string"
+                        },
+                        "artifact_filename": {
+                          "type": "string",
+                          "description": "Immutable actual rendered filename, independent of current schedule format."
+                        },
+                        "artifact_metadata_known": {
+                          "type": "boolean",
+                          "description": "False for untouched legacy history; no guessed metadata backfill."
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "description": "Actual retained JSON artifact bytes; report payload is distinct from remote metadata."
+                    }
+                  ]
+                }
+              },
+              "application/sarif+json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Run not owned/missing or no retained artifact URI."
+          },
+          "410": {
+            "description": "Recorded local artifact file unavailable."
+          },
+          "500": {
+            "description": "Artifact metadata source unavailable."
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Get artifact"
+        "summary": "Download one retained compliance run artifact",
+        "description": "Tenant-scoped run identity. New artifacts use immutable actual format/MIME/filename captured during rendering, including PDF-to-HTML fallback; schedule format changes cannot relabel old bytes. Legacy missing metadata is never guessed from current schedule: file bytes use octet-stream and URI basename with legacy_unknown marker. S3/unknown URI schemes return explicit JSON metadata, not fabricated artifact bytes.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
       }
     },
     "/api/v1/compliance/schedules": {
@@ -13844,13 +14148,53 @@
       "get": {
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Loaded run metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "runs"
+                  ],
+                  "properties": {
+                    "runs": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ComplianceRunRecord"
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Get runs"
+        "summary": "List retained run metadata for one schedule",
+        "description": "Tenant-scoped loaded run history; actual artifact metadata is captured per run and does not follow current schedule settings. Legacy metadata remains explicitly unknown. No mutation or rerun.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 50
+            }
+          }
+        ]
       }
     },
     "/api/v1/compliance/summary": {
@@ -15292,8 +15636,10 @@
                             "type": "object",
                             "required": [
                               "id",
+                              "cluster_id",
                               "namespace",
                               "name",
+                              "platform_role",
                               "critical",
                               "high"
                             ],
@@ -15302,10 +15648,18 @@
                                 "type": "string",
                                 "format": "uuid"
                               },
+                              "cluster_id": {
+                                "type": "string",
+                                "format": "uuid",
+                                "nullable": true
+                              },
                               "namespace": {
                                 "type": "string"
                               },
                               "name": {
+                                "type": "string"
+                              },
+                              "platform_role": {
                                 "type": "string"
                               },
                               "critical": {
@@ -16599,7 +16953,7 @@
     "/api/v1/events:export": {
       "get": {
         "summary": "Stream recent finding and threat events",
-        "description": "Organization-scoped NDJSON finding and threat evidence, read in bounded pages from one repeatable-read snapshot. Threat time filtering uses at; threat rows include exact platform_role metadata. Each line remains a valid JSON object. If reading fails after streaming begins, an error record terminates the stream; clients must treat it as incomplete.",
+        "description": "Organization-scoped NDJSON finding and threat evidence, read in bounded pages from one repeatable-read snapshot. Threat time filtering uses at; threat rows include exact platform_role metadata. Each line remains a valid JSON object. If reading fails after streaming begins, an error record terminates the stream; clients must treat it as incomplete. Finding and threat frames retain their original evidence fields plus platform_role with explicit unknown empty string. Finding roles follow actual tenant/source-cluster and target-kind identity; recurring UUIDs at different first_seen_at remain separate records.",
         "parameters": [
           {
             "name": "hours",
@@ -21790,7 +22144,46 @@
     },
     "/api/v1/network/policies/lifecycle": {
       "get": {
-        "summary": "Cluster-scoped network policy lifecycle preview, diff, approval, and rollback state"
+        "summary": "Cluster-scoped network policy lifecycle preview, diff, approval, and rollback state",
+        "responses": {
+          "200": {
+            "description": "Observed policy lifecycle with exact platform metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "properties": {
+                          "workload": {
+                            "type": "string"
+                          },
+                          "cluster_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "platform_role": {
+                            "type": "string"
+                          },
+                          "tuple_preview": {
+                            "type": "array",
+                            "items": {
+                              "$ref": "#/components/schemas/NetworkPolicyObservedTuple"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/network/policies/nbe": {
@@ -23527,52 +23920,304 @@
       "get": {
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Source-qualified readable report",
+            "headers": {
+              "X-Constellation-PDF-Fallback": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "browser-print"
+                  ]
+                },
+                "description": "Present when the optional PDF renderer is unavailable; bytes/filename/MIME remain HTML."
+              },
+              "X-Report-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "enum": [
+                    100000
+                  ]
+                }
+              },
+              "X-Report-Total": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-Report-Truncated": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed/duplicate report selector."
+          },
+          "404": {
+            "description": "Owned report scope missing."
+          },
+          "500": {
+            "description": "Report source or rendering unavailable.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Get compliance.html"
+        "summary": "Compliance evidence report (HTML)",
+        "description": "Requires existing read_findings. HTML is the primary readable download; PDF is an optional compatibility rendering of identical source evidence, falling back to correctly typed/named HTML. Exact owned cluster and all report reads use one repeatable-read snapshot. Query/scan/iteration failure returns an explicit error; no successful partial/zero report. Full retained compliance check rows use the same effective exemptions as the control inventory. Graded pass rate is pass/(pass+fail); manual/exempted/not-applicable remain separate. Report rows are capped100000 with full summary/source counts and explicit truncation.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Optional exact owned source cluster; absence is explicitly organization-wide."
+          },
+          {
+            "name": "framework",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "default": "cis-k8s-1.9"
+            },
+            "description": "Exact framework; all selects all frameworks."
+          }
+        ]
       }
     },
     "/api/v1/reports/compliance.pdf": {
       "get": {
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Source-qualified readable report",
+            "headers": {
+              "X-Constellation-PDF-Fallback": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "browser-print"
+                  ]
+                },
+                "description": "Present when the optional PDF renderer is unavailable; bytes/filename/MIME remain HTML."
+              },
+              "X-Report-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "enum": [
+                    100000
+                  ]
+                }
+              },
+              "X-Report-Total": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-Report-Truncated": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed/duplicate report selector."
+          },
+          "404": {
+            "description": "Owned report scope missing."
+          },
+          "500": {
+            "description": "Report source or rendering unavailable.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Get compliance.pdf"
+        "summary": "Compliance evidence report (PDF)",
+        "description": "Requires existing read_findings. HTML is the primary readable download; PDF is an optional compatibility rendering of identical source evidence, falling back to correctly typed/named HTML. Exact owned cluster and all report reads use one repeatable-read snapshot. Query/scan/iteration failure returns an explicit error; no successful partial/zero report. Full retained compliance check rows use the same effective exemptions as the control inventory. Graded pass rate is pass/(pass+fail); manual/exempted/not-applicable remain separate. Report rows are capped100000 with full summary/source counts and explicit truncation.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Optional exact owned source cluster; absence is explicitly organization-wide."
+          },
+          {
+            "name": "framework",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "default": "cis-k8s-1.9"
+            },
+            "description": "Exact framework; all selects all frameworks."
+          }
+        ]
       }
     },
     "/api/v1/reports/executive.html": {
       "get": {
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Source-qualified readable report",
+            "headers": {
+              "X-Constellation-PDF-Fallback": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "browser-print"
+                  ]
+                },
+                "description": "Present when the optional PDF renderer is unavailable; bytes/filename/MIME remain HTML."
+              }
+            },
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed/duplicate report selector."
+          },
+          "404": {
+            "description": "Owned report scope missing."
+          },
+          "500": {
+            "description": "Report source or rendering unavailable.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Get executive.html"
+        "summary": "Executive evidence report (HTML)",
+        "description": "Requires existing read_findings. HTML is the primary readable download; PDF is an optional compatibility rendering of identical source evidence, falling back to correctly typed/named HTML. Exact owned cluster and all report reads use one repeatable-read snapshot. Query/scan/iteration failure returns an explicit error; no successful partial/zero report. Counts cover all retained finding instances and lifecycles in the actual source cluster, not an invented30-day window. Top10 workloads retain actual namespace/cluster/platform role; all framework summaries use effective exemptions and graded denominator. MTTR is separately labeled organization-wide materialized90-day evidence because its source has no cluster dimension.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Optional exact owned source cluster; absence is explicitly organization-wide."
+          }
+        ]
       }
     },
     "/api/v1/reports/executive.pdf": {
       "get": {
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Source-qualified readable report",
+            "headers": {
+              "X-Constellation-PDF-Fallback": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "browser-print"
+                  ]
+                },
+                "description": "Present when the optional PDF renderer is unavailable; bytes/filename/MIME remain HTML."
+              }
+            },
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed/duplicate report selector."
+          },
+          "404": {
+            "description": "Owned report scope missing."
+          },
+          "500": {
+            "description": "Report source or rendering unavailable.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Get executive.pdf"
+        "summary": "Executive evidence report (PDF)",
+        "description": "Requires existing read_findings. HTML is the primary readable download; PDF is an optional compatibility rendering of identical source evidence, falling back to correctly typed/named HTML. Exact owned cluster and all report reads use one repeatable-read snapshot. Query/scan/iteration failure returns an explicit error; no successful partial/zero report. Counts cover all retained finding instances and lifecycles in the actual source cluster, not an invented30-day window. Top10 workloads retain actual namespace/cluster/platform role; all framework summaries use effective exemptions and graded denominator. MTTR is separately labeled organization-wide materialized90-day evidence because its source has no cluster dimension.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Optional exact owned source cluster; absence is explicitly organization-wide."
+          }
+        ]
       }
     },
     "/api/v1/repository-packages:report": {

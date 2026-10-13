@@ -51,6 +51,9 @@ func TestDashboardFixableDestinationAndWorkloadIdentity(t *testing.T) {
 	 ($2,$3,$5,'payments','same-name','Deployment',90,90)`, selectedID, siblingID, org, cluster, sibling); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := pool.Exec(ctx, `UPDATE deployments SET labels='{"helm.sh/chart":"constellation-1"}'::jsonb WHERE id=$1`, selectedID); err != nil {
+		t.Fatal(err)
+	}
 	request := func(path string) *http.Request {
 		r := httptest.NewRequestWithContext(ctx, http.MethodGet, path, nil)
 		return r.WithContext(WithSubject(r.Context(), Subject{OrgID: org}))
@@ -67,7 +70,7 @@ func TestDashboardFixableDestinationAndWorkloadIdentity(t *testing.T) {
 	if summary.Posture.VulnSignals["fixable"] != 4 {
 		t.Fatalf("fixable=%d, want 4", summary.Posture.VulnSignals["fixable"])
 	}
-	if len(summary.Posture.TopVulnerable) != 1 || summary.Posture.TopVulnerable[0].ID != selectedID.String() {
+	if len(summary.Posture.TopVulnerable) != 1 || summary.Posture.TopVulnerable[0].ID != selectedID.String() || summary.Posture.TopVulnerable[0].ClusterID == nil || *summary.Posture.TopVulnerable[0].ClusterID != cluster || summary.Posture.TopVulnerable[0].PlatformRole != "core" {
 		t.Fatalf("wrong workload identity: %+v", summary.Posture.TopVulnerable)
 	}
 	w = httptest.NewRecorder()

@@ -95,19 +95,20 @@ type networkPolicyLifecycleSummary struct {
 }
 
 type networkPolicyTuplePreviewDTO struct {
-	Direction     string `json:"direction"`
-	Peer          string `json:"peer"`
-	Protocol      string `json:"protocol"`
-	Port          int    `json:"port"`
-	L7Protocol    string `json:"l7_protocol,omitempty"`
-	Verdict       string `json:"verdict"`
-	Samples       int    `json:"samples"`
-	Bytes         int64  `json:"bytes"`
-	Packets       int64  `json:"packets"`
-	FirstSeenAt   string `json:"first_seen_at"`
-	LastSeenAt    string `json:"last_seen_at"`
-	Included      bool   `json:"included"`
-	ExcludeReason string `json:"exclude_reason,omitempty"`
+	Direction        string `json:"direction"`
+	Peer             string `json:"peer"`
+	PeerPlatformRole string `json:"peer_platform_role"`
+	Protocol         string `json:"protocol"`
+	Port             int    `json:"port"`
+	L7Protocol       string `json:"l7_protocol,omitempty"`
+	Verdict          string `json:"verdict"`
+	Samples          int    `json:"samples"`
+	Bytes            int64  `json:"bytes"`
+	Packets          int64  `json:"packets"`
+	FirstSeenAt      string `json:"first_seen_at"`
+	LastSeenAt       string `json:"last_seen_at"`
+	Included         bool   `json:"included"`
+	ExcludeReason    string `json:"exclude_reason,omitempty"`
 }
 
 type networkPolicyPreviewDTO struct {
@@ -721,6 +722,40 @@ SELECT namespace, name, labels
 	}
 	if err := flowRows.Err(); err != nil {
 		return nil, err
+	}
+
+	// Peer roles are display evidence only; they intentionally do not enter the
+	// candidate hash or generated policy intent. Unknown org-wide source identity
+	// cannot borrow labels from a selected deployment in another cluster.
+	flowRows.Close()
+	if cluster != nil {
+		parsedCluster, err := uuid.Parse(cluster.ID)
+		if err != nil {
+			return nil, err
+		}
+		parsedOrg, err := uuid.Parse(orgID)
+		if err != nil {
+			return nil, err
+		}
+		identities := []handlerpkg.PlatformWorkloadIdentity{}
+		type position struct {
+			workload string
+			index    int
+		}
+		positions := []position{}
+		for workload, items := range tuplePreviews {
+			for i, item := range items {
+				identities = append(identities, handlerpkg.PlatformWorkloadIdentity{ClusterID: parsedCluster, Workload: item.Peer})
+				positions = append(positions, position{workload, i})
+			}
+		}
+		roles, err := handlerpkg.EvidencePlatformRoles(r.Context(), h.db.Pool(), parsedOrg, identities)
+		if err != nil {
+			return nil, err
+		}
+		for i, pos := range positions {
+			tuplePreviews[pos.workload][pos.index].PeerPlatformRole = roles[i]
+		}
 	}
 
 	// NET-4: load the PERSISTED per-workload mode + mode_since so the elevation
