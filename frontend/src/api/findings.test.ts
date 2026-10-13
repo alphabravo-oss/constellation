@@ -29,3 +29,13 @@ it("does not trigger a download when the filtered export fails", async () => {
   const anchor = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
   await expect(findings.exportCSV({ q: "unknown:value" })).rejects.toThrow("export unavailable"); expect(anchor).not.toHaveBeenCalled();
 });
+it('uses exact observation paths and reviewed revisions without timestamp rounding or legacy fallback', async () => {
+  const selector = { first_seen_at: '2026-01-01T00:00:00.123457Z', cluster_id: 'target' };
+  const get = vi.spyOn(api, 'get').mockResolvedValue({ data: { id: 'finding' } });
+  const post = vi.spyOn(api, 'post').mockResolvedValue({ data: { status: 'ok' } });
+  await findings.instance('finding', selector); await findings.instanceComments('finding', selector);
+  await findings.instanceSuppress('finding', selector, { reviewed_revision: '9223372036854775806', reason: 'Reviewed exact record' });
+  expect(get).toHaveBeenNthCalledWith(1, '/finding-instances/finding', { params: selector }); expect(get).toHaveBeenNthCalledWith(2, '/finding-instances/finding/comments', { params: selector });
+  expect(post).toHaveBeenCalledWith('/finding-instances/finding/suppress', { reviewed_revision: '9223372036854775806', reason: 'Reviewed exact record' }, { params: selector });
+  get.mockRejectedValueOnce({ response: { status: 404 } }); await expect(findings.instance('finding', selector)).rejects.toEqual({ response: { status: 404 } }); expect(get.mock.calls.at(-1)?.[0]).toBe('/finding-instances/finding');
+});

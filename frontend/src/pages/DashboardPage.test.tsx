@@ -281,3 +281,10 @@ it("carries source time bounds to exact event-only destinations and graded compl
  const events=links.find(u=>u.searchParams.get("after_exclusive")==="true")!;expect(events.searchParams.get("after")).toBe("2026-09-28T20:00:00.654321Z");expect(events.searchParams.get("severity")).toBe("high,critical");
  expect(links.some(u=>u.pathname==="/clusters/cluster/compliance"&&u.searchParams.get("framework")==="all"&&u.searchParams.get("status")==="graded")).toBe(true);
 });
+it('preserves the selected recurrence in dashboard detail and triage destinations', async () => {
+  route.params = new URLSearchParams('tab=overview');
+  const finding = { id: 'repeated', cluster_id: 'cluster', title: 'Repeated observation', severity: 'critical', risk_score: 95, lifecycle: 'open', kind: 'vulnerability', first_seen_at: '2026-01-01T00:00:00.123457Z', last_seen_at: '2026-01-01T00:00:00.123457Z' };
+  vi.mocked(findings.list).mockResolvedValue({ findings: [finding] } as Awaited<ReturnType<typeof findings.list>>);
+  await renderPage(); await settled(() => expect(host.textContent).toContain('Repeated observation'));
+  expect(host.querySelector('a[href="/clusters/cluster/findings/repeated?first_seen_at=2026-01-01T00%3A00%3A00.123457Z"]')).not.toBeNull();
+});

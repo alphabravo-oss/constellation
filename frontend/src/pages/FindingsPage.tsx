@@ -1,3 +1,4 @@
+import { findingHref, findingBelongsToCluster, findingDTOReady, findingEpochNanos, findingRowIDMatches, findingInstanceReady, findingRowKey, findingReceiptMatches } from "@/lib/finding-instance";
 import { SavedViewsMenu } from "@/components/SavedViewsMenu";
 import { useExportGuard, exportQueryReady } from "@/hooks/useExportGuard";
 import { clusterCacheReady } from "@/lib/cluster-evidence";
@@ -78,7 +79,7 @@ export function FindingsPage() {
   const identity = useTablePreferencesIdentity();
   const owner = [identity?.org_id, identity?.user_id];
   const { clusterId, cluster, isLoading: clusterLoading, error: clusterError } = useCluster();
-  const scopeReady = !!clusterId && cluster?.id === clusterId && !clusterLoading && !clusterError;
+  const scopeReady = !!identity?.org_id && !!identity?.user_id && !!clusterId && cluster?.id === clusterId && !clusterLoading && !clusterError;
   const [searchParams, setSearchParams] = useRouteSearchParams();
   const locationHash = useLocation({ select: location => location.hash });
   const severity = (["critical", "high", "medium", "low", "info"] as const).find((value) => value === searchParams.get("severity")) ?? "";
@@ -120,7 +121,7 @@ export function FindingsPage() {
   const [density, setDensity] = useOperatorDensity(DENSITY_KEY);
   const { views, deleteView, persistenceError } = useSavedViews<SavedView>(FINDING_VIEWS_KEY, { validate: isFindingSavedView });
   const navigate = useNavigate();
-  const openFinding = (finding: Finding) => navigate({ href: clusterId ? `/clusters/${clusterId}/findings/${finding.id}` : `/findings/${finding.id}` });
+  const openFinding = (finding: Finding) => navigate({ href: findingHref(finding, clusterId) });
   const request: NonNullable<Parameters<typeof findings.list>[0]> = { kind: activeView === "cve" ? "vulnerability" as const : kind || undefined, lifecycle: lifecycle || undefined, cluster_id: clusterId, ...(groupMode ? { group_mode: groupMode } : {}), ...(idScope ? { id_scope: idScope as "all" } : {}), ...(targetType ? { target_type: targetType } : {}), q: serverQuery || undefined, fixable: fixableOnly || undefined, sort: activeView === "cve" ? "risk" : sort, order: activeView === "cve" ? "desc" as const : order };
   const instanceKey = ["findings", ...owner, request, activeView, activeView === "instances" ? page : 0];
   // The rollup needs a single instance solely for its lifecycle counts.
@@ -128,13 +129,14 @@ export function FindingsPage() {
   const cveKey = ["findings-cve", ...owner, request, page];
   const cveQ = useQuery({ queryKey: cveKey, queryFn: () => findings.byCVE({ cluster_id: clusterId, ...(groupMode ? { group_mode: groupMode } : {}), ...(idScope ? { id_scope: idScope as "all" } : {}), ...(targetType ? { target_type: targetType } : {}), lifecycle: lifecycle || undefined, q: serverQuery || undefined, fixable: fixableOnly || undefined, limit: PAGE_SIZE, offset: page * PAGE_SIZE }), enabled: activeView === "cve" && scopeReady && querySettled, placeholderData: keepPreviousData });
   const activeQ = activeView === "cve" ? cveQ : q;
-  const ready = scopeReady && querySettled && activeQ.isSuccess && !activeQ.isFetching && !activeQ.isPlaceholderData;
-  const rows = useMemo(() => q.data?.findings ?? [], [q.data]);
+  const validInstances = !q.data || Array.isArray(q.data.findings) && q.data.findings.every(row => !!row && typeof row.id === "string" && !!clusterId && findingBelongsToCluster(row, clusterId) && findingEpochNanos(row.first_seen_at) !== null && (!row.row_id || findingRowIDMatches(row))) && new Set(q.data.findings.map(findingRowKey)).size === q.data.findings.length;
+  const ready = (activeView !== "instances" || validInstances) && scopeReady && querySettled && activeQ.isSuccess && !activeQ.isFetching && !activeQ.isPlaceholderData;
+  const rows = useMemo(() => validInstances ? q.data?.findings ?? [] : [], [q.data, validInstances]);
   const cveRows = cveQ.data?.cves ?? [];
   const total = ready ? activeQ.data?.total ?? 0 : undefined;
   const outOfRange = ready && page > 0 && page * PAGE_SIZE >= (total ?? 0);
   const grouped = useMemo(() => groupRows(rows, groupBy), [rows, groupBy]);
-  const selectionScope = JSON.stringify([clusterId, groupMode, idScope, targetType, kind, lifecycle, severity, query, fixableOnly, activeView, groupBy, page, sort, order]);
+  const selectionScope = JSON.stringify([owner, clusterId, groupMode, idScope, targetType, kind, lifecycle, severity, query, fixableOnly, activeView, groupBy, page, sort, order]);
   const [selection, setSelection] = useState<{ scope: string; ids: Set<React.Key> }>({ scope: selectionScope, ids: new Set() });
   const selected = ready && activeView === "instances" && selection.scope === selectionScope ? selection.ids : new Set<React.Key>();
   const setSelected = (ids: Set<React.Key>) => setSelection({ scope: selectionScope, ids });
@@ -276,20 +278,31 @@ export function FindingsPage() {
     },
   ];
 
+  columns.push({ id: "instance", header: "Observation identity", kind: "id", wrap: true, cell: finding => finding.row_id ?? "Not reported", exportValue: finding => finding.row_id ?? "" }, { id: "first-seen", header: "First observed", kind: "date", cell: finding => finding.first_seen_at, exportValue: finding => finding.first_seen_at });
   const totalSelected = selected.size;
 
+  const captureBulk = useExportGuard(selectionScope, !ready, () => !!clusterId && clusterCacheReady(qc, clusterId) && exportQueryReady(qc, instanceKey, q.data));
   const bulkAction = useMutation({
-    mutationFn: async (action: "triage" | "suppress" | "accept") => {
+    mutationFn: async ({ action, scope, isCurrent }: { action: "triage" | "suppress" | "accept"; scope: string; isCurrent: () => boolean }) => {
+      if (scope !== selectionScope || !isCurrent()) throw new Error("Selection is unavailable");
       const current = qc.getQueryState<Awaited<ReturnType<typeof findings.list>>>(instanceKey);
       const ids = Array.from(selected) as string[];
-      const available = new Set(current?.data?.findings.map((finding) => finding.id));
-      if (!ready || activeView !== "instances" || !ids.length || current?.status !== "success" || current.fetchStatus !== "idle" || ids.some((id) => !available.has(id))) throw new Error("Selection is unavailable");
-      const results = await Promise.allSettled(ids.map((id) => action === "triage" ? findings.triage(id, { priority: "high" }) : action === "suppress" ? findings.suppress(id, { reason: "bulk suppress via Findings" }) : findings.acceptRisk(id, { reason: "bulk accept-risk via Findings", accepted_until: new Date(Date.now() + 30 * 86400_000).toISOString() })));
+      const available = new Map(current?.data?.findings.map(finding => [findingRowKey(finding), finding]));
+      if (!ready || !clusterId || activeView !== "instances" || !ids.length || !clusterCacheReady(qc, clusterId) || !exportQueryReady(qc, instanceKey, q.data) || ids.some(id => { const row = available.get(id); return !findingInstanceReady(row) || !findingDTOReady(row, row.id, clusterId, row.first_seen_at); })) throw new Error("Selection is unavailable");
+      const results = await Promise.allSettled(ids.map(async key => {
+        const finding = available.get(key)!;
+        const selector = { first_seen_at: finding.first_seen_at, cluster_id: clusterId };
+        const reviewed_revision = finding.revision!;
+        const receipt = action === "triage" ? await findings.instanceTriage(finding.id, selector, { reviewed_revision, priority: "high" }) : action === "suppress" ? await findings.instanceSuppress(finding.id, selector, { reviewed_revision, reason: "bulk suppress via Findings" }) : await findings.instanceAcceptRisk(finding.id, selector, { reviewed_revision, reason: "bulk accept-risk via Findings", accepted_until: new Date(Date.now() + 30 * 86400_000).toISOString() });
+        if (!findingReceiptMatches(receipt, finding, clusterId)) throw new Error("Updated observation could not be confirmed");
+      }));
       if (results.some((result) => result.status === "rejected")) throw new Error("Some selected findings could not be updated");
     },
-    onSettled: () => { void qc.invalidateQueries({ queryKey: ["findings"] }); void qc.invalidateQueries({ queryKey: ["findings-cve"] }); setSelected(new Set()); },
+    onSettled: (_data, _error, captured) => { if (captured.scope !== selectionScope || !captured.isCurrent()) return; void qc.invalidateQueries({ queryKey: ["findings"] }); void qc.invalidateQueries({ queryKey: ["findings-cve"] }); setSelected(new Set()); },
   });
 
+  const resetBulk = bulkAction.reset;
+  useEffect(() => { resetBulk(); }, [selectionScope, resetBulk]);
   return (
     <div className="space-y-4" data-testid="findings-page" data-cluster-id={clusterId ?? ""}>
       <PageHeader
@@ -459,37 +472,37 @@ export function FindingsPage() {
       {bulkAction.isError && <ErrorState title="Some selected findings could not be updated. Refresh and review their current states before retrying." />}
       {activeView === "cve" && q.isError && <ErrorState title="Lifecycle counts could not be loaded." action={<Button onClick={() => void q.refetch()}>Retry counts</Button>} />}
       {!scopeReady ? <ErrorState title="The active cluster could not be resolved. Findings are unavailable until its scope recovers." />
-        : activeQ.isError ? <ErrorState title="Could not load findings. Review your query and retry." action={<Button onClick={() => void activeQ.refetch()}>Retry</Button>} />
+        : activeView === "instances" && !validInstances ? <ErrorState title="Finding observations could not be identified safely." action={<Button onClick={() => void q.refetch()}>Retry</Button>} /> : activeQ.isError ? <ErrorState title="Could not load findings. Review your query and retry." action={<Button onClick={() => void activeQ.refetch()}>Retry</Button>} />
         : !ready ? <LoadingState label={activeQ.isPending ? "Loading findings…" : "Updating findings…"} />
         : outOfRange ? <EmptyState title="This page is outside the current results" hint="The inventory may have changed. Return to the first page to review matching results." action={<Button onClick={() => setPage(0)}>First page</Button>} />
         : <>
           {activeView === "cve" ? <CVETable rows={cveRows} clusterId={clusterId} allIds={allIds} targetType={targetType} />
             : groupBy === "none" ? <DataTable
-                rows={rows} columns={columns} rowKey={(finding) => finding.id}
+                rows={rows} columns={columns} rowKey={findingRowKey}
                 density={density} onDensityChange={setDensity} selectable selected={selected} onSelectedChange={setSelected}
                 onRowClick={openFinding} sort={{ id: sort === "last_seen" ? "age" : sort, dir: order }} onSortChange={onSortChange} manualSorting pagination={false}
-                preferencesKey={INSTANCE_TABLE_KEY} defaultHiddenColumnIds={["package", "fixed", "platform-role"]}
-                exportFileName="constellation-findings-page" exportLabel="Export this page CSV" testId="findings-table"
+                preferencesKey={INSTANCE_TABLE_KEY} defaultHiddenColumnIds={["package", "fixed", "platform-role", "instance", "first-seen"]}
+                canExport={() => !!clusterId && clusterCacheReady(qc, clusterId) && exportQueryReady(qc, instanceKey, q.data)} exportFileName="constellation-findings-page" exportLabel="Export this page CSV" testId="findings-table"
                 emptyState={<EmptyState title="No findings match" hint="Adjust your filters or clear the query." icon={<Tag className="h-8 w-8" />} action={<Button variant="outline" onClick={() => setFilters({ q: "", kind: "", group_mode: "", id_scope: "", target_type: "", severity: "", lifecycle: "open", fixable: "", page: "" })}>Reset filters</Button>} />}
               />
             : <div className="space-y-3">
                 <p className="text-xs text-muted-foreground" data-testid="findings-group-scope">{grouped.length} groups from {rows.length} instances on this server page. Group counts, selection, and table CSV cover this page only.</p>
                 {grouped.map((group) => <details key={group.label} open className="rounded-md border border-border bg-card">
                   <summary className="flex cursor-pointer items-center justify-between gap-2 border-b border-border px-3 py-2 list-none"><span className="flex items-center gap-2"><ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /><span className="text-sm font-semibold">{group.label}</span><span className="text-xs text-muted-foreground">{group.items.length} on this page</span></span></summary>
-                  <DataTable rows={group.items} columns={columns} rowKey={(finding) => finding.id} density={density} onDensityChange={setDensity}
-                    selectable selected={selected} onSelectedChange={(ids) => { const merged = new Set(selected); for (const item of group.items) merged.delete(item.id); for (const id of ids) if (group.items.some((item) => item.id === id)) merged.add(id); setSelected(merged); }} onRowClick={openFinding}
+                  <DataTable rows={group.items} columns={columns} rowKey={findingRowKey} density={density} onDensityChange={setDensity}
+                    selectable selected={selected} onSelectedChange={(ids) => { const merged = new Set(selected); for (const item of group.items) merged.delete(findingRowKey(item)); for (const id of ids) if (group.items.some((item) => findingRowKey(item) === id)) merged.add(id); setSelected(merged); }} onRowClick={openFinding}
                     sort={{ id: sort === "last_seen" ? "age" : sort, dir: order }} onSortChange={onSortChange} manualSorting pagination={false}
-                    showDensityToggle={false} showColumnChooser={false} preferencesKey={INSTANCE_TABLE_KEY} defaultHiddenColumnIds={["package", "fixed", "platform-role"]}
-                    exportFileName={`constellation-findings-page-${safeFilename(group.label)}`} exportLabel="Export this group on this page CSV" className="rounded-none border-0" />
+                    showDensityToggle={false} showColumnChooser={false} preferencesKey={INSTANCE_TABLE_KEY} defaultHiddenColumnIds={["package", "fixed", "platform-role", "instance", "first-seen"]}
+                    canExport={() => !!clusterId && clusterCacheReady(qc, clusterId) && exportQueryReady(qc, instanceKey, q.data)} exportFileName={`constellation-findings-page-${safeFilename(group.label)}`} exportLabel="Export this group on this page CSV" className="rounded-none border-0" />
                 </details>)}
                 {!rows.length && <EmptyState title="No findings match" hint="Adjust your filters or clear the query." />}
               </div>}
           <Pager page={page} pageSize={PAGE_SIZE} total={total} rowsOnPage={activeView === "cve" ? cveRows.length : rows.length} onPage={setPage} />
         </>}
       <ActionBar count={totalSelected} onClear={() => setSelected(new Set())}>
-        <Button size="sm" variant="outline" disabled={!ready || bulkAction.isPending} onClick={() => bulkAction.mutate("triage")}>Triage</Button>
-        <Button size="sm" variant="outline" disabled={!ready || bulkAction.isPending} onClick={() => bulkAction.mutate("suppress")}>Suppress</Button>
-        <Button size="sm" variant="outline" disabled={!ready || bulkAction.isPending} onClick={() => bulkAction.mutate("accept")}>Accept risk · 30d</Button>
+        <Button size="sm" variant="outline" disabled={!ready || bulkAction.isPending} onClick={() => bulkAction.mutate({ action: "triage", scope: selectionScope, isCurrent: captureBulk() })}>Triage</Button>
+        <Button size="sm" variant="outline" disabled={!ready || bulkAction.isPending} onClick={() => bulkAction.mutate({ action: "suppress", scope: selectionScope, isCurrent: captureBulk() })}>Suppress</Button>
+        <Button size="sm" variant="outline" disabled={!ready || bulkAction.isPending} onClick={() => bulkAction.mutate({ action: "accept", scope: selectionScope, isCurrent: captureBulk() })}>Accept risk · 30d</Button>
       </ActionBar>
     </div>
   );

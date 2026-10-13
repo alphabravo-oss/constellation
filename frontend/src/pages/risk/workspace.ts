@@ -1,7 +1,10 @@
+import { findingDTOReady, findingEpochNanos, findingHref } from "@/lib/finding-instance";
 import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
 import { assetDisplayName } from "@/lib/asset-identity";
 import { useParams } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect } from "react";
+import { exportQueryReady } from "@/hooks/useExportGuard";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouteSearchParams } from "@/lib/route-search";
 import { assets, deployments, findings, nodes, type AssetDetail, type DeploymentDetail, type Finding, type NodeDetail } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
@@ -11,16 +14,17 @@ export type RiskEntity =
   | { type: "deployment"; data: DeploymentDetail }
   | { type: "finding"; data: Finding }
   | { type: "node"; data: NodeDetail };
-export type RiskFinding = Pick<Finding, "id" | "title" | "severity" | "risk_score" | "lifecycle" | "kind" | "last_seen_at" | "platform_role">;
+export type RiskFinding = Pick<Finding, "id" | "title" | "severity" | "risk_score" | "lifecycle" | "kind" | "last_seen_at" | "platform_role"> & Partial<Pick<Finding, "first_seen_at" | "row_id" | "revision" | "cluster_id" | "source_cluster_id" | "target_cluster_id">>;
 export interface ReportedRisk { composite: number; factors: Array<{ name: string; description: string; score: number; raw: number; weight: number }> }
 export const FINDINGS_PAGE_SIZE = 100;
 
 export function useRiskWorkspace() {
+  const qc = useQueryClient();
   const operator = useTablePreferencesIdentity();
   const owner = `${operator?.org_id}:${operator?.user_id}`;
   const { entityType = "", entityId = "" } = useParams({ strict: false });
   const { clusterId, cluster, isLoading: clusterLoading, error: clusterError } = useCluster();
-  const scopeReady = !!clusterId && cluster?.id === clusterId && !clusterLoading && !clusterError;
+  const scopeReady = !!operator?.org_id && !!operator?.user_id && !!clusterId && cluster?.id === clusterId && !clusterLoading && !clusterError;
   const supported = ["asset", "deployment", "node", "finding"].includes(entityType);
   const [params, setParams] = useRouteSearchParams();
   const rawPage = params.get("findings_page");
@@ -32,20 +36,24 @@ export function useRiskWorkspace() {
     if (value > 0) current.set("findings_page", String(value + 1)); else current.delete("findings_page");
     return current;
   });
-  const entityQueryKey = ["risk-entity", owner, clusterId, entityType, entityId];
+  const selectors = params.getAll("first_seen_at");
+  const firstSeen = selectors[0];
+  const validSelector = entityType !== "finding" || selectors.length <= 1 && (!selectors.length || findingEpochNanos(firstSeen) !== null);
+  const entityQueryKey = ["risk-entity", owner, clusterId, entityType, entityId, entityType === "finding" ? firstSeen ?? "legacy" : ""];
   const entityQ = useQuery({
     queryKey: entityQueryKey,
-    enabled: scopeReady && supported && !!entityId,
+    enabled: scopeReady && supported && !!entityId && validSelector,
     queryFn: async (): Promise<RiskEntity> => {
       if (entityType === "asset") return { type: "asset", data: await assets.get(entityId) };
       if (entityType === "deployment") return { type: "deployment", data: await deployments.get(entityId) };
       if (entityType === "node") return { type: "node", data: await nodes.get(clusterId!, entityId) };
-      return { type: "finding", data: await findings.get(entityId) };
+      return { type: "finding", data: firstSeen ? await findings.instance(entityId, { first_seen_at: firstSeen, cluster_id: clusterId }) : await findings.get(entityId) };
     },
   });
   const identity = entityQ.data ? entityIdentity(entityQ.data) : undefined;
-  const matches = identity?.id === entityId && identity?.clusterId === clusterId;
-  const entity = scopeReady && !entityQ.isError && matches ? entityQ.data : undefined;
+  const matches = entityQ.data?.type === "finding" ? findingDTOReady(entityQ.data.data, entityId, clusterId!, firstSeen) : identity?.id === entityId && identity?.clusterId === clusterId;
+  const entity = scopeReady && !entityQ.isError && matches && exportQueryReady(qc, entityQueryKey) ? entityQ.data : undefined;
+  useEffect(() => { if (entity?.type === "finding" && !firstSeen) setParams(current => { current.set("first_seen_at", entity.data.first_seen_at); return current; }, { replace: true }); }, [entity, firstSeen, setParams]);
   const assetQuery = entity?.type === "asset" ? `asset:${entity.data.asset.id}` : undefined;
   const findingQueryKey = ["risk-related", owner, clusterId, entityId, assetQuery, page];
   const query = useQuery({
@@ -66,7 +74,7 @@ export function useRiskWorkspace() {
   const generic = entity?.type === "asset" && !query.isError && !findingScopeMismatch && !invalidPage ? query.data : undefined;
   const records: RiskFinding[] = entity?.type === "finding" ? [entity.data] : entity?.type === "deployment" ? entity.data.findings ?? [] : generic?.findings ?? [];
   const stats: ReturnType<typeof entityStats> = entity ? entityStats(entity, generic, !generic || criticalQ.isError ? undefined : criticalQ.data?.total, !generic || highQ.isError ? undefined : highQ.data?.total) : {};
-  return { owner, findingQueryKey, entityType, entityId, clusterId, cluster, clusterLoading, clusterError, scopeReady, supported, entityQ, entityQueryKey, entity, matches, query, criticalQ, highQ, assetQuery, generic, findingScopeMismatch, records, stats, page, invalidPage, setPage };
+  return { firstSeen, validSelector, owner, findingQueryKey, entityType, entityId, clusterId, cluster, clusterLoading, clusterError, scopeReady, supported, entityQ, entityQueryKey, entity, matches, query, criticalQ, highQ, assetQuery, generic, findingScopeMismatch, records, stats, page, invalidPage, setPage };
 }
 export type RiskWorkspace = ReturnType<typeof useRiskWorkspace>;
 export type RiskTabProps = { workspace: RiskWorkspace };
@@ -84,6 +92,7 @@ function entityStats(entity: RiskEntity, generic: Awaited<ReturnType<typeof find
 }
 export function finiteScore(value: unknown): number | undefined { return typeof value === "number" && Number.isFinite(value) ? value : undefined; }
 export function detailPath(workspace: RiskWorkspace) {
+  if (workspace.entity?.type === "finding") return findingHref(workspace.entity.data, workspace.clusterId);
   const root = `/clusters/${encodeURIComponent(workspace.clusterId!)}`;
   const segment = workspace.entityType === "asset" ? "assets" : workspace.entityType === "node" ? "nodes" : workspace.entityType === "deployment" ? "deployments" : "findings";
   return `${root}/${segment}/${encodeURIComponent(workspace.entityId)}`;

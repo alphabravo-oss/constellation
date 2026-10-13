@@ -6,7 +6,7 @@ async function mockInventory(page: Page, endpoint: string, payload: unknown | ((
 }
 const asset = (index: number) => ({ id: `asset-${index + 1}`, cluster_id: clusterId, kind: "image", name: `asset-${String(index + 1).padStart(3, "0")}`, labels: {}, platform_role: "", ai_workload: false, criticality: "low", finding_count: 0, critical_findings: 0, high_findings: 0, open_findings: 0, sbom_count: 0, image_signed: true, first_seen_at: at, last_seen_at: at });
 const assetSummary = (total: number) => ({ total, images: total, workloads: 0, critical_high: 0, open_findings: 0, signed_images: total, unsigned_images: 0, signature_unknown: 0, with_sbom: 0, missing_sbom: total, ai: 0 });
-const finding = (index: number) => ({ id: `finding-${index + 1}`, cluster_id: clusterId, title: `finding-title-${String(index + 1).padStart(3, "0")}`, severity: "high", lifecycle: "open", kind: "vulnerability", asset_id: `asset-${index + 1}`, risk_score: 0, first_seen_at: at, last_seen_at: at, platform_role: "" });
+const finding = (index: number) => ({ id: `finding-${index + 1}`, row_id: `finding-${index + 1}:${(Date.parse(at) / 1000).toFixed(6)}`, revision: "1", source_cluster_id: clusterId, target_cluster_id: null, cluster_id: clusterId, title: `finding-title-${String(index + 1).padStart(3, "0")}`, severity: "high", lifecycle: "open", kind: "vulnerability", asset_id: `asset-${index + 1}`, risk_score: 0, first_seen_at: at, last_seen_at: at, platform_role: "" });
 const counts = (total: number) => ({ open: total, triaged: 0, in_progress: 0, accepted: 0, suppressed: 0, resolved: 0 });
 test("assets render 100 rows on each server page with full matching summaries", async ({ page }) => {
     const inventory = Array.from({ length: 250 }, (_, i) => asset(i));

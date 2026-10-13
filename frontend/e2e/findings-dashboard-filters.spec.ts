@@ -7,6 +7,7 @@ const fixtureFindings = [
     { id: "critical-accepted", title: "Critical accepted finding", severity: "critical", lifecycle: "accepted", kind: "license" },
 ].map((finding, index) => ({
     ...finding,
+    row_id: `${finding.id}:${(Date.parse("2026-09-26T12:00:00Z") / 1000).toFixed(6)}`, revision: "1", source_cluster_id: clusterId, target_cluster_id: null,
     risk_score: 90 - index * 10,
     asset_id: `asset-${index}`,
     cluster_id: clusterId,

@@ -12,11 +12,11 @@ import { RiskDetailPage } from "./RiskDetailPage";
 
 const state = vi.hoisted(() => ({ clusterId: "cluster" as string | undefined, cluster: { id: "cluster", name: "Demo" } as { id: string; name: string } | undefined, isLoading: false, error: null as Error | null }));
 vi.mock("@/hooks/useCluster", () => ({ useCluster: () => state }));
-vi.mock("@/api/client", () => ({ assets: { get: vi.fn() }, deployments: { get: vi.fn(), findings: vi.fn(), findingsCSV: vi.fn() }, findings: { get: vi.fn(), list: vi.fn(), exportCSV: vi.fn() }, nodes: { get: vi.fn() }, network: { map: vi.fn() }, enterprise: { runtime: vi.fn() }, fileProfiles: { get: vi.fn() }, compliance: { summary: vi.fn() } }));
+vi.mock("@/api/client", () => ({ assets: { get: vi.fn() }, deployments: { get: vi.fn(), findings: vi.fn(), findingsCSV: vi.fn() }, findings: { get: vi.fn(), instance: vi.fn(), list: vi.fn(), exportCSV: vi.fn() }, nodes: { get: vi.fn() }, network: { map: vi.fn() }, enterprise: { runtime: vi.fn() }, fileProfiles: { get: vi.fn() }, compliance: { summary: vi.fn() } }));
 vi.mock("@/lib/csv", () => ({ downloadCsv: vi.fn() }));
 const assetID = "11111111-1111-4111-8111-111111111111";
 const asset = (): AssetDetail => ({ asset: { id: assetID, cluster_id: "cluster", kind: "host", name: "exact-asset", criticality: "high", labels: {}, ai_workload: false, finding_count: 0, critical_findings: 0, high_findings: 0, open_findings: 0, sbom_count: 0, first_seen_at: "2026-10-12T00:00:00Z", last_seen_at: "2026-10-12T00:00:00Z" }, findings: [], sboms: [], image_acceptances: [] });
-const finding = (id = "finding", severity: Finding["severity"] = "high"): Finding => ({ id, asset_id: assetID, cluster_id: "cluster", kind: "vulnerability", title: `Finding ${id}`, severity, lifecycle: "open", risk_score: 42, attack_techniques: [], first_seen_at: "2026-10-12T00:00:00Z", last_seen_at: "2026-10-12T00:00:00Z" });
+const finding = (id = "finding", severity: Finding["severity"] = "high"): Finding => ({ id, row_id: `${id}:1791763200`, revision: "4", asset_id: assetID, cluster_id: "cluster", kind: "vulnerability", title: `Finding ${id}`, severity, lifecycle: "open", risk_score: 42, attack_techniques: [], first_seen_at: "2026-10-12T00:00:00Z", last_seen_at: "2026-10-12T00:00:00Z" });
 const node = (): NodeDetail => ({ node: { node: "node-a", cluster_id: "cluster", last_seen_at: "2026-10-12T00:00:00Z", last_scanned_at: "2026-10-12T00:00:00Z", scan_status: "completed", runtime_agent_status: "healthy", open_vulns: 303, critical_vulns: 200, high_vulns: 103, coverage_gaps: [] }, vulnerabilities: [], processes: { items: [{ pid: 101, comm: "node-process", cmdline: "actual command", uid: 0 }] }, cis: { checks: [{ id: "1.1.1", title: "Node CIS check", result: "fail", detail: "actual CIS evidence" }] } } as unknown as NodeDetail);
 const deployment = (): DeploymentDetail => ({ id: "deployment", cluster_id: "cluster", name: "app", namespace: "payments", kind: "Deployment", labels: {}, risk_score: 73, risk_factors: { vulnerabilities: 55 }, finding_count: 905, critical_count: 605, high_count: 300, first_seen_at: "2026-10-12T00:00:00Z", last_seen_at: "2026-10-12T00:00:00Z", image_refs: [], workload_ids: ["payments/app"], images: [], package_evidence: [], findings: [{ ...finding("deployment-direct"), target_type: "workload", target_ref: "payments/app" }], runtime_events: [{ id: "runtime", kind: "process_exec", workload_id: "payments/app", node_id: "node-a", source: "agent", severity: "high", verdict: "deny", at: "2026-10-12T00:00:00Z", payload: {}, attack_techniques: [] }], network_flows: [{ id: "flow", src: "payments/app", dst: "payments/db", dst_port: 5432, protocol: "TCP", verdict: "block", bytes: 100, packets: 2, last_seen_at: "2026-10-12T00:00:00Z" }], threat_pivots: [], file_risks: [], violations: [], compliance_evidence: [{ id: "check", framework: "cis", control_id: "5.2.2", title: "Deployment control", severity: "high", status: "fail", effective_status: "fail", source: "agent", target_kind: "workload", target: "payments/app", evidence: "actual deployment evidence", observed_at: "2026-10-12T00:00:00Z" }], process_baseline: { cluster_id: "cluster", workload_id: "payments/app", control_workload_id: "payments/app", mode: "monitor", learned_processes_count: 1, monitored_alerts_24h: 1, enforced_blocks_24h: 0, processes: [{ name: "actual-process", args: [], path: "/bin/process", observed_count: 3, first_seen: "2026-10-12T00:00:00Z", last_seen: "2026-10-12T00:00:00Z" }] }, file_profile: { cluster_id: "cluster", workload_id: "payments/app", control_workload_id: "payments/app", mode: "monitor", learned_paths_count: 1, sensitive_path_count: 0, rule_count: 0, watched_file_count: 0, monitored_alerts_24h: 0, enforced_blocks_24h: 0, files: [{ path: "/actual-file", operation: "read", observed_count: 3, sensitive: false, flags: 0, mode: 0, first_seen: "2026-10-12T00:00:00Z", last_seen: "2026-10-12T00:00:00Z" }], rules: [], exceptions: [], watched_files: [] } });
 const response = (rows: Finding[], total = rows.length) => ({ findings: rows, total, limit: 100, offset: 0, has_more: total > rows.length, lifecycle_counts: { open: total, in_progress: 0, accepted: 0, suppressed: 0, triaged: 0, resolved: 0 } });
@@ -26,7 +26,7 @@ beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   Object.assign(state, { clusterId: "cluster", cluster: { id: "cluster", name: "Demo" }, isLoading: false, error: null });
   localStorage.clear();
-  vi.mocked(assets.get).mockResolvedValue(asset()); vi.mocked(deployments.get).mockResolvedValue(deployment()); vi.mocked(nodes.get).mockResolvedValue(node()); vi.mocked(findings.get).mockResolvedValue(finding());
+  vi.mocked(assets.get).mockResolvedValue(asset()); vi.mocked(deployments.get).mockResolvedValue(deployment()); vi.mocked(nodes.get).mockResolvedValue(node()); vi.mocked(findings.get).mockResolvedValue(finding()); vi.mocked(findings.instance).mockImplementation(async id => finding(id));
   vi.mocked(findings.list).mockImplementation(async params => response(params?.q?.includes("severity:critical") ? [finding("critical", "critical")] : params?.q?.includes("severity:high") ? [finding("high")] : [finding("generic")]));
 });
 afterEach(() => { act(() => root?.unmount()); root = undefined; client?.clear(); host?.remove(); vi.resetAllMocks(); });
@@ -68,7 +68,7 @@ it("resolves nodes through exact cluster/node lookup and displays actual host ev
 });
 
 it("shows only server-reported finding risk decomposition", async () => {
-  vi.mocked(findings.get).mockResolvedValue({ ...finding(), risk: { composite: 42, factors: [{ name: "actual_factor", description: "Reported explanation", score: 11, raw: 20, weight: 0.55 }] } });
+  vi.mocked(findings.instance).mockResolvedValue({ ...finding(), risk: { composite: 42, factors: [{ name: "actual_factor", description: "Reported explanation", score: 11, raw: 20, weight: 0.55 }] } });
   await render("finding", "finding"); await settled(() => expect(host.textContent).toContain("11 weighted points"));
   expect(findings.get).toHaveBeenCalledWith("finding"); expect(findings.list).not.toHaveBeenCalled(); expect(host.textContent).not.toContain("Exploitability"); expect(host.textContent).not.toContain("Generate runbook"); expect(host.textContent).not.toContain("watch list"); expect(host.textContent).toContain("Reported risk: 42/100");
 });
@@ -86,7 +86,7 @@ it("uses server asset/cluster filters, exact full totals, URL paging and full-so
   expect(host.querySelector('[data-testid="risk-generic-findings"] tbody')?.children).toHaveLength(100);
   await act(async () => button("Next").click()); await settled(() => expect(host.textContent).toContain("Finding 305")); expect(history.location.search).toBe("?tab=findings&findings_page=4");
   await act(async () => button("Export matching records (up to 10,000)").click()); expect(findings.exportCSV).toHaveBeenCalledWith({ cluster_id: "cluster", q: `asset:${assetID}`, sort: "risk", order: "desc", limit: 10000 }, expect.any(Function));
-  expect(host.querySelector('a[href="/clusters/cluster/findings/305"]')).not.toBeNull(); expect(host.querySelector('[data-testid="scope-bar"]')).toBeNull();
+  expect(host.querySelector('a[href="/clusters/cluster/findings/305?first_seen_at=2026-10-12T00%3A00%3A00Z"]')).not.toBeNull(); expect(host.querySelector('[data-testid="scope-bar"]')).toBeNull();
 });
 
 it("reports failed or foreign asset findings without cached rows or healthy zeros", async () => {
@@ -173,7 +173,7 @@ it.each(["network","process"])("withholds foreign embedded deployment evidence i
 });
 
 it("exports the selected finding's actual platform role when its optional column is selected", async () => {
-  vi.mocked(findings.get).mockResolvedValue({ ...finding(), platform_role: "core" });
+  vi.mocked(findings.instance).mockResolvedValue({ ...finding(), platform_role: "core" });
   await render("finding", "finding", "?tab=findings"); await settled(() => expect(host.querySelector('[data-testid="risk-generic-findings"]')).not.toBeNull());
   expect(host.querySelector('[data-testid="risk-generic-findings"] thead')?.textContent).not.toContain("Platform role");
   await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="risk-generic-findings-columns-trigger"]')!.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 })));

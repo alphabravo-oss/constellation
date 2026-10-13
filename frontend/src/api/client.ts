@@ -99,6 +99,10 @@ export type FindingKind =
   | "secret" | "signature" | "ml-model" | "compliance" | "runtime";
 
 export interface Finding {
+  row_id?: string;
+  revision?: string;
+  source_cluster_id?: string | null;
+  target_cluster_id?: string | null;
   platform_role?: string;
   risk?: { composite: number; factors: Array<{ name: string; description: string; score: number; raw: number; weight: number }> };
   id: string;
@@ -176,6 +180,10 @@ export interface Comment {
   created_at: string;
 }
 
+export interface FindingInstanceSelector { first_seen_at: string; cluster_id?: string }
+export interface FindingInstanceReceipt { status: string; id: string; row_id: string; first_seen_at: string; revision: string; source_cluster_id: string | null; target_cluster_id: string | null }
+export interface FindingInstanceComments { row_id: string; first_seen_at: string; revision: string; comments: Comment[]; legacy_comments: Comment[]; legacy_history_scope: "uuid" }
+
 export interface CVERollup {
   cve: string;
   severity: Severity;
@@ -205,6 +213,12 @@ export const findings = {
     for (const [key, value] of Object.entries(params)) if (value !== undefined && value !== false && value !== "") query.set(key, value === true ? "1" : String(value));
     return downloadAPIFile(`/findings.csv?${query}`, "constellation-findings-instances.csv", shouldDownload);
   },
+  instance: (id: string, selector: FindingInstanceSelector) => api.get<Finding>(`/finding-instances/${encodeURIComponent(id)}`, { params: selector }).then(r => r.data),
+  instanceTriage: (id: string, selector: FindingInstanceSelector, body: { reviewed_revision: string; assignee_id?: string; priority?: string }) => api.post<FindingInstanceReceipt>(`/finding-instances/${encodeURIComponent(id)}/triage`, body, { params: selector }).then(r => r.data),
+  instanceSuppress: (id: string, selector: FindingInstanceSelector, body: { reviewed_revision: string; reason: string }) => api.post<FindingInstanceReceipt>(`/finding-instances/${encodeURIComponent(id)}/suppress`, body, { params: selector }).then(r => r.data),
+  instanceAcceptRisk: (id: string, selector: FindingInstanceSelector, body: { reviewed_revision: string; reason: string; approver_id?: string; accepted_until: string }) => api.post<FindingInstanceReceipt>(`/finding-instances/${encodeURIComponent(id)}/accept-risk`, body, { params: selector }).then(r => r.data),
+  instanceComments: (id: string, selector: FindingInstanceSelector) => api.get<FindingInstanceComments>(`/finding-instances/${encodeURIComponent(id)}/comments`, { params: selector }).then(r => r.data),
+  instanceAddComment: (id: string, selector: FindingInstanceSelector, body: { reviewed_revision: string; body: string }) => api.post<Comment & Omit<FindingInstanceReceipt, "id" | "status">>(`/finding-instances/${encodeURIComponent(id)}/comments`, body, { params: selector }).then(r => r.data),
   get: (id: string) => api.get<Finding>(`/findings/${id}`).then((r) => r.data),
   triage:     (id: string, body: { assignee_id?: string; priority?: string }) =>
     api.post(`/findings/${id}/triage`, body).then((r) => r.data),
@@ -255,6 +269,10 @@ export interface Asset {
 }
 
 export interface AssetFinding {
+  first_seen_at?: string | null;
+  revision?: string;
+  source_cluster_id?: string | null;
+  target_cluster_id?: string | null;
   platform_role?: string;
   id: string;
   kind: FindingKind;
@@ -1738,6 +1756,7 @@ export interface VulnerabilityException {
   };
   cve_refs: string[];
   finding_refs: string[];
+  finding_instances?: Array<{ id: string; row_id: string; first_seen_at: string; revision: string; source_cluster_id: string | null; target_cluster_id: string | null }>;
   requester: { id: string; name: string; email: string; team: string };
   approver?: { id: string; name: string; email: string; team: string };
   requested_at: string;

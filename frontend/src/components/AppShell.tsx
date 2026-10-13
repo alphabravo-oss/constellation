@@ -1,3 +1,5 @@
+import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
+import { findingHref, findingRowKey } from "@/lib/finding-instance";
 // AppShell — scope navigation and cluster-scoped navigation.
 //
 // Layout (sidebar w-60/w-16, topbar h-14, content p-6 max-w-[1600px] fade-in,
@@ -660,8 +662,11 @@ function MenuItem({
 }
 
 function NotificationBell({ onNavigate }: { onNavigate: (to: string) => void }) {
+  const operator = useTablePreferencesIdentity();
+  const owner = `${operator?.org_id}:${operator?.user_id}`;
   const q = useQuery({
-    queryKey: ["bell-feed"],
+    queryKey: ["bell-feed", owner],
+    enabled: !!operator?.org_id && !!operator?.user_id,
     queryFn: () => findingsApi.list({ lifecycle: "open", limit: 50 }),
     staleTime: 30_000,
     refetchInterval: 60_000,
@@ -669,7 +674,7 @@ function NotificationBell({ onNavigate }: { onNavigate: (to: string) => void }) 
   // Runtime threats (DLP/WAF/IPS) so the bell isn't findings-only — surface recent
   // high-severity runtime detections alongside vuln findings.
   const rtQ = useQuery({
-    queryKey: ["bell-runtime"],
+    queryKey: ["bell-runtime", owner],
     queryFn: () => runtimeThreatsApi.list({ hours: 24, severity_min: 4 }),
     staleTime: 30_000,
     refetchInterval: 60_000,
@@ -747,11 +752,11 @@ function NotificationBell({ onNavigate }: { onNavigate: (to: string) => void }) 
           )}
           <ul className="max-h-80 overflow-auto">
             {items.map((f) => (
-              <li key={f.id}>
+              <li key={findingRowKey(f)}>
                 <button
                   type="button"
                   onClick={() => {
-                    if (f.cluster_id) onNavigate(`/clusters/${f.cluster_id}/findings/${f.id}`);
+                    if (f.cluster_id || f.source_cluster_id || f.target_cluster_id) onNavigate(findingHref(f));
                     else onNavigate("/clusters");
                   }}
                   className="w-full text-left flex items-start gap-3 px-4 py-3 border-b border-border last:border-0 hover:bg-accent/50 transition-colors"

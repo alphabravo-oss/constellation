@@ -1,3 +1,6 @@
+import { useRouteSearchParams } from "@/lib/route-search";
+import { findingHref, findingRevisionValid, sameFindingTimestamp } from "@/lib/finding-instance";
+import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
 import { useParams } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 
@@ -18,18 +21,26 @@ type ReconSignal = NonNullable<Finding["reconciliation"]>[number];
 export function FindingDetailPage() {
   const { fid } = useParams({ strict: false });
   const { clusterId, cluster, isLoading, error } = useCluster();
+  const [params] = useRouteSearchParams();
+  const identity = useTablePreferencesIdentity();
   const listPath = clusterId ? `/clusters/${clusterId}/findings` : "/findings";
   return <PageContainer>
     {!clusterId || !fid ? <><PageHeader title="Finding" description="Review this finding and its history." backLink={<a href={listPath}>Findings</a>} /><ErrorState title="Select an available cluster and finding to continue." /></>
-      : <FindingScope key={`${clusterId}:${fid}`} clusterId={clusterId} findingId={fid} resolvedClusterId={cluster?.id} clusterLoading={isLoading} clusterError={Boolean(error)}>
+      : <FindingScope key={`${identity?.org_id}:${identity?.user_id}:${clusterId}:${fid}:${params.get("first_seen_at")}`} clusterId={clusterId} findingId={fid} resolvedClusterId={cluster?.id} clusterLoading={isLoading} clusterError={Boolean(error)}>
           {(finding, unavailable) => <FindingDetail finding={finding} clusterId={clusterId} listPath={listPath} unavailable={unavailable} />}
         </FindingScope>}
   </PageContainer>;
 }
 
 function FindingDetail({ finding: f, clusterId, listPath, unavailable }: { finding: Finding; clusterId: string; listPath: string; unavailable: boolean }) {
-  const detailPath = `${listPath}/${encodeURIComponent(f.id)}`;
-  const comments = useQuery({ queryKey: ["finding-comments", clusterId, f.id], queryFn: () => findings.listComments(f.id), enabled: !unavailable });
+  const identity = useTablePreferencesIdentity();
+  const comments = useQuery({ queryKey: ["finding-comments", identity?.org_id, identity?.user_id, clusterId, f.id, f.first_seen_at], queryFn: async () => {
+    const response = await findings.instanceComments(f.id, { first_seen_at: f.first_seen_at, cluster_id: clusterId });
+    const validComment = (row: unknown) => !!row && typeof row === "object" && typeof (row as { id?: unknown }).id === "string" && typeof (row as { author_id?: unknown }).author_id === "string" && typeof (row as { body?: unknown }).body === "string" && typeof (row as { created_at?: unknown }).created_at === "string";
+    if (!response || response.row_id !== f.row_id || !sameFindingTimestamp(response.first_seen_at, f.first_seen_at) || !findingRevisionValid(response.revision) || response.legacy_history_scope !== "uuid" || !Array.isArray(response.comments) || !Array.isArray(response.legacy_comments) || !response.comments.every(validComment) || !response.legacy_comments.every(validComment)) throw new Error("Comment evidence does not match the selected observation");
+    return response;
+  }, enabled: !unavailable });
+  const assetCluster = f.source_cluster_id ?? f.cluster_id;
   const score = cvssScore(f);
   const hasVulnerabilityMetadata =
     typeof score === "number" || Boolean(f.cvss_vector) || Boolean(f.kev) || typeof f.epss === "number";
@@ -56,7 +67,7 @@ function FindingDetail({ finding: f, clusterId, listPath, unavailable }: { findi
             <span>· {f.lifecycle}</span>
             {isExceptionLifecycle(f.lifecycle) ? (
               <a
-                href={exceptionHref(clusterId, f.lifecycle, f.id)}
+                href={exceptionHref(clusterId, f.lifecycle, f.id, f.first_seen_at)}
                 className="rounded-md border border-border px-2 py-0.5 text-foreground hover:bg-accent"
                 data-testid="finding-exception-link"
               >
@@ -65,12 +76,13 @@ function FindingDetail({ finding: f, clusterId, listPath, unavailable }: { findi
             ) : null}
           </span>
         }
-        actions={!unavailable ? <><a href={`${detailPath}/suppress`} className="rounded-md border border-border bg-card px-3 py-1.5 text-sm hover:bg-accent">Suppress</a><a href={`${detailPath}/accept-risk`} className="rounded-md border border-border bg-card px-3 py-1.5 text-sm hover:bg-accent">Accept risk</a></> : undefined}
+        actions={!unavailable ? <><a href={findingHref(f, clusterId, "suppress")} className="rounded-md border border-border bg-card px-3 py-1.5 text-sm hover:bg-accent">Suppress</a><a href={findingHref(f, clusterId, "accept-risk")} className="rounded-md border border-border bg-card px-3 py-1.5 text-sm hover:bg-accent">Accept risk</a></> : undefined}
       />
       <VerdictBanner status={f.lifecycle === "open" ? "degraded" : "info"} title={`This finding is ${f.lifecycle}`} detail={f.accepted_until ? `Risk acceptance expires ${new Date(f.accepted_until).toLocaleString()}.` : "Review the evidence and recorded history before changing its lifecycle."} />
       <StatGrid><StatCard label="Risk score" value={f.risk_score} /><StatCard label="CVSS base" value={typeof score === "number" ? score.toFixed(1) : "—"} /><StatCard label="Lifecycle" value={f.lifecycle} /></StatGrid>
 
-      {f.asset_id ? (
+      <Collapse label="Observation details"><dl className="space-y-2 text-sm"><div><dt>First observed</dt><dd><time dateTime={f.first_seen_at} className="font-mono">{f.first_seen_at}</time></dd></div><div><dt>Reviewed revision</dt><dd>{f.revision}</dd></div><div><dt>Observation identity</dt><dd className="break-all font-mono">{f.row_id}</dd></div><div><dt>Source cluster</dt><dd>{f.source_cluster_id ?? f.cluster_id ?? "Not reported"}</dd></div><div><dt>Target cluster override</dt><dd>{f.target_cluster_id ?? "None reported"}</dd></div></dl></Collapse>
+      {f.asset_id && assetCluster ? (
         <section
           className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-4 py-2.5 text-xs"
           data-testid="finding-affected-asset"
@@ -79,14 +91,14 @@ function FindingDetail({ finding: f, clusterId, listPath, unavailable }: { findi
           <span className="font-mono">{f.asset_id.slice(0, 24)}</span>
           <div className="ml-auto flex items-center gap-2">
             <a
-              href={`/clusters/${clusterId}/risk/asset/${encodeURIComponent(f.asset_id)}`}
+              href={`/clusters/${assetCluster}/risk/asset/${encodeURIComponent(f.asset_id)}`}
               className="rounded-md border border-border px-2 py-1 text-foreground hover:bg-accent"
               data-testid="finding-affected-asset-risk"
             >
               Risk workspace
             </a>
             <a
-              href={`/clusters/${clusterId}/assets/${encodeURIComponent(f.asset_id)}`}
+              href={`/clusters/${assetCluster}/assets/${encodeURIComponent(f.asset_id)}`}
               className="rounded-md border border-border px-2 py-1 text-foreground hover:bg-accent"
               data-testid="finding-affected-asset-detail"
             >
@@ -173,15 +185,15 @@ function FindingDetail({ finding: f, clusterId, listPath, unavailable }: { findi
         className="rounded-lg border border-border bg-card p-4"
         data-testid="comments-section"
       >
-        <div className="mb-3 flex items-center justify-between gap-3"><h2 className="text-sm font-medium">Comment history</h2>{!unavailable && <a href={`${detailPath}/comments/new`} className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent">Add comment</a>}</div>
+        <div className="mb-3 flex items-center justify-between gap-3"><h2 className="text-sm font-medium">Comment history</h2>{!unavailable && <a href={findingHref(f, clusterId, "comments/new")} className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent">Add comment</a>}</div>
         {comments.isError && <ErrorState title="Comment history could not be loaded." action={<Button onClick={() => void comments.refetch()}>Retry comments</Button>} />}
         {comments.isPending && <LoadingState label="Loading comment history…" />}
         {comments.isFetching && !comments.isPending && <p className="mb-3 text-xs text-muted-foreground">Refreshing comment history…</p>}
         <ul className="mb-3 space-y-2" data-testid="comments-list">
-          {comments.isSuccess && !comments.isFetching && (comments.data?.comments ?? []).length === 0 && (
+          {!unavailable && comments.isSuccess && !comments.isFetching && (comments.data?.comments ?? []).length === 0 && (
             <li className="text-xs text-muted-foreground">No comments yet.</li>
           )}
-          {(comments.data?.comments ?? []).map((c) => (
+          {(!unavailable && comments.isSuccess && !comments.isFetching ? comments.data.comments : []).map((c) => (
             <li
               key={c.id}
               className="rounded-md border border-border bg-background p-2 text-sm"
@@ -195,7 +207,7 @@ function FindingDetail({ finding: f, clusterId, listPath, unavailable }: { findi
             </li>
           ))}
         </ul>
-
+        {!unavailable && comments.isSuccess && !comments.isFetching && comments.data.legacy_comments?.length > 0 && <Collapse label="Earlier discussion for this finding ID"><p className="mb-2 text-xs text-muted-foreground">These older comments were recorded without an observation timestamp.</p><ul className="space-y-2">{comments.data.legacy_comments.map(comment => <li key={comment.id} className="whitespace-pre-wrap text-sm">{comment.body}</li>)}</ul></Collapse>}
       </section>
     </div>
   );
@@ -205,9 +217,9 @@ function isExceptionLifecycle(lifecycle: string) {
   return lifecycle === "accepted" || lifecycle === "suppressed";
 }
 
-function exceptionHref(clusterId: string, lifecycle: string, query: string) {
+function exceptionHref(clusterId: string, lifecycle: string, query: string, firstSeen: string) {
   const status = lifecycle === "suppressed" ? "suppressed" : "approved";
-  const params = new URLSearchParams({ status, target: "finding", finding: query });
+  const params = new URLSearchParams({ status, target: "finding", finding: query, first_seen_at: firstSeen });
   return `/clusters/${clusterId}/exceptions?${params.toString()}`;
 }
 

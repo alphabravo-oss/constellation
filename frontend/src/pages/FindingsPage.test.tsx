@@ -1,5 +1,5 @@
 import { downloadCsv } from "@/lib/csv";
-/* global HTMLSelectElement */
+/* global HTMLSelectElement, HTMLTableRowElement */
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -23,9 +23,9 @@ vi.mock("@/lib/route-search", async () => {
 });
 vi.mock("@/hooks/useCluster", () => ({ useCluster: () => ({ clusterId: route.clusterId, cluster: { id: route.clusterId }, error: route.clusterError, isLoading: false }) }));
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => route.navigate, useLocation: () => "", Link: ({ children, href }: { children: ReactNode; href?: string }) => <a href={href}>{children}</a> }));
-vi.mock("@/api/client", () => ({ findings: { list: vi.fn(), byCVE: vi.fn(), exportCSV: vi.fn(), triage: vi.fn(), suppress: vi.fn(), acceptRisk: vi.fn() } }));
+vi.mock("@/api/client", () => ({ findings: { list: vi.fn(), byCVE: vi.fn(), exportCSV: vi.fn(), instanceTriage: vi.fn(), instanceSuppress: vi.fn(), instanceAcceptRisk: vi.fn() } }));
 const identity = { org_id: "org", user_id: "operator" };
-const fixture = (index: number): Finding => ({ id: `finding-${index}`, asset_id: `asset-${index % 2}`, kind: "vulnerability", title: `Finding ${index}`, external_id: `CVE-fixture-${index}`, severity: "critical", lifecycle: "open", risk_score: 99, first_seen_at: "2026-01-01T00:00:00Z", last_seen_at: "2026-01-01T00:00:00Z", kev: false } as Finding);
+const fixture = (index: number): Finding => ({ id: `finding-${index}`, cluster_id: "cluster", row_id: `finding-${index}:1767225600`, revision: "4", asset_id: `asset-${index % 2}`, kind: "vulnerability", title: `Finding ${index}`, external_id: `CVE-fixture-${index}`, severity: "critical", lifecycle: "open", risk_score: 99, first_seen_at: "2026-01-01T00:00:00Z", last_seen_at: "2026-01-01T00:00:00Z", kev: false } as Finding);
 const counts = { open: 701, triaged: 22, in_progress: 33, accepted: 44, suppressed: 55, resolved: 66 };
 const listed = (offset = 0, total = 705) => ({ findings: Array.from({ length: Math.min(10, Math.max(0, total - offset)) }, (_, index) => fixture(offset + index)), limit: 100, offset, total, has_more: offset + 100 < total, lifecycle_counts: counts });
 vi.mock("@/lib/csv", () => ({ downloadCsv: vi.fn() }));
@@ -36,7 +36,7 @@ beforeEach(() => {
   localStorage.clear();
   vi.mocked(findings.list).mockImplementation(async (params) => listed(params?.offset));
   vi.mocked(findings.byCVE).mockResolvedValue({ cves: [{ cve: "CVE-last", severity: "critical", risk_score: 99, instances: 300, affected_images: 1, affected_clusters: 1, images: ["image"], last_seen_at: "2026-01-01T00:00:00Z", kev: false } as CVERollup], total: 701, limit: 100, offset: 0 });
-  vi.mocked(findings.exportCSV).mockResolvedValue(); vi.mocked(findings.triage).mockResolvedValue({}); vi.mocked(findings.suppress).mockResolvedValue({}); vi.mocked(findings.acceptRisk).mockResolvedValue({});
+  vi.mocked(findings.exportCSV).mockResolvedValue(); for (const method of [findings.instanceTriage, findings.instanceSuppress, findings.instanceAcceptRisk]) vi.mocked(method).mockImplementation(async id => ({ ...fixture(Number(id.split("-")[1])), status: "ok", id, row_id: `${id}:1767225600`, revision: "5", source_cluster_id: "cluster", target_cluster_id: null }));
 });
 afterEach(() => { act(() => root?.unmount()); client?.clear(); host?.remove(); vi.resetAllMocks(); vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); });
 async function renderPage() {
@@ -165,8 +165,8 @@ it("merges selections across page-scoped groups and only mutates those selected 
   const selectors = [...host.querySelectorAll<HTMLInputElement>('tbody input[type="checkbox"]')];
   await act(async () => selectors[0].click()); await act(async () => selectors[1].click());
   expect(host.querySelector('[aria-label="Bulk actions, 2 selected"]')).not.toBeNull();
-  await click("Triage"); await settled(() => expect(findings.triage).toHaveBeenCalledTimes(2));
-  expect(findings.triage).toHaveBeenCalledWith("finding-0", { priority: "high" }); expect(findings.triage).toHaveBeenCalledWith("finding-1", { priority: "high" });
+  await click("Triage"); await settled(() => expect(findings.instanceTriage).toHaveBeenCalledTimes(2));
+  expect(findings.instanceTriage).toHaveBeenCalledWith("finding-0", { first_seen_at: "2026-01-01T00:00:00Z", cluster_id: "cluster" }, { reviewed_revision: "4", priority: "high" }); expect(findings.instanceTriage).toHaveBeenCalledWith("finding-1", { first_seen_at: "2026-01-01T00:00:00Z", cluster_id: "cluster" }, { reviewed_revision: "4", priority: "high" });
 });
 it("clears selection on page and cluster changes", async () => {
   await renderPage(); await settled(() => expect(host.textContent).toContain("Finding 0")); await selectFirst(); await click("Next");
@@ -179,7 +179,7 @@ it("blocks stale bulk mutations before query observer notification", async () =>
   await renderPage(); await settled(() => expect(host.textContent).toContain("Finding 0")); await selectFirst();
   const triage = button("Triage");
   await act(async () => { for (const query of client.getQueryCache().findAll({ queryKey: ["findings"] })) client.setQueryData(query.queryKey, { ...listed(), findings: [] }); triage.click(); });
-  await settled(() => expect(host.textContent).toContain("Some selected findings could not be updated")); expect(findings.triage).not.toHaveBeenCalled();
+  await settled(() => expect(host.textContent).toContain("Some selected findings could not be updated")); expect(findings.instanceTriage).not.toHaveBeenCalled();
 });
 it("retains truthful refresh errors and drops stale selections during fetching", async () => {
   await renderPage(); await settled(() => expect(host.textContent).toContain("Finding 0")); await selectFirst();
@@ -189,10 +189,10 @@ it("retains truthful refresh errors and drops stale selections during fetching",
   await settled(() => expect(host.textContent).toContain("Updating findings"));
   expect(host.querySelector('[aria-label="Bulk actions, 1 selected"]')).toBeNull(); expect(button("Export filtered instances CSV").disabled).toBe(true);
   await act(async () => reject(new Error("private refresh detail")));
-  await settled(() => expect(host.textContent).toContain("Could not load findings")); expect(host.textContent).not.toContain("No findings match"); expect(findings.triage).not.toHaveBeenCalled();
+  await settled(() => expect(host.textContent).toContain("Could not load findings")); expect(host.textContent).not.toContain("No findings match"); expect(findings.instanceTriage).not.toHaveBeenCalled();
 });
 it("reports partial bulk failure and refetches current state", async () => {
-  vi.mocked(findings.triage).mockRejectedValue(new Error("private mutation detail"));
+  vi.mocked(findings.instanceTriage).mockRejectedValue(new Error("private mutation detail"));
   await renderPage(); await settled(() => expect(host.textContent).toContain("Finding 0")); await selectFirst(); await click("Triage");
   await settled(() => expect(host.textContent).toContain("Some selected findings could not be updated"));
   expect(host.textContent).not.toContain("private mutation detail"); expect(host.querySelector('[aria-label="Bulk actions, 1 selected"]')).toBeNull();
@@ -315,4 +315,31 @@ it("rejects pending finding CSV after an operator round trip and retains the cli
   await act(async () => complete());
   await settled(() => expect(button("Export filtered instances CSV").disabled).toBe(false));
   expect(host.textContent).not.toContain("Could not export matching instances");
+});
+it('selects two microsecond-separated recurrences independently and mutates exactly those revisions', async () => {
+  const older = { ...fixture(0), first_seen_at: '2026-01-01T00:00:00.123456Z', row_id: 'finding-0:1767225600.123456', revision: '7', title: 'Earlier observation' };
+  const newer = { ...older, first_seen_at: '2026-01-01T00:00:00.123457Z', row_id: 'finding-0:1767225600.123457', revision: '11', title: 'Later observation' };
+  vi.mocked(findings.list).mockResolvedValue({ ...listed(), findings: [older, newer], total: 2, has_more: false });
+  vi.mocked(findings.instanceTriage).mockImplementation(async (id, selector, body) => ({ ...newer, id, first_seen_at: selector.first_seen_at, row_id: selector.first_seen_at === older.first_seen_at ? older.row_id : newer.row_id, revision: String(BigInt(body.reviewed_revision) + 1n), status: 'ok', source_cluster_id: 'cluster', target_cluster_id: null }));
+  await renderPage(); await settled(() => expect(host.querySelectorAll('[data-testid="findings-table"] tbody tr')).toHaveLength(2));
+  const selectors = [...host.querySelectorAll<HTMLInputElement>('tbody input[type="checkbox"]')]; await act(async () => selectors[1].click());
+  expect(host.querySelector('[aria-label="Bulk actions, 1 selected"]')).not.toBeNull(); await click('Triage');
+  await settled(() => expect(findings.instanceTriage).toHaveBeenCalledOnce()); expect(findings.instanceTriage).toHaveBeenCalledWith('finding-0', { first_seen_at: newer.first_seen_at, cluster_id: 'cluster' }, { reviewed_revision: '11', priority: 'high' });
+});
+it('opens the exact raw observation selector when a recurring row is inspected', async () => {
+  const observed = { ...fixture(0), first_seen_at: '2026-01-01T00:00:00.123457Z', row_id: 'finding-0:1767225600.123457' };
+  vi.mocked(findings.list).mockResolvedValue({ ...listed(), findings: [observed], total: 1, has_more: false }); await renderPage(); await settled(() => expect(host.textContent).toContain('Finding 0'));
+  await act(async () => host.querySelector<HTMLTableRowElement>('tbody tr')!.click()); expect(route.navigate).toHaveBeenCalledWith({ href: '/clusters/cluster/findings/finding-0?first_seen_at=2026-01-01T00%3A00%3A00.123457Z' });
+});
+it('rejects malformed physical identity instead of rendering duplicate or misidentified rows', async () => {
+  vi.mocked(findings.list).mockResolvedValue({ ...listed(), findings: [{ ...fixture(0), row_id: 'finding-0:1767225600.000001' }] }); await renderPage(); await settled(() => expect(host.textContent).toContain('could not be identified safely')); expect(host.querySelector('[data-testid="findings-table"]')).toBeNull(); expect(findings.instanceTriage).not.toHaveBeenCalled();
+});
+it('withholds foreign observations even when their physical ID and revision are valid', async () => {
+  vi.mocked(findings.list).mockResolvedValue({ ...listed(), findings: [{ ...fixture(0), cluster_id: 'foreign' }] }); await renderPage(); await settled(() => expect(host.textContent).toContain('could not be identified safely')); expect(host.querySelector('[data-testid="findings-table"]')).toBeNull(); expect(findings.instanceTriage).not.toHaveBeenCalled();
+});
+it('does not report a delayed bulk result or clear new selections after the inventory scope changes', async () => {
+  let reject!: (error: Error) => void; vi.mocked(findings.instanceTriage).mockImplementationOnce(() => new Promise((_done, fail) => { reject = fail; }));
+  await renderPage(); await settled(() => expect(host.textContent).toContain('Finding 0')); await selectFirst(); await click('Triage'); await settled(() => expect(findings.instanceTriage).toHaveBeenCalledOnce());
+  route.clusterId = 'other'; vi.mocked(findings.list).mockImplementation(async params => ({ ...listed(params?.offset), findings: listed(params?.offset).findings.map(row => ({ ...row, cluster_id: 'other' })) })); await rerenderPage(); await settled(() => expect(host.querySelector('[data-cluster-id="other"] tbody')).not.toBeNull()); await selectFirst();
+  await act(async () => reject(new Error('old scope failed'))); await settled(() => expect(host.textContent).not.toContain('Some selected findings could not be updated')); expect(host.querySelector('[aria-label="Bulk actions, 1 selected"]')).not.toBeNull(); expect(route.navigate).not.toHaveBeenCalled();
 });

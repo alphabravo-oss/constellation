@@ -1,3 +1,5 @@
+import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
+import { findingHref, findingRowKey } from "@/lib/finding-instance";
 import { useMemo, useRef } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -71,6 +73,8 @@ const SCORE_FACTORS = [
 ] as const;
 
 export function DashboardPage() {
+  const operator = useTablePreferencesIdentity();
+  const findingOwner = `${operator?.org_id}:${operator?.user_id}`;
   const { clusterId, cluster, isLoading: clusterLoading, error: clusterError } = useCluster();
   const scopeReady = !!clusterId && cluster?.id === clusterId && !clusterLoading && !clusterError;
   const [requestedTab, setTab] = useTabParam("tab", "overview");
@@ -80,7 +84,7 @@ export function DashboardPage() {
   // risk, top actions, heatmap, trend). One 250-row fetch instead of two
   // 1000-row fetches with detail_json — much faster page load.
   const open  = useQuery({
-    queryKey: ["findings", "open", clusterId],
+    queryKey: ["findings", findingOwner, "open", clusterId],
     queryFn: () => findings.list({ lifecycle: "open", cluster_id: clusterId, limit: 250 }),
     enabled: scopeReady,
   });
@@ -310,10 +314,10 @@ export function DashboardPage() {
           ) : (
             <ul className="divide-y divide-border">
               {topActions.map((f) => (
-                <li key={f.id} className="accent-slide flex items-center gap-3 px-3 py-2 hover:bg-muted/40 transition-colors">
+                <li key={findingRowKey(f)} className="accent-slide flex items-center gap-3 px-3 py-2 hover:bg-muted/40 transition-colors">
                   <SeverityBadge severity={f.severity} kev={false} />
                   <div className="min-w-0 flex-1">
-                    <a href={clusterPath(`/findings/${f.id}`)} className="text-sm hover:underline truncate block" title={f.title}>
+                    <a href={findingHref(f, clusterId)} className="text-sm hover:underline truncate block" title={f.title}>
                       {f.title}
                     </a>
                     <div className="text-[10px] text-mono text-muted-foreground">
@@ -321,7 +325,7 @@ export function DashboardPage() {
                     </div>
                   </div>
                   <RiskScore score={f.risk_score} size="sm" />
-                  <Button size="sm" variant="outline" onClick={() => navigate({ href: clusterPath(`/findings/${f.id}`) })}>Triage</Button>
+                  <Button size="sm" variant="outline" onClick={() => navigate({ href: findingHref(f, clusterId) })}>Triage</Button>
                 </li>
               ))}
             </ul>

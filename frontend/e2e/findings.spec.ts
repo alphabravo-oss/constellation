@@ -31,11 +31,11 @@ test("Finding rows open exact detail and dedicated action pages with Cancel", as
     await expect(page.locator("tbody tr").first()).toBeVisible();
     // Inspect the exact finding before navigating to its dedicated action.
     await page.locator("tbody tr").first().getByRole("button", { name: /glibc heap overflow/i }).click();
-    await expect(page).toHaveURL(/\/findings\/[a-f0-9-]+$/);
+    await expect(page).toHaveURL(url => /\/findings\/[a-f0-9-]+$/.test(url.pathname) && !!url.searchParams.get("first_seen_at"));
     const detailURL = page.url();
     await expect(page.getByRole("link", { name: "Suppress", exact: true })).toBeVisible();
     await page.getByRole("link", { name: "Accept risk", exact: true }).click();
-    await expect(page).toHaveURL(/\/findings\/[^/]+\/accept-risk$/);
+    await expect(page).toHaveURL(url => /\/findings\/[^/]+\/accept-risk$/.test(url.pathname) && url.searchParams.get("first_seen_at") === new URL(detailURL).searchParams.get("first_seen_at"));
     await expect(page.getByRole("heading", { name: "Accept finding risk", exact: true })).toBeVisible();
     await expect(page.getByLabel(/^Reason/)).toBeVisible();
     await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();

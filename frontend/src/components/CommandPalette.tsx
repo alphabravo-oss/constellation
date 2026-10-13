@@ -1,3 +1,5 @@
+import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
+import { findingHref, findingRowKey } from "@/lib/finding-instance";
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
@@ -49,19 +51,20 @@ const RECENT_KEY = "constellation.cmdk.recent.v1";
 
 interface RecentItem { id: string; label: string; href: string; ts: number }
 
-function loadRecent(): RecentItem[] {
+function loadRecent(key: string): RecentItem[] {
   if (typeof localStorage === "undefined") return [];
   try {
-    const raw = localStorage.getItem(RECENT_KEY);
+    const raw = localStorage.getItem(key);
     if (!raw) return [];
-    return JSON.parse(raw) as RecentItem[];
+    const rows: unknown = JSON.parse(raw);
+    return Array.isArray(rows) ? rows.filter((row): row is RecentItem => !!row && typeof row === "object" && typeof row.id === "string" && typeof row.label === "string" && typeof row.href === "string" && row.href.startsWith("/") && !row.href.startsWith("//") && typeof row.ts === "number") : [];
   } catch { return []; }
 }
-function pushRecent(item: Omit<RecentItem, "ts">) {
-  const cur = loadRecent().filter((i) => i.id !== item.id);
+function pushRecent(key: string, item: Omit<RecentItem, "ts">) {
+  const cur = loadRecent(key).filter((i) => i.id !== item.id);
   cur.unshift({ ...item, ts: Date.now() });
   const trimmed = cur.slice(0, 8);
-  try { localStorage.setItem(RECENT_KEY, JSON.stringify(trimmed)); } catch { /* noop */ }
+  try { localStorage.setItem(key, JSON.stringify(trimmed)); } catch { /* noop */ }
 }
 
 /**
@@ -76,6 +79,9 @@ function pushRecent(item: Omit<RecentItem, "ts">) {
  *   - Quick actions (toggle theme, density, CVE lookup, etc.)
  */
 export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+  const operator = useTablePreferencesIdentity();
+  const owner = `${operator?.org_id}:${operator?.user_id}`;
+  const recentKey = `${RECENT_KEY}:${owner}`;
   const navigate = useNavigate();
   const location = useLocation();
   const { theme, toggle: toggleTheme } = useTheme();
@@ -93,9 +99,9 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
 
   // Load entity data lazily — only when palette is open
   const findingsQ = useQuery({
-    queryKey: ["cmdk-findings", clusterId],
+    queryKey: ["cmdk-findings", owner, clusterId],
     queryFn: () => findings.list({ limit: 100, cluster_id: clusterId ?? undefined }),
-    enabled: open,
+    enabled: open && !!operator?.org_id && !!operator?.user_id,
     staleTime: 60_000,
   });
   const assetsQ = useQuery({
@@ -142,13 +148,13 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
     staleTime: 60_000,
   });
 
-  const recent = useMemo(loadRecent, [open]);
+  const recent = useMemo(() => open ? loadRecent(recentKey) : [], [open, recentKey]);
 
   const go = useCallback((href: string, label: string, id?: string) => {
-    if (id) pushRecent({ id: id ?? href, label, href });
+    if (id) pushRecent(recentKey, { id: id ?? href, label, href });
     onOpenChange(false);
     navigate({ href: href });
-  }, [navigate, onOpenChange]);
+  }, [navigate, onOpenChange, recentKey]);
   const resolveHref = useCallback((href: string) => {
     if (clusterId && isClusterHref(href)) return `/clusters/${clusterId}${href}`;
     return href;
@@ -231,7 +237,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
               {findingsQ.data?.findings && findingsQ.data.findings.length > 0 && (
                 <Group heading="Findings">
                   {findingsQ.data.findings.slice(0, 8).map((f) => (
-                    <Item key={f.id} icon={<AlertTriangle />} onSelect={() => go(f.cluster_id ? `/clusters/${f.cluster_id}/findings/${f.id}` : resolveHref(`/findings/${f.id}`), f.title, f.id)}>
+                    <Item key={findingRowKey(f)} value={`${f.title} ${f.external_id ?? ""} ${findingRowKey(f)}`} icon={<AlertTriangle />} onSelect={() => go(findingHref(f, f.cluster_id || clusterId || undefined), f.title, findingRowKey(f))}>
                       <span className="flex-1 truncate">{f.title}</span>
                       <span className="ml-2 text-[10px] text-mono text-muted-foreground">{f.external_id ?? f.id.slice(0, 6)}</span>
                     </Item>

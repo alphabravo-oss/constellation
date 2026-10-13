@@ -181,3 +181,12 @@ it("exports the asset finding inventory's actual roles in the visible page colum
   const role = headers.indexOf("Platform role"); expect(role).toBeGreaterThanOrEqual(0);
   expect(rows.map(row => row[role])).toEqual([""]);
 });
+it('links generic recurrences using raw observation timestamps while leaving canonical image evidence read-only', async () => {
+  const older = { ...detail().findings[0], id: 'shared', row_id: 'asset:shared:1791763200.123456', first_seen_at: '2026-10-12T00:00:00.123456Z', revision: '4', source_cluster_id: 'cluster-a', target_cluster_id: null, source: 'asset' as const };
+  const newer = { ...older, row_id: 'asset:shared:1791763200.123457', first_seen_at: '2026-10-12T00:00:00.123457Z' };
+  const image = { ...older, row_id: 'image:shared', image_scan_result_id: 'scan', source: 'image_scan' as const, first_seen_at: null, revision: undefined, source_cluster_id: null, title: 'Canonical image observation' };
+  vi.mocked(assets.findings).mockResolvedValue({ ...findingPage(), items: [older, newer, image], total: 3, summary: { total: 3, high: 3, critical: 0, open: 3, asset_findings: 2, image_scan_findings: 1 } });
+  await render(); await settled(() => expect(host.querySelectorAll('[data-testid="asset-findings-table"] tbody tr')).toHaveLength(3));
+  const hrefs = [...host.querySelectorAll<HTMLAnchorElement>('tbody a[href*="/findings/"]')].map(link => link.getAttribute('href'));
+  expect(hrefs).toEqual(['/clusters/cluster-a/findings/shared?first_seen_at=2026-10-12T00%3A00%3A00.123456Z', '/clusters/cluster-a/findings/shared?first_seen_at=2026-10-12T00%3A00%3A00.123457Z']); expect(host.querySelector('[data-testid="asset-findings-table"] tbody')?.textContent).toContain('Canonical image observation');
+});
