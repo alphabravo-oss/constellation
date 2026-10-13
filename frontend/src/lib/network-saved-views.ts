@@ -43,6 +43,9 @@ export interface NetworkSessionSavedFilters {
 }
 
 export interface NetworkPcapSavedFilters {
+  q?: string;
+  namespace?: string;
+  node?: string;
   status: string;
   workload: string;
   duration_s: number;
@@ -260,6 +263,9 @@ function normalizeSessionSavedFilters(value: unknown): NetworkSessionSavedFilter
 function normalizePcapSavedFilters(value: unknown): NetworkPcapSavedFilters {
   const record = isRecord(value) ? value : {};
   return {
+    ...(normalizeTextFilter(record.q) ? { q: normalizeTextFilter(record.q) } : {}),
+    ...(normalizeTextFilter(record.namespace) ? { namespace: normalizeTextFilter(record.namespace) } : {}),
+    ...(normalizeTextFilter(record.node) ? { node: normalizeTextFilter(record.node) } : {}),
     status: normalizePcapStatus(record.status),
     workload: normalizeTextFilter(record.workload),
     duration_s: normalizePcapDuration(record.duration_s),

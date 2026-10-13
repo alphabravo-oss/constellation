@@ -8,6 +8,7 @@ import { nodes, type NodeDetail, type NodeVulnerability, type NodeVulnerabilityP
 import { downloadCsv } from "@/lib/csv";
 import { TablePreferencesProvider } from "@/contexts/TablePreferencesContext";
 import { TestRouter } from "@/test/router";
+import { INVENTORY_MAX_PAGE } from "@/lib/inventory-pagination";
 import { NodeDetailPage } from "./NodeDetailPage";
 const scope = vi.hoisted(() => ({ resolved: "", loading: false, error: null as Error | null }));
 vi.mock("@/hooks/useCluster", async () => { const router = await vi.importActual<typeof import("@tanstack/react-router")>("@tanstack/react-router"); return { useCluster: () => { const { id } = router.useParams({ strict: false }); return { clusterId: id, cluster: { id: scope.resolved || id }, isLoading: scope.loading, error: scope.error }; } }; });
@@ -76,7 +77,7 @@ it("refreshes both node posture and its independent full finding inventory", asy
 it.each(["cluster", "node", "row scope", "row node", "IDs", "metadata", "summary", "page", "filter"])("withholds %s mismatches instead of treating them as an empty successful scan", async defect => {
  vi.mocked(nodes.vulnerabilities).mockImplementation(async (cluster, name, params) => { const data = response(cluster, name, params); if (defect === "cluster") data.cluster_id = "other"; if (defect === "node") data.node = "other"; if (defect === "row scope") data.items[0].cluster_id = data.items[0].source_cluster_id = "other"; if (defect === "row node") data.items[0].node = "other"; if (defect === "IDs") data.items[1].row_id = data.items[0].row_id; if (defect === "metadata") data.total = 1; if (defect === "summary") delete (data as Partial<NodeVulnerabilityResponse>).summary; if (defect === "page") data.offset = 100; if (defect === "filter") data.severity = "critical"; return data; }); await render(); await settle(() => expect(button("Retry host findings")).toBeDefined()); expect(rows()).toHaveLength(0); expect(button("Export matching CSV")).toBeUndefined(); expect(host.textContent).not.toContain("No matching host finding instances returned");
 });
-it.each(["0", "bad", "10001"])("rejects URL page %s before fetching a different page", async page => {
+it.each(["0", "bad", String(INVENTORY_MAX_PAGE + 1)])("rejects URL page %s before fetching a different page", async page => {
  await render(`?page=${page}&context=keep`); await settle(() => expect(host.textContent).toContain("Choose supported host finding filters")); expect(nodes.vulnerabilities).not.toHaveBeenCalled(); await click("Reset host finding filters"); await settle(() => expect(rows()).toHaveLength(100)); expect(history.location.search).toContain("context=keep");
 });
 it("recovers an out-of-range server page while retaining full matching totals and exact selection", async () => {

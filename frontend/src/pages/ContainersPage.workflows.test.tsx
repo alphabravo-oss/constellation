@@ -174,10 +174,12 @@ it("loads and exports the exact source cohort beyond the former3000 cap", async 
       sort: "name",
       order: "asc",
     }),
+    expect.any(Function),
   );
   expect(containers.exportCSV).toHaveBeenCalledWith(
     "cluster",
     expect.not.objectContaining({ offset: expect.anything() }),
+    expect.any(Function),
   );
   await settled(() =>
     expect(host.textContent).toContain("Exported 4001 of 4001"),
@@ -394,4 +396,25 @@ it("shows image names and discloses hashes only on request", async () => {
     });
     expect(disclosure.querySelector("code")?.textContent).toBe(digest);
   }
+});
+
+it("invalidates a pending container export through a scope error and recovery", async () => {
+  let complete!: () => void;
+  let guard!: () => boolean;
+  vi.mocked(containers.exportCSV).mockImplementation((_cluster, _filters, shouldDownload) => new Promise(resolve => {
+    guard = shouldDownload!;
+    complete = () => resolve({ total: 4001, exported: 4001, limit: 100000, truncated: false });
+  }));
+  await render("/clusters/cluster/containers");
+  await settled(() => expect(button("Export matching containers CSV").disabled).toBe(false));
+  await act(async () => button("Export matching containers CSV").click());
+  expect(guard()).toBe(true);
+  await act(async () => {
+    await client.fetchQuery({ queryKey: ["clusters"], queryFn: async () => { throw new Error("Scope refresh failed"); } }).catch(() => {});
+  });
+  await act(async () => client.setQueryData(["clusters"], { clusters: [{ id: "cluster" }] }));
+  expect(guard()).toBe(false);
+  await act(async () => complete());
+  await settled(() => expect(button("Export matching containers CSV").disabled).toBe(false));
+  expect(host.textContent).not.toContain("Exported 4001");
 });

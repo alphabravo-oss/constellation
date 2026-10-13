@@ -1,49 +1,33 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createMemoryHistory, type RouterHistory } from "@tanstack/react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { StreamsTab } from "./NetworkMapPage";
+import { StreamsTab } from "./NetworkSecondaryInventory";
 import { downloadCsv } from "@/lib/csv";
-import { network, type ConversationEntries } from "@/api/client";
-
+import { network } from "@/api/client";
+import { TestRouter } from "@/test/router";
+import { TablePreferencesProvider } from "@/contexts/TablePreferencesContext";
+import { streamPage, streamRow } from "@/test/network-secondary-inventory";
+const scope = vi.hoisted(() => ({ clusterId: "cluster", cluster: { id: "cluster" }, isLoading: false, error: null as Error | null }));
+vi.mock("@/hooks/useCluster", () => ({ useCluster: () => scope }));
 vi.mock("@/lib/csv", () => ({ downloadCsv: vi.fn() }));
-vi.mock("@/api/client", () => ({ network: { conversationEntries: vi.fn() } }));
-let root: Root; let host: HTMLDivElement; let client: QueryClient;
-beforeEach(() => { host = document.createElement("div"); document.body.append(host); root = createRoot(host); client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); });
-afterEach(() => { act(() => root.unmount()); client.clear(); host.remove(); vi.resetAllMocks(); });
-function evidence(from = "prod/api", to = "other/api"): ConversationEntries {
-  return { from, to, window_hours: 24, entries: [{ protocol: "TCP", application: "HTTPS", port: 443, verdict: "block", bytes: 100, packets: 2, sessions: 1, client_bytes: 70, server_bytes: 30, severity: 4, threat_id: 0, last_seen_at: "2026-10-12T00:00:00Z" }], totals: { bytes: 100, packets: 2, sessions: 1, client_bytes: 70, server_bytes: 30 } };
-}
-async function render(from = "prod/api", to = "other/api") { await act(async () => root.render(<QueryClientProvider client={client}><StreamsTab clusterID="cluster" from={from} to={to} hours={24} active /></QueryClientProvider>)); }
-async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
-it("loads the exact directed pair without relying on a sampled map flow", async () => {
-  vi.mocked(network.conversationEntries).mockResolvedValue(evidence()); await render();
-  await settled(() => expect(host.textContent).toContain("HTTPS"));
-  expect(network.conversationEntries).toHaveBeenCalledWith({ from: "prod/api", to: "other/api", cluster_id: "cluster", hours: 24 });
-  expect(host.textContent).toContain("Up to 200 returned streams");
-  vi.mocked(network.conversationEntries).mockResolvedValue(evidence("other/api", "prod/api")); await render("other/api", "prod/api");
-  await settled(() => expect(network.conversationEntries).toHaveBeenLastCalledWith({ from: "other/api", to: "prod/api", cluster_id: "cluster", hours: 24 }));
-});
-it("does not display returned evidence for another pair", async () => {
-  vi.mocked(network.conversationEntries).mockResolvedValue(evidence("wrong/api")); await render();
-  await settled(() => expect(host.textContent).toContain("do not match")); expect(host.textContent).not.toContain("HTTPS");
-});
-it("withholds cached evidence after a failed refresh and offers retry", async () => {
-  vi.mocked(network.conversationEntries).mockResolvedValue(evidence()); await render(); await settled(() => expect(host.textContent).toContain("HTTPS"));
-  vi.mocked(network.conversationEntries).mockRejectedValue(new Error("unavailable"));
-  await act(async () => { await client.invalidateQueries({ queryKey: ["conv-entries"] }); });
-  await settled(() => expect(host.textContent).toContain("could not be loaded or refreshed")); expect(host.textContent).not.toContain("HTTPS");
-  expect([...host.querySelectorAll("button")].some(b => b.textContent === "Retry streams")).toBe(true);
-});
+vi.mock("@/api/client", () => ({ network: { conversationEntriesInventory: vi.fn(), conversationEntriesCSV: vi.fn() } }));
+let root: Root, host: HTMLDivElement, client: QueryClient, history: RouterHistory;
+beforeEach(() => { (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT=true; scope.clusterId="cluster";scope.cluster={id:"cluster"};scope.error=null;scope.isLoading=false;host=document.createElement("div");document.body.append(host);root=createRoot(host);client=new QueryClient({defaultOptions:{queries:{retry:false}}}); });
+afterEach(() => { act(() => root.unmount()); client.clear(); host.remove(); vi.resetAllMocks();localStorage.clear(); });
+async function render(url = "", sourceFilters = {}) { history=createMemoryHistory({initialEntries:[`/clusters/cluster/network?tab=conversations&context=keep${url}#proof`]}); await act(async()=>root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{org_id:"org",user_id:"user"}}><TestRouter history={history}><StreamsTab clusterID="cluster" from="prod/api" to="other/api" hours={168} sourceFilters={sourceFilters} active /></TestRouter></TablePreferencesProvider></QueryClientProvider>)); }
+async function settle(check:()=>void){await vi.waitFor(async()=>{await act(async()=>{});check();},{timeout:4000});}
+function button(text:string){return [...host.querySelectorAll<HTMLButtonElement>("button")].find(row=>row.textContent===text)!;}
+async function input(label:string,value:string){await act(async()=>{const field=host.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")!.set!.call(field,value);field.dispatchEvent(new Event("input",{bubbles:true}));});}
+it("requests the exact filtered directed pair and full retained summary beyond the old cap",async()=>{const rows=Array.from({length:1005},(_,i)=>streamRow(i+1));vi.mocked(network.conversationEntriesInventory).mockImplementation(async request=>streamPage(request,rows));await render("&stream_page=11&stream_sort=port&stream_order=asc",{namespace:"prod",group:"group",verdict:"allow",port:443,application:"https",peer:"10.0.0.1",hide_platform:false});await settle(()=>expect(host.textContent).toContain("APP-1005"));expect(network.conversationEntriesInventory).toHaveBeenLastCalledWith(expect.objectContaining({cluster_id:"cluster",from:"prod/api",to:"other/api",hours:168,offset:1000,limit:100,sort:"port",order:"asc",namespace:"prod",group:"group",verdict:"allow",port:443,application:"https",peer:"10.0.0.1"}));expect(host.textContent).toContain("1,005 matching aggregate streams");expect(host.textContent).not.toContain("Up to 200");expect(host.textContent).not.toContain("aggregate of");});
+it("keeps server page and sort coherent through history and resets page for search",async()=>{const rows=Array.from({length:1005},(_,i)=>streamRow(i+1));vi.mocked(network.conversationEntriesInventory).mockImplementation(async request=>streamPage(request,rows));await render("&stream_sort=port&stream_order=asc");await settle(()=>expect(host.textContent).toContain("APP-1"));await act(async()=>button("Next").click());await settle(()=>expect(host.textContent).toContain("APP-101"));expect(history.location.search).toContain("stream_page=2");await act(async()=>history.back());await settle(()=>expect([...host.querySelectorAll("tbody td")].some(cell=>cell.textContent==="APP-1")).toBe(true));await act(async()=>history.forward());await settle(()=>expect(host.textContent).toContain("APP-101"));await input("Search streams","APP-1005");await settle(()=>expect(host.textContent).toContain("1 matching aggregate streams"));expect(network.conversationEntriesInventory).toHaveBeenLastCalledWith(expect.objectContaining({q:"APP-1005",offset:0}));expect(history.location.search).not.toContain("stream_page");expect(history.location.search).toContain("context=keep");expect(history.location.hash).toBe("#proof");});
+it("withholds foreign or malformed pair evidence",async()=>{vi.mocked(network.conversationEntriesInventory).mockImplementation(async request=>({...streamPage(request),to:"wrong/api"}));await render();await settle(()=>expect(host.textContent).toContain("do not match"));expect(host.textContent).not.toContain("APP-1");expect(button("Export matching CSV").disabled).toBe(true);});
+it("withholds cached evidence after a failed refresh and offers retry",async()=>{vi.mocked(network.conversationEntriesInventory).mockImplementation(async request=>streamPage(request));await render();await settle(()=>expect(host.textContent).toContain("APP-1"));vi.mocked(network.conversationEntriesInventory).mockRejectedValue(new Error("offline"));await act(async()=>{await client.invalidateQueries({queryKey:["conv-stream-inventory"]});});await settle(()=>expect(host.textContent).toContain("could not be loaded or refreshed"));expect(host.textContent).not.toContain("APP-1");expect(button("Retry streams")).toBeDefined();expect(button("Export matching CSV").disabled).toBe(true);});
+it("exports precise page values and rejects an in-flight matching CSV after navigation",async()=>{vi.mocked(network.conversationEntriesInventory).mockImplementation(async request=>streamPage(request,[{...streamRow(),bytes:1024,from_platform_role:"core"}]));let guard:(()=>boolean)|undefined;vi.mocked(network.conversationEntriesCSV).mockImplementation(async(_request,current)=>{guard=current;return{total:1,exported:1,limit:100000,truncated:false};});await render("&stream_sort=bytes");await settle(()=>expect(host.textContent).toContain("APP-1"));await act(async()=>button("Export page CSV").click());const[,headers,rows]=vi.mocked(downloadCsv).mock.calls.at(-1)!;expect(rows[0][headers.indexOf("Bytes")]).toBe(1024);expect(rows[0][headers.indexOf("from_platform_role")]).toBe("core");expect(rows).toHaveLength(1);await act(async()=>button("Export matching CSV").click());expect(network.conversationEntriesCSV).toHaveBeenCalledWith(expect.objectContaining({cluster_id:"cluster",from:"prod/api",to:"other/api",hours:168}),expect.any(Function));expect(guard!()).toBe(true);await act(async()=>history.push("/clusters/cluster/network?tab=conversations&stream_page=2"));expect(guard!()).toBe(false);});
+it("requires settled exact cluster and organization identity before any query",async()=>{scope.cluster={id:"other"};vi.mocked(network.conversationEntriesInventory).mockImplementation(async request=>streamPage(request));await render();expect(network.conversationEntriesInventory).not.toHaveBeenCalled();expect(host.textContent).toContain("could not be resolved");});
+it("provides truthful recovery for an out-of-range server page",async()=>{vi.mocked(network.conversationEntriesInventory).mockImplementation(async request=>streamPage(request));await render("&stream_page=21474837");await settle(()=>expect(host.textContent).toContain("No records were returned for this page"));expect(host.textContent).not.toContain("0–");await act(async()=>button("First page").click());await settle(()=>expect(host.textContent).toContain("APP-1"));expect(network.conversationEntriesInventory).toHaveBeenLastCalledWith(expect.objectContaining({offset:0}));});
 
-it("exports both directed endpoint roles with every returned stream", async () => {
-  vi.mocked(network.conversationEntries).mockResolvedValue({ ...evidence("operations/houston", "prod/api"), from_platform_role: "core", to_platform_role: "" });
-  await render("operations/houston", "prod/api"); await settled(() => expect(host.textContent).toContain("HTTPS"));
-  expect(host.textContent).toContain("core");
-  await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Export CSV")!.click());
-  const [, headers, rows] = vi.mocked(downloadCsv).mock.calls.at(-1)!;
-  expect(rows[0][headers.indexOf("From")]).toBe("operations/houston");
-  expect(rows[0][headers.indexOf("from_platform_role")]).toBe("core");
-  expect(rows[0][headers.indexOf("to_platform_role")]).toBe("");
-  expect(headers).not.toContain("rowKey");
-});
+it.each(["&stream_page=NaN","&stream_page=21474838","&stream_sort=unknown","&stream_order=unknown","&stream_page=1&stream_page=2"])("rejects invalid stream URL %s before dispatch",async url=>{await render(url);expect(network.conversationEntriesInventory).not.toHaveBeenCalled();expect(host.textContent).toContain("Reset sorting and page");vi.mocked(network.conversationEntriesInventory).mockImplementation(async request=>streamPage(request));await act(async()=>button("Reset sorting and page").click());await settle(()=>expect(host.textContent).toContain("APP-1"));expect(history.location.search).toContain("context=keep");});
+
+it("ignores unrelated stream URL keys while recovering duplicate owned filters",async()=>{vi.mocked(network.conversationEntriesInventory).mockImplementation(async request=>streamPage(request));await render("&stream_q=APP-1&stream_q=APP-2&stream_namespace=a&stream_namespace=b&stream_node=a&stream_node=b");expect(network.conversationEntriesInventory).not.toHaveBeenCalled();await act(async()=>button("Reset sorting and page").click());await settle(()=>expect(host.textContent).toContain("APP-1"));expect(new URLSearchParams(history.location.search).getAll("stream_q")).toEqual(["APP-1"]);expect(new URLSearchParams(history.location.search).getAll("stream_namespace")).toEqual(["a","b"]);});

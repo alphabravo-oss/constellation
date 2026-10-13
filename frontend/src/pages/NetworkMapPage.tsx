@@ -1,3 +1,5 @@
+import { StreamsTab, PcapWorkspaceTab } from "./NetworkSecondaryInventory";
+export { StreamsTab, PcapWorkspaceTab } from "./NetworkSecondaryInventory";
 import { INVENTORY_MAX_PAGE } from "@/lib/inventory-pagination";
 import { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useIsFetching, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -32,9 +34,6 @@ import {
   Ban,
   ChevronUp,
   ChevronDown,
-  Download,
-  Trash2,
-  RefreshCw,
   Table2,
 } from "lucide-react";
 
@@ -78,9 +77,9 @@ import {
   groupsApi,
   network,
   policies,
-  runtimePcap,
   runtimeThreats,
   type NetworkConversation,
+  type NetworkConversationFilters,
   type NetworkFlow,
   type NetworkFlowState,
   type NetworkNodeKind,
@@ -91,8 +90,6 @@ import {
   type NetworkSessionsResponse,
   type NetworkSessionKillResponse,
   type NetworkWorkload,
-  type PcapCapture,
-  type PcapCaptureStatus,
   type RuntimeThreat,
   type RuntimeThreatDetail,
 } from "@/api/client";
@@ -325,10 +322,10 @@ function NetworkMapInner() {
       hiddenKinds,
       scopeMode,
       sessionFilters,
-      pcapFilters,
+      pcapFilters: { ...pcapFilters, q: routeParams.get("pcap_q") ?? undefined, namespace: routeParams.get("pcap_namespace") ?? undefined, node: routeParams.get("pcap_node") ?? undefined },
       conversationFilters: conversationScope,
     }),
-    [workspaceTab, hours, namespace, groupFilter, verdict, verdictsVisible, protocolFilter, namespaceFilter, hidePlatformComponents, hiddenKinds, scopeMode, sessionFilters, pcapFilters, conversationScope],
+    [workspaceTab, hours, namespace, groupFilter, verdict, verdictsVisible, protocolFilter, namespaceFilter, hidePlatformComponents, hiddenKinds, scopeMode, sessionFilters, pcapFilters, conversationScope, routeParams],
   );
 
   const restoredContext = useRef<string | null>(null);
@@ -337,7 +334,7 @@ function NetworkMapInner() {
     const serialized = JSON.stringify(snapshot);
     restoredContext.current = serialized;
     pendingRestore.current = serialized;
-    updateRoute({ tab: snapshot.workspace_tab === "map" ? null : snapshot.workspace_tab, hours: snapshot.hours === 24 ? null : String(snapshot.hours), namespace: snapshot.namespace, group: snapshot.group, verdict: snapshot.verdict, ...(!restoring ? { flow: null, workload: null } : {}), [NETWORK_VIEW_PARAM]: serialized, hide_platform: String(snapshot.hide_platform_components), from: snapshot.conversation_filters?.from ?? null, to: snapshot.conversation_filters?.to ?? null, verdict_group: snapshot.conversation_filters?.verdict_group ?? null }, restoring, !restoring);
+    updateRoute({ tab: snapshot.workspace_tab === "map" ? null : snapshot.workspace_tab, hours: snapshot.hours === 24 ? null : String(snapshot.hours), namespace: snapshot.namespace, group: snapshot.group, verdict: snapshot.verdict, ...(!restoring ? { flow: null, workload: null } : {}), [NETWORK_VIEW_PARAM]: serialized, hide_platform: String(snapshot.hide_platform_components), from: snapshot.conversation_filters?.from ?? null, to: snapshot.conversation_filters?.to ?? null, verdict_group: snapshot.conversation_filters?.verdict_group ?? null, pcap_q: snapshot.pcap_filters.q ?? null, pcap_namespace: snapshot.pcap_filters.namespace ?? null, pcap_node: snapshot.pcap_filters.node ?? null }, restoring, !restoring);
     if (restoring) { const port = Number(snapshot.session_filters.port); previousTrafficSignature.current = JSON.stringify({ protocol: snapshot.session_filters.protocol || undefined, application: snapshot.session_filters.application || undefined, port: Number.isInteger(port) && port > 0 ? port : undefined, peer: snapshot.session_filters.peer || undefined, workload: snapshot.session_filters.workload || undefined, node: snapshot.session_filters.node || undefined }); }
     setVerdictsVisible(snapshot.verdicts_visible);
     setProtocolFilter(new Set(snapshot.protocols));
@@ -633,7 +630,7 @@ function NetworkMapInner() {
   }, [live, clusterID, queryClient]);
 
   const activeInventory = workspaceTab === "conversations" ? conversationsQ : workspaceTab === "sessions" ? sessionsQ : workspaceTab === "threats" ? threatsQ : q;
-  const lastUpdated = activeInventory.isSuccess && activeInventory.dataUpdatedAt ? `Updated ${new Date(activeInventory.dataUpdatedAt).toLocaleTimeString()}` : "not loaded";
+  const lastUpdated = workspaceTab === "pcap" ? "" : activeInventory.isSuccess && activeInventory.dataUpdatedAt ? `Updated ${new Date(activeInventory.dataUpdatedAt).toLocaleTimeString()}` : "not loaded";
 
   const selectFlow = useCallback(
     (flowID: string) => {
@@ -724,17 +721,17 @@ function NetworkMapInner() {
           <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-mono">
             <StatusPill label={live ? "Auto refresh" : "paused"} tone={live ? "success" : "neutral"} />
             <Button size="sm" variant="outline" onClick={() => setLive((c) => !c)}>{live ? "Pause" : "Resume"}</Button>
-            <Button size="sm" variant="outline" onClick={() => { void q.refetch(); void conversationsQ.refetch(); void lifecycleQ.refetch(); void threatsQ.refetch(); void sessionsQ.refetch(); }}>Refresh</Button>
+            <Button size="sm" variant="outline" onClick={() => { if (workspaceTab === "pcap") { void queryClient.invalidateQueries({ queryKey: ["pcap-captures", clusterID] }); return; } void q.refetch(); void conversationsQ.refetch(); void lifecycleQ.refetch(); void threatsQ.refetch(); void sessionsQ.refetch(); }}>Refresh</Button>
           </div>
         }
       />
       {restoreContext && !networkViewSnapshotFromParams(routeParams) && <ErrorState title="The saved network context is invalid. URL filters remain active." action={<Button onClick={() => updateRoute({ [NETWORK_VIEW_PARAM]: null }, true)}>Discard invalid context</Button>} />}
-      <VerdictBanner status={activeInventory.isError ? "degraded" : "info"}
+      <VerdictBanner status={workspaceTab !== "pcap" && activeInventory.isError ? "degraded" : "info"}
         title={workspaceTab === "conversations" ? !conversationsAvailable ? conversationsQ.isFetching ? "Loading conversations" : "Conversation evidence unavailable" : `${conversationsQ.data!.total} matching directed pairs`
           : workspaceTab === "sessions" ? !sessionsAvailable ? sessionsQ.isFetching ? "Loading sessions" : "Session evidence unavailable" : `${sessionsTotal} matching live sessions`
           : workspaceTab === "threats" ? !threatsAvailable ? threatsQ.isFetching ? "Loading threats" : "Threat evidence unavailable" : `${threatsQ.data!.total} matching threats`
-          : q.isError ? "Network map evidence unavailable" : "Inspect observed network activity"}
-        detail={workspaceTab === "map" ? "The map loads up to 300 rolled-up flows and 50 recent flow events. Narrow filters to inspect more. Missing traffic does not prove a workload is protected."
+          : workspaceTab === "pcap" ? "Capture request ledger" : q.isError ? "Network map evidence unavailable" : "Inspect observed network activity"}
+        detail={workspaceTab === "pcap" ? "The ledger reports retained capture requests. A request does not establish a completed capture; its matching counts, files and refresh status appear below." : workspaceTab === "map" ? "The map loads up to 300 rolled-up flows and 50 recent flow events. Narrow filters to inspect more. Missing traffic does not prove a workload is protected."
           : workspaceTab === "sessions" ? "Totals cover all matching sessions reported in the last five minutes. Missing sessions do not establish agent coverage or protection."
           : workspaceTab === "conversations" ? "Totals cover all matching directed pairs in retained hourly rollups for this window. Missing traffic does not prove a workload is protected."
           : "Reported evidence is limited by its source coverage. Missing activity does not prove a workload is protected."} />
@@ -1165,6 +1162,7 @@ function NetworkMapInner() {
       <FlowInspectorPopover
         open={popoverOpen && !!selectedFlow}
         flow={selectedFlow}
+        sourceFilters={{ namespace: namespace || undefined, group: effectiveGroupFilter || undefined, verdict: verdict || undefined, ...sharedTrafficFilters, hide_platform: hidePlatformComponents }}
         clusterID={clusterID}
         hours={hours}
         denyCapable={denyCapable}
@@ -1199,12 +1197,12 @@ function NetworkMapInner() {
             onPage={setConversationPage}
             loading={conversationsQ.isPending}
             hours={hours}
-            onSelect={(conversation) => updateRoute({ inspect_from: conversation.from, inspect_to: conversation.to })}
+            onSelect={(conversation) => updateRoute({ inspect_from: conversation.from, inspect_to: conversation.to, stream_page: null })}
           />}
           {routeParams.get("inspect_from") && routeParams.get("inspect_to") && <section className="mt-4 space-y-3 rounded-md border border-border bg-card p-4" data-testid="network-conversation-detail">
             <div className="flex flex-wrap items-start justify-between gap-2"><h2 className="break-all text-sm font-semibold">{routeParams.get("inspect_from")} → {routeParams.get("inspect_to")}</h2><Button onClick={() => updateRoute({ inspect_from: null, inspect_to: null })}>Close conversation</Button></div>
-            <p className="text-xs text-muted-foreground">Reported streams for this exact pair in the selected window, across all outcomes. List filters do not narrow this detail.</p>
-            <StreamsTab from={routeParams.get("inspect_from")!} to={routeParams.get("inspect_to")!} clusterID={clusterID} hours={hours} active />
+            <p className="text-xs text-muted-foreground">Matching retained streams for this filtered directed pair and time window.</p>
+            <StreamsTab from={routeParams.get("inspect_from")!} to={routeParams.get("inspect_to")!} clusterID={clusterID} hours={hours} active sourceFilters={conversationRequest} />
           </section>}
         </RadixTabs.Content>
 
@@ -1229,6 +1227,7 @@ function NetworkMapInner() {
 
         <RadixTabs.Content value="pcap" className="min-h-0 flex-1 overflow-auto outline-none" data-testid="network-workspace-panel-pcap">
           <PcapWorkspaceTab
+            autoRefresh={live}
             clusterID={clusterID}
             groupFilter={effectiveGroupFilter}
             filters={pcapFilters}
@@ -1528,156 +1527,6 @@ function formatKillRequestedAt(value?: string) {
   return d.toLocaleTimeString();
 }
 
-export function PcapWorkspaceTab({
-  clusterID,
-  groupFilter,
-  filters,
-  snapshot,
-  onFiltersChange,
-}: {
-  clusterID: string;
-  groupFilter: string;
-  filters: NetworkPcapSavedFilters;
-  snapshot: NetworkSavedViewSnapshot;
-  onFiltersChange: (filters: NetworkPcapSavedFilters) => void;
-}) {
-  const queryClient = useQueryClient();
-  const location = useLocation();
-  const createHref = networkViewHref(clusterID, new URLSearchParams(location.searchStr), location.hash, "pcap", snapshot);
-  const updateFilter = <K extends keyof NetworkPcapSavedFilters>(key: K, value: NetworkPcapSavedFilters[K]) => {
-    onFiltersChange({ ...filters, [key]: value });
-  };
-  const statusParam: PcapCaptureStatus | undefined = filters.status === "" ? undefined : filters.status as PcapCaptureStatus;
-  const listParams = useMemo(() => {
-    const port = Number(filters.dst_port);
-    return {
-      cluster_id: clusterID || undefined,
-      workload: filters.workload.trim() || undefined,
-      group: groupFilter || undefined,
-      status: statusParam,
-      protocol: filters.protocol || undefined,
-      src_ip: filters.src_ip.trim() || undefined,
-      dst_ip: filters.dst_ip.trim() || undefined,
-      dst_port: Number.isInteger(port) && port > 0 ? port : undefined,
-    };
-  }, [clusterID, filters.dst_ip, filters.dst_port, filters.protocol, filters.src_ip, filters.workload, groupFilter, statusParam]);
-  const hasPcapFilters = Boolean(
-    filters.status ||
-    filters.workload.trim() ||
-    filters.protocol ||
-    filters.src_ip.trim() ||
-    filters.dst_ip.trim() ||
-    filters.dst_port ||
-    filters.bpf_filter.trim() ||
-    filters.interface.trim() ||
-    filters.file_count ||
-    filters.file_size_mb ||
-    filters.duration_s !== EMPTY_PCAP_FILTERS.duration_s,
-  );
-  const portInvalid = !!filters.dst_port && (!/^\d+$/.test(filters.dst_port) || Number(filters.dst_port) < 1 || Number(filters.dst_port) > 65535);
-  const capturesQ = useQuery({
-    queryKey: ["pcap-captures", clusterID, listParams],
-    queryFn: () => runtimePcap.list(listParams),
-    enabled: !!clusterID && !portInvalid,
-    refetchInterval: 5_000,
-  });
-  const scopeMismatch = capturesQ.isSuccess && capturesQ.data.some(capture => capture.cluster_id !== clusterID);
-  const captures = capturesQ.isSuccess && !scopeMismatch && !portInvalid ? capturesQ.data : [];
-  const remove = useMutation({
-    mutationFn: (id: string) => {
-      const current = queryClient.getQueryState<PcapCapture[]>(["pcap-captures", clusterID, listParams]);
-      if (current?.status !== "success" || current.fetchStatus !== "idle" || !current.data?.some(capture => capture.id === id && capture.cluster_id === clusterID)) throw new Error("Capture scope changed. Refresh and review before removing it.");
-      return runtimePcap.remove(id);
-    },
-    onSuccess: () => {
-      toast.success("PCAP capture removed");
-      void queryClient.invalidateQueries({ queryKey: ["pcap-captures", clusterID] });
-    },
-    onError: (err) => toast.error((err as Error).message || "Failed to remove PCAP capture"),
-  });
-  if (!clusterID) {
-    return (
-      <div className="rounded-md border border-border bg-card px-3 py-8 text-center text-sm text-muted-foreground" data-testid="network-pcap-tab">
-        Select a cluster before requesting packet captures.
-      </div>
-    );
-  }
-  return (
-    <section className="space-y-3" data-testid="network-pcap-tab">
-      <div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-muted-foreground">Latest 200 matching capture requests. Filters apply on the server before the cap. A recorded request is not a completed capture.</p><Button asChild variant="primary"><a href={createHref} data-testid="network-pcap-new">+ Request capture</a></Button></div>
-      <div className="flex flex-wrap items-end gap-3 rounded-md border border-border bg-card p-3">
-        {([['workload', 'Workload'], ['src_ip', 'Source IP'], ['dst_ip', 'Destination IP'], ['dst_port', 'Destination port']] as const).map(([key, label]) => <label key={key} className="space-y-1 text-xs"><span>{label}</span><input aria-label={`Capture ${label.toLowerCase()} filter`} className="block h-8 max-w-full rounded border border-input bg-background px-2" value={filters[key]} onChange={event => updateFilter(key, event.target.value)} /></label>)}
-        <label className="space-y-1 text-xs"><span>Protocol</span><select aria-label="Capture protocol filter" className="block h-8 rounded border border-input bg-background px-2" value={filters.protocol} onChange={event => updateFilter('protocol', event.target.value)}><option value="">Any</option><option value="tcp">TCP</option><option value="udp">UDP</option><option value="icmp">ICMP</option></select></label>
-        <Button variant="outline" disabled={!hasPcapFilters} onClick={() => onFiltersChange({ ...EMPTY_PCAP_FILTERS })}>Clear filters</Button>
-      </div>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <select
-          value={filters.status}
-          onChange={(event) => updateFilter("status", event.target.value)}
-          className="h-8 rounded border border-input bg-background px-2 text-xs outline-none focus:border-[color:var(--color-primary)]"
-          data-testid="network-pcap-status"
-        >
-          <option value="">All captures</option>
-          <option value="pending">Pending</option>
-          <option value="running">Running</option>
-          <option value="completed">Completed</option>
-          <option value="failed">Failed</option>
-          <option value="expired">Expired</option>
-        </select>
-        <Button size="sm" variant="outline" disabled={portInvalid} onClick={() => void capturesQ.refetch()} data-testid="network-pcap-refresh">
-          <RefreshCw className="h-3.5 w-3.5" aria-hidden />
-          Refresh
-        </Button>
-      </div>
-      {portInvalid ? <ErrorState title="Destination port must be a whole number from 1 to 65535." /> : scopeMismatch ? <ErrorState title="Capture evidence does not match the selected cluster." /> : capturesQ.isError ? <ErrorState title="Packet captures could not be loaded or refreshed." error={capturesQ.error} action={<Button onClick={() => void capturesQ.refetch()}>Retry captures</Button>} /> : <div className="overflow-hidden rounded-md border border-border bg-card">
-        <DataTable<PcapCapture>
-          testId="network-pcap-table"
-          className="rounded-none border-0"
-          rows={captures}
-          rowKey={(capture) => capture.id}
-          preferencesKey="network-pcap-captures"
-          exportFileName="loaded-capture-requests"
-          sourceLimit={200}
-          sourceCount={captures.length}
-          emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">{capturesQ.isPending ? "Loading captures..." : "No packet captures match this filter."}</div>}
-          columns={[
-            { id: "workload", header: "Workload", kind: "name", code: true, cell: (capture) => capture.workload },
-            { id: "platform_role", header: "Platform role", kind: "text", exportHeader: "platform_role", cell: (capture) => capture.platform_role || "Not classified", exportValue: (capture) => capture.platform_role ?? "" },
-            { id: "namespace", header: "Namespace", kind: "name", cell: (capture) => capture.namespace },
-            { id: "filter", header: "Filter", kind: "text", wrap: true, size: 220, cell: pcapCaptureFilterLabel },
-            { id: "status", header: "Status", kind: "status", cell: (capture) => <PcapStatusPill status={capture.status} /> },
-            { id: "node", header: "Node", kind: "id", cell: (capture) => capture.claimed_by_node || "-" },
-            { id: "packets", header: "Packets", kind: "count", cell: (capture) => capture.packet_count == null ? "Not reported" : capture.packet_count.toLocaleString() },
-            { id: "size", header: "Size", kind: "bytes", cell: (capture) => capture.file_size_bytes == null ? "Not reported" : formatBytes(capture.file_size_bytes) },
-            { id: "requested", header: "Requested", kind: "date", cell: (capture) => formatDateTime(capture.requested_at) },
-            { id: "actions", header: "", kind: "actions", exportable: false, size: 160, minSize: 160, maxSize: 240, wrap: true, cell: (capture) => <div className="flex flex-wrap items-center justify-end gap-1">
-              {capture.status === "completed" && <Button size="sm" variant="outline" onClick={() => void runtimePcap.download(capture.id).catch((err: Error) => toast.error(`PCAP download failed: ${err.message}`))} data-testid="network-pcap-download"><Download className="h-3.5 w-3.5" aria-hidden />Download</Button>}
-              {capture.error_message ? <span className="min-w-0 break-words text-[color:var(--color-status-error)]">{capture.error_message}</span> : null}
-              <Button size="icon" variant="ghost" disabled={remove.isPending} onClick={() => { if (window.confirm(`Remove PCAP capture ${capture.id.slice(0, 8)}?`)) remove.mutate(capture.id); }} title={capture.status === "pending" || capture.status === "running" ? "Cancel capture" : "Remove capture"} data-testid="network-pcap-delete"><Trash2 className="h-3.5 w-3.5" aria-hidden /></Button>
-            </div> },
-          ]}
-        />
-      </div>}
-      {capturesQ.isSuccess && !scopeMismatch && !portInvalid && <p className="text-xs text-muted-foreground">{captures.length} returned capture requests. Server fetch is capped at 200; table sort and CSV cover all returned captures and selected columns.</p>}
-    </section>
-  );
-}
-
-function pcapCaptureFilterLabel(capture: PcapCapture) {
-  const parts = [
-    capture.protocol,
-    capture.src_ip,
-    capture.dst_ip,
-    capture.dst_port ? `:${capture.dst_port}` : "",
-  ].filter(Boolean);
-  if (capture.bpf_filter) parts.push(`bpf ${capture.bpf_filter}`);
-  if (capture.interface) parts.push(`iface ${capture.interface}`);
-  if ((capture.file_count ?? 0) > 1) {
-    parts.push(`${capture.file_count}x${capture.file_size_mb || "auto"}MB`);
-  }
-  return parts.join(" ") || "any";
-}
-
 export function NetworkRulesWorkspaceTab({
   items,
   selectedWorkload,
@@ -1882,15 +1731,6 @@ export function NetworkThreatsWorkspaceTab({
   );
 }
 
-function PcapStatusPill({ status }: { status: PcapCaptureStatus }) {
-  const tone =
-    status === "completed" ? "text-[color:var(--color-status-success)] bg-[color:var(--color-status-success)]/15"
-    : status === "failed" ? "text-[color:var(--color-status-error)] bg-[color:var(--color-status-error)]/15"
-    : status === "running" ? "text-[color:var(--color-primary)] bg-[color:var(--color-primary)]/15"
-    : "text-muted-foreground bg-muted";
-  return <span className={cn("rounded px-1.5 py-0.5 text-[10px] uppercase", tone)}>{status}</span>;
-}
-
 // ───── Helper: classify a flow into one of the three verdict chips. ─────
 function verdictGroupFromState(state: NetworkFlowState, verdict: string): VerdictGroup | null {
   if (state === "ok") return "allow";
@@ -2081,6 +1921,7 @@ function FlowInspectorPopover({
   clusterID,
   hours,
   denyCapable,
+  sourceFilters,
   recentFlows,
   threats,
   lifecycle,
@@ -2092,6 +1933,7 @@ function FlowInspectorPopover({
   clusterID: string;
   hours: number;
   denyCapable: boolean;
+  sourceFilters: NetworkConversationFilters;
   recentFlows: NetworkRecentFlow[];
   threats: RuntimeThreat[];
   lifecycle: NetworkPolicyLifecycle[];
@@ -2210,7 +2052,7 @@ function FlowInspectorPopover({
                 <EdgePeersTab flow={flow} clusterID={clusterID} hours={hours} denyCapable={denyCapable} active={tab === "peers"} />
               </RadixTabs.Content>
               <RadixTabs.Content value="streams" className="outline-none">
-                <StreamsTab flow={flow} clusterID={clusterID} hours={hours} active={tab === "streams"} />
+                <StreamsTab flow={flow} clusterID={clusterID} hours={hours} active={tab === "streams"} sourceFilters={sourceFilters} />
               </RadixTabs.Content>
               <RadixTabs.Content value="threat" className="outline-none">
                 <ThreatTab flow={flow} threats={threats} />
@@ -2403,65 +2245,6 @@ function EdgePeersTab({ flow, clusterID, hours, denyCapable, active }: { flow: N
           </li>
         ))}
       </ul>
-    </div>
-  );
-}
-
-// StreamsTab shows the FULL conversation between the two endpoints (NV's per-conversation
-// drill-down): every protocol/port/application stream from→to with its total bytes and
-// session count. Direction is the edge itself (from→to) — like NeuVector, per-connection
-// client/server byte split lives in the Live Sessions view, not the folded conversation
-// (dp's connection reports sum both directions into one figure).
-export function StreamsTab({ flow, from: explicitFrom, to: explicitTo, clusterID, hours, active }: { flow?: NetworkFlow; from?: string; to?: string; clusterID: string; hours: number; active: boolean }) {
-  const from = explicitFrom ?? flow?.src ?? "";
-  const to = explicitTo ?? flow?.dst ?? "";
-  const q = useQuery({
-    queryKey: ["conv-entries", clusterID, from, to, hours],
-    queryFn: () => network.conversationEntries({ from: from, to: to, cluster_id: clusterID || undefined, hours }),
-    enabled: active && !!clusterID && !!from && !!to,
-    staleTime: 30_000,
-  });
-  if (q.isError) return <ErrorState title="Conversation streams could not be loaded or refreshed." error={q.error} action={<Button onClick={() => void q.refetch()}>Retry streams</Button>} />;
-  if (q.isPending) return <p className="text-xs text-muted-foreground">Loading streams…</p>;
-  const data = q.data;
-  if (data && (data.from !== from || data.to !== to || data.window_hours !== hours)) return <ErrorState title="Conversation streams do not match the selected pair and window." />;
-  const entries = data?.entries ?? [];
-  if (entries.length === 0) return <p className="text-xs text-muted-foreground">No aggregated streams recorded for this pair in the window.</p>;
-  const t = data!.totals;
-  return (
-    <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">Up to 200 returned streams; totals and CSV cover this loaded sample. CSV includes the selected table columns.</p>
-      <div className="grid gap-2 sm:grid-cols-2">
-        <Field label="Streams" value={String(entries.length)} />
-        <Field label="Total bytes" value={formatBytes(t.bytes)} />
-        <Field label="Sessions" value={t.sessions.toLocaleString()} />
-        <Field label="Packets" value={t.packets.toLocaleString()} />
-      </div>
-      <div className="min-w-0">
-        <DataTable
-          rows={entries.map((entry, index) => ({ ...entry, rowKey: index, from, to, from_platform_role: data?.from_platform_role, to_platform_role: data?.to_platform_role }))}
-          rowKey={(entry) => entry.rowKey}
-          defaultDensity="compact"
-          sourceLimit={200}
-          sourceCount={entries.length}
-          preferencesKey="network-conversation-streams"
-          exportFileName="network-conversation-streams"
-          columns={[
-            { id: "from", header: "From", kind: "name", code: true, cell: (entry) => entry.from },
-            { id: "from_platform_role", header: "From role", kind: "text", exportHeader: "from_platform_role", cell: (entry) => entry.from_platform_role || "Not classified", exportValue: (entry) => entry.from_platform_role ?? "" },
-            { id: "to", header: "To", kind: "name", code: true, cell: (entry) => entry.to },
-            { id: "to_platform_role", header: "To role", kind: "text", exportHeader: "to_platform_role", cell: (entry) => entry.to_platform_role || "Not classified", exportValue: (entry) => entry.to_platform_role ?? "" },
-            { id: "application", header: "Proto / App", kind: "name", code: true, size: 180, minSize: 120, cell: (entry) => <>{entry.protocol}{entry.application ? <span className="text-muted-foreground">/{entry.application}</span> : ""}</> },
-            { id: "port", header: "Port", kind: "count", cell: (entry) => entry.port || "—" },
-            { id: "bytes", header: "Bytes", kind: "bytes", cell: (entry) => formatBytes(entry.bytes) },
-            { id: "sessions", header: "Sessions", kind: "count", cell: (entry) => entry.sessions.toLocaleString() },
-            { id: "verdict", header: "Verdict", kind: "status", cell: (entry) => <><span className={cn("rounded px-1 text-xs", entry.verdict === "deny" ? "text-[color:var(--color-status-error)]" : "text-muted-foreground")}>{entry.verdict}</span>{entry.threat_id > 0 && <span className="ml-1 text-[color:var(--color-status-error)]" title={`threat ${entry.threat_id}`}>⚠</span>}</> },
-          ]}
-        />
-      </div>
-      <p className="text-[10px] leading-tight text-muted-foreground/80">
-        Traffic {shortName(from)} → {shortName(to)}, per protocol/port stream. Per-connection client/server byte split is in the Live Sessions panel.
-      </p>
     </div>
   );
 }

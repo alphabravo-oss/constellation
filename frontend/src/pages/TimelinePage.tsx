@@ -1,3 +1,6 @@
+import { SavedViewsMenu } from "@/components/SavedViewsMenu";
+import { useExportGuard, exportQueryReady } from "@/hooks/useExportGuard";
+import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
 // TimelinePage — B1 unified incident timeline.
 //
 // One chronological investigation view that merges the four NeuVector event
@@ -7,7 +10,7 @@
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState, useEffect, useRef, type ReactNode } from "react";
 import { useQuery, useQueryClient, useIsFetching } from "@tanstack/react-query";
-import { Bookmark, Save, SlidersHorizontal } from "lucide-react";
+import { Save, SlidersHorizontal } from "lucide-react";
 
 import {
   securityTimeline,
@@ -95,6 +98,7 @@ export function TimelinePage() {
     error: clusterError,
   } = useCluster();
   const qc = useQueryClient();
+  const identity = useTablePreferencesIdentity();
   const registryFetching = useIsFetching({
     queryKey: ["clusters"],
     exact: true,
@@ -306,10 +310,10 @@ export function TimelinePage() {
     limit: TIMELINE_PAGE,
     offset: page * TIMELINE_PAGE,
   };
-  const owner = JSON.stringify([clusterId, readParams]);
-  const q = useQuery({
-    queryKey: [
+  const owner = JSON.stringify([identity?.org_id, identity?.user_id, clusterId, readParams]);
+  const timelineKey = [
       "security-timeline",
+      identity?.org_id, identity?.user_id,
       clusterId,
       sources.size === 0 ? "none" : typeParam,
       sevParam,
@@ -324,7 +328,9 @@ export function TimelinePage() {
       requestedHours,
       afterExclusive,
       verdict,
-    ],
+    ];
+  const q = useQuery({
+    queryKey: timelineKey,
     queryFn: () => securityTimeline.list(readParams),
     // No source selected ⇒ nothing to fetch.
     enabled: scopeReady && sources.size > 0 && !invalidWindow,
@@ -356,6 +362,7 @@ export function TimelinePage() {
     !invalidWindow &&
     !scopeMismatch &&
     !cohortMismatch;
+  const captureExport = useExportGuard(owner, !available || q.isFetching, () => !!clusterId && clusterCacheReady(qc, clusterId) && exportQueryReady(qc, timelineKey, q.data));
   // Pin an older Dashboard's rolling-window fallback after its first successful
   // response, so later pages and exports retain the exact lower boundary.
   useEffect(() => {
@@ -462,13 +469,7 @@ export function TimelinePage() {
             >
               Refresh
             </Button>
-            {views.length > 0 && (
-              <TimelineSavedViewsMenu
-                views={views}
-                onApply={applyView}
-                onDelete={deleteView}
-              />
-            )}
+            <SavedViewsMenu views={views} onApply={applyView} onDelete={deleteView} summary={timelineSavedViewSummary} testId="timeline-saved-views-menu" />
             <Button
               type="button"
               size="sm"
@@ -535,29 +536,34 @@ export function TimelinePage() {
                   !clusterCacheReady(qc, clusterId)
                 )
                   return;
+                const shouldDownload = captureExport();
+                if (!shouldDownload()) return;
                 exportPending.current = true;
                 const exportOwner = owner;
                 setExportState({ owner: exportOwner, pending: true });
                 void securityTimeline
-                  .exportCSV(readParams)
-                  .then((result) =>
+                  .exportCSV(readParams, shouldDownload)
+                  .then((result) => {
+                    if (!shouldDownload()) return;
                     setExportState({
                       owner: exportOwner,
                       pending: false,
                       result: result.truncated
                         ? `Exported ${result.exported.toLocaleString()} of ${result.total.toLocaleString()} matching records; export cap ${result.limit.toLocaleString()}.`
                         : `Exported all ${result.total.toLocaleString()} matching event records.`,
-                    }),
-                  )
-                  .catch((error: Error) =>
+                    });
+                  })
+                  .catch((error: Error) => {
+                    if (!shouldDownload()) return;
                     setExportState({
                       owner: exportOwner,
                       pending: false,
                       error: error.message || "Event export failed. Retry.",
-                    }),
-                  )
+                    });
+                  })
                   .finally(() => {
                     exportPending.current = false;
+                    setExportState(current => current?.owner === exportOwner ? { ...current, pending: false } : current);
                   });
               }}
             >
@@ -928,68 +934,6 @@ export function TimelinePage() {
           hint="It is absent from this page or the active filters."
         />
       )}
-    </div>
-  );
-}
-
-function TimelineSavedViewsMenu({
-  views,
-  onApply,
-  onDelete,
-}: {
-  views: TimelineSavedView[];
-  onApply: (view: TimelineSavedView) => void;
-  onDelete: (id: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="relative">
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        onClick={() => setOpen((current) => !current)}
-      >
-        <Bookmark className="h-3.5 w-3.5" aria-hidden /> Views{" "}
-        <span className="font-mono text-muted-foreground">
-          ({views.length})
-        </span>
-      </Button>
-      {open ? (
-        <div
-          className="absolute right-0 top-full z-30 mt-1 w-[300px] rounded-md border border-border bg-popover p-2 shadow-[var(--elev-popover)]"
-          onMouseLeave={() => setOpen(false)}
-          data-testid="timeline-saved-views-menu"
-        >
-          <ul className="space-y-1">
-            {views.map((view) => (
-              <li key={view.id} className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onApply(view);
-                    setOpen(false);
-                  }}
-                  className="min-w-0 flex-1 rounded px-2 py-1 text-left text-xs hover:bg-accent"
-                >
-                  <div className="font-medium">{view.name}</div>
-                  <div className="truncate font-mono text-[10px] text-muted-foreground">
-                    {timelineSavedViewSummary(view)}
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onDelete(view.id)}
-                  aria-label={`delete timeline view ${view.name}`}
-                  className="rounded p-1 text-muted-foreground hover:bg-muted"
-                >
-                  x
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
     </div>
   );
 }

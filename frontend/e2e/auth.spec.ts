@@ -1,4 +1,5 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Response } from "@playwright/test";
+import { waitForLoginCooldown } from "./utils";
 
 const EMAIL = "admin@demo.test";
 const PASSWORD = "Constellation!1";
@@ -33,9 +34,18 @@ test.describe("Authentication", () => {
   });
 
   test("hides SSO when no provider is configured", async ({ page }) => {
-    const providers = page.waitForResponse("**/api/v1/auth/providers");
-    await page.goto("/auth/login");
-    expect(await (await providers).json()).toEqual({ oidc: false, saml: false });
+    const deadline = Date.now() + 65_000;
+    let providers: Response;
+    while (true) {
+      const requested = page.waitForResponse("**/api/v1/auth/providers");
+      await page.goto("/auth/login");
+      providers = await requested;
+      // Provider discovery shares the real anonymous auth limiter with login.
+      // Honor its cooldown; every other response still fails immediately.
+      if (providers.status() !== 429 || !await waitForLoginCooldown(providers.headers()["retry-after"], deadline)) break;
+    }
+    expect(providers.ok()).toBe(true);
+    expect(await providers.json()).toEqual({ oidc: false, saml: false });
     await expect(page.getByText("Enter your credentials to continue.")).toBeVisible();
     await expect(page.getByText(/Continue with SSO|continue with password/i)).toHaveCount(0);
   });

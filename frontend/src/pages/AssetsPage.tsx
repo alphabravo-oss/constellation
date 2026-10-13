@@ -1,7 +1,9 @@
+import { useExportGuard, exportQueryReady } from "@/hooks/useExportGuard";
+import { clusterCacheReady } from "@/lib/cluster-evidence";
 import { assetDisplayName } from "@/lib/asset-identity";
 import { DigestDisclosure } from "@/components/ui/digest-disclosure";
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { BadgeCheck, Boxes, FileJson, Search, ShieldAlert, ShieldCheck } from "lucide-react";
 
 import { assets, type Asset } from "@/api/client";
@@ -28,6 +30,7 @@ export function AssetsPage() {
   // with NULL cluster_id (org-wide registry pulls, ML models, IaC files) are
   // omitted in cluster mode by design — they live in a future org-level inventory
   // surface, not under a specific cluster's posture pane.
+  const qc = useQueryClient();
   const inventoryScope = useInventoryScope();
   const { clusterId, isLoading: clusterLoading, error: clusterError } = inventoryScope;
   const scopeReady = inventoryScope.ready;
@@ -48,8 +51,9 @@ export function AssetsPage() {
   const setSelectedID = (id: string) => setParams(current => { current.set("selected", id); return current; });
   const setPage = (next: number) => setParams(current => { if (next) current.set("page", String(next + 1)); else current.delete("page"); current.delete("selected"); return current; });
   const filters = { cluster_id: clusterId, search: query || undefined, kind: kind === "all" ? undefined : kind, criticality: criticality === "all" ? undefined : criticality, ...(ai ? { ai_workload: ai === "true" } : {}), sort, order: order as "asc" | "desc" };
+  const inventoryKey = ["assets", identity?.org_id, identity?.user_id, filters, page];
   const q = useQuery({
-    queryKey: ["assets", identity?.org_id, identity?.user_id, filters, page], enabled: scopeReady && querySettled,
+    queryKey: inventoryKey, enabled: scopeReady && querySettled,
     queryFn: async () => {
       if ((ai && !["true", "false"].includes(ai)) || (params.has("order") && !["asc", "desc"].includes(params.get("order")!)) || !Number.isSafeInteger(rawPage) || rawPage < 1 || rawPage > 10000000) throw new Error("Invalid asset filter or page");
       const response = await assets.list({ ...filters, limit: ASSET_PAGE_SIZE, offset: page * ASSET_PAGE_SIZE });
@@ -66,11 +70,13 @@ export function AssetsPage() {
   const [exportError, setExportError] = useState<{ scope: string; error: unknown } | null>(null);
   const [exportResult, setExportResult] = useState<{ scope: string; exported: number; total: number; truncated: boolean } | null>(null);
   const exportScope = JSON.stringify([identity, filters]);
+  const captureExport = useExportGuard(JSON.stringify([exportScope, page]), !ready, () => !!clusterId && clusterCacheReady(qc, clusterId) && exportQueryReady(qc, inventoryKey, q.data));
   const exportMatching = async () => {
-    if (!ready || exporting) return;
+    const shouldDownload = captureExport();
+    if (!shouldDownload() || exporting) return;
     setExportError(null); setExporting(true);
-    try { const result = await assets.exportCsv(filters); setExportResult({ scope: exportScope, ...result }); }
-    catch (error) { setExportError({ scope: exportScope, error }); } finally { setExporting(false); }
+    try { const result = await assets.exportCsv(filters, shouldDownload); if (!shouldDownload()) return; setExportResult({ scope: exportScope, ...result }); }
+    catch (error) { if (shouldDownload()) setExportError({ scope: exportScope, error }); } finally { setExporting(false); }
   };
   const setSort = (value: { id: string; dir: "asc" | "desc" } | null) => setParams(current => { current.set("sort", value?.id ?? "risk"); current.set("order", value?.dir ?? "desc"); current.delete("page"); current.delete("selected"); return current; });
 

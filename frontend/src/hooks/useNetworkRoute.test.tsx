@@ -48,3 +48,12 @@ it("clamps invalid windows/pages and retains literal endpoint filters", async ()
   expect(current.hours).toBe(24); expect(current.conversationPage).toBe(0); expect(current.workspaceTab).toBe("map");
   expect(current.params.get("from")).toBe("ns/%_api");
 });
+
+it.each(["hours", "namespace", "group", "verdict"])("resets secondary pages on global %s changes and restores them through history",async key=>{
+ await render("/network?conversation_page=4&session_page=3&threat_page=2&stream_page=8&pcap_page=11&context=keep#proof");
+ await act(async()=>{if(key==="hours")current.setHours(168);if(key==="namespace")current.setNamespace("prod");if(key==="group")current.setGroupFilter("group-a");if(key==="verdict")current.setVerdict("block");});
+ for(const prefix of ["conversation","session","threat","stream","pcap"])expect(current.params.has(`${prefix}_page`)).toBe(false);
+ expect(current.params.get("context")).toBe("keep");expect(history.location.hash).toBe("#proof");
+ await act(async()=>history.back());await vi.waitFor(()=>expect(current.params.get("stream_page")).toBe("8"));expect(current.params.get("pcap_page")).toBe("11");
+});
+it("retains secondary pages during snapshot restoration without a reset",async()=>{await render("/network?stream_page=8&pcap_page=11&inspect_from=prod%2Fa&inspect_to=prod%2Fb");await act(async()=>current.update({hours:"168",namespace:"prod",pcap_q:"needle"},true,false));expect(current.params.get("stream_page")).toBe("8");expect(current.params.get("pcap_page")).toBe("11");expect(current.params.get("inspect_from")).toBe("prod/a");});

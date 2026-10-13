@@ -36,7 +36,7 @@ async function render(url = "/clusters/cluster/timeline") {
   await act(async () => new Promise(resolve => setTimeout(resolve, 20)));
 }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
-function click(label: string) { const button = [...host.querySelectorAll("button")].find(el => el.textContent?.trim() === label)!; act(() => button.click()); }
+function click(label: string) { const button = [...host.querySelectorAll("button")].find(el => el.textContent?.trim() === label)!; act(() => { if (label.startsWith("Views (")) button.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })); else button.click(); }); }
 
 it("restores source, severity, text, time and page filters from a shared URL", async () => {
   await render("/clusters/cluster/timeline?tab=custom&type=audit,runtime_event&severity=critical,high&q=exec&namespace=prod&workload=api&ref=rule&from=2026-10-10T00:00&to=2026-10-12T00:00&page=3");
@@ -117,7 +117,7 @@ it("ignores malformed timeline payloads and applies validated advanced filters",
   localStorage.setItem(key, JSON.stringify([{ id: "valid", name: "Named investigation", category: "custom", sources: ["runtime_event"], severities: ["high"], query: "api", namespace: "prod", workload: "web", reference: "rule", from: "2026-10-10T00:00", to: "2026-10-12T00:00" }, { id: "bad", name: "Malformed", category: "custom", sources: {}, query: [] }]));
   await render(); click("Views (1)"); expect(host.textContent).not.toContain("Malformed");
   expect(host.textContent).toContain("1 saved view record was rejected");
-  const apply = [...host.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent?.startsWith("Named investigation"))!; await act(async () => apply.click());
+  const apply = [...document.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent?.startsWith("Named investigation"))!; await act(async () => apply.click());
   await settled(() => expect(securityTimeline.list).toHaveBeenLastCalledWith(expect.objectContaining({ type: "runtime_event", severity: "high", q: "api", namespace: "prod", workload: "web", ref: "rule", from: "2026-10-10T00:00:00.000Z", to: "2026-10-12T00:00:00.000Z", offset: 0 })));
 });
 it("retains ISO timestamp offsets and milliseconds when applying a saved view", async () => {
@@ -125,7 +125,7 @@ it("retains ISO timestamp offsets and milliseconds when applying a saved view", 
   const key = operatorStorageKey("constellation.timeline.views.v1", { org_id: "org", user_id: "user" })!;
   localStorage.setItem(key, JSON.stringify([{ id: "precise", name: "Exact interval", category: "audit", sources: ["audit"], severities: [], query: "", namespace: "", workload: "", reference: "", from, to }]));
   await render(); click("Views (1)");
-  const apply = [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent?.startsWith("Exact interval"))!;
+  const apply = [...document.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent?.startsWith("Exact interval"))!;
   await act(async () => apply.click());
   await settled(() => expect(securityTimeline.list).toHaveBeenLastCalledWith(expect.objectContaining({ type: "audit", from: "2026-10-10T07:04:56.789Z", to: "2026-10-10T07:05:01.123Z" })));
   const params = new URLSearchParams(history.location.search); expect(params.get("from")).toBe(from); expect(params.get("to")).toBe(to);
@@ -169,7 +169,7 @@ it.each(["cluster","boundary"])("rejects wrong %s evidence and disables matching
  vi.mocked(securityTimeline.list).mockResolvedValue({...exactResponse(),...(mismatch==="cluster"?{items:[{...item,cluster_id:"other"}]}:{from:"2026-10-11T12:34:56.123455Z"})});
  await render(`/clusters/cluster/timeline?tab=event&after=${encodeURIComponent(boundary)}`);
  await settled(()=>expect(host.textContent).toContain("does not match the selected cluster and event window"));expect(host.querySelector('[data-testid="timeline-summary"]')).toBeNull();
- const exportButton=[...host.querySelectorAll<HTMLButtonElement>("button")].find(button=>button.textContent==="Export matching events (up to 10,000)")!;expect(exportButton.disabled).toBe(true);
+ const exportButton=[...document.querySelectorAll<HTMLButtonElement>("button")].find(button=>button.textContent==="Export matching events (up to 10,000)")!;expect(exportButton.disabled).toBe(true);
 });
 it("reports full matching export caps and errors, and blocks duplicate requests while downloading",async()=>{
  vi.mocked(securityTimeline.list).mockResolvedValue(exactResponse(200,12000));
@@ -177,9 +177,9 @@ it("reports full matching export caps and errors, and blocks duplicate requests 
  await settled(()=>expect(host.textContent).toContain("12,000 matching event records"));
  let resolve!: (value:{total:number;exported:number;limit:number;truncated:boolean})=>void;
  vi.mocked(securityTimeline.exportCSV).mockReturnValue(new Promise(done=>{resolve=done;}));
- const button=[...host.querySelectorAll<HTMLButtonElement>("button")].find(button=>button.textContent==="Export matching events (up to 10,000)")!;
+ const button=[...document.querySelectorAll<HTMLButtonElement>("button")].find(button=>button.textContent==="Export matching events (up to 10,000)")!;
  await act(async()=>{button.click();button.click();});expect(securityTimeline.exportCSV).toHaveBeenCalledTimes(1);expect(button.disabled).toBe(true);
- expect(securityTimeline.exportCSV).toHaveBeenCalledWith(expect.objectContaining({cluster_id:"cluster",type:"runtime_event",after:boundary,verdict:"alert,block,quarantine"}));
+ expect(securityTimeline.exportCSV).toHaveBeenCalledWith(expect.objectContaining({cluster_id:"cluster",type:"runtime_event",after:boundary,verdict:"alert,block,quarantine"}), expect.any(Function));
  await act(async()=>resolve({total:12000,exported:10000,limit:10000,truncated:true}));
  await settled(()=>expect(host.textContent).toContain("Exported 10,000 of 12,000 matching records"));
  vi.mocked(securityTimeline.exportCSV).mockRejectedValue(new Error("offline"));await act(async()=>button.click());await settled(()=>expect(host.textContent).toContain("Matching event export failed"));expect(host.textContent).toContain("offline");
@@ -193,4 +193,22 @@ it("exports applicable runtime/threat roles and retains one precise lower-bound 
  vi.mocked(securityTimeline.list).mockResolvedValue({...exactResponse(0,2,true),items:[{...item,platform_role:"core",verdict:"alert"},{...item,id:"unknown",source:"dpi_threat",platform_role:""}]});
  await render(`/clusters/cluster/timeline?tab=custom&type=runtime_event,dpi_threat&after=${encodeURIComponent(boundary)}&after_exclusive=true`);await settled(()=>expect(host.textContent).toContain("Process observed"));
  expect(host.textContent?.match(/Strictly after/g)).toHaveLength(1);click("Export current page CSV");const [,headers,rows]=vi.mocked(downloadCsv).mock.calls.at(-1)!;expect(rows.map(row=>row[headers.indexOf("platform_role")])).toEqual(["core",""]);expect(new URLSearchParams(history.location.search).get("after")).toBe(boundary);
+});
+
+it("blocks a pending timeline CSV when source refresh completes before its response", async () => {
+  let complete!: () => void;
+  let guard!: () => boolean;
+  vi.mocked(securityTimeline.exportCSV).mockImplementation((_params, shouldDownload) => new Promise(resolve => {
+    guard = shouldDownload!;
+    complete = () => resolve({ total: 42, exported: 42, limit: 10000, truncated: false });
+  }));
+  await render("/clusters/cluster/timeline?tab=event");
+  await settled(() => expect(host.querySelector('[data-testid="timeline-event-row"]')).not.toBeNull());
+  click("Export matching events (up to 10,000)");
+  expect(guard()).toBe(true);
+  await act(async () => client.invalidateQueries({ queryKey: ["security-timeline"] }));
+  await settled(() => expect(client.isFetching()).toBe(0));
+  expect(guard()).toBe(false);
+  await act(async () => complete());
+  expect(host.textContent).not.toContain("Exported all 42");
 });

@@ -1,9 +1,9 @@
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { Activity, ArrowRight, Clock3, Copy, Database, Download, Globe2, Mail, ScanSearch, SlidersHorizontal } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { componentsInventory, systemConfigApi, type ComponentInstance, type ConfigProvenance } from "@/api/client";
+import { systemConfigApi, type ConfigProvenance } from "@/api/client";
 import { PageContainer, PageHeader, PageSection } from "@/components/ui/page";
 import { DataTable } from "@/components/ui/data-table";
 import { Card } from "@/components/ui/card";
@@ -12,6 +12,8 @@ import { Button } from "@/components/ui/button";
 import { ErrorState, LoadingState } from "@/components/ui/states";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
+import { ComponentRevisionInventory, AppliedStatusPill } from "./ComponentRevisionInventory";
 
 type BackendConfigSource = "default" | "environment_bootstrap" | "database";
 type ConfigSource = BackendConfigSource | "unknown";
@@ -30,29 +32,19 @@ interface ConfigGroup {
   items: ConfigItem[];
 }
 
-interface AppliedRevisionRow {
-  id: string;
-  component: string;
-  role: string;
-  hostname: string;
-  cluster: string;
-  reportedRevision: number | null;
-  status: "current" | "behind" | "ahead" | "unknown";
-  lastSeenAt: string;
-}
-
 export function EffectiveConfigPage() {
+  const identity = useTablePreferencesIdentity();
+  const owner = identity?.org_id && identity.user_id ? `${identity.org_id}:${identity.user_id}` : "";
+  const qc = useQueryClient();
+  const configKey = ["system-config", owner];
   const [requestedTab, setTab] = useTabParam("tab", "values");
   const tab = ["values", "sources", "reports", "json"].includes(requestedTab) ? requestedTab : "values";
   const q = useQuery({
-    queryKey: ["system-config"],
+    queryKey: configKey,
+    enabled: !!owner,
     queryFn: () => systemConfigApi.get(),
   });
-  const componentsQ = useQuery({
-    queryKey: ["components-inventory", "effective-config"],
-    queryFn: () => componentsInventory.list({ limit: 1000 }),
-    staleTime: 30_000,
-  });
+
 
   if (q.isPending) {
     return (
@@ -79,8 +71,6 @@ export function EffectiveConfigPage() {
   const nonDefaultItems = items.filter((item) => item.source === "database" || item.source === "environment_bootstrap");
   const unknownItems = items.filter((item) => item.source === "unknown").length;
   const provider = q.data.applied?.provider;
-  const appliedRows = buildAppliedRevisionRows(componentsQ.isSuccess ? componentsQ.data.components : [], q.data.revision);
-  const reportingApplied = appliedRows.filter((row) => row.reportedRevision !== null).length;
   const redactedJson = JSON.stringify(config, null, 2);
   const source = q.data.source === "system_config" ? "System config row" : q.data.source === "default" ? "No persisted row" : "Unknown";
 
@@ -91,7 +81,7 @@ export function EffectiveConfigPage() {
         description="Redacted system configuration, per-key sources, and the serving replica's provider state."
         actions={
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" disabled={q.isFetching || componentsQ.isFetching} onClick={() => { void q.refetch(); void componentsQ.refetch(); }}>Refresh</Button>
+            <Button variant="outline" disabled={q.isFetching} onClick={() => { void q.refetch(); void qc.invalidateQueries({ queryKey: ["components-inventory", "effective-config", owner] }); }}>Refresh</Button>
             <Button variant="outline" onClick={() => void copyText(redactedJson).catch(() => undefined)}>
               <Copy className="h-4 w-4" />
               Copy JSON
@@ -185,43 +175,7 @@ export function EffectiveConfigPage() {
           This reports the system config provider on the replica serving this response. It does not confirm scanner or other component adoption, or a reload by every network client.
         </p>
       </section><PageSection title="Component Revision Reports" description="Only an explicit system_config_revision in component heartbeat metadata is used here.">
-        <section className="rounded-md border border-border bg-card p-3" data-testid="effective-config-applied-revisions">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-sm font-semibold">Reported system config revision</h2>
-            <span className="text-xs text-muted-foreground">
-              {componentsQ.isError ? "Inventory unavailable" : componentsQ.isPending ? "Loading inventory" : `${reportingApplied}/${appliedRows.length} components report a revision`} · target revision {q.data.revision}
-            </span>
-          </div>
-          <p className="mt-2 text-xs text-muted-foreground">Reports reflect the last heartbeat and do not establish current component health.</p>
-          {componentsQ.isError ? (
-            <div className="mt-3">
-              <ErrorState title="Component inventory unavailable" error={componentsQ.error} />
-              <Button className="mt-2" variant="outline" onClick={() => void componentsQ.refetch()}>Retry inventory</Button>
-            </div>
-          ) : componentsQ.isPending ? (
-            <p className="mt-3 text-xs text-muted-foreground">Loading component reports...</p>
-          ) : appliedRows.length === 0 ? (
-            <p className="mt-3 text-xs text-muted-foreground">No component heartbeats are available.</p>
-          ) : (
-            <div className="mt-3 min-w-0">
-              <DataTable<AppliedRevisionRow>
-                rows={appliedRows}
-                rowKey={(row) => row.id}
-                preferencesKey="effective-config-reports"
-                exportFileName="effective-config-loaded-reports"
-                exportLabel="Export loaded reports CSV"
-                sourceLimit={1000} sourceCount={appliedRows.length}
-                columns={[
-                  { id: "component", header: "Component", kind: "name", exportValue: (row) => `${row.component}; role=${row.role}; cluster=${row.cluster}`, cell: (row) => <><div className="font-medium">{row.component}</div><div className="text-xs text-muted-foreground">{row.role} · {row.cluster}</div></> },
-                  { id: "host", header: "Host", kind: "id", exportValue: (row) => row.hostname, cell: (row) => row.hostname },
-                  { id: "revision", header: "Reported revision", kind: "count", exportValue: (row) => row.reportedRevision ?? "", cell: (row) => row.reportedRevision ?? "Unknown" },
-                  { id: "status", header: "Compared with target", kind: "status", size: 200, exportValue: (row) => row.status, cell: (row) => <AppliedStatusPill status={row.status} /> },
-                  { id: "lastSeen", header: "Last seen", kind: "date", exportValue: (row) => row.lastSeenAt, cell: (row) => formatDateTime(row.lastSeenAt) },
-                ]}
-              />
-            </div>
-          )}
-        </section>
+        <ComponentRevisionInventory targetRevision={q.data.revision} sourceQueryKey={configKey} sourceRefreshing={q.isFetching} />
       </PageSection></div>) },
         { value: "json", label: "JSON", content: (<Card title="Redacted JSON" description="The config object returned by /system/config after backend redaction.">
         <pre className="max-h-[460px] overflow-auto rounded-md border border-border bg-muted p-3 text-xs">{redactedJson}</pre>
@@ -287,39 +241,6 @@ function configValue(item: ConfigItem): string {
   return typeof item.value === "string" ? item.value : JSON.stringify(item.value);
 }
 
-function buildAppliedRevisionRows(components: ComponentInstance[], targetRevision: number): AppliedRevisionRow[] {
-  return components.map((component) => {
-    const revision = extractAppliedRevision(component.metadata ?? {});
-    return {
-      id: component.id,
-      component: component.display_name || component.component,
-      role: component.role,
-      hostname: component.hostname,
-      cluster: component.cluster_name || component.cluster_id || "org",
-      reportedRevision: revision,
-      status: appliedRevisionStatus(revision, targetRevision),
-      lastSeenAt: component.last_seen_at,
-    };
-  }).sort((a, b) => statusRank(a.status) - statusRank(b.status) || a.component.localeCompare(b.component));
-}
-
-function extractAppliedRevision(metadata: Record<string, unknown>): number | null {
-  const value = metadata.system_config_revision;
-  const revision = typeof value === "number" ? value : typeof value === "string" && /^\d+$/.test(value.trim()) ? Number(value.trim()) : NaN;
-  return Number.isSafeInteger(revision) && revision >= 0 ? revision : null;
-}
-
-function appliedRevisionStatus(revision: number | null, targetRevision: number): AppliedRevisionRow["status"] {
-  if (revision === null) return "unknown";
-  if (revision < targetRevision) return "behind";
-  if (revision > targetRevision) return "ahead";
-  return "current";
-}
-
-function statusRank(status: AppliedRevisionRow["status"]): number {
-  return { behind: 0, ahead: 1, unknown: 2, current: 3 }[status];
-}
-
 function ProvenancePills({ item }: { item: ConfigItem }) {
   return (
     <span className="inline-flex flex-wrap gap-1">
@@ -335,15 +256,6 @@ function SourcePill({ source }: { source: ConfigSource }) {
   const cls = source === "database" ? "border-primary/30 bg-primary/10 text-primary" :
     source === "environment_bootstrap" ? "border-status-info/30 bg-status-info/10 text-status-info" :
     "border-border bg-muted text-muted-foreground";
-  return <span className={`inline-flex rounded border px-1.5 py-0.5 text-[10px] font-medium ${cls}`}>{label}</span>;
-}
-
-function AppliedStatusPill({ status }: { status: AppliedRevisionRow["status"] | "unavailable" }) {
-  const cls = status === "current" ? "border-primary/30 bg-primary/10 text-primary" :
-    status === "behind" ? "border-status-warning/30 bg-status-warning/10 text-status-warning" :
-    status === "ahead" ? "border-status-info/30 bg-status-info/10 text-status-info" :
-    "border-border bg-muted text-muted-foreground";
-  const label = { current: "Current", behind: "Behind", ahead: "Ahead", unknown: "Unknown", unavailable: "Unavailable" }[status];
   return <span className={`inline-flex rounded border px-1.5 py-0.5 text-[10px] font-medium ${cls}`}>{label}</span>;
 }
 

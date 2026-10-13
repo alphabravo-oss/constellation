@@ -11,7 +11,7 @@ export function useNetworkRoute() {
       for (const [key, value] of Object.entries(changes)) {
         if (value === null || value === "") next.delete(key); else next.set(key, value);
       }
-      if (resetPage) { next.delete("session_page"); next.delete("threat_page"); next.delete("conversation_page"); next.delete("inspect_from"); next.delete("inspect_to"); }
+      if (resetPage) { next.delete("stream_page"); next.delete("pcap_page"); next.delete("session_page"); next.delete("threat_page"); next.delete("conversation_page"); next.delete("inspect_from"); next.delete("inspect_to"); }
       return next;
     }, { replace });
   }, [setParams]);

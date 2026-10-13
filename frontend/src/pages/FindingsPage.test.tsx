@@ -47,8 +47,8 @@ async function renderPage() {
 }
 async function rerenderPage() { await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={identity}><FindingsPage /></TablePreferencesProvider></QueryClientProvider>)); }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }, { timeout: 3000 }); }
-function button(label: string) { return [...host.querySelectorAll<HTMLButtonElement>("button")].find((element) => element.textContent?.trim() === label)!; }
-async function click(label: string) { await act(async () => button(label).click()); }
+function button(label: string) { return [...document.querySelectorAll<HTMLButtonElement>("button")].find((element) => element.textContent?.trim() === label)!; }
+async function click(label: string) { await act(async () => { if (label.startsWith("Views (")) button(label).dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })); else button(label).click(); }); }
 async function search(value: string) {
   await act(async () => { const input = host.querySelector<HTMLInputElement>('[aria-label="Search findings"]')!; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); });
 }
@@ -132,7 +132,7 @@ it("exports all matching instances with the same predicates and global sort, ind
   route.initial = "view=instances&page=6&kind=runtime&lifecycle=suppressed&severity=high&fixable=true&q=asset:api%20!kev:true&sort=title&order=asc";
   await renderPage(); await settled(() => expect(button("Export filtered instances CSV").disabled).toBe(false));
   await click("Export filtered instances CSV");
-  await settled(() => expect(findings.exportCSV).toHaveBeenCalledWith({ kind: "runtime", lifecycle: "suppressed", cluster_id: "cluster", q: "asset:api !kev:true severity:high", fixable: true, sort: "title", order: "asc", limit: 100000, offset: 0 }));
+  await settled(() => expect(findings.exportCSV).toHaveBeenCalledWith({ kind: "runtime", lifecycle: "suppressed", cluster_id: "cluster", q: "asset:api !kev:true severity:high", fixable: true, sort: "title", order: "asc", limit: 100000, offset: 0 }, expect.any(Function)));
   expect(host.textContent).toContain("Up to 100,000 matching instances");
   expect(button("Export this page CSV")).toBeDefined();
 });
@@ -142,7 +142,7 @@ it("keeps CVE global risk order, uses full DSL and discloses instance and page e
   expect(findings.byCVE).toHaveBeenLastCalledWith(expect.objectContaining({ q: "package:openssl !kev:true severity:high", fixable: true, offset: 500, limit: 100 }));
   expect(host.querySelector('[data-testid="findings-cve-table"] thead [aria-sort]')).toBeNull();
   await click("Export filtered instances CSV");
-  await settled(() => expect(findings.exportCSV).toHaveBeenCalledWith(expect.objectContaining({ kind: "vulnerability", q: "package:openssl !kev:true severity:high cve:CVE-", sort: "risk", order: "desc", offset: 0, limit: 100000 })));
+  await settled(() => expect(findings.exportCSV).toHaveBeenCalledWith(expect.objectContaining({ kind: "vulnerability", q: "package:openssl !kev:true severity:high cve:CVE-", sort: "risk", order: "desc", offset: 0, limit: 100000 }), expect.any(Function)));
   expect(button("Export this CVE page CSV")).toBeDefined();
 });
 it("shows export failure without discarding filters or results", async () => {
@@ -218,7 +218,7 @@ it("ignores malformed saved view payloads and applies only a validated named vie
   localStorage.setItem(operatorStorageKey("constellation.findings.views.v1", identity)!, JSON.stringify([{ id: "valid", name: "Valid saved filters", kind: "runtime", lifecycle: "accepted", query: "api" }, { id: "bad", name: "Malformed", kind: [], lifecycle: {}, query: null }]));
   await renderPage(); await settled(() => expect(host.textContent).toContain("Finding 0")); await click("Views (1)");
   expect(host.textContent).toContain("1 saved view record was rejected");
-  expect(host.textContent).not.toContain("Malformed"); const apply = [...host.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent?.startsWith("Valid saved filters"))!; await act(async () => apply.click());
+  expect(host.textContent).not.toContain("Malformed"); const apply = [...document.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent?.startsWith("Valid saved filters"))!; await act(async () => apply.click());
   await settled(() => expect(findings.list).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "runtime", lifecycle: "accepted", q: "api" })));
 });
 it("reports a failed saved-view delete without removing the persisted or visible record", async () => {
@@ -226,7 +226,7 @@ it("reports a failed saved-view delete without removing the persisted or visible
   localStorage.setItem(key, JSON.stringify([{ id: "valid", name: "Retained view", kind: "runtime", lifecycle: "open", query: "api" }]));
   await renderPage(); await settled(() => expect(host.textContent).toContain("Finding 0")); await click("Views (1)");
   const original = localStorage; vi.stubGlobal("localStorage", { getItem: original.getItem.bind(original), setItem: () => { throw new Error("quota"); } });
-  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="delete view Retained view"]')!.click()); await settled(() => expect(host.textContent).toContain("could not be stored")); expect(host.textContent).toContain("Retained view");
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Delete view Retained view"]')!.click()); await settled(() => expect(host.textContent).toContain("could not be stored")); await click("Views (1)"); expect(document.body.textContent).toContain("Retained view");
   vi.unstubAllGlobals(); expect(JSON.parse(localStorage.getItem(key)!)).toHaveLength(1);
 });
 
@@ -242,7 +242,7 @@ it("keeps the exact target cohort across paging, CVE rollup, export and selectio
  await settled(() => expect(host.textContent).toContain("CVE-last"));
  expect(findings.byCVE).toHaveBeenLastCalledWith(expect.objectContaining({ target_type: "host", cluster_id: "cluster" }));
  await click("Export filtered instances CSV");
- expect(findings.exportCSV).toHaveBeenCalledWith(expect.objectContaining({ target_type: "host", offset: 0, limit: 100000 }));
+ expect(findings.exportCSV).toHaveBeenCalledWith(expect.objectContaining({ target_type: "host", offset: 0, limit: 100000 }), expect.any(Function));
 });
 
 it("applies saved target cohorts and clears them when applying a legacy view", async () => {
@@ -250,9 +250,9 @@ it("applies saved target cohorts and clears them when applying a legacy view", a
  localStorage.setItem(key, JSON.stringify([{ id: "target", name: "Host cohort", kind: "vulnerability", lifecycle: "open", query: "", targetType: "host", view: "instances" }, { id: "legacy", name: "All targets", kind: "vulnerability", lifecycle: "open", query: "", view: "instances" }]));
  route.initial = "view=instances&target_type=image-workload&page=6";
  await renderPage(); await settled(() => expect(host.textContent).toContain("Finding 500")); await click("Views (2)");
- await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent?.startsWith("Host cohort"))!.click());
+ await act(async () => [...document.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent?.startsWith("Host cohort"))!.click());
  await settled(() => { expect(params().get("target_type")).toBe("host"); expect(findings.list).toHaveBeenLastCalledWith(expect.objectContaining({ target_type: "host", offset: 0 })); });
- await click("Views (2)"); await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent?.startsWith("All targets"))!.click());
+ await click("Views (2)"); await act(async () => [...document.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent?.startsWith("All targets"))!.click());
  await settled(() => { expect(params().has("target_type")).toBe(false); expect(findings.list).toHaveBeenLastCalledWith(expect.not.objectContaining({ target_type: expect.anything() })); });
 });
 
@@ -264,7 +264,7 @@ it("loads an exact strongest-mode ID cohort and exports advisories without addin
  expect(findings.list).toHaveBeenLastCalledWith(expect.objectContaining({ group_mode: "protect", id_scope: "all" }));
  expect(host.textContent).toContain("101 matching vulnerability IDs"); expect(host.textContent).toContain("By vulnerability ID");
  expect(host.textContent).toContain("an ID may appear in more than one mode"); expect(host.querySelector('a[href*="/cve/GHSA"]')).toBeNull();
- await click("Export filtered instances CSV"); expect(findings.exportCSV).toHaveBeenCalledWith(expect.objectContaining({ group_mode: "protect", id_scope: "all", q: undefined, offset: 0 }));
+ await click("Export filtered instances CSV"); expect(findings.exportCSV).toHaveBeenCalledWith(expect.objectContaining({ group_mode: "protect", id_scope: "all", q: undefined, offset: 0 }), expect.any(Function));
  await selectFilter("Strongest group mode", "monitor"); await settled(() => expect(findings.byCVE).toHaveBeenLastCalledWith(expect.objectContaining({ group_mode: "monitor", offset: 0 })));
  expect(params().get("page")).toBeNull();
 });
@@ -275,9 +275,9 @@ it("clears selected instances after a mode change and restores a saved exact mod
  await renderPage(); await settled(() => expect(host.textContent).toContain("Finding 500")); await selectFirst();
  await selectFilter("Strongest group mode", "monitor"); await settled(() => expect(host.textContent).toContain("Finding 0"));
  expect(host.querySelector<HTMLInputElement>('[data-testid="findings-table"] tbody input[type="checkbox"]')?.checked).toBe(false);
- await click("Views (2)"); await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(b=>b.textContent?.startsWith("Discover ID cohort"))!.click());
+ await click("Views (2)"); await act(async () => [...document.querySelectorAll<HTMLButtonElement>("button")].find(b=>b.textContent?.startsWith("Discover ID cohort"))!.click());
  await settled(() => expect(findings.list).toHaveBeenLastCalledWith(expect.objectContaining({ group_mode: "discover", id_scope: "all", offset: 0 })));
- await click("Views (2)"); await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(b=>b.textContent?.startsWith("Legacy cohort"))!.click());
+ await click("Views (2)"); await act(async () => [...document.querySelectorAll<HTMLButtonElement>("button")].find(b=>b.textContent?.startsWith("Legacy cohort"))!.click());
  await settled(() => { expect(params().has("group_mode")).toBe(false); expect(params().has("id_scope")).toBe(false); });
 });
 
@@ -293,4 +293,26 @@ it("retains reported and explicitly unknown roles in the visible-column page exp
   const [, headers, rows] = vi.mocked(downloadCsv).mock.calls.at(-1)!;
   const role = headers.indexOf("Platform role"); expect(role).toBeGreaterThanOrEqual(0);
   expect(rows.map(row => row[role])).toEqual(["core", "", ""]);
+});
+
+it("rejects pending finding CSV after an operator round trip and retains the clicked request", async () => {
+  let complete!: () => void;
+  let guard!: () => boolean;
+  vi.mocked(findings.exportCSV).mockImplementation((_request, shouldDownload) => new Promise(resolve => { guard = shouldDownload!; complete = resolve; }));
+  route.initial = "view=instances&severity=high&page=3&sort=title&order=asc";
+  await renderPage();
+  await settled(() => expect(button("Export filtered instances CSV").disabled).toBe(false));
+  await click("Export filtered instances CSV");
+  await settled(() => expect(guard).toBeTypeOf("function"));
+  expect(guard()).toBe(true);
+  identity.user_id = "other-operator";
+  await rerenderPage();
+  identity.user_id = "operator";
+  await rerenderPage();
+  expect(guard()).toBe(false);
+  expect(findings.exportCSV).toHaveBeenCalledOnce();
+  expect(findings.exportCSV).toHaveBeenCalledWith(expect.objectContaining({ q: "severity:high", sort: "title", order: "asc", limit: 100000, offset: 0 }), expect.any(Function));
+  await act(async () => complete());
+  await settled(() => expect(button("Export filtered instances CSV").disabled).toBe(false));
+  expect(host.textContent).not.toContain("Could not export matching instances");
 });

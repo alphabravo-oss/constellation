@@ -250,6 +250,41 @@ describe("DataTable preferences", () => {
     expect(host?.textContent).not.toContain("platform");
   });
 
+  it("rechecks page export freshness at click time without needing a rerender", () => {
+    let fresh = true;
+    const canExport = vi.fn(() => fresh);
+    const createURL = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:guarded-table");
+    const revokeURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    const blob = vi.spyOn(globalThis, "Blob");
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    render(<DataTable rows={rows} columns={columns} rowKey={row => row.id} exportFileName="guarded-page" testId="guarded-page" canExport={canExport} />);
+    const exportButton = host!.querySelector<HTMLButtonElement>('[data-testid="guarded-page-export-csv"]')!;
+    expect(exportButton.disabled).toBe(false);
+    expect(canExport).toHaveBeenCalled();
+    canExport.mockClear();
+
+    fresh = false;
+    act(() => exportButton.click());
+    expect(canExport).toHaveBeenCalledOnce();
+    expect(blob).not.toHaveBeenCalled();
+    expect(createURL).not.toHaveBeenCalled();
+    expect(click).not.toHaveBeenCalled();
+
+    fresh = true;
+    act(() => exportButton.click());
+    expect(canExport).toHaveBeenCalledTimes(2);
+    expect(blob).toHaveBeenCalledOnce();
+    expect(createURL).toHaveBeenCalledOnce();
+    expect(click).toHaveBeenCalledOnce();
+    expect(revokeURL).toHaveBeenCalledWith("blob:guarded-table");
+    expect(blob).toHaveBeenCalledWith(["Name,Risk,Owner\napi,42,platform"], { type: "text/csv;charset=utf-8" });
+  });
+
+  it("disables page CSV when the supplied evidence guard is already unavailable", () => {
+    render(<DataTable rows={rows} columns={columns} rowKey={row => row.id} exportFileName="stale-page" testId="stale-page" canExport={() => false} />);
+    expect(host?.querySelector<HTMLButtonElement>('[data-testid="stale-page-export-csv"]')?.disabled).toBe(true);
+  });
+
   it("exports visible columns with stable CSV values", async () => {
     let exportedBlob: Blob | undefined;
     let exportedName = "";

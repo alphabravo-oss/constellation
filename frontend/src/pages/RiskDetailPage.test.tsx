@@ -85,7 +85,7 @@ it("uses server asset/cluster filters, exact full totals, URL paging and full-so
   await settled(() => { expect(summary.textContent).toContain("195"); expect(summary.textContent).toContain("53"); expect(summary.textContent).toContain("209"); });
   expect(host.querySelector('[data-testid="risk-generic-findings"] tbody')?.children).toHaveLength(100);
   await act(async () => button("Next").click()); await settled(() => expect(host.textContent).toContain("Finding 305")); expect(history.location.search).toBe("?tab=findings&findings_page=4");
-  await act(async () => button("Export matching records (up to 10,000)").click()); expect(findings.exportCSV).toHaveBeenCalledWith({ cluster_id: "cluster", q: `asset:${assetID}`, sort: "risk", order: "desc", limit: 10000 });
+  await act(async () => button("Export matching records (up to 10,000)").click()); expect(findings.exportCSV).toHaveBeenCalledWith({ cluster_id: "cluster", q: `asset:${assetID}`, sort: "risk", order: "desc", limit: 10000 }, expect.any(Function));
   expect(host.querySelector('a[href="/clusters/cluster/findings/305"]')).not.toBeNull(); expect(host.querySelector('[data-testid="scope-bar"]')).toBeNull();
 });
 
@@ -156,7 +156,7 @@ it("shows capped export pending and failure feedback without dropping filters", 
   await render("asset", assetID, "?tab=findings"); await settled(() => expect(button("Export matching records (up to 10,000)")?.disabled).toBe(false));
   await act(async () => button("Export matching records (up to 10,000)").click());
   await settled(() => expect(button("Exporting…")?.disabled).toBe(true));
-  expect(findings.exportCSV).toHaveBeenCalledWith({ cluster_id: "cluster", q: `asset:${assetID}`, sort: "risk", order: "desc", limit: 10000 });
+  expect(findings.exportCSV).toHaveBeenCalledWith({ cluster_id: "cluster", q: `asset:${assetID}`, sort: "risk", order: "desc", limit: 10000 }, expect.any(Function));
   await act(async () => fail(new Error("download failed")));
   await settled(() => expect(host.textContent).toContain("Could not export asset finding records")); expect(button("Export matching records (up to 10,000)").disabled).toBe(false); expect(history.location.search).toBe("?tab=findings");
 });
@@ -196,4 +196,21 @@ it("keeps a bounded deployment overview preview read-only and links to the full 
  const d=deployment();d.findings=[{id:"same-uuid",kind:"runtime",title:"Compatibility preview observation",severity:"high",risk_score:60,lifecycle:"open",last_seen_at:"2026-10-12T23:00:00Z"}];vi.mocked(deployments.get).mockResolvedValue(d);
  await render("deployment","deployment","?tab=overview&findings_page=13&custom=keep");await settled(()=>expect(host.textContent).toContain("Compatibility preview observation"));expect(host.querySelector('a[href$="/findings/same-uuid"]')).toBeNull();expect(deployments.findings).not.toHaveBeenCalled();
  const link=[...host.querySelectorAll<HTMLAnchorElement>("a")].find(anchor=>anchor.textContent==="Browse workload findings")!;const params=new URLSearchParams(link.getAttribute("href")!.slice(1));expect(params.get("tab")).toBe("findings");expect(params.get("findings_page")).toBe("13");expect(params.get("custom")).toBe("keep");
+});
+
+it("discards pending asset risk export after related evidence invalidation and recovery", async () => {
+  let complete!: () => void;
+  let guard!: () => boolean;
+  vi.mocked(findings.exportCSV).mockImplementation((_params, shouldDownload) => new Promise(resolve => { guard = shouldDownload!; complete = resolve; }));
+  await render("asset", assetID, "?tab=findings");
+  await settled(() => expect(button("Export matching records (up to 10,000)")?.disabled).toBe(false));
+  await act(async () => button("Export matching records (up to 10,000)").click());
+  await settled(() => expect(guard).toBeTypeOf("function"));
+  expect(guard()).toBe(true);
+  await act(async () => client.invalidateQueries({ queryKey: ["risk-related"] }));
+  await settled(() => expect(client.isFetching()).toBe(0));
+  expect(guard()).toBe(false);
+  await act(async () => complete());
+  await settled(() => expect(button("Export matching records (up to 10,000)").disabled).toBe(false));
+  expect(host.textContent).not.toContain("Could not export asset finding records");
 });

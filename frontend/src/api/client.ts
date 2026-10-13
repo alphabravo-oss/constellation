@@ -74,8 +74,9 @@ export { api };
 
 // --- typed endpoints (thin layer) ---
 
-export async function downloadAPIFile(path: string, filename: string) {
+export async function downloadAPIFile(path: string, filename: string, shouldDownload?: ScanInventoryDownloadGuard) {
   const response = await api.get(path, { responseType: "blob" });
+  assertInventoryDownloadCurrent(shouldDownload);
   const blob = response.data instanceof Blob ? response.data : new Blob([response.data]);
   // Prefer the server-provided filename (Content-Disposition) when present.
   const cd = String(response.headers?.["content-disposition"] ?? "");
@@ -199,10 +200,10 @@ export const findings = {
   // NeuVector-style rollup: one row per CVE with its blast radius (affected images/clusters).
   byCVE: (params: { cluster_id?: string; target_type?: string; group_mode?: string; id_scope?: "all"; lifecycle?: Lifecycle; limit?: number; offset?: number; fixable?: boolean; q?: string } = {}) =>
     api.get<{ cves: CVERollup[]; limit: number; offset: number; total: number }>("/findings/by-cve", { params: { ...params, fixable: params.fixable ? "true" : undefined, q: params.q || undefined } }).then((r) => r.data),
-  exportCSV: (params: { kind?: FindingKind; lifecycle?: Lifecycle; cluster_id?: string; target_type?: string; group_mode?: string; id_scope?: "all"; q?: string; limit?: number; offset?: number; fixable?: boolean; sort?: string; order?: "asc" | "desc" } = {}) => {
+  exportCSV: (params: { kind?: FindingKind; lifecycle?: Lifecycle; cluster_id?: string; target_type?: string; group_mode?: string; id_scope?: "all"; q?: string; limit?: number; offset?: number; fixable?: boolean; sort?: string; order?: "asc" | "desc" } = {}, shouldDownload?: ScanInventoryDownloadGuard) => {
     const query = new URLSearchParams();
     for (const [key, value] of Object.entries(params)) if (value !== undefined && value !== false && value !== "") query.set(key, value === true ? "1" : String(value));
-    return downloadAPIFile(`/findings.csv?${query}`, "constellation-findings-instances.csv");
+    return downloadAPIFile(`/findings.csv?${query}`, "constellation-findings-instances.csv", shouldDownload);
   },
   get: (id: string) => api.get<Finding>(`/findings/${id}`).then((r) => r.data),
   triage:     (id: string, body: { assignee_id?: string; priority?: string }) =>
@@ -322,11 +323,12 @@ export const assets = {
   findingsCSV: (id: string, params: AssetFindingInventoryParams, shouldDownload?: ScanInventoryDownloadGuard) => downloadScanInventoryCSV(`/assets/${encodeURIComponent(id)}/findings.csv`, params, `asset-${id}-findings.csv`, shouldDownload),
   list: (params: AssetsListParams = {}) =>
     api.get<AssetsListResponse>("/assets", { params }).then((r) => r.data),
-  exportCsv: async (params: AssetsListParams = {}) => {
+  exportCsv: async (params: AssetsListParams = {}, shouldDownload?: ScanInventoryDownloadGuard) => {
     const filters = { ...params }; delete filters.limit; delete filters.offset;
     const response = await api.get<Blob>("/assets.csv", { params: filters, responseType: "blob" });
     const total = Number(response.headers["x-export-total"]), limit = Number(response.headers["x-export-limit"]), truncated = response.headers["x-export-truncated"];
     if (!Number.isSafeInteger(total) || total < 0 || limit !== 100000 || !["true", "false"].includes(String(truncated)) || (truncated === "true") !== (total > limit)) throw new Error("Asset export scope could not be confirmed.");
+    assertInventoryDownloadCurrent(shouldDownload);
     const blob = response.data instanceof Blob ? response.data : new Blob([response.data]); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = "constellation-assets.csv"; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
     return { total, exported: Math.min(total, limit), limit, truncated: truncated === "true" };
   },
@@ -469,11 +471,12 @@ export interface ContainerListResponse {
 export const containers = {
   list: (clusterID: string, params: ContainerListParams = {}) =>
     api.get<ContainerListResponse>(`/clusters/${encodeURIComponent(clusterID)}/containers`, { params }).then((r) => r.data),
-  exportCSV: async (clusterID: string, params: ContainerListParams = {}) => {
+  exportCSV: async (clusterID: string, params: ContainerListParams = {}, shouldDownload?: ScanInventoryDownloadGuard) => {
     const filters = { ...params }; delete filters.limit; delete filters.offset;
     const response = await api.get<Blob>(`/clusters/${encodeURIComponent(clusterID)}/containers.csv`, { params: filters, responseType: "blob" });
     const total = Number(response.headers["x-export-total"]), limit = Number(response.headers["x-export-limit"]), truncated = response.headers["x-export-truncated"];
     if (!/^\d+$/.test(String(response.headers["x-export-total"])) || !Number.isSafeInteger(total) || total < 0 || limit !== 100000 || !["true", "false"].includes(String(truncated)) || (truncated === "true") !== (total > limit)) throw new Error("Container export scope could not be confirmed.");
+    assertInventoryDownloadCurrent(shouldDownload);
     const blob = response.data instanceof Blob ? response.data : new Blob([response.data]); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = "constellation-running-containers.csv"; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
     return { total, exported: Math.min(total, limit), limit, truncated: truncated === "true" };
   },
@@ -2172,6 +2175,19 @@ export interface ConversationEntries {
   totals: { bytes: number; client_bytes: number; server_bytes: number; packets: number; sessions: number };
 }
 
+export interface ConversationStreamInventoryParams extends NetworkConversationFilters {
+  cluster_id: string; from: string; to: string; q?: string; protocol?: string;
+}
+export interface ConversationStreamInventoryRow extends ConversationEntry {
+  row_id: string; from_platform_role: string; to_platform_role: string;
+}
+export interface ConversationStreamInventoryResponse {
+  cluster_id: string; from: string; to: string; window_hours: number;
+  entries: ConversationStreamInventoryRow[]; total: number; summary: Record<string, number>; totals: Record<string, number>;
+  limit: number; offset: number; has_more: boolean; sort: string; order: "asc" | "desc";
+  filters: Record<string, string | number | boolean>; source: "rollups"; source_complete: boolean; summary_scope: string;
+}
+
 // NV RESTSession — one live connection from the runtime-agent's dp session table.
 export interface NetworkSession {
   row_id?: string; cluster_id?: string; updated_at?: string;
@@ -2579,6 +2595,10 @@ export const network = {
     api.get<{ workload: string; peers: NetworkPeer[] }>("/network/peers", { params }).then((r) => r.data.peers),
   conversationEntries: (params: { from: string; to: string; hours?: number; cluster_id?: string }) =>
     api.get<ConversationEntries>("/network/conversations/entries", { params }).then((r) => r.data),
+  conversationEntriesInventory: (params: ConversationStreamInventoryParams) =>
+    api.get<ConversationStreamInventoryResponse>("/network/conversations/streams", { params }).then(r => r.data),
+  conversationEntriesCSV: (params: ConversationStreamInventoryParams, shouldDownload?: ScanInventoryDownloadGuard) =>
+    downloadScanInventoryCSV("/network/conversations/streams.csv", params, "conversation-streams.csv", shouldDownload),
   // NV RESTSession: the live per-connection table (dp ctrl_list_session snapshot).
   sessions: (params: NetworkSessionFilters = {}) =>
     api.get<NetworkSessionsResponse>("/network/sessions", { params }).then(r => r.data),
@@ -2733,7 +2753,24 @@ export interface PcapCapture {
   expires_at: string;
 }
 
+export interface PcapInventoryParams {
+  cluster_id: string; workload?: string; namespace?: string; node?: string; group?: string; status?: PcapCaptureStatus;
+  protocol?: string; src_ip?: string; dst_ip?: string; dst_port?: number; q?: string; hide_platform?: boolean;
+  limit?: number; offset?: number; sort?: string; order?: "asc" | "desc";
+}
+export interface PcapInventoryRow extends Omit<PcapCapture, "packet_count" | "file_size_bytes"> {
+  row_id: string; platform_role: string; packet_count: number | null; file_size_bytes: number | null;
+}
+export interface PcapInventoryResponse {
+  cluster_id: string; captures: PcapInventoryRow[]; total: number; summary: Record<string, number>;
+  limit: number; offset: number; has_more: boolean; sort: string; order: "asc" | "desc";
+  filters: Record<string, string | number | boolean>; source_complete: boolean; summary_scope: string;
+}
+
 export const runtimePcap = {
+  inventory: (params: PcapInventoryParams) => api.get<PcapInventoryResponse>("/runtime-pcap/inventory", { params }).then(r => r.data),
+  inventoryCSV: (params: PcapInventoryParams, shouldDownload?: ScanInventoryDownloadGuard) =>
+    downloadScanInventoryCSV("/runtime-pcap/inventory.csv", params, "capture-requests.csv", shouldDownload),
   start: (body: {
     cluster_id: string;
     workload: string;
@@ -2763,8 +2800,8 @@ export const runtimePcap = {
     api.get<PcapCapture>(`/runtime-pcap/${encodeURIComponent(id)}`).then((r) => r.data),
   downloadURL: (id: string) =>
     `${api.defaults.baseURL ?? ""}/runtime-pcap/${encodeURIComponent(id)}/download`,
-  download: (id: string) =>
-    downloadAPIFile(`/runtime-pcap/${encodeURIComponent(id)}/download`, `capture-${id}.pcap`),
+  download: (id: string, shouldDownload?: ScanInventoryDownloadGuard) =>
+    downloadAPIFile(`/runtime-pcap/${encodeURIComponent(id)}/download`, `capture-${id}.pcap`, shouldDownload),
   remove: (id: string) =>
     api.delete<{ deleted: string }>(`/runtime-pcap/${encodeURIComponent(id)}`).then((r) => r.data),
 };
@@ -3054,7 +3091,7 @@ export interface TimelineReadParams {
   verdict?: string;
 }
 export const securityTimeline = {
-  exportCSV: async (params: TimelineReadParams = {}) => {
+  exportCSV: async (params: TimelineReadParams = {}, shouldDownload?: ScanInventoryDownloadGuard) => {
     const filters = { ...params };
     delete filters.limit;
     delete filters.offset;
@@ -3076,6 +3113,7 @@ export const securityTimeline = {
       throw new Error(
         "Event export scope could not be confirmed. Retry the export.",
       );
+    assertInventoryDownloadCurrent(shouldDownload);
     const blob =
       response.data instanceof Blob ? response.data : new Blob([response.data]);
     const url = URL.createObjectURL(blob);

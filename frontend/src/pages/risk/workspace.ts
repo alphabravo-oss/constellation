@@ -1,3 +1,4 @@
+import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
 import { assetDisplayName } from "@/lib/asset-identity";
 import { useParams } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
@@ -15,6 +16,8 @@ export interface ReportedRisk { composite: number; factors: Array<{ name: string
 export const FINDINGS_PAGE_SIZE = 100;
 
 export function useRiskWorkspace() {
+  const operator = useTablePreferencesIdentity();
+  const owner = `${operator?.org_id}:${operator?.user_id}`;
   const { entityType = "", entityId = "" } = useParams({ strict: false });
   const { clusterId, cluster, isLoading: clusterLoading, error: clusterError } = useCluster();
   const scopeReady = !!clusterId && cluster?.id === clusterId && !clusterLoading && !clusterError;
@@ -29,7 +32,7 @@ export function useRiskWorkspace() {
     if (value > 0) current.set("findings_page", String(value + 1)); else current.delete("findings_page");
     return current;
   });
-  const entityQueryKey = ["risk-entity", clusterId, entityType, entityId];
+  const entityQueryKey = ["risk-entity", owner, clusterId, entityType, entityId];
   const entityQ = useQuery({
     queryKey: entityQueryKey,
     enabled: scopeReady && supported && !!entityId,
@@ -44,17 +47,18 @@ export function useRiskWorkspace() {
   const matches = identity?.id === entityId && identity?.clusterId === clusterId;
   const entity = scopeReady && !entityQ.isError && matches ? entityQ.data : undefined;
   const assetQuery = entity?.type === "asset" ? `asset:${entity.data.asset.id}` : undefined;
+  const findingQueryKey = ["risk-related", owner, clusterId, entityId, assetQuery, page];
   const query = useQuery({
-    queryKey: ["risk-related", clusterId, entityId, assetQuery, page],
+    queryKey: findingQueryKey,
     enabled: !!entity && !!assetQuery && !invalidPage,
     queryFn: () => findings.list({ cluster_id: clusterId, q: assetQuery, limit: FINDINGS_PAGE_SIZE, offset: page * FINDINGS_PAGE_SIZE, sort: "risk", order: "desc" }),
   });
   const criticalQ = useQuery({
-    queryKey: ["risk-related-critical", clusterId, entityId, assetQuery], enabled: !!entity && !!assetQuery && !invalidPage,
+    queryKey: ["risk-related-critical", owner, clusterId, entityId, assetQuery], enabled: !!entity && !!assetQuery && !invalidPage,
     queryFn: () => findings.list({ cluster_id: clusterId, q: `${assetQuery} severity:critical`, limit: 1 }),
   });
   const highQ = useQuery({
-    queryKey: ["risk-related-high", clusterId, entityId, assetQuery], enabled: !!entity && !!assetQuery && !invalidPage,
+    queryKey: ["risk-related-high", owner, clusterId, entityId, assetQuery], enabled: !!entity && !!assetQuery && !invalidPage,
     queryFn: () => findings.list({ cluster_id: clusterId, q: `${assetQuery} severity:high`, limit: 1 }),
   });
   const sameAsset = (rows: Finding[] | undefined) => rows?.every(row => row.asset_id === entityId && row.cluster_id === clusterId) ?? true;
@@ -62,7 +66,7 @@ export function useRiskWorkspace() {
   const generic = entity?.type === "asset" && !query.isError && !findingScopeMismatch && !invalidPage ? query.data : undefined;
   const records: RiskFinding[] = entity?.type === "finding" ? [entity.data] : entity?.type === "deployment" ? entity.data.findings ?? [] : generic?.findings ?? [];
   const stats: ReturnType<typeof entityStats> = entity ? entityStats(entity, generic, !generic || criticalQ.isError ? undefined : criticalQ.data?.total, !generic || highQ.isError ? undefined : highQ.data?.total) : {};
-  return { entityType, entityId, clusterId, cluster, clusterLoading, clusterError, scopeReady, supported, entityQ, entityQueryKey, entity, matches, query, criticalQ, highQ, assetQuery, generic, findingScopeMismatch, records, stats, page, invalidPage, setPage };
+  return { owner, findingQueryKey, entityType, entityId, clusterId, cluster, clusterLoading, clusterError, scopeReady, supported, entityQ, entityQueryKey, entity, matches, query, criticalQ, highQ, assetQuery, generic, findingScopeMismatch, records, stats, page, invalidPage, setPage };
 }
 export type RiskWorkspace = ReturnType<typeof useRiskWorkspace>;
 export type RiskTabProps = { workspace: RiskWorkspace };

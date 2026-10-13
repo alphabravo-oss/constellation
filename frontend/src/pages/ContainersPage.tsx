@@ -1,10 +1,12 @@
+import { useExportGuard, exportQueryReady } from "@/hooks/useExportGuard";
+import { clusterCacheReady } from "@/lib/cluster-evidence";
 // ContainersPage — the per-running-container inventory (NeuVector's Assets → Containers).
 // Source snapshots contain running entries; workload enrichment is advisory.
 // Constellation previously only aggregated to the deployment level; this lists every
 // live container across all nodes with its pod, image, node, state, and workload
 // security posture (privileged/root/risk). Closes the #1 structural NV-parity gap.
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Boxes, ShieldAlert } from "lucide-react";
 
 import { containers, type ContainerRow } from "@/api/client";
@@ -27,6 +29,7 @@ import { Pager } from "@/components/ui/pager";
 import { usePlatformComponentVisibility } from "@/hooks/usePlatformComponentVisibility";
 
 export function ContainersPage() {
+  const qc = useQueryClient();
   const scope = useInventoryScope();
   const { clusterId } = scope;
   const route = useInventoryRoute();
@@ -73,8 +76,9 @@ export function ContainersPage() {
     sort,
     order: order as "asc" | "desc",
   };
+  const inventoryKey = ["containers", scope.owner, clusterId, filters, route.page];
   const q = useQuery({
-    queryKey: ["containers", scope.owner, clusterId, filters, route.page],
+    queryKey: inventoryKey,
     queryFn: async () => {
       const result = await containers.list(clusterId!, {
         ...filters,
@@ -148,15 +152,18 @@ export function ContainersPage() {
     truncated: boolean;
   } | null>(null);
   const exportScope = JSON.stringify([scope.owner, clusterId, filters]);
+  const captureExport = useExportGuard(JSON.stringify([exportScope, route.page]), !available, () => !!clusterId && clusterCacheReady(qc, clusterId) && exportQueryReady(qc, inventoryKey, q.data));
   const exportMatching = async () => {
-    if (!available || exporting) return;
+    const shouldDownload = captureExport();
+    if (!shouldDownload() || exporting) return;
     setExportError(null);
     setExporting(true);
     try {
-      const result = await containers.exportCSV(clusterId!, filters);
+      const result = await containers.exportCSV(clusterId!, filters, shouldDownload);
+      if (!shouldDownload()) return;
       setExportResult({ scope: exportScope, ...result });
     } catch (error) {
-      setExportError({ scope: exportScope, error });
+      if (shouldDownload()) setExportError({ scope: exportScope, error });
     } finally {
       setExporting(false);
     }

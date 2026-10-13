@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { api, imageScanResults, type ScanInventoryDownloadGuard, type ScanInventoryExportResult } from "@/api/client";
+import { exportQueryReady } from "@/hooks/useExportGuard";
 import { ScanInventoryExport } from "./inventory-workspace";
 
 let root: Root;
@@ -73,4 +74,23 @@ it("allows a pending HTTP export through a same-scope rerender with confirmed ev
  await act(async () => root.render(tree("same-scope", download))); await act(async () => button().click()); await settle(() => expect(get).toHaveBeenCalledOnce());
  await act(async () => root.render(tree("same-scope", download))); await act(async () => respond());
  await settle(() => expect(host.textContent).toContain("Exported all 42 matching records")); expect(click).toHaveBeenCalledOnce();
+});
+
+
+it("blocks a pending shared export after cache invalidation and recovery without a control rerender", async () => {
+ let respond!: () => void;
+ client.setQueryData(["reviewed-inventory"], { total: 42 });
+ const reviewed = client.getQueryData(["reviewed-inventory"]);
+ const get = vi.spyOn(api, "get").mockImplementation(() => new Promise(resolve => { respond = () => resolve({ data: new Blob(["ID\n1\n"]), headers: { "x-export-total": "42", "x-export-limit": "100000", "x-export-truncated": "false" } }); }));
+ const createURL = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:inventory");
+ const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+ const sourceCurrent = () => exportQueryReady(client, ["reviewed-inventory"], reviewed);
+ const download = (shouldDownload: ScanInventoryDownloadGuard) => imageScanResults.exportCSV({ cluster_id: "cluster" }, shouldDownload);
+ await act(async () => root.render(<QueryClientProvider client={client}><ScanInventoryExport context="owner:cluster" disabled={false} isCurrent={sourceCurrent} download={download} /></QueryClientProvider>));
+ await act(async () => button().click()); await settle(() => expect(get).toHaveBeenCalledOnce());
+ await act(async () => { void client.invalidateQueries({ queryKey: ["reviewed-inventory"], refetchType: "none" }); client.setQueryData(["reviewed-inventory"], reviewed); });
+ expect(sourceCurrent()).toBe(true);
+ await act(async () => respond());
+ await settle(() => expect(client.getMutationCache().getAll()[0].state.status).toBe("error"));
+ expect(createURL).not.toHaveBeenCalled(); expect(click).not.toHaveBeenCalled(); expect(host.textContent).not.toContain("Exported all");
 });

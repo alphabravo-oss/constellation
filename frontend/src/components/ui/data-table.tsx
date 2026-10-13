@@ -92,6 +92,8 @@ export interface DataTableProps<T> {
   /** Enables CSV export for the currently rendered rows and visible columns. */
   exportFileName?: string;
   exportLabel?: string;
+  /** Recheck current scope/evidence immediately before page CSV dispatch. */
+  canExport?: () => boolean;
   /** data-testid on the wrapper (preserves page/table test hooks after migration). */
   testId?: string;
   /** Accessible name; defaults to the column labels for distinct table regions. */
@@ -153,6 +155,7 @@ function DataTableView<T>({
   onHiddenColumnIdsChange,
   exportFileName,
   exportLabel = "Export CSV",
+  canExport,
   testId,
   ariaLabel,
   rowTestId,
@@ -380,6 +383,7 @@ function DataTableView<T>({
     const exportColumns = visibleColumns.filter((column) => column.exportable !== false);
     const headers = exportColumns.map((column) => column.exportHeader ?? headerText(column.header, column.id));
     const csvRows = modelRows.map((row) => exportColumns.map((column) => exportCellValue(column, row.original)));
+    if (canExport && !canExport()) return;
     downloadCsv(exportFileName, headers, csvRows);
   }
 
@@ -397,10 +401,11 @@ function DataTableView<T>({
             <button
               type="button"
               onClick={exportVisibleRows}
+              disabled={canExport ? !canExport() : false}
               aria-label={exportLabel}
               title={exportLabel}
               data-testid={testId ? `${testId}-export-csv` : undefined}
-              className="inline-flex h-7 items-center gap-1.5 rounded border border-border bg-card px-2 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              className="inline-flex h-7 items-center gap-1.5 rounded border border-border bg-card px-2 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Download className="h-3.5 w-3.5" />
               <span>{exportLabel}</span>

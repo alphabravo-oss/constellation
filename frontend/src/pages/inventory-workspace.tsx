@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useExportGuard } from "@/hooks/useExportGuard";
 import { useMutation, useIsFetching, useQueryClient } from "@tanstack/react-query";
 import { useCluster } from "@/hooks/useCluster";
 import { useDebounced } from "@/hooks/useDebounced";
@@ -61,14 +61,10 @@ export function scanInventoryResponseValid(data: (ScanInventoryMetadata & { limi
   return !!data && data.offset === offset && data.limit === INVENTORY_PAGE_SIZE && Number.isSafeInteger(data.total) && data.total! >= 0 && typeof data.has_more === "boolean" && data.summary?.total === data.total && summaryKeys.every(key => Number.isSafeInteger(data.summary?.[key]) && data.summary![key] >= 0) && data.sort === sort && data.order === order && rows === Math.min(INVENTORY_PAGE_SIZE, Math.max(0, data.total! - offset)) && data.has_more === (data.total! > offset + rows);
 }
 
-export function ScanInventoryExport({ context, disabled, download }: { context: string; disabled: boolean; download: (shouldDownload: ScanInventoryDownloadGuard) => Promise<ScanInventoryExportResult> }) {
-  const current = useRef({ context, disabled, generation: 0 });
-  const generation = current.current.generation + (current.current.context !== context || current.current.disabled !== disabled ? 1 : 0);
-  current.current = { context, disabled, generation };
-  const mounted = useRef(false);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  const exportCSV = useMutation({ mutationFn: async (request: { context: string; generation: number; download: (shouldDownload: ScanInventoryDownloadGuard) => Promise<ScanInventoryExportResult> }) => {
-    const shouldDownload = () => mounted.current && !current.current.disabled && request.context === current.current.context && request.generation === current.current.generation;
+export function ScanInventoryExport({ context, disabled, download, isCurrent }: { context: string; disabled: boolean; isCurrent?: ScanInventoryDownloadGuard; download: (shouldDownload: ScanInventoryDownloadGuard) => Promise<ScanInventoryExportResult> }) {
+  const captureExport = useExportGuard(context, disabled, isCurrent);
+  const exportCSV = useMutation({ mutationFn: async (request: { context: string; shouldDownload: ScanInventoryDownloadGuard; download: (shouldDownload: ScanInventoryDownloadGuard) => Promise<ScanInventoryExportResult> }) => {
+    const shouldDownload = request.shouldDownload;
     if (!shouldDownload()) throw new Error("Refresh the inventory before exporting this scope.");
     const result = await request.download(shouldDownload);
     if (!shouldDownload()) throw new Error("Refresh the inventory before exporting this scope.");
@@ -76,7 +72,7 @@ export function ScanInventoryExport({ context, disabled, download }: { context: 
   } });
   const result = exportCSV.data?.context === context ? exportCSV.data : undefined;
   const failed = exportCSV.isError && exportCSV.variables?.context === context;
-  return <div className="space-y-2"><Button disabled={disabled || exportCSV.isPending} onClick={() => exportCSV.mutate({ context, generation, download })}>{exportCSV.isPending ? "Exporting matching CSV…" : "Export matching CSV"}</Button>
+  return <div className="space-y-2"><Button disabled={disabled || exportCSV.isPending} onClick={() => exportCSV.mutate({ context, shouldDownload: captureExport(), download })}>{exportCSV.isPending ? "Exporting matching CSV…" : "Export matching CSV"}</Button>
     {failed && <p role="alert" className="text-sm text-destructive">Matching CSV could not be exported. Refresh the evidence and try again.</p>}
     {result && <p role={result.truncated ? "alert" : "status"} className="text-sm">{result.truncated ? `Export capped at ${result.limit.toLocaleString()} of ${result.total.toLocaleString()} matching records. Narrow filters for a complete export.` : `Exported all ${result.exported.toLocaleString()} matching records across pages.`}</p>}
   </div>;

@@ -1,3 +1,4 @@
+import { streamPage, capturePage } from "@/test/network-secondary-inventory";
 import { act } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
@@ -9,13 +10,13 @@ import { operatorStorageKey } from "@/lib/operator-preferences";
 import { networkViewHref, networkViewSnapshotFromParams } from "@/lib/network-saved-view-route";
 import { buildNetworkSavedViewSnapshot, networkActivitySavedViewsStorageKey } from "@/lib/network-saved-views";
 import { parseURLSearch, stringifyURLSearch } from "@/lib/route-search";
-import { network, groupsApi, runtimeThreats, policies, type RuntimeThreat, type RuntimeThreatFilters, type RuntimeThreatPage, type NetworkConversation, type NetworkConversationFilters, type NetworkConversations, type NetworkSession, type NetworkSessionFilters, type NetworkSessionsResponse } from "@/api/client";
+import { network, groupsApi, runtimeThreats, runtimePcap, policies, type RuntimeThreat, type RuntimeThreatFilters, type RuntimeThreatPage, type NetworkConversation, type NetworkConversationFilters, type NetworkConversations, type NetworkSession, type NetworkSessionFilters, type NetworkSessionsResponse } from "@/api/client";
 import { NetworkMapPage } from "./NetworkMapPage";
 import { NetworkSavedViewFormPage } from "./NetworkSavedViewFormPage";
 vi.mock("@/hooks/useCluster", () => ({ useCluster: () => ({ clusterId: "cluster", cluster: { id: "cluster", name: "Primary" }, isLoading: false, error: null }) }));
 vi.mock("@/api/client", () => ({
-  groupsApi: { list: vi.fn() }, network: { map: vi.fn(), conversations: vi.fn(), lifecycle: vi.fn(), sessions: vi.fn(), conversationEntries: vi.fn(), streamFlows: vi.fn(), killSession: vi.fn(), conversationsCSV: vi.fn(), sessionsCSV: vi.fn(), policyAction: vi.fn(), rollbackPolicy: vi.fn() },
-  policies: { dpiThreatSettings: vi.fn(), updateDpiThreatSettings: vi.fn() }, runtimeThreats: { page: vi.fn(), exportCSV: vi.fn() }, runtimePcap: { list: vi.fn(), remove: vi.fn(), download: vi.fn() },
+  groupsApi: { list: vi.fn() }, network: { map: vi.fn(), conversations: vi.fn(), lifecycle: vi.fn(), sessions: vi.fn(), conversationEntriesInventory: vi.fn(), conversationEntriesCSV: vi.fn(), streamFlows: vi.fn(), killSession: vi.fn(), conversationsCSV: vi.fn(), sessionsCSV: vi.fn(), policyAction: vi.fn(), rollbackPolicy: vi.fn() },
+  policies: { dpiThreatSettings: vi.fn(), updateDpiThreatSettings: vi.fn() }, runtimeThreats: { page: vi.fn(), exportCSV: vi.fn() }, runtimePcap: { inventory: vi.fn(), inventoryCSV: vi.fn(), remove: vi.fn(), download: vi.fn() },
 }));
 function threatPage(params: RuntimeThreatFilters = {}, rows: RuntimeThreat[] = []): RuntimeThreatPage {
  const matching = rows.filter(row => !params.hide_platform || row.platform_role !== "core"); const offset = params.offset ?? 0;
@@ -50,7 +51,8 @@ beforeEach(() => {
   vi.mocked(network.conversations).mockImplementation(async params => conversationPage(params));
   vi.mocked(network.lifecycle).mockResolvedValue({ items: [], summary: { total: 0, ready: 0, discover: 0, monitor: 0, protect: 0, rollback_ready: 0, pending_approval: 0 } }); vi.mocked(network.sessions).mockImplementation(async params => sessionPage(params));
   vi.mocked(runtimeThreats.page).mockImplementation(async params => threatPage(params)); vi.mocked(policies.dpiThreatSettings).mockResolvedValue({ cluster_id: "cluster", weak_tls_enabled: false }); vi.mocked(network.streamFlows).mockReturnValue(() => {});
-  vi.mocked(network.conversationEntries).mockResolvedValue({ from: "prod/api", to: "other/api", window_hours: 168, entries: [], totals: { bytes: 0, packets: 0, sessions: 0, client_bytes: 0, server_bytes: 0 } });
+  vi.mocked(network.conversationEntriesInventory).mockImplementation(async request => streamPage(request, []));
+  vi.mocked(runtimePcap.inventory).mockImplementation(async request => capturePage(request, []));
   host = document.createElement("div"); document.body.append(host); root = createRoot(host); client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 });
 afterEach(() => { act(() => root.unmount()); client.clear(); host.remove(); history?.destroy(); localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -78,7 +80,7 @@ async function restored(stage = "initial restoration", expected = snapshot) {
   expect(network.killSession).not.toHaveBeenCalled(); expect(network.policyAction).not.toHaveBeenCalled(); expect(network.rollbackPolicy).not.toHaveBeenCalled(); expect(policies.updateDpiThreatSettings).not.toHaveBeenCalled();
 }
 async function openForm(expected = snapshot) { await act(async () => button("network-saved-view-save").click()); await settle(() => expect(history.location.pathname).toBe("/clusters/cluster/network/views/new")); await settle(() => expect(host.querySelector("#network-view-name"), `${host.textContent} snapshot=${new URLSearchParams(history.location.search).get("network_view")}`).not.toBeNull()); expect(history.location.pathname).toBe("/clusters/cluster/network/views/new"); expect(networkViewSnapshotFromParams(new URLSearchParams(history.location.search))).toEqual(expected); }
-it("restores an exact snapshot without clearing server page, detail selection or non-URL filters", async () => { await render(); expect(network.conversationEntries).toHaveBeenCalledWith({ cluster_id: "cluster", from: "prod/api", to: "other/api", hours: 168 }); });
+it("restores an exact snapshot without clearing server page, detail selection or non-URL filters", async () => { await render(); expect(network.conversationEntriesInventory).toHaveBeenCalledWith(expect.objectContaining({ cluster_id: "cluster", from: "prod/api", to: "other/api", hours: 168, namespace: "prod", group: "group-id", verdict: "block", port: 443, peer: "10.0.0.1", application: "https" })); });
 async function roundTrip(action: "Save" | "Cancel") {
   await render(); await openForm();
   await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent === action)!.click()); await restored(`${action} return`);
@@ -339,4 +341,17 @@ it.each(["21474838", "NaN"])("rejects session page %s and resets only sorting/pa
   expect(params.get("group")).toBe("group-id"); expect(params.get("hide_platform")).toBe("true"); expect(params.get("context")).toBe("keep");
   expect(host.textContent).not.toContain("NaN");
   expect(vi.mocked(network.sessions).mock.calls.every(([request]) => Number.isSafeInteger(request?.offset))).toBe(true);
+});
+
+it.each(["Save","Cancel"] as const)("restores capture ledger filters and deep server page through dedicated %s/history",async action=>{
+ const rich=buildNetworkSavedViewSnapshot({...{workspaceTab:"pcap" as const,hours:24,namespace:"",group:"group-id",verdict:"",verdictsVisible:{allow:true,alert:true,block:true},protocolFilter:[],namespaceFilter:[],hidePlatformComponents:false,hiddenKinds:[],scopeMode:"both" as const},pcapFilters:{q:"needle%_literal",namespace:"operations",node:"node-a",status:"completed",workload:"operations/api"}});
+ const check=async()=>{await settle(()=>{expect(networkViewSnapshotFromParams(new URLSearchParams(history.location.search))).toEqual(rich);expect(runtimePcap.inventory).toHaveBeenLastCalledWith(expect.objectContaining({cluster_id:"cluster",q:"needle%_literal",namespace:"operations",node:"node-a",status:"completed",workload:"operations/api",offset:1000,sort:"packets",order:"asc",hide_platform:false}));expect(host.querySelector('[data-testid="network-pcap-tab"]')).not.toBeNull();expect(new URLSearchParams(history.location.search).get("pcap_page")).toBe("11");expect(history.location.hash).toBe("#proof");});};
+ await render(networkViewHref("cluster",new URLSearchParams("tab=pcap&pcap_page=11&pcap_sort=packets&pcap_order=asc&context=keep"),"#proof","network",rich));await check();await openForm(rich);await act(async()=>[...host.querySelectorAll<HTMLButtonElement>("button")].find(item=>item.textContent===action)!.click());await check();await act(async()=>history.back());await settle(()=>expect(host.querySelector("#network-view-name")).not.toBeNull());await act(async()=>history.forward());await check();
+});
+
+it("keeps capture ledger status independent of unrelated map failure and refreshes capture inventory",async()=>{vi.mocked(network.map).mockRejectedValue(new Error("map unavailable"));await render("/clusters/cluster/network?tab=pcap&hide_platform=false");await settle(()=>expect(host.textContent).toContain("matching capture requests"));expect(host.textContent).toContain("Capture request ledger");expect(host.textContent).not.toContain("Network map evidence unavailable");expect(host.textContent).not.toContain("Updated ");const calls=vi.mocked(runtimePcap.inventory).mock.calls.length;await act(async()=>[...host.querySelectorAll<HTMLButtonElement>("button")].find(b=>b.textContent==="Refresh")!.click());await settle(()=>expect(runtimePcap.inventory).toHaveBeenCalledTimes(calls+1));});
+
+it("pauses and resumes capture polling using the visible network refresh control",async()=>{
+ await render("/clusters/cluster/network?tab=pcap&hide_platform=false");await settle(()=>expect(host.textContent).toContain("matching capture requests"));
+ try { vi.useFakeTimers();await act(async()=>[...host.querySelectorAll<HTMLButtonElement>("button")].find(b=>b.textContent==="Pause")!.click());const paused=vi.mocked(runtimePcap.inventory).mock.calls.length;await act(async()=>vi.advanceTimersByTimeAsync(5001));expect(runtimePcap.inventory).toHaveBeenCalledTimes(paused);await act(async()=>[...host.querySelectorAll<HTMLButtonElement>("button")].find(b=>b.textContent==="Resume")!.click());await act(async()=>vi.advanceTimersByTimeAsync(5001));expect(runtimePcap.inventory).toHaveBeenCalledTimes(paused+1); } finally { vi.useRealTimers(); }
 });

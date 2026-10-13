@@ -46,7 +46,9 @@ beforeEach(() => {
   vi.mocked(runtimeEvents.exportCSV).mockResolvedValue({total:1,exported:1,limit:100000,truncated:false});
 });
 afterEach(() => { act(() => root?.unmount()); host?.remove(); client?.clear(); vi.resetAllMocks(); });
-async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
+// The first route mounts two asynchronous queries; allow the same bounded
+// render budget under concurrent CI load as the other inventory workflows.
+async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }, { timeout: 3000 }); }
 async function render(url = "/clusters/cluster-a/runtime", seed?: (client: QueryClient) => void) {
   host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); seed?.(client);

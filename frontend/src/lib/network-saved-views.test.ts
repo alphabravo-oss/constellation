@@ -227,3 +227,5 @@ function makeView(id: string, name: string): NetworkSavedView {
     }),
   };
 }
+
+it("preserves optional capture ledger search/namespace/node while keeping legacy snapshots unchanged", () => { const view = makeView("id", "Named"); const legacy = normalizeNetworkSavedViewSnapshot(view.filters)!; expect(legacy.pcap_filters).not.toHaveProperty("q"); const rich = { ...view.filters, pcap_filters: { ...view.filters.pcap_filters, q: " needle%_literal ", namespace: "custom-install", node: "node-a" } }; const normalized = normalizeNetworkSavedViewSnapshot(rich)!; expect(normalized.pcap_filters).toMatchObject({ q: "needle%_literal", namespace: "custom-install", node: "node-a" }); expect(parseNetworkSavedViewsImport(JSON.stringify([{ ...view, filters: rich }]), "cluster")[0].filters.pcap_filters).toMatchObject({ q: "needle%_literal", namespace: "custom-install", node: "node-a" }); expect(normalizeNetworkSavedViewSnapshot({ ...rich, pcap_filters: { ...rich.pcap_filters, node: 123 } })).toBeNull(); });

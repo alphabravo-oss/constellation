@@ -1,8 +1,12 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { api, assets, baselines, compliance, componentsInventory, cve, deployments, fileProfiles, imageScanResults, network, nodes, registries, repositoryScans, runtimeEvents, runtimeThreats, scanJobs, serverlessFunctions, type ScanInventoryDownloadGuard, type ScanInventoryExportResult } from "./client";
+import { api, assets, containers, findings, securityTimeline, baselines, compliance, componentsInventory, cve, deployments, fileProfiles, imageScanResults, network, nodes, registries, repositoryScans, runtimeEvents, runtimeThreats, scanJobs, serverlessFunctions, type ScanInventoryDownloadGuard } from "./client";
 
 afterEach(() => vi.restoreAllMocks());
-const exporters: Array<[string, (guard: ScanInventoryDownloadGuard) => Promise<ScanInventoryExportResult>]> = [
+const exporters: Array<[string, (guard: ScanInventoryDownloadGuard) => Promise<unknown>]> = [
+  ["assets", guard => assets.exportCsv({}, guard)],
+  ["containers", guard => containers.exportCSV("cluster", {}, guard)],
+  ["timeline", guard => securityTimeline.exportCSV({}, guard)],
+  ["findings", guard => findings.exportCSV({}, guard)],
   ["asset findings", guard => assets.findingsCSV("asset", {}, guard)],
   ["node vulnerabilities", guard => nodes.exportVulnerabilitiesCSV("cluster", "node", {}, guard)],
   ["compliance evidence", guard => compliance.exportEvidenceCSV({}, guard)],
@@ -27,7 +31,7 @@ const exporters: Array<[string, (guard: ScanInventoryDownloadGuard) => Promise<S
 it.each(exporters)("does not dispatch pending %s CSV after its scope becomes stale", async (_name, download) => {
   let respond!: () => void;
   vi.spyOn(api, "get").mockImplementation(() => new Promise(resolve => {
-    respond = () => resolve({ data: new Blob(["ID\n1\n"]), headers: { "x-export-total": "1", "x-export-limit": "100000", "x-export-truncated": "false" } });
+    respond = () => resolve({ data: new Blob(["ID\n1\n"]), headers: { "x-export-total": "1", "x-export-limit": _name === "timeline" ? "10000" : "100000", "x-export-truncated": "false" } });
   }));
   const createURL = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:export");
   const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});

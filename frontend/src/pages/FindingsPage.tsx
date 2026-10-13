@@ -1,9 +1,13 @@
+import { SavedViewsMenu } from "@/components/SavedViewsMenu";
+import { useExportGuard, exportQueryReady } from "@/hooks/useExportGuard";
+import { clusterCacheReady } from "@/lib/cluster-evidence";
+import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
 // Findings inventory — server filtering, ordered pages, URL state, and page-scoped selection.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { useRouteSearchParams } from "@/lib/route-search";
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
-import { Save, Tag, Bookmark, ChevronDown, ListFilter } from "lucide-react";
+import { Save, Tag, ChevronDown, ListFilter } from "lucide-react";
 
 import {
   findings,
@@ -71,6 +75,8 @@ function cvssColor(score = 0) {
 
 export function FindingsPage() {
   const qc = useQueryClient();
+  const identity = useTablePreferencesIdentity();
+  const owner = [identity?.org_id, identity?.user_id];
   const { clusterId, cluster, isLoading: clusterLoading, error: clusterError } = useCluster();
   const scopeReady = !!clusterId && cluster?.id === clusterId && !clusterLoading && !clusterError;
   const [searchParams, setSearchParams] = useRouteSearchParams();
@@ -116,10 +122,11 @@ export function FindingsPage() {
   const navigate = useNavigate();
   const openFinding = (finding: Finding) => navigate({ href: clusterId ? `/clusters/${clusterId}/findings/${finding.id}` : `/findings/${finding.id}` });
   const request: NonNullable<Parameters<typeof findings.list>[0]> = { kind: activeView === "cve" ? "vulnerability" as const : kind || undefined, lifecycle: lifecycle || undefined, cluster_id: clusterId, ...(groupMode ? { group_mode: groupMode } : {}), ...(idScope ? { id_scope: idScope as "all" } : {}), ...(targetType ? { target_type: targetType } : {}), q: serverQuery || undefined, fixable: fixableOnly || undefined, sort: activeView === "cve" ? "risk" : sort, order: activeView === "cve" ? "desc" as const : order };
-  const instanceKey = ["findings", request, activeView, activeView === "instances" ? page : 0];
+  const instanceKey = ["findings", ...owner, request, activeView, activeView === "instances" ? page : 0];
   // The rollup needs a single instance solely for its lifecycle counts.
   const q = useQuery({ queryKey: instanceKey, queryFn: () => findings.list({ ...request, limit: activeView === "instances" ? PAGE_SIZE : 1, offset: activeView === "instances" ? page * PAGE_SIZE : 0 }), enabled: scopeReady && querySettled, placeholderData: keepPreviousData });
-  const cveQ = useQuery({ queryKey: ["findings-cve", request, page], queryFn: () => findings.byCVE({ cluster_id: clusterId, ...(groupMode ? { group_mode: groupMode } : {}), ...(idScope ? { id_scope: idScope as "all" } : {}), ...(targetType ? { target_type: targetType } : {}), lifecycle: lifecycle || undefined, q: serverQuery || undefined, fixable: fixableOnly || undefined, limit: PAGE_SIZE, offset: page * PAGE_SIZE }), enabled: activeView === "cve" && scopeReady && querySettled, placeholderData: keepPreviousData });
+  const cveKey = ["findings-cve", ...owner, request, page];
+  const cveQ = useQuery({ queryKey: cveKey, queryFn: () => findings.byCVE({ cluster_id: clusterId, ...(groupMode ? { group_mode: groupMode } : {}), ...(idScope ? { id_scope: idScope as "all" } : {}), ...(targetType ? { target_type: targetType } : {}), lifecycle: lifecycle || undefined, q: serverQuery || undefined, fixable: fixableOnly || undefined, limit: PAGE_SIZE, offset: page * PAGE_SIZE }), enabled: activeView === "cve" && scopeReady && querySettled, placeholderData: keepPreviousData });
   const activeQ = activeView === "cve" ? cveQ : q;
   const ready = scopeReady && querySettled && activeQ.isSuccess && !activeQ.isFetching && !activeQ.isPlaceholderData;
   const rows = useMemo(() => q.data?.findings ?? [], [q.data]);
@@ -144,9 +151,12 @@ export function FindingsPage() {
   function applyView(value: SavedView) {
     setFilters({ group_mode: value.groupMode ?? "", id_scope: value.idScope ?? "", target_type: value.targetType ?? "", kind: value.kind, lifecycle: value.lifecycle || "all", q: value.query, severity: value.severity ?? "", fixable: value.fixable ? "true" : "", view: value.view ?? ((value.kind && value.kind !== "vulnerability") || (value.lifecycle && value.lifecycle !== "open") || value.severity ? "instances" : "cve"), group: value.group ?? "none", sort: value.sort ?? "risk", order: value.order ?? "desc" });
   }
-  const exportCSV = useMutation({ mutationFn: () => {
-    if (!ready) throw new Error("Current results are unavailable");
-    return findings.exportCSV({ ...request, q: activeView === "cve" && !allIds ? [serverQuery, "cve:CVE-"].filter(Boolean).join(" ") : request.q, limit: 100000, offset: 0 });
+  const exportContext = JSON.stringify([owner, request, activeView, page, query]);
+  const captureExport = useExportGuard(exportContext, !ready, () => !!clusterId && clusterCacheReady(qc, clusterId) && exportQueryReady(qc, activeView === "cve" ? cveKey : instanceKey, activeQ.data));
+  const exportCSV = useMutation({ mutationFn: async (captured: { shouldDownload: ReturnType<typeof captureExport>; request: Parameters<typeof findings.exportCSV>[0] }) => {
+    if (!captured.shouldDownload()) throw new Error("Current results are unavailable");
+    await findings.exportCSV(captured.request, captured.shouldDownload);
+    if (!captured.shouldDownload()) throw new Error("Current results are unavailable");
   } });
 
   const columns: Column<Finding>[] = [
@@ -287,9 +297,7 @@ export function FindingsPage() {
         description="Search matching security findings across the active scope, then review or update individual instances."
         actions={
           <>
-            {views.length > 0 && (
-              <SavedViewsMenu views={views} onApply={applyView} onDelete={deleteView} />
-            )}
+            <SavedViewsMenu views={views} onApply={applyView} onDelete={deleteView} summary={view => [view.lifecycle, view.kind, view.query].filter(Boolean).join(" · ") || "all"} />
             <Button size="sm" variant="outline" disabled={!scopeReady} onClick={() => { if (clusterId) void navigate({ href: inventoryViewHref(clusterId, "findings", searchParams, locationHash, true) }); }}>
               <Save className="h-3.5 w-3.5" /> Save view
             </Button>
@@ -443,11 +451,11 @@ export function FindingsPage() {
       )}
 
       <div className="flex flex-wrap items-center gap-3">
-        <Button variant="outline" disabled={!ready || exportCSV.isPending} onClick={() => exportCSV.mutate()}>{exportCSV.isPending ? "Exporting…" : "Export filtered instances CSV"}</Button>
+        <Button variant="outline" disabled={!ready || exportCSV.isPending} onClick={() => exportCSV.mutate({ shouldDownload: captureExport(), request: { ...request, q: activeView === "cve" && !allIds ? [serverQuery, "cve:CVE-"].filter(Boolean).join(" ") : request.q, limit: 100000, offset: 0 } })}>{exportCSV.isPending ? "Exporting…" : "Export filtered instances CSV"}</Button>
         <span className="text-xs text-muted-foreground">Up to 100,000 matching instances, across all pages.{activeView === "cve" ? ` ${allIds ? "Vulnerability ID" : "CVE"} table exports contain only the rollups on this page.` : " Table exports and selections contain only this page."}</span>
       </div>
       {activeView === "cve" && fixableOnly && <p className="text-xs text-muted-foreground">Fixable {allIds ? "vulnerability ID" : "CVE"} rollups count all matching instances of an ID with an available fix. The filtered instance CSV includes only instances with an available fix.</p>}
-      {exportCSV.isError && <ErrorState title="Could not export matching instances. Try again." />}
+      {exportCSV.isError && exportCSV.variables?.shouldDownload() && <ErrorState title="Could not export matching instances. Try again." />}
       {bulkAction.isError && <ErrorState title="Some selected findings could not be updated. Refresh and review their current states before retrying." />}
       {activeView === "cve" && q.isError && <ErrorState title="Lifecycle counts could not be loaded." action={<Button onClick={() => void q.refetch()}>Retry counts</Button>} />}
       {!scopeReady ? <ErrorState title="The active cluster could not be resolved. Findings are unavailable until its scope recovers." />
@@ -552,50 +560,6 @@ function CVETable({ rows, clusterId, allIds = false, targetType }: { rows: CVERo
       testId="findings-cve-table"
       emptyState={<EmptyState title={allIds ? "No vulnerability IDs match" : "No CVEs match"} hint="Adjust your filters or clear the query." icon={<Tag className="h-8 w-8" />} />}
     />
-  );
-}
-
-function SavedViewsMenu({ views, onApply, onDelete }: { views: SavedView[]; onApply: (v: SavedView) => void; onDelete: (id: string) => void }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded border border-border bg-card text-xs hover:bg-accent"
-      >
-        <Bookmark className="h-3.5 w-3.5" /> Views <span className="text-mono text-muted-foreground">({views.length})</span>
-      </button>
-      {open && (
-        <div
-          className="absolute right-0 top-full z-30 mt-1 w-[260px] rounded-md border border-border bg-popover p-2 shadow-[var(--elev-popover)]"
-          onMouseLeave={() => setOpen(false)}
-        >
-          <ul className="space-y-1">
-            {views.map((v) => (
-              <li key={v.id} className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => { onApply(v); setOpen(false); }}
-                  className="flex-1 rounded px-2 py-1 text-left text-xs hover:bg-accent"
-                >
-                  <div className="font-medium">{v.name}</div>
-                  <div className="text-[10px] text-mono text-muted-foreground truncate">
-                    {[v.lifecycle, v.kind, v.query].filter(Boolean).join(" · ") || "all"}
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onDelete(v.id)}
-                  aria-label={`delete view ${v.name}`}
-                  className="rounded p-1 text-muted-foreground hover:bg-muted"
-                >×</button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
   );
 }
 
