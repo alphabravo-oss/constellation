@@ -27,6 +27,7 @@ async function renderPage(form = true) {
 }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => { }); check(); }); }
 function button(label: string) { return [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === label)!; }
+function disclosure(label: string) { return [...host.querySelectorAll("details")].find((details) => details.querySelector("summary")?.textContent?.trim() === label)!; }
 async function submit() { await act(async () => { host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); }); }
 async function changeFilter(value: string) { await act(async () => { const input = host.querySelector("input")!; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); }); }
 
@@ -47,11 +48,18 @@ it.each(["failed", "wrong-cluster", "wrong-workload", "missing-rule"])("does not
   expect(host.querySelector("form")).toBeNull(); expect(host.textContent).not.toContain("private transport details"); expect(fileProfiles.updateRule).not.toHaveBeenCalled();
 });
 it("keeps unsaved edits across background refetches and preserves existing advanced fields", async () => {
-  route.ruleId = "rule"; await renderPage(); await settled(() => expect(host.querySelector("form")).not.toBeNull());
+  route.ruleId = "rule"; await renderPage(); await settled(() => expect(button("Save")?.disabled).toBe(false));
   await changeFilter("/var/draft/"); expect(host.querySelector("input")?.value).toBe("/var/draft/");
   await act(async () => { client.setQueryData(["file-monitor-detail", "cluster", "workload", "org:user"], { ...profile, rules: [{ ...rule, filter: "/changed/", enabled: true }] }); });
-  expect(host.querySelector("input")?.value).toBe("/var/draft/"); expect(host.querySelector("details")?.open).toBe(false);
-  await settled(() => expect(button("Save").disabled).toBe(true)); await act(async () => button("Review current configuration").click());
+  await settled(() => {
+    expect(button("Save").disabled).toBe(true);
+    expect(host.querySelector("input")?.value).toBe("/var/draft/");
+    expect(disclosure("Advanced").open).toBe(false);
+    expect(disclosure("Compare current configuration with your draft").open).toBe(true);
+  });
+  await submit(); expect(fileProfiles.updateRule).not.toHaveBeenCalled();
+  await act(async () => button("Review current configuration").click());
+  await settled(() => expect(button("Save").disabled).toBe(false));
   vi.mocked(fileProfiles.updateRule).mockRejectedValue(new Error("private transport details")); await submit();
   await settled(() => expect(host.textContent).toContain("Could not save this rule. Your draft is preserved"));
   expect(fileProfiles.updateRule).toHaveBeenCalledWith("workload", "rule", expect.objectContaining({ filter: "/var/draft/", enabled: false, description: "Existing description", behavior: "monitor_change" }), { cluster_id: "cluster" });

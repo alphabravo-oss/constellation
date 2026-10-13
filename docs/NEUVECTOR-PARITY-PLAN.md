@@ -1562,6 +1562,36 @@ Dormant SSE and fleet-scale export latency remain unqualified; correctness at a
 100,000-row cap is not a performance claim. Broader infrastructure/security
 acceptance remains separate from the selected console scope.
 
+The reviewed-inventory continuation (October 13, Helm **74**) deploys frozen
+`reviewed-inventories-20261013` API/frontend/migration images and schema **176**.
+All seven deployments are ready. Runtime-policy changes use reviewed decimal-string
+versions and exact cluster ownership; migration175 makes legacy renames invalidate
+review. Network peer diagnostics return role, scope and source-cap metadata. The
+additive Network Rules inventory filters and sorts before pagination, uses exact
+endpoint-pair identities and exports the complete matching cohort up to 100,000.
+Audit and global CVE catalog matching exports use the same predicates as their
+lists, with explicit lookahead caps. Export guards recheck the current operator,
+scope and evidence before download. Audit chain hashes and other added technical
+metadata migrate behind Columns; the exact Findings chooser reveals observation
+times without erasing ordinary table preferences.
+
+Validation: **2,162 frontend tests / 147 files**, global lint and production build
+pass. **136 fresh PostgreSQL executions** across runtime revisions (16), network
+rule/peer/portability (58), Audit CSV (28) and CVE CSV (34) pass. Schema/OpenAPI
+contracts, affected Go vet and all 118 endpoint mappings pass. The corrected full
+browser run passes **265/265**, one worker with no retries/skips, against the frozen
+production images; its first attempt was invalid because the login helper pointed
+to a different API and was stopped before this corrected run. Evidence:
+`/tmp/reviewed-inventory-qualified-browser.log`,
+`/tmp/reviewed-inventory-frontend-full-tests.log` and the per-domain database logs.
+Live read-only checks reconcile 1,712 Network Rules and 43 platform-hidden matches
+with their complete CSVs, exact Audit event scalars and positive/empty CVE filters.
+Live runtime and peer samples were empty; their positive cases remain isolated
+fixture/database evidence. The native live Audit status is 32px with Details closed
+and chain hashes absent from default columns. Evidence:
+`/tmp/reviewed-inventories-live-results.json` and
+`/tmp/reviewed-inventory-deploy.log`. No live policy writes were performed.
+
 The admission-engine continuation adds migration **172** and persists normalized
 engine outcomes atomically with image scan completion. The built-in vulnerability
 profiles now require successful Trivy and Grype results rather than retired
