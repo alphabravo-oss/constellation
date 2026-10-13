@@ -3,7 +3,6 @@ package findings
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -13,8 +12,6 @@ import (
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
-	"github.com/alphabravocompany/constellation/internal/handler/sqlx"
-	searchdsl "github.com/alphabravocompany/constellation/pkg/search/dsl"
 )
 
 type CVE struct {
@@ -193,134 +190,6 @@ var cveSortColumns = map[string]string{
 	"epss":      "epss_probability",
 	"kev":       "kev_listed",
 	"published": "published_at",
-}
-
-func (c *CVE) Search(w http.ResponseWriter, r *http.Request) {
-	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 200 {
-		limit = 50
-	}
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-
-	// Filter params.
-	kevOnly := r.URL.Query().Get("kev") == "true" || r.URL.Query().Get("kev") == "1"
-	epssGt, _ := strconv.ParseFloat(r.URL.Query().Get("epss_gt"), 64)
-	cvssGt, _ := strconv.ParseFloat(r.URL.Query().Get("cvss_gt"), 64)
-	severity := strings.ToLower(r.URL.Query().Get("severity"))
-	source := strings.TrimSpace(r.URL.Query().Get("source"))
-
-	var (
-		args    []any
-		clauses []string
-	)
-
-	// Resolve well-known nickname queries to their canonical CVE-ID so a search
-	// for "log4shell" actually returns CVE-2021-44228 even though a substring
-	// (ILIKE) match against the NVD title would otherwise return zero rows.
-	canonical := resolveNickname(q)
-
-	switch {
-	case strings.Contains(q, ":"):
-		compiled, err := searchdsl.Compile(q, cvesSearchSchema)
-		if err != nil {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "search: " + err.Error()})
-			return
-		}
-		if !compiled.Empty() {
-			args = append(args, compiled.Args...)
-			clauses = append(clauses, "("+sqlx.ShiftPlaceholders(compiled.Where, 0)+")")
-		}
-	case q != "":
-		// Substring (ILIKE) search: cve_id ILIKE, alias array containment, title +
-		// description ILIKE, plus canonical-nickname lookup. This is case-insensitive
-		// substring matching, not trigram-similarity fuzzy search. cve_id has a
-		// trigram GIN index so ILIKE on it is index-eligible; title/description fall
-		// back to seq scan which is bounded by the trailing LIMIT.
-		args = append(args, q)
-		qIdx := len(args)
-		expr := []string{
-			"cve_id ILIKE '%' || $" + strconv.Itoa(qIdx) + " || '%'",
-			"$" + strconv.Itoa(qIdx) + " = ANY(aliases)",
-			"COALESCE(title,'')       ILIKE '%' || $" + strconv.Itoa(qIdx) + " || '%'",
-			"COALESCE(description,'') ILIKE '%' || $" + strconv.Itoa(qIdx) + " || '%'",
-		}
-		if canonical != "" {
-			args = append(args, canonical)
-			expr = append(expr, "cve_id = $"+strconv.Itoa(len(args)))
-		}
-		clauses = append(clauses, "("+strings.Join(expr, " OR ")+")")
-	}
-
-	if kevOnly {
-		clauses = append(clauses, "kev_listed = TRUE")
-	}
-	if epssGt > 0 {
-		args = append(args, epssGt)
-		clauses = append(clauses, "epss_probability > $"+strconv.Itoa(len(args)))
-	}
-	if cvssGt > 0 {
-		args = append(args, cvssGt)
-		clauses = append(clauses, "cvss_base > $"+strconv.Itoa(len(args)))
-	}
-	if lo, hi, ok := severityRange(severity); ok {
-		args = append(args, lo, hi)
-		clauses = append(clauses, "cvss_base >= $"+strconv.Itoa(len(args)-1)+" AND cvss_base < $"+strconv.Itoa(len(args)))
-	}
-	if source != "" {
-		args = append(args, source)
-		clauses = append(clauses, "$"+strconv.Itoa(len(args))+" = ANY(sources)")
-	}
-
-	where := ""
-	if len(clauses) > 0 {
-		where = "WHERE " + strings.Join(clauses, " AND ")
-	}
-
-	// Server-side sort: the catalog is far larger than one page, so client-side sort
-	// over the returned rows only reorders the visible slice. Map the requested column
-	// to a whitelisted expression (no injection — column is never interpolated from raw
-	// input) and default to the relevance ordering when unset.
-	orderBy := `kev_listed DESC,
-          epss_probability DESC NULLS LAST,
-          cvss_base DESC NULLS LAST,
-          published_at DESC NULLS LAST`
-	if col, ok := cveSortColumns[strings.ToLower(strings.TrimSpace(r.URL.Query().Get("sort")))]; ok {
-		dir := "DESC"
-		if strings.ToLower(strings.TrimSpace(r.URL.Query().Get("dir"))) == "asc" {
-			dir = "ASC"
-		}
-		orderBy = col + " " + dir + " NULLS LAST, cve_id ASC"
-	}
-	args = append(args, limit, offset)
-	sql := `
-SELECT cve_id, COALESCE(title,''), COALESCE(description,''), cvss_base, cvss_vector,
-       kev_listed, kev_added, epss_probability, epss_updated_at, aliases, affected, sources,
-       published_at, modified_at
-  FROM cve_records ` + where + `
- ORDER BY ` + orderBy + `
- LIMIT $` + strconv.Itoa(len(args)-1) + ` OFFSET $` + strconv.Itoa(len(args))
-
-	rows, err := c.db.Pool().Query(r.Context(), sql, args...)
-	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	defer rows.Close()
-	out := make([]cveDTO, 0, limit)
-	for rows.Next() {
-		var d cveDTO
-		var affected []byte
-		if err := rows.Scan(&d.CVEID, &d.Title, &d.Description, &d.CVSSBase, &d.CVSSVector,
-			&d.KEVListed, &d.KEVAdded, &d.EPSSProbability, &d.EPSSUpdatedAt,
-			&d.Aliases, &affected, &d.Sources, &d.PublishedAt, &d.ModifiedAt); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		d.Affected = affected
-		out = append(out, d)
-	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"results": out, "limit": limit, "offset": offset})
 }
 
 func (c *CVE) Get(w http.ResponseWriter, r *http.Request) {

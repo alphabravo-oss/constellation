@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -67,6 +68,7 @@ type RuntimePolicy struct {
 	DefAction  uint8           `json:"def_action"`
 	ApplyDir   int             `json:"apply_dir"`
 	Rules      json.RawMessage `json:"rules"`
+	Revision   string          `json:"revision"`
 	Version    int64           `json:"version"`
 	CreatedBy  *uuid.UUID      `json:"created_by,omitempty"`
 	CreatedAt  time.Time       `json:"created_at"`
@@ -211,6 +213,7 @@ RETURNING id, dp_policy_id`,
 	p.ID = id
 	p.DPPolicyID = dpPolicyID
 	p.Version = 1
+	p.Revision = "1"
 	if s.auditLog != nil {
 		if auditErr := s.auditLog.LogPolicyCreate(ctx, p.OrgID, p.CreatedBy, snapshot(p), requestID); auditErr != nil {
 			// Audit write failure does NOT roll back the policy — losing
@@ -437,6 +440,7 @@ func scanPolicy(s rowScanner) (*RuntimePolicy, error) {
 		return nil, err
 	}
 	p.Mode = PolicyMode(mode)
+	p.Revision = strconv.FormatInt(p.Version, 10)
 	p.DefAction = uint8(defAct)
 	p.ApplyDir = int(applyDir)
 	p.Rules = json.RawMessage(rulesText)

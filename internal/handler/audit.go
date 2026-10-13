@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/csv"
 	"fmt"
 	"math"
 	"net/http"
@@ -35,10 +36,28 @@ type auditDTO struct {
 }
 
 func (a *Audit) List(w http.ResponseWriter, r *http.Request) {
+	a.list(w, r, false)
+}
+
+// ExportCSV uses the same predicate and ordering as List. Audit history can be
+// enormous; one lookahead row reports truncation without a full COUNT scan.
+func (a *Audit) ExportCSV(w http.ResponseWriter, r *http.Request) {
+	a.list(w, r, true)
+}
+
+const auditExportLimit = 100000
+
+func (a *Audit) list(w http.ResponseWriter, r *http.Request, export bool) {
 	subj, ok := SubjectFrom(r.Context())
 	if !ok {
 		jsonError(w, http.StatusUnauthorized, "no subject")
 		return
+	}
+	for _, key := range []string{"cluster_id", "event_id", "event_ids", "support_bundle_job_id", "action", "framework", "control", "limit", "offset"} {
+		if len(r.URL.Query()[key]) > 1 {
+			jsonError(w, http.StatusBadRequest, "duplicate "+key)
+			return
+		}
 	}
 	cohort, cohortSet, err := auditEventCohort(r)
 	if err != nil {
@@ -72,6 +91,18 @@ func (a *Audit) List(w http.ResponseWriter, r *http.Request) {
 	if offset < 0 {
 		offset = 0
 	}
+	if export {
+		for _, key := range []string{"limit", "offset"} {
+			if raw := r.URL.Query().Get(key); raw != "" {
+				value, err := strconv.ParseInt(raw, 10, 64)
+				if err != nil || value < 0 || key == "limit" && value == 0 {
+					jsonError(w, http.StatusBadRequest, "invalid "+key)
+					return
+				}
+			}
+		}
+		limit, offset = auditExportLimit, 0
+	}
 	// audit_events is 10s of millions of rows, so an exact COUNT(*) per page would be a
 	// slow full scan. Instead fetch one extra row to learn whether a next page exists —
 	// cursor-style has_more paging, cheap at any table size.
@@ -95,21 +126,28 @@ func (a *Audit) List(w http.ResponseWriter, r *http.Request) {
 	// E2: ?framework=<id>&control=<id> filters by compliance mapping. We
 	// translate (framework, control) → action-prefix list at request time
 	// (the mapping table is small and static, so this is cheap) and pass
-	// the result as a parallel array to the SQL. When both `action` and
-	// (framework, control) are present, action wins — operators using the
-	// drill-down link from a compliance report click through to "all the
-	// action=X rows that demonstrate this control".
+	// the result as a parallel array to the SQL. An exact action intersects
+	// the control mapping so every visible filter constrains the result.
 	fw := strings.TrimSpace(r.URL.Query().Get("framework"))
 	ctrl := strings.TrimSpace(r.URL.Query().Get("control"))
+	if (fw == "") != (ctrl == "") {
+		jsonError(w, http.StatusBadRequest, "framework and control must be supplied together")
+		return
+	}
 	var controlPrefixes []string
-	if fw != "" && ctrl != "" && action == "" {
+	if fw != "" && ctrl != "" {
 		controlPrefixes = auditlog.ActionsFor(auditlog.Framework(fw), ctrl)
 		if len(controlPrefixes) == 0 {
 			// Unknown control or framework — return empty result rather
 			// than the entire audit log. An auditor pasting a malformed
 			// control ID should not exfiltrate everything.
+			if export {
+				writeAuditCSV(w, nil, false)
+				return
+			}
 			writeJSON(w, http.StatusOK, map[string]any{
 				"events": []auditDTO{}, "limit": limit, "offset": offset,
+				"has_more": false,
 				"control_mapping": map[string]string{
 					"framework": fw, "control_id": ctrl,
 					"note": "no audit actions mapped to this control",
@@ -145,6 +183,10 @@ func (a *Audit) List(w http.ResponseWriter, r *http.Request) {
 		hasMore = true
 		out = out[:limit]
 	}
+	if export {
+		writeAuditCSV(w, out, hasMore)
+		return
+	}
 	resp := map[string]any{"events": out, "limit": limit, "offset": offset, "has_more": hasMore}
 	if fw != "" && ctrl != "" {
 		resp["control_mapping"] = map[string]any{
@@ -154,6 +196,31 @@ func (a *Audit) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func writeAuditCSV(w http.ResponseWriter, events []auditDTO, truncated bool) {
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="audit-events.csv"`)
+	w.Header().Set("X-Export-Limit", strconv.Itoa(auditExportLimit))
+	w.Header().Set("X-Export-Rows", strconv.Itoa(len(events)))
+	w.Header().Set("X-Export-Truncated", strconv.FormatBool(truncated))
+	cw := csv.NewWriter(w)
+	if err := cw.Write([]string{"event_id", "at", "actor_id", "action", "target_kind", "target_id", "prev_hash", "chain_hash"}); err != nil {
+		panic(http.ErrAbortHandler)
+	}
+	for _, event := range events {
+		actor := ""
+		if event.ActorID != nil {
+			actor = event.ActorID.String()
+		}
+		if err := cw.Write([]string{event.EventID, event.At.UTC().Format(time.RFC3339Nano), actor, event.Action, event.TargetKind, event.TargetID, event.PrevHash, event.ChainHash}); err != nil {
+			panic(http.ErrAbortHandler)
+		}
+	}
+	cw.Flush()
+	if cw.Error() != nil {
+		panic(http.ErrAbortHandler)
+	}
 }
 
 // auditListQuery preserves the target-based cluster scope without walking the

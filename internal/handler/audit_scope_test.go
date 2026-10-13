@@ -145,8 +145,12 @@ func TestAuditListClusterTargetsAndFilters(t *testing.T) {
 	params.Set("control", "ZZ-99")
 	assertAuditIDs(t, f.list(f.orgA, params).Events, nil)
 	params.Set("action", familyAction)
-	// An explicit action wins even when the supplied control has no mapping.
-	assertAuditIDs(t, f.list(f.orgA, params).Events, eligible)
+	// Every visible filter applies, including a control with no mapping.
+	assertAuditIDs(t, f.list(f.orgA, params).Events, nil)
+	params.Set("control", "AC-2")
+	assertAuditIDs(t, f.list(f.orgA, params).Events, nil)
+	params.Set("action", "auth.login.local")
+	assertAuditIDs(t, f.list(f.orgA, params).Events, []int64{mapped})
 }
 
 func TestAuditListClusterPaginationBeyondFirstPage(t *testing.T) {

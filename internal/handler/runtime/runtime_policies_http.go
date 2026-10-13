@@ -213,7 +213,7 @@ func (h *RuntimePoliciesHTTP) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	_, err = h.store.db.Pool().Exec(r.Context(), `
 UPDATE runtime_policies
-   SET rules = $1::jsonb, def_action = $2, apply_dir = $3, name = $4, updated_by = $5
+   SET rules = $1::jsonb, def_action = $2, apply_dir = $3, name = $4, updated_by = $5, version = version + 1, updated_at = NOW()
  WHERE id = $6 AND org_id = $7`,
 		string(current.Rules), int16(current.DefAction), int16(current.ApplyDir),
 		current.Name, sub.UserID, id, sub.OrgID)

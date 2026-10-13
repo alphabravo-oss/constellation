@@ -7713,6 +7713,564 @@
             "description": "Positive decimal database row revision; preserve as a string."
           }
         }
+      },
+      "NetworkPeerEvidence": {
+        "type": "object",
+        "required": [
+          "workload",
+          "cluster_id",
+          "workload_platform_role",
+          "hide_platform",
+          "source_limit",
+          "total",
+          "has_more",
+          "peers"
+        ],
+        "properties": {
+          "workload": {
+            "type": "string"
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "workload_platform_role": {
+            "type": "string",
+            "description": "Exact platform classification; an empty string means unknown or customer evidence. Mixed peer identities cannot borrow an arbitrary workload role."
+          },
+          "hide_platform": {
+            "type": "boolean"
+          },
+          "source_limit": {
+            "type": "integer",
+            "enum": [
+              500
+            ]
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "peers": {
+            "type": "array",
+            "maxItems": 500,
+            "items": {
+              "type": "object",
+              "required": [
+                "peer_ip",
+                "peer",
+                "peer_platform_role",
+                "peer_cluster_id",
+                "direction",
+                "external",
+                "bytes",
+                "sessions",
+                "packets",
+                "ports",
+                "protocols",
+                "verdict",
+                "last_seen_at"
+              ],
+              "properties": {
+                "peer_ip": {
+                  "type": "string"
+                },
+                "peer": {
+                  "type": "string",
+                  "description": "One exact identified peer workload, or empty for mixed/unresolved/external identities."
+                },
+                "peer_platform_role": {
+                  "type": "string",
+                  "description": "Exact platform classification; an empty string means unknown or customer evidence. Mixed peer identities cannot borrow an arbitrary workload role."
+                },
+                "peer_cluster_id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "nullable": true
+                },
+                "direction": {
+                  "type": "string",
+                  "enum": [
+                    "ingress",
+                    "egress"
+                  ]
+                },
+                "external": {
+                  "type": "boolean"
+                },
+                "bytes": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "sessions": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "packets": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "ports": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer"
+                  },
+                  "maxItems": 12
+                },
+                "protocols": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "verdict": {
+                  "type": "string"
+                },
+                "fqdn": {
+                  "type": "string"
+                },
+                "last_seen_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          }
+        }
+      },
+      "RuntimePolicy": {
+        "type": "object",
+        "required": [
+          "id",
+          "org_id",
+          "cluster_id",
+          "workload",
+          "namespace",
+          "name",
+          "mode",
+          "revision",
+          "version",
+          "rules",
+          "updated_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "org_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "workload": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "monitor",
+              "enforce",
+              "disabled"
+            ]
+          },
+          "revision": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "description": "Positive decimal database version; preserve as a string."
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "dp_policy_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "rules": {},
+          "def_action": {
+            "type": "integer"
+          },
+          "apply_dir": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "updated_by": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "RuntimePolicyReviewedRequest": {
+        "type": "object",
+        "required": [
+          "cluster_id",
+          "expected_version"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expected_version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "description": "Positive decimal database version; preserve as a string."
+          }
+        }
+      },
+      "RuntimePolicyReviewedUpdate": {
+        "type": "object",
+        "required": [
+          "cluster_id",
+          "expected_version"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expected_version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "description": "Positive decimal database version; preserve as a string."
+          },
+          "rules": {},
+          "name": {
+            "type": "string"
+          },
+          "def_action": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255
+          },
+          "apply_dir": {
+            "type": "integer"
+          }
+        }
+      },
+      "NetworkRuleInventoryRow": {
+        "type": "object",
+        "required": [
+          "row_id",
+          "id",
+          "from",
+          "to",
+          "ports",
+          "applications",
+          "action",
+          "disable",
+          "comment",
+          "priority",
+          "learned",
+          "cfg_type",
+          "match_counter",
+          "last_match_timestamp",
+          "from_platform_role",
+          "to_platform_role"
+        ],
+        "properties": {
+          "row_id": {
+            "type": "string",
+            "description": "Opaque immutable endpoint-pair identity. Display hash ID can collide and is not row identity."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "ports": {
+            "type": "string"
+          },
+          "applications": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "allow",
+              "deny"
+            ]
+          },
+          "disable": {
+            "type": "boolean"
+          },
+          "comment": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "learned": {
+            "type": "boolean"
+          },
+          "cfg_type": {
+            "type": "string",
+            "enum": [
+              "learned",
+              "learned_override",
+              "user_created"
+            ]
+          },
+          "match_counter": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "last_match_timestamp": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "from_platform_role": {
+            "type": "string"
+          },
+          "to_platform_role": {
+            "type": "string"
+          }
+        }
+      },
+      "NetworkRuleInventory": {
+        "type": "object",
+        "required": [
+          "cluster_id",
+          "rules",
+          "total",
+          "has_more",
+          "summary",
+          "limit",
+          "offset",
+          "sort",
+          "order",
+          "filters",
+          "source",
+          "summary_scope",
+          "source_complete"
+        ],
+        "properties": {
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NetworkRuleInventoryRow"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "summary": {
+            "type": "object",
+            "required": [
+              "total",
+              "allow",
+              "deny",
+              "learned",
+              "disabled"
+            ],
+            "properties": {
+              "total": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "allow": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "deny": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "learned": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "disabled": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              }
+            }
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          "sort": {
+            "type": "string"
+          },
+          "order": {
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ]
+          },
+          "filters": {
+            "type": "object",
+            "required": [
+              "q",
+              "from",
+              "to",
+              "action",
+              "status",
+              "cfg_type",
+              "hide_platform"
+            ],
+            "properties": {
+              "q": {
+                "type": "string"
+              },
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              },
+              "action": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "cfg_type": {
+                "type": "string"
+              },
+              "hide_platform": {
+                "type": "boolean"
+              }
+            }
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "retained_flow_rollups_and_authored_overrides"
+            ]
+          },
+          "summary_scope": {
+            "type": "string",
+            "enum": [
+              "matching_rules"
+            ]
+          },
+          "source_complete": {
+            "type": "boolean",
+            "description": "Complete retained cohort, not proof of collection or workload enforcement."
+          }
+        }
+      },
+      "CVECatalogRecord": {
+        "type": "object",
+        "required": [
+          "cve_id",
+          "kev_listed",
+          "aliases",
+          "sources",
+          "affected"
+        ],
+        "properties": {
+          "cve_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "cvss_vector": {
+            "type": "string"
+          },
+          "cvss_base": {
+            "type": "number"
+          },
+          "kev_listed": {
+            "type": "boolean"
+          },
+          "epss_probability": {
+            "type": "number"
+          },
+          "aliases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "affected": {},
+          "kev_added": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "epss_updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "published_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "modified_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
       }
     },
     "responses": {
@@ -8824,7 +9382,7 @@
     "/api/v1/audit/events": {
       "get": {
         "summary": "List audit events (descending)",
-        "description": "Returns organization-scoped audit events. event_id selects one exact event; support_bundle_job_id selects the job's create, completion, and download history. A supplied cluster_id remains an ownership-checked filter. Requires read_audit.",
+        "description": "Returns organization-scoped audit events. event_id selects one exact event; support_bundle_job_id selects the job's create, completion, and download history. A supplied cluster_id remains an ownership-checked filter. Requires read_audit. framework and control must be supplied together; An explicit action intersects the valid framework/control mapping. An unmapped pair returns events=[] and has_more=false. No full COUNT is performed. Duplicate known filter parameters are rejected in JSON and CSV.",
         "parameters": [
           {
             "name": "event_id",
@@ -8883,6 +9441,33 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "framework",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "framework and control are a required pair when either is supplied."
+          },
+          {
+            "name": "control",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "framework and control are a required pair when either is supplied."
+          },
+          {
+            "name": "with_controls",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "1 or true adds control mappings to JSON rows."
           }
         ],
         "responses": {
@@ -8917,6 +9502,140 @@
                       "type": "boolean"
                     }
                   }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query, malformed selected IDs, more than 20 IDs, or incompatible filters."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/audit/events.csv": {
+      "get": {
+        "summary": "Export matching audit events as CSV",
+        "description": "Requires read_audit. Same tenant/owned cluster, event/cohort/job/action/framework+control predicates and at DESC,id DESC order as JSON. Valid limit/offset inputs are ignored: export starts at offset zero and emits up to 100000 matching records with one lookahead row. No full COUNT. Unknown mapping exports header-only CSV; framework/control must be paired; explicit action intersects the mapped action prefixes. Columns: event_id, at, actor_id, action, target_kind, target_id, prev_hash, chain_hash. Event IDs remain lossless decimal strings; timestamps retain microsecond precision. Duplicate known filter parameters are rejected in JSON and CSV.",
+        "parameters": [
+          {
+            "name": "event_id",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "support_bundle_job_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "description": "Validated but ignored for export."
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Validated but ignored for export; starts at zero."
+          },
+          {
+            "name": "event_ids",
+            "in": "query",
+            "required": false,
+            "description": "Comma-separated bounded set of at most 20 positive decimal int64 IDs. Presence with an empty value selects no rows. Duplicate IDs are deduplicated. Organization-scoped, ordered by timestamp descending then numeric ID descending. Cannot combine with cluster_id, event_id, support_bundle_job_id, action, framework or control; other-organization and missing IDs are omitted.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "framework",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "framework and control are a required pair when either is supplied."
+          },
+          {
+            "name": "control",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "framework and control are a required pair when either is supplied."
+          },
+          {
+            "name": "with_controls",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "1 or true adds control mappings to JSON rows."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching audit CSV; cap reported explicitly.",
+            "headers": {
+              "X-Export-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "enum": [
+                    100000
+                  ]
+                }
+              },
+              "X-Export-Rows": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100000
+                }
+              },
+              "X-Export-Truncated": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
                 }
               }
             }
@@ -10495,6 +11214,372 @@
           },
           "400": {
             "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{id}/network-rules/inventory": {
+      "get": {
+        "summary": "List the complete retained network rule inventory",
+        "description": "Requires read_findings and an exact owned cluster. All retained observed rollups merge with authored overrides before filters, full matching summaries and bounded SQL sorting/paging in one repeatable-read snapshot. No 3000-row source cap. The winning observed verdict group is selected by match count descending, latest match descending and verdict ascending; authored action/status/comment/priority overlay it using existing semantics. Authored ports/applications remain authoritative only for manual unobserved pairs. Default evaluation sorting exactly preserves configured-first, priority ascending, match count descending; table sorting does not change policy precedence. Hash display IDs retain the existing UTF-8 FNV algorithm, while pair row_id disambiguates collisions. Platform roles are exact source-cluster endpoint metadata; hide_platform filters before count/page/export. Read errors fail explicitly. Portable authored YAML import/export and policy writes remain distinct unchanged APIs.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Literal case-insensitive substring over endpoints, ports, applications and comments; %, _ and backslash stay literal."
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact trimmed source endpoint."
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact trimmed destination endpoint."
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "allow",
+                "deny"
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "enabled",
+                "disabled"
+              ]
+            }
+          },
+          {
+            "name": "cfg_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "learned",
+                "learned_override",
+                "user_created"
+              ]
+            }
+          },
+          {
+            "name": "hide_platform",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "evaluation",
+                "priority",
+                "from",
+                "to",
+                "action",
+                "matches",
+                "last_match",
+                "type",
+                "status",
+                "apps",
+                "ports",
+                "id"
+              ],
+              "default": "evaluation"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "asc"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483647,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Full matching summary and bounded rules",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkRuleInventory"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed/duplicate query or invalid filter/sort/limit/offset."
+          },
+          "404": {
+            "description": "Cluster not owned or missing."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{id}/network-rules/inventory.csv": {
+      "get": {
+        "summary": "Export matching retained network rules as CSV",
+        "description": "Requires read_findings and an exact owned cluster. All retained observed rollups merge with authored overrides before filters, full matching summaries and bounded SQL sorting/paging in one repeatable-read snapshot. No 3000-row source cap. The winning observed verdict group is selected by match count descending, latest match descending and verdict ascending; authored action/status/comment/priority overlay it using existing semantics. Authored ports/applications remain authoritative only for manual unobserved pairs. Default evaluation sorting exactly preserves configured-first, priority ascending, match count descending; table sorting does not change policy precedence. Hash display IDs retain the existing UTF-8 FNV algorithm, while pair row_id disambiguates collisions. Platform roles are exact source-cluster endpoint metadata; hide_platform filters before count/page/export. Read errors fail explicitly. Portable authored YAML import/export and policy writes remain distinct unchanged APIs. Valid limit/offset are ignored for CSV; matching export starts at zero with a 100000-record cap. Includes all fields independently of visible columns, including endpoint roles and pair identity.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Literal case-insensitive substring over endpoints, ports, applications and comments; %, _ and backslash stay literal."
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact trimmed source endpoint."
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact trimmed destination endpoint."
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "allow",
+                "deny"
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "enabled",
+                "disabled"
+              ]
+            }
+          },
+          {
+            "name": "cfg_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "learned",
+                "learned_override",
+                "user_created"
+              ]
+            }
+          },
+          {
+            "name": "hide_platform",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "evaluation",
+                "priority",
+                "from",
+                "to",
+                "action",
+                "matches",
+                "last_match",
+                "type",
+                "status",
+                "apps",
+                "ports",
+                "id"
+              ],
+              "default": "evaluation"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "asc"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483647,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching rule CSV in requested stable order",
+            "headers": {
+              "X-Export-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "enum": [
+                    100000
+                  ]
+                }
+              },
+              "X-Export-Total": {
+                "schema": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                }
+              },
+              "X-Export-Truncated": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed/duplicate query or invalid filter/sort/limit/offset."
+          },
+          "404": {
+            "description": "Cluster not owned or missing."
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -13478,7 +14563,328 @@
     },
     "/api/v1/cve/search": {
       "get": {
-        "summary": "pg_trgm fuzzy CVE search"
+        "summary": "Search the global CVE intelligence catalog",
+        "description": "Authenticated read_findings global imported intelligence, not organization affected findings. Both JSON and CSV use the same search/filter predicate and stable cve_id ASC tie. Malformed or duplicate filters are rejected. Default ordering KEV DESC, EPSS DESC, CVSS DESC, published DESC, cve_id ASC. Strictly greater numeric thresholds; zero adds no threshold. No full matching count is returned.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Existing field DSL or bare substring/alias/nickname search. Bare ILIKE retains SQL wildcard behavior."
+          },
+          {
+            "name": "kev",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false",
+                "1",
+                "0"
+              ]
+            }
+          },
+          {
+            "name": "epss_gt",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          {
+            "name": "cvss_gt",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 10
+            }
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "critical",
+                "high",
+                "medium",
+                "low",
+                "info",
+                "none"
+              ]
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact trimmed imported source identifier."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "cve_id",
+                "cvss",
+                "severity",
+                "epss",
+                "kev",
+                "published"
+              ]
+            }
+          },
+          {
+            "name": "dir",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50
+            },
+            "description": "JSON valid range1..200; numeric values outside that range preserve legacy50 fallback."
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483647,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bounded global catalog rows",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "results",
+                    "limit",
+                    "offset"
+                  ],
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CVECatalogRecord"
+                      }
+                    },
+                    "limit": {
+                      "type": "integer"
+                    },
+                    "offset": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed or duplicate filter/query, unsupported severity/sort/direction, or invalid finite thresholds."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/cve/search.csv": {
+      "get": {
+        "summary": "Export matching global CVE catalog intelligence as CSV",
+        "description": "Authenticated read_findings global imported intelligence, not organization affected findings. Both JSON and CSV use the same search/filter predicate and stable cve_id ASC tie. Malformed or duplicate filters are rejected. Default ordering KEV DESC, EPSS DESC, CVSS DESC, published DESC, cve_id ASC. Strictly greater numeric thresholds; zero adds no threshold. No full matching count is returned. CSV ignores limit/offset entirely, fetches one lookahead row and emits up to100000 matching records. No total/count header. Columns cve_id,title,description,cvss_base,cvss_vector,kev_listed,kev_added,epss_probability,epss_updated_at,aliases,sources,published_at,modified_at. The large affected metadata document is excluded; CVE ID links the catalog record.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Existing field DSL or bare substring/alias/nickname search. Bare ILIKE retains SQL wildcard behavior."
+          },
+          {
+            "name": "kev",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false",
+                "1",
+                "0"
+              ]
+            }
+          },
+          {
+            "name": "epss_gt",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          {
+            "name": "cvss_gt",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 10
+            }
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "critical",
+                "high",
+                "medium",
+                "low",
+                "info",
+                "none"
+              ]
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact trimmed imported source identifier."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "cve_id",
+                "cvss",
+                "severity",
+                "epss",
+                "kev",
+                "published"
+              ]
+            }
+          },
+          {
+            "name": "dir",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Ignored for CSV."
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Ignored for CSV."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching catalog CSV",
+            "headers": {
+              "X-Export-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "enum": [
+                    100000
+                  ]
+                }
+              },
+              "X-Export-Rows": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100000
+                }
+              },
+              "X-Export-Truncated": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed or duplicate filter/query, unsupported severity/sort/direction, or invalid finite thresholds."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/api/v1/cve/stats": {
@@ -20321,15 +21727,65 @@
     },
     "/api/v1/network/peers": {
       "get": {
+        "summary": "Inspect workload peer IP aggregates",
+        "description": "Organization-owned source-cluster evidence. Missing cluster_id preserves the legacy selected owned cluster default and the response identifies that cluster. Missing/invalid hours preserves the legacy 168-hour default; maximum valid hours is 720. Positive platform roles resolve exact canonical or pod ownership in the actual source cluster before aggregation. An IP shared by multiple identities has unknown role and no selected peer cluster. hide_platform removes positive platform endpoints before folding, totals and the 500-row cap. total counts matching direction/IP groups, not sessions; has_more explicitly reports omitted peer groups. Role, source and flow reads share one read-only snapshot; query/scan/iteration failures return errors rather than partial success. No peer CSV endpoint.",
+        "parameters": [
+          {
+            "name": "workload",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 720,
+              "default": 168
+            }
+          },
+          {
+            "name": "hide_platform",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Bounded peer evidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkPeerEvidence"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing workload, invalid/unowned cluster, malformed or duplicate query, or invalid hide_platform."
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
-        },
-        "summary": "Get peers"
+        }
       }
     },
     "/api/v1/network/policies/lifecycle": {
@@ -24251,7 +25707,14 @@
       "get": {
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimePolicy"
+                }
+              }
+            }
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -24262,7 +25725,14 @@
       "put": {
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimePolicy"
+                }
+              }
+            }
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -24275,7 +25745,14 @@
       "post": {
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimePolicy"
+                }
+              }
+            }
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -24288,7 +25765,14 @@
       "post": {
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimePolicy"
+                }
+              }
+            }
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -24327,13 +25811,317 @@
       "post": {
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimePolicy"
+                }
+              }
+            }
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Create promote"
+      }
+    },
+    "/api/v1/runtime-policies/{id}/reviewed": {
+      "delete": {
+        "summary": "Delete one reviewed runtime policy",
+        "description": "Requires manage_policies. A distinct route fails closed on old API replicas. Required owned cluster_id and expected_version select the exact reviewed policy. Locks, mutation and hash-chained audit append are atomic; stale/missing/failed audit writes change no policy or audit record. Successful edits and mode actions advance version exactly once, including name-only and no-op reviewed writes; revision is the lossless decimal alias. Delete returns the deleted reviewed version. Legacy routes remain compatible.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimePolicyReviewedRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Exact committed policy receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "deleted",
+                    "id",
+                    "cluster_id",
+                    "workload",
+                    "revision"
+                  ],
+                  "properties": {
+                    "deleted": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "cluster_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "workload": {
+                      "type": "string"
+                    },
+                    "revision": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]*$",
+                      "description": "Positive decimal database version; preserve as a string."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed identity/revision/body or unsupported fields."
+          },
+          "404": {
+            "description": "Policy or cluster not owned in the requested scope."
+          },
+          "409": {
+            "description": "Reviewed policy version changed; refresh and review."
+          },
+          "428": {
+            "description": "expected_version is required."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "summary": "Update one reviewed runtime policy",
+        "description": "Requires manage_policies. A distinct route fails closed on old API replicas. Required owned cluster_id and expected_version select the exact reviewed policy. Locks, mutation and hash-chained audit append are atomic; stale/missing/failed audit writes change no policy or audit record. Successful edits and mode actions advance version exactly once, including name-only and no-op reviewed writes; revision is the lossless decimal alias. Delete returns the deleted reviewed version. Legacy routes remain compatible.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimePolicyReviewedUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Exact committed policy receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimePolicy"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed identity/revision/body or unsupported fields."
+          },
+          "404": {
+            "description": "Policy or cluster not owned in the requested scope."
+          },
+          "409": {
+            "description": "Reviewed policy version changed; refresh and review."
+          },
+          "428": {
+            "description": "expected_version is required."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/runtime-policies/{id}/reviewed/demote": {
+      "post": {
+        "summary": "Demote one reviewed runtime policy",
+        "description": "Requires manage_policies. A distinct route fails closed on old API replicas. Required owned cluster_id and expected_version select the exact reviewed policy. Locks, mutation and hash-chained audit append are atomic; stale/missing/failed audit writes change no policy or audit record. Successful edits and mode actions advance version exactly once, including name-only and no-op reviewed writes; revision is the lossless decimal alias. Delete returns the deleted reviewed version. Legacy routes remain compatible.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimePolicyReviewedRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Exact committed policy receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimePolicy"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed identity/revision/body or unsupported fields."
+          },
+          "404": {
+            "description": "Policy or cluster not owned in the requested scope."
+          },
+          "409": {
+            "description": "Reviewed policy version changed; refresh and review."
+          },
+          "428": {
+            "description": "expected_version is required."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/runtime-policies/{id}/reviewed/disable": {
+      "post": {
+        "summary": "Disable one reviewed runtime policy",
+        "description": "Requires manage_policies. A distinct route fails closed on old API replicas. Required owned cluster_id and expected_version select the exact reviewed policy. Locks, mutation and hash-chained audit append are atomic; stale/missing/failed audit writes change no policy or audit record. Successful edits and mode actions advance version exactly once, including name-only and no-op reviewed writes; revision is the lossless decimal alias. Delete returns the deleted reviewed version. Legacy routes remain compatible.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimePolicyReviewedRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Exact committed policy receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimePolicy"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed identity/revision/body or unsupported fields."
+          },
+          "404": {
+            "description": "Policy or cluster not owned in the requested scope."
+          },
+          "409": {
+            "description": "Reviewed policy version changed; refresh and review."
+          },
+          "428": {
+            "description": "expected_version is required."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/runtime-policies/{id}/reviewed/promote": {
+      "post": {
+        "summary": "Promote one reviewed runtime policy",
+        "description": "Requires manage_policies. A distinct route fails closed on old API replicas. Required owned cluster_id and expected_version select the exact reviewed policy. Locks, mutation and hash-chained audit append are atomic; stale/missing/failed audit writes change no policy or audit record. Successful edits and mode actions advance version exactly once, including name-only and no-op reviewed writes; revision is the lossless decimal alias. Delete returns the deleted reviewed version. Legacy routes remain compatible.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimePolicyReviewedRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Exact committed policy receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimePolicy"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed identity/revision/body or unsupported fields."
+          },
+          "404": {
+            "description": "Policy or cluster not owned in the requested scope."
+          },
+          "409": {
+            "description": "Reviewed policy version changed; refresh and review."
+          },
+          "428": {
+            "description": "expected_version is required."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/api/v1/runtime-policies/{id}/simulate": {

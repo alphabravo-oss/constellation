@@ -690,6 +690,8 @@ func (s *Server) buildRouter() chi.Router {
 			r.Post("/network/enforcement", s.requireVerb(rbac.VerbManagePolicies, networkMap.EnforcementCreate))
 			r.Delete("/network/enforcement/{id}", s.requireVerb(rbac.VerbManagePolicies, networkMap.EnforcementLift))
 			r.Get("/clusters/{id}/network-rules", s.requireVerb(rbac.VerbReadFindings, networkMap.NetworkRules))
+			r.Get("/clusters/{id}/network-rules/inventory", s.requireVerb(rbac.VerbReadFindings, networkMap.NetworkRulesInventory))
+			r.Get("/clusters/{id}/network-rules/inventory.csv", s.requireVerb(rbac.VerbReadFindings, networkMap.NetworkRulesInventoryCSV))
 			r.Post("/clusters/{id}/network-rules", s.requireVerb(rbac.VerbManagePolicies, networkMap.UpsertNetworkRule))
 			r.Put("/clusters/{id}/network-rules", s.requireVerb(rbac.VerbManagePolicies, networkMap.UpsertNetworkRule))
 			r.Delete("/clusters/{id}/network-rules", s.requireVerb(rbac.VerbManagePolicies, networkMap.DeleteNetworkRule))
@@ -733,6 +735,11 @@ func (s *Server) buildRouter() chi.Router {
 			r.Post("/runtime-policies/{id}/demote", s.requireVerb(rbac.VerbManagePolicies, rtPolicies.Demote))
 			r.Post("/runtime-policies/{id}/disable", s.requireVerb(rbac.VerbManagePolicies, rtPolicies.Disable))
 			r.Delete("/runtime-policies/{id}", s.requireVerb(rbac.VerbManagePolicies, rtPolicies.Delete))
+			r.Put("/runtime-policies/{id}/reviewed", s.requireVerb(rbac.VerbManagePolicies, rtPolicies.ReviewedUpdate))
+			r.Post("/runtime-policies/{id}/reviewed/promote", s.requireVerb(rbac.VerbManagePolicies, rtPolicies.ReviewedPromote))
+			r.Post("/runtime-policies/{id}/reviewed/demote", s.requireVerb(rbac.VerbManagePolicies, rtPolicies.ReviewedDemote))
+			r.Post("/runtime-policies/{id}/reviewed/disable", s.requireVerb(rbac.VerbManagePolicies, rtPolicies.ReviewedDisable))
+			r.Delete("/runtime-policies/{id}/reviewed", s.requireVerb(rbac.VerbManagePolicies, rtPolicies.ReviewedDelete))
 			// Wave B2/B3: match-stats (saved) + simulate (candidate). Read
 			// verb on both — neither mutates state.
 			r.Get("/runtime-policies/{id}/match-stats", s.requireVerb(rbac.VerbReadFindings, rtPolicies.MatchStats))
@@ -1211,6 +1218,7 @@ func (s *Server) buildRouter() chi.Router {
 			// metadata is served from it when cve_records has no row.
 			cve := findings.NewCVE(s.db, "")
 			r.Get("/cve/search", s.requireVerb(rbac.VerbReadFindings, cve.Search))
+			r.Get("/cve/search.csv", s.requireVerb(rbac.VerbReadFindings, cve.SearchCSV))
 			r.Get("/cve/stats", s.requireVerb(rbac.VerbReadFindings, cve.Stats))
 			r.Get("/cve/bundle/status", s.requireVerb(rbac.VerbReadFindings, cve.BundleStatus))
 			r.Get("/cve/{id}/affected", s.requireVerb(rbac.VerbReadFindings, cve.Affected))
@@ -1220,6 +1228,7 @@ func (s *Server) buildRouter() chi.Router {
 
 			auditHandler := handler.NewAudit(s.db)
 			r.Get("/audit/events", s.requireVerb(rbac.VerbReadAudit, auditHandler.List))
+			r.Get("/audit/events.csv", s.requireVerb(rbac.VerbReadAudit, auditHandler.ExportCSV))
 			r.Post("/audit/verify", s.requireVerb(rbac.VerbReadAudit, auditHandler.Verify))
 			// E2: compliance evidence path. ControlMappings is the static
 			// table (no PII / org data) so we put it under VerbReadAudit
