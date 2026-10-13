@@ -15,7 +15,7 @@ test("Runtime policy conflict requires explicit review and preserves the candida
     const request = route.request(), url = new URL(request.url());
     if (request.method() === "GET") {
       if (failRead) return route.fulfill({ status: 500, json: { error: "Read unavailable" } });
-      return route.fulfill({ json: url.pathname.endsWith(policyID) ? policy : [policy] });
+      return route.fulfill({ json: url.pathname.endsWith(policyID) ? policy : { policies: [policy] } });
     }
     expect(request.method()).toBe("PUT");
     expect(url.pathname).toBe(`/api/v1/runtime-policies/${policyID}/reviewed`);
@@ -55,6 +55,42 @@ test("Runtime policy conflict requires explicit review and preserves the candida
   expect(writes.map(write => write.expected_version)).toEqual(["1", "2"]);
   expect(writes[1]).toEqual({ cluster_id: savedViewCluster, expected_version: "2", name: "Retained operator draft", rules: [{ id: 77, action: 2 }] });
   expect(policy.mode).toBe("enforce");
+});
+
+test("Disabled runtime policies re-enable only in monitor mode with exact reviewed receipts", async ({ page }) => {
+  await savedViewsFixture(page);
+  const otherID = "55555555-5555-4555-8555-555555555555";
+  const disabled: RuntimePolicy = { id: policyID, org_id: "org-a", cluster_id: savedViewCluster, namespace: "payments", workload: "payments/api", name: "Paused runtime policy", dp_policy_id: 77, mode: "disabled", rules: [], version: 1, revision: "9007199254740993", def_action: 2, apply_dir: 0, created_at: "2026-10-12T00:00:00Z", updated_at: "2026-10-12T00:00:00Z" };
+  let policies = [disabled, { ...disabled, id: otherID, workload: "payments/worker", name: "Unconfirmed runtime policy" }];
+  const writes: Array<{ id: string; body: unknown }> = [];
+  await page.route("**/api/v1/runtime-policies**", async route => {
+    const request = route.request(), url = new URL(request.url());
+    if (request.method() === "GET") return route.fulfill({ json: { policies } });
+    expect(request.method()).toBe("POST");
+    const id = url.pathname.split("/")[4];
+    expect(url.pathname).toBe(`/api/v1/runtime-policies/${id}/reviewed/demote`);
+    expect([policyID, otherID]).toContain(id);
+    const body = request.postDataJSON();
+    expect(body).toEqual({ cluster_id: savedViewCluster, expected_version: "9007199254740993" });
+    writes.push({ id, body });
+    const reviewed = policies.find(policy => policy.id === id)!;
+    const receipt = { ...reviewed, mode: id === otherID ? "enforce" : "monitor", revision: "9007199254740994", updated_at: "2026-10-13T01:00:00Z" } satisfies RuntimePolicy;
+    if (id === policyID) policies = policies.map(policy => policy.id === id ? receipt : policy);
+    await route.fulfill({ json: receipt });
+  });
+  await page.goto(`/clusters/${savedViewCluster}/runtime-policies`);
+  await expect(page.getByTestId(`runtime-policy-enable-${policyID}`)).toHaveText("Enable in monitor mode");
+  await expect(page.getByTestId(`runtime-policy-promote-${policyID}`)).toHaveCount(0);
+  await page.getByTestId(`runtime-policy-enable-${policyID}`).click();
+  await expect(page.getByTestId(`runtime-policy-promote-${policyID}`)).toBeEnabled();
+  await expect(page.getByTestId(`runtime-policy-enable-${policyID}`)).toHaveCount(0);
+  const unconfirmed = page.getByTestId(`runtime-policy-row-${otherID}`);
+  await page.getByTestId(`runtime-policy-enable-${otherID}`).click();
+  await expect(unconfirmed).toContainText("Reload before another write");
+  await expect(page.getByTestId(`runtime-policy-enable-${otherID}`)).toBeDisabled();
+  expect(writes.map(write => write.id)).toEqual([policyID, otherID]);
+  expect(policies.find(policy => policy.id === policyID)?.mode).toBe("monitor");
+  expect(policies.find(policy => policy.id === otherID)?.mode).toBe("disabled");
 });
 
 test("Both peer diagnostics retain returned roles, selected visibility and shown CSV scope", async ({ page }) => {
