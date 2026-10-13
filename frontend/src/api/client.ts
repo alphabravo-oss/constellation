@@ -4799,7 +4799,7 @@ export type ScanInventoryDownloadGuard = () => boolean;
 function assertInventoryDownloadCurrent(shouldDownload?: ScanInventoryDownloadGuard) {
   if (shouldDownload && !shouldDownload()) throw new Error("Refresh the inventory before exporting this scope.");
 }
-async function downloadScanInventoryCSV(path: string, params: ScanInventoryParams, filename: string, shouldDownload?: ScanInventoryDownloadGuard): Promise<ScanInventoryExportResult> {
+async function downloadScanInventoryCSV(path: string, params: ScanInventoryParams, filename: string, shouldDownload?: ScanInventoryDownloadGuard, expectedHeaders?: Record<string, string>): Promise<ScanInventoryExportResult> {
   const filters = { ...params }; delete filters.limit; delete filters.offset;
   const response = await api.get<Blob>(path, { params: filters, responseType: "blob" });
   if (!/^[0-9]+$/.test(String(response.headers["x-export-total"] ?? "")) || !/^[0-9]+$/.test(String(response.headers["x-export-limit"] ?? ""))) throw new Error("Export scope could not be confirmed.");
@@ -4807,6 +4807,7 @@ async function downloadScanInventoryCSV(path: string, params: ScanInventoryParam
   const truncated = response.headers["x-export-truncated"];
   if (!Number.isSafeInteger(total) || total < 0 || !Number.isSafeInteger(limit) || limit < 1 || !["true", "false"].includes(String(truncated)) || (truncated === "true") !== (total > limit)) throw new Error("Export scope could not be confirmed. Retry before treating the download as complete.");
   assertInventoryDownloadCurrent(shouldDownload);
+  if (expectedHeaders && Object.entries(expectedHeaders).some(([header, expected]) => response.headers[header] !== expected)) throw new Error("Export response did not confirm the requested organization and inventory scope.");
   const blob = response.data instanceof Blob ? response.data : new Blob([response.data]);
   const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = filename; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
   return { total, exported: Math.min(total, limit), limit, truncated: truncated === "true" };
@@ -6281,7 +6282,10 @@ export const vulndbApi = {
 
 export const backupsApi = {
   inventory: (params: BackupInventoryParams = {}) => api.get<BackupInventoryResponse>("/backups/inventory", { params }).then(r => r.data),
-  inventoryCSV: (params: BackupInventoryParams = {}, shouldDownload?: ScanInventoryDownloadGuard) => downloadScanInventoryCSV("/backups/inventory.csv", params, "constellation-backup-metadata.csv", shouldDownload),
+  inventoryCSV: async (params: BackupInventoryParams, expectedOrgID: string, shouldDownload?: ScanInventoryDownloadGuard) => {
+    if (!expectedOrgID?.trim()) throw new Error("An available organization is required to export backup metadata.");
+    return downloadScanInventoryCSV("/backups/inventory.csv", params, "constellation-backup-metadata.csv", shouldDownload, { "x-export-org-id": expectedOrgID, "x-export-scope": "matching_owned_backup_runs", "x-export-limit": "100000" });
+  },
   list: () => api.get<{ backups: BackupSummary[] }>("/backups").then((r) => r.data.backups),
   get: (id: string) => api.get<BackupSummary>(`/backups/${id}`).then((r) => r.data),
   create: (body: { sign_mode?: string }) =>

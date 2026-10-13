@@ -231,6 +231,7 @@ it("exports matching metadata filters separately from scalar page CSV", async ()
         order: "asc",
         offset: 100,
       }),
+      "org",
       expect.any(Function),
     ),
   );
@@ -310,7 +311,7 @@ it("isolates owner cache and rejects a retained export guard after the operator 
   await render();
   await settle(() => expect(host.textContent).toContain("205 matching"));
   let guard!: () => boolean;
-  vi.mocked(backupsApi.inventoryCSV).mockImplementation(async (_p, current) => {
+  vi.mocked(backupsApi.inventoryCSV).mockImplementation(async (_p, _org, current) => {
     guard = current!;
     return new Promise(() => {});
   });

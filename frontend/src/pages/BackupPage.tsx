@@ -604,7 +604,7 @@ export function BackupPage() {
               context={context}
               disabled={listQ.isFetching}
               isCurrent={() => exportQueryReady(qc, key, listQ.data)}
-              download={(current) => backupsApi.inventoryCSV(request, current)}
+              download={(current) => backupsApi.inventoryCSV(request, identity!.org_id, current)}
             />
             <div data-testid="backup-history">
               <DataTable
