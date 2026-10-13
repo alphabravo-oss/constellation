@@ -1423,14 +1423,87 @@ Helm 71 remains the deployed build. The exact Nodes status cited by the user was
 rechecked live: 32px collapsed at 1280px, 40px at 640px, with explanation hidden
 until Details is activated and no narrow document overflow.
 
-The remaining selected-console inventory audit includes conversation streams,
-the PCAP request ledger, Effective Config component reports, and the Node Risk
-view's reuse of its bounded host-CVE payload. Dormant SSE remains unqualified and disabled.
-The live cluster has no discovered custom-namespace installation candidate; a
-real isolated chart installation and discovery proof remains outstanding. Named
-saved views and the full accessibility/cross-dataset acceptance matrix remain
-open. The legacy bounded detail payloads remain compatibility surfaces; primary
-Asset/Node/CVE/raw Compliance inventories have independent full-cohort contracts.
+The October 13 secondary-inventory continuation adds full retained conversation
+stream and packet-capture request inventories, independent matching summaries,
+stable server filtering/paging and capped matching CSV. Stream rows identify
+aggregate tuples; capture rows preserve physical request IDs and distinguish
+unknown measurements from zero. Exact owned cluster scope is required, platform
+exclusion happens before counting, and CSV never exposes private capture paths.
+The capture ledger keeps confirmed rows visible during polling, pauses polling
+when requested and reports its own source status independently of the map.
+
+Effective Config now pages the full retained component inventory and exports
+explicitly reported system-config revisions. Missing revisions stay unknown and
+do not establish fleet adoption. Node Detail and Node Risk share the full host
+finding inventory instead of reusing a bounded preview. Shared export guards
+invalidate pending downloads on context changes, unmounts, refresh failures or
+cache replacement, even if the same scope becomes available again before React
+renders. Page CSV checks the reviewed data again at dispatch.
+
+Findings and Timeline use a shared keyboard-accessible saved-view menu with
+focus return after deletion. Browser cases cover save/cancel, exact URL and
+filter restoration, reload/history, user/organization isolation and storage
+failure; Network cases additionally cover import validation and all saved
+workspaces. These are bounded adopter checks, not complete accessibility parity.
+
+The production source passes **2,061 frontend tests in 142 files**, global lint
+and production typecheck/build. Fresh PostgreSQL 16/schema173 qualification
+passes **452 race/shuffle/count2 executions** across server, inventory-list,
+component-revision and secondary-network suites with no skips. Fixtures cover
+more than 1,000 records, both 100,001-row CSV caps, tenant/sibling isolation,
+nullable measurements and strict query validation. Go vet, generated
+OpenAPI/server contracts and all 111 endpoint mappings pass. Evidence:
+`/tmp/secondary-frontend-tests-qualified.log`,
+`/tmp/secondary-server-db/integration.json`,
+`/tmp/network-secondary-final-db/integration.json` and
+`/tmp/component-revision-csv-release-db.log`.
+
+The final production images pass the **entire 216-case browser run**, with one
+worker, no retries and no skips, against isolated PostgreSQL 16/schema173.
+Two new secondary-inventory cases also pass on those images, bringing the
+qualified discovered coverage to 218 cases. The focused nine-case Network
+saved-view/role/secondary run passes as well. Browser lint and strict standalone
+TypeScript checks pass; generated screenshots are archived outside source.
+Evidence: `/tmp/secondary-full-qualified-browser.log`,
+`/tmp/network-secondary-browser.log` and
+`/tmp/network-secondary-final-browser.log`, with their corresponding reports.
+
+Helm **72** deploys API/frontend `secondary-inventory-20261013`, retaining
+migration `audit-lookup-20261012` and schema173; all seven deployments are ready.
+Live list/CSV checks agree for the sampled retained stream, its platform-hidden
+and no-match cohorts, and all 12 component reports. None of those reports claims
+an explicit config revision. The live capture ledger is empty, so positive
+capture continuation remains fixture-qualified. Invalid/foreign cluster and
+query bounds reject correctly; bounded reads took 0.015–0.048 seconds. Native
+browser checks render the capture ledger, component revision reports and the
+641-record host finding inventory, with details collapsed and no desktop
+document overflow. Evidence: `/tmp/secondary-inventories-live-results.json` and
+`/tmp/secondary-inventory-deploy.log`.
+
+A genuine isolated chart installation in `orbit-install-proof` now qualifies
+custom-namespace discovery: the real Ready frontend pod, UID/image ID and
+Pod→ReplicaSet→Deployment chain were recorded. Scoped API/CSV show two core
+workloads and one core container; hiding platform components returns zero while
+observation timestamps continue advancing. Native browser hide/show restores
+both workloads. This frontend-only fixture does not establish component
+heartbeats or the complete role/export matrix. Its default helper image was
+rejected by existing admission enforcement; using the deployed frontend image
+for the directory-creation step allowed installation without policy changes.
+The temporary release was uninstalled after verification. Evidence:
+`/tmp/custom-install-proof/verification.json` and accompanying JSON/CSV.
+
+Hosted CI on `9e52eb7` passes Go unit/integration and dependency/FIPS checks.
+Its browser run passes 205 cases and fails provider discovery on a real 429;
+the updated test honors the existing Retry-After helper without bypassing
+throttling. Its frontend run passes 1,959 cases and times out one initial Runtime
+query; that test now uses the existing three-second settled-query convention.
+These local corrections still require hosted confirmation. Existing
+quality/gosec/gitleaks gates remain open.
+
+Remaining selected-console work includes exact historical finding detail/action
+identity, complete dashboard source/destination reconciliation and all-page
+accessibility, aliases and saved-state acceptance. Dormant SSE remains disabled
+and unqualified. Legacy bounded detail payloads remain compatibility surfaces.
 Fleet-scale role-export latency remains unqualified; correctness fixtures do not
 establish performance at the 100,000-row export cap.
 
@@ -2125,7 +2198,7 @@ coverage remain open.
 | SIEM-1 named receiver routing and receipts | A deployed API sent to only the selected SMTP receiver, surfaced a delivered receipt and audit link, and refused paused sends; source tests cover retries and isolation. |
 | POL-1 shared GroupPicker coverage | Editor audit and a response-rule save-path test prove shared group selection; full enforcement remains a separate open item. |
 | IAM-1 local-user recovery | PostgreSQL/router tests prove scoped unlock and force reset with atomic audit receipts; a deterministic production-browser test exercises the local-only operator controls. Other IAM-1 items remain open. |
-| UI-3 platform-role classification | Source API tests and a deterministic production-browser test prove custom-namespace `core` classification and visibility behavior. The complete API/export and live-install matrix remains open. |
+| UI-3 platform-role classification | Source API tests, production-browser tests and a genuine isolated custom-namespace chart installation prove `core` classification, visibility and continued discovery. The complete API/export matrix remains open. |
 | UI-2 YAML contract discipline | The six enterprise-table YAML controls (network, DLP, signatures, response, groups, vulnerability profiles) each pair export with a registered import route and typed client call. Generated cluster-init and Kubernetes policy YAML are deployment artifacts, not table configuration imports. The response-rule control has deterministic production-browser coverage; the other families have existing import tests. This closes only the YAML discipline row, not shared-table completeness. |
 | UI-1 scope order | The October 12 user decision makes Clusters the first persistent entry, followed by Organization, Platform and Integrations, across the sidebar, command palette and Settings hub. Navigation fixtures now follow that order, and live browser checks confirm sidebar, Settings and palette agreement. Prior deterministic browser evidence covers canonical route targets, keyboard navigation and cluster context; the revised full specs have not been rerun. Other UI-1 items remain open. |
 | UI-1 duplicate entry points | Generic health and system-health aliases now redirect to platform health, while cluster sensor/registration health remains intentionally distinct at its cluster URL. Token, attestation, access-control, integration and Settings aliases preserve deep paths, filters and fragments. Cluster health selection follows its URL rather than silently displaying the first cluster; three API-backed cluster browser cases and deterministic alias/settings cases pass. Other feature-home and page-contract rows remain open. |
@@ -2270,7 +2343,7 @@ concurrent-ingest cases. This closes only the bounded reclaim item below.
 | MIG-1 bounded cutover fixture | Eight-object PostgreSQL, mock and disposable local API smoke; complete canonical fixture open | A manifest enumerates two groups, one network edge, one vulnerability profile, one DLP rule, one WAF rule and two group bindings with source, converted, unsupported, applied and rolled-back counts. A fresh migration-166 PostgreSQL handler test verifies preview semantics, target rows, apply and rollback. The opt-in loopback-only runner refuses nonempty import history or preexisting targets, checks counts and HTML availability for Migration and Policy Center routes, and attempts rollback cleanup on failure; 11 mock tests pass. Against a disposable local API and separate production-build UI HTML server, preflight, eight-create preview, apply/target reads and eight-delete rollback all passed. A production-build Chromium case with deterministic API fixtures shows DLP/WAF preview/apply, Policy Center links and imported origin/group scope on DLP and WAF/DPI pages; it does not render against the real importing API. The local smoke used a seeded org rather than a genuine new-org cutover, and remaining families are absent, so neither the full fixture nor new-org cutover acceptance item is closed. |
 | POL-1 group workflow | API and production-browser control plane verified; enforcement open | A PostgreSQL-backed server test creates groups, previews/applies a NeuVector fixture containing a network edge and DLP/WAF bindings, checks usage and mode promotion, verifies RBAC/audit, and rejects unsafe delete without losing the group or references. A Chromium Playwright run against both an isolated production stack and a Helm-deployed API with a production frontend build creates a group, uses it in a network rule and DLP/WAF bindings, inspects usage, promotes mode, gets 409 on unsafe delete and cleans up. The UI-authored network rule is a network override, not a `group_rule_edges` row, so the usage blocker count is two (DLP/WAF). Live network and DPI enforcement remain unproven; the item stays open. |
 | IAM-1 local-user recovery | Closed bounded action; other IAM-1 items open | Unlock and force-password-reset routes require manage-users RBAC and scope the target to the caller org. Mutations and audit receipts commit together or roll back on audit failure. Access-control overview exposes local-password, lockout and reset-required state; production-build Chromium verifies local-only controls and the recovery route calls with deterministic API fixtures. Focused handler, router/RBAC, audit and OpenAPI tests pass. LDAP/SAML/OIDC connection tests, role previews, NeuVector identity import and namespace filtering remain open. |
-| UI-3 platform-role classification | Closed backend-classification row; API/export matrix open | Exact platform namespaces plus workload labels and Helm installation identity classify custom platform install namespaces as `core` in deployment list/detail, container inventory, network map, exposure and policy lifecycle. Frontend inventories and map prefer the backend role, retain exact-namespace fallback for legacy responses and include the role in container/deployment CSV. Source API tests, frontend helper tests and a deterministic production-browser inventory/export test pass. Live custom-install verification, session/conversation role coverage and the complete export surface remain open. |
+| UI-3 platform-role classification | Closed backend-classification row; API/export matrix open | Exact platform namespaces plus workload labels and Helm installation identity classify custom platform install namespaces as `core` in deployment list/detail, container inventory, network map, exposure and policy lifecycle. Frontend inventories and map prefer the backend role and retain exact-namespace fallback for legacy responses. Source tests and production-browser inventory/export tests pass. A genuine custom installation proves workload/container API/CSV roles, hide/show and continued discovery while hidden; the complete export surface remains open. |
 | POL-3 response-rule YAML portability | Bounded control-plane slice; composite POL-3 row open | Org-wide or exact-cluster YAML export/import validates version, scope, media type, size, selectors and conflict policy; import records an attempt before mutation and commits completion audit with successful rows. Unsupported action params fail closed, receiver IDs normalize to names on export, and import requires a matching target-org receiver name. OpenAPI, scoped RBAC, PostgreSQL/race and deterministic production-browser controls are covered. Non-threat event-category wiring plus deployed response-enforcement proof remain open. |
 
 | REG-1 kind validation | Source fix verified; connector matrix open | Registry create rejects unknown kinds with an explicit 400; PATCH rejects any supplied `kind` (including null/empty/non-string) rather than silently ignoring an attempted type change. Unit/HTTP tests cover all 13 accepted kinds, unknown create and immutable update. This does not prove per-kind discovery/auth against real registries or endpoint/credential validation. |
@@ -3066,19 +3139,20 @@ are not counted as inline authoring.
 - [x] Move classification to backend `platform_role` metadata using namespace,
   labels, and installation identity so custom install namespaces work like
   NeuVector's `platform_role=core`. Source API and deterministic browser tests
-  cover custom namespaces; live custom-install verification remains part of the
-  broader UI-3 release matrix.
+  cover custom namespaces. A genuine isolated chart installation additionally
+  qualifies workload/container discovery, API/CSV roles and browser hide/show.
 - [ ] Expose the same role in all relevant APIs and exports; UI namespace matching
   remains a compatibility fallback. Deployment, container, network-map, exposure
   and policy-lifecycle APIs plus session/conversation responses and
   container/deployment/session/conversation CSV now carry the role. Multi-cluster
   org-wide conversations omit ambiguous label-derived roles. Conversation
   detail includes roles for matching flows; the conversation table CSV also
-  includes endpoint roles with browser coverage. Dashboard exposure CSV also includes the server role. Other exports and
-  live-install proof remain open. The subsequent flow/recent-entry, threat and
+  includes endpoint roles with browser coverage. Dashboard exposure CSV also includes the server role. Other exports
+  remain open. The subsequent flow/recent-entry, threat and
   capture increment adds exact identity-derived roles and default page CSV
-  coverage, including explicit unknown values; it does not qualify every export
-  or a live custom installation.
+  coverage, including explicit unknown values. Retained stream and capture
+  matching exports now preserve role metadata too. The isolated live custom
+  installation qualifies workload/container surfaces, not every export.
 
 ### UI-4 Dashboard and operational posture
 
