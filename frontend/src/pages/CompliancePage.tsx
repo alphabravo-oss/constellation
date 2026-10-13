@@ -214,7 +214,7 @@ export function CompliancePage() {
             {checks.isFetching && <p role="status" className="text-sm text-muted-foreground">Refreshing control evidence…</p>}
             <section className="space-y-4" data-testid="framework-detail">
               <p className="text-sm text-muted-foreground">{totals!.total.toLocaleString()} evidence rows match the server filters across {active === "all" ? "all reported frameworks" : active}. Metrics cover all matches. Matching CSV covers up to 100,000 rows across pages, independent of visible columns.</p>
-              <ScanInventoryExport context={context} disabled={checks.isFetching} download={() => compliance.exportChecksCSV(request)} />
+              <ScanInventoryExport context={context} disabled={checks.isFetching} download={shouldDownload => compliance.exportChecksCSV(request, shouldDownload)} />
               {revokeExemption.isError && <p role="alert" className="text-sm text-status-error">Could not revoke this exemption. Refresh the controls and try again.</p>}
               <DataTable rows={checkRows} columns={checkColumns} rowKey={item => item.id!} preferencesKey="compliance-controls" testId="compliance-controls-table" pagination={false} manualSorting sort={{ id: sort, dir: order as "asc" | "desc" }} onSortChange={next => route.update({ sort: next?.id ?? null, order: next?.dir ?? null })} emptyState={<EmptyState title="No evaluated controls match these filters" hint="This is a filtered evidence cohort, not a claim that the cluster has no compliance checks." />} />
               {route.page > 0 && checkRows.length === 0 && <Button onClick={() => route.setPage(0)}>First page</Button>}

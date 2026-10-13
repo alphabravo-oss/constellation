@@ -189,7 +189,7 @@ it("continues beyond the old latest100 cap and exports every matching record wit
  await settled(()=>expect(host.querySelectorAll('[data-testid="runtime-live-table"] tbody tr')).toHaveLength(5));
  expect(summaryValues()).toEqual(["205","103","0","0","205"]);expect(host.textContent).toContain("operations/service-200");expect(host.textContent).not.toContain("operations/service-0");
  expect(runtimeEvents.list).toHaveBeenLastCalledWith(expect.objectContaining({offset:200,limit:100,sort:"at",order:"desc"}));
- await act(async()=>findButton("Export matching CSV").click());expect(runtimeEvents.exportCSV).toHaveBeenCalledWith(expect.objectContaining({offset:200,cluster_id:"cluster-a"}));
+ await act(async()=>findButton("Export matching CSV").click());expect(runtimeEvents.exportCSV).toHaveBeenCalledWith(expect.objectContaining({offset:200,cluster_id:"cluster-a"}), expect.any(Function));
  await settled(()=>expect(host.textContent).toContain("Exported all 205 matching records across pages"));
  await act(async()=>findButton("Prev").click());await settled(()=>expect(host.querySelectorAll('[data-testid="runtime-live-table"] tbody tr')).toHaveLength(100));
  expect(new URLSearchParams(history.location.search).getAll("context")).toEqual(["a","b"]);expect(history.location.hash).toBe("#runtime");

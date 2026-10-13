@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Boxes, ChevronLeft, FileWarning, ShieldAlert } from "lucide-react";
-import { fileProfiles, type DeploymentDetail, type DeploymentComplianceEvidence, type DeploymentFileProfile, type DeploymentFileRisk, type DeploymentFinding, type DeploymentImageEvidence, type DeploymentNetworkFlow, type DeploymentPackageEvidence, type DeploymentProcessBaseline, type DeploymentThreatKind, type DeploymentThreatPivot, type FileProfileBundle, type NetworkPolicyLifecycle, type RuntimeEvent, type Violation } from "@/api/client";
+import { fileProfiles, type DeploymentDetail, type DeploymentComplianceEvidence, type DeploymentFileProfile, type DeploymentFileRisk, type DeploymentImageEvidence, type DeploymentNetworkFlow, type DeploymentPackageEvidence, type DeploymentProcessBaseline, type DeploymentThreatKind, type DeploymentThreatPivot, type FileProfileBundle, type NetworkPolicyLifecycle, type RuntimeEvent, type Violation } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { ModePill, StatusPill as SharedStatusPill } from "@/components/ui/status-pill";
@@ -13,7 +13,8 @@ import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { ErrorState, LoadingState, EmptyState } from "@/components/ui/states";
 import { cn } from "@/lib/cn";
 import { fmtRelative } from "@/lib/format";
-import { useDeploymentContext, currentDeployment, actionURL, profileIsOwned, policyIsCurrent, workloadID, nextMode } from "./deployment-detail/context";
+import { useDeploymentContext, deploymentKey, currentDeployment, actionURL, profileIsOwned, policyIsCurrent, workloadID, nextMode } from "./deployment-detail/context";
+import { DeploymentFindingsInventory } from "./DeploymentFindingsInventory";
 import { EvidenceInventory } from "./deployment-detail/EvidenceInventory";
 
 export function DeploymentDetailPage() {
@@ -44,7 +45,7 @@ export function DeploymentDetailPage() {
       {q.isFetching && <p role="status" className="text-sm text-muted-foreground">Refreshing deployment evidence… Authoring is paused until the refresh succeeds.</p>}
       <Tabs key={`${clusterId}/${did}`} value={tab} onValueChange={setTab} items={[
         { value: "overview", label: "Overview", content: <div className="space-y-5"><WorkloadPosture detail={detail} /><Collapse label="Advanced: source coverage and identities"><dl className="grid gap-3 text-sm sm:grid-cols-2"><Field label="Owned workload identities" value={detail.workload_ids.join(" · ") || "Not reported"} wide /><Field label="Returned image links" value={detail.images.length} /><Field label="Returned package reports" value={`${detail.package_evidence.length} · up to 20`} /><Field label="Packages across returned reports" value={sumPackages(detail.package_evidence)} /><Field label="Returned runtime events" value={`${detail.runtime_events.length} · latest 50`} /><Field label="Returned network flows" value={`${detail.network_flows.length} · latest 50`} /><Field label="Returned compliance controls" value={`${detail.compliance_evidence?.length ?? 0} · latest 50`} /></dl><p className="mt-3 text-xs text-muted-foreground">Package counts sum returned reports and can include repeated packages. Activity samples are not aggregate totals.</p></Collapse><a href={`${root}/risk/deployment/${encodeURIComponent(detail.id)}`} className="text-sm text-primary hover:underline">Open deployment risk workspace</a></div> },
-        { value: "findings", label: "Findings", content: <div className="space-y-5"><ImageEvidenceTable images={detail.images} clusterId={clusterId} /><FindingsTable findings={detail.findings} clusterId={clusterId} /></div> },
+        { value: "findings", label: "Findings", content: <div className="space-y-5"><ImageEvidenceTable images={detail.images} clusterId={clusterId} /><DeploymentFindingsInventory deployment={detail} sourceQueryKey={deploymentKey(clusterId, did)} sourceKind="detail" sourceReady={ready} /></div> },
         { value: "network", label: "Network", content: <div className="space-y-5"><DeploymentActionsPanel detail={detail} clusterId={clusterId!} ready={ready} /><NetworkFlowsTable flows={detail.network_flows} clusterId={clusterId!} /></div> },
         { value: "runtime", label: "Runtime", content: <div className="space-y-5"><ProcessBaselinePanel baseline={detail.process_baseline} detail={detail} clusterId={clusterId!} ready={ready} /><ThreatPivotsPanel pivots={detail.threat_pivots ?? []} /><RuntimeEventsPanel events={detail.runtime_events} clusterId={clusterId!} /></div> },
         { value: "files", label: "Files", content: <div className="space-y-5"><FileProfilePanel profile={detail.file_profile} detail={detail} clusterId={clusterId!} ready={ready} /><ImageFileRisksPanel risks={detail.file_risks ?? []} clusterId={clusterId} /></div> },
@@ -390,64 +391,6 @@ function ImageFileRisksPanel({ risks, clusterId }: { risks: DeploymentFileRisk[]
                 className="rounded-none border-0"
         emptyState={
           <div className="px-3 py-8 text-center text-xs text-muted-foreground">No image file-risk artifacts linked to this workload.</div>
-        }
-      />
-    </section>
-  );
-}
-
-function FindingsTable({ findings, clusterId }: { findings: DeploymentFinding[]; clusterId?: string }) {
-  const columns: Column<DeploymentFinding>[] = [
-    {
-      id: "finding",
-      header: "Finding", kind: "name", wrap: true,
-      cell: (finding) => (
-        <>
-          {finding.external_id ? (
-            <a href={`/cve/${finding.external_id}`} className="font-mono text-xs font-medium hover:underline">{finding.external_id}</a>
-          ) : (
-            <a href={`/clusters/${clusterId}/findings/${finding.id}`} className="font-mono text-xs font-medium hover:underline">{finding.kind}</a>
-          )}
-          <div className="mt-1 text-xs text-muted-foreground">{finding.title}</div>
-        </>
-      ),
-    },
-    {
-      id: "package",
-      header: "Package", kind: "text", code: true, wrap: true, size: 200, minSize: 144, maxSize: 280,
-      cell: (finding) => (
-        <>
-          <div className="font-mono text-xs">{finding.package_name || "-"}</div>
-          <div className="mt-1 font-mono text-[11px] text-muted-foreground">{finding.package_version || "-"}</div>
-        </>
-      ),
-    },
-    {
-      id: "severity",
-      header: "Severity", kind: "status",
-      cell: (finding) => <SeverityPill severity={finding.severity} />,
-    },
-    {
-      id: "risk",
-      header: "Risk", kind: "count",
-      cell: (finding) => finding.risk_score,
-      className: "font-semibold",
-    },
-  ];
-  return (
-    <section className="overflow-hidden rounded-lg border border-border bg-card">
-      <header className="border-b border-border px-3 py-2">
-        <h2 className="text-sm font-semibold">Workload findings</h2>
-        <p className="mt-1 text-xs text-muted-foreground">Up to 100 open direct workload findings. These records are separate from canonical image scan counts reported by inventory.</p>
-      </header>
-      <DataTable<DeploymentFinding>
-        rows={findings}
-        preferencesKey="deployment-direct-findings" exportFileName="deployment-returned-findings" sourceLimit={100} sourceCount={findings.length}
-        columns={columns}
-        rowKey={(finding) => finding.id}
-                className="rounded-none border-0"
-        emptyState={
-          <div className="px-3 py-8 text-center text-xs text-muted-foreground">No direct workload findings recorded.</div>
         }
       />
     </section>

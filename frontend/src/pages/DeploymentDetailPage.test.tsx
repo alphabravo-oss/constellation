@@ -1,3 +1,5 @@
+import { deploymentFindingPage, deploymentFindingFixture } from "./deployment-findings/test-fixtures";
+import { TablePreferencesProvider } from "@/contexts/TablePreferencesContext";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { createMemoryHistory, type RouterHistory } from "@tanstack/react-router";
@@ -10,15 +12,16 @@ import { DeploymentDetailPage } from "./DeploymentDetailPage";
 import { fixtureDeployment, fixturePolicy } from "./deployment-detail/test-fixtures";
 const scope = vi.hoisted(() => ({ clusterId: "cluster" as string | undefined, cluster: { id: "cluster" } as { id: string } | undefined, isLoading: false, error: null as Error | null }));
 vi.mock("@/hooks/useCluster", () => ({ useCluster: () => scope }));
-vi.mock("@/api/client", () => ({ deployments: { get: vi.fn() }, fileProfiles: { exportBundle: vi.fn() } }));
+vi.mock("@/api/client", () => ({ deployments: { get: vi.fn(), findings: vi.fn(), findingsCSV: vi.fn() }, fileProfiles: { exportBundle: vi.fn() } }));
 vi.mock("@/lib/csv", () => ({ downloadCsv: vi.fn() }));
 let root: Root | undefined; let host: HTMLDivElement; let client: QueryClient; let history: RouterHistory;
-beforeEach(() => { (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true; Object.assign(scope, { clusterId: "cluster", cluster: { id: "cluster" }, isLoading: false, error: null }); localStorage.clear(); vi.mocked(deployments.get).mockResolvedValue(fixtureDeployment()); });
+beforeEach(() => {
+ vi.mocked(deployments.findings).mockImplementation(async (_id, params) => deploymentFindingPage(params));vi.mocked(deployments.findingsCSV).mockResolvedValue({total:1,exported:1,limit:100000,truncated:false}); (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true; Object.assign(scope, { clusterId: "cluster", cluster: { id: "cluster" }, isLoading: false, error: null }); localStorage.clear(); vi.mocked(deployments.get).mockResolvedValue(fixtureDeployment()); });
 afterEach(() => { act(() => root?.unmount()); root = undefined; client?.clear(); host?.remove(); vi.restoreAllMocks(); vi.resetAllMocks(); });
 async function render(search = "", seed?: (client: QueryClient) => void) {
  host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host); client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); seed?.(client);
  history = createMemoryHistory({ initialEntries: [`/clusters/cluster/deployments/deployment${search}`] });
- await act(async () => root!.render(<QueryClientProvider client={client}><TestRouter history={history} path="/clusters/$clusterId/deployments/$did"><DeploymentDetailPage /></TestRouter></QueryClientProvider>));
+ await act(async () => root!.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{org_id:"org",user_id:"operator"}}><TestRouter history={history} path="/clusters/$clusterId/deployments/$did"><DeploymentDetailPage /></TestRouter></TablePreferencesProvider></QueryClientProvider>));
 }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
 async function tab(name: string) { await act(async () => [...host.querySelectorAll('[role="tab"]')].find(item => item.textContent === name)!.dispatchEvent(new MouseEvent("mousedown", { button: 0, bubbles: true }))); }
@@ -110,4 +113,18 @@ it("shows actual embedded runtime cluster and role while CSV preserves unclassif
 
 it.each(["network","runtime"])("withholds foreign embedded %s rows and CSV",async kind=>{
  const d=fixtureDeployment();d.network_flows=[{id:"foreign-flow",cluster_id:"foreign",src:"private/source",dst:"private/dest",src_platform_role:"core",dst_platform_role:"core",protocol:"tcp",verdict:"allow",bytes:10,packets:1,last_seen_at:"2026-10-12T00:00:00Z"}];d.runtime_events=[{id:"foreign-event",cluster_id:"foreign",platform_role:"core",kind:"process_exec",workload_id:"private/workload",node_id:"node",source:"ebpf",severity:"high",verdict:"alert",at:"2026-10-12T00:00:00Z",attack_techniques:[],payload:{}}];vi.mocked(deployments.get).mockResolvedValue(d);await render(`?tab=${kind}`);await settled(()=>expect(host.textContent).toContain(`Embedded ${kind==="network"?"network flows":"runtime events"} do not match this cluster`));expect(host.textContent).not.toContain(kind==="network"?"private/source":"private/workload");expect(downloadCsv).not.toHaveBeenCalled();
+});
+
+it("replaces the direct finding sample with a scoped full inventory beyond1000 and matching export", async () => {
+ const corpus=Array.from({length:1207},(_,index)=>deploymentFindingFixture(index));
+ vi.mocked(deployments.findings).mockImplementation(async(id,params)=>deploymentFindingPage(params,corpus,id));
+ await render("?tab=findings&findings_page=13&custom=keep");await settled(()=>expect(host.querySelectorAll('[data-testid="deployment-findings-table"] tbody tr')).toHaveLength(7));
+ expect(host.textContent).toContain("1,207 matching workload finding records");expect(host.textContent).not.toContain("Up to 100 open direct workload findings");expect([...host.querySelectorAll("h2")].some(header=>header.textContent==="Running images")).toBe(true);
+ expect(deployments.findings).toHaveBeenCalledWith("deployment",expect.objectContaining({cluster_id:"cluster",offset:1200,lifecycle:"open"}));
+ await act(async()=>button("Export matching CSV").click());await settled(()=>expect(deployments.findingsCSV).toHaveBeenCalledWith("deployment",expect.objectContaining({cluster_id:"cluster",offset:1200,limit:100}), expect.any(Function)));expect(history.location.search).toContain("custom=keep");
+});
+it("blocks finding rows when the parent deployment cache is invalidated before refresh", async () => {
+ await render("?tab=findings");await settled(()=>expect(host.querySelector('[data-testid="deployment-findings-table"]')).not.toBeNull());
+ await act(async()=>client.getQueryCache().find({queryKey:["deployment","cluster","deployment"],exact:true})!.setState({isInvalidated:true}));
+ await settled(()=>expect(host.querySelector('[data-testid="deployment-findings-table"]')).toBeNull());expect(button("Export matching CSV")).toBeUndefined();
 });

@@ -162,7 +162,7 @@ it("exports matching jobs across pages with exact filters and visible failure fe
   await render("list",`/settings/scanner?status=failed&target_type=image&cluster_id=${cluster}&registry_id=${registry}&page=3`);
   await settled(()=>expect(host.textContent).toContain("205 matching jobs"));await click("Export matching CSV");
   await settled(()=>expect(host.textContent).toContain("Matching CSV could not be exported"));
-  expect(scanJobs.exportCSV).toHaveBeenLastCalledWith(expect.objectContaining({cluster_id:cluster,registry_id:registry,status:"failed",target_type:"image",sort:"requested",order:"desc",offset:200}));
+  expect(scanJobs.exportCSV).toHaveBeenLastCalledWith(expect.objectContaining({cluster_id:cluster,registry_id:registry,status:"failed",target_type:"image",sort:"requested",order:"desc",offset:200}), expect.any(Function));
   await click("Export matching CSV");await settled(()=>expect(host.textContent).toContain("Exported all 205 matching records across pages"));
 });
 it("blocks a stale action from invalidated cache before React rerenders", async () => {

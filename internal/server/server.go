@@ -665,6 +665,8 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/deployments", s.requireVerbNS(rbac.VerbReadFindings, deps.List))
 			r.Get("/deployments.csv", s.requireVerbNS(rbac.VerbReadFindings, deps.ExportCSV))
 			r.Get("/deployments/{id}", s.requireVerb(rbac.VerbReadFindings, deps.Get))
+			r.Get("/deployments/{id}/findings", s.requireVerb(rbac.VerbReadFindings, deps.FindingsInventory))
+			r.Get("/deployments/{id}/findings.csv", s.requireVerb(rbac.VerbReadFindings, deps.FindingsCSV))
 			r.Get("/violations", s.requireVerb(rbac.VerbReadFindings, deps.Violations))
 
 			networkMap := network.NewNetwork(s.db).WithAudit(s.auditLog)

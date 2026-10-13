@@ -421,7 +421,7 @@ export function RegistryImagesPage() {
         <ScanInventoryExport
           context={JSON.stringify([scope.owner, regId, filters])}
           disabled={!ready || !summary?.total}
-          download={() => registries.imagesCSV(regId!, filters)}
+          download={shouldDownload => registries.imagesCSV(regId!, filters, shouldDownload)}
         />
       </div>
       {!registryReady ? (

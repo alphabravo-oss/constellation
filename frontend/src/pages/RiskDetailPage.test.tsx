@@ -1,3 +1,5 @@
+import { deploymentFindingPage, deploymentFindingFixture } from "./deployment-findings/test-fixtures";
+import { TablePreferencesProvider } from "@/contexts/TablePreferencesContext";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { createMemoryHistory, type RouterHistory } from "@tanstack/react-router";
@@ -10,7 +12,7 @@ import { RiskDetailPage } from "./RiskDetailPage";
 
 const state = vi.hoisted(() => ({ clusterId: "cluster" as string | undefined, cluster: { id: "cluster", name: "Demo" } as { id: string; name: string } | undefined, isLoading: false, error: null as Error | null }));
 vi.mock("@/hooks/useCluster", () => ({ useCluster: () => state }));
-vi.mock("@/api/client", () => ({ assets: { get: vi.fn() }, deployments: { get: vi.fn() }, findings: { get: vi.fn(), list: vi.fn(), exportCSV: vi.fn() }, nodes: { get: vi.fn() }, network: { map: vi.fn() }, enterprise: { runtime: vi.fn() }, fileProfiles: { get: vi.fn() }, compliance: { summary: vi.fn() } }));
+vi.mock("@/api/client", () => ({ assets: { get: vi.fn() }, deployments: { get: vi.fn(), findings: vi.fn(), findingsCSV: vi.fn() }, findings: { get: vi.fn(), list: vi.fn(), exportCSV: vi.fn() }, nodes: { get: vi.fn() }, network: { map: vi.fn() }, enterprise: { runtime: vi.fn() }, fileProfiles: { get: vi.fn() }, compliance: { summary: vi.fn() } }));
 vi.mock("@/lib/csv", () => ({ downloadCsv: vi.fn() }));
 const assetID = "11111111-1111-4111-8111-111111111111";
 const asset = (): AssetDetail => ({ asset: { id: assetID, cluster_id: "cluster", kind: "host", name: "exact-asset", criticality: "high", labels: {}, ai_workload: false, finding_count: 0, critical_findings: 0, high_findings: 0, open_findings: 0, sbom_count: 0, first_seen_at: "2026-10-12T00:00:00Z", last_seen_at: "2026-10-12T00:00:00Z" }, findings: [], sboms: [], image_acceptances: [] });
@@ -20,6 +22,7 @@ const deployment = (): DeploymentDetail => ({ id: "deployment", cluster_id: "clu
 const response = (rows: Finding[], total = rows.length) => ({ findings: rows, total, limit: 100, offset: 0, has_more: total > rows.length, lifecycle_counts: { open: total, in_progress: 0, accepted: 0, suppressed: 0, triaged: 0, resolved: 0 } });
 let host: HTMLDivElement; let root: Root | undefined; let client: QueryClient; let history: RouterHistory;
 beforeEach(() => {
+ vi.mocked(deployments.findings).mockImplementation(async (_id, params) => deploymentFindingPage(params));vi.mocked(deployments.findingsCSV).mockResolvedValue({total:1,exported:1,limit:100000,truncated:false});
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   Object.assign(state, { clusterId: "cluster", cluster: { id: "cluster", name: "Demo" }, isLoading: false, error: null });
   localStorage.clear();
@@ -31,7 +34,7 @@ async function render(type = "asset", id = assetID, search = "", seed?: (client:
   host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); seed?.(client);
   history = createMemoryHistory({ initialEntries: [`/clusters/cluster/risk/${type}/${id}${search}`] });
-  await act(async () => root!.render(<QueryClientProvider client={client}><TestRouter history={history} path="/clusters/$clusterId/risk/$entityType/$entityId"><RiskDetailPage /></TestRouter></QueryClientProvider>));
+  await act(async () => root!.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{org_id:"org",user_id:"operator"}}><TestRouter history={history} path="/clusters/$clusterId/risk/$entityType/$entityId"><RiskDetailPage /></TestRouter></TablePreferencesProvider></QueryClientProvider>));
 }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
 const button = (label: string) => [...host.querySelectorAll("button")].find(item => item.textContent?.trim() === label)!;
@@ -180,4 +183,17 @@ it("exports the selected finding's actual platform role when its optional column
   await act(async () => button("Export returned findings").click());
   const [, headers, rows] = vi.mocked(downloadCsv).mock.calls.at(-1)!;
   expect(rows[0][headers.indexOf("Platform role")]).toBe("core");
+});
+
+it("uses the same paged deployment finding inventory in Risk while retaining parent context", async () => {
+ const corpus=Array.from({length:1207},(_,index)=>deploymentFindingFixture(index));vi.mocked(deployments.findings).mockImplementation(async(id,params)=>deploymentFindingPage(params,corpus,id));
+ await render("deployment","deployment","?tab=findings&findings_page=13&custom=risk-context");await settled(()=>expect(host.querySelectorAll('[data-testid="deployment-findings-table"] tbody tr')).toHaveLength(7));
+ expect(host.textContent).toContain("1,207 matching workload finding records");expect(host.querySelector('[data-testid="risk-generic-findings"]')).toBeNull();expect(findings.list).not.toHaveBeenCalled();expect(host.querySelector('a[href*="/findings/workload-finding"]')).toBeNull();
+ await act(async()=>button("Prev").click());await settled(()=>expect(deployments.findings).toHaveBeenLastCalledWith("deployment",expect.objectContaining({offset:1100})));expect(history.location.search).toContain("tab=findings");expect(history.location.search).toContain("custom=risk-context");
+ await act(async()=>history.back());await settled(()=>expect(deployments.findings).toHaveBeenLastCalledWith("deployment",expect.objectContaining({offset:1200})));
+});
+it("keeps a bounded deployment overview preview read-only and links to the full inventory with context", async () => {
+ const d=deployment();d.findings=[{id:"same-uuid",kind:"runtime",title:"Compatibility preview observation",severity:"high",risk_score:60,lifecycle:"open",last_seen_at:"2026-10-12T23:00:00Z"}];vi.mocked(deployments.get).mockResolvedValue(d);
+ await render("deployment","deployment","?tab=overview&findings_page=13&custom=keep");await settled(()=>expect(host.textContent).toContain("Compatibility preview observation"));expect(host.querySelector('a[href$="/findings/same-uuid"]')).toBeNull();expect(deployments.findings).not.toHaveBeenCalled();
+ const link=[...host.querySelectorAll<HTMLAnchorElement>("a")].find(anchor=>anchor.textContent==="Browse workload findings")!;const params=new URLSearchParams(link.getAttribute("href")!.slice(1));expect(params.get("tab")).toBe("findings");expect(params.get("findings_page")).toBe("13");expect(params.get("custom")).toBe("keep");
 });

@@ -137,7 +137,7 @@ it("keeps threat totals, server sort, continuation and matching exports on one U
  await settle(() => expect(host.querySelector('tbody')?.textContent).toContain("threat-100"));
  await click("Severity"); await settle(() => expect(runtimeThreats.page).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "severity", offset: 0, hide_platform: false, hours: 168 })));
  await settle(() => expect(host.querySelectorAll('[data-testid="network-threats-table"] tbody tr')).toHaveLength(100));
- await click("Export matching CSV"); await settle(() => expect(runtimeThreats.exportCSV).toHaveBeenCalledWith(expect.objectContaining({ cluster_id: "cluster", sort: "severity", offset: 0, hide_platform: false })));
+ await click("Export matching CSV"); await settle(() => expect(runtimeThreats.exportCSV).toHaveBeenCalledWith(expect.objectContaining({ cluster_id: "cluster", sort: "severity", offset: 0, hide_platform: false }), expect.any(Function)));
  expect(history.location.search).toContain("context=keep");
  await act(async () => history.back()); await settle(() => expect(history.location.search).toContain("threat_page=2"));
  await settle(() => expect(host.querySelector('tbody')?.textContent).toContain("threat-100"));
@@ -171,7 +171,7 @@ it("traverses full conversation cohorts with server sorting, matching export and
   await settle(() => expect(tableRows("conversations")[0].textContent).toContain("prod/source-051"));
   expect(host.querySelector('[data-testid="network-conversations-table"] th[data-column-id="bytes"]')?.getAttribute("aria-sort")).toBe("ascending");
   await clickLabel("Export matching CSV");
-  await settle(() => expect(network.conversationsCSV).toHaveBeenCalledWith(expect.objectContaining({sort:"bytes",order:"asc",offset:0,hide_platform:true,namespace:"prod",verdict:"block",hours:168,cluster_id:"cluster"})));
+  await settle(() => expect(network.conversationsCSV).toHaveBeenCalledWith(expect.objectContaining({sort:"bytes",order:"asc",offset:0,hide_platform:true,namespace:"prod",verdict:"block",hours:168,cluster_id:"cluster"}), expect.any(Function)));
   await settle(() => expect(host.textContent).toContain("177"));
   await act(async () => history.back());
   await settle(() => expect(tableRows("conversations")[0].textContent).toContain("prod/source-203"));
@@ -197,7 +197,7 @@ it("keeps full session summaries, distinct same-ID rows, server sort/export and 
   await settle(() => expect(tableRows("sessions")[0].textContent).toContain("prod/api-050"));
   expect(host.querySelector('[data-testid="network-sessions-table"] th[data-column-id="workload"]')?.getAttribute("aria-sort")).toBe("ascending");
   await clickLabel("Export matching CSV");
-  await settle(() => expect(network.sessionsCSV).toHaveBeenCalledWith(expect.objectContaining({cluster_id:"cluster",sort:"workload",order:"asc",hide_platform:true,offset:0})));
+  await settle(() => expect(network.sessionsCSV).toHaveBeenCalledWith(expect.objectContaining({cluster_id:"cluster",sort:"workload",order:"asc",hide_platform:true,offset:0}), expect.any(Function)));
   expect(vi.mocked(network.sessionsCSV).mock.calls[0][0]).not.toHaveProperty("hours");
   await act(async () => history.back());
   await settle(() => expect(tableRows("sessions")[0].textContent).toContain("prod/api-304"));
@@ -208,7 +208,7 @@ it("keeps full session summaries, distinct same-ID rows, server sort/export and 
   await act(async () => history.push(networkViewHref("cluster",new URLSearchParams("tab=sessions&hide_platform=true&context=keep"),"","network",buildNetworkSavedViewSnapshot({workspaceTab:"sessions",hours:24,namespace:"",verdict:"",verdictsVisible:{allow:true,alert:true,block:true},protocolFilter:[],namespaceFilter:[],hiddenKinds:[],scopeMode:"both",pcapFilters:{workload:"",bpf_filter:""},hidePlatformComponents:true,sessionFilters:{protocol:"tcp",application:"https",port:"443",peer:"10.0.0.1",workload:"prod/api-40",node:""}}))));
   await settle(() => expect(tableRows("sessions")).toHaveLength(5));
   await clickLabel("Export matching CSV");
-  await settle(() => expect(network.sessionsCSV).toHaveBeenLastCalledWith(expect.objectContaining({workload:"prod/api-40",protocol:"tcp",application:"https",port:443,peer:"10.0.0.1",hide_platform:true,offset:0})));
+  await settle(() => expect(network.sessionsCSV).toHaveBeenLastCalledWith(expect.objectContaining({workload:"prod/api-40",protocol:"tcp",application:"https",port:443,peer:"10.0.0.1",hide_platform:true,offset:0}), expect.any(Function)));
   expect(network.killSession).not.toHaveBeenCalled();
 }, 20000);
 

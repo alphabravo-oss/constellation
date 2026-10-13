@@ -180,7 +180,7 @@ export function RuntimePage() {
       : liveScopeMismatch ? <ErrorState title="Runtime events do not match the selected scope, filters or page." action={<Button onClick={() => void liveQ.refetch()}>Retry latest events</Button>} />
       : !liveReady ? <LoadingState label="Loading runtime events…" /> : <>
         <p className="text-sm text-muted-foreground">{liveQ.data.total!.toLocaleString()} event records match these filters.</p>
-        <ScanInventoryExport context={JSON.stringify(liveKey)} disabled={liveQ.isFetching || !liveReady} download={() => runtimeEvents.exportCSV(liveRequest)} />
+        <ScanInventoryExport context={JSON.stringify(liveKey)} disabled={liveQ.isFetching || !liveReady} download={shouldDownload => runtimeEvents.exportCSV(liveRequest, shouldDownload)} />
         <DataTable rows={liveEvents} rowKey={(event) => event.row_id!} columns={liveColumns} pagination={false} manualSorting sort={{ id: liveSort, dir: liveOrder as "asc" | "desc" }} onSortChange={next => route.update({ sort: next?.id || null, order: next?.dir || null })}
           defaultDensity="compact" preferencesKey="runtime-live-events" exportFileName="runtime-events-page" testId="runtime-live-table"
           emptyState={<p className="px-3 py-6 text-sm text-muted-foreground">No runtime events match these filters.</p>} />

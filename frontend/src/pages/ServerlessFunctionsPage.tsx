@@ -118,7 +118,7 @@ export function ServerlessFunctionsPage() {
         <StatCard label="Role Risks" value={summary.role_risks.toLocaleString()} icon={<KeyRound className="h-3.5 w-3.5" />} tone={summary.role_risks > 0 ? "high" : "neutral"} hint="critical/high role posture" />
       </StatGrid>}
 
-      <div className="flex flex-wrap gap-3"><Button disabled={q.isFetching || route.debouncing || !scope.ready || !validFilters} onClick={() => void q.refetch()}>Refresh</Button><ScanInventoryExport context={JSON.stringify([scope.owner, clusterId, request])} disabled={!available || q.isFetching} download={() => serverlessFunctions.exportCSV(request)} /></div>
+      <div className="flex flex-wrap gap-3"><Button disabled={q.isFetching || route.debouncing || !scope.ready || !validFilters} onClick={() => void q.refetch()}>Refresh</Button><ScanInventoryExport context={JSON.stringify([scope.owner, clusterId, request])} disabled={!available || q.isFetching} download={shouldDownload => serverlessFunctions.exportCSV(request, shouldDownload)} /></div>
       {q.isFetching && q.isSuccess && <p role="status" className="text-sm text-muted-foreground">Refreshing scan inventory…</p>}
       <p className="text-xs text-muted-foreground">Matching CSV includes fixed inventory columns across all matching pages (up to 100,000 records). The table’s page CSV follows visible columns.</p>
       <section className="rounded-lg border border-border bg-card p-3">

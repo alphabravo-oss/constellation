@@ -307,7 +307,7 @@ export function ComponentsPage() {
 
       <section className="flex flex-col gap-6">
         {!inventoryAvailable ? q.isError || q.isSuccess && !inventoryScopeValid ? <ErrorState title={q.isError ? "Component inventory could not be loaded." : "Component inventory does not match the active cluster."} error={q.error} action={<Button onClick={() => void q.refetch()}>Retry</Button>} /> : <LoadingState label="Loading component inventory…" /> : <>
-        <ScanInventoryExport context={context} disabled={q.isFetching} download={() => componentsInventory.exportCSV(request)} />
+        <ScanInventoryExport context={context} disabled={q.isFetching} download={shouldDownload => componentsInventory.exportCSV(request, shouldDownload)} />
         <DataTable<ComponentInstance>
           defaultHiddenColumnIds={["hostname", "restarts", "heartbeat"]}
           rows={filtered}

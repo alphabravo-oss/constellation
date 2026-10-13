@@ -115,7 +115,7 @@ export function RepositoryScansPage() {
         <StatCard label="Attestations" value={summary.attestations.toLocaleString()} icon={<Fingerprint className="h-3.5 w-3.5" />} hint={`${summary.trusted_attestations} trusted · ${summary.unverified_attestations} unverified`} />
       </StatGrid>}
 
-      <div className="flex flex-wrap gap-3"><Button disabled={q.isFetching || route.debouncing || !scope.ready || !validFilters} onClick={() => void q.refetch()}>Refresh</Button><ScanInventoryExport context={JSON.stringify([scope.owner, clusterId, request])} disabled={!available || q.isFetching} download={() => repositoryScans.exportCSV(request)} /></div>
+      <div className="flex flex-wrap gap-3"><Button disabled={q.isFetching || route.debouncing || !scope.ready || !validFilters} onClick={() => void q.refetch()}>Refresh</Button><ScanInventoryExport context={JSON.stringify([scope.owner, clusterId, request])} disabled={!available || q.isFetching} download={shouldDownload => repositoryScans.exportCSV(request, shouldDownload)} /></div>
       {q.isFetching && q.isSuccess && <p role="status" className="text-sm text-muted-foreground">Refreshing scan inventory…</p>}
       <p className="text-xs text-muted-foreground">Matching CSV includes fixed inventory columns across all matching pages (up to 100,000 records). The table’s page CSV follows visible columns.</p>
       <section className="rounded-lg border border-border bg-card p-3">

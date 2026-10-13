@@ -80,7 +80,7 @@ it("isolates account queries and suppresses evidence when cluster resolution or 
 it("exports matching filters across pages and reports truncation or download failure", async () => {
  vi.mocked(compliance.exportEvidenceCSV).mockResolvedValueOnce({ total: 100005, exported: 100000, limit: 100000, truncated: true }).mockRejectedValueOnce(new Error("download failed"));
  await render("&evidence_scope=node&evidence_status=fail&evidence_page=2"); await settle(() => expect(rows()).toHaveLength(100));
- await act(async () => button("Export matching CSV").click()); expect(compliance.exportEvidenceCSV).toHaveBeenCalledWith(expect.objectContaining({ scope: "node", status: "fail", offset: 100 }));
+ await act(async () => button("Export matching CSV").click()); expect(compliance.exportEvidenceCSV).toHaveBeenCalledWith(expect.objectContaining({ scope: "node", status: "fail", offset: 100 }), expect.any(Function));
  await settle(() => expect(host.textContent).toContain("Export capped at 100,000 of 100,005")); await act(async () => button("Export matching CSV").click());
  await settle(() => expect(host.textContent).toContain("Matching CSV could not be exported"));
 });

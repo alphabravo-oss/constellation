@@ -104,7 +104,7 @@ it.each(scans)("%s keeps server ordering authoritative and restores URL sorting 
 it.each(scans)("%s exports matching records beyond the current page with URL filters and order", async kind => {
  const key = kind === "image" ? "severity" : kind === "repository" ? "status" : "posture"; const value = kind === "repository" ? "failed" : "high";
  await render(kind, `?${key}=${value}&page=7&sort=scan&order=asc&q=literal%25_value`); await ready(kind);
- await act(async () => button("Export matching CSV").click()); await settle(() => expect(exportAPI(kind)).toHaveBeenCalledWith(expect.objectContaining({ [key]: value, sort: "scan", order: "asc", q: "literal%_value" })));
+ await act(async () => button("Export matching CSV").click()); await settle(() => expect(exportAPI(kind)).toHaveBeenCalledWith(expect.objectContaining({ [key]: value, sort: "scan", order: "asc", q: "literal%_value" }), expect.any(Function)));
  await settle(() => expect(host.textContent).toContain("Exported all 800 matching records across pages"));
 });
 it.each(scans)("%s shows matching-export failures and caps without claiming a complete result", async kind => {

@@ -289,7 +289,7 @@ it("loads source pages beyond500 with literal filters, matching summaries and ex
     severity: "critical",
     sort: "image",
     order: "asc",
-  });
+  }, expect.any(Function));
   await act(async () => button("Export this page CSV").click());
   expect(vi.mocked(downloadCsv).mock.calls[0][2]).toHaveLength(10);
   expect(history!.location.hash).toBe("#proof");
@@ -359,6 +359,11 @@ it("resets only current view pages when filters/sort change and restores control
       "images",
       expect.objectContaining({ sort: "findings", order: "desc" }),
     ),
+  );
+  await settled(() =>
+    expect(
+      host.querySelector('th[data-column-id="findings"]')?.getAttribute("aria-sort"),
+    ).toBe("descending"),
   );
   await act(async () => button("Finding instances").click());
   await settled(() =>

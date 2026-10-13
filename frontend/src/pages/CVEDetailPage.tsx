@@ -335,11 +335,11 @@ export function CVEDetailPage() {
         <ScanInventoryExport
           context={JSON.stringify([owner, cveKey, view, request])}
           disabled={!ready || !summary?.total}
-          download={() => {
+          download={shouldDownload => {
             const { limit: _limit, offset: _offset, ...filters } = request;
             void _limit;
             void _offset;
-            return cveApi.affectedInventoryCSV(cveKey, view, filters);
+            return cveApi.affectedInventoryCSV(cveKey, view, filters, shouldDownload);
           }}
         />
       </div>

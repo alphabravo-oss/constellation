@@ -6435,6 +6435,318 @@
           "source",
           "org_id"
         ]
+      },
+      "DeploymentFindingInventorySummary": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "critical": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "high": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "fixable": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "open": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "in_progress": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "triaged": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "accepted": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "suppressed": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "resolved": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "canonical": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "pod": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "ambiguous_owners": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "other_lifecycle": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "total",
+          "critical",
+          "high",
+          "fixable",
+          "open",
+          "in_progress",
+          "triaged",
+          "accepted",
+          "suppressed",
+          "resolved",
+          "canonical",
+          "pod",
+          "ambiguous_owners",
+          "other_lifecycle"
+        ]
+      },
+      "DeploymentFindingInventoryRecord": {
+        "type": "object",
+        "properties": {
+          "row_id": {
+            "type": "string",
+            "description": "Physical finding record identity, retaining both finding UUID and first_seen_at; UUID alone is not a unique historical record."
+          },
+          "kind": {
+            "type": "string"
+          },
+          "external_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "lifecycle": {
+            "type": "string"
+          },
+          "target_ref": {
+            "type": "string"
+          },
+          "package_name": {
+            "type": "string"
+          },
+          "package_version": {
+            "type": "string"
+          },
+          "fixed_version": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "first_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "risk_score": {
+            "type": "integer"
+          },
+          "target_type": {
+            "type": "string",
+            "enum": [
+              "workload"
+            ]
+          },
+          "fixable": {
+            "type": "boolean"
+          },
+          "source_cluster_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true,
+            "description": "Original findings.cluster_id, which may differ from the target deployment cluster."
+          },
+          "target_cluster_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "effective_target_cluster_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "COALESCE(target_cluster_id,cluster_id); always the requested owned deployment cluster."
+          },
+          "platform_role": {
+            "type": "string",
+            "enum": [
+              "",
+              "core"
+            ],
+            "description": "Backend-evaluated role for exact workload evidence. Ambiguous label-derived ownership and contradictory source/target cluster identity remain unknown."
+          },
+          "attribution": {
+            "type": "string",
+            "enum": [
+              "canonical",
+              "pod"
+            ]
+          },
+          "owner_count": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "owner_ambiguous": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "row_id",
+          "kind",
+          "external_id",
+          "title",
+          "severity",
+          "lifecycle",
+          "target_ref",
+          "package_name",
+          "package_version",
+          "fixed_version",
+          "id",
+          "first_seen_at",
+          "last_seen_at",
+          "risk_score",
+          "target_type",
+          "fixable",
+          "source_cluster_id",
+          "target_cluster_id",
+          "effective_target_cluster_id",
+          "platform_role",
+          "attribution",
+          "owner_count",
+          "owner_ambiguous"
+        ]
+      },
+      "DeploymentFindingInventoryResponse": {
+        "type": "object",
+        "properties": {
+          "deployment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "workload_id": {
+            "type": "string"
+          },
+          "owner_count": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "owner_ambiguous": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeploymentFindingInventoryRecord"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "summary": {
+            "$ref": "#/components/schemas/DeploymentFindingInventorySummary"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          "sort": {
+            "type": "string"
+          },
+          "order": {
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ]
+          },
+          "filters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              },
+              "lifecycle": {
+                "type": "string"
+              },
+              "severity": {
+                "type": "string"
+              },
+              "fixable": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q",
+              "lifecycle",
+              "severity",
+              "fixable"
+            ]
+          },
+          "source_complete": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "summary_scope": {
+            "type": "string",
+            "enum": [
+              "matching_direct_workload_findings"
+            ]
+          }
+        },
+        "required": [
+          "deployment_id",
+          "cluster_id",
+          "workload_id",
+          "owner_count",
+          "owner_ambiguous",
+          "items",
+          "total",
+          "summary",
+          "has_more",
+          "limit",
+          "offset",
+          "sort",
+          "order",
+          "filters",
+          "source_complete",
+          "summary_scope"
+        ]
       }
     },
     "responses": {
@@ -12991,6 +13303,399 @@
         },
         "summary": "Get deployments",
         "description": " Embedded runtime_events include actual cluster_id and explicit platform_role; network_flows include actual cluster_id, src_platform_role and dst_platform_role. Exact tenant/cluster/ownership resolution leaves IP or ambiguous roles empty and rejects classification failures. Unknown deployment cluster does not match other clusters. Each embedded evidence list remains bounded at50 rows, ordered by timestamp then ID."
+      }
+    },
+    "/api/v1/deployments/{id}/findings": {
+      "get": {
+        "summary": "List deployment workload findings",
+        "description": "Read-only inventory of direct workload finding records for one exact owned deployment. Default lifecycle=open preserves the legacy detail cohort; lifecycle=all includes all retained lifecycle states. Effective target cluster uses COALESCE(target_cluster_id,cluster_id), preserving legacy target-cluster precedence while exposing the original source cluster separately. Canonical namespace/name evidence is shared across workload kinds and reports ambiguous owners; pod evidence requires exact uniquely owned references in the same organization and cluster, never guessed prefixes. Physical identity includes UUID and first_seen_at. Counts, summaries and pages share a repeatable-read snapshot of all matching retained records and are independent of the legacy 100-record detail sample. source_complete describes this retained cohort, not scanner coverage or collection completeness. This is distinct from image scan findings and deployment inventory severity totals.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "description": "Exact organization-owned cluster for this deployment."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Trimmed, case-insensitive literal substring search; not the global Findings search DSL."
+          },
+          {
+            "name": "lifecycle",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "open",
+                "triaged",
+                "in_progress",
+                "resolved",
+                "suppressed",
+                "accepted"
+              ],
+              "default": "open"
+            }
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "critical",
+                "high",
+                "medium",
+                "low",
+                "info",
+                "unknown"
+              ]
+            }
+          },
+          {
+            "name": "fixable",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "true",
+                "false"
+              ]
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "finding",
+                "cve",
+                "severity",
+                "risk",
+                "lifecycle",
+                "kind",
+                "package",
+                "fixed",
+                "observed",
+                "first_seen"
+              ],
+              "default": "risk"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483647,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Missing or invalid identifier, duplicate parameter, filter, sort or page bound.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authenticated user subject required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "read-findings permission required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Deployment or cluster not found in the authenticated organization and requested scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Scope or finding evidence could not be read; failure is not an empty inventory or export.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Matching summary and requested finding page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeploymentFindingInventoryResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/deployments/{id}/findings.csv": {
+      "get": {
+        "summary": "Export matching deployment workload findings",
+        "description": "Read-only inventory of direct workload finding records for one exact owned deployment. Default lifecycle=open preserves the legacy detail cohort; lifecycle=all includes all retained lifecycle states. Effective target cluster uses COALESCE(target_cluster_id,cluster_id), preserving legacy target-cluster precedence while exposing the original source cluster separately. Canonical namespace/name evidence is shared across workload kinds and reports ambiguous owners; pod evidence requires exact uniquely owned references in the same organization and cluster, never guessed prefixes. Physical identity includes UUID and first_seen_at. Counts, summaries and pages share a repeatable-read snapshot of all matching retained records and are independent of the legacy 100-record detail sample. source_complete describes this retained cohort, not scanner coverage or collection completeness. This is distinct from image scan findings and deployment inventory severity totals. CSV ignores valid pagination values, preserves the same filters and ordering, exports at most 100,000 records and reports truncation. A row is evidence, not an authorization to mutate a historical record through a UUID-only endpoint.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "description": "Exact organization-owned cluster for this deployment."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Trimmed, case-insensitive literal substring search; not the global Findings search DSL."
+          },
+          {
+            "name": "lifecycle",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "open",
+                "triaged",
+                "in_progress",
+                "resolved",
+                "suppressed",
+                "accepted"
+              ],
+              "default": "open"
+            }
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "critical",
+                "high",
+                "medium",
+                "low",
+                "info",
+                "unknown"
+              ]
+            }
+          },
+          {
+            "name": "fixable",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "true",
+                "false"
+              ]
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "finding",
+                "cve",
+                "severity",
+                "risk",
+                "lifecycle",
+                "kind",
+                "package",
+                "fixed",
+                "observed",
+                "first_seen"
+              ],
+              "default": "risk"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Missing or invalid identifier, duplicate parameter, filter, sort or page bound.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authenticated user subject required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "read-findings permission required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Deployment or cluster not found in the authenticated organization and requested scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Scope or finding evidence could not be read; failure is not an empty inventory or export.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Matching retained finding records across pages.",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Export-Total": {
+                "description": "Total matching records before the CSV cap.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-Export-Limit": {
+                "description": "Maximum exported matching records.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "enum": [
+                    100000
+                  ]
+                }
+              },
+              "X-Export-Truncated": {
+                "description": "True exactly when matching total exceeds 100,000. Narrow filters for an uncapped matching export.",
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/events": {

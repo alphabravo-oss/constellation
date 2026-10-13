@@ -462,6 +462,22 @@ SELECT DISTINCT pod_workload_id
 	return uniqueStrings(out)
 }
 
+// deploymentLinkedImageScanMatchSQL uses the existing l/r query aliases. A known
+// opaque digest is authoritative; mutable references resolve only absent digests.
+const deploymentLinkedImageScanMatchSQL = `              -- A known opaque digest is authoritative. Mutable references can
+              -- resolve a scan only when the workload link has no digest.
+              (btrim(COALESCE(l.image_digest,'')) <> '' AND r.image_digest = l.image_digest)
+           OR (btrim(COALESCE(l.image_digest,'')) = '' AND (
+                 (l.image_ref <> '' AND r.image_ref = l.image_ref)
+              OR (l.image_ref_normalized <> '' AND r.image_ref_normalized = l.image_ref_normalized)
+              OR (l.image_repository IS NOT NULL AND l.image_repository <> ''
+                  AND r.image_repository = l.image_repository
+                  AND l.image_tag IS NOT NULL AND l.image_tag <> ''
+                  AND r.image_tag = l.image_tag)
+              ))`
+
+const deploymentLinkedImageScanOrderSQL = `r.last_scanned_at DESC NULLS LAST, r.id DESC`
+
 func (h *Deployments) deploymentImages(r *http.Request, orgID, deploymentID uuid.UUID) ([]deploymentImageDTO, error) {
 	rows, err := h.db.Pool().Query(r.Context(), `
 SELECT l.image_ref,
@@ -480,6 +496,7 @@ SELECT l.image_ref,
        sr.last_scanned_at,
        l.last_seen_at
   FROM image_workload_links l
+  JOIN deployments d ON d.id=l.deployment_id AND d.org_id=l.org_id AND d.cluster_id=l.cluster_id
   LEFT JOIN LATERAL (
       -- ponytail: severity rollups are computed from image_scan_findings (the
       -- source of truth) rather than denormalized columns on image_scan_results,
@@ -487,23 +504,17 @@ SELECT l.image_ref,
       -- detail query; fold into one GROUP BY only if this shows up in profiling.
       SELECT r.*,
              (SELECT count(*) FROM image_scan_findings f
-               WHERE f.image_scan_result_id = r.id AND lower(f.severity) = 'critical') AS critical_count,
+               WHERE f.image_scan_result_id = r.id AND f.org_id=r.org_id AND lower(f.severity) = 'critical') AS critical_count,
              (SELECT count(*) FROM image_scan_findings f
-               WHERE f.image_scan_result_id = r.id AND lower(f.severity) = 'high') AS high_count,
+               WHERE f.image_scan_result_id = r.id AND f.org_id=r.org_id AND lower(f.severity) = 'high') AS high_count,
              (SELECT COALESCE(max(f.risk_score), 0) FROM image_scan_findings f
-               WHERE f.image_scan_result_id = r.id) AS max_risk_score
+               WHERE f.image_scan_result_id = r.id AND f.org_id=r.org_id) AS max_risk_score
         FROM image_scan_results r
        WHERE r.org_id = l.org_id
          AND (
-              (l.image_digest IS NOT NULL AND l.image_digest <> '' AND r.image_digest = l.image_digest)
-           OR (l.image_ref <> '' AND r.image_ref = l.image_ref)
-           OR (l.image_ref_normalized <> '' AND r.image_ref_normalized = l.image_ref_normalized)
-           OR (l.image_repository IS NOT NULL AND l.image_repository <> ''
-               AND r.image_repository = l.image_repository
-               AND l.image_tag IS NOT NULL AND l.image_tag <> ''
-               AND r.image_tag = l.image_tag)
+`+deploymentLinkedImageScanMatchSQL+`
          )
-       ORDER BY r.last_scanned_at DESC
+       ORDER BY `+deploymentLinkedImageScanOrderSQL+`
        LIMIT 1
   ) sr ON true
  WHERE l.org_id = $1 AND l.deployment_id = $2
@@ -860,20 +871,15 @@ SELECT DISTINCT ON (sr.id, a.id)
        a.payload,
        a.created_at
   FROM image_workload_links l
+  JOIN deployments d ON d.id=l.deployment_id AND d.org_id=l.org_id AND d.cluster_id=l.cluster_id
   JOIN LATERAL (
       SELECT r.*
         FROM image_scan_results r
        WHERE r.org_id = l.org_id
          AND (
-              (l.image_digest IS NOT NULL AND l.image_digest <> '' AND r.image_digest = l.image_digest)
-           OR (l.image_ref <> '' AND r.image_ref = l.image_ref)
-           OR (l.image_ref_normalized <> '' AND r.image_ref_normalized = l.image_ref_normalized)
-           OR (l.image_repository IS NOT NULL AND l.image_repository <> ''
-               AND r.image_repository = l.image_repository
-               AND l.image_tag IS NOT NULL AND l.image_tag <> ''
-               AND r.image_tag = l.image_tag)
+`+deploymentLinkedImageScanMatchSQL+`
          )
-       ORDER BY r.last_scanned_at DESC
+       ORDER BY `+deploymentLinkedImageScanOrderSQL+`
        LIMIT 1
   ) sr ON true
   JOIN image_scan_artifacts a

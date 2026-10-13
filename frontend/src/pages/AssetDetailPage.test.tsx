@@ -130,7 +130,7 @@ it("uses matching CSV and preserves filters and page through URL history", async
   await render('/clusters/cluster-a/assets/asset-a?tab=findings&severity=high&page=2&context=keep');
   await settled(() => expect(host.querySelector('[data-testid="asset-findings-table"]')).not.toBeNull()); expect(assets.findings).toHaveBeenLastCalledWith("asset-a", expect.objectContaining({ severity: "high", offset: 100 }));
   expect(host.textContent).toContain("No findings match"); await act(async () => button("First page").click()); await settled(() => expect(host.textContent).toContain("asset-a vulnerable package")); expect(history.location.search).toContain("context=keep");
-  await act(async () => button("Export matching CSV").click()); await settled(() => expect(assets.findingsCSV).toHaveBeenCalledWith("asset-a", expect.objectContaining({ cluster_id: "cluster-a", severity: "high", offset: 0 })));
+  await act(async () => button("Export matching CSV").click()); await settled(() => expect(assets.findingsCSV).toHaveBeenCalledWith("asset-a", expect.objectContaining({ cluster_id: "cluster-a", severity: "high", offset: 0 }), expect.any(Function)));
   await act(async () => history.back()); await settled(() => expect(assets.findings).toHaveBeenLastCalledWith("asset-a", expect.objectContaining({ offset: 100 })));
 });
 it("keeps a failed inventory refresh distinct from an empty result and recovers", async () => {

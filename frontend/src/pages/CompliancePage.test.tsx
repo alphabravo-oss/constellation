@@ -48,7 +48,7 @@ it("opens the dashboard graded cross-framework cohort with its exact denominator
 it("reads stable server pages, keeps full totals and exports the same cohort across pages",async()=>{
  vi.mocked(compliance.checks).mockImplementation(async params=>response(params as ComplianceChecksParams,Array.from({length:205},(_,i)=>row(i,i<150?"pass":"fail",i%2?"pci":"cis"))));
  await render("?framework=all&status=graded&page=2");await settle(()=>expect(rows()).toHaveLength(100));expect(host.textContent).toContain("Evidence target 100");expect(host.textContent).not.toContain("Evidence target 0");expect(host.querySelector('[data-testid="compliance-summary"]')!.textContent).toContain("Matching evidence rows205");
- await act(async()=>button("Export matching CSV").click());expect(compliance.exportChecksCSV).toHaveBeenCalledWith(expect.objectContaining({framework:"all",status:"graded",offset:100}));await settle(()=>expect(host.textContent).toContain("Exported all 3 matching records across pages"));
+ await act(async()=>button("Export matching CSV").click());expect(compliance.exportChecksCSV).toHaveBeenCalledWith(expect.objectContaining({framework:"all",status:"graded",offset:100}), expect.any(Function));await settle(()=>expect(host.textContent).toContain("Exported all 3 matching records across pages"));
  await act(async()=>button("Next").click());await settle(()=>expect(rows()).toHaveLength(5));expect(history.location.search).toContain("page=3");
 });
 it("updates filter URL and restores the earlier cohort on Back without losing repeated context or hash",async()=>{

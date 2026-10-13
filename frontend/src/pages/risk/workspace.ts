@@ -29,8 +29,9 @@ export function useRiskWorkspace() {
     if (value > 0) current.set("findings_page", String(value + 1)); else current.delete("findings_page");
     return current;
   });
+  const entityQueryKey = ["risk-entity", clusterId, entityType, entityId];
   const entityQ = useQuery({
-    queryKey: ["risk-entity", clusterId, entityType, entityId],
+    queryKey: entityQueryKey,
     enabled: scopeReady && supported && !!entityId,
     queryFn: async (): Promise<RiskEntity> => {
       if (entityType === "asset") return { type: "asset", data: await assets.get(entityId) };
@@ -61,7 +62,7 @@ export function useRiskWorkspace() {
   const generic = entity?.type === "asset" && !query.isError && !findingScopeMismatch && !invalidPage ? query.data : undefined;
   const records: RiskFinding[] = entity?.type === "finding" ? [entity.data] : entity?.type === "deployment" ? entity.data.findings ?? [] : generic?.findings ?? [];
   const stats: ReturnType<typeof entityStats> = entity ? entityStats(entity, generic, !generic || criticalQ.isError ? undefined : criticalQ.data?.total, !generic || highQ.isError ? undefined : highQ.data?.total) : {};
-  return { entityType, entityId, clusterId, cluster, clusterLoading, clusterError, scopeReady, supported, entityQ, entity, matches, query, criticalQ, highQ, assetQuery, generic, findingScopeMismatch, records, stats, page, invalidPage, setPage };
+  return { entityType, entityId, clusterId, cluster, clusterLoading, clusterError, scopeReady, supported, entityQ, entityQueryKey, entity, matches, query, criticalQ, highQ, assetQuery, generic, findingScopeMismatch, records, stats, page, invalidPage, setPage };
 }
 export type RiskWorkspace = ReturnType<typeof useRiskWorkspace>;
 export type RiskTabProps = { workspace: RiskWorkspace };

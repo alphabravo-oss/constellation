@@ -253,7 +253,7 @@ it("uses matching summaries and exports exact filters beyond500", async () => {
     severity: "critical",
     sort: "repository",
     order: "asc",
-  });
+  }, expect.any(Function));
 });
 it("resets filter pages and restores filter history preserving context/hash", async () => {
   vi.mocked(registries.images).mockImplementation(async (_id, p) =>

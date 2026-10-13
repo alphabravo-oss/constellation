@@ -1312,10 +1312,77 @@ column selections are preserved; Reset columns restores the new baseline default
 The live file profile has no custom rules, so concurrent edit/delete acceptance
 remains covered by the fresh database and frontend fixtures, not a live mutation.
 
-The remaining UI-3 matrix includes Deployment direct workload findings: its
-compatibility payload still caps findings at 100, including detail/risk page CSV.
-This requires its own full inventory contract because primary Findings excludes
-workload vulnerability records. Dormant SSE remains unqualified and disabled.
+The deployment-findings continuation adds an independent direct-workload
+inventory shared by Deployment Detail and Risk Findings. Exact owned cluster and
+deployment scope, full matching summaries, stable server sorting, literal search,
+lifecycle/severity/fixability filters and continuation replace the primary
+100-record sample. Matching CSV covers up to 100,000 physical observations and
+reports truncation; page CSV follows visible columns. UUID plus the full original
+timestamp identifies each observation, including repeated UUIDs and legacy
+lifecycle values. Canonical namespace/name ownership ambiguity remains explicit;
+pod attribution requires a unique exact owned link. Source and effective target
+clusters are preserved separately, with conservative backend platform roles.
+
+Both parent views use the shared table, URL state and compact Details disclosure.
+A read-only detail peek preserves the exact observation and closes on scope or
+freshness changes. Technical IDs stay under Source details. The Risk Overview
+retains an explicitly labeled top-five preview from the legacy bounded payload
+and links to the full inventory. Historical finding authoring still needs exact
+UUID/timestamp identity and concurrency checks across detail, bulk actions,
+comments, audits and notifications; UUID-only actions are not exposed from this
+new inventory.
+
+Deployment image and file-risk evidence now require an exact, case-sensitive
+match when an image digest is known. Mutable reference/tag fallback applies only
+when the link has no digest. Scan selection has a deterministic tie-breaker and
+owned deployment/cluster and child-organization checks. Reused tags cannot borrow
+another digest's evidence. The file-risk artifact preview remains capped at 20.
+
+Matching exports using the shared inventory control now recheck scope immediately
+before browser download dispatch, after the HTTP response arrives. The callback
+is propagated through all 19 API seams used by that control. Unmounting, changing
+context or temporarily disabling stale evidence invalidates the pending request,
+even if the original context becomes active again. Existing exact-cache
+preflights also run after the response where present. This does not qualify
+independent export controls that do not use the shared inventory component.
+
+Qualification covers **1,960 frontend cases across 139 files**: 1,957 passed in
+the full run; three old callback-signature expectations were corrected, then all
+73 cases in that file passed. No production edit followed that run. Full lint,
+production build/typecheck, affected Go vet, OpenAPI/contracts and endpoint-map
+checks pass. The combined Deployment backend passes **42 fresh PostgreSQL
+race/shuffle executions**, count2, with no failures or skips. Fixtures cover
+over 1,300 findings, repeated UUID observations, legacy lifecycle values and
+100,005 matches producing a correctly labeled 100,000-row CSV. Image/file-risk
+fixtures cover exact and missing digests, reused tags, cross-tenant children,
+cross-cluster links and tied scan timestamps.
+
+Helm **71** deploys API/frontend `deployment-findings-20261013`, retaining migration
+`audit-lookup-20261012` and schema173; all seven deployments are ready. The live
+ingress workload returns **83** direct findings; list and CSV agree for all,
+fixable, literal-search and empty filters. Two-row pages do not overlap; offset
+2,000,000 preserves totals on the empty page, and matching CSV ignores page offset.
+Missing, malformed, duplicated and foreign scope checks return the expected
+errors. Bounded inventory reads measured **0.03–0.15 seconds** in this sample;
+the existing aggregate deployment detail remains slower and is not qualified
+for fleet-scale latency (9.8 seconds in the image-identity check). Both linked
+images match their selected scan's exact digest in the live API. See
+`/tmp/deployment-findings-live-results.json` and
+`/tmp/deployment-image-identity-live.json`.
+
+Native browser checks pass in both Deployment and Risk Findings: exact-record
+inspection, Source details disclosure, Escape/focus return, literal search,
+matching downloads, sort/Back restoration and empty-page recovery. Tables align
+at desktop and 640px widths with no document overflow or clipped actions. The
+compact status is 32px on desktop and wraps to 40px in the narrow workload view;
+the original Nodes status is 32px with its explanatory paragraph hidden until
+Details is opened. No live authoring or scan actions were submitted. Positive
+continuation beyond 100 records remains fixture-qualified for this small live
+workload cohort.
+
+The remaining selected-console inventory audit includes conversation streams,
+the PCAP request ledger, Effective Config component reports, and the Node Risk
+view's reuse of its bounded host-CVE payload. Dormant SSE remains unqualified and disabled.
 The live cluster has no discovered custom-namespace installation candidate; a
 real isolated chart installation and discovery proof remains outstanding. Named
 saved views and the full accessibility/cross-dataset acceptance matrix remain

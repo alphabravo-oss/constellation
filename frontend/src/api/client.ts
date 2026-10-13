@@ -319,7 +319,7 @@ export interface AssetsListParams { limit?: number; offset?: number; cluster_id?
 export interface AssetsListResponse { assets: Asset[]; limit: number; offset: number; has_more: boolean; total: number; summary: Record<string, number>; sort: string; order: "asc" | "desc" }
 export const assets = {
   findings: (id: string, params: AssetFindingInventoryParams) => api.get<AssetFindingInventoryResponse>(`/assets/${encodeURIComponent(id)}/findings`, { params }).then(r => r.data),
-  findingsCSV: (id: string, params: AssetFindingInventoryParams) => downloadScanInventoryCSV(`/assets/${encodeURIComponent(id)}/findings.csv`, params, `asset-${id}-findings.csv`),
+  findingsCSV: (id: string, params: AssetFindingInventoryParams, shouldDownload?: ScanInventoryDownloadGuard) => downloadScanInventoryCSV(`/assets/${encodeURIComponent(id)}/findings.csv`, params, `asset-${id}-findings.csv`, shouldDownload),
   list: (params: AssetsListParams = {}) =>
     api.get<AssetsListResponse>("/assets", { params }).then((r) => r.data),
   exportCsv: async (params: AssetsListParams = {}) => {
@@ -527,20 +527,21 @@ export const networkRules = {
 export const nodes = {
   list: (clusterID: string, params?: NodeInventoryParams) =>
     api.get<NodeListResponse>(`/clusters/${encodeURIComponent(clusterID)}/nodes`, { params }).then((r) => r.data),
-  exportCSV: async (clusterID: string, params: NodeInventoryParams = {}) => {
+  exportCSV: async (clusterID: string, params: NodeInventoryParams = {}, shouldDownload?: ScanInventoryDownloadGuard) => {
     const filters = { ...params }; delete filters.limit; delete filters.offset;
     const response = await api.get<Blob>(`/clusters/${encodeURIComponent(clusterID)}/nodes.csv`, { params: filters, responseType: "blob" });
     const total = Number(response.headers["x-export-total"]), limit = Number(response.headers["x-export-limit"]), truncated = response.headers["x-export-truncated"];
     if (!/^\d+$/.test(String(response.headers["x-export-total"])) || !Number.isSafeInteger(total) || total < 0 || limit !== 100000 || !["true", "false"].includes(String(truncated)) || (truncated === "true") !== (total > limit)) throw new Error("Node export scope could not be confirmed.");
-    const blob = response.data instanceof Blob ? response.data : new Blob([response.data]); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = "constellation-nodes.csv"; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
+    assertInventoryDownloadCurrent(shouldDownload);
+  const blob = response.data instanceof Blob ? response.data : new Blob([response.data]); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = "constellation-nodes.csv"; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
     return { total, exported: Math.min(total, limit), limit, truncated: truncated === "true" };
   },
   get: (clusterID: string, node: string) =>
     api.get<NodeDetail>(`/clusters/${encodeURIComponent(clusterID)}/nodes/${encodeURIComponent(node)}`).then((r) => r.data),
   vulnerabilities: (clusterID: string, node: string, params: NodeVulnerabilityParams = {}) =>
     api.get<NodeVulnerabilityResponse>(`/clusters/${encodeURIComponent(clusterID)}/nodes/${encodeURIComponent(node)}/vulnerabilities`, { params }).then(r => r.data),
-  exportVulnerabilitiesCSV: (clusterID: string, node: string, params: NodeVulnerabilityParams = {}) =>
-    downloadScanInventoryCSV(`/clusters/${encodeURIComponent(clusterID)}/nodes/${encodeURIComponent(node)}/vulnerabilities.csv`, params, "constellation-node-host-vulnerabilities.csv"),
+  exportVulnerabilitiesCSV: (clusterID: string, node: string, params: NodeVulnerabilityParams = {}, shouldDownload?: ScanInventoryDownloadGuard) =>
+    downloadScanInventoryCSV(`/clusters/${encodeURIComponent(clusterID)}/nodes/${encodeURIComponent(node)}/vulnerabilities.csv`, params, "constellation-node-host-vulnerabilities.csv", shouldDownload),
   scan: (scanTargetID: string) =>
     api.post(`/scan/host/${encodeURIComponent(scanTargetID)}`, {}).then((r) => r.data),
 };
@@ -695,19 +696,20 @@ export const compliance = {
   frameworks: () => api.get<{ frameworks: Framework[] }>("/compliance/frameworks").then((r) => r.data),
   checks: (framework?: string | ComplianceChecksParams, cluster_id?: string, options?: Omit<ComplianceChecksParams, "framework" | "cluster_id">) =>
     api.get<ComplianceChecksResponse>("/compliance/checks", { params: typeof framework === "object" ? framework : { framework, cluster_id, ...options } }).then((r) => r.data),
-  exportChecksCSV: async (params: ComplianceChecksParams) => {
+  exportChecksCSV: async (params: ComplianceChecksParams, shouldDownload?: ScanInventoryDownloadGuard) => {
     const filters = { ...params }; delete filters.limit; delete filters.offset;
     const response = await api.get<Blob>("/compliance/checks/export.csv", { params: filters, responseType: "blob" });
     const total = Number(response.headers["x-export-total"]), limit = Number(response.headers["x-export-limit"]), truncated = response.headers["x-export-truncated"];
     if (!/^\d+$/.test(String(response.headers["x-export-total"])) || !Number.isSafeInteger(total) || total < 0 || limit !== 100000 || !["true", "false"].includes(String(truncated)) || (truncated === "true") !== (total > limit)) throw new Error("Compliance export scope could not be confirmed.");
-    const blob = response.data instanceof Blob ? response.data : new Blob([response.data]); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = "constellation-compliance-checks.csv"; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
+    assertInventoryDownloadCurrent(shouldDownload);
+  const blob = response.data instanceof Blob ? response.data : new Blob([response.data]); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = "constellation-compliance-checks.csv"; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
     return { total, exported: Math.min(total, limit), limit, truncated: truncated === "true" };
   },
   summary:    (cluster_id?: string) =>
     api.get<{ frameworks: ComplianceSummary[] }>("/compliance/summary", { params: { cluster_id } }).then((r) => r.data),
   evidence: (params: ComplianceEvidenceParams = {}) =>
     api.get<ComplianceEvidenceResponse>("/compliance/evidence", { params }).then((r) => r.data),
-  exportEvidenceCSV: (params: ComplianceEvidenceParams = {}) => downloadScanInventoryCSV("/compliance/evidence.csv", params, "constellation-compliance-evidence.csv"),
+  exportEvidenceCSV: (params: ComplianceEvidenceParams = {}, shouldDownload?: ScanInventoryDownloadGuard) => downloadScanInventoryCSV("/compliance/evidence.csv", params, "constellation-compliance-evidence.csv", shouldDownload),
   nodeEvidence: (params: ComplianceEvidenceParams = {}) =>
     api.get<ComplianceEvidenceResponse>("/compliance/nodes", { params }).then((r) => r.data),
   workloadEvidence: (params: ComplianceEvidenceParams = {}) =>
@@ -819,6 +821,57 @@ export interface DeploymentFinding {
   package_version?: string;
   fixed_version?: string;
   last_seen_at: string;
+}
+
+export interface DeploymentFindingsParams {
+  cluster_id: string;
+  q?: string;
+  lifecycle?: Lifecycle | "all";
+  severity?: Severity | "unknown";
+  fixable?: boolean;
+  sort?: string;
+  order?: "asc" | "desc";
+  limit?: number;
+  offset?: number;
+}
+export interface DeploymentFindingInventoryRow extends Omit<DeploymentFinding, "severity" | "kind" | "lifecycle"> {
+  lifecycle: string;
+  severity: Severity | "unknown";
+  kind: string;
+  row_id: string;
+  first_seen_at: string;
+  external_id: string;
+  target_type: "workload";
+  target_ref: string;
+  package_name: string;
+  package_version: string;
+  fixed_version: string;
+  fixable: boolean;
+  source_cluster_id: string | null;
+  target_cluster_id: string | null;
+  effective_target_cluster_id: string;
+  platform_role: string;
+  attribution: "canonical" | "pod";
+  owner_count: number;
+  owner_ambiguous: boolean;
+}
+export interface DeploymentFindingsResponse {
+  deployment_id: string;
+  cluster_id: string;
+  workload_id: string;
+  owner_count: number;
+  owner_ambiguous: boolean;
+  items: DeploymentFindingInventoryRow[];
+  total: number;
+  summary: Record<string, number>;
+  has_more: boolean;
+  limit: number;
+  offset: number;
+  sort: string;
+  order: "asc" | "desc";
+  filters: { q: string; lifecycle: string; severity: string; fixable: string };
+  source_complete: boolean;
+  summary_scope: string;
 }
 
 export interface DeploymentNetworkFlow {
@@ -1039,6 +1092,10 @@ export interface DeploymentDetail extends Deployment {
 }
 
 export const deployments = {
+  findings: (id: string, params: DeploymentFindingsParams) =>
+    api.get<DeploymentFindingsResponse>(`/deployments/${encodeURIComponent(id)}/findings`, { params }).then(r => r.data),
+  findingsCSV: (id: string, params: DeploymentFindingsParams, shouldDownload?: ScanInventoryDownloadGuard) =>
+    downloadScanInventoryCSV(`/deployments/${encodeURIComponent(id)}/findings.csv`, params, `deployment-${id}-findings.csv`, shouldDownload),
   list: (params: { q?: string; name?: string; namespace?: string; cluster_id?: string; hide_platform?: boolean; platform_role?: string; risk_fact?: string; group_mode?: string; limit?: number; offset?: number } = {}) =>
     api.get<{ deployments: Deployment[]; total: number; limit: number; offset: number; has_more: boolean; platform_count: number; summary: { total: number; at_risk: number; finding_count: number; critical_count: number; high_count: number } }>("/deployments", { params }).then((r) => r.data),
   exportCsv: (params: { q?: string; name?: string; namespace?: string; cluster_id?: string; hide_platform?: boolean; platform_role?: string; risk_fact?: string } = {}) =>
@@ -1144,7 +1201,7 @@ export interface BaselineInventoryResponse {
 }
 export const baselines = {
  inventory: (params: BaselineInventoryParams) => api.get<BaselineInventoryResponse>("/runtime/baselines/inventory",{params}).then(r=>r.data),
- inventoryCSV: (params: BaselineInventoryParams) => downloadScanInventoryCSV("/runtime/baselines/inventory.csv",params,"process-baselines.csv"),
+ inventoryCSV: (params: BaselineInventoryParams, shouldDownload?: ScanInventoryDownloadGuard) => downloadScanInventoryCSV("/runtime/baselines/inventory.csv",params,"process-baselines.csv", shouldDownload),
   list: (params: { cluster_id?: string; namespace?: string } = {}) =>
     api
       .get<{ profiles: BaselineSummary[]; summary: { total: number; learn: number; monitor: number; enforce: number } }>(
@@ -1331,7 +1388,7 @@ export interface FileProfileInventoryResponse { profiles: FileProfileInventoryRo
 
 export const fileProfiles = {
   inventory: (params: FileProfileInventoryParams) => api.get<FileProfileInventoryResponse>("/runtime/file-profiles/inventory", {params}).then(r=>r.data),
-  inventoryCSV: (params: FileProfileInventoryParams) => downloadScanInventoryCSV("/runtime/file-profiles/inventory.csv",params,"file-monitor-profiles.csv"),
+  inventoryCSV: (params: FileProfileInventoryParams, shouldDownload?: ScanInventoryDownloadGuard) => downloadScanInventoryCSV("/runtime/file-profiles/inventory.csv",params,"file-monitor-profiles.csv", shouldDownload),
   list: (params: { cluster_id?: string; namespace?: string } = {}) =>
     api
       .get<{ profiles: FileProfileSummary[]; summary: { total: number; learn: number; monitor: number; enforce: number } }>(
@@ -2024,12 +2081,13 @@ export interface ComponentInventoryResponse {
 export const componentsInventory = {
   list: (params?: ComponentsInventoryParams) =>
     api.get<ComponentInventoryResponse>("/components", { params }).then((r) => r.data),
-  exportCSV: async (params: ComponentsInventoryParams = {}) => {
+  exportCSV: async (params: ComponentsInventoryParams = {}, shouldDownload?: ScanInventoryDownloadGuard) => {
     const filters = { ...params }; delete filters.limit; delete filters.offset;
     const response = await api.get<Blob>("/components/export.csv", { params: filters, responseType: "blob" });
     const total = Number(response.headers["x-export-total"]), limit = Number(response.headers["x-export-limit"]), truncated = response.headers["x-export-truncated"];
     if (!/^\d+$/.test(String(response.headers["x-export-total"])) || !Number.isSafeInteger(total) || total < 0 || limit !== 100000 || !["true", "false"].includes(String(truncated)) || (truncated === "true") !== (total > limit)) throw new Error("Component export scope could not be confirmed.");
-    const blob = response.data instanceof Blob ? response.data : new Blob([response.data]); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = "constellation-components.csv"; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
+    assertInventoryDownloadCurrent(shouldDownload);
+  const blob = response.data instanceof Blob ? response.data : new Blob([response.data]); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = "constellation-components.csv"; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
     return { total, exported: Math.min(total, limit), limit, truncated: truncated === "true" };
   },
   get: (id: string) =>
@@ -2506,8 +2564,8 @@ export interface NetworkPolicyLifecycleResponse {
 export interface NetworkConversationFilters { from?: string; to?: string; verdict_group?: "blocked"; hours?: number; cluster_id?: string; namespace?: string; verdict?: string; group?: string; port?: number; peer?: string; application?: string; limit?: number; offset?: number; sort?: string; order?: "asc" | "desc"; hide_platform?: boolean }
 
 export const network = {
-  conversationsCSV: (params: NetworkConversationFilters) => downloadScanInventoryCSV("/network/conversations.csv", params, "network-conversations.csv"),
-  sessionsCSV: (params: NetworkSessionFilters) => downloadScanInventoryCSV("/network/sessions.csv", params, "network-sessions.csv"),
+  conversationsCSV: (params: NetworkConversationFilters, shouldDownload?: ScanInventoryDownloadGuard) => downloadScanInventoryCSV("/network/conversations.csv", params, "network-conversations.csv", shouldDownload),
+  sessionsCSV: (params: NetworkSessionFilters, shouldDownload?: ScanInventoryDownloadGuard) => downloadScanInventoryCSV("/network/sessions.csv", params, "network-sessions.csv", shouldDownload),
   map: (params: { hours?: number; namespace?: string; group?: string; verdict?: string; cluster_id?: string; port?: number; peer?: string; application?: string; offset?: number; recent_offset?: number } = {}) =>
     api.get<NetworkMap>("/network/map", { params }).then((r) => r.data),
   exposure: (params: { hours?: number; cluster_id?: string } = {}) =>
@@ -2939,7 +2997,7 @@ export interface GeneratePolicyResponse {
 export interface RuntimeThreatFilters { hours?: number; severity_min?: number; cluster_id?: string; workload_id?: string; group?: string; category?: "dlp" | "waf" | "ips"; port?: number; peer?: string; application?: number | string; limit?: number; offset?: number; namespace?: string; node?: string; q?: string; hide_platform?: boolean; sort?: string; order?: "asc" | "desc" }
 export interface RuntimeThreatPage { threats: RuntimeThreat[]; total: number; limit: number; offset: number; has_more: boolean; cluster_id?: string | null; window_hours?: number; sort?: string; order?: "asc" | "desc"; summary?: Record<string, number>; filters?: Record<string, unknown> }
 export const runtimeThreats = {
-  exportCSV: (params: RuntimeThreatFilters) => downloadScanInventoryCSV("/runtime-threats.csv", params, "runtime-threats.csv"),
+  exportCSV: (params: RuntimeThreatFilters, shouldDownload?: ScanInventoryDownloadGuard) => downloadScanInventoryCSV("/runtime-threats.csv", params, "runtime-threats.csv", shouldDownload),
   list: (params: RuntimeThreatFilters = {}) =>
     api.get<{ threats: RuntimeThreat[] }>("/runtime-threats", { params }).then((r) => r.data.threats),
   page: (params: RuntimeThreatFilters = {}) =>
@@ -4585,7 +4643,7 @@ export interface ScanJobInventoryResponse extends ScanInventoryMetadata { jobs: 
 export const scanJobs = {
   list: (params?: ScanJobInventoryParams) =>
     api.get<ScanJobInventoryResponse>("/scan-jobs", { params }).then((r) => r.data),
-  exportCSV: (params: ScanJobInventoryParams = {}) => downloadScanInventoryCSV("/scan-jobs.csv", params, "constellation-scan-jobs.csv"),
+  exportCSV: (params: ScanJobInventoryParams = {}, shouldDownload?: ScanInventoryDownloadGuard) => downloadScanInventoryCSV("/scan-jobs.csv", params, "constellation-scan-jobs.csv", shouldDownload),
   enqueue: (body: { target_type: string; target_ref: string; platform?: string; target_cluster_id?: string; source_type?: string; source_ref?: string; max_attempts?: number }) =>
     api.post<{ id: string; status: string }>("/scan-jobs", body).then((r) => r.data),
   attempts: (id: string) =>
@@ -4612,20 +4670,25 @@ export interface ImageScanInventoryParams extends ScanInventoryParams { cluster_
 export interface RepositoryScanInventoryParams extends ScanInventoryParams { branch?: string; workflow?: string; status?: string }
 export interface ServerlessInventoryParams extends ScanInventoryParams { provider?: string; account_id?: string; region?: string; posture?: string }
 export interface ScanInventoryExportResult { total: number; exported: number; limit: number; truncated: boolean }
-async function downloadScanInventoryCSV(path: string, params: ScanInventoryParams, filename: string): Promise<ScanInventoryExportResult> {
+export type ScanInventoryDownloadGuard = () => boolean;
+function assertInventoryDownloadCurrent(shouldDownload?: ScanInventoryDownloadGuard) {
+  if (shouldDownload && !shouldDownload()) throw new Error("Refresh the inventory before exporting this scope.");
+}
+async function downloadScanInventoryCSV(path: string, params: ScanInventoryParams, filename: string, shouldDownload?: ScanInventoryDownloadGuard): Promise<ScanInventoryExportResult> {
   const filters = { ...params }; delete filters.limit; delete filters.offset;
   const response = await api.get<Blob>(path, { params: filters, responseType: "blob" });
   if (!/^[0-9]+$/.test(String(response.headers["x-export-total"] ?? "")) || !/^[0-9]+$/.test(String(response.headers["x-export-limit"] ?? ""))) throw new Error("Export scope could not be confirmed.");
   const total = Number(response.headers["x-export-total"]), limit = Number(response.headers["x-export-limit"]);
   const truncated = response.headers["x-export-truncated"];
   if (!Number.isSafeInteger(total) || total < 0 || !Number.isSafeInteger(limit) || limit < 1 || !["true", "false"].includes(String(truncated)) || (truncated === "true") !== (total > limit)) throw new Error("Export scope could not be confirmed. Retry before treating the download as complete.");
+  assertInventoryDownloadCurrent(shouldDownload);
   const blob = response.data instanceof Blob ? response.data : new Blob([response.data]);
   const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = filename; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
   return { total, exported: Math.min(total, limit), limit, truncated: truncated === "true" };
 }
 
 export const imageScanResults = {
-  exportCSV: (params: ImageScanInventoryParams = {}) => downloadScanInventoryCSV("/image-scan-results/export.csv", params, "constellation-image-scan-results.csv"),
+  exportCSV: (params: ImageScanInventoryParams = {}, shouldDownload?: ScanInventoryDownloadGuard) => downloadScanInventoryCSV("/image-scan-results/export.csv", params, "constellation-image-scan-results.csv", shouldDownload),
   list: (params?: ImageScanInventoryParams) =>
     api.get<ScanInventoryMetadata & { image_scan_results: ImageScanResult[]; limit: number; offset: number }>("/image-scan-results", { params }).then((r) => r.data),
   get: (id: string) =>
@@ -4663,7 +4726,7 @@ export const imageScanResults = {
 };
 
 export const serverlessFunctions = {
-  exportCSV: (params: ServerlessInventoryParams = {}) => downloadScanInventoryCSV("/serverless-functions/export.csv", params, "constellation-serverless-functions.csv"),
+  exportCSV: (params: ServerlessInventoryParams = {}, shouldDownload?: ScanInventoryDownloadGuard) => downloadScanInventoryCSV("/serverless-functions/export.csv", params, "constellation-serverless-functions.csv", shouldDownload),
   list: (params?: ServerlessInventoryParams) =>
     api.get<ScanInventoryMetadata & { serverless_functions: ServerlessFunction[]; limit: number; offset: number }>("/serverless-functions", { params }).then((r) => r.data),
   get: (id: string) =>
@@ -4671,7 +4734,7 @@ export const serverlessFunctions = {
 };
 
 export const repositoryScans = {
-  exportCSV: (params: RepositoryScanInventoryParams = {}) => downloadScanInventoryCSV("/repository-scans/export.csv", params, "constellation-repository-scans.csv"),
+  exportCSV: (params: RepositoryScanInventoryParams = {}, shouldDownload?: ScanInventoryDownloadGuard) => downloadScanInventoryCSV("/repository-scans/export.csv", params, "constellation-repository-scans.csv", shouldDownload),
   list: (params?: RepositoryScanInventoryParams) =>
     api.get<ScanInventoryMetadata & { repository_scans: RepositoryScan[]; limit: number; offset: number }>("/repository-scans", { params }).then((r) => r.data),
   get: (id: string) =>
@@ -5440,8 +5503,8 @@ export const cve = {
     api.get<CVEAffectedResponse>(`/cve/${encodeURIComponent(id)}/affected`, { params: clusterId ? { cluster_id: clusterId } : undefined }).then((r) => r.data),
   affectedInventory: <V extends CVEAffectedInventoryView>(id: string, view: V, params: CVEAffectedInventoryParams = {}) =>
     api.get<CVEAffectedInventoryResponse<CVEAffectedInventoryRows[V]>>(`/cve/${encodeURIComponent(id)}/affected/${view}`, { params }).then(response => response.data),
-  affectedInventoryCSV: (id: string, view: CVEAffectedInventoryView, params: CVEAffectedInventoryParams = {}) =>
-    downloadScanInventoryCSV(`/cve/${encodeURIComponent(id)}/affected/${view}.csv`, params, `constellation-cve-affected-${view}.csv`),
+  affectedInventoryCSV: (id: string, view: CVEAffectedInventoryView, params: CVEAffectedInventoryParams = {}, shouldDownload?: ScanInventoryDownloadGuard) =>
+    downloadScanInventoryCSV(`/cve/${encodeURIComponent(id)}/affected/${view}.csv`, params, `constellation-cve-affected-${view}.csv`, shouldDownload),
 
 };
 
@@ -5747,7 +5810,7 @@ export interface RuntimeEventsResponse {
 }
 export const runtimeEvents = {
   list: (params: RuntimeEventsParams = {}) => api.get<RuntimeEventsResponse>("/events", { params }).then((r) => r.data),
-  exportCSV: (params: RuntimeEventsParams = {}) => downloadScanInventoryCSV("/events.csv", params, "constellation-runtime-events.csv"),
+  exportCSV: (params: RuntimeEventsParams = {}, shouldDownload?: ScanInventoryDownloadGuard) => downloadScanInventoryCSV("/events.csv", params, "constellation-runtime-events.csv", shouldDownload),
 };
 
 export const auth = {
@@ -5934,12 +5997,13 @@ export const registries = {
     api.post<RegistryCancelScansResult>(`/registries/${id}/cancel-scans`).then((r) => r.data),
   images: (id: string, params: RegistryImageParams = {}) =>
     api.get<RegistryImageResponse>(`/registries/${encodeURIComponent(id)}/images`, { params }).then((r) => r.data),
-  imagesCSV: async (id: string, params: RegistryImageParams = {}) => {
+  imagesCSV: async (id: string, params: RegistryImageParams = {}, shouldDownload?: ScanInventoryDownloadGuard) => {
     const filters = { ...params }; delete filters.limit; delete filters.offset;
     const response = await api.get<Blob>(`/registries/${encodeURIComponent(id)}/images.csv`, { params: filters, responseType: "blob" });
     const total = Number(response.headers["x-export-total"]), limit = Number(response.headers["x-export-limit"]), truncated = response.headers["x-export-truncated"];
     if (!/^\d+$/.test(String(response.headers["x-export-total"])) || !Number.isSafeInteger(total) || total < 0 || limit !== 100000 || !["true", "false"].includes(String(truncated)) || (truncated === "true") !== (total > limit)) throw new Error("Registry image export scope could not be confirmed.");
-    const blob = response.data instanceof Blob ? response.data : new Blob([response.data]); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = "constellation-registry-images.csv"; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
+    assertInventoryDownloadCurrent(shouldDownload);
+  const blob = response.data instanceof Blob ? response.data : new Blob([response.data]); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = "constellation-registry-images.csv"; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
     return { total, exported: Math.min(total, limit), limit, truncated: truncated === "true" };
   },
 };

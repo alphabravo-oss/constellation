@@ -69,7 +69,8 @@ it("keeps server row order and sends shared table sorting to URL/server", async 
 });
 it("exports the full matching cohort separately from current-page visible columns", async () => {
   await render("?page=7"); await settled(() => expect(host.querySelectorAll("tbody tr")).toHaveLength(1)); await click("Export matching CSV");
-  await settled(() => expect(baselines.inventoryCSV).toHaveBeenCalledWith(expect.objectContaining({ cluster_id: "cluster", offset: 600, hide_platform: false }))); expect(host.textContent).toContain("Exported all 601 matching records across pages");
+  await settled(() => expect(baselines.inventoryCSV).toHaveBeenCalledWith(expect.objectContaining({ cluster_id: "cluster", offset: 600, hide_platform: false }), expect.any(Function)));
+  await settled(() => expect(host.textContent).toContain("Exported all 601 matching records across pages"));
   await click("Export this page CSV"); const [, headers, rows] = vi.mocked(downloadCsv).mock.calls.at(-1)!; expect(rows).toHaveLength(1); expect(rows[0][headers.indexOf("Workload")]).toBe("default/workload-0600"); expect(headers).not.toContain("Platform role");
 });
 it("suppresses failed-refresh rows, totals and exports and recovers without dropping filters", async () => {

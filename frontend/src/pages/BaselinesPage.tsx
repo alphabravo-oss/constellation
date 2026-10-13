@@ -59,10 +59,14 @@ export function BaselinesPage() {
   const profiles = data?.profiles ?? [];
   const retry = () => scopeReady && owner && !invalid ? void q.refetch() : scope.retryScope();
   const context = JSON.stringify([key, route.query]);
-  const exportCSV = () => {
+  const exportCurrent = () => {
     const state = scope.qc.getQueryState<BaselineInventoryResponse>(key);
-    if (!available || !clusterId || !clusterCacheReady(scope.qc, clusterId) || state?.status !== "success" || state.fetchStatus !== "idle" || state.isInvalidated || !baselineInventoryMatches(state.data, request)) return Promise.reject(new Error("Refresh process profiles before exporting"));
-    return baselinesApi.inventoryCSV(request);
+    if (!available || !clusterId || !clusterCacheReady(scope.qc, clusterId) || state?.status !== "success" || state.fetchStatus !== "idle" || state.isInvalidated || !baselineInventoryMatches(state.data, request)) return false;
+    return true;
+  };
+  const exportCSV = (shouldDownload: () => boolean) => {
+    if (!exportCurrent()) return Promise.reject(new Error("Refresh process profiles before exporting"));
+    return baselinesApi.inventoryCSV(request, () => shouldDownload() && exportCurrent());
   };
   const columns: TableColumn<BaselineInventoryRow>[] = [
     { id: "workload", header: "Workload", kind: "name", wrap: true, sort: () => 0, cell: p => <a href={baselinePath(clusterId!,p.workload_id)} className="text-primary hover:underline">{p.workload_id}</a>, exportValue: p => p.workload_id },

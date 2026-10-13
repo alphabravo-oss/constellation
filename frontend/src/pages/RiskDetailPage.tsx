@@ -28,7 +28,7 @@ export function RiskDetailPage() {
   const root = `/clusters/${encodeURIComponent(workspace.clusterId ?? "")}`;
   const assetFailures = entity?.type === "asset" && (workspace.query.isError || workspace.criticalQ.isError || workspace.highQ.isError || workspace.findingScopeMismatch || workspace.invalidPage);
   const unavailable = !!clusterError || entityQ.isError || (entityQ.isSuccess && !workspace.matches) || assetFailures;
-  const source = entity?.type === "asset" ? "Counts cover server-filtered generic finding records; canonical image scan evidence is shown separately." : entity?.type === "deployment" ? "Risk and severity counts are reported by deployment inventory. Direct workload findings and other evidence have explicit source limits." : entity?.type === "node" ? "Counts cover this node’s reported open host vulnerabilities. A composite risk score is not reported." : "Counts describe this finding only. Risk factors come from its reported decomposition.";
+  const source = entity?.type === "asset" ? "Counts cover server-filtered generic finding records; canonical image scan evidence is shown separately." : entity?.type === "deployment" ? "Risk and severity counts are reported by deployment inventory. Direct workload findings use a filtered server inventory; other evidence discloses its source limits." : entity?.type === "node" ? "Counts cover this node’s reported open host vulnerabilities. A composite risk score is not reported." : "Counts describe this finding only. Risk factors come from its reported decomposition.";
   const refresh = () => {
     void entityQ.refetch();
     if (entity?.type === "asset") { void workspace.query.refetch(); void workspace.criticalQ.refetch(); void workspace.highQ.refetch(); }

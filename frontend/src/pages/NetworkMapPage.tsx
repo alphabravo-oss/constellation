@@ -1194,7 +1194,7 @@ function NetworkMapInner() {
             total={conversationsQ.data!.total!}
             summary={conversationsQ.data!.summary!}
             sort={conversationSort} onSort={changeSort("conversation")}
-            matchingExport={<ScanInventoryExport context={JSON.stringify(conversationKey)} disabled={!conversationsAvailable} download={() => { exportReady(conversationKey); return network.conversationsCSV(conversationRequest); }} />}
+            matchingExport={<ScanInventoryExport context={JSON.stringify(conversationKey)} disabled={!conversationsAvailable} download={shouldDownload => { exportReady(conversationKey); return network.conversationsCSV(conversationRequest, () => { if (!shouldDownload()) return false; exportReady(conversationKey); return true; }); }} />}
             page={conversationPage}
             onPage={setConversationPage}
             loading={conversationsQ.isPending}
@@ -1213,7 +1213,7 @@ function NetworkMapInner() {
             sessions={sessions}
             summary={sessionsQ.data!.summary!}
             sort={sessionSort} onSort={changeSort("session")}
-            matchingExport={<ScanInventoryExport context={JSON.stringify(sessionKey)} disabled={!sessionsAvailable} download={() => { exportReady(sessionKey); return network.sessionsCSV(sessionRequest); }} />}
+            matchingExport={<ScanInventoryExport context={JSON.stringify(sessionKey)} disabled={!sessionsAvailable} download={shouldDownload => { exportReady(sessionKey); return network.sessionsCSV(sessionRequest, () => { if (!shouldDownload()) return false; exportReady(sessionKey); return true; }); }} />}
             total={sessionsTotal}
             hasMore={sessionsHasMore}
             page={sessionPage}
@@ -1255,7 +1255,7 @@ function NetworkMapInner() {
             total={threatsQ.data!.total}
             summary={threatsQ.data!.summary!}
             sort={threatSort} onSort={changeSort("threat")}
-            matchingExport={<ScanInventoryExport context={JSON.stringify(threatKey)} disabled={!threatsAvailable} download={() => { exportReady(threatKey); return runtimeThreats.exportCSV(threatRequest); }} />}
+            matchingExport={<ScanInventoryExport context={JSON.stringify(threatKey)} disabled={!threatsAvailable} download={shouldDownload => { exportReady(threatKey); return runtimeThreats.exportCSV(threatRequest, () => { if (!shouldDownload()) return false; exportReady(threatKey); return true; }); }} />}
             page={threatPage}
             onPage={setThreatPage}
             weakTLS={scopeReady&&!dpiSettingsQ.isError&&dpiSettingsQ.data?.cluster_id===clusterID?dpiSettingsQ.data.weak_tls_enabled:undefined}
