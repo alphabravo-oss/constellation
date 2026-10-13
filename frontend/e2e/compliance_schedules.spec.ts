@@ -13,6 +13,7 @@ test.beforeEach(async ({ page }) => {
     else if (path === "/compliance/frameworks") body = { frameworks: [{ id: "cis-k8s-1.9", name: "CIS Kubernetes 1.9", category: "kubernetes" }] };
     else if (path === "/compliance/summary") body = { frameworks: [] };
     else if (path === "/compliance/schedules" && route.request().method() === "POST") {
+      expect(route.request().postDataJSON()).toMatchObject({ cluster_id: clusterId, name: "Draft schedule", report_format: "json", framework: "cis-k8s-1.9" });
       await route.fulfill({ status: 503, json: { error: "Fixture save failure" } }); return;
     }
     else if (path === "/compliance/schedules") body = { schedules: [schedule, { ...schedule, id: "local", name: "Local schedule", cluster_id: clusterId }], summary: { total: 2, enabled: 2, disabled: 0 }, frameworks: ["cis-k8s-1.9"], report_formats: ["pdf", "json", "sarif", "csv"] };
@@ -44,11 +45,11 @@ test("New schedule uses its own URL, retains failed drafts and cancels to the sc
   await page.getByTestId("schedule-create-open").click();
   await expect(page).toHaveURL(new RegExp(`/clusters/${clusterId}/compliance/schedules/new`));
   await expect(page.getByRole("heading", { name: "New compliance schedule" })).toBeVisible();
-  await page.getByLabel("Name", { exact: true }).fill("Draft schedule");
+  await page.getByTestId("wizard-name").fill("Draft schedule");
   await page.getByLabel("Report format").selectOption("json");
   await page.getByRole("button", { name: "Create schedule", exact: true }).click();
   await expect(page.getByRole("alert").filter({ hasText: "Your draft is preserved" })).toBeVisible();
-  await expect(page.getByLabel("Name", { exact: true })).toHaveValue("Draft schedule");
+  await expect(page.getByTestId("wizard-name")).toHaveValue("Draft schedule");
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(page).toHaveURL(`${root}?tab=schedules&filter=auditors`);
   await expect(page.locator("form")).toHaveCount(0);

@@ -11,7 +11,8 @@ export type AuthState = {
   cookies: BrowserCookie[];
 };
 
-export const authStatePath = path.resolve(".playwright-auth/state.json");
+// Parallel local acceptance runs keep their short-lived sessions separate.
+export const authStatePath = path.resolve(process.env.PLAYWRIGHT_AUTH_STATE_DIR ?? ".playwright-auth", "state.json");
 
 export function readAuthState(): AuthState | null {
   if (process.env.PLAYWRIGHT_AUTH_SETUP !== "1") return null;

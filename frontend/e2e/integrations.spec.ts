@@ -15,6 +15,21 @@ test("Settings links to integration delivery operations", async ({ page }) => {
 });
 
 test("Integration delivery page shows enterprise connector operations", async ({ page }) => {
+  // Retry workers may advance seeded deliveries; use a fixed observed ledger
+  // to verify retrying/delivered/DLQ rendering without calling external receivers.
+  const instances = [
+    { id: "pagerduty-critical", name: "Critical PagerDuty service", type: "pagerduty" },
+    { id: "secops-slack", name: "SecOps Slack", type: "slack" },
+    { id: "servicenow-sec-queue", name: "ServiceNow security queue", type: "servicenow" },
+  ].map(instance => ({ ...instance, status: "healthy", owner: "Security", environment: "test", endpoint: "https://receiver.invalid", secret_ref: "redacted", supported_events: ["finding.escalated"] }));
+  await page.route("**/api/v1/integration-deliveries", route => route.fulfill({ json: {
+    summary: { integration_instances_total: 3, healthy_receivers: 2, degraded_receivers: 1, dead_letters_open: 1 },
+    integration_instances: instances, receiver_health: [], testable_actions: [],
+    routing_rules: [{ id: "tree", name: "Saved notification routing tree", enabled: true, receiver_ids: ["pagerduty-critical"], throttle: "1m", dedupe_window: "5m" }],
+    delivery_history: [{ id: "retry", event_type: "finding.escalated", status: "retrying", receiver_id: "servicenow-sec-queue", attempts: 2 }, { id: "delivered", event_type: "policy.deny", status: "delivered", receiver_id: "secops-slack", attempts: 1 }],
+    retry_stats: [{ receiver_id: "servicenow-sec-queue", queued_retries: 1, retry_rate_24h: "5%", dead_letters_open: 1, backoff_policy: "exponential" }],
+    guardrails: [{ id: "redaction", name: "Secret redaction", enforced: true }],
+  } }));
   await page.goto("/settings/integrations?tab=operations");
 
   await expect(page.getByTestId("integration-connectors")).toContainText("Critical PagerDuty service");
@@ -25,6 +40,8 @@ test("Integration delivery page shows enterprise connector operations", async ({
   await expect(page.getByTestId("routing-rules")).toContainText("pagerduty-critical");
   await expect(page.getByTestId("delivery-history")).toContainText("finding.escalated");
   await expect(page.getByTestId("delivery-history")).toContainText("retrying");
+  await expect(page.getByTestId("delivery-history")).toContainText("delivered");
+  await expect(page.getByTestId("retry-queue")).toContainText("1 queued");
   await expect(page.getByTestId("retry-queue")).toContainText("servicenow-sec-queue");
   await expect(page.getByTestId("retry-queue")).toContainText("DLQ");
   await expect(page.getByTestId("integration-guardrails")).toContainText("Secret redaction");

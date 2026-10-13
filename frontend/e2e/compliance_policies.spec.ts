@@ -13,7 +13,12 @@ test.describe("Compliance controls and exemption pages", () => {
       else if (path === "/clusters") body = { clusters: [{ id: clusterId, name: "Test cluster", state: "connected" }] };
       else if (path === "/compliance/frameworks") body = { frameworks: [{ id: "cis-k8s-1.9", name: "CIS Kubernetes 1.9", category: "kubernetes" }, { id: "gdpr", name: "GDPR", category: "regulatory-eu" }] };
       else if (path === "/compliance/summary") body = { frameworks: [{ framework: "cis-k8s-1.9", total: 1, pass: 0, fail: 1, manual: 0, exempted: 0, pass_pct: 0 }] };
-      else if (path === "/compliance/checks") body = { checks: [{ framework: "cis-k8s-1.9", control_id: "1.2", title: "Restrict control-plane permissions", status: "fail", effective_status: "fail", severity: "high", evidence: "Fixture evidence" }] };
+      else if (path === "/compliance/checks") {
+        const params = new URL(route.request().url()).searchParams;
+        expect(params.get("cluster_id")).toBe(clusterId);
+        const framework = params.get("framework") || "cis-k8s-1.9";
+        body = { checks: [{ id: `check-${framework}`, cluster_id: clusterId, framework, control_id: "1.2", title: "Restrict control-plane permissions", status: "fail", effective_status: "fail", severity: "high", evidence: "Fixture evidence" }], cluster_id: clusterId, framework, status: params.get("status") || "", profile: params.get("profile") || "", control_id: params.get("control_id") || "", q: params.get("q") || "", sort: params.get("sort") || "control", order: params.get("order") || "asc", limit: Number(params.get("limit") || 100), offset: Number(params.get("offset") || 0), total: 1, has_more: false, summary: { total: 1, pass: 0, fail: 1, manual: 0, not_applicable: 0, exempted: 0, graded: 1, ungraded: 0 } };
+      }
       else if (path === "/compliance/exemptions" && route.request().method() === "POST") { await route.fulfill({ status: 503, json: { error: "Fixture save failure" } }); return; }
       else if (path === "/compliance/exemptions") body = { exemptions: [] };
       else { await route.fulfill({ status: 404, json: { error: `Unmocked ${path}` } }); return; }
@@ -39,10 +44,10 @@ test.describe("Compliance controls and exemption pages", () => {
     await page.getByRole("button", { name: "Exempt", exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/clusters/${clusterId}/compliance/exemptions/new`));
     await expect(page.getByRole("heading", { name: "New compliance exemption" })).toBeVisible();
-    await page.getByLabel("Reason", { exact: true }).fill("Approved compensating controls");
+    await page.getByRole("textbox", { name: /^Reason/ }).fill("Approved compensating controls");
     await page.getByRole("button", { name: "Create exemption", exact: true }).click();
     await expect(page.getByRole("alert").filter({ hasText: "Your draft is preserved" })).toBeVisible();
-    await expect(page.getByLabel("Reason", { exact: true })).toHaveValue("Approved compensating controls");
+    await expect(page.getByRole("textbox", { name: /^Reason/ })).toHaveValue("Approved compensating controls");
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(page).toHaveURL(`${root}?framework=cis-k8s-1.9&filter=auditors&tab=frameworks`);
     await expect(page.locator("form")).toHaveCount(0);
@@ -63,13 +68,15 @@ test("Policies page dry-runs admission decisions before enforcement", async ({ p
   await page.getByRole("tab", { name: /Admission simulator/i }).click();
 
   await expect(page.getByTestId("policy-simulator")).toBeVisible();
+  const previewResponse = page.waitForResponse(response => response.url().includes("/api/v1/policies/simulate") && response.request().method() === "POST");
   await page.getByTestId("policy-simulator-run").click();
+  expect((await (await previewResponse).json()).admission_review).toMatchObject({ dry_run: true, sends_webhook: false, persists_decision: false });
 
   await expect(page.getByTestId("policy-simulator-results")).toContainText("deny");
   await expect(page.getByTestId("policy-simulator-results")).toContainText("Pod/privileged-debug");
   await expect(page.getByTestId("policy-simulator-results")).toContainText("block-unsigned-images");
-  await expect(page.getByTestId("policy-simulator-results")).toContainText("Sends webhook");
-  await expect(page.getByTestId("policy-simulator-results")).toContainText("Persists decision");
+  await expect(page.getByTestId("policy-simulator-guardrails")).toContainText("Manifest redaction");
+  await expect(page.getByTestId("policy-simulator-guardrails")).toContainText("Monitor before enforce");
   await expect(page.getByTestId("policy-simulator-guardrails")).toContainText("Dry-run only");
 });
 

@@ -1,8 +1,8 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-12** (source/stack and live infrastructure review;
-prior feature acceptance evidence remains dated below)
+Last reconciled: **2026-10-13** (console/browser acceptance;
+source, infrastructure and prior feature evidence remain dated below)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -1379,6 +1379,49 @@ the original Nodes status is 32px with its explanatory paragraph hidden until
 Details is opened. No live authoring or scan actions were submitted. Positive
 continuation beyond 100 records remains fixture-qualified for this small live
 workload cohort.
+
+The October 13 browser acceptance continuation resolves the obsolete fixture,
+route, disclosure and label expectations in the existing suite without deleting
+or skipping cases. The **entire 202-case run passes** against isolated PostgreSQL
+16/schema173 and the exact Helm-71 API/frontend images, with one worker and no
+retries. Production login throttling remains enabled: UI and API login helpers
+honor only 429 Retry-After cooldowns, while cookie secrecy, two-tab refresh,
+CSRF and refresh-reuse assertions remain intact. Per-run authentication files
+avoid concurrent-run collisions; teardown removed its state while preserving an
+unrelated sentinel in the configured directory.
+
+Updated high-volume fixtures filter before paging and supply current totals,
+summary, scope and ordering contracts. Matching Assets CSV preserves explicit
+cluster/search/kind/criticality/order filters, excludes negative cohorts and
+omits page bounds; 100,005 matches produce 100,000 ordered exported records.
+Image engine outcomes agree with the fixture's completeness summary. Network
+fixtures distinguish the organization notification preview from exact-cluster
+primary inventory. Finding risk-acceptance checks submit and verify rationale
+and expiry through the dedicated form.
+
+Four additional browser cases pass for shared table preferences (five including
+setup): Assets, Nodes and Components preserve keyboard resizing, ordering,
+pinning, density and visibility across reloads, return focus after menu actions,
+retain header/cell geometry at desktop and 640px, support keyboard horizontal
+scrolling without document overflow, and reset visibly without changing the URL.
+The identity fixture separately verifies user/organization preference isolation,
+stale-column removal, width clamping and reset without hiding active URL filters.
+Assets/Components use seeded API evidence; Nodes uses an explicit valid host row
+because the selected seeded cluster has no host observations. This qualifies
+these adopters, not the complete all-page accessibility or named-view matrix.
+All 26 changed/new browser source files pass explicit e2e lint and strict
+standalone TypeScript checks. Evidence: `/tmp/parity-browser-full.log`,
+`/tmp/parity-browser-tables-qualified.log` and the corresponding HTML reports.
+Generated screenshots are archived outside the tracked source.
+
+Hosted CI on `1cee666` passes frontend, Go unit/integration and dependency/FIPS
+checks. Its browser job still uses the earlier test files and reports 42 failed,
+159 passed and one not run; the passing local suite above qualifies their
+replacement, not an already-green hosted run. Existing quality/gosec/gitleaks
+gates remain open. This acceptance increment changes tests/documentation only;
+Helm 71 remains the deployed build. The exact Nodes status cited by the user was
+rechecked live: 32px collapsed at 1280px, 40px at 640px, with explanation hidden
+until Details is activated and no narrow document overflow.
 
 The remaining selected-console inventory audit includes conversation streams,
 the PCAP request ledger, Effective Config component reports, and the Node Risk

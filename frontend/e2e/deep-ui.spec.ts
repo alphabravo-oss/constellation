@@ -254,25 +254,21 @@ test("wave-c: CVEDetail page", async ({ page }) => {
   diag.data = "yes";
 });
 
-test("wave-c: ScopeBar persists a filter", async ({ page }) => {
-  const diag = newDiag("ScopeBar", "/timeline");
+test("wave-c: Timeline URL filters persist within the selected cluster", async ({ page }) => {
+  const diag = newDiag("TimelineFilters", "/timeline");
   attachDiagnostics(page, diag);
   await page.goto("/timeline");
-  await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
-  const scopeBar = page.getByTestId("scope-bar");
-  await expect(scopeBar).toBeVisible();
-  // Click "Cluster" chip
-  await scopeBar.getByRole("button", { name: /Cluster/ }).click();
-  await scopeBar.locator("input[placeholder='all clusters']").fill("prod-us-east-1");
-  await scopeBar.locator("input[placeholder='all clusters']").press("Enter");
-  await page.waitForTimeout(300);
-  // URL should contain ?cluster=prod-us-east-1
-  expect(page.url()).toMatch(/cluster=/);
+  await page.waitForURL(/\/clusters\/[^/]+\/timeline/);
+  const cluster = new URL(page.url()).pathname.split("/")[2];
+  const filters = page.getByTestId("timeline-advanced-filters");
+  await expect(filters).toBeVisible();
+  await filters.getByLabel("Namespace", { exact: true }).fill("default");
+  await expect(page).toHaveURL(/namespace=default/);
+  await expect(filters.getByLabel("Namespace", { exact: true })).toHaveValue("default");
   await page.screenshot({ path: path.join(SCREENS_DIR, "scopebar-filter.png"), fullPage: true });
-  // Reload — should still have the chip selected
   await page.reload();
-  await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
-  expect(page.url()).toMatch(/cluster=/);
+  await expect(page).toHaveURL(new RegExp(`/clusters/${cluster}/timeline.*namespace=default`));
+  await expect(page.getByTestId("timeline-advanced-filters").getByLabel("Namespace", { exact: true })).toHaveValue("default");
   diag.mounted = true;
   diag.data = "yes";
 });
@@ -287,7 +283,7 @@ test("wave-d: ResponseRules guided create", async ({ page }) => {
   await page.getByRole("button", { name: /New rule/i }).click();
   // Use a unique name based on timestamp
   const name = `e2e-rule-${Date.now()}`;
-  await expect(page.getByRole("heading", { name: "New rule" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "New response rule", exact: true })).toBeVisible();
   await page.getByLabel("Name", { exact: true }).fill(name);
   await page.getByLabel("Description").fill("Created by the deep-ui smoke test");
   await page.screenshot({ path: path.join(SCREENS_DIR, "rrv2-builder.png"), fullPage: true });

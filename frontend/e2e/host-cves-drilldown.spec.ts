@@ -39,21 +39,24 @@ test.beforeEach(async ({ page }) => {
         break;
       case "/dashboard/summary":
         body = {
-          findings_by_severity: { critical: 3, high: 0, medium: 0, low: 0, info: 0 },
-          findings_total: 3,
-          open_findings: 3,
+          findings_by_severity: { critical: 102, high: 0, medium: 0, low: 0, info: 0 },
+          findings_total: 102,
+          open_findings: 102,
           accepted_risks: 0,
           recent_activity: [],
-          posture: { security_score: 60, score_breakdown: {}, vulns_by_location: { host: 4, image: 0 }, vuln_signals: {}, hardening: {}, enforcement: {}, cves_by_mode: {}, exposed_by_mode: {}, top_vulnerable: [] },
+          posture: { security_score: 60, score_breakdown: {}, vulns_by_location: { host: 102, image: 0 }, vuln_signals: {}, hardening: {}, enforcement: {}, cves_by_mode: {}, exposed_by_mode: {}, top_vulnerable: [] },
         };
         break;
       case `/clusters/${clusterId}/nodes`: {
         seenNodeRequests.push(url);
+        expect(url.searchParams.get("limit")).toBe("100");
+        expect(url.searchParams.get("sort")).toBe("critical");
+        expect(url.searchParams.get("order")).toBe("desc");
         const offset = Number(url.searchParams.get("offset"));
         const filtered = url.searchParams.get("host_cves") === "open";
-        const matching = filtered
-          ? [node("host-cve-a", 2), node("host-cve-b", 1), ...Array.from({ length: 98 }, (_, index) => node(`host-cve-peer-${index}`, 1)), node("host-cve-c", 1)]
-          : [node("host-cve-a", 2), node("host-compliance-only", 0)];
+        const matching = [node("host-cve-a", 2), node("host-cve-b", 1), ...Array.from({ length: 98 }, (_, index) => node(`host-cve-peer-${index}`, 1)), node("host-cve-z-tail", 1), node("host-compliance-only", 0)]
+          .filter(item => !filtered || item.open_vulns > 0)
+          .sort((a, b) => b.critical_vulns - a.critical_vulns || a.node.localeCompare(b.node));
         const items = matching.slice(offset, offset + 100);
         body = {
           cluster_id: clusterId, items, total: matching.length, limit: 100, offset, has_more: offset + items.length < matching.length,
@@ -64,7 +67,7 @@ test.beforeEach(async ({ page }) => {
         break;
       }
       case "/findings":
-        body = { findings: [] };
+        body = { findings: [], total: 0, limit: Number(url.searchParams.get("limit") || 100), offset: Number(url.searchParams.get("offset") || 0), has_more: false, lifecycle_counts: { open: 0, in_progress: 0, triaged: 0, accepted: 0, suppressed: 0, resolved: 0 } };
         break;
       default:
         await route.fulfill({ status: 404, json: { error: `Unmocked ${path}` } });
@@ -76,6 +79,8 @@ test.beforeEach(async ({ page }) => {
 
 test("Host CVEs link keeps its finding scope and the node cohort supports server pages", async ({ page }) => {
   await page.goto(`${root}/dashboard`);
+  await page.getByRole("tab", { name: "Posture", exact: true }).click();
+  await page.locator("summary").filter({ hasText: "Additional posture metrics" }).click();
   const tile = page.getByTestId("dashboard-page").locator("a").filter({ has: page.getByText("Host CVEs", { exact: true }) }).first();
   await expect(tile).toHaveAttribute("href", `${root}/findings?view=instances&kind=vulnerability&lifecycle=open&target_type=host`);
   // Nodes remains a distinct legacy cohort: one node per source-cluster target.
@@ -92,7 +97,7 @@ test("Host CVEs link keeps its finding scope and the node cohort supports server
 
   await page.getByRole("button", { name: "Next", exact: true }).click();
   await expect(page.getByText("101 nodes match the server filters; 1 on this page.", { exact: false })).toBeVisible();
-  await expect(page.getByTestId("nodes-table")).toContainText("host-cve-c");
+  await expect(page.getByTestId("nodes-table")).toContainText("host-cve-z-tail");
   await expect(page.getByRole("button", { name: "Next", exact: true })).toBeDisabled();
   expect(seenNodeRequests[1].searchParams.get("offset")).toBe("100");
   expect(seenNodeRequests.every((url) => url.pathname === `/api/v1/clusters/${clusterId}/nodes`)).toBe(true);
@@ -104,9 +109,13 @@ test("risk selector and browser history restore the host filter", async ({ page 
 
   await page.getByTestId("node-risk-filter").selectOption("all");
   await expect(page).toHaveURL(`${root}/nodes`);
+  await expect(page.getByText("102 nodes match the server filters; 100 on this page.", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
   await expect(page.getByTestId("nodes-table")).toContainText("host-compliance-only");
-  await expect(page.getByText("2 nodes match the server filters; 2 on this page.", { exact: false })).toBeVisible();
+  await expect(page.getByText("102 nodes match the server filters; 2 on this page.", { exact: false })).toBeVisible();
 
+  await page.goBack();
+  await expect(page).toHaveURL(`${root}/nodes`);
   await page.goBack();
   await expect(page).toHaveURL(`${root}/nodes?risk=host-cves`);
   await expect(page.getByTestId("node-risk-filter")).toHaveValue("host-cves");

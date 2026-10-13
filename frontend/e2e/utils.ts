@@ -14,6 +14,20 @@ const browserCookieNames = ["__Host-constellation-session", "__Host-constellatio
 
 type Credentials = typeof CREDS;
 
+export async function waitForLoginCooldown(retryAfter: string | undefined, deadline: number) {
+  const seconds = Number(retryAfter);
+  const wait = retryAfter && Number.isFinite(seconds)
+    ? seconds * 1000
+    : retryAfter ? Date.parse(retryAfter) - Date.now() : 6000;
+  const milliseconds = Math.max(1000, Number.isFinite(wait) ? wait : 6000);
+  if (Date.now() + milliseconds > deadline) return false;
+  // Extend only time spent honoring the production limiter, never assertions.
+  const info = test.info();
+  info.setTimeout(info.timeout + milliseconds);
+  await delay(milliseconds);
+  return true;
+}
+
 // Setup runs against the production limiter. Auth/security specs deliberately
 // create and revoke sessions; respect its cooldown instead of disabling it or
 // forging client IPs. Invalid credentials and other errors still fail promptly.
@@ -25,20 +39,8 @@ export async function loginRequest(request: APIRequestContext, creds: Credential
       ...(browser ? { headers: { "X-Constellation-Client": "browser", Origin: new URL(API).origin } } : {}),
     });
     if (response.status() !== 429) return response;
-    const value = response.headers()["retry-after"];
-    const seconds = Number(value);
-    const wait = value && Number.isFinite(seconds)
-      ? seconds * 1000
-      : value ? Date.parse(value) - Date.now() : 6000;
-    const milliseconds = Math.max(1000, Number.isFinite(wait) ? wait : 6000);
-    if (Date.now() + milliseconds > deadline) return response;
+    if (!await waitForLoginCooldown(response.headers()["retry-after"], deadline)) return response;
     await response.dispose();
-    // Preserve the workflow's timeout budget when production throttling delays
-    // setup. This extends only the actual cooldown, not assertion timeouts or
-    // the login retry deadline, and never retries a failed workflow.
-    const info = test.info();
-    info.setTimeout(info.timeout + milliseconds);
-    await delay(milliseconds);
   }
 }
 function credentialsKey(creds: Credentials) {

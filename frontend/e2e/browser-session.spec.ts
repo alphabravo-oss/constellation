@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { waitForLoginCooldown } from "./utils";
 
 const accessCookie = "__Host-constellation-session";
 const refreshCookie = "__Host-constellation-refresh";
@@ -7,11 +8,16 @@ async function signIn(page: Page) {
   await page.goto("/auth/login");
   await page.getByLabel("Email").fill("admin@demo.test");
   await page.getByLabel("Password", { exact: true }).fill("Constellation!1");
-  const responsePromise = page.waitForResponse((response) => response.url().endsWith("/api/v1/auth/login") && response.request().method() === "POST");
-  await page.getByRole("button", { name: /^Sign in$/ }).click();
-  const response = await responsePromise;
-  expect(response.status()).toBe(200);
-  expect(await response.json()).not.toHaveProperty("token");
+  const deadline = Date.now() + 65_000;
+  while (true) {
+    const responsePromise = page.waitForResponse((response) => response.url().endsWith("/api/v1/auth/login") && response.request().method() === "POST");
+    await page.getByRole("button", { name: /^Sign in$/ }).click();
+    const response = await responsePromise;
+    if (response.status() === 429 && await waitForLoginCooldown(response.headers()["retry-after"], deadline)) continue;
+    expect(response.status()).toBe(200);
+    expect(await response.json()).not.toHaveProperty("token");
+    break;
+  }
   await expect(page).toHaveURL(/\/clusters$/);
 }
 
@@ -85,6 +91,8 @@ test("cookie mutations require CSRF protection and configuration reports live pr
   })).status);
   expect(restored).toBe(200);
   await page.goto("/settings/effective-config");
+  await page.getByRole("tab", { name: "Revision reports" }).click();
+  await expect(page).toHaveURL(/\?tab=reports$/);
   await expect(page.getByTestId("effective-config-provider-applied")).toBeVisible();
 });
 

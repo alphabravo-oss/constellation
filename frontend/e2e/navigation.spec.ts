@@ -190,6 +190,8 @@ test("Scanner and registry pages expose operator queue visibility", async ({ pag
   await page.goto("/settings/scanner");
   await expect(page.getByRole("heading", { name: /^Scanner & CVE Sources$/i })).toBeVisible();
   await expect(page.getByTestId("scanner-operator-summary")).toBeVisible();
+  await expect(page.getByTestId("scanner-queue-metrics")).toBeHidden();
+  await page.getByText("Queue depth by target type", { exact: true }).click();
   await expect(page.getByTestId("scanner-queue-metrics")).toBeVisible();
   await expect(page.getByTestId("scanner-recent-jobs")).toBeVisible();
   await page.getByRole("tab", { name: "Workers and capacity" }).click();
@@ -257,7 +259,12 @@ test("Components role filters show matching instances and diagnostics", async ({
       await route.fulfill({ json: {
         summary: { generated_at: "2026-01-01T01:00:00Z", components: 3, total_instances: 3, healthy: 3, degraded: 0, stale: 0, drift: 0, crashlooping: 0, missing: 0 },
         rollups: [],
-        components,
+        components: components.filter(item => !new URL(route.request().url()).searchParams.get("role") || item.role === new URL(route.request().url()).searchParams.get("role")),
+        cluster_id: clusterID, source_window_hours: 24, q: "", status: "", component: "",
+        role: new URL(route.request().url()).searchParams.get("role") || "",
+        role_counts: { all: 3, controller: 1, enforcer: 1, scanner: 1, admission: 0, discoverer: 0, other: 0 },
+        limit: 100, offset: 0, total: new URL(route.request().url()).searchParams.has("role") ? 1 : 3, has_more: false,
+        sort: new URL(route.request().url()).searchParams.get("sort") || "component", order: new URL(route.request().url()).searchParams.get("order") || "asc",
       } });
       return;
     }
@@ -285,9 +292,14 @@ test("Components role filters show matching instances and diagnostics", async ({
 
   await page.goto(`/clusters/${clusterID}/components?role=enforcer`);
   const table = page.getByTestId("component-inventory-table");
+  await table.getByRole("button", { name: "Columns", exact: true }).click();
+  await page.getByRole("menuitemcheckbox", { name: "Hostname", exact: true }).click();
+  await page.keyboard.press("Escape");
+  let previousSelection: string | null = null;
   for (const role of [roles[1], roles[0], roles[2]]) {
     await page.getByTestId(`component-nv-role-${role.id}`).click();
-    await expect(page).toHaveURL(new RegExp(`\\?role=${role.id}$`));
+    await expect.poll(() => new URL(page.url()).searchParams.get("role")).toBe(role.id);
+    expect(new URL(page.url()).searchParams.get("component")).toBe(previousSelection);
     await expect(table).toContainText(role.host);
     for (const other of roles.filter((candidate) => candidate.id !== role.id)) {
       await expect(table).not.toContainText(other.host);
@@ -296,6 +308,7 @@ test("Components role filters show matching instances and diagnostics", async ({
     await expect(page).toHaveURL(new RegExp(`role=${role.id}.*component=${role.id}$`));
     await expect(page.getByTestId("component-diagnostics")).toContainText(`${role.id} diagnostic`);
     await expect(page.getByTestId("component-preview")).toContainText(role.host);
+    previousSelection = role.id;
   }
 });
 
@@ -346,12 +359,18 @@ test("Admission Control exposes rules, criteria, and profile rollout panels", as
   await expect(page.getByTestId("admission-options-catalog")).toBeVisible();
   await page.getByRole("button", { name: "Import profile", exact: true }).click();
   await expect(page).toHaveURL(/admission\/import$/);
-  await expect(page.getByTestId("admission-profile-templates")).toBeVisible();
-  await expect(page.getByTestId("admission-profile-templates")).toContainText(/Rules/i);
-
+  await expect(page.getByTestId("admission-profile-select")).toBeVisible();
+  await expect(page.getByTestId("admission-profile-compare")).toContainText(/Profile rules compared with installed policies/i);
+  await expect(page.getByTestId("admission-profile-import")).toBeDisabled();
   await page.getByRole("button", { name: /^Preview$/i }).click();
-  await expect(page.getByTestId("admission-profile-preview")).toBeVisible();
-  await expect(page.getByTestId("admission-profile-preview")).toContainText(/monitor|enforce/i);
+  await expect(page.getByRole("status").filter({ hasText: "Preview ready:" })).toBeVisible();
+  await expect(page.getByTestId("admission-profile-compare")).toContainText(/Preview compared with installed policies/i);
+  await expect(page.getByTestId("admission-profile-import")).toBeEnabled();
+  await page.getByRole("tab", { name: "Bundle JSON", exact: true }).click();
+  await expect(page).toHaveURL(/tab=bundle/);
+  await expect(page.getByTestId("admission-profile-import")).toBeDisabled();
+  await page.goBack();
+  await expect(page.getByRole("tab", { name: "Catalog", exact: true })).toHaveAttribute("aria-selected", "true");
 });
 
 test.describe("Org sidebar navigation — routes", () => {
@@ -381,9 +400,17 @@ test("Settings hub links to System Health and Access Control", async ({ page }) 
 test("Effective Config exposes source, diff, and applied revision panels", async ({ page }) => {
   await page.goto("/settings/effective-config");
   await expect(page.getByRole("heading", { name: /^Effective Config$/i })).toBeVisible();
+  await expect(page.getByTestId("effective-config-source-summary")).toBeHidden();
+  await page.getByRole("tab", { name: "Provenance", exact: true }).click();
+  await expect(page).toHaveURL(/tab=sources/);
   await expect(page.getByTestId("effective-config-source-summary")).toBeVisible();
   await expect(page.getByTestId("effective-config-default-diff")).toBeVisible();
+  await page.getByRole("tab", { name: "Revision reports", exact: true }).click();
+  await expect(page).toHaveURL(/tab=reports/);
   await expect(page.getByTestId("effective-config-applied-revisions")).toBeVisible();
+  await expect(page.getByTestId("effective-config-source-summary")).toBeHidden();
+  await page.goBack();
+  await expect(page.getByTestId("effective-config-source-summary")).toBeVisible();
 });
 
 test("Migration Imports exposes readiness, recommended actions, and report export", async ({ page }) => {

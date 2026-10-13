@@ -6,6 +6,7 @@ const root = `/clusters/${clusterId}`;
 const seenAt = "2026-09-26T12:00:00Z";
 const deployment = (name: string, namespace: string, riskScore: number) => ({
   id: `${namespace}-${name}`,
+  cluster_id: clusterId,
   namespace,
   name,
   platform_role: undefined as string | undefined,
@@ -64,7 +65,8 @@ test.beforeEach(async ({ page }) => {
         };
         break;
       case "/deployments": {
-        const matching = matchingDeployments(url);
+        expect(url.searchParams.get("cluster_id")).toBe(clusterId);
+        const matching = matchingDeployments(url).sort((a, b) => b.risk_score - a.risk_score || a.id.localeCompare(b.id));
         const offset = Number(url.searchParams.get("offset") ?? 0);
         const limit = Number(url.searchParams.get("limit") ?? 100);
         body = { deployments: matching.slice(offset, offset + limit), total: matching.length, limit, offset, has_more: offset + limit < matching.length, platform_count: 0, summary: { total: matching.length, at_risk: matching.filter((row) => row.risk_score >= 60).length, finding_count: matching.length, critical_count: matching.length, high_count: 0 } };
@@ -83,26 +85,32 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("Dashboard link filters deployment rows and search follows browser history", async ({ page }) => {
+test("Dashboard namespace-qualified link filters deployment rows and search follows browser history", async ({ page }) => {
   await page.goto(`${root}/dashboard`);
-  const dashboardLink = page.getByTestId("dashboard-page").getByRole("link", { name: /^frontend default 2C 1H$/ });
-  await expect(dashboardLink).toHaveAttribute("href", `${root}/deployments?q=frontend`);
+  await page.getByRole("tab", { name: "Network", exact: true }).click();
+  const dashboardLink = page.getByTestId("dashboard-page").getByRole("link", { name: /^frontend default · namespace \+ name search 2C 1H$/ });
+  await expect(dashboardLink).toHaveAttribute("href", `${root}/deployments?q=frontend&namespace=default&hide_platform=false`);
 
   const deploymentRequest = page.waitForRequest((request) => new URL(request.url()).pathname === "/api/v1/deployments");
   await dashboardLink.click();
   expect(new URL((await deploymentRequest).url()).searchParams.get("cluster_id")).toBe(clusterId);
-  await expect(page).toHaveURL(`${root}/deployments?q=frontend`);
+  await expect(page).toHaveURL(`${root}/deployments?q=frontend&namespace=default&hide_platform=false`);
 
   const search = page.getByTestId("deployment-search");
   const rows = page.getByTestId("deployment-row");
   await expect(search).toHaveValue("frontend");
+  await expect(page.getByTestId("namespace-filter")).toHaveValue("default");
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText("default/frontend");
+  await expect(rows.first()).not.toContainText("payments/frontend-canary");
+  await page.getByTestId("namespace-filter").fill("");
   await expect(rows).toHaveCount(2);
   await expect(rows.first()).toContainText("default/frontend");
   await expect(rows.last()).toContainText("payments/frontend-canary");
   await expect(page.getByTestId("deployments-summary").locator(".text-display").first()).toHaveText("2");
 
   await search.fill("API");
-  await expect(page).toHaveURL(`${root}/deployments?q=API`);
+  await expect(page).toHaveURL(`${root}/deployments?q=API&hide_platform=false`);
   await expect(search).toHaveValue("API");
   await expect(rows).toHaveCount(1);
   await expect(rows.first()).toContainText("default/api-service");
@@ -114,10 +122,10 @@ test("Dashboard link filters deployment rows and search follows browser history"
   expect(csv).not.toContain("frontend");
 
   await page.goBack();
-  await expect(page).toHaveURL(`${root}/dashboard`);
+  await expect(page).toHaveURL(`${root}/dashboard?tab=network`);
 
   await page.goForward();
-  await expect(page).toHaveURL(`${root}/deployments?q=API`);
+  await expect(page).toHaveURL(`${root}/deployments?q=API&hide_platform=false`);
   await expect(search).toHaveValue("API");
   await expect(rows).toHaveCount(1);
   await expect(rows.first()).toContainText("default/api-service");

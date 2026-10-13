@@ -13,12 +13,12 @@ test("Response catalog shows built-in organization rules and URL event filters",
   await expect(page.getByTestId("response-rules-table").getByText("Unauthorized external egress")).toBeVisible();
   await expect(page.getByTestId("response-rules-table").getByText("alert, quarantine_workload")).toBeVisible();
 
-  await page.getByLabel("Event type", { exact: true }).selectOption("network");
+  await page.getByRole("combobox", { name: /^Event type/ }).selectOption("network");
   await expect(page).toHaveURL(/event=network/);
   await expect(page.getByTestId("response-rule-row")).toHaveCount(1);
   await expect(page.getByTestId("response-rules-table").getByText("Unauthorized external egress")).toBeVisible();
   await page.reload();
-  await expect(page.getByLabel("Event type", { exact: true })).toHaveValue("network");
+  await expect(page.getByRole("combobox", { name: /^Event type/ })).toHaveValue("network");
   await expect(page.getByTestId("response-rule-row")).toHaveCount(1);
   await expect(page.getByRole("button", { name: "Authored response rules", exact: true })).toBeVisible();
 });
@@ -39,7 +39,7 @@ test("shared table headers and cells stay aligned across widths and densities", 
           const h = header.getBoundingClientRect();
           const c = cells[index].getBoundingClientRect();
           return Math.abs(h.x - c.x) < 1 && Math.abs(h.width - c.width) < 1
-            && getComputedStyle(header).textAlign === getComputedStyle(cells[index]).textAlign;
+            && window.getComputedStyle(header).textAlign === window.getComputedStyle(cells[index]).textAlign;
         });
       })).toBe(true);
     }
@@ -48,7 +48,7 @@ test("shared table headers and cells stay aligned across widths and densities", 
 
 test("Response catalog overrides use a dedicated form and require a fresh preview", async ({ page }) => {
   await page.goto("/response");
-  await page.getByLabel("Event type", { exact: true }).selectOption("dlp");
+  await page.getByRole("combobox", { name: /^Event type/ }).selectOption("dlp");
   await page.getByRole("button", { name: "Edit override for Secret exfiltration pattern", exact: true }).click();
   await expect(page).toHaveURL(/\/response\/dlp-secret-exfiltration\/edit/);
   await expect(page.getByRole("heading", { name: "Edit response catalog override", exact: true })).toBeVisible();
@@ -68,7 +68,7 @@ test("Response catalog overrides use a dedicated form and require a fresh previe
   await expect(page.getByTestId("response-rule-save")).toBeEnabled();
   await page.getByTestId("response-rule-save").click();
   await expect(page.getByRole("heading", { name: "Response Catalog", exact: true })).toBeVisible();
-  await expect(page.getByLabel("Event type", { exact: true })).toHaveValue("dlp");
+  await expect(page.getByRole("combobox", { name: /^Event type/ })).toHaveValue("dlp");
   const savedRule = page.getByTestId("response-rule-row").filter({ hasText: "Secret exfiltration pattern" });
   await expect(savedRule).toContainText("enforce");
   await expect(savedRule).toContainText("Organization override");

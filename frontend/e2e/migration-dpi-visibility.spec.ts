@@ -159,7 +159,11 @@ test("MIG-1 imported DLP/WAF rules and group scope are visible across Migration 
   await expect(page.getByRole("heading", { name: "DLP Rules", exact: true })).toBeVisible();
   await expect(page.getByTestId("runtime-dlp-row-dlp-rule-id")).toContainText("Promote");
   await expect(page.getByTestId("runtime-dlp-list")).toContainText(dlpName);
+  await page.getByTestId("runtime-dlp-list").getByRole("button", { name: "Columns", exact: true }).click();
+  await page.getByRole("menuitemcheckbox", { name: "Origin", exact: true }).click();
+  await page.keyboard.press("Escape");
   await expect(page.getByTestId("runtime-dlp-list")).toContainText("NeuVector import");
+  await page.getByText("Advanced", { exact: true }).click();
   await expect(page.getByTestId("dlp-group-bindings-rows")).toContainText("cutover.api.default");
   await expect(page.getByTestId("runtime-dlp-nv-compatibility").getByRole("link", { name: "Migration Imports" })).toHaveAttribute("href", "/settings/migration");
 
@@ -170,8 +174,13 @@ test("MIG-1 imported DLP/WAF rules and group scope are visible across Migration 
   await expect(page.getByTestId("runtime-signature-row-waf-rule-id")).toContainText("Promote");
   await expect(page.getByTestId("runtime-signatures-list")).toContainText(wafName);
   await expect(page.getByTestId("runtime-signatures-list")).toContainText("WAF");
+  await page.getByTestId("runtime-signatures-list").getByRole("button", { name: "Columns", exact: true }).click();
+  await page.getByRole("menuitemcheckbox", { name: "Direction", exact: true }).click();
+  await page.getByRole("menuitemcheckbox", { name: "Origin", exact: true }).click();
+  await page.keyboard.press("Escape");
   await expect(page.getByTestId("runtime-signatures-list")).toContainText("ingress");
   await expect(page.getByTestId("runtime-signatures-list")).toContainText("NeuVector import");
+  await page.getByText("Advanced", { exact: true }).click();
   await expect(page.getByTestId("signature-group-bindings-rows")).toContainText("cutover.api.default");
   await expect(fixture.unexpected).toEqual([]);
 });
