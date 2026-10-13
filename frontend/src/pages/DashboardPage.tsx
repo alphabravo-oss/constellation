@@ -22,7 +22,7 @@ import {
   enterprise,
   federation,
   network,
-  downloadAPIFile,
+  downloadExecutiveReport,
   scannerOperations,
   systemHealth,
   type CVEBundleStatus,
@@ -828,7 +828,7 @@ export function DashboardPage() {
             : "A risk-first snapshot of your fleet. Click any tile to drill in."
         }
         actions={
-          <DashboardReportDownload clusterId={clusterId} scopeReady={scopeReady} owner={operator?.org_id && operator.user_id ? findingOwner : undefined} />
+          <DashboardReportDownload orgId={operator?.org_id} clusterId={clusterId} scopeReady={scopeReady} owner={operator?.org_id && operator.user_id ? findingOwner : undefined} />
         }
       />
 
@@ -857,16 +857,16 @@ export function DashboardPage() {
   );
 }
 
-function DashboardReportDownload({ clusterId, scopeReady, owner }: { clusterId?: string; scopeReady: boolean; owner?: string }) {
+function DashboardReportDownload({ orgId, clusterId, scopeReady, owner }: { orgId?: string; clusterId?: string; scopeReady: boolean; owner?: string }) {
   const qc = useQueryClient();
   const registryFetching = useIsFetching({ queryKey: ["clusters"], exact: true });
   const detailFetching = useIsFetching({ queryKey: ["cluster", clusterId], exact: true });
-  const ready = !!owner && !!clusterId && scopeReady && !registryFetching && !detailFetching && clusterCacheReady(qc, clusterId);
+  const ready = !!orgId && !!owner && !!clusterId && scopeReady && !registryFetching && !detailFetching && clusterCacheReady(qc, clusterId);
   const context = JSON.stringify([owner, clusterId]);
   const capture = useExportGuard(context, !ready, () => ready && !!clusterId && clusterCacheReady(qc, clusterId));
   const download = useMutation({ mutationFn: async ({ current }: { context: string; current: () => boolean }) => {
     if (!current()) throw new Error("Report scope changed");
-    await downloadAPIFile(`/reports/executive.html?cluster_id=${encodeURIComponent(clusterId!)}`, "constellation-executive-report.html", current);
+    await downloadExecutiveReport(orgId!, clusterId!, current);
   } });
   return <div className="flex flex-wrap items-center gap-2">
     <Button variant="outline" disabled={!ready || download.isPending} title="Download this cluster’s executive security report as HTML" onClick={() => download.mutate({ context, current: capture() })}>

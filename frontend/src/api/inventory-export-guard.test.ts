@@ -1,10 +1,11 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { api, assets, containers, findings, securityTimeline, baselines, compliance, componentsInventory, cve, deployments, fileProfiles, imageScanResults, network, nodes, registries, repositoryScans, runtimeEvents, runtimeThreats, scanJobs, serverlessFunctions, type ScanInventoryDownloadGuard } from "./client";
+import { api, assets, containers, downloadExecutiveReport, findings, securityTimeline, baselines, compliance, componentsInventory, cve, deployments, fileProfiles, imageScanResults, network, nodes, registries, repositoryScans, runtimeEvents, runtimeThreats, scanJobs, serverlessFunctions, type ScanInventoryDownloadGuard } from "./client";
 
 afterEach(() => vi.restoreAllMocks());
 const exporters: Array<[string, (guard: ScanInventoryDownloadGuard) => Promise<unknown>]> = [
   ["assets", guard => assets.exportCsv({}, guard)],
   ["compliance artifact", guard => compliance.downloadRunArtifact("run", guard)],
+  ["executive report", guard => downloadExecutiveReport("org", "cluster", guard)],
   ["containers", guard => containers.exportCSV("cluster", {}, guard)],
   ["timeline", guard => securityTimeline.exportCSV({}, guard)],
   ["findings", guard => findings.exportCSV({}, guard)],
@@ -44,6 +45,28 @@ it.each(exporters)("does not dispatch pending %s CSV after its scope becomes sta
   await rejected;
   expect(createURL).not.toHaveBeenCalled();
   expect(click).not.toHaveBeenCalled();
+});
+
+it.each([
+  {},
+  { "x-report-org-id": "org", "x-report-cluster-id": "organization" },
+  { "x-report-org-id": "other", "x-report-cluster-id": "cluster" },
+  { "x-report-org-id": "org", "x-report-cluster-id": "sibling" },
+])("withholds an executive report with missing or mismatched scope receipts: %j", async headers => {
+  vi.spyOn(api, "get").mockResolvedValue({ data: new Blob(["report"]), headers });
+  const createURL = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:report");
+  await expect(downloadExecutiveReport("org", "cluster", () => true)).rejects.toThrow("did not confirm");
+  expect(createURL).not.toHaveBeenCalled();
+});
+
+it("downloads executive HTML only for the confirmed report scope", async () => {
+  const request = vi.spyOn(api, "get").mockResolvedValue({ data: new Blob(["report"]), headers: { "x-report-org-id": "org", "x-report-cluster-id": "cluster", "content-disposition": 'attachment; filename="cluster-report.html"' } });
+  vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:report");
+  vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+  const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) { expect(this.download).toBe("cluster-report.html"); });
+  await downloadExecutiveReport("org", "cluster", () => true);
+  expect(request).toHaveBeenCalledWith("/reports/executive.html", { params: { cluster_id: "cluster" }, responseType: "blob" });
+  expect(click).toHaveBeenCalledOnce();
 });
 
 it("allows direct-call exports without a scope callback", async () => {

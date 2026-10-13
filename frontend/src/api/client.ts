@@ -75,8 +75,21 @@ export { api };
 // --- typed endpoints (thin layer) ---
 
 export async function downloadAPIFile(path: string, filename: string, shouldDownload?: ScanInventoryDownloadGuard) {
-  const response = await api.get(path, { responseType: "blob" });
+  const response = await api.get<Blob>(path, { responseType: "blob" });
   assertInventoryDownloadCurrent(shouldDownload);
+  dispatchAPIFile(response, filename);
+}
+
+export async function downloadExecutiveReport(orgId: string, clusterId: string, shouldDownload: ScanInventoryDownloadGuard) {
+  const response = await api.get<Blob>("/reports/executive.html", { params: { cluster_id: clusterId }, responseType: "blob" });
+  assertInventoryDownloadCurrent(shouldDownload);
+  if (response.headers["x-report-org-id"] !== orgId || response.headers["x-report-cluster-id"] !== clusterId) {
+    throw new Error("The report response did not confirm the requested organization and cluster.");
+  }
+  dispatchAPIFile(response, "constellation-executive-report.html");
+}
+
+function dispatchAPIFile(response: { data: Blob; headers: Record<string, unknown> }, filename: string) {
   const blob = response.data instanceof Blob ? response.data : new Blob([response.data]);
   // Prefer the server-provided filename (Content-Disposition) when present.
   const cd = String(response.headers?.["content-disposition"] ?? "");

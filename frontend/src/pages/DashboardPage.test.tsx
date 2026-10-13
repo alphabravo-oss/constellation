@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { TablePreferencesProvider } from "@/contexts/TablePreferencesContext";
 import { DashboardPage } from "./DashboardPage";
-import { downloadAPIFile, dashboard, network, findings, clusters, systemHealth, compliance, enterprise, scannerOperations, federation, type PlatformFactsResponse } from "@/api/client";
+import { downloadExecutiveReport, dashboard, network, findings, clusters, systemHealth, compliance, enterprise, scannerOperations, federation, type PlatformFactsResponse } from "@/api/client";
 import { downloadCsv } from "@/lib/csv";
 const scope = vi.hoisted(() => ({ clusterId: "cluster" as string | undefined, cluster: { id: "cluster", name: "Demo" } as { id: string; name: string } | undefined, isLoading: false, error: null as Error | null }));
 const route = vi.hoisted(() => ({ params: new URLSearchParams(), setParams: vi.fn() }));
@@ -23,7 +23,7 @@ vi.mock("@/api/client", () => ({
   network: { exposure: vi.fn(), conversations: vi.fn().mockResolvedValue({ conversations: [] }) },
   scannerOperations: { status: vi.fn().mockResolvedValue({}), workers: vi.fn().mockResolvedValue([]) },
   systemHealth: { cluster: vi.fn().mockResolvedValue({ heartbeats: [] }), overview: vi.fn() },
-  downloadAPIFile: vi.fn(),
+  downloadExecutiveReport: vi.fn(),
 }));
 let root: Root; let host: HTMLDivElement; let client: QueryClient;
 beforeEach(() => {
@@ -49,12 +49,12 @@ async function renderPage(seed?: (client: QueryClient) => void) {
 }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
 it("downloads cluster-scoped HTML and invalidates its pending download when scope changes", async () => {
-  vi.mocked(downloadAPIFile).mockResolvedValue(undefined);
+  vi.mocked(downloadExecutiveReport).mockResolvedValue(undefined);
   await renderPage(); await settled(() => expect(host.textContent).toContain("Security risk: 27/100"));
   const button = [...host.querySelectorAll("button")].find(item => item.textContent?.trim() === "Download report (HTML)")!;
   expect(button.disabled).toBe(false); await act(async () => button.click());
-  expect(downloadAPIFile).toHaveBeenCalledWith("/reports/executive.html?cluster_id=cluster", "constellation-executive-report.html", expect.any(Function));
-  const guard = vi.mocked(downloadAPIFile).mock.calls[0][2]!; expect(guard()).toBe(true);
+  expect(downloadExecutiveReport).toHaveBeenCalledWith("org", "cluster", expect.any(Function));
+  const guard = vi.mocked(downloadExecutiveReport).mock.calls[0][2]!; expect(guard()).toBe(true);
   await act(async () => client.setQueryData(["clusters"], { clusters: [] })); expect(guard()).toBe(false);
   await act(async () => client.setQueryData(["clusters"], { clusters: [{ id: "cluster" }] })); expect(guard()).toBe(false);
 });
