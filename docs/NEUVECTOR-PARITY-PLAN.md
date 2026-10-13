@@ -1492,20 +1492,75 @@ for the directory-creation step allowed installation without policy changes.
 The temporary release was uninstalled after verification. Evidence:
 `/tmp/custom-install-proof/verification.json` and accompanying JSON/CSV.
 
-Hosted CI on `9e52eb7` passes Go unit/integration and dependency/FIPS checks.
-Its browser run passes 205 cases and fails provider discovery on a real 429;
-the updated test honors the existing Retry-After helper without bypassing
-throttling. Its frontend run passes 1,959 cases and times out one initial Runtime
-query; that test now uses the existing three-second settled-query convention.
-These local corrections still require hosted confirmation. Existing
-quality/gosec/gitleaks gates remain open.
+Hosted CI on `0c6790f` now passes frontend, browser, Go unit/integration and
+dependency/FIPS checks. This confirms the provider-discovery Retry-After handling
+and the Runtime settled-query correction from the preceding run. Existing
+quality/gosec/gitleaks gates remain open; the aggregate required gate is not green.
 
-Remaining selected-console work includes exact historical finding detail/action
-identity, complete dashboard source/destination reconciliation and all-page
-accessibility, aliases and saved-state acceptance. Dormant SSE remains disabled
-and unqualified. Legacy bounded detail payloads remain compatibility surfaces.
-Fleet-scale role-export latency remains unqualified; correctness fixtures do not
-establish performance at the 100,000-row export cap.
+### Exact finding observations and finite navigation acceptance — October 13
+
+Schema **174** binds finding detail, actions, comments, exception evidence and
+audit attribution to the physical `(id, first_seen_at)` observation. Exact routes
+require a reviewed decimal-string revision for writes and return conflicts when
+evidence changed. UUID-only callers resolve only a unique retained observation;
+ambiguous IDs require a choice. The narrow standalone `id:<UUID>` chooser includes
+owned workload recurrences without changing ordinary global vulnerability totals.
+Old UUID-only comments remain separately disclosed; no migration guesses which
+observation they belonged to. Scanner updates preserve the exact selected row.
+
+Console links, selections, bulk operations and cache keys preserve microseconds.
+Stale forms retain drafts, pause Save and provide explicit Refresh observation.
+Unconfirmed late responses prevent blind repeat writes. Generic asset findings
+carry exact identity; canonical image-scan evidence stays separate. Federation
+passes exact selectors/revisions without broadening custom read allowlists.
+
+The final build passes **2,091 frontend tests in 143 files**, lint and production
+typecheck/build. **228 fresh PostgreSQL 16/schema174 executions** pass with race,
+shuffle, count2 and no skips across finding, scanner, server and affected handler
+contracts; focused asset/federation and occurrence suites also pass. OpenAPI,
+affected Go vet and **118 endpoint mappings** pass. Evidence:
+`/tmp/finding-instance-frontend-qualified-tests.log`,
+`/tmp/finding-instances-broad-db/integration.json` and
+`/tmp/finding-instance-endpoint-mapping.log`.
+
+The full **248-case browser suite** passes on frozen API/frontend/migration
+`finding-instances-20261013` images, with one worker and no retries/skips.
+The finite alias matrix covers all **96 declared redirects** and **49 supported
+detail/form suffixes**, plus true soft navigation, history, repeated filters,
+fragments, sibling scope and empty-cluster fallback. A source guard detects
+unlisted new aliases. Evidence: `/tmp/finding-instance-full-browser.log` and its
+report/results; generated screenshots are archived separately from source.
+
+Helm **73** deploys these images and schema174; all seven deployments are ready.
+Live read-only checks sample five of 6,123 finding rows and verify three exact
+detail/comment/chooser/CSV cohorts, malformed selectors and foreign scope.
+Details and forms preserve the raw observation timestamp; Cancel returns to the
+same observation. Status rows remain 32px with details collapsed and no document
+overflow at 1280px. Positive recurrence, comments and mutations are disposable
+fixture evidence; no live finding state was changed. Evidence:
+`/tmp/finding-instances-live-results.json` and `/tmp/finding-instance-deploy.log`.
+
+Seven deterministic Dashboard browser cases pass, including four additional
+cases beyond the full suite (**252 discovered cases**). They reconcile strongest
+mode vulnerability IDs/exposure, host/platform rollups, runtime/chart temporal
+boundaries, exact selected organization audit IDs, graded cross-framework
+compliance, and image/host/fixable/privileged/root/exposure tile counts through
+pages, exports, history and reload. Missing audit records remain missing after
+newer events arrive. Zero, null and false exposure facts preserve source units.
+Together with existing severity/acceptance, component/deny-link, backend and live
+evidence, this closes exact tile destinations. Operational source-count
+reconciliation is a separate acceptance item. Evidence:
+`/tmp/dashboard-evidence-final-browser.log` (7 passed).
+
+The finite remaining console audit identifies runtime-policy review guards,
+Network Rules server filtering/continuation beyond its old 3,000-row cap,
+Audit filters/matching CSV, global CVE matching CSV and stale summary handling,
+remaining saved-view adopters, and shared preference/accessibility acceptance.
+Small follow-ups expose observation times in the ambiguity chooser, link
+workload-finding peeks to exact detail, and return roles in network peer diagnostics.
+Dormant SSE and fleet-scale export latency remain unqualified; correctness at a
+100,000-row cap is not a performance claim. Broader infrastructure/security
+acceptance remains separate from the selected console scope.
 
 The admission-engine continuation adds migration **172** and persists normalized
 engine outcomes atomically with image scan completion. The built-in vulnerability
@@ -1526,8 +1581,8 @@ has zero findings. The API image is
 `sha256:8382addded7cd3d9d2e74410772f6b64342189a0f82e88ea74abe6e19ded867b`.
 These checks do not close the remaining parity or live cutover acceptance gates.
 
-**Parity is not release-complete.** The feature checklist has 56 checked
-and 97 open items. Counts describe acceptance items, not a percentage of code
+**Parity is not release-complete.** The feature checklist has 58 checked
+and 95 open items. Counts describe acceptance items, not a percentage of code
 implemented. The complete scope and remaining gates are retained below; do not
 convert partially implemented items into checked boxes.
 
@@ -2157,16 +2212,16 @@ Unchecked parent items remain open until **all** their acceptance requirements
 are met. Code present is not the same as verified or release-ready. The older
 deficiency ledger includes findings that already have fixes; do not use its
 historical counts as a count of currently open defects.
-Acceptance backlog: **97 open**. Lease-scoped private-registry proof and
+Acceptance backlog: **95 open**. Lease-scoped private-registry proof and
 live scanner revision/capacity visibility close two REG-1 items. The October 12 browser/FIPS CI gate closes one
 bounded item with local and hosted evidence. The September reconciliation reached 98;
 the October 11 fleet review adds two explicit ingestion/isolation gates.
 Since the `800b0ef` baseline of 107 open,
-**fifteen existing items closed** (four OPS-1 items, three SIEM-1 items, one
-POL-1 item, one IAM-1 item, two UI-1 items, one UI-2 item, one UI-3 item and two REG-1 items), and four new items were added: vendor interoperability, legacy
+**seventeen existing items closed** (four OPS-1 items, three SIEM-1 items, one
+POL-1 item, one IAM-1 item, three UI-1 items, one UI-2 item, one UI-3 item, one UI-4 item and two REG-1 items), and four new items were added: vendor interoperability, legacy
 DPI binding tenant validation, registration/proof of the unreachable
 group-edge HTTP workflow, and durable storage-growth controls.
-The checklist contains **56 checked bounded rows** (39 at baseline); one new
+The checklist contains **58 checked bounded rows** (39 at baseline); one new
 bounded OPS-2 database-reclaim item was added as complete. Earlier
 rounds added bounded POL-1, POL-2 and API-1 fixes without closing their parent
 acceptance item. Those rounds added an eight-object cutover fixture and opt-in
@@ -3065,10 +3120,13 @@ progressive disclosure, while retaining Constellation's security vocabulary.
 
 ### UI-1 Page and navigation contract
 
-- [ ] One canonical home per feature; aliases redirect instead of rendering a
-  duplicate surface. DLP/WAF legacy routes now redirect to their canonical
-  runtime pages and forms, and common aliases retain deep paths, filters and
-  fragments. Other duplicate feature routes still need audit.
+- [x] One canonical home per feature; aliases redirect instead of rendering a
+  duplicate surface. A finite source audit and 24 browser cases cover all 96
+  declared redirects plus 49 supported detail/form suffixes. Filters, repeated
+  query values, fragments, explicit sibling scope, soft navigation and history
+  survive redirects. Organization/cluster Audit and CVE detail remain legitimate
+  scoped homes; dedicated new/edit forms are separate workflows. The matrix has
+  a source coverage guard so future aliases cannot silently escape qualification.
 - [x] Keep Clusters first as the primary workspace, followed by Organization,
   Platform, and Integrations (updated by the October 12 user decision). Sidebar,
   command palette, and Settings hub agree. Clusters remains a direct link;
@@ -3159,7 +3217,7 @@ are not counted as inline authoring.
 - [ ] Reconcile component health, policy modes, threats, vulnerability posture,
   exposed services, admission, scanner DB, and federation counts with their
   source endpoints.
-- [ ] Link every tile to the exact filtered source view. Browser tests now cover
+- [x] Link every tile to the exact filtered source view. Browser tests now cover
   dashboard metric destinations and supported component/network filters.
   Findings filters and server pages now preserve URL state and use matching
   instance totals; CVE rollups retain their filtered total and share the search DSL.
@@ -3171,13 +3229,15 @@ are not counted as inline authoring.
   windows and visible platform context. The conversation header requests a combined
   deny/block cohort before server pagination. Top-vulnerable deployment links and
   the source/destination matrix now use exact deployment IDs and explicit cohort
-  units. Fixable findings share the source predicate. Complete live matrix
-  acceptance across datasets remains open. Exact destinations now also cover
+  units. Fixable findings share the source predicate. Exact destinations also cover
   24-hour runtime alert verdicts, cross-framework graded compliance, the returned
   organization audit IDs, strongest-policy-mode vulnerability-ID/exposure groups,
   and the 14-day high/critical event chart. Source bounds, effective exemption
-  status and distinct-ID units remain explicit; broader dataset, concurrent-change
-  and all-tile acceptance are still required.
+  status and distinct-ID units remain explicit. The finite source/destination
+  browser matrix now reconciles positive multi-page cohorts, matching exports,
+  temporal boundaries, missing/pinned audit records, history and reload. Backend
+  and recorded live checks supplement those fixtures. Operational health/source
+  reconciliation remains in the separate item above.
 - [ ] Prefer downloadable HTML/CSV/JSON evidence; add PDF only when it materially
   improves a customer workflow.
 
