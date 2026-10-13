@@ -100,3 +100,20 @@ it('cannot redirect a later operator after a pending write returns', async () =>
 it.each(['cluster', 'rules', 'revision'])('refuses an unconfirmed %s write receipt and keeps its draft', async field => {
   vi.mocked(runtimePolicies.get).mockResolvedValue(policy); const value = receipt(); if (field === 'cluster') value.cluster_id = 'foreign'; if (field === 'rules') value.rules = []; if (field === 'revision') value.revision = '1'; vi.mocked(runtimePolicies.updateReviewed).mockResolvedValue(value); await renderPage(); await settled(() => expect(saveButton().disabled).toBe(false)); await submit(); await settled(() => expect(host.textContent).toContain('Reload before another write')); expect(route.navigate).not.toHaveBeenCalled(); expect(saveButton().disabled).toBe(true); expect(host.querySelector('textarea')?.value).toBe(policy.rules);
 });
+
+it.each(["failure", "pending"])("retains a new policy draft while cluster refresh is %s and blocks create until recovery", async state => {
+  route.policyId = "";
+  await renderPage();
+  const fields = [...host.querySelectorAll<HTMLInputElement>('input[type="text"]')];
+  const values = ["team/new", "team", "Retained new policy"];
+  await act(async () => { fields.forEach((field, index) => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field, values[index]); field.dispatchEvent(new Event("input", { bubbles: true })); }); });
+  expect(saveButton().disabled).toBe(false);
+  if (state === "failure") scope.error = new Error("cluster read unavailable"); else scope.isLoading = true;
+  await rerender();
+  expect([...host.querySelectorAll<HTMLInputElement>('input[type="text"]')].map(field => field.value)).toEqual(values);
+  expect(saveButton().disabled).toBe(true); await submit(); expect(runtimePolicies.create).not.toHaveBeenCalled();
+  scope.error = null; scope.isLoading = false; await rerender();
+  expect([...host.querySelectorAll<HTMLInputElement>('input[type="text"]')].map(field => field.value)).toEqual(values);
+  expect(saveButton().disabled).toBe(false);
+  expect(runtimePolicies.get).not.toHaveBeenCalled();
+});

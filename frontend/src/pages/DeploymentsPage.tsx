@@ -1,11 +1,15 @@
+import { ResourceSavedViewsControl } from "@/components/ResourceSavedViewsControl";
 // Risk-prioritized deployment dashboard — StackRox parity.
 //
 // The center of the platform's operational workflow: show the riskiest
 // deployments first and expose the factors behind the score. The discoverer
 // rolls image/workload findings and runtime exposure into deployments.risk_score.
+import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
+import { useExportGuard, exportQueryReady } from "@/hooks/useExportGuard";
+import { clusterCacheReady } from "@/lib/cluster-evidence";
 import { useState } from "react";
 import { useRouteSearchParams } from "@/lib/route-search";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Flame, Layers, RefreshCw, ShieldAlert } from "lucide-react";
 import { deployments, type Deployment } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
@@ -23,7 +27,10 @@ const PAGE_SIZE = 100;
 
 export function DeploymentsPage() {
   const { clusterId, cluster, isLoading: clusterLoading, error: clusterError } = useCluster();
-  const scopeReady = !!clusterId && cluster?.id === clusterId && !clusterLoading && !clusterError;
+  const identity = useTablePreferencesIdentity();
+  const owner = identity?.org_id && identity.user_id ? `${identity.org_id}:${identity.user_id}` : "";
+  const client = useQueryClient();
+  const scopeReady = !!owner && !!clusterId && cluster?.id === clusterId && !clusterLoading && !clusterError;
   const [searchParams, setSearchParams] = useRouteSearchParams();
   const search = searchParams.get("q") ?? searchParams.get("name") ?? "";
   const namespace = searchParams.get("namespace") ?? "";
@@ -37,11 +44,12 @@ export function DeploymentsPage() {
   const normalizedVisibility = visibility?.toLowerCase();
   const validVisibility = visibility === null || ["true", "false", "1", "0", "t", "f"].includes(normalizedVisibility!);
   const hidePlatformComponents = visibility === null ? preferredHidden : ["true", "1", "t"].includes(normalizedVisibility!);
-  const [exporting, setExporting] = useState(false);
-  const [exportError, setExportError] = useState<unknown>(null);
+  const [pendingExport, setPendingExport] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<{context:string;error:unknown} | null>(null);
   const filters = { q: search.trim() || undefined, namespace: namespace || undefined, cluster_id: clusterId, hide_platform: hidePlatformComponents, platform_role: platformRole === "all" ? undefined : platformRole, ...(groupMode ? { group_mode: groupMode } : {}), ...(riskFact ? { risk_fact: riskFact } : {}) };
+  const inventoryKey = ["deployments", owner, clusterId, search.trim(), namespace, platformRole, groupMode, riskFact, hidePlatformComponents, visibility, page];
   const q = useQuery({
-    queryKey: ["deployments", clusterId, search.trim(), namespace, platformRole, groupMode, riskFact, hidePlatformComponents, visibility, page],
+    queryKey: inventoryKey,
     queryFn: async () => {
       if (!validVisibility) throw new Error("Invalid platform visibility filter");
       return deployments.list({ ...filters, limit: PAGE_SIZE, offset: page * PAGE_SIZE });
@@ -62,16 +70,23 @@ export function DeploymentsPage() {
     if (nextPage === 0) current.delete("page"); else current.set("page", String(nextPage + 1));
     return current;
   });
+  const exportContext = JSON.stringify([owner, filters, page]);
+  const exporting = pendingExport === exportContext;
+  const captureExport = useExportGuard(exportContext, !scopeReady || !q.isSuccess || q.isFetching, () => !!clusterId && clusterCacheReady(client, clusterId) && exportQueryReady(client, inventoryKey, q.data));
   const exportMatching = async () => {
-    setExportError(null); setExporting(true);
+    const current = captureExport();
+    if (!current() || exporting) return;
+    const context = exportContext;
+    setExportError(null); setPendingExport(context);
     try {
       const blob = await deployments.exportCsv(filters);
+      if (!current()) return;
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url; anchor.download = "constellation-workloads.csv";
       anchor.click(); URL.revokeObjectURL(url);
-    } catch (error) { setExportError(error); }
-    finally { setExporting(false); }
+    } catch (error) { if (current()) setExportError({context,error}); }
+    finally { setPendingExport(previous => previous === context ? null : previous); }
   };
 
   // The server fixes order by risk, last seen, then ID. No client comparators
@@ -154,6 +169,7 @@ export function DeploymentsPage() {
         detail="Search, visibility, counts, paging and CSV use the same source filters. Platform visibility does not change collection or protection."
       />
 
+      <ResourceSavedViewsControl inventory="deployments" clusterId={clusterId} ready={scopeReady && q.isSuccess && !q.isFetching} overrides={{hide_platform:String(hidePlatformComponents)}}/>
       <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-card p-3">
         <label className="min-w-48 flex-1 space-y-1 text-xs"><span className="text-muted-foreground">Search</span><input type="search" value={search} onChange={(event) => updateFilter("q", event.target.value)} placeholder="Deployment name or namespace/name" className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm" data-testid="deployment-search" /></label>
         <label className="space-y-1 text-xs"><span className="text-muted-foreground">Namespace</span><input value={namespace} onChange={(event) => updateFilter("namespace", event.target.value)} placeholder="All namespaces" className="block rounded-md border border-border bg-background px-3 py-2 text-sm" data-testid="namespace-filter" /></label>
@@ -174,7 +190,7 @@ export function DeploymentsPage() {
       </div>
       {groupMode && <p className="text-xs text-muted-foreground" data-testid="deployment-group-mode-scope">Workloads whose strongest configured group mode is {groupMode}. Unmatched workloads are excluded. This describes cached group membership, not applied protection.</p>}
       {riskFact && <p className="text-xs text-muted-foreground" data-testid="deployment-risk-fact-scope">Recorded risk fact: {riskFact}. Matches deployments reporting this key, including zero or null values; this does not assert that the condition is active.</p>}
-      {exportError ? <ErrorState title="Deployment export failed" error={exportError} /> : null}
+      {exportError?.context === exportContext ? <ErrorState title="Deployment export failed" error={exportError.error} /> : null}
 
       <StatGrid data-testid="deployments-summary">
         <StatCard label="Deployments" value={summary?.total.toLocaleString() ?? "—"} icon={<Layers className="h-3.5 w-3.5" />} />

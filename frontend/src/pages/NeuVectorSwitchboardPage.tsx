@@ -28,6 +28,8 @@ import { PageContainer, PageHeader, PageSection } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
 import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { Button } from "@/components/ui/button";
+import { Collapse } from "@/components/ui/collapse";
+import { VerdictBanner } from "@/components/ui/verdict-banner";
 
 type RouteLink = { label: string; to: string; id?: string };
 type Mapping = {
@@ -204,6 +206,8 @@ export function NeuVectorSwitchboardPage() {
         }
       />
 
+      <VerdictBanner status="info" title="Navigation reference for this cluster" detail="This directory maps operating concepts to their Constellation pages. Feature mappings are not release or enforcement acceptance results." />
+
       <StatGrid>
         <StatCard label="NV areas mapped" value={mappings.length} hint="Primary console areas" icon={<ClipboardCheck className="h-3.5 w-3.5" />} />
         <StatCard label="Parity+ areas" value={mappings.filter((m) => m.status === "better").length} hint="Stronger than NV today" tone="accent" icon={<BadgeCheck className="h-3.5 w-3.5" />} />
@@ -234,20 +238,20 @@ export function NeuVectorSwitchboardPage() {
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {mapping.links.map((link) => (
-                      <Link
+                      <a
                         key={`${mapping.nv}:${link.label}`}
-                        to="." href={link.to}
+                        href={link.to}
                         data-testid={`neuvector-map-link-${mapping.id}-${link.id ?? slugify(link.label)}`}
                         className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-primary/40 hover:bg-accent"
                       >
                         {link.label}
                         <ArrowRight className="h-3 w-3 text-muted-foreground" />
-                      </Link>
+                      </a>
                     ))}
                   </div>
-                  <ul className="space-y-1 text-xs text-muted-foreground">
+                  <Collapse label="Mapping details"><ul className="space-y-1 text-xs text-muted-foreground">
                     {mapping.notes.map((note) => <li key={note}>{note}</li>)}
-                  </ul>
+                  </ul></Collapse>
                 </div>
               </div>
             </Card>
@@ -255,6 +259,7 @@ export function NeuVectorSwitchboardPage() {
         </div>
       </PageSection>
 
+      <Collapse label="Advanced: operating concepts and migration guidance">
       <div className="grid gap-4 xl:grid-cols-3">
         <Card title="Mode Vocabulary" description="Operator-facing aliases for policy posture.">
           <dl className="grid gap-3 text-sm">
@@ -286,6 +291,7 @@ export function NeuVectorSwitchboardPage() {
           </ul>
         </Card>
       </div>
+      </Collapse>
     </PageContainer>
   );
 }
@@ -305,7 +311,7 @@ function ModeRow({ nv, constellation, detail }: { nv: string; constellation: str
 function RunwayLink({ icon, label, to }: { icon: React.ReactNode; label: string; to: string }) {
   return (
     <li>
-      <Link to="." href={to} className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2 transition-colors hover:bg-accent">
+      <a href={to} className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2 transition-colors hover:bg-accent">
         <span className="flex min-w-0 items-center gap-2">
           <span className="flex h-6 w-6 items-center justify-center rounded bg-muted text-muted-foreground [&_svg]:h-3.5 [&_svg]:w-3.5">
             {icon}
@@ -313,7 +319,7 @@ function RunwayLink({ icon, label, to }: { icon: React.ReactNode; label: string;
           <span className="truncate">{label}</span>
         </span>
         <ArrowRight className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
-      </Link>
+      </a>
     </li>
   );
 }

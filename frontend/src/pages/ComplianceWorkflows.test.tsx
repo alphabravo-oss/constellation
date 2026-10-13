@@ -109,6 +109,11 @@ describe("exemption form", () => {
 });
 
 describe("schedule form", () => {
+  it.each([["pdf", "html", "json"], ["pdf", "json", "csv"]])("prefers a supported evidence format over PDF", async (...formats) => {
+    vi.mocked(compliance.listDBSchedules).mockResolvedValue({ ...options, report_formats: formats });
+    await renderPage(<ComplianceScheduleFormPage />); await settled(() => expect(host.querySelector("form")).not.toBeNull());
+    expect([...host.querySelectorAll("select")].find(select => select.id === "schedule-format")!.value).toBe(formats.includes("html") ? "html" : "json");
+  });
   it("blocks authoring when report options fail", async () => {
     vi.mocked(compliance.listDBSchedules).mockRejectedValue(new Error("private")); await renderPage(<ComplianceScheduleFormPage />);
     await settled(() => expect(host.textContent).toContain("Schedule options could not be loaded")); expect(host.querySelector("form")).toBeNull(); expect(compliance.createSchedule).not.toHaveBeenCalled();
@@ -165,15 +170,27 @@ describe("compliance workspaces", () => {
     route.search = "tab=schedules&filter=a&filter=b";
     vi.mocked(compliance.listDBSchedules).mockResolvedValue({ ...options, schedules: [inherited, { ...inherited, id: "local", name: "Local schedule", cluster_id: "cluster" }, { ...inherited, id: "foreign", name: "Foreign schedule", cluster_id: "other" }] });
     vi.mocked(compliance.runScheduleNow).mockResolvedValue({ schedule: inherited, queued: true, message: "queued" });
-    vi.mocked(compliance.scheduleRuns).mockResolvedValue({ runs: [{ id: "run", org_id: "org", framework: "cis", started_at: "2026-10-12T00:00:00Z", status: "succeeded", summary: { pass: 1, fail: 0, manual: 0 }, artifact_signature: "signature", artifact_uri: "artifact", triggered_by: "manual" }] });
+    vi.mocked(compliance.scheduleRuns).mockResolvedValue({ runs: [{ id: "run", org_id: "org", framework: "cis", started_at: "2026-10-12T00:00:00Z", status: "succeeded", summary: { pass: 1, fail: 0, manual: 0 }, artifact_signature: "signature", artifact_uri: "artifact", artifact_metadata_known: true, artifact_format: "html", artifact_filename: "evidence.html", triggered_by: "manual" }] });
     vi.mocked(compliance.downloadRunArtifact).mockResolvedValue(undefined);
     await renderPage(<CompliancePage />); await settled(() => expect(host.textContent).toContain("Shared schedule"));
     expect(host.textContent).toContain("Organization schedule · applies across clusters"); expect(host.textContent).toContain("Cluster schedule"); expect(host.textContent).not.toContain("Foreign schedule"); expect(host.querySelector("form")).toBeNull();
     await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="schedule-run-organization"]')!.click()); await settled(() => expect(host.textContent).toContain("Compliance run queued")); expect(compliance.runScheduleNow).toHaveBeenCalledWith("organization");
     await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="schedule-runs-toggle-organization"]')!.click()); await settled(() => expect(host.textContent).toContain("Signature recorded"));
-    await click("Download"); expect(compliance.downloadRunArtifact).toHaveBeenCalledWith("run");
+    expect(host.querySelector('[data-testid="schedule-runs-organization"]')?.textContent).toContain("HTML"); expect(host.querySelector('[data-testid="run-download-run"]')?.getAttribute("title")).toBe("evidence.html");
+    await click("Download"); expect(compliance.downloadRunArtifact).toHaveBeenCalledWith("run", expect.any(Function));
+    const guard = vi.mocked(compliance.downloadRunArtifact).mock.calls[0][1]!; expect(guard()).toBe(true);
+    await act(async () => client.invalidateQueries({queryKey:["compliance","schedule-runs"]})); expect(guard()).toBe(false);
     await click("New schedule"); expect(route.navigate).toHaveBeenCalledWith({ href: "/clusters/cluster/compliance/schedules/new?tab=schedules&filter=a&filter=b" });
   });
+});
+
+it.each(["foreign organization", "different schedule"])("withholds run history for a %s response", async kind => {
+  route.search = "tab=schedules";
+  vi.mocked(compliance.scheduleRuns).mockResolvedValue({ runs: [{ id: "run", org_id: kind === "foreign organization" ? "foreign" : "org", schedule_id: kind === "different schedule" ? "other" : "organization", framework: "cis", started_at: "2026-10-12T00:00:00Z", status: "succeeded", summary: {}, triggered_by: "manual", artifact_uri: "file:///report.html" }] });
+  await renderPage(<CompliancePage />); await settled(() => expect(host.textContent).toContain("Shared schedule"));
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="schedule-runs-toggle-organization"]')!.click());
+  await settled(() => expect(host.textContent).toContain("Run history could not be loaded"));
+  expect(host.querySelector('[data-testid="run-download-run"]')).toBeNull();
 });
 
 it("retains an exemption draft when the control disappears on refresh", async () => {

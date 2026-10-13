@@ -65,7 +65,7 @@ function ScheduleEditor({ clusterId, frameworks, reportFormats, backTo, unavaila
   const [cron, setCron] = useState(CADENCES[0].cron);
   const [timezone, setTimezone] = useState("UTC");
   const [delivery, setDelivery] = useState<ComplianceScheduleDelivery[]>([{ kind: "file", target: "file:///tmp/compliance-out/" }]);
-  const [format, setFormat] = useState(reportFormats.includes("pdf") ? "pdf" : reportFormats[0]);
+  const [format, setFormat] = useState(["html", "json", "csv", "sarif", "pdf"].find(value => reportFormats.includes(value)) ?? reportFormats[0]);
   const [template, setTemplate] = useState("compliance-detailed");
   const [customCadence, setCustomCadence] = useState(false);
   const valid = !unavailable && !!name.trim() && frameworks.some((item) => item.id === framework) && cron.trim().split(/\s+/).length === 5 && !!timezone.trim() && reportFormats.includes(format) && !!template.trim();

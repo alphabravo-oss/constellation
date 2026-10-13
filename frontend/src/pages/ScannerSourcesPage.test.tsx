@@ -8,7 +8,7 @@ import { ScannerSourcesPage } from "./ScannerSourcesPage";
 
 const route = vi.hoisted(() => ({ tab: "jobs" }));
 vi.mock("@/lib/route-search", () => ({ useRouteSearchParams: () => [new URLSearchParams({ tab: route.tab }), vi.fn()] }));
-vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn(), Link: ({ children }: { children: ReactNode }) => <span>{children}</span> }));
+vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn(), useLocation: ({select}: {select: (location: {hash:string})=>string}) => select({hash:""}), Link: ({ children }: { children: ReactNode }) => <span>{children}</span> }));
 vi.mock("@/api/client", () => ({ scanJobs: { list: vi.fn(), attempts: vi.fn(), exportCSV: vi.fn() }, scanJobsAdmin: {}, scannerOperations: { status: vi.fn(), workers: vi.fn(), cacheStat: vi.fn() }, systemConfigApi: { get: vi.fn() }, systemHealth: { overview: vi.fn() } }));
 
 let root: Root;

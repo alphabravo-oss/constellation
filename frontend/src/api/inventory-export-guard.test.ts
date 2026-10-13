@@ -4,6 +4,7 @@ import { api, assets, containers, findings, securityTimeline, baselines, complia
 afterEach(() => vi.restoreAllMocks());
 const exporters: Array<[string, (guard: ScanInventoryDownloadGuard) => Promise<unknown>]> = [
   ["assets", guard => assets.exportCsv({}, guard)],
+  ["compliance artifact", guard => compliance.downloadRunArtifact("run", guard)],
   ["containers", guard => containers.exportCSV("cluster", {}, guard)],
   ["timeline", guard => securityTimeline.exportCSV({}, guard)],
   ["findings", guard => findings.exportCSV({}, guard)],

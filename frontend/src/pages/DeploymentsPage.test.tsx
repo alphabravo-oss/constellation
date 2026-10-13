@@ -5,6 +5,7 @@ import { createMemoryHistory, type RouterHistory } from "@tanstack/react-router"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { deployments, type Deployment } from "@/api/client";
+import { TablePreferencesProvider } from "@/contexts/TablePreferencesContext";
 import { TestRouter } from "@/test/router";
 import { DeploymentsPage } from "./DeploymentsPage";
 
@@ -15,16 +16,17 @@ let root: Root | undefined;
 let host: HTMLDivElement;
 let client: QueryClient;
 let history: RouterHistory;
+let identity = {org_id:"org",user_id:"user"};
 const row = (name: string, role?: string): Deployment => ({ id: name, namespace: "payments", name, kind: "Deployment", labels: {}, platform_role: role, risk_score: 70, risk_factors: {}, finding_count: 1, critical_count: 1, high_count: 0, first_seen_at: "2026-10-12T00:00:00Z", last_seen_at: "2026-10-12T00:00:00Z" });
 const response = (rows: Deployment[], total = rows.length, platformCount = 0) => ({ deployments: rows, total, platform_count: platformCount, has_more: total > 100, limit: 100, offset: 0, summary: { total, at_risk: total, finding_count: total, critical_count: total, high_count: 0 } });
 
-beforeEach(() => { Object.assign(state, { clusterId: "cluster", cluster: { id: "cluster" }, isLoading: false, error: null }); localStorage.clear(); vi.mocked(deployments.list).mockResolvedValue(response([row("customer-0605")], 251, 650)); });
+beforeEach(() => { identity={org_id:"org",user_id:"user"}; Object.assign(state, { clusterId: "cluster", cluster: { id: "cluster" }, isLoading: false, error: null }); localStorage.clear(); vi.mocked(deployments.list).mockResolvedValue(response([row("customer-0605")], 251, 650)); });
 afterEach(() => { act(() => root?.unmount()); root = undefined; client?.clear(); host?.remove(); vi.restoreAllMocks(); vi.resetAllMocks(); });
 async function render(url: string, previous?: string) {
  host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
  history = createMemoryHistory({ initialEntries: previous ? [previous, url] : [url] });
- await act(async () => root!.render(<QueryClientProvider client={client}><TestRouter history={history}><DeploymentsPage /></TestRouter></QueryClientProvider>));
+ await act(async () => root!.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={identity}><TestRouter history={history}><DeploymentsPage /></TestRouter></TablePreferencesProvider></QueryClientProvider>));
  await vi.waitFor(async () => { await act(async () => {}); expect(host.querySelector('[data-testid="deployments-page"]')).not.toBeNull(); });
 }
 async function settled() { await vi.waitFor(async () => { await act(async () => {}); expect(host.querySelector('[data-testid="deployment-page-scope"]')).not.toBeNull(); }); }
@@ -119,4 +121,11 @@ it("preserves exact exposure-mode filters across CSV, URL paging and back/forwar
  await vi.waitFor(() => { expect(history.location.search).not.toContain("page="); expect(deployments.list).toHaveBeenLastCalledWith(expect.objectContaining({ group_mode:"discover", offset:0 })); });
  await act(async () => history.back()); await vi.waitFor(() => expect(deployments.list).toHaveBeenLastCalledWith(expect.objectContaining({ group_mode:"protect", offset:100 })));
  await act(async () => history.forward()); await vi.waitFor(() => expect(deployments.list).toHaveBeenLastCalledWith(expect.objectContaining({ group_mode:"discover", offset:0 })));
+});
+
+it("discards a pending export after filters change instead of downloading the old cohort",async()=>{
+ let finish:(value:Blob)=>void=()=>{};vi.mocked(deployments.exportCsv).mockImplementation(()=>new Promise(resolve=>{finish=resolve;}));const click=vi.spyOn(HTMLAnchorElement.prototype,"click").mockImplementation(()=>{});const create=vi.spyOn(URL,"createObjectURL").mockReturnValue("blob:deployment");await render("/clusters/cluster/deployments?q=old&hide_platform=false");await settled();await act(async()=>button("Export CSV").click());await input("deployment-search","new");await vi.waitFor(()=>expect(deployments.list).toHaveBeenLastCalledWith(expect.objectContaining({q:"new"})));await act(async()=>finish(new Blob(["Name\nold\n"])));expect(click).not.toHaveBeenCalled();expect(create).not.toHaveBeenCalled();expect(host.textContent).not.toContain("Deployment export failed");
+});
+it("isolates owner cache and suppresses an old owner's late export feedback",async()=>{
+ let reject:(error:Error)=>void=()=>{};vi.mocked(deployments.exportCsv).mockImplementation(()=>new Promise((_resolve,fail)=>{reject=fail;}));await render("/clusters/cluster/deployments?hide_platform=false");await settled();await act(async()=>button("Export CSV").click());identity={org_id:"other",user_id:"other"};await act(async()=>root!.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={identity}><TestRouter history={history}><DeploymentsPage/></TestRouter></TablePreferencesProvider></QueryClientProvider>));await vi.waitFor(()=>expect(client.getQueryCache().findAll({queryKey:["deployments","other:other"]})).toHaveLength(1));await act(async()=>reject(new Error("private old owner failure")));expect(host.textContent).not.toContain("Deployment export failed");expect(host.textContent).not.toContain("private old owner failure");expect(client.getQueryCache().findAll({queryKey:["deployments","org:user"]})).toHaveLength(1);
 });

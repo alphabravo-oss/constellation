@@ -44,13 +44,15 @@ export function RuntimePolicyFormPage() {
   const context = JSON.stringify([scope.owner, clusterID, policyId]);
   const [snapshot, setSnapshot] = useState<{ context: string; policy: RuntimePolicy } | null>(null);
   const ready = scope.ready && (!policyId || existing.isSuccess && !existing.isFetching && exportQueryReady(scope.client, key) && policyMatches(existing.data, scope.org, clusterID, policyId));
+  const [loadedContext, setLoadedContext] = useState<string | null>(null);
+  if (ready && loadedContext !== context) setLoadedContext(context);
   if (policyId && ready && snapshot?.context !== context) setSnapshot({ context, policy: existing.data! });
   const initial = snapshot?.context === context ? snapshot.policy : undefined;
   const backTo = `/clusters/${clusterID}/runtime-policies${search.size ? `?${search}` : ""}`;
   const recheck = () => scope.recheck() && (!policyId || exportQueryReady(scope.client, key, existing.data) && policyMatches(scope.client.getQueryData(key), scope.org, clusterID, policyId));
   const refresh = async () => { if (!scope.recheck()) return undefined; const result = await existing.refetch(); return scope.recheck() && result.isSuccess && policyMatches(result.data, scope.org, clusterID, policyId) ? result.data : undefined; };
   const waitingHeader = <PageHeader title={policyId ? "Edit runtime policy" : "New runtime policy"} actions={<a className="text-sm underline" href={backTo}>Cancel</a>} />;
-  if (!scope.ready && !initial) return <div className="space-y-6">{waitingHeader}{scope.isLoading ? <LoadingState label="Resolving policy cluster…" /> : <ErrorState title="Resolve the selected cluster and operator before authoring policies." action={<Button onClick={scope.retry}>Retry cluster</Button>} />}</div>;
+  if (!scope.ready && loadedContext !== context) return <div className="space-y-6">{waitingHeader}{scope.isLoading ? <LoadingState label="Resolving policy cluster…" /> : <ErrorState title="Resolve the selected cluster and operator before authoring policies." action={<Button onClick={scope.retry}>Retry cluster</Button>} />}</div>;
   if (policyId && !initial) return <div className="space-y-6">{waitingHeader}{existing.isPending || existing.isFetching ? <LoadingState label="Loading runtime policy…" /> : <ErrorState title="This policy could not be loaded for the selected cluster." action={<ScopeButton onClick={() => void existing.refetch()}>Retry</ScopeButton>} />}</div>;
   return <RuntimePolicyEditor key={context} clusterID={clusterID} policyID={policyId ?? null} initial={initial} latest={ready ? existing.data : undefined} unavailable={!ready} recheck={recheck} refresh={refresh} scope={scope} backTo={backTo} />;
 }

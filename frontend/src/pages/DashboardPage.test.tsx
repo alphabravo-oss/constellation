@@ -2,8 +2,9 @@ import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { TablePreferencesProvider } from "@/contexts/TablePreferencesContext";
 import { DashboardPage } from "./DashboardPage";
-import { dashboard, network, findings, clusters, systemHealth, compliance, enterprise, scannerOperations, federation, type PlatformFactsResponse } from "@/api/client";
+import { downloadAPIFile, dashboard, network, findings, clusters, systemHealth, compliance, enterprise, scannerOperations, federation, type PlatformFactsResponse } from "@/api/client";
 import { downloadCsv } from "@/lib/csv";
 const scope = vi.hoisted(() => ({ clusterId: "cluster" as string | undefined, cluster: { id: "cluster", name: "Demo" } as { id: string; name: string } | undefined, isLoading: false, error: null as Error | null }));
 const route = vi.hoisted(() => ({ params: new URLSearchParams(), setParams: vi.fn() }));
@@ -44,9 +45,27 @@ async function renderPage(seed?: (client: QueryClient) => void) {
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(["clusters"], { clusters: [{ id: "cluster", name: "Demo" }] });
   seed?.(client);
-  await act(async () => root.render(<QueryClientProvider client={client}><DashboardPage /></QueryClientProvider>));
+  await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{org_id:"org",user_id:"user"}}><DashboardPage /></TablePreferencesProvider></QueryClientProvider>));
 }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
+it("downloads cluster-scoped HTML and invalidates its pending download when scope changes", async () => {
+  vi.mocked(downloadAPIFile).mockResolvedValue(undefined);
+  await renderPage(); await settled(() => expect(host.textContent).toContain("Security risk: 27/100"));
+  const button = [...host.querySelectorAll("button")].find(item => item.textContent?.trim() === "Download report (HTML)")!;
+  expect(button.disabled).toBe(false); await act(async () => button.click());
+  expect(downloadAPIFile).toHaveBeenCalledWith("/reports/executive.html?cluster_id=cluster", "constellation-executive-report.html", expect.any(Function));
+  const guard = vi.mocked(downloadAPIFile).mock.calls[0][2]!; expect(guard()).toBe(true);
+  await act(async () => client.setQueryData(["clusters"], { clusters: [] })); expect(guard()).toBe(false);
+  await act(async () => client.setQueryData(["clusters"], { clusters: [{ id: "cluster" }] })); expect(guard()).toBe(false);
+});
+it("exports the exact top-workload identity and reported platform role", async () => {
+  route.params = new URLSearchParams("tab=network");
+  vi.mocked(dashboard.summary).mockResolvedValue({ findings_by_severity: {}, recent_activity: [], posture: { security_score: 27, top_vulnerable: [{ id:"deployment",cluster_id:"cluster",namespace:"custom-install",name:"controller",platform_role:"core",critical:2,high:3 }] } } as unknown as Awaited<ReturnType<typeof dashboard.summary>>);
+  await renderPage(); await settled(() => expect(host.textContent).toContain("controller"));
+  const panel = [...host.querySelectorAll("h2")].find(item => item.textContent === "Top Vulnerable Assets")!.closest("section")!;
+  await act(async () => panel.querySelector("button")!.click());
+  expect(downloadCsv).toHaveBeenCalledWith("constellation-vulnerable-workloads", ["Deployment ID", "Cluster ID", "Namespace", "Workload", "Platform Role", "Critical", "High"], [["deployment", "cluster", "custom-install", "controller", "core", 2, 3]]);
+});
 it("shows five authoritative metrics despite an empty loaded finding sample", async () => {
   await renderPage(); await settled(() => expect(host.textContent).toContain("Security risk: 27/100"));
   const summary = host.querySelector('[data-testid="dashboard-summary"]')!;
@@ -79,7 +98,7 @@ const platformFacts = (count = 9): PlatformFactsResponse => ({
   findings_summary: { open: 2, critical: 1, high: 1, medium: 0, low: 0 }, findings: [],
 } as PlatformFactsResponse);
 const button = (text: string) => [...host.querySelectorAll("button")].find((element) => element.textContent?.trim() === text)!;
-async function rerender() { await act(async () => root.render(<QueryClientProvider client={client}><DashboardPage /></QueryClientProvider>)); }
+async function rerender() { await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{org_id:"org",user_id:"user"}}><DashboardPage /></TablePreferencesProvider></QueryClientProvider>)); }
 
 it.each(["loading", "missing", "wrong", "error", "transition"])("blocks queries and cached metrics for %s cluster scope", async (condition) => {
   route.params = new URLSearchParams("tab=operations");

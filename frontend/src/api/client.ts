@@ -528,6 +528,22 @@ export interface NetworkRule {
   match_counter: number;
   last_match_timestamp: number;
 }
+export interface NetworkRuleInventoryRow extends NetworkRule {
+  row_id: string;
+  from_platform_role: string;
+  to_platform_role: string;
+}
+export interface NetworkRuleInventoryParams {
+  q?: string; from?: string; to?: string; action?: string; status?: string; cfg_type?: string;
+  hide_platform?: boolean; sort?: string; order?: "asc" | "desc"; limit?: number; offset?: number;
+}
+export interface NetworkRuleInventoryResponse {
+  cluster_id: string; rules: NetworkRuleInventoryRow[]; total: number; has_more: boolean;
+  summary: { total: number; allow: number; deny: number; learned: number; disabled: number };
+  limit: number; offset: number; sort: string; order: 'asc' | 'desc';
+  filters: { q: string; from: string; to: string; action: string; status: string; cfg_type: string; hide_platform: boolean };
+  source: 'retained_flow_rollups_and_authored_overrides'; summary_scope: 'matching_rules'; source_complete: true;
+}
 export interface NetworkRuleInput {
   from: string;
   to: string;
@@ -539,6 +555,10 @@ export interface NetworkRuleInput {
   priority?: number;
 }
 export const networkRules = {
+  inventory: (clusterID: string, params: NetworkRuleInventoryParams = {}) =>
+    api.get<NetworkRuleInventoryResponse>(`/clusters/${encodeURIComponent(clusterID)}/network-rules/inventory`, { params }).then(r => r.data),
+  inventoryCSV: (clusterID: string, params: NetworkRuleInventoryParams = {}, shouldDownload?: ScanInventoryDownloadGuard) =>
+    downloadScanInventoryCSV(`/clusters/${encodeURIComponent(clusterID)}/network-rules/inventory.csv`, params, 'constellation-network-rules.csv', shouldDownload),
   list: (clusterID: string) =>
     api.get<{ cluster_id: string; rules: NetworkRule[]; summary: { total: number; allow: number; deny: number; learned: number; disabled: number } }>(`/clusters/${encodeURIComponent(clusterID)}/network-rules`).then((r) => r.data),
   upsert: (clusterID: string, body: NetworkRuleInput) =>
@@ -718,6 +738,10 @@ export interface ComplianceRunDB {
   summary: { pass?: number; fail?: number; manual?: number; total?: number };
   artifact_uri?: string;
   artifact_signature?: string;
+  artifact_format?: string;
+  artifact_media_type?: string;
+  artifact_filename?: string;
+  artifact_metadata_known?: boolean;
   artifact_size_bytes?: number;
   triggered_by: string;
   error_message?: string;
@@ -780,8 +804,8 @@ export const compliance = {
   scheduleRuns: (id: string, limit = 50) =>
     api.get<{ runs: ComplianceRunDB[] }>(`/compliance/schedules/${id}/runs`, { params: { limit } }).then((r) => r.data),
   runArtifactURL: (id: string) => `/api/v1/compliance/runs/${id}/artifact`,
-  downloadRunArtifact: (id: string) =>
-    downloadAPIFile(`/compliance/runs/${id}/artifact`, `compliance-run-${id}.json`),
+  downloadRunArtifact: (id: string, shouldDownload?: ScanInventoryDownloadGuard) =>
+    downloadAPIFile(`/compliance/runs/${id}/artifact`, `compliance-run-${id}.json`, shouldDownload),
 };
 
 export interface Deployment {
@@ -2550,6 +2574,7 @@ export interface NetworkPolicyLifecycle {
     last_observation: string;
   };
   tuple_preview: Array<{
+    peer_platform_role?: string;
     direction: string;
     peer: string;
     protocol: string;
@@ -5154,7 +5179,7 @@ export interface DashboardSummary {
     exposed_by_mode: Record<string, number>;    // net-exposed workloads by group mode (discover/monitor/protect)
     new_service_policy_mode: string;            // NV NewServiceMode: mode new service groups start in (network)
     new_service_profile_mode: string;           // NV NewServiceProfileMode: process/file mode for new groups
-    top_vulnerable: Array<{ id?: string; namespace: string; name: string; critical: number; high: number }>;
+    top_vulnerable: Array<{ id?: string; cluster_id?: string | null; platform_role?: string; namespace: string; name: string; critical: number; high: number }>;
   };
 }
 

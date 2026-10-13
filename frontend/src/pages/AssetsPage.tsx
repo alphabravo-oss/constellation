@@ -1,3 +1,4 @@
+import { ResourceSavedViewsControl } from "@/components/ResourceSavedViewsControl";
 import { useExportGuard, exportQueryReady } from "@/hooks/useExportGuard";
 import { clusterCacheReady } from "@/lib/cluster-evidence";
 import { assetDisplayName } from "@/lib/asset-identity";
@@ -134,6 +135,7 @@ export function AssetsPage() {
         title={!scopeReady ? "Cluster scope unavailable" : q.isError ? "Asset inventory unavailable" : !ready ? "Loading or updating assets" : `${q.data.total.toLocaleString()} matching assets`}
         detail="Search, filters, summary, sorting and server pages cover the complete matching inventory. Table CSV covers this page; full CSV exports up to 100,000 matching assets." />
       {!scopeReady ? <ErrorState title="Resolve the selected cluster before loading assets" error={clusterError} action={<Button onClick={inventoryScope.retry}>Retry cluster</Button>} /> : q.isError ? <ErrorState title="Could not load or refresh assets" error={q.error} action={<Button onClick={() => void q.refetch()}>Retry</Button>} /> : !ready ? <LoadingState label="Loading or updating assets…" /> : null}
+      <ResourceSavedViewsControl inventory="assets" clusterId={clusterId} ready={ready}/>
       <StatGrid data-testid="assets-summary">
         <StatCard label="Matching assets" value={summary?.total.toLocaleString() ?? "—"} icon={<Boxes className="h-3.5 w-3.5" />} hint={summary ? `${summary.images} images · ${summary.workloads} workloads · ${summary.ai} AI` : undefined} />
         <StatCard label="Critical / High" value={summary?.critical_high.toLocaleString() ?? "—"} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={(summary?.critical_high ?? 0) > 0 ? "high" : "neutral"} hint={summary ? `${summary.open_findings} open findings` : undefined} />

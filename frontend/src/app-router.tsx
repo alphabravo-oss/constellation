@@ -68,6 +68,10 @@ const EffectiveConfigPage = lazy(() => import("./pages/EffectiveConfigPage").the
 // Cluster-scoped pages — lazy-loaded so the picker stays cheap.
 const DashboardPage         = lazy(() => import("./pages/DashboardPage").then((m) => ({ default: m.DashboardPage })));
 const FindingsPage          = lazy(() => import("./pages/FindingsPage").then((m) => ({ default: m.FindingsPage })));
+const AssetSavedViewFormPage = lazy(() => import("./pages/ResourceSavedViewFormPage").then(m => ({ default: m.AssetSavedViewFormPage })));
+const DeploymentSavedViewFormPage = lazy(() => import("./pages/ResourceSavedViewFormPage").then(m => ({ default: m.DeploymentSavedViewFormPage })));
+const RuntimeSavedViewFormPage = lazy(() => import("./pages/ResourceSavedViewFormPage").then(m => ({ default: m.RuntimeSavedViewFormPage })));
+const ScannerSavedViewFormPage = lazy(() => import("./pages/ResourceSavedViewFormPage").then(m => ({ default: m.ScannerSavedViewFormPage })));
 const FindingSavedViewFormPage = lazy(() => import("./pages/InventorySavedViewFormPage").then(m => ({ default: m.FindingSavedViewFormPage })));
 const TimelineSavedViewFormPage = lazy(() => import("./pages/InventorySavedViewFormPage").then(m => ({ default: m.TimelineSavedViewFormPage })));
 const NetworkSavedViewFormPage = lazy(() => import("./pages/NetworkSavedViewFormPage").then(m => ({ default: m.NetworkSavedViewFormPage })));
@@ -223,6 +227,9 @@ const cluster_neuvectorRoute = createRoute({ getParentRoute: () => app_clusters_
 const cluster_network_dpiSettingsRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "network/settings/dpi", component: () => <SuspenseRoute><NetworkDpiSettingsFormPage /></SuspenseRoute> });
 const cluster_network_actionRoute = createRoute({getParentRoute:()=>app_clusters_idRoute,path:"network/actions/$action",component:()=><SuspenseRoute><NetworkActionFormPage /></SuspenseRoute>});
 const cluster_findingsRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "findings", component: () => (<SuspenseRoute><FindingsPage /></SuspenseRoute>) });
+const cluster_assets_savedViewRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "assets/views/new", component: () => <SuspenseRoute><AssetSavedViewFormPage /></SuspenseRoute> });
+const cluster_deployments_savedViewRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "deployments/views/new", component: () => <SuspenseRoute><DeploymentSavedViewFormPage /></SuspenseRoute> });
+const cluster_runtime_savedViewRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "runtime/views/new", component: () => <SuspenseRoute><RuntimeSavedViewFormPage /></SuspenseRoute> });
 const cluster_findings_savedViewRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "findings/views/new", component: () => <SuspenseRoute><FindingSavedViewFormPage /></SuspenseRoute> });
 const cluster_timeline_savedViewRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "timeline/views/new", component: () => <SuspenseRoute><TimelineSavedViewFormPage /></SuspenseRoute> });
 const cluster_network_savedViewRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "network/views/new", component: () => <SuspenseRoute><NetworkSavedViewFormPage /></SuspenseRoute> });
@@ -374,6 +381,7 @@ const settings_attestation_trust_newRoute = createRoute({ getParentRoute: () => 
 const settings_attestation_trust_idRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "attestation-trust/$id", component: () => (<SuspenseRoute><AttestationPolicyFormPage /></SuspenseRoute>) });
 const settings_healthRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "health", component: () => (<SuspenseRoute><SystemHealthPage /></SuspenseRoute>) });
 const settings_scanner_databaseSettingsRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "scanner/databases/edit", component: () => <SuspenseRoute><ScannerDatabaseSettingsFormPage /></SuspenseRoute> });
+const settings_scanner_savedViewRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "scanner/views/new", component: () => <SuspenseRoute><ScannerSavedViewFormPage /></SuspenseRoute> });
 const settings_scannerRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "scanner", component: () => (<SuspenseRoute><ScannerSourcesPage /></SuspenseRoute>) });
 const settings_scanner_nvdRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "scanner/nvd", component: () => (<SuspenseRoute><NvdConfigPage /></SuspenseRoute>) });
 const settings_networkRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "network", component: () => (<SuspenseRoute><NetworkProxyPage /></SuspenseRoute>) });
@@ -461,6 +469,9 @@ authenticatedRoute.addChildren([
   cluster_findingsRoute,
   cluster_network_dpiSettingsRoute,
   cluster_network_actionRoute,
+  cluster_assets_savedViewRoute,
+  cluster_deployments_savedViewRoute,
+  cluster_runtime_savedViewRoute,
   cluster_findings_savedViewRoute,
   cluster_timeline_savedViewRoute,
   cluster_network_savedViewRoute,
@@ -613,6 +624,7 @@ authenticatedRoute.addChildren([
   settings_attestation_trust_idRoute,
   settings_healthRoute,
   settings_scanner_databaseSettingsRoute,
+  settings_scanner_savedViewRoute,
   settings_scannerRoute,
   settings_scanner_nvdRoute,
   settings_networkRoute,

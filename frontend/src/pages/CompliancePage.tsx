@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Field, Select } from "@/components/ui/form";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { DataTable, type Column } from "@/components/ui/data-table";
+import { exportQueryReady, useExportGuard } from "@/hooks/useExportGuard";
 
 // regLabel shortens a compliance standard id to a compact badge label.
 function regLabel(std: string): string {
@@ -324,11 +325,19 @@ function ScheduleRow({
   onToggleRuns: () => void;
   runsOpen: boolean;
 }) {
+  const identity = useTablePreferencesIdentity();
+  const qc = useQueryClient();
+  const runKey = ["compliance", "schedule-runs", schedule.id, identity?.org_id, identity?.user_id];
   const runs = useQuery({
-    queryKey: ["compliance", "schedule-runs", schedule.id],
-    queryFn: () => compliance.scheduleRuns(schedule.id, 25),
-    enabled: runsOpen && !unavailable,
+    queryKey: runKey,
+    queryFn: () => compliance.scheduleRuns(schedule.id, 25).then(response => {
+      if (!Array.isArray(response.runs) || response.runs.some(run => run.org_id !== identity?.org_id || run.schedule_id && run.schedule_id !== schedule.id)) throw new Error("Run history does not match the reviewed schedule");
+      return response;
+    }),
+    enabled: runsOpen && !unavailable && !!identity?.org_id && !!identity.user_id,
   });
+  const current = () => !!identity?.org_id && !!identity.user_id && !unavailable && exportQueryReady(qc, runKey, runs.data) && !!runs.data?.runs.every(run => run.org_id === identity.org_id);
+  const captureDownload = useExportGuard(JSON.stringify(runKey), !current(), current);
   return (
     <article className="rounded-lg border border-border bg-card p-3" data-testid={`schedule-${schedule.id}`}>
       <div className="flex items-start justify-between gap-3">
@@ -411,6 +420,7 @@ function ScheduleRow({
               rows={runs.data.runs}
               rowKey={(run) => run.id}
               preferencesKey="compliance-schedule-run-history"
+              canExport={current}
               exportFileName={`constellation-compliance-schedule-${schedule.id}-loaded-runs`}
               exportLabel="Export loaded run metadata CSV"
               sourceLimit={25} sourceCount={runs.data.runs.length}
@@ -419,7 +429,8 @@ function ScheduleRow({
                 { id: "status", exportValue: run => run.status, header: "Status", kind: "status", size: 144, minSize: 128, cell: (run) => <span className={`rounded-md px-1.5 py-0.5 text-[10px] ${run.status === "succeeded" ? "bg-[color:var(--color-status-success)]/15 text-[color:var(--color-status-success)]" : run.status === "failed" ? "bg-[color:var(--color-status-error)]/15 text-[color:var(--color-status-error)]" : "bg-muted text-muted-foreground"}`}>{run.status}</span> },
                 { id: "summary", exportValue: run => `${run.summary.pass ?? 0} / ${run.summary.fail ?? 0} / ${run.summary.manual ?? 0}`, header: "Pass / Fail / Manual", kind: "count", numeric: true, size: 184, minSize: 176, cell: (run) => `${run.summary.pass ?? 0} / ${run.summary.fail ?? 0} / ${run.summary.manual ?? 0}` },
                 { id: "signature", exportValue: run => run.artifact_signature || "Not recorded", header: "Signature", kind: "status", size: 176, minSize: 160, cell: (run) => run.artifact_signature ? <span title={run.artifact_signature} className="rounded bg-[color:var(--color-status-success)]/15 px-1.5 py-0.5 text-[color:var(--color-status-success)]">Signature recorded</span> : <span className="text-muted-foreground">—</span> },
-                { id: "artifact", exportable: false, header: "Artifact", kind: "actions", size: 144, minSize: 136, cell: (run) => run.artifact_uri ? <button type="button" disabled={unavailable} onClick={() => compliance.downloadRunArtifact(run.id).catch(() => toast.error("Artifact download failed. Try again."))} className="inline-flex items-center gap-1 text-foreground hover:underline" data-testid={`run-download-${run.id}`}><Download className="h-3 w-3" aria-hidden /> Download</button> : <span className="text-muted-foreground">—</span> },
+                { id: "format", header: "Artifact format", kind: "status", cell: run => run.artifact_metadata_known && run.artifact_format ? run.artifact_format.toUpperCase() : "Not recorded", exportValue: run => run.artifact_metadata_known ? run.artifact_format ?? "" : "Not recorded" },
+                { id: "artifact", exportable: false, header: "Artifact", kind: "actions", size: 160, minSize: 144, cell: (run) => run.artifact_uri ? <button type="button" disabled={!current()} title={run.artifact_filename || undefined} onClick={() => compliance.downloadRunArtifact(run.id, captureDownload()).catch(() => toast.error("Artifact download failed or its reviewed scope changed. Refresh before retrying."))} className="inline-flex items-center gap-1 text-foreground hover:underline" data-testid={`run-download-${run.id}`}><Download className="h-3 w-3" aria-hidden /> {run.artifact_uri.startsWith("s3://") ? "Download metadata" : "Download"}</button> : <span className="text-muted-foreground">—</span> },
               ]}
             />
           )}

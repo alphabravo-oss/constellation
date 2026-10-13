@@ -523,3 +523,17 @@ it("exports the loaded threat page and real workload role without action control
  const [,headers,rows]=vi.mocked(downloadCsv).mock.calls.at(-1)!;
  expect(rows).toHaveLength(1); expect(rows[0][headers.indexOf("platform_role")]).toBe("core"); expect(rows[0][headers.indexOf("Workload")]).toBe("operations/houston"); expect(headers).not.toContain("Actions"); expect(headers).not.toContain(""); expect(rows.flat()).not.toContain("Pivot");
 });
+
+it("keeps exact observed tuple role evidence in the read-only preview and CSV", async () => {
+  const policy = candidate();
+  const tuple = { direction: "egress", peer: "custom-install/controller", protocol: "TCP", port: 443, verdict: "allow", samples: 1, bytes: 10, packets: 1, first_seen_at: "2026-10-12T00:00:00Z", last_seen_at: "2026-10-12T00:00:00Z", included: true };
+  policy.tuple_preview = [{ ...tuple, peer_platform_role: "core" }, { ...tuple, peer: "custom-install/ambiguous", peer_platform_role: "" }, { ...tuple, peer: "10.0.0.9" }];
+  await render(<NetworkRulesWorkspaceTab items={[policy]} selectedWorkload={policy.workload} onSelect={vi.fn()} available loading={false} refreshing={false} onRetry={vi.fn()} />);
+  const table = host.querySelector('[data-testid="network-policy-tuple-preview"]')!;
+  expect(table.querySelectorAll("tbody tr")).toHaveLength(3);
+  expect(table.textContent).toContain("Core"); expect(table.textContent).toContain("Unclassified"); expect(table.textContent).toContain("Not reported");
+  await act(async () => [...table.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Export returned tuple preview")!.click());
+  const [, headers, rows] = vi.mocked(downloadCsv).mock.calls.at(-1)!;
+  expect(rows.map(row => row[headers.indexOf("Platform role")])).toEqual(["core", "", ""]);
+  expect(policy.candidate_hash).toBe("hash");
+});

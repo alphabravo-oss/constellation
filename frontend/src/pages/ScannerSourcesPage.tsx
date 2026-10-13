@@ -1,3 +1,4 @@
+import { ResourceSavedViewsControl } from "@/components/ResourceSavedViewsControl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -438,6 +439,7 @@ export function ScannerSourcesPage() {
                 <select aria-label="Scan target type" value={targetType} onChange={event => route.update({ target_type: event.target.value })} className="rounded-md border border-border bg-background p-2 text-sm"><option value="">All target types</option>{JOB_TARGET_TYPES.map(type => <option key={type}>{type}</option>)}</select>
                 <Button variant="outline" onClick={() => route.update({ q: null, status: null, target_type: null, cluster_id: null, registry_id: null, sort: null, order: null })}>Reset job filters</Button>
               </div>
+              <ResourceSavedViewsControl inventory="scanner" ready={jobsAvailable}/>
               <Collapse label="Advanced: cluster and registry scope">
                 <div className="grid gap-3 sm:grid-cols-2"><Field label="Cluster ID"><TextInput aria-label="Scan job cluster ID" value={clusterFilter} onChange={event => route.update({ cluster_id: event.target.value }, true, true)} placeholder="All clusters" /></Field><Field label="Registry ID"><TextInput aria-label="Scan job registry ID" value={registryFilter} onChange={event => route.update({ registry_id: event.target.value }, true, true)} placeholder="All registries" /></Field></div>
               </Collapse>

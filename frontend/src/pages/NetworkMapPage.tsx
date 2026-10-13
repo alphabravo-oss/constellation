@@ -2659,6 +2659,13 @@ function PolicyLifecyclePanel({
       exportValue: (r) => r.peer,
     },
     {
+      id: "platform-role",
+      header: "Platform role",
+      kind: "status",
+      cell: (r) => r.peer_platform_role === "core" ? "Core" : r.peer_platform_role === "" ? "Unclassified" : "Not reported",
+      exportValue: (r) => r.peer_platform_role ?? "",
+    },
+    {
       id: "protocol",
       header: "Protocol",
       kind: "text",

@@ -2,7 +2,9 @@ import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext"
 import { findingHref, findingRowKey } from "@/lib/finding-instance";
 import { useMemo, useRef } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, useIsFetching } from "@tanstack/react-query";
+import { useExportGuard } from "@/hooks/useExportGuard";
+import { clusterCacheReady } from "@/lib/cluster-evidence";
 import { downloadCsv } from "@/lib/csv";
 import { Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis } from "recharts";
 import {
@@ -554,8 +556,8 @@ export function DashboardPage() {
         <Panel title="Top Vulnerable Assets" subtitle="Up to six reported workloads ranked by critical/high inventory counts" icon={<AlertOctagon className="h-3.5 w-3.5" />}
           rightSlot={(posture?.top_vulnerable?.length ?? 0) > 0 ? (
             <button type="button"
-              onClick={() => downloadCsv("constellation-vulnerable-workloads", ["Namespace", "Workload", "Critical", "High"],
-                (posture?.top_vulnerable ?? []).map((t) => [t.namespace, t.name, t.critical, t.high]))}
+              onClick={() => downloadCsv("constellation-vulnerable-workloads", ["Deployment ID", "Cluster ID", "Namespace", "Workload", "Platform Role", "Critical", "High"],
+                (posture?.top_vulnerable ?? []).map((t) => [t.id ?? "", t.cluster_id ?? "", t.namespace, t.name, t.platform_role ?? "Unknown", t.critical, t.high]))}
               className="rounded-md border border-border bg-card px-2 py-1 text-[10px] font-medium hover:bg-accent">
               Export CSV
             </button>
@@ -826,14 +828,7 @@ export function DashboardPage() {
             : "A risk-first snapshot of your fleet. Click any tile to drill in."
         }
         actions={
-          <button
-            type="button"
-            title="Download the organization-wide executive security report"
-            onClick={() => downloadAPIFile("/reports/executive.pdf", "constellation-executive-report.html")}
-            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-2 text-sm hover:bg-accent"
-          >
-            <FileWarning className="h-4 w-4" /> Organization report
-          </button>
+          <DashboardReportDownload clusterId={clusterId} scopeReady={scopeReady} owner={operator?.org_id && operator.user_id ? findingOwner : undefined} />
         }
       />
 
@@ -860,6 +855,25 @@ export function DashboardPage() {
 
     </div>
   );
+}
+
+function DashboardReportDownload({ clusterId, scopeReady, owner }: { clusterId?: string; scopeReady: boolean; owner?: string }) {
+  const qc = useQueryClient();
+  const registryFetching = useIsFetching({ queryKey: ["clusters"], exact: true });
+  const detailFetching = useIsFetching({ queryKey: ["cluster", clusterId], exact: true });
+  const ready = !!owner && !!clusterId && scopeReady && !registryFetching && !detailFetching && clusterCacheReady(qc, clusterId);
+  const context = JSON.stringify([owner, clusterId]);
+  const capture = useExportGuard(context, !ready, () => ready && !!clusterId && clusterCacheReady(qc, clusterId));
+  const download = useMutation({ mutationFn: async ({ current }: { context: string; current: () => boolean }) => {
+    if (!current()) throw new Error("Report scope changed");
+    await downloadAPIFile(`/reports/executive.html?cluster_id=${encodeURIComponent(clusterId!)}`, "constellation-executive-report.html", current);
+  } });
+  return <div className="flex flex-wrap items-center gap-2">
+    <Button variant="outline" disabled={!ready || download.isPending} title="Download this cluster’s executive security report as HTML" onClick={() => download.mutate({ context, current: capture() })}>
+      <FileWarning className="mr-1 h-4 w-4" />{download.isPending ? "Downloading…" : "Download report (HTML)"}
+    </Button>
+    {download.isError && download.variables.context === context && <span role="alert" className="text-xs">Report download failed or its cluster changed. Refresh before retrying.</span>}
+  </div>;
 }
 
 // ─────────────────────────── helpers + subcomponents ───────────────────────────

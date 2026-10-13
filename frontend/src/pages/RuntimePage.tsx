@@ -1,3 +1,4 @@
+import { ResourceSavedViewsControl } from "@/components/ResourceSavedViewsControl";
 import { useIsFetching, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity, Clock3, RadioTower, ShieldAlert, Skull } from "lucide-react";
 import type { ReactNode } from "react";
@@ -165,6 +166,7 @@ export function RuntimePage() {
       <h2 className="text-sm font-semibold">Runtime event history</h2>
       <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground" data-testid="runtime-live-status">{liveQ.isError || liveScopeMismatch ? "Unavailable" : liveQ.isFetching ? "Refreshing" : "Polling"}</span>
     </div>
+    <ResourceSavedViewsControl inventory="runtime" clusterId={clusterId} ready={liveReady && !liveQ.isFetching && !route.debouncing}/>
     <div className="flex flex-wrap items-end gap-3">
       <FormField label="Search events" htmlFor="runtime-event-search" className="min-w-56 flex-1"><TextInput id="runtime-event-search" value={route.query} onChange={event => route.setQuery(event.target.value)} /></FormField>
       <FormField label="Minimum severity" htmlFor="runtime-event-severity"><Select id="runtime-event-severity" value={params.get("severity") || ""} onChange={event => route.update({ severity: event.target.value || null })}><option value="">All severities</option>{EVENT_SEVERITIES.map(value => <option key={value} value={value}>{value} and higher</option>)}</Select></FormField>
