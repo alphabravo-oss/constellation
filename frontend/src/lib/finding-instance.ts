@@ -68,3 +68,7 @@ export function findingReceiptMatches(receipt: unknown, reviewed: FindingIdentit
 export function findingDTOReady(row: FindingIdentity | undefined, id: string, cluster: string, firstSeen?: string) {
   return !!row && findingInstanceReady(row) && row.id === id && findingBelongsToCluster(row, cluster) && (!firstSeen || sameFindingTimestamp(row.first_seen_at, firstSeen));
 }
+
+export function isFindingChooserQuery(query: string) {
+  return /^id:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(query.trim());
+}

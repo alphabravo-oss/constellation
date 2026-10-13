@@ -1,4 +1,4 @@
-import { findingHref, findingBelongsToCluster, findingDTOReady, findingEpochNanos, findingRowIDMatches, findingInstanceReady, findingRowKey, findingReceiptMatches } from "@/lib/finding-instance";
+import { findingHref, findingBelongsToCluster, findingDTOReady, findingEpochNanos, findingRowIDMatches, findingInstanceReady, findingRowKey, findingReceiptMatches, isFindingChooserQuery } from "@/lib/finding-instance";
 import { SavedViewsMenu } from "@/components/SavedViewsMenu";
 import { useExportGuard, exportQueryReady } from "@/hooks/useExportGuard";
 import { clusterCacheReady } from "@/lib/cluster-evidence";
@@ -43,6 +43,7 @@ import { FINDING_VIEWS_KEY, isFindingSavedView, inventoryViewHref, type FindingS
 
 const DENSITY_KEY     = "constellation.findings.density";
 const INSTANCE_TABLE_KEY = "findings.instances";
+const OBSERVATION_COLUMNS_MIGRATION = { id: "observation-metadata-v1", hideColumnIds: ["instance", "first-seen"] };
 const CVE_TABLE_KEY = "findings.cve-rollup";
 
 const STATE_TABS: Array<{ label: string; lifecycle: Lifecycle; description: string }> = [
@@ -92,6 +93,7 @@ export function FindingsPage() {
   const lifecycleValue = searchParams.get("lifecycle");
   const lifecycle: Lifecycle | "" = lifecycleValue === "all" ? "" : (["open", "triaged", "in_progress", "accepted", "suppressed", "resolved"] as const).find((value) => value === lifecycleValue) ?? "open";
   const query = searchParams.get("q") ?? "";
+  const instanceChooser = isFindingChooserQuery(query);
   const debouncedQuery = useDebounced(query.trim(), 300);
   const querySettled = query.trim() === debouncedQuery;
   const serverQuery = [debouncedQuery, severity ? `severity:${severity}` : ""].filter(Boolean).join(" ");
@@ -278,7 +280,7 @@ export function FindingsPage() {
     },
   ];
 
-  columns.push({ id: "instance", header: "Observation identity", kind: "id", wrap: true, cell: finding => finding.row_id ?? "Not reported", exportValue: finding => finding.row_id ?? "" }, { id: "first-seen", header: "First observed", kind: "date", cell: finding => finding.first_seen_at, exportValue: finding => finding.first_seen_at });
+  columns.push({ id: "instance", header: "Observation identity", kind: "id", wrap: true, cell: finding => finding.row_id ?? "Not reported", exportValue: finding => finding.row_id ?? "" }, { id: "first-seen", header: "First observed", kind: "date", hideable: !instanceChooser, cell: finding => finding.first_seen_at, exportValue: finding => finding.first_seen_at });
   const totalSelected = selected.size;
 
   const captureBulk = useExportGuard(selectionScope, !ready, () => !!clusterId && clusterCacheReady(qc, clusterId) && exportQueryReady(qc, instanceKey, q.data));
@@ -481,7 +483,7 @@ export function FindingsPage() {
                 rows={rows} columns={columns} rowKey={findingRowKey}
                 density={density} onDensityChange={setDensity} selectable selected={selected} onSelectedChange={setSelected}
                 onRowClick={openFinding} sort={{ id: sort === "last_seen" ? "age" : sort, dir: order }} onSortChange={onSortChange} manualSorting pagination={false}
-                preferencesKey={INSTANCE_TABLE_KEY} defaultHiddenColumnIds={["package", "fixed", "platform-role", "instance", "first-seen"]}
+                preferencesKey={INSTANCE_TABLE_KEY} preferenceMigration={OBSERVATION_COLUMNS_MIGRATION} defaultHiddenColumnIds={["package", "fixed", "platform-role", "instance", "first-seen"]}
                 canExport={() => !!clusterId && clusterCacheReady(qc, clusterId) && exportQueryReady(qc, instanceKey, q.data)} exportFileName="constellation-findings-page" exportLabel="Export this page CSV" testId="findings-table"
                 emptyState={<EmptyState title="No findings match" hint="Adjust your filters or clear the query." icon={<Tag className="h-8 w-8" />} action={<Button variant="outline" onClick={() => setFilters({ q: "", kind: "", group_mode: "", id_scope: "", target_type: "", severity: "", lifecycle: "open", fixable: "", page: "" })}>Reset filters</Button>} />}
               />
@@ -492,7 +494,7 @@ export function FindingsPage() {
                   <DataTable rows={group.items} columns={columns} rowKey={findingRowKey} density={density} onDensityChange={setDensity}
                     selectable selected={selected} onSelectedChange={(ids) => { const merged = new Set(selected); for (const item of group.items) merged.delete(findingRowKey(item)); for (const id of ids) if (group.items.some((item) => findingRowKey(item) === id)) merged.add(id); setSelected(merged); }} onRowClick={openFinding}
                     sort={{ id: sort === "last_seen" ? "age" : sort, dir: order }} onSortChange={onSortChange} manualSorting pagination={false}
-                    showDensityToggle={false} showColumnChooser={false} preferencesKey={INSTANCE_TABLE_KEY} defaultHiddenColumnIds={["package", "fixed", "platform-role", "instance", "first-seen"]}
+                    showDensityToggle={false} showColumnChooser={false} preferencesKey={INSTANCE_TABLE_KEY} preferenceMigration={OBSERVATION_COLUMNS_MIGRATION} defaultHiddenColumnIds={["package", "fixed", "platform-role", "instance", "first-seen"]}
                     canExport={() => !!clusterId && clusterCacheReady(qc, clusterId) && exportQueryReady(qc, instanceKey, q.data)} exportFileName={`constellation-findings-page-${safeFilename(group.label)}`} exportLabel="Export this group on this page CSV" className="rounded-none border-0" />
                 </details>)}
                 {!rows.length && <EmptyState title="No findings match" hint="Adjust your filters or clear the query." />}

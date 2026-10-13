@@ -3,14 +3,15 @@ import { createRoot, type Root } from "react-dom/client";
 import { createMemoryHistory, type RouterHistory } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
-import { api, assets, type Asset } from "@/api/client";
+import { api, assets, downloadLookaheadCSV, type Asset } from "@/api/client";
 import { downloadCsv } from "@/lib/csv";
 import { TestRouter } from "@/test/router";
+import { TablePreferencesProvider } from "@/contexts/TablePreferencesContext";
 import { AssetsPage } from "./AssetsPage";
 import { AuditPage } from "./AuditPage";
 const scope = vi.hoisted(() => ({ clusterId: "cluster" as string | undefined, cluster: { id: "cluster" } as { id: string } | undefined, isLoading: false, error: null as Error | null }));
 vi.mock("@/hooks/useCluster", () => ({ useCluster: () => scope }));
-vi.mock("@/api/client", () => ({ assets: { list: vi.fn(), exportCsv: vi.fn() }, api: { get: vi.fn() } }));
+vi.mock("@/api/client", () => ({ assets: { list: vi.fn(), exportCsv: vi.fn() }, api: { get: vi.fn() }, downloadLookaheadCSV: vi.fn() }));
 vi.mock("@/lib/csv", () => ({ downloadCsv: vi.fn() }));
 let root: Root | undefined; let host: HTMLDivElement; let client: QueryClient; let history: RouterHistory;
 const asset = (id = "asset"): Asset => ({ id, cluster_id: "cluster", name: id, kind: "image", criticality: "high", labels: {}, first_seen_at: "2026-10-01T00:00:00Z", last_seen_at: "2026-10-12T00:00:00Z", open_findings: 3, critical_findings: 1, high_findings: 2, image_signed: false, sbom_count: 1 } as Asset);
@@ -18,7 +19,7 @@ const audit = (id = 1) => ({ id, action: `action-${id}`, actor_id: "full-actor-i
 const assetResponse = (rows: Asset[], total = rows.length, offset = 0) => ({ assets: rows, total, offset, limit: 100, has_more: offset + rows.length < total, sort: "risk", order: "desc" as const, summary: { total, images: total, workloads: 0, critical_high: 0, open_findings: 0, signed_images: 0, unsigned_images: 0, signature_unknown: 0, with_sbom: 0, missing_sbom: 0, ai: 0 } });
 beforeEach(() => { (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true; Object.assign(scope, { clusterId: "cluster", cluster: { id: "cluster" }, isLoading: false, error: null }); vi.mocked(assets.list).mockResolvedValue(assetResponse([asset()])); vi.mocked(api.get).mockResolvedValue({ data: { events: [audit()], has_more: false } }); });
 afterEach(() => { act(() => root?.unmount()); root = undefined; client?.clear(); host?.remove(); vi.resetAllMocks(); });
-async function render(page: ReactNode, url: string) { host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host); client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); history = createMemoryHistory({ initialEntries: [url] }); await act(async () => root!.render(<QueryClientProvider client={client}><TestRouter history={history}>{page}</TestRouter></QueryClientProvider>)); }
+async function render(page: ReactNode, url: string) { host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host); client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); history = createMemoryHistory({ initialEntries: [url] }); await act(async () => root!.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{org_id:"org",user_id:"user"}}><TestRouter history={history}>{page}</TestRouter></TablePreferencesProvider></QueryClientProvider>)); }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }, { timeout: 3000 }); }
 const button = (text: string) => [...host.querySelectorAll("button")].find(b => b.textContent?.trim() === text)!;
 it.each(["missing", "wrong", "loading", "error"])("does not fetch cluster inventories with %s scope", async condition => { if (condition === "missing") scope.cluster = undefined; if (condition === "wrong") scope.cluster = { id: "other" }; if (condition === "loading") scope.isLoading = true; if (condition === "error") scope.error = new Error("offline"); await render(<><AssetsPage /><AuditPage /></>, "/clusters/cluster/assets"); expect(assets.list).not.toHaveBeenCalled(); expect(api.get).not.toHaveBeenCalled(); expect(host.querySelector("table")).toBeNull(); });
@@ -26,9 +27,48 @@ it("preserves an explicit missing asset selection", async () => { await render(<
 it("loads beyond the first asset page and exports only displayed server matches", async () => { vi.mocked(assets.list).mockImplementation(async p => assetResponse([asset(p?.offset ? "match-next" : "match-first")], p?.offset ? 101 : 101, p?.offset ?? 0)); await render(<AssetsPage />, "/clusters/cluster/assets?q=match"); await settled(() => expect(button("Next")).toBeTruthy()); await act(async () => button("Next").click()); await settled(() => expect(host.textContent).toContain("match-next")); expect(assets.list).toHaveBeenLastCalledWith(expect.objectContaining({search:"match",limit:100,offset:100,cluster_id:"cluster"})); await act(async () => button("Export this page CSV").click()); const csv=vi.mocked(downloadCsv).mock.calls.at(-1)!;expect(csv[2]).toHaveLength(1);expect(csv[2][0][0]).toBe("match-next"); });
 it("reports a failed server page and permits Retry without claiming empty success", async () => { vi.mocked(assets.list).mockImplementation(async p=>{if(p?.offset)throw new Error("next failed");return assetResponse([asset()],101);}); await render(<AssetsPage />, "/clusters/cluster/assets");await settled(()=>expect(button("Next")).toBeTruthy());await act(async()=>button("Next").click());await settled(()=>expect(host.textContent).toContain("Could not load or refresh assets"));expect(host.querySelector("table")).toBeNull();expect(button("Retry")).toBeTruthy(); });
 it.each(["foreign", "refresh", "pagination"])("hides misleading asset evidence for %s response", async kind => { if (kind === "foreign") vi.mocked(assets.list).mockResolvedValue(assetResponse([{ ...asset(), cluster_id: "other" }])); if (kind === "pagination") vi.mocked(assets.list).mockResolvedValue({ ...assetResponse([],1),has_more: true }); await render(<AssetsPage />, "/clusters/cluster/assets"); if (kind === "refresh") { await settled(() => expect(host.querySelector("table")).not.toBeNull()); vi.mocked(assets.list).mockRejectedValue(new Error("refresh failed")); await act(async () => { await client.invalidateQueries({ queryKey: ["assets"] }); }); } await settled(() => expect(host.textContent).toContain("Could not load or refresh assets")); expect(host.querySelector("table")).toBeNull(); expect(host.querySelector('[data-testid="assets-summary"]')?.textContent?.match(/—/g)).toHaveLength(4); });
-it("preserves audit pages through history and exports full page identities", async () => { vi.mocked(api.get).mockImplementation(async (_url, options) => ({ data: { events: [audit((options?.params as { offset?: number } | undefined)?.offset === 100 ? 101 : 1)], has_more: (options?.params as { offset?: number } | undefined)?.offset !== 100 } })); await render(<AuditPage />, "/clusters/cluster/audit?context=kept#evidence"); await settled(() => expect(host.textContent).toContain("action-1")); await act(async () => button("Next").click()); await settled(() => expect(host.textContent).toContain("action-101")); expect(history.location.search).toContain("page=2"); expect(history.location.search).toContain("context=kept"); expect(history.location.hash).toBe("#evidence"); expect([...host.querySelectorAll("button")].filter(b => b.textContent?.trim() === "Next")).toHaveLength(1); await act(async () => button("Export this page CSV").click()); const csv = vi.mocked(downloadCsv).mock.calls.at(-1)!; expect(csv[0]).toBe("audit-events-page-2"); expect(csv[2][0]).toContain("full-actor-identity"); expect(csv[2][0]).toContain("1234567890abcdef-full-hash"); await act(async () => history.back()); await settled(() => expect(host.textContent).toContain("action-1")); await act(async () => history.forward()); await settled(() => expect(host.textContent).toContain("action-101")); });
+it("preserves audit pages through history and exports full page identities", async () => { vi.mocked(api.get).mockImplementation(async (_url, options) => ({ data: { events: [audit((options?.params as { offset?: number } | undefined)?.offset === 100 ? 101 : 1)], has_more: (options?.params as { offset?: number } | undefined)?.offset !== 100 } })); await render(<AuditPage />, "/clusters/cluster/audit?context=kept#evidence"); await settled(() => expect(host.textContent).toContain("action-1")); await act(async () => button("Next").click()); await settled(() => expect(host.textContent).toContain("action-101")); expect(history.location.search).toContain("page=2"); expect(history.location.search).toContain("context=kept"); expect(history.location.hash).toBe("#evidence"); expect([...host.querySelectorAll("button")].filter(b => b.textContent?.trim() === "Next")).toHaveLength(1); await act(async () => button("Export this page CSV").click()); const csv = vi.mocked(downloadCsv).mock.calls.at(-1)!; expect(csv[0]).toBe("audit-events-page-2"); expect(csv[2][0]).toContain("full-actor-identity"); expect(csv[2][0]).not.toContain("1234567890abcdef-full-hash"); expect(host.querySelector("table")?.textContent).not.toContain("1234567890abcdef-full-hash"); await act(async () => history.back()); await settled(() => expect(host.textContent).toContain("action-1")); await act(async () => history.forward()); await settled(() => expect(host.textContent).toContain("action-101")); });
 it("allows explicit organization event lookup without inventing cluster scope", async () => { scope.cluster = undefined; vi.mocked(api.get).mockResolvedValue({ data: { events: [audit(42)], has_more: false } }); await render(<AuditPage />, "/clusters/missing/audit?event_id=42&page=4"); await settled(() => expect(api.get).toHaveBeenCalled()); expect(api.get).toHaveBeenLastCalledWith("/audit/events", { params: { limit: 1, offset: 0, cluster_id: undefined, event_id: "42", support_bundle_job_id: undefined } }); expect(host.textContent).toContain("organization-scoped"); expect(button("Next")).toBeUndefined(); });
 it("suppresses audit cache after a failed refresh and permits retry", async () => { await render(<AuditPage />, "/clusters/cluster/audit"); await settled(() => expect(host.textContent).toContain("action-1")); vi.mocked(api.get).mockRejectedValue(new Error("offline")); await act(async () => { await client.invalidateQueries({ queryKey: ["audit"] }); }); await settled(() => expect(host.textContent).toContain("Audit evidence unavailable")); expect(host.querySelector("table")).toBeNull(); vi.mocked(api.get).mockResolvedValue({ data: { events: [audit(2)], has_more: false } }); await act(async () => button("Retry").click()); await settled(() => expect(host.textContent).toContain("action-2")); });
+
+it("passes visible Audit action/control filters to every page and matching CSV", async () => {
+  vi.mocked(downloadLookaheadCSV).mockResolvedValue({exported:205,limit:100000,truncated:false});
+  await render(<AuditPage />, "/clusters/cluster/audit?action=auth.login.local&framework=nist-800-53&control=AC-2&page=3&context=keep#evidence");
+  await settled(()=>expect(host.textContent).toContain("action-1"));
+  expect(api.get).toHaveBeenLastCalledWith("/audit/events",{params:expect.objectContaining({cluster_id:"cluster",action:"auth.login.local",framework:"nist-800-53",control:"AC-2",offset:200})});
+  expect(host.querySelector<HTMLInputElement>('[name="action"]')!.value).toBe("auth.login.local");
+  await act(async()=>button("Export matching CSV").click());
+  expect(downloadLookaheadCSV).toHaveBeenCalledWith("/audit/events.csv",expect.objectContaining({cluster_id:"cluster",action:"auth.login.local",framework:"nist-800-53",control:"AC-2"}),"audit-events.csv",expect.any(Function));
+  expect(vi.mocked(downloadLookaheadCSV).mock.calls[0][1]).not.toHaveProperty("offset");
+  await settled(()=>expect(host.textContent).toContain("Exported all 205 matching records across pages"));
+  await act(async()=>button("Reset filters").click());
+  await settled(()=>expect(api.get).toHaveBeenLastCalledWith("/audit/events",{params:expect.objectContaining({offset:0})}));
+  expect(history.location.search).toBe("?context=keep");expect(history.location.hash).toBe("#evidence");
+  await act(async()=>history.back());await settled(()=>expect(host.querySelector<HTMLInputElement>('[name="action"]')!.value).toBe("auth.login.local"));
+});
+
+it.each(["framework=nist","control=AC-2","page=0","page=bad","action=a&action=b","event_id=01"])("rejects invalid Audit filter %s without substituting a broader cohort",async query=>{
+ await render(<AuditPage scope="organization"/>,`/organization/audit?${query}`);expect(api.get).not.toHaveBeenCalled();expect(host.textContent).toContain("Invalid audit filters");expect(host.querySelector("table")).toBeNull();
+});
+
+it("applies edited Audit filters and resets only pagination", async () => {
+ await render(<AuditPage />, "/clusters/cluster/audit?page=3&context=keep#evidence");
+ await settled(()=>expect(host.textContent).toContain("action-1"));
+ const fields = { action:" auth.login.local ",framework:"nist-800-53",control:"AC-2" };
+ for(const [name,value] of Object.entries(fields)) host.querySelector<HTMLInputElement>(`[name="${name}"]`)!.value=value;
+ await act(async()=>host.querySelector("form")!.dispatchEvent(new Event("submit",{bubbles:true,cancelable:true})));
+ await settled(()=>expect(api.get).toHaveBeenLastCalledWith("/audit/events",{params:expect.objectContaining({action:"auth.login.local",framework:"nist-800-53",control:"AC-2",offset:0})}));
+ expect(history.location.search).toContain("context=keep");expect(history.location.search).not.toContain("page=");expect(history.location.hash).toBe("#evidence");
+});
+
+it("a pending Audit export cannot revive after its source refreshes",async()=>{
+ let resolve!:(value:{exported:number;limit:number;truncated:boolean})=>void;
+ vi.mocked(downloadLookaheadCSV).mockImplementation(()=>new Promise(done=>{resolve=done;}));
+ await render(<AuditPage scope="organization"/>,"/organization/audit?event_ids=1");await settled(()=>expect(host.textContent).toContain("action-1"));
+ await act(async()=>button("Export matching CSV").click());const guard=vi.mocked(downloadLookaheadCSV).mock.calls[0][3];expect(guard()).toBe(true);
+ await act(async()=>client.invalidateQueries({queryKey:["audit"]}));await settled(()=>expect(host.textContent).toContain("action-1"));expect(guard()).toBe(false);
+ await act(async()=>resolve({exported:1,limit:100000,truncated:false}));
+});
 
 it("updates all asset destinations after selection and keeps missing signature metadata unknown", async () => {
  vi.mocked(assets.list).mockResolvedValue(assetResponse([asset("first"), { ...asset("second"), image_signed: undefined }])); await render(<AssetsPage />, "/clusters/cluster/assets"); await settled(() => expect(host.querySelectorAll("tbody tr")).toHaveLength(2)); await act(async () => (host.querySelectorAll("tbody tr")[1] as HTMLElement).click()); await settled(() => expect(history.location.search).toContain("selected=second"));

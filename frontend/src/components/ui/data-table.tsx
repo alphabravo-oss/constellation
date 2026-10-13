@@ -22,6 +22,7 @@ export type TableSort = { id: string; dir: "asc" | "desc" };
 interface StoredTablePreferences extends TableArrangement {
   density?: Density;
   hiddenColumnIds?: string[];
+  preferenceMigrations?: string[];
 }
 
 export interface Column<T> {
@@ -88,6 +89,7 @@ export interface DataTableProps<T> {
   hiddenColumnIds?: string[];
   /** Initial hidden columns when no stored preferences exist. */
   defaultHiddenColumnIds?: string[];
+  preferenceMigration?: { id: string; hideColumnIds: string[] };
   onHiddenColumnIdsChange?: (ids: string[]) => void;
   /** Enables CSV export for the currently rendered rows and visible columns. */
   exportFileName?: string;
@@ -152,6 +154,7 @@ function DataTableView<T>({
   showColumnChooser,
   hiddenColumnIds,
   defaultHiddenColumnIds,
+  preferenceMigration,
   onHiddenColumnIdsChange,
   exportFileName,
   exportLabel = "Export CSV",
@@ -165,7 +168,7 @@ function DataTableView<T>({
   pagination = true,
 }: DataTableProps<T>) {
   const [requestedPage, setRequestedPage] = useState(0);
-  const storedPreferences = useMemo(() => readStoredTablePreferences(preferencesKey), [preferencesKey]);
+  const storedPreferences = useMemo(() => readStoredTablePreferences(preferencesKey, preferenceMigration), [preferencesKey, preferenceMigration]);
   const [requestedArrangement, setArrangement] = useState<TableArrangement>(() => sanitizeArrangement(storedPreferences, columns));
   const arrangement = useMemo(() => sanitizeArrangement(requestedArrangement, columns), [requestedArrangement, columns]);
   const pinning = useMemo(() => arrangement.columnPinning ?? { start: columns.filter(column => column.sticky).map(column => column.id), end: [] }, [arrangement.columnPinning, columns]);
@@ -193,14 +196,14 @@ function DataTableView<T>({
   };
 
   const hiddenIds = useMemo(
-    () => sanitizeHiddenColumns(hiddenColumnIds ?? Array.from(internalHiddenColumnIds), columns),
-    [hiddenColumnIds, internalHiddenColumnIds, columns],
+    () => sanitizeHiddenColumns(hiddenColumnIds ?? Array.from(internalHiddenColumnIds), columns, preferenceMigration?.hideColumnIds),
+    [hiddenColumnIds, internalHiddenColumnIds, columns, preferenceMigration?.hideColumnIds],
   );
   const visibleColumns = useMemo(
     () => orderedColumns.filter((c) => !hiddenIds.has(c.id) || c.hideable === false),
     [orderedColumns, hiddenIds],
   );
-  const columnVisibility = useMemo(() => Object.fromEntries(columns.map(column => [column.id, !hiddenIds.has(column.id)])), [columns, hiddenIds]);
+  const columnVisibility = useMemo(() => Object.fromEntries(columns.map(column => [column.id, !hiddenIds.has(column.id) || column.hideable === false])), [columns, hiddenIds]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   useEffect(() => {
@@ -237,23 +240,24 @@ function DataTableView<T>({
       return JSON.stringify(previous) === JSON.stringify(next) ? previous : next;
     });
     setInternalHiddenColumnIds((prev) => {
-      const next = sanitizeHiddenColumns(Array.from(prev), columns);
+      const next = sanitizeHiddenColumns(Array.from(prev), columns, preferenceMigration?.hideColumnIds);
       return setsEqual(prev, next) ? prev : next;
     });
-  }, [columns]);
+  }, [columns, preferenceMigration?.hideColumnIds]);
 
   useEffect(() => {
     if (!preferencesKey) return;
     const prefs = readStoredTablePreferences(preferencesKey);
     setPreferencesUnavailable(!writeStoredTablePreferences(preferencesKey, {
       ...prefs,
+      ...((storedPreferences.preferenceMigrations?.length || prefs.preferenceMigrations?.length) ? { preferenceMigrations: Array.from(new Set([...(storedPreferences.preferenceMigrations ?? []), ...(prefs.preferenceMigrations ?? [])])) } : {}),
       columnWidths: arrangement.columnWidths,
       columnOrder: arrangement.columnOrder,
       columnPinning: arrangement.columnPinning,
       ...(hiddenColumnIds === undefined ? { hiddenColumnIds: Array.from(hiddenIds) } : {}),
       ...(densityProp === undefined ? { density: internalDensity } : {}),
     }));
-  }, [preferencesKey, hiddenColumnIds, hiddenIds, densityProp, internalDensity, preferencesWriteAttempt, arrangement]);
+  }, [preferencesKey, hiddenColumnIds, hiddenIds, densityProp, internalDensity, preferencesWriteAttempt, arrangement, storedPreferences]);
 
   useEffect(() => {
     if (densityProp) {
@@ -337,7 +341,7 @@ function DataTableView<T>({
   }
 
   function resetColumns() {
-    const next = sanitizeHiddenColumns(defaultHiddenColumnIds ?? [], columns);
+    const next = sanitizeHiddenColumns(defaultHiddenColumnIds ?? [], columns, preferenceMigration?.hideColumnIds);
     setInternalHiddenColumnIds(next);
     onHiddenColumnIdsChange?.(Array.from(next));
   }
@@ -724,7 +728,7 @@ function exportCellValue<T>(column: Column<T>, row: T): CsvCell {
   return "";
 }
 
-function readStoredTablePreferences(key?: string): StoredTablePreferences {
+function readStoredTablePreferences(key?: string, migration?: { id: string; hideColumnIds: string[] }): StoredTablePreferences {
   if (!key) return {};
   try {
     if (typeof localStorage === "undefined") return {};
@@ -736,7 +740,11 @@ function readStoredTablePreferences(key?: string): StoredTablePreferences {
     const density = parsed.density === "compact" || parsed.density === "cozy" || parsed.density === "comfy"
       ? parsed.density
       : undefined;
-    return { ...parsed, density, hiddenColumnIds };
+    const markers = Array.isArray(parsed.preferenceMigrations) ? parsed.preferenceMigrations.filter((id: unknown): id is string => typeof id === "string") : [];
+    if (migration && !markers.includes(migration.id)) {
+      return { ...parsed, density, ...(hiddenColumnIds ? { hiddenColumnIds: Array.from(new Set([...hiddenColumnIds, ...migration.hideColumnIds])) } : {}), preferenceMigrations: [...markers, migration.id] };
+    }
+    return { ...parsed, density, hiddenColumnIds, ...(markers.length ? { preferenceMigrations: markers } : {}) };
   } catch {
     return {};
   }
@@ -754,10 +762,10 @@ function writeStoredTablePreferences(key: string, preferences: StoredTablePrefer
   }
 }
 
-function sanitizeHiddenColumns<T>(ids: string[], columns: Column<T>[]): Set<string> {
-  const hideable = new Set(columns.filter(column => column.hideable !== false).map(column => column.id));
+function sanitizeHiddenColumns<T>(ids: string[], columns: Column<T>[], preserve: string[] = []): Set<string> {
+  const hideable = new Set(columns.filter(column => column.hideable !== false || preserve.includes(column.id)).map(column => column.id));
   const hidden = new Set(ids.filter(id => hideable.has(id)));
-  if (columns.length && columns.every(column => hidden.has(column.id))) hidden.delete(columns[0].id);
+  if (columns.length && columns.every(column => column.hideable !== false && hidden.has(column.id))) hidden.delete(columns[0].id);
   return hidden;
 }
 

@@ -390,3 +390,18 @@ it("keeps bounded detail inventories scrollable without changing default paginat
   expect(host?.textContent).toContain("Showing 1–200 of 200 matching loaded rows.");
   expect(host?.textContent).toContain("Server fetch limit: 200 rows");
 });
+it('migrates only new metadata hides once, retains layout choices and preserves an explicit later show', async () => {
+  const migration = { id: 'observation-v1', hideColumnIds: ['instance', 'first-seen'] };
+  const extra: Column<Row>[] = [...columns.map((column, index) => ({ ...column, kind: (index === 0 ? 'name' : index === 1 ? 'count' : 'text') as Column<Row>['kind'] })), { id: 'instance', kind: 'id', header: 'Instance', cell: row => row.id }, { id: 'first-seen', kind: 'date', header: 'First observed', cell: () => '2026-01-01T00:00:00.123456Z' }];
+  localStorage.setItem(storageKey('migration'), JSON.stringify({ density: 'compact', hiddenColumnIds: ['owner'], columnWidths: { name: 280 }, columnOrder: ['risk', 'name', 'owner'], columnPinning: { start: ['name'], end: [] } }));
+  const view = (chooser = false, org = 'org') => <TablePreferencesProvider identity={{ org_id: org, user_id: 'user' }}><DataTable rows={rows} columns={extra.map(column => column.id === 'first-seen' ? { ...column, hideable: !chooser } : column)} rowKey={row => row.id} preferencesKey='migration' preferenceMigration={migration} /></TablePreferencesProvider>;
+  render(view());
+  let stored = JSON.parse(localStorage.getItem(storageKey('migration'))!); expect(stored.hiddenColumnIds).toEqual(['owner', 'instance', 'first-seen']); expect(stored.density).toBe('compact'); expect(stored.columnWidths.name).toBe(280); expect(stored.columnOrder.slice(0, 3)).toEqual(['risk', 'name', 'owner']); expect(stored.columnPinning).toEqual({ start: ['name'], end: [] }); expect(stored.preferenceMigrations).toEqual(['observation-v1']);
+  act(() => root?.render(view(true))); expect(host?.querySelector('th[data-column-id="first-seen"]')).not.toBeNull(); expect(host?.querySelector('th[data-column-id="instance"]')).toBeNull(); expect(JSON.parse(localStorage.getItem(storageKey('migration'))!).hiddenColumnIds).toContain('first-seen');
+  act(() => root?.render(view())); expect(host?.querySelector('th[data-column-id="first-seen"]')).toBeNull();
+  await act(async () => host?.querySelector<HTMLButtonElement>('[aria-label="Columns"]')?.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 })));
+  const choice = [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find(item => item.textContent === 'First observed')!; await act(async () => choice.click());
+  expect(host?.querySelector('th[data-column-id="first-seen"]')).not.toBeNull();
+  act(() => root?.render(view(false, 'other-org'))); expect(host?.querySelector('th[data-column-id="first-seen"]')).not.toBeNull(); // New owner has no legacy hidden list.
+  act(() => root?.render(view())); expect(host?.querySelector('th[data-column-id="first-seen"]')).not.toBeNull(); stored = JSON.parse(localStorage.getItem(storageKey('migration'))!); expect(stored.hiddenColumnIds).toEqual(['owner', 'instance']); expect(stored.preferenceMigrations).toEqual(['observation-v1']);
+});

@@ -1,3 +1,4 @@
+import { NetworkPeerEvidence } from "./NetworkPeerEvidence";
 import { StreamsTab, PcapWorkspaceTab } from "./NetworkSecondaryInventory";
 export { StreamsTab, PcapWorkspaceTab } from "./NetworkSecondaryInventory";
 import { INVENTORY_MAX_PAGE } from "@/lib/inventory-pagination";
@@ -1104,6 +1105,7 @@ function NetworkMapInner() {
               clusterID={clusterID}
               hours={hours}
               denyCapable={denyCapable}
+              hidePlatform={hidePlatformComponents}
               onSelectFlow={(id) => { selectFlow(id); setPopoverOpen(true); }}
             />
             <div className="mt-2 flex items-center justify-between">
@@ -2049,7 +2051,7 @@ function FlowInspectorPopover({
                 <FlowTab flow={flow} threats={threats} />
               </RadixTabs.Content>
               <RadixTabs.Content value="peers" className="outline-none">
-                <EdgePeersTab flow={flow} clusterID={clusterID} hours={hours} denyCapable={denyCapable} active={tab === "peers"} />
+                <EdgePeersTab flow={flow} clusterID={clusterID} hours={hours} denyCapable={denyCapable} hidePlatform={sourceFilters.hide_platform ?? false} active={tab === "peers"} />
               </RadixTabs.Content>
               <RadixTabs.Content value="streams" className="outline-none">
                 <StreamsTab flow={flow} clusterID={clusterID} hours={hours} active={tab === "streams"} sourceFilters={sourceFilters} />
@@ -2193,60 +2195,12 @@ function EnforcementCard({ clusterID }: { clusterID: string }) {
 // all external peers into one "external" node, so a workload→external line is a single edge;
 // this lists every real IP that edge represents (the whole point of "click the line to
 // external and see the IPs").
-function EdgePeersTab({ flow, clusterID, hours, denyCapable, active }: { flow: NetworkFlow; clusterID: string; hours: number; denyCapable: boolean; active: boolean }) {
-  const isAgg = (id: string) => id === "external" || id.startsWith("external/");
-  // Pick the workload side + the direction of THIS edge relative to it.
-  let workload = flow.src;
-  let direction: "ingress" | "egress" = "egress";
-  let peerIsExternal = false;
-  if (isAgg(flow.dst)) { workload = flow.src; direction = "egress"; peerIsExternal = true; }
-  else if (isAgg(flow.src)) { workload = flow.dst; direction = "ingress"; peerIsExternal = true; }
-  else { workload = flow.src; direction = "egress"; }
-  const navigate = useNavigate();
-  const q = useQuery({
-    queryKey: ["edge-peers", clusterID, workload, hours],
-    queryFn: () => network.peers({ workload, cluster_id: clusterID || undefined, hours }),
-    enabled: active && !!workload && !isAgg(workload),
-    staleTime: 30_000,
-  });
-  if (isAgg(workload)) return <p className="text-xs text-muted-foreground">Select an edge with a workload endpoint to list its peer IPs.</p>;
-  if (q.isPending) return <p className="text-xs text-muted-foreground">Loading peer IPs…</p>;
-  let peers = (q.data ?? []).filter((p) => p.direction === direction);
-  if (peerIsExternal) peers = peers.filter((p) => p.external);
-  if (peers.length === 0) return <p className="text-xs text-muted-foreground">No individual peer IPs recorded for this direction.</p>;
-  const totalBytes = peers.reduce((a, p) => a + p.bytes, 0);
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-        <span>{peers.length} {peerIsExternal ? "external " : ""}peer{peers.length === 1 ? "" : "s"} · {shortName(workload)} {direction === "egress" ? "→ out" : "← in"}</span>
-        <span>{formatBytes(totalBytes)}</span>
-      </div>
-      <ul className="max-h-[340px] space-y-1 overflow-auto pr-1">
-        {peers.map((p, i) => (
-          <li key={p.peer_ip + i} className="rounded border border-border/60 p-1.5 text-[11px]">
-            <div className="flex items-center justify-between gap-1">
-              <span className="text-mono font-medium">{p.fqdn || p.peer || p.peer_ip}</span>
-              <span className="flex shrink-0 items-center gap-1">
-                {p.external && <span className="rounded bg-[color-mix(in_oklab,var(--color-severity-medium)_18%,transparent)] px-1 text-[9px] uppercase text-[color:var(--color-severity-medium)]">ext</span>}
-                {p.protocols.length ? <span className="text-[9px] uppercase text-muted-foreground/70">{p.protocols[0]}</span> : null}
-                {p.external && clusterID && denyCapable ? (
-                  <button type="button" title={`Block ${shortName(workload)} ${direction === "egress" ? "→" : "←"} ${p.peer_ip}`}
-                    onClick={() => navigate({ href: networkActionHref(clusterID, "block-ip", workload, { ip: p.peer_ip, direction }) })}
-                    className="rounded p-0.5 text-muted-foreground hover:text-[color:var(--color-severity-critical)]">
-                    <Ban className="h-3 w-3" />
-                  </button>
-                ) : null}
-              </span>
-            </div>
-            <div className="mt-0.5 text-[10px] text-muted-foreground truncate">
-              {(p.fqdn || p.peer) ? <span className="text-mono">{p.peer_ip} · </span> : null}
-              {formatBytes(p.bytes)}{p.sessions > 0 ? ` · ${p.sessions.toLocaleString()} sess` : ""}{p.ports.length ? ` · :${p.ports.slice(0, 6).join(", :")}` : ""}
-            </div>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
+function EdgePeersTab({ flow, clusterID, hours, denyCapable, hidePlatform, active }: { flow: NetworkFlow; clusterID: string; hours: number; denyCapable: boolean; hidePlatform: boolean; active: boolean }) {
+  const aggregate = (id: string) => id === "external" || id.startsWith("external/");
+  const workload = aggregate(flow.src) ? flow.dst : flow.src;
+  const direction = aggregate(flow.src) ? "ingress" : "egress";
+  if (aggregate(workload)) return <p className="text-xs text-muted-foreground">Select an edge with a workload endpoint to list peer IPs.</p>;
+  return <NetworkPeerEvidence clusterID={clusterID} workload={workload} hours={hours} hidePlatform={hidePlatform} active={active} direction={direction} externalOnly={aggregate(flow.src) || aggregate(flow.dst)} testId="network-edge-peers" blockHref={denyCapable ? peer => networkActionHref(clusterID, "block-ip", workload, { ip: peer.peer_ip, direction }) : undefined} />;
 }
 
 function FlowTab({ flow, threats }: { flow: NetworkFlow; threats: RuntimeThreat[] }) {
@@ -2505,20 +2459,12 @@ function HistoryTab({ data, samples }: { data: number[]; samples: NetworkRecentF
 // dismissed without changing the selected flow (e.g. user closed the dialog
 // but still wants the data visible in the right rail).
 
-function WorkloadDrilldown({ workload, flows, clusterID, hours, denyCapable, onSelectFlow }: { workload: NetworkWorkload; flows: NetworkFlow[]; clusterID: string; hours: number; denyCapable: boolean; onSelectFlow: (flowID: string) => void }) {
+function WorkloadDrilldown({ workload, flows, clusterID, hours, denyCapable, hidePlatform, onSelectFlow }: { workload: NetworkWorkload; flows: NetworkFlow[]; clusterID: string; hours: number; denyCapable: boolean; hidePlatform: boolean; onSelectFlow: (flowID: string) => void }) {
   const [tab, setTab] = useState<"ingress" | "egress" | "peers">("egress");
-  const navigate = useNavigate();
   const related = flows.filter((f) => f.src === workload.id || f.dst === workload.id);
   const ingressFlows = related.filter((f) => f.dst === workload.id);
   const egressFlows = related.filter((f) => f.src === workload.id);
   const visibleFlows = tab === "ingress" ? ingressFlows : egressFlows;
-  // NV-style per-peer list: every individual peer IP (incl. external) for this workload.
-  const peersQ = useQuery({
-    queryKey: ["network-peers", clusterID, workload.id, hours],
-    queryFn: () => network.peers({ workload: workload.id, cluster_id: clusterID || undefined, hours }),
-    enabled: tab === "peers" && !!workload.id,
-    staleTime: 30_000,
-  });
   return (
     <div className="space-y-4" data-testid="network-workload-detail">
       <div>
@@ -2560,36 +2506,7 @@ function WorkloadDrilldown({ workload, flows, clusterID, hours, denyCapable, onS
           </button>
         </div>
         {tab === "peers" ? (
-          peersQ.isPending ? (
-            <p className="px-1 py-2 text-xs text-muted-foreground">Loading peers…</p>
-          ) : (peersQ.data ?? []).length === 0 ? (
-            <p className="px-1 py-2 text-xs text-muted-foreground">No individual peers observed.</p>
-          ) : (
-            <ul className="max-h-72 space-y-1 overflow-auto pr-1 text-xs" data-testid="network-workload-peers">
-              {(peersQ.data ?? []).map((p, i) => (
-                <li key={p.direction + p.peer_ip + i} className="rounded border border-border/60 p-1.5">
-                  <div className="flex items-center justify-between gap-1">
-                    <span className="text-mono font-medium">{p.fqdn || p.peer || p.peer_ip}</span>
-                    <span className="flex items-center gap-1 shrink-0">
-                      {p.external && <span className="rounded bg-[color-mix(in_oklab,var(--color-severity-medium)_18%,transparent)] px-1 text-[9px] uppercase text-[color:var(--color-severity-medium)]">ext</span>}
-                      <span className="rounded bg-muted px-1 text-[9px] uppercase text-muted-foreground">{p.direction === "ingress" ? "in" : "out"}</span>
-                      {p.external && clusterID && denyCapable ? (
-                        <button type="button" title={`Block ${shortName(workload.id)} ${p.direction === "egress" ? "→" : "←"} ${p.peer_ip}`}
-                          onClick={() => navigate({ href: networkActionHref(clusterID, "block-ip", workload.id, { ip: p.peer_ip, direction: p.direction }) })}
-                          className="rounded p-0.5 text-muted-foreground hover:text-[color:var(--color-severity-critical)]">
-                          <Ban className="h-3 w-3" />
-                        </button>
-                      ) : null}
-                    </span>
-                  </div>
-                  <div className="mt-0.5 text-[10px] text-muted-foreground truncate">
-                    {p.fqdn || p.peer ? <span className="text-mono">{p.peer_ip} · </span> : null}
-                    {formatBytes(p.bytes)}{p.sessions > 0 ? ` · ${p.sessions.toLocaleString()} sess` : ""}{p.ports.length ? ` · :${p.ports.slice(0, 5).join(", :")}` : ""}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )
+          <NetworkPeerEvidence clusterID={clusterID} workload={workload.id} hours={hours} hidePlatform={hidePlatform} active testId="network-workload-peers" blockHref={denyCapable ? peer => networkActionHref(clusterID, "block-ip", workload.id, { ip: peer.peer_ip, direction: peer.direction }) : undefined} />
         ) : (
         <ul className="max-h-72 space-y-2 overflow-auto pr-1 text-sm">
           {visibleFlows.map((f) => (

@@ -92,6 +92,19 @@ export async function downloadAPIFile(path: string, filename: string, shouldDown
   URL.revokeObjectURL(url);
 }
 
+export interface LookaheadExportResult { exported: number; limit: number; truncated: boolean }
+export async function downloadLookaheadCSV(path: string, params: Record<string, string | number | undefined>, filename: string, shouldDownload: ScanInventoryDownloadGuard): Promise<LookaheadExportResult> {
+  const response = await api.get<Blob>(path, { params, responseType: "blob" });
+  const rows = String(response.headers["x-export-rows"] ?? ""), cap = String(response.headers["x-export-limit"] ?? ""), more = String(response.headers["x-export-truncated"] ?? "");
+  const exported = Number(rows), limit = Number(cap), truncated = more === "true";
+  if (!/^\d+$/.test(rows) || !/^\d+$/.test(cap) || !Number.isSafeInteger(exported) || !Number.isSafeInteger(limit) || limit !== 100000 || exported > limit || !["true", "false"].includes(more) || truncated && exported !== limit) throw new Error("Export scope could not be confirmed.");
+  assertInventoryDownloadCurrent(shouldDownload);
+  const blob = response.data instanceof Blob ? response.data : new Blob([response.data]);
+  const url = URL.createObjectURL(blob), anchor = document.createElement("a");
+  anchor.href = url; anchor.download = filename; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
+  return { exported, limit, truncated };
+}
+
 export type Severity = "info" | "low" | "medium" | "high" | "critical";
 export type Lifecycle = "open" | "triaged" | "in_progress" | "resolved" | "suppressed" | "accepted";
 export type FindingKind =
@@ -2152,6 +2165,8 @@ export interface ConversationEntry {
   last_seen_at: string;
 }
 export interface NetworkPeer {
+  peer_platform_role?: string;
+  peer_cluster_id?: string | null;
   peer_ip: string;
   peer?: string;
   fqdn?: string;
@@ -2164,6 +2179,12 @@ export interface NetworkPeer {
   protocols: string[];
   verdict: string;
   last_seen_at: string;
+}
+
+export interface NetworkPeerEvidenceResponse {
+  workload: string; cluster_id: string | null; workload_platform_role: string; hide_platform: boolean;
+  source_limit: number; total: number; has_more: boolean;
+  peers: Array<NetworkPeer & { peer_platform_role: string; peer_cluster_id: string | null }>;
 }
 
 // Phase-1 CNI enforcement action (isolate | block_ip) reconciled by the applier.
@@ -2610,6 +2631,7 @@ export const network = {
   // NV per-conversation drill-down: every protocol/port/app stream between from→to,
   // with directional (in/out) bytes + session counts.
   // NV per-conversation peer list: every individual peer IP (incl. external) for a workload.
+  peersEvidence: (params: { workload: string; hours?: number; cluster_id: string; hide_platform: boolean }) => api.get<NetworkPeerEvidenceResponse>("/network/peers", { params }).then(r => r.data),
   peers: (params: { workload: string; hours?: number; cluster_id?: string }) =>
     api.get<{ workload: string; peers: NetworkPeer[] }>("/network/peers", { params }).then((r) => r.data.peers),
   conversationEntries: (params: { from: string; to: string; hours?: number; cluster_id?: string }) =>
@@ -2936,6 +2958,7 @@ export const dpiGroupBindings = {
 export type RuntimePolicyMode = "monitor" | "enforce" | "disabled";
 
 export interface RuntimePolicy {
+  revision?: string;
   id: string;
   dp_policy_id: number;
   org_id: string;
@@ -2987,7 +3010,14 @@ export interface PolicyMatchStats {
   }>>;
 }
 
+export interface RuntimePolicyReview { cluster_id: string; expected_version: string }
+export interface RuntimePolicyDeleteReceipt { deleted: string; id: string; cluster_id: string; revision: string; workload: string }
 export const runtimePolicies = {
+  updateReviewed: (id: string, body: RuntimePolicyReview & { rules: RuntimePolicyRule[]; name: string }) => api.put<RuntimePolicy>(`/runtime-policies/${encodeURIComponent(id)}/reviewed`, body).then(r => r.data),
+  promoteReviewed: (id: string, body: RuntimePolicyReview) => api.post<RuntimePolicy>(`/runtime-policies/${encodeURIComponent(id)}/reviewed/promote`, body).then(r => r.data),
+  demoteReviewed: (id: string, body: RuntimePolicyReview) => api.post<RuntimePolicy>(`/runtime-policies/${encodeURIComponent(id)}/reviewed/demote`, body).then(r => r.data),
+  disableReviewed: (id: string, body: RuntimePolicyReview) => api.post<RuntimePolicy>(`/runtime-policies/${encodeURIComponent(id)}/reviewed/disable`, body).then(r => r.data),
+  removeReviewed: (id: string, body: RuntimePolicyReview) => api.delete<RuntimePolicyDeleteReceipt>(`/runtime-policies/${encodeURIComponent(id)}/reviewed`, { data: body }).then(r => r.data),
   list: (cluster_id: string) =>
     api.get<{ policies: RuntimePolicy[] }>("/runtime-policies", { params: { cluster_id } })
       .then((r) => r.data.policies),
@@ -5536,7 +5566,15 @@ export interface CVEAffectedImageEvidence { image_ref: string; image_ref_normali
 export interface CVEAffectedInventoryRows { images: CVEAffectedImage & {row_id: string}; workloads: CVEAffectedWorkload & {row_id: string; image_evidence: CVEAffectedImageEvidence[]}; clusters: CVEAffectedCluster & {row_id: string}; packages: CVEAffectedInventoryPackage }
 export interface CVEAffectedInventoryResponse<T> { cve_id: string; cluster_id: string | null; view: CVEAffectedInventoryView; items: T[]; total: number; summary: Record<string,number>; has_more: boolean; limit: number; offset: number; sort: string; order: "asc" | "desc" }
 
+function cveCatalogCSVParams(params: CVESearchParams): Record<string, string | number | undefined> {
+  return { q: params.q ?? "", kev: params.kev ? "true" : undefined, epss_gt: params.epss_gt, cvss_gt: params.cvss_gt, severity: params.severity, source: params.source, sort: params.sort, dir: params.dir };
+}
+
 export const cve = {
+  catalogCSVPath: "/cve/search.csv",
+  catalogCSVParams: cveCatalogCSVParams,
+  searchCSV: (params: CVESearchParams, shouldDownload: ScanInventoryDownloadGuard) =>
+    downloadLookaheadCSV("/cve/search.csv", cveCatalogCSVParams(params), "constellation-cve-catalog.csv", shouldDownload),
   search: (qOrParams: string | CVESearchParams = "") => {
     const params: Record<string, unknown> = typeof qOrParams === "string"
       ? { q: qOrParams }

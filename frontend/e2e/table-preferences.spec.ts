@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { login } from "./utils";
 import { inventoryAt, inventoryCluster, inventoryMetadata, mockInventoryEndpoints } from "./fixtures/inventory-contracts";
+import { dashboardEvidence, evidenceRoot } from "./fixtures/dashboard-evidence";
 
 async function layoutAction(page: Page, table: Locator, column: string, action: string) {
   const trigger = table.getByRole("button", { name: "Column layout", exact: true });
@@ -86,9 +87,19 @@ for (const entry of [
   { route: "assets", testId: "assets-table", column: "Risk", columnId: "risk", hidden: "Criticality", hiddenId: "criticality" },
   { route: "nodes", testId: "nodes-table", column: "Operating system", columnId: "os", hidden: "Packages", hiddenId: "packages" },
   { route: "components", testId: "component-inventory-table", column: "Build", columnId: "build", hidden: "Runtime", hiddenId: "runtime" },
+  { route: "deployments", testId: "deployments-table", column: "Risk", columnId: "risk", hidden: "Risk factors", hiddenId: "factors" },
+  { route: "audit", testId: "audit-page", column: "Actor", columnId: "actor", hidden: "Target", hiddenId: "target" },
 ]) {
   test(`${entry.route} preserves keyboard table preferences and resets them without changing filters`, async ({ page }) => {
-    if (entry.route === "nodes") {
+    if (entry.route === "deployments") {
+      await dashboardEvidence().install(page);
+      await page.goto(`${evidenceRoot}/deployments?risk_fact=privileged&context=keep`);
+    } else if (entry.route === "audit") {
+      await mockInventoryEndpoints(page, {
+        "/audit/events": (_url, response) => response.fulfill({ json: { events: [{ id: 1, event_id: "1", action: "auth.login.local", actor_id: "operator", target_kind: "cluster", target_id: inventoryCluster, prev_hash: "previous", chain_hash: "hidden-chain", at: inventoryAt }], has_more: false } }),
+      });
+      await page.goto(`/clusters/${inventoryCluster}/audit?action=auth.login.local&context=keep`);
+    } else if (entry.route === "nodes") {
       // The seeded cluster may have no host observations. Use an explicit row
       // so alignment checks exercise cells, rather than the empty-state colspan.
       await mockInventoryEndpoints(page, {
