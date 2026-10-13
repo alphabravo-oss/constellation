@@ -23949,6 +23949,29 @@
                 "schema": {
                   "type": "boolean"
                 }
+              },
+              "X-Report-Org-ID": {
+                "description": "Actual authenticated organization UUID for the committed report source. Current clients validate this receipt before saving bytes.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "X-Report-Cluster-ID": {
+                "description": "Actual committed report scope: exact owned cluster UUID when cluster_id was requested, otherwise organization. Absent on older APIs; current scoped clients reject absent or mismatched receipts.",
+                "schema": {
+                  "type": "string",
+                  "oneOf": [
+                    {
+                      "format": "uuid"
+                    },
+                    {
+                      "enum": [
+                        "organization"
+                      ]
+                    }
+                  ]
+                }
               }
             },
             "content": {
@@ -24036,6 +24059,29 @@
                 "schema": {
                   "type": "boolean"
                 }
+              },
+              "X-Report-Org-ID": {
+                "description": "Actual authenticated organization UUID for the committed report source. Current clients validate this receipt before saving bytes.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "X-Report-Cluster-ID": {
+                "description": "Actual committed report scope: exact owned cluster UUID when cluster_id was requested, otherwise organization. Absent on older APIs; current scoped clients reject absent or mismatched receipts.",
+                "schema": {
+                  "type": "string",
+                  "oneOf": [
+                    {
+                      "format": "uuid"
+                    },
+                    {
+                      "enum": [
+                        "organization"
+                      ]
+                    }
+                  ]
+                }
               }
             },
             "content": {
@@ -24110,6 +24156,29 @@
                   ]
                 },
                 "description": "Present when the optional PDF renderer is unavailable; bytes/filename/MIME remain HTML."
+              },
+              "X-Report-Org-ID": {
+                "description": "Actual authenticated organization UUID for the committed report source. Current clients validate this receipt before saving bytes.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "X-Report-Cluster-ID": {
+                "description": "Actual committed report scope: exact owned cluster UUID when cluster_id was requested, otherwise organization. Absent on older APIs; current scoped clients reject absent or mismatched receipts.",
+                "schema": {
+                  "type": "string",
+                  "oneOf": [
+                    {
+                      "format": "uuid"
+                    },
+                    {
+                      "enum": [
+                        "organization"
+                      ]
+                    }
+                  ]
+                }
               }
             },
             "content": {
@@ -24169,6 +24238,29 @@
                   ]
                 },
                 "description": "Present when the optional PDF renderer is unavailable; bytes/filename/MIME remain HTML."
+              },
+              "X-Report-Org-ID": {
+                "description": "Actual authenticated organization UUID for the committed report source. Current clients validate this receipt before saving bytes.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "X-Report-Cluster-ID": {
+                "description": "Actual committed report scope: exact owned cluster UUID when cluster_id was requested, otherwise organization. Absent on older APIs; current scoped clients reject absent or mismatched receipts.",
+                "schema": {
+                  "type": "string",
+                  "oneOf": [
+                    {
+                      "format": "uuid"
+                    },
+                    {
+                      "enum": [
+                        "organization"
+                      ]
+                    }
+                  ]
+                }
               }
             },
             "content": {

@@ -31,6 +31,12 @@ func TestOpenAPIActualReportArtifactMetadataAndScope(t *testing.T) {
 		if !found {
 			t.Fatal("missing exact source cluster report parameter", path)
 		}
+		headers := op["responses"].(map[string]any)["200"].(map[string]any)["headers"].(map[string]any)
+		for _, receipt := range []string{"X-Report-Org-ID", "X-Report-Cluster-ID"} {
+			if headers[receipt] == nil {
+				t.Fatal("missing committed source receipt", path, receipt)
+			}
+		}
 	}
 	props := spec.Components.Schemas["ComplianceRunRecord"]["properties"].(map[string]any)
 	for _, name := range []string{"artifact_format", "artifact_media_type", "artifact_filename", "artifact_metadata_known"} {

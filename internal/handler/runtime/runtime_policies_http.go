@@ -72,7 +72,16 @@ func (h *RuntimePoliciesHTTP) List(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "cluster_id is required")
 		return
 	}
-	rows, err := h.store.ListForCluster(r.Context(), sub.OrgID, clusterID)
+	var owned bool
+	if err := h.store.db.Pool().QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM clusters WHERE id=$1 AND org_id=$2)`, clusterID, sub.OrgID).Scan(&owned); err != nil {
+		jsonError(w, 500, err.Error())
+		return
+	}
+	if !owned {
+		jsonError(w, 404, "cluster not found")
+		return
+	}
+	rows, err := h.store.ListInventoryForCluster(r.Context(), sub.OrgID, clusterID)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return

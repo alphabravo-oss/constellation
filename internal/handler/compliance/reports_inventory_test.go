@@ -89,6 +89,25 @@ func TestReportsFullEffectiveScopeAndExactWorkloadRoles(t *testing.T) {
 	if request(h.ExecutiveHTML, "/reports/executive.html?cluster_id="+foreign.String()).Code != 404 {
 		t.Fatal("foreign report cluster accepted")
 	}
+	// Both formats and report families return source receipts, including the
+	// organization-wide default. A missing PDF tool exercises HTML fallback.
+	t.Setenv("PATH", t.TempDir())
+	for _, handle := range []http.HandlerFunc{h.ComplianceHTML, h.CompliancePDF, h.ExecutiveHTML, h.ExecutivePDF} {
+		for _, selected := range []bool{false, true} {
+			path, expected := "/reports/source?framework=report-framework", "organization"
+			if selected {
+				path += "&cluster_id=" + cluster.String()
+				expected = cluster.String()
+			}
+			response := request(handle, path)
+			if response.Code != 200 || response.Header().Get("X-Report-Org-ID") != org.String() || response.Header().Get("X-Report-Cluster-ID") != expected {
+				t.Fatalf("report scope receipt: status=%d headers=%v", response.Code, response.Header())
+			}
+		}
+	}
+	if response := request(h.ExecutiveHTML, "/reports/source?cluster_id="+foreign.String()); response.Header().Get("X-Report-Org-ID") != "" || response.Header().Get("X-Report-Cluster-ID") != "" {
+		t.Fatal("rejected foreign scope produced a success receipt")
+	}
 	// Read failures never render a successful empty/partial report.
 	role := pgx.Identifier{"report_read_test_" + uuid.New().String()}.Sanitize()
 	if _, err := p.Exec(ctx, `CREATE ROLE `+role); err != nil {

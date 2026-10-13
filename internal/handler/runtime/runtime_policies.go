@@ -284,6 +284,25 @@ func (s *RuntimePolicyStore) Get(ctx context.Context, orgID, id uuid.UUID) (*Run
 	return scanPolicy(row)
 }
 
+// ListInventoryForCluster includes disabled policies so operators can review,
+// edit and re-enable them. The agent distribution method below remains filtered.
+func (s *RuntimePolicyStore) ListInventoryForCluster(ctx context.Context, orgID, clusterID uuid.UUID) ([]*RuntimePolicy, error) {
+	rows, err := s.db.Pool().Query(ctx, `SELECT `+policySelectCols+` FROM runtime_policies WHERE org_id=$1 AND cluster_id=$2 ORDER BY namespace,name,id`, orgID, clusterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*RuntimePolicy{}
+	for rows.Next() {
+		p, err := scanPolicy(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 // ListForCluster returns every policy that should drive dp on the given
 // cluster — mode in (monitor, enforce). Ordered by namespace then name
 // for deterministic agent-side reconcile.

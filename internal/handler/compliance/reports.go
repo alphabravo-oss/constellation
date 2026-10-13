@@ -70,6 +70,18 @@ func reportScope(ctx context.Context, tx pgx.Tx, org uuid.UUID, cluster *uuid.UU
 	}
 	return orgName, scope, nil
 }
+
+// Scope receipts let current download clients reject responses from older replicas
+// that ignored a requested cluster selector. They identify the committed source.
+func reportScopeReceipt(w http.ResponseWriter, org uuid.UUID, cluster *uuid.UUID) {
+	w.Header().Set("X-Report-Org-ID", org.String())
+	scope := "organization"
+	if cluster != nil {
+		scope = cluster.String()
+	}
+	w.Header().Set("X-Report-Cluster-ID", scope)
+}
+
 func writeReport(w http.ResponseWriter, html []byte, asPDF bool, filename string) {
 	if asPDF {
 		pdf, err := report.HTMLToPDF(html)
@@ -185,6 +197,7 @@ func (h *Reports) serveCompliance(w http.ResponseWriter, r *http.Request, asPDF 
 	w.Header().Set("X-Report-Limit", fmt.Sprint(inventorylist.ExportLimit))
 	w.Header().Set("X-Report-Total", fmt.Sprint(summary.Total))
 	w.Header().Set("X-Report-Truncated", fmt.Sprint(truncated))
+	reportScopeReceipt(w, sub.OrgID, cluster)
 	writeReport(w, html, asPDF, "constellation-compliance")
 }
 func (h *Reports) serveExecutive(w http.ResponseWriter, r *http.Request, asPDF bool) {
@@ -287,5 +300,6 @@ func (h *Reports) serveExecutive(w http.ResponseWriter, r *http.Request, asPDF b
 		http.Error(w, "Report source unavailable", 500)
 		return
 	}
+	reportScopeReceipt(w, sub.OrgID, cluster)
 	writeReport(w, html, asPDF, "constellation-executive")
 }

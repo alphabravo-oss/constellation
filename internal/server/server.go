@@ -553,6 +553,7 @@ func (s *Server) buildRouter() chi.Router {
 		AllowedOrigins:   corsAllowedOrigins(s.cfg.CORSOrigins),
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Authorization", "Content-Type", "If-Match", "X-Request-Id", "Idempotency-Key", auth.BrowserHeader},
+		ExposedHeaders:   []string{"X-Report-Org-ID", "X-Report-Cluster-ID", "X-Report-Limit", "X-Report-Total", "X-Report-Truncated", "X-Constellation-PDF-Fallback", "Content-Disposition"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}
