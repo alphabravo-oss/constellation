@@ -1389,6 +1389,8 @@ func (s *Server) buildRouter() chi.Router {
 			backups := handler.NewBackups(s.db, s.auditLog)
 			r.Post("/backups", s.requireVerb(rbac.VerbManageOrg, backups.Create))
 			r.Get("/backups", s.requireVerb(rbac.VerbManageOrg, backups.List))
+			r.Get("/backups/inventory", s.requireVerb(rbac.VerbManageOrg, backups.Inventory))
+			r.Get("/backups/inventory.csv", s.requireVerb(rbac.VerbManageOrg, backups.InventoryCSV))
 			r.Get("/backups/{id}", s.requireVerb(rbac.VerbManageOrg, backups.Get))
 			r.Get("/backups/{id}/download", s.requireVerb(rbac.VerbManageOrg, backups.Download))
 			r.Post("/backups/verify", s.requireVerb(rbac.VerbManageOrg, backups.Verify))

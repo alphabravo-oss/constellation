@@ -6158,6 +6158,14 @@ export interface BackupSummary {
   error?: string;
 }
 
+export interface BackupInventoryParams extends ScanInventoryParams { status?: string; mode?: string; signed?: string }
+export interface BackupInventoryRow extends BackupSummary { org_id: string }
+export interface BackupInventoryResponse {
+ backups: BackupInventoryRow[]; org_id: string; filters: { q: string; status: string; mode: string; signed: string };
+ total: number; has_more: boolean; summary: Record<string, number>; latest_success: BackupInventoryRow | null;
+ limit: number; offset: number; sort: string; order: "asc" | "desc"; source_complete: boolean; summary_scope: string;
+}
+
 export interface BackupSchedule {
   cron_expr: string;
   enabled: boolean;
@@ -6272,12 +6280,14 @@ export const vulndbApi = {
 };
 
 export const backupsApi = {
+  inventory: (params: BackupInventoryParams = {}) => api.get<BackupInventoryResponse>("/backups/inventory", { params }).then(r => r.data),
+  inventoryCSV: (params: BackupInventoryParams = {}, shouldDownload?: ScanInventoryDownloadGuard) => downloadScanInventoryCSV("/backups/inventory.csv", params, "constellation-backup-metadata.csv", shouldDownload),
   list: () => api.get<{ backups: BackupSummary[] }>("/backups").then((r) => r.data.backups),
   get: (id: string) => api.get<BackupSummary>(`/backups/${id}`).then((r) => r.data),
   create: (body: { sign_mode?: string }) =>
     api.post<{ id: string; status: string }>("/backups", body).then((r) => r.data),
   downloadURL: (id: string) => `/api/v1/backups/${id}/download`,
-  download: (id: string) => downloadAPIFile(`/backups/${id}/download`, `backup-${id}.tar.gz`),
+  download: (id: string, shouldDownload?: ScanInventoryDownloadGuard) => downloadAPIFile(`/backups/${id}/download`, `backup-${id}.tar.gz`, shouldDownload),
   verify: (file: File) =>
     api.post<BackupManifestDTO>("/backups/verify", file, {
       headers: { "Content-Type": "application/octet-stream" },

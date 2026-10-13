@@ -21,8 +21,8 @@ afterEach(() => { act(() => root?.unmount()); client?.clear(); host?.remove(); v
 async function mountPage() {
   await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{ ...identity }}><RuntimePoliciesPage /></TablePreferencesProvider></QueryClientProvider>));
 }
-async function renderPage(mode: "monitor" | "enforce", expectRow = true) {
-  vi.mocked(runtimePolicies.list).mockResolvedValue([{ id: "policy", name: "Policy", workload: "team/app", namespace: "team", org_id: "org", cluster_id: "cluster", revision: "1", version: 1, mode, rules: [], updated_at: "2026-10-12T00:00:00Z" } as unknown as RuntimePolicy]);
+async function renderPage(mode: "monitor" | "enforce" | "disabled", expectRow = true, overrides: Partial<RuntimePolicy> = {}) {
+  vi.mocked(runtimePolicies.list).mockResolvedValue([{ id: "policy", name: "Policy", workload: "team/app", namespace: "team", org_id: "org", cluster_id: "cluster", revision: "1", version: 1, mode, rules: [], updated_at: "2026-10-12T00:00:00Z", ...overrides } as unknown as RuntimePolicy]);
   host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   await mountPage();
@@ -105,4 +105,42 @@ it("does not retain another operator's rows while their source is pending", asyn
   expect(host.querySelector('[data-testid="runtime-policy-row-policy"]')).toBeNull();
   expect(button("runtime-policies-new").disabled).toBe(true);
   expect(client.getQueryState(["runtime-policies", "org:next", "cluster"])).toBeDefined();
+});
+
+
+it("re-enables a disabled policy in monitor mode using its exact decimal reviewed revision", async () => {
+  const reviewed = { ...policy, mode: "disabled" as const, revision: "9007199254740993" };
+  const receipt = { ...reviewed, mode: "monitor" as const, revision: "9007199254740994" };
+  await renderPage("disabled", true, reviewed);
+  vi.mocked(runtimePolicies.demoteReviewed).mockImplementation(async () => {
+    vi.mocked(runtimePolicies.list).mockResolvedValue([receipt]);
+    return receipt;
+  });
+  expect(button("runtime-policy-enable-policy").textContent).toBe("Enable in monitor mode");
+  expect(host.querySelector('[data-testid="runtime-policy-promote-policy"]')).toBeNull();
+  await act(async () => button("runtime-policy-enable-policy").click());
+  await settle(() => expect(button("runtime-policy-promote-policy")?.disabled).toBe(false));
+  expect(runtimePolicies.demoteReviewed).toHaveBeenCalledExactlyOnceWith("policy", { cluster_id: "cluster", expected_version: "9007199254740993" });
+  expect(host.querySelector('[data-testid="runtime-policy-enable-policy"]')).toBeNull();
+  expect(host.textContent).not.toContain("could not be confirmed");
+  expect(runtimePolicies.promoteReviewed).not.toHaveBeenCalled();
+});
+
+it.each(["wrong-mode", "unchanged-revision", "foreign-cluster"])("does not confirm a disabled-policy re-enable with a %s receipt", async mismatch => {
+  await renderPage("disabled");
+  vi.mocked(runtimePolicies.demoteReviewed).mockResolvedValue({ ...policy, mode: mismatch === "wrong-mode" ? "enforce" : "monitor", revision: mismatch === "unchanged-revision" ? "1" : "2", cluster_id: mismatch === "foreign-cluster" ? "foreign" : "cluster" });
+  await act(async () => button("runtime-policy-enable-policy").click());
+  await settle(() => expect(host.textContent).toContain("Reload before another write"));
+  expect(button("runtime-policy-enable-policy").disabled).toBe(true);
+  await act(async () => button("runtime-policy-enable-policy").click());
+  expect(runtimePolicies.demoteReviewed).toHaveBeenCalledOnce();
+});
+
+it("blocks re-enabling a disabled policy when its reviewed evidence invalidates before render", async () => {
+  await renderPage("disabled");
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: rowKey, exact: true, refetchType: "none" });
+    button("runtime-policy-enable-policy").click();
+  });
+  expect(runtimePolicies.demoteReviewed).not.toHaveBeenCalled();
 });

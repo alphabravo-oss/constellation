@@ -8452,6 +8452,232 @@
             "type": "boolean"
           }
         }
+      },
+      "BackupInventoryRow": {
+        "type": "object",
+        "required": [
+          "id",
+          "org_id",
+          "mode",
+          "status",
+          "started_at",
+          "size_bytes",
+          "signed"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "org_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "org-backup",
+              "pg-dump"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "succeeded",
+              "failed"
+            ]
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finished_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "signed": {
+            "type": "boolean"
+          },
+          "signer_identity": {
+            "type": "string"
+          },
+          "format_version": {
+            "type": "string"
+          },
+          "s3_uri": {
+            "type": "string"
+          },
+          "tables_included": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "BackupInventorySummary": {
+        "type": "object",
+        "required": [
+          "total",
+          "running",
+          "succeeded",
+          "failed",
+          "signed",
+          "size_bytes"
+        ],
+        "properties": {
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "running": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "succeeded": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "failed": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "signed": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "BackupInventoryPage": {
+        "type": "object",
+        "required": [
+          "backups",
+          "org_id",
+          "filters",
+          "latest_success",
+          "summary",
+          "summary_scope",
+          "source_complete",
+          "total",
+          "has_more",
+          "limit",
+          "offset",
+          "sort",
+          "order"
+        ],
+        "properties": {
+          "backups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BackupInventoryRow"
+            }
+          },
+          "org_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "filters": {
+            "type": "object",
+            "required": [
+              "q",
+              "status",
+              "mode",
+              "signed"
+            ],
+            "properties": {
+              "q": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "mode": {
+                "type": "string"
+              },
+              "signed": {
+                "type": "string"
+              }
+            }
+          },
+          "latest_success": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BackupInventoryRow"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Latest successful owned backup across the entire organization, independent of matching history filters and page; null when none exists."
+          },
+          "summary": {
+            "$ref": "#/components/schemas/BackupInventorySummary"
+          },
+          "summary_scope": {
+            "type": "string",
+            "const": "matching_owned_backup_runs"
+          },
+          "source_complete": {
+            "type": "boolean",
+            "const": true,
+            "description": "Full retained owned metadata, not proof of artifact availability or restore readiness."
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          "sort": {
+            "type": "string",
+            "enum": [
+              "when",
+              "mode",
+              "size",
+              "status",
+              "signer"
+            ]
+          },
+          "order": {
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ]
+          }
+        }
       }
     },
     "responses": {
@@ -10513,6 +10739,296 @@
           }
         },
         "summary": "Create backups"
+      }
+    },
+    "/api/v1/backups/inventory": {
+      "get": {
+        "summary": "List owned backup run inventory",
+        "description": "Requires manage-org. Read-only repeatable-read inventory of all retained backup metadata owned by the authenticated organization. NULL-org legacy system backups and foreign organizations are excluded; existing legacy list/detail/download APIs are unchanged. Filters precede counts, summary, sorting, paging and export. latest_success covers the full owned organization independently of filters, from the same snapshot. This does not establish artifact availability, signature verification or restore readiness. Duplicate query parameters and malformed filters/paging return400. Internal source failures return generic500.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Literal case-insensitive substring across UUID, mode/status, signer, format, S3 URI, error and included table names; trimmed and lowercased.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Exact status, all or omitted selects every status.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "running",
+                "succeeded",
+                "failed"
+              ]
+            }
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "required": false,
+            "description": "Exact backup format family.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "org-backup",
+                "pg-dump"
+              ]
+            }
+          },
+          {
+            "name": "signed",
+            "in": "query",
+            "required": false,
+            "description": "Recorded signature flag, not proof of verification.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "true",
+                "false"
+              ]
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "description": "Server sort with exact backup UUID ascending tie-breaker.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "when",
+                "mode",
+                "size",
+                "status",
+                "signer"
+              ],
+              "default": "when"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "description": "Sort direction.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Rows per server page. Invalid explicit values return400.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "description": "Zero-based offset. Invalid explicit values return400.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483647,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching full counts and page with independent full organization latest success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupInventoryPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query or duplicate parameters."
+          },
+          "401": {
+            "description": "Authentication required."
+          },
+          "403": {
+            "description": "manage-org required."
+          },
+          "500": {
+            "description": "Backup history source unavailable; no partial rows or export."
+          }
+        }
+      }
+    },
+    "/api/v1/backups/inventory.csv": {
+      "get": {
+        "summary": "Export matching owned backup metadata",
+        "description": "Requires manage-org. Read-only repeatable-read inventory of all retained backup metadata owned by the authenticated organization. NULL-org legacy system backups and foreign organizations are excluded; existing legacy list/detail/download APIs are unchanged. Filters precede counts, summary, sorting, paging and export. latest_success covers the full owned organization independently of filters, from the same snapshot. This does not establish artifact availability, signature verification or restore readiness. Duplicate query parameters and malformed filters/paging return400. Internal source failures return generic500. CSV ignores valid limit/offset and exports up to100,000 matching runs in requested order, with total/limit/truncation disclosure. Metadata only: includes UUID/org, mode/status/times/raw bytes/SHA/signature flag/signer/format/S3 URI/included table names/error; never local artifact paths or archive contents.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Literal case-insensitive substring across UUID, mode/status, signer, format, S3 URI, error and included table names; trimmed and lowercased.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Exact status, all or omitted selects every status.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "running",
+                "succeeded",
+                "failed"
+              ]
+            }
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "required": false,
+            "description": "Exact backup format family.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "org-backup",
+                "pg-dump"
+              ]
+            }
+          },
+          {
+            "name": "signed",
+            "in": "query",
+            "required": false,
+            "description": "Recorded signature flag, not proof of verification.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "true",
+                "false"
+              ]
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "description": "Server sort with exact backup UUID ascending tie-breaker.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "when",
+                "mode",
+                "size",
+                "status",
+                "signer"
+              ],
+              "default": "when"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "description": "Sort direction.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching scalar metadata CSV.",
+            "headers": {
+              "X-Export-Total": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "description": "Full matching owned record count."
+              },
+              "X-Export-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "const": 100000
+                },
+                "description": "Maximum exported metadata rows."
+              },
+              "X-Export-Truncated": {
+                "schema": {
+                  "type": "boolean"
+                },
+                "description": "True if the matching count exceeds100000."
+              },
+              "X-Export-Org-ID": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "description": "Authenticated owner."
+              },
+              "X-Export-Scope": {
+                "schema": {
+                  "type": "string",
+                  "const": "matching_owned_backup_runs"
+                },
+                "description": "Source qualifier."
+              }
+            },
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query or duplicate parameters."
+          },
+          "401": {
+            "description": "Authentication required."
+          },
+          "403": {
+            "description": "manage-org required."
+          },
+          "500": {
+            "description": "Backup history source unavailable; no partial rows or export."
+          }
+        }
       }
     },
     "/api/v1/backups/restore": {

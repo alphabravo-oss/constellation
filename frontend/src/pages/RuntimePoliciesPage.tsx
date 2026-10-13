@@ -190,6 +190,11 @@ function PolicyActions({ p, owner, available, recheck, onEdit, onPromoteClick }:
           Demote
         </Button>
       )}
+      {p.mode === "disabled" && (
+        <Button size="sm" variant="outline" onClick={() => action.mutate("demote")} disabled={busy} data-testid={`runtime-policy-enable-${p.id}`}>
+          Enable in monitor mode
+        </Button>
+      )}
       <Button size="sm" variant="ghost" aria-label={`Edit ${p.name}`} onClick={() => { if (recheck()) onEdit(); }} disabled={busy} data-testid={`runtime-policy-edit-${p.id}`}>
         <Edit3 className="h-3.5 w-3.5" />
       </Button>

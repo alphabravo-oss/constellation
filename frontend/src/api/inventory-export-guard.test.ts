@@ -1,9 +1,11 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { api, assets, containers, downloadExecutiveReport, findings, securityTimeline, baselines, compliance, componentsInventory, cve, deployments, fileProfiles, imageScanResults, network, nodes, registries, repositoryScans, runtimeEvents, runtimeThreats, scanJobs, serverlessFunctions, type ScanInventoryDownloadGuard } from "./client";
+import { api, backupsApi, assets, containers, downloadExecutiveReport, findings, securityTimeline, baselines, compliance, componentsInventory, cve, deployments, fileProfiles, imageScanResults, network, nodes, registries, repositoryScans, runtimeEvents, runtimeThreats, scanJobs, serverlessFunctions, type ScanInventoryDownloadGuard } from "./client";
 
 afterEach(() => vi.restoreAllMocks());
 const exporters: Array<[string, (guard: ScanInventoryDownloadGuard) => Promise<unknown>]> = [
   ["assets", guard => assets.exportCsv({}, guard)],
+  ["backup metadata", guard => backupsApi.inventoryCSV({}, guard)],
+  ["backup artifact", guard => backupsApi.download("owned-backup", guard)],
   ["compliance artifact", guard => compliance.downloadRunArtifact("run", guard)],
   ["executive report", guard => downloadExecutiveReport("org", "cluster", guard)],
   ["containers", guard => containers.exportCSV("cluster", {}, guard)],
