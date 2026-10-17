@@ -891,6 +891,35 @@ not strict packet acceptance or deployment. Evidence:
 `/tmp/constellation-integrated-314afad/combined-db-evidence-manifest.json`
 (SHA256 `024399a77d511e9f94136c81c6db78c8d76140a887ce2b53f23c4258f81cc760`).
 
+Exact `314afad` now has five fresh Go1.26.9 linux/amd64 binaries and three
+qualified local image assemblies (API/CLI, scanner and runtime). The runtime
+packages the fresh integrated Go agent and the normal production DP above;
+all95 native vendor files match the qualified source. Base layers/configuration
+and BPF remain verified. Images pass nonroot payload readability and0755 modes;
+API/CLI/scanner also execute --help successfully. The runtime has no CLI help
+mode; that extra smoke invocation timed out and was removed, with no runtime
+help pass claimed. This was local artifact assembly over qualified bases, not
+a fresh full Docker/native/BPF pipeline rebuild. The52-artifact image seal is
+`/tmp/constellation-integrated-314afad/image-qualification-manifest.json`
+(SHA256 `8bdc02411d6cff62b667e2c1ac95750a86d46c29f416ed1066bb9abbe052b717`).
+
+The actual strict Flannel run on runtime index9df9ce866d0d passes all24 probes:
+five denied,19 server observations and16 fresh native verdict checks, including
+policy changes and DP-stopped bypass. Independent verification uses the unchanged
+matcher/deadline/matrix and byte-identical actual inputs. All26 raw post-cursor
+records remain available; every accepted native payload appears in that capture
+and has FirstSeenAt equal to the probe start, including the previously failing
+change-a/server-a/18081 case. Nonzero Idle remains an approximation outside
+these observed cases. All23 actual linked-library hashes match the qualified
+production build. All nine owned resources are absent by recorded identities;
+all250 artifacts from four previous failed runs remain unchanged. This qualifies
+the disposable single-node Flannel fixture, not BPF, other CNIs, off-host recovery,
+real node failure or main-cluster enforcement. Main rollout remains separate.
+The119-artifact completed seal is
+`/tmp/constellation-flannel-policy-clock314afad/actual-packet-evidence-manifest.json`
+(SHA256 `a524f229aefd20ed7d54fb4be81055b8cad119ac394a6b37bf26222a9d225327`).
+
+
 
 
 ## October 12 implementation continuation
