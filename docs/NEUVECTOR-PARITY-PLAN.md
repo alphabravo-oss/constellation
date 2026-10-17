@@ -919,6 +919,20 @@ The119-artifact completed seal is
 `/tmp/constellation-flannel-policy-clock314afad/actual-packet-evidence-manifest.json`
 (SHA256 `a524f229aefd20ed7d54fb4be81055b8cad119ac394a6b37bf26222a9d225327`).
 
+Hosted `39028433987` at exact `314afad` is completed. Frontend passes2344 tests
+across158 files; browser passes279 cases. Go unit/integration, FIPS, govulncheck
+and all dependency jobs pass. Gotestsum reports3642 unit tests including737 skips
+and8302 integration tests including14 skips; these totals are not zero-skip
+qualification. Configured lint decreases1504→1495 and standalone gosec163→156;
+historical gitleaks and the required gate still fail. Four added standalone
+occurrences remain at reviewed CLI local-file/subprocess boundaries; the net
+decrease does not imply no added findings. Previous checkpoints and report/ZIP
+hashes are preserved. No gate waiver or overall release-complete claim follows.
+Completed evidence:
+`/tmp/security-triage-39028433987/COMPLETED-MANIFEST.json`
+(SHA256 `7731efd3a798b8fed77c90092b6e3eeb69b89d373eca33eb681ad8193aecf889`).
+
+
 
 
 
