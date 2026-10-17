@@ -60,6 +60,12 @@
      existing claim; deployment preflight must also verify Bound/accessModes. */}}
 {{- $claim := lookup "v1" "PersistentVolumeClaim" .Release.Namespace $claimName }}
 {{- if $claim }}
+{{- if $claim.metadata.deletionTimestamp }}
+{{- fail "PCAP storage PVC must not be terminating" }}
+{{- end }}
+{{- if ne (default "Filesystem" $claim.spec.volumeMode) "Filesystem" }}
+{{- fail "PCAP storage PVC volumeMode must be Filesystem" }}
+{{- end }}
 {{- if ne (dig "status" "phase" "" $claim) "Bound" }}
 {{- fail "PCAP storage PVC must be Bound before enabling API packet evidence" }}
 {{- end }}

@@ -1097,7 +1097,6 @@
             "type": "string",
             "enum": [
               "running",
-              "completed",
               "failed"
             ]
           },
@@ -1106,7 +1105,8 @@
           },
           "packet_count": {
             "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "minimum": 0
           }
         }
       },
@@ -28578,8 +28578,12 @@
           },
           "default": {
             "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "description": "Downloads require a completed receipt and confined private file whose actual size and SHA256 match the uploaded evidence. Missing or mismatched evidence returns 500 before any packet bytes are sent."
       }
     },
     "/api/v1/runtime-pcap/{id}/status": {
@@ -28636,8 +28640,15 @@
           },
           "default": {
             "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "description": "Only a verified upload may complete a capture. Completed status requests and attempts to downgrade a completed capture return 409; refresh its authoritative receipt after a lost upload acknowledgement. Failed and expired captures remain terminal."
       }
     },
     "/api/v1/runtime-pcap/{id}/upload": {

@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler"
@@ -378,7 +379,7 @@ func (h *PcapHTTP) Download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = root.Close() }()
-	f, err := openPcapFile(root, id)
+	f, err := openVerifiedPcap(root, got)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, "pcap file unavailable on server")
 		return
@@ -584,11 +585,6 @@ func (h *PcapHTTP) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	got, err := h.getByID(r.Context(), tok.OrgID, id)
-	if err != nil || got == nil || got.ClusterID != boundCluster {
-		jsonError(w, http.StatusNotFound, "not found")
-		return
-	}
 	var req AgentStatusUpdate
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -596,32 +592,35 @@ func (h *PcapHTTP) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch req.Status {
-	case PcapStatusRunning, PcapStatusFailed, PcapStatusCompleted:
-		// fine — note completed-via-status is rare (upload sets it
-		// automatically); we allow it for agents that complete with zero bytes.
+	case PcapStatusRunning, PcapStatusFailed:
+	case PcapStatusCompleted:
+		jsonError(w, http.StatusConflict, "capture completion requires a verified upload")
+		return
+	case PcapStatusPending, PcapStatusExpired:
+		jsonError(w, http.StatusBadRequest, "invalid agent status")
+		return
 	default:
-		jsonError(w, http.StatusBadRequest, "invalid status: "+string(req.Status))
+		jsonError(w, http.StatusBadRequest, "invalid agent status")
 		return
 	}
-	if err := h.capturePlatformRoles(r.Context(), tok.OrgID, []*PcapCapture{got}); err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+	if req.PacketCount < 0 {
+		jsonError(w, http.StatusBadRequest, "packet_count must not be negative")
 		return
 	}
-	role := got.PlatformRole
-	completedAtClause := ""
-	if req.Status == PcapStatusCompleted || req.Status == PcapStatusFailed {
-		completedAtClause = ", completed_at = NOW()"
+	got, err := h.setPcapStatus(r.Context(), tok.OrgID, boundCluster, id, req)
+	if errors.Is(err, pgx.ErrNoRows) {
+		jsonError(w, http.StatusNotFound, "not found")
+		return
 	}
-	got, err = scanPcap(h.db.Pool().QueryRow(r.Context(), `
-UPDATE runtime_pcap_captures
-   SET status = $1, error_message = $2, packet_count = COALESCE(NULLIF($3,0::bigint), packet_count)`+completedAtClause+`
- WHERE id = $4 AND org_id = $5 AND cluster_id = $6 RETURNING `+pcapCols,
-		string(req.Status), req.ErrorMessage, req.PacketCount, id, tok.OrgID, boundCluster))
+	if errors.Is(err, errPcapTerminalStatus) {
+		jsonError(w, http.StatusConflict, "capture is terminal; refresh its receipt")
+		return
+	}
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		jsonError(w, http.StatusInternalServerError, "capture status unavailable")
 		return
 	}
-	got.PlatformRole = role
+
 	httpx.WriteJSON(w, http.StatusOK, got)
 }
 
