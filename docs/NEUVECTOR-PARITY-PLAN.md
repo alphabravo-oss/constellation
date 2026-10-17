@@ -792,6 +792,31 @@ PostgreSQL fixtures are absent. This source is committed but not deployed.
 Evidence: `/tmp/constellation-oidc-response-ef0d7a9/evidence/frozen-manifest.json`
 (SHA256 `b95a28d4c62fe3e1b6138d701a09cc357616ed275e7c73581e7edf64395c088c`).
 
+Source `7d51fa8` completes the CLI artifact boundary: job-unique S3 names, private
+workspaces, checked completion/catalog receipts, pinned upload files and strict
+signing flags. pg_dump receives a private libpq service profile instead of a DSN
+in its arguments; password remains in the child environment. Bounded complete
+service reads reject a valid truncated prefix before it can choose a target.
+Help/parse failures no longer expose inherited database/endpoint defaults.
+Signature inspection caps all decompressed bytes at512MiB, including framing and
+trailing data, and validates the gzip trailer. Actual S3 service acceptance and
+full disaster recovery remain unqualified.
+
+The original CLI snapshot passes208 top-level /402 including-subtest fresh180
+race/shuffle executions without skips, vet and builds. A network-none realPG16
+fixture checks URI/keyword/multihost export, authentication/TLS failures, private
+modes, redaction and readable dump contents; eight owned containers are absent.
+The two-file bounded-reader follow-up separately passes30 standalone repeated
+race/shuffle executions, tagged vet, a fresh build and actual help. Its negative
+control reproduces the exact original valid-prefix/omitted-target failure.
+The original full DB/PG16 proof is retained as ancestor evidence, not relabelled
+as an exact-source follow-up integration run. Scoped original lint decreases
+48→42; follow-up standalone lint remains6. Reviewed new gosec findings remain
+open, with no production suppression or gate waiver. No main rollout occurred.
+Combined source/evidence seal:
+`/tmp/constellation-backup-cli-service-bound/FINAL-SEAL.json`
+(SHA256 `b1859c18e464706cf9a3563c09f4f0d51a9aba273c546f8adfb1b85a619c99ab`).
+
 
 ## October 12 implementation continuation
 

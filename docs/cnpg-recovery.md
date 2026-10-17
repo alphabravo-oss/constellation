@@ -100,6 +100,37 @@ Before switching the existing StatefulSet:
 
 Keep package B and DB-05 open until their full restore/deployment acceptance exists.
 
+## Logical backup commands
+
+`constellation-backup --mode=org-backup` and `constellationctl backup create`
+export one organization's portable archive. Use `--out` for a local artifact,
+`--s3=s3://bucket/prefix` for upload, or both. Generated filenames include the
+organization name, time and job UUID; repeated jobs do not share an S3 object
+name. Temporary workspaces use0700 permissions and artifacts use0600. Explicit
+output directories must already exist; their permissions are not changed.
+
+Choose either `--sign-key=/path/to/private.pem` or `--sign-keyless`.
+`--verify-key=/path/to/public.pem` requires static-key signing and verifies the
+completed archive before upload. An explicit empty key or conflicting signing
+options fails before work begins. Omitting signing flags produces unsigned
+output. Signature inspection allows up to512MiB of decompressed data, including
+tar framing and trailing bytes, and checks the gzip trailer.
+
+The standalone `--mode=pg-dump` exports the whole database through the matching
+PostgreSQL client. It rejects signing/verification flags. Supply the connection
+through `DATABASE_URL` to avoid putting credentials in the command invocation.
+The child receives a temporary0600 service profile and its password through
+`PGPASSWORD`; this keeps the DSN out of child arguments, but does not hide the
+child environment from the same user or privileged processes. Service-file
+reads must complete within1MiB. Unsupported non-password values are rejected
+instead of being trimmed or silently changing the database target.
+
+Upload or catalog acknowledgement failures return an error. A completed local
+artifact is retained for recovery, and a completed upload whose catalog write
+fails reports its job UUID, object URI and retained local path. Check those
+receipts before retrying; an error does not prove that no S3 object was created.
+These commands do not replace the CNPG WAL/PITR recovery procedure above.
+
 ## Local RustFS rehearsal (October 11, 2026)
 
 The user selected local RustFS for initial testing. The non-secret contract is:
