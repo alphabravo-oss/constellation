@@ -789,3 +789,41 @@ rebuild is in progress and no new runtime image is deployed. Evidence manifests:
 Hosted `39016927220` has completed: unit/integration, browser, frontend, FIPS
 and all dependency checks pass. Quality, gosec and historical gitleaks remain
 blocking failures. No broad scanner exclusion or lowered threshold was added.
+
+## Combined runtime qualification and storage admission hold
+
+Source `fcfe91b` also fixes the server side of session controls: an operational
+threat-setting read error returns a categorical 500 before consuming pending
+kills, while the committed snapshot remains retryable. Missing settings still
+deliberately default false. The full network package passes 214 fresh180 repeated
+race tests without skips; the unpatched permission-denied fixture fails twice
+with a false-disable response and lost pending command. Scoped lint adds nothing.
+
+Combined exact `5b417c0` passes 3,700 fresh180 repeated race executions with zero
+failures. Four explicit harness skips remain: native-generator and isolated
+Flannel tests, each twice. They are not excluded or counted as packet proof.
+The separate canonical full native rebuild at `faf627d` passes all matcher and
+reporter assertions without object reuse. A canonical optimized production DP
+build at `5b417c0` compiles 51 C units; all 23 linked runtime dependency files
+match the qualified base byte-for-byte. New agent/native binaries are assembled
+with unchanged BPF/base layers and verified hashes/modes in candidate
+`controls-20261017-5b417c0-r2`; isolated packet qualification is still pending.
+An initial private assembly had agent mode0700 from the host umask; its image is
+preserved and explicit0755 COPY fixes the candidate. Neither image is deployed.
+Evidence: `/tmp/constellation-combined-5b417c0-db/evidence-manifest.json`,
+`/tmp/constellation-native-full-faf627d/review-manifest.json`,
+`/tmp/constellation-native-prod-5b417c0/review-manifest.json` and
+`/tmp/constellation-runtime-combined-5b417c0/image-manifest.json`.
+
+Main remains Helm81/schema180. Exact7d API cache preparation and fresh CNPG
+backup completed (08:56:55UTC). Storage preparation created only the owned new
+claim/bootstrap Pod; the existing admission rule rejects the local-path BusyBox
+helper because its scan is older than24h. The storage phase timed out with the
+claim/Pod preserved, before API shutdown or Helm upgrade. Refresh must use a
+real scan of the exact admitted digest; no policy bypass or fabricated freshness
+is allowed. Phase receipts remain under `/tmp/constellation-pcap-main-7d54c3d/`.
+
+Hosted `39018641255` at `f2b5607` has completed: unit/integration, browser,
+frontend, FIPS and dependency/vulnerability checks pass. Lint1509, gosec166 and
+historical gitleaks remain failed. These are blocking results, not a baseline
+waiver. No overall parity acceptance row is closed by these bounded corrections.
