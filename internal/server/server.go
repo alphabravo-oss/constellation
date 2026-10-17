@@ -541,10 +541,8 @@ func corsAllowedOrigins(origins []string) []string {
 func (s *Server) buildRouter() chi.Router {
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
-	// SECURITY: honor X-Forwarded-For / X-Real-IP ONLY when the direct peer is a
-	// trusted proxy. Bare chimw.RealIP rewrites RemoteAddr from those headers for
-	// every client, letting an attacker spoof its source IP and mint a fresh
-	// per-IP auth rate-limit bucket per request (credential-spray bypass).
+	// Resolve the client only through the trusted suffix of X-Forwarded-For;
+	// client-supplied prefixes and alternative headers cannot mint rate buckets.
 	r.Use(s.trustedProxyRealIP())
 	r.Use(chimw.Recoverer)
 	r.Use(s.slogMiddleware)
@@ -2290,12 +2288,10 @@ func rateLimited(w http.ResponseWriter, _ *http.Request) {
 	writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
 }
 
-// trustedProxyRealIP returns middleware that applies chi's RealIP rewrite (which
-// derives RemoteAddr from X-Forwarded-For / X-Real-IP / True-Client-IP) ONLY for
-// requests whose direct TCP peer falls inside a trusted-proxy CIDR. For every
-// other peer RemoteAddr is left as the real socket address. This closes the
-// credential-spray bypass: without the gate, any client could spoof a forwarded
-// header to mint a fresh per-IP auth rate-limit bucket on each request.
+// trustedProxyRealIP resolves X-Forwarded-For from right to left, starting at
+// the trusted socket peer and stopping at the first untrusted address. Other
+// forwarding headers cannot override that chain. Missing or invalid evidence
+// leaves the socket address intact for rate limits and audit attribution.
 //
 // Trusted CIDRs come from CONSTELLATION_TRUSTED_PROXIES (comma-separated CIDRs or
 // bare IPs). When unset, we default to loopback + RFC1918/RFC4193 private ranges
@@ -2306,15 +2302,14 @@ func (s *Server) trustedProxyRealIP() func(http.Handler) http.Handler {
 	rawTrusted := os.Getenv("CONSTELLATION_TRUSTED_PROXIES")
 	trusted := parseTrustedProxies(rawTrusted)
 	explicitTrust := strings.TrimSpace(rawTrusted) != ""
-	realIP := chimw.RealIP
 	return func(next http.Handler) http.Handler {
-		honored := realIP(next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			peerTrusted := ipInNets(remoteHostIP(r.RemoteAddr), trusted)
 			r = r.WithContext(authctx.WithTrustedProxy(r.Context(), peerTrusted && explicitTrust))
 			if peerTrusted {
-				honored.ServeHTTP(w, r)
-				return
+				if ip := forwardedClientIP(r.Header.Values("X-Forwarded-For"), trusted); ip != nil {
+					r.RemoteAddr = ip.String()
+				}
 			}
 			next.ServeHTTP(w, r)
 		})

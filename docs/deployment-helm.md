@@ -684,8 +684,16 @@ With NetworkPolicies enabled, `networkPolicies.frontendIngressCIDRs` also admits
 the Ingress/Gateway peers to this direct API path. Narrow it to the actual proxy
 networks; do not assume a pod source address is the same as a node source address.
 
-Set `api.env.CONSTELLATION_TRUSTED_PROXIES` to the direct proxy IPs/CIDRs. The
-middleware records peer trust before rewriting the client IP. Federation honors
+Set `api.env.CONSTELLATION_TRUSTED_PROXIES` to the actual trusted proxy IPs/CIDRs
+in the forwarding chain. The middleware records direct-peer trust before
+rewriting the client IP. For a trusted socket peer, it reads `X-Forwarded-For`
+from right to left and stops at the first untrusted IP. The proxy must append
+its actual client address or overwrite the header with a verified chain.
+`True-Client-IP` and `X-Real-IP` are ignored; proxies providing only those headers
+must also supply `X-Forwarded-For`. Missing headers, malformed trusted suffixes
+and chains exceeding 64 hops or 8192 bytes retain the socket address. These
+requests share the proxy's rate-limit bucket. Do not include client networks in
+the trusted proxy list. Federation honors
 forwarded TLS and a configured forwarded client-certificate header only for that
 explicitly configured trusted peer. The terminator must overwrite incoming forwarding/certificate
 headers and perform the client TLS handshake. A forwarded public certificate
