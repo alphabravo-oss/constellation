@@ -154,6 +154,86 @@ mode. Runtime policy fields now reject overflowing IDs/directions, invalid actio
 and null rules before storage/wire conversion; 84 fresh177 executions pass. These
 follow-ups are not included in the deployed `034f2baf49c1` images.
 
+The remaining CLI stream/output/catalog pass is committed in `b40bfad`: eight
+production files and their failure-path tests pass 208 fresh177 race/shuffle
+executions without skips. Configured CLI lint falls from 96 to 19 findings, with
+no new suppressions. The remaining findings are still open. Commit `fe6ca82`
+updates deprecated collectors and equivalent parser/selector branches; 814
+repeated executions and 14 fresh177 federation executions pass, with 24 focused
+DSL executions after the final helper extraction. Exact source manifests and
+reports are retained under `/tmp/quality-cli-remaining-frozen-manifest.json`,
+`/tmp/quality-cli-remaining-frozen-fresh177.log` and
+`/tmp/security-static-routine-manifest.json`.
+
+Hosted run `39006425871` at `7ea6fd5` passes unit/integration, browser, FIPS,
+govulncheck and dependency checks, while quality, gosec and historical gitleaks remain failing. Its frontend
+suite passes 2,293 tests and fails one response-rule workflow test: the fixture
+submits before response options finish loading, when Save is intentionally
+disabled. The follow-up test explicitly exercises that blocked state, waits for
+Save readiness, and then checks the failed-save draft. Focused tests, lint and
+type checks pass. The full Node24 rerun passes all 2,294 tests without skips
+(`/tmp/constellation-frontend-20261017-qualified.json`). Hosted source `7ea6fd5`
+reports 1,695 quality findings and 218 standalone gosec findings with no Go
+loading errors; formatting and ShellCheck reports are empty. The source-only
+CLI/parser follow-ups above postdate that hosted scan.
+
+Commit `713f862` makes legacy runtime policy create/update/mode/delete mutations
+and their configured audit writes atomic. It also rejects foreign or missing
+clusters on create, retains immutable before/after snapshots, and serializes
+concurrent partial edits. All 678 runtime-package fresh177 repeated race tests
+pass without skips; audit-failure tests prove mutation rollback for every legacy
+CRUD path and the system rollback store path. This does not qualify the separate
+learned-policy generation path. Evidence: `/tmp/security-legacy-policy-db/` and
+`/tmp/security-legacy-policy-manifest.json`.
+
+Commit `3f1181d` propagates cancellation through the remaining 12 contextless
+HTTP, socket, SQL and child-process test calls and their shared helpers. The
+13-file final snapshot passes 296 fresh177 repeated race executions with no
+skips. All 12 `noctx` findings are removed without adding context-check findings;
+other pre-existing diagnostics remain. Evidence:
+`/tmp/constellation-noctx-remaining-final-db/` and
+`/tmp/constellation-noctx-remaining-manifest.json`.
+
+The schema178 exact-process-response candidate is documented in
+[security testing](security-testing.md#exact-process-response-candidate-schema-178).
+It adds durable intent/result delivery, pidfd and exact kernel identity checks,
+protected-workload guards, tenant-scoped receipts and rolling-upgrade isolation.
+Its strict kernel and disposable-child checks pass; it does not close RUN1 or
+claim a deployed process-kill workflow. Source `ce667d1` images are built. Its
+combined fresh178 suite passes 1,648 executions, with four explicit skips for the
+opt-in kernel test and child helper across two runs; the separate privileged
+kernel suite passes twice without skips. The isolated CNPG recovery drill is
+being rerun after correcting fixture queue ordering: the demo seed already has
+an older pending scan, so the proof job must explicitly take the first FIFO
+position. The exact-job/registry assertion is retained. The first attempt
+completed its scheduled backup but stopped before restore. This is not recovery
+acceptance. Evidence: `/tmp/constellation-response-ce667d1/`.
+
+Commit `3f08263` adds DLP/signature cluster ownership checks before reads,
+mutations and builtin seeding; agent bundles resolve the authenticated cluster
+before seeding and cache by organization plus cluster. Configured audit failure
+rolls back CRUD and builtin seeds; signature category authorization uses the
+locked row. Fresh177 whole-runtime qualification passes 752 executions; the
+final exact-source focused run passes 80 without skips. Owned lint and vet pass.
+Evidence: `/tmp/security-dlp-qualified-db/` and
+`/tmp/security-dlp-frozen-sha256.json`.
+
+Commit `f41f2f5` separates cluster-bound runner ingest/claim routes from existing
+JWT/PAT authoring routes and enforces owned-cluster selectors on user writes.
+Organization-wide claims bind to the authenticated cluster atomically with an
+audit event. Fresh178 qualification passes 54 executions without skips; HTTP
+credential/RBAC, OpenAPI and rendered-runner chart checks pass. Evidence:
+`/tmp/compliance-agent-final-db/` and
+`/tmp/compliance-agent-frozen-manifest.sha256`. Claims mean accepted, not completed;
+execution completion/retry remains unqualified. Ingest/enqueue atomic audit and
+claimed benchmark propagation are separate follow-ups.
+
+These DLP/compliance commits and the in-progress per-workload policy scope batch
+are not included in the `ce667d1` images or the current main deployment. Review of
+workload scope found and is correcting old-agent protocol compatibility and
+native IP/port matching gaps. Transport tests alone do not close the CNI packet
+acceptance gate. Generated-policy merge/audit hardening is also in progress.
+
 ## October 12 implementation continuation
 
 The user selected **Astronomer-style console behavior and workflows** as the

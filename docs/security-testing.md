@@ -436,3 +436,54 @@ zero historical certificate/key matches and zero read errors. Its JSON report is
 `/tmp/constellation-admission-trust-main-20261017.json`. External clusters and
 trust stores remain unproven; this local audit does not authorize a global
 revocation-complete claim.
+
+
+### Exact process-response candidate (schema 178)
+
+Commit `9b637f1` adds a separate process-response queue and protocol, isolated
+from legacy agents during rolling upgrades. The queue preserves the triggering
+process event's node, boot ID, kernel start time, PID, command and container
+identity. An agent opens a pidfd, then verifies the exact kernel identity and
+current container/workload before signaling. Unknown identities, protected host
+or system workloads, missing hooks and unsupported pidfds refuse the action.
+The process response flag remains opt-in; the deployment does not enable it.
+
+The agent writes intent to its private durable telemetry volume before an
+effect, and saves the outcome before delivery. A crash with intent but no result
+becomes `uncertain`; the agent never repeats that effect. Results are removed
+only after an exact durable server receipt, whose audit write commits with the
+terminal queue state. `applied` means SIGKILL was accepted, not that process exit
+was observed. This durability starts after enqueue commits; source-event
+response dispatch remains a separate best-effort post-commit step. Runtime
+credentials authenticate a cluster; the node selector is not independent node
+authentication.
+
+Journal entries and response envelopes have matching byte limits. Unknown,
+corrupt or interrupted journal files stop new effects. A drained journal permits
+credential rotation within the same API/cluster/node scope. A journal with pending
+intent or results requires operator reconciliation before a credential or scope
+change; it is never silently rebound to a different identity.
+
+Qualification includes 192 fresh178 focused executions without skips, 136
+focused local executions, a real pidfd lifecycle against a disposable child,
+and two strict real-kernel BPF lifecycle executions. The kernel test requires
+`CONSTELLATION_TEST_BPF_IDENTITY=1` and privileges; it rejects degraded capture,
+checks its own child's exact event/map identity after nonleader thread exit, and
+checks removal after normal leader exit. Ordinary integration runs explicitly
+skip that opt-in test and its child helper. This does not qualify a deployed
+response-rule workflow or the CNI enforcement matrix. Evidence is retained in
+`/tmp/response-v2-final-fresh-db/`, `/tmp/response-v2-review-final.json` and
+`/tmp/response-v2-kernel-identity-final.json`.
+
+Candidate source `ce667d1` also adds the missing conntrack executable to the
+runtime image. Image provenance/native dependency checks pass; the unprivileged
+image startup check intentionally has no kernel privileges or uploads. Dedicated
+kernel tests provide the kernel evidence. The combined fresh178 suite passes
+1,648 executions with four explicit opt-in kernel/helper skips; its separate
+privileged kernel run passes twice. The first recovery drill completed its
+scheduled backup but stopped at a fixture queue-order assertion before restore.
+The corrected harness gives its proof job first FIFO position while retaining
+the exact-job assertion; the retry is pending. Recovery and rollout evidence is
+being collected under `/tmp/constellation-response-ce667d1/`.
+The repository's global security and quality gates remain failing and no findings
+have been suppressed by this candidate.
