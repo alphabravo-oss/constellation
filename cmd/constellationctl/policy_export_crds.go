@@ -142,11 +142,13 @@ CONSTELLATION_DATABASE_URL / DATABASE_URL.`,
 				if err := os.WriteFile(output, buf.Bytes(), 0o644); err != nil {
 					return fmt.Errorf("write %s: %w", output, err)
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "wrote %d CR document(s) to %s\n", len(docs), output)
-				return nil
+				out := &commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
+				out.printf("wrote %d CR document(s) to %s\n", len(docs), output)
+				return out.result()
 			}
-			_, err = cmd.OutOrStdout().Write(buf.Bytes())
-			return err
+			out := &commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
+			out.write(buf.String())
+			return out.result()
 		},
 	}
 	cmd.Flags().StringVar(&databaseURL, "database-url", "", "Policy store DSN (else CONSTELLATION_DATABASE_URL / DATABASE_URL)")

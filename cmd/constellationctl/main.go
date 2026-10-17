@@ -6,8 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -26,9 +26,7 @@ import (
 )
 
 // newExecCommand wraps exec.CommandContext so tests can swap the runner if needed.
-var newExecCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-	return exec.CommandContext(ctx, name, args...)
-}
+var newExecCommand = exec.CommandContext
 
 // version is overridden at build time by goreleaser via -ldflags.
 var version = "dev"
@@ -94,8 +92,10 @@ func saveConfig(c *config) error {
 // ---- commands ----
 
 func versionCmd() *cobra.Command {
-	return &cobra.Command{Use: "version", Short: "Print version", Run: func(cmd *cobra.Command, _ []string) {
-		fmt.Fprintln(cmd.OutOrStdout(), version)
+	return &cobra.Command{Use: "version", Short: "Print version", RunE: func(cmd *cobra.Command, _ []string) error {
+		out := &commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
+		out.println(version)
+		return out.result()
 	}}
 }
 
@@ -103,7 +103,11 @@ func loginCmd() *cobra.Command {
 	var server, email string
 	cmd := &cobra.Command{Use: "login", Short: "Authenticate against a Constellation server",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			fmt.Fprint(cmd.OutOrStdout(), "Password: ")
+			output := &commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
+			output.write("Password: ")
+			if err := output.result(); err != nil {
+				return err
+			}
 			var pw string
 			if _, err := fmt.Fscan(cmd.InOrStdin(), &pw); err != nil {
 				return fmt.Errorf("read password: %w", err)
@@ -139,6 +143,7 @@ canonical artifacts (SARIF, JSON, SPDX 2.3, CycloneDX 1.6). Exits non-zero when 
 finding meets or exceeds --fail-on severity.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			output := &commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
 			ctx, cancel := context.WithTimeout(cmd.Context(), 20*time.Minute)
 			defer cancel()
 
@@ -154,53 +159,69 @@ finding meets or exceeds --fail-on severity.`,
 
 			if sarifOut != "" {
 				doc := sarif.FromScanResult(version, res)
-				b, _ := sarif.MarshalIndent(doc)
+				b, err := sarif.MarshalIndent(doc)
+				if err != nil {
+					return err
+				}
 				if err := os.WriteFile(sarifOut, b, 0o644); err != nil {
 					return err
 				}
 				if !quiet {
-					fmt.Fprintf(cmd.OutOrStdout(), "wrote SARIF: %s\n", sarifOut)
+					output.printf("wrote SARIF: %s\n", sarifOut)
 				}
 			}
 			if jsonOut != "" {
-				b, _ := json.MarshalIndent(res, "", "  ")
+				b, err := json.MarshalIndent(res, "", "  ")
+				if err != nil {
+					return err
+				}
 				if err := os.WriteFile(jsonOut, b, 0o644); err != nil {
 					return err
 				}
 				if !quiet {
-					fmt.Fprintf(cmd.OutOrStdout(), "wrote JSON:  %s\n", jsonOut)
+					output.printf("wrote JSON:  %s\n", jsonOut)
 				}
 			}
 			if spdxOut != "" {
 				doc := sbom.SPDX2_3(version, res)
-				b, _ := json.MarshalIndent(doc, "", "  ")
+				b, err := json.MarshalIndent(doc, "", "  ")
+				if err != nil {
+					return err
+				}
 				if err := os.WriteFile(spdxOut, b, 0o644); err != nil {
 					return err
 				}
 				if !quiet {
-					fmt.Fprintf(cmd.OutOrStdout(), "wrote SPDX:  %s\n", spdxOut)
+					output.printf("wrote SPDX:  %s\n", spdxOut)
 				}
 			}
 			if cyclonedxOut != "" {
 				doc := sbom.CycloneDX1_6(version, res)
-				b, _ := json.MarshalIndent(doc, "", "  ")
+				b, err := json.MarshalIndent(doc, "", "  ")
+				if err != nil {
+					return err
+				}
 				if err := os.WriteFile(cyclonedxOut, b, 0o644); err != nil {
 					return err
 				}
 				if !quiet {
-					fmt.Fprintf(cmd.OutOrStdout(), "wrote CycloneDX: %s\n", cyclonedxOut)
+					output.printf("wrote CycloneDX: %s\n", cyclonedxOut)
 				}
 			}
 
 			if !quiet {
-				printScanSummary(cmd.OutOrStdout(), res)
+				printScanSummary(output, res)
+			}
+
+			if err := output.result(); err != nil {
+				return err
 			}
 
 			// Exit logic.
 			if worst := highestSeverity(res); severityAtLeast(worst, failOn) {
 				os.Exit(1)
 			}
-			return nil
+			return output.result()
 		},
 	}
 	cmd.Flags().StringVar(&failOn, "fail-on", "critical", "Severity threshold for non-zero exit (info|low|medium|high|critical)")
@@ -215,11 +236,11 @@ finding meets or exceeds --fail-on severity.`,
 }
 
 // printScanSummary renders the human-readable scan summary on stdout.
-func printScanSummary(w io.Writer, res *scanner.ScanResult) {
-	fmt.Fprintf(w, "\nImage:        %s\n", res.ImageRef)
-	fmt.Fprintf(w, "Engines:      %s\n", engineList(res))
-	fmt.Fprintf(w, "Packages:     %d\n", len(res.Packages))
-	fmt.Fprintf(w, "Findings:     %d\n\n", len(res.Findings))
+func printScanSummary(out *commandOutput, res *scanner.ScanResult) {
+	out.printf("\nImage:        %s\n", res.ImageRef)
+	out.printf("Engines:      %s\n", engineList(res))
+	out.printf("Packages:     %d\n", len(res.Packages))
+	out.printf("Findings:     %d\n\n", len(res.Findings))
 
 	counts := map[string]int{}
 	for _, f := range res.Findings {
@@ -227,23 +248,23 @@ func printScanSummary(w io.Writer, res *scanner.ScanResult) {
 	}
 	for _, sev := range []string{"critical", "high", "medium", "low", "info"} {
 		if counts[sev] > 0 {
-			fmt.Fprintf(w, "  %-9s %d\n", sev, counts[sev])
+			out.printf("  %-9s %d\n", sev, counts[sev])
 		}
 	}
 
 	if len(res.Findings) == 0 {
-		fmt.Fprintln(w, "\nNo vulnerabilities found.")
+		out.println("\nNo vulnerabilities found.")
 		return
 	}
 
 	// Top 10 findings as a quick table.
-	fmt.Fprintln(w, "\nTop findings:")
-	fmt.Fprintln(w, "  SEVERITY   CVE             PACKAGE@VERSION                       FIXED")
+	out.println("\nTop findings:")
+	out.println("  SEVERITY   CVE             PACKAGE@VERSION                       FIXED")
 	for i, f := range res.Findings {
 		if i >= 10 {
 			break
 		}
-		fmt.Fprintf(w, "  %-10s %-15s %-37s %s\n",
+		out.printf("  %-10s %-15s %-37s %s\n",
 			strings.ToUpper(f.Severity), f.VulnerabilityID,
 			truncate(fmt.Sprintf("%s@%s", f.Package.Name, f.Package.Version), 37),
 			ifEmpty(f.FixedVersion, "-"))
@@ -314,6 +335,7 @@ func iacCheckCmd() *cobra.Command {
 		Short: "Scan infrastructure-as-code (Terraform / Helm / Kustomize / Dockerfile / K8s YAML / CloudFormation)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			output := &commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
 			// Delegate to Trivy IaC (covers all six input types per the spec).
 			format := "json"
 			if sarifOut != "" {
@@ -327,11 +349,11 @@ func iacCheckCmd() *cobra.Command {
 				if err := os.WriteFile(sarifOut, out, 0o644); err != nil {
 					return err
 				}
-				fmt.Fprintln(cmd.OutOrStdout(), "wrote SARIF:", sarifOut)
-				return nil
+				output.println("wrote SARIF:", sarifOut)
+				return output.result()
 			}
-			fmt.Println(string(out))
-			return nil
+			output.println(string(out))
+			return output.result()
 		}}
 	cmd.Flags().StringVar(&sarifOut, "sarif", "", "Write SARIF output to this path")
 	cmd.Flags().StringVar(&failOn, "fail-on", "high", "Severity threshold for non-zero exit")
@@ -344,6 +366,7 @@ func modelCheckCmd() *cobra.Command {
 		Short: "Scan ML model artifact for unsafe-deserialization formats",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			output := &commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
 			path := args[0]
 			info, err := os.Stat(path)
 			if err != nil {
@@ -355,18 +378,21 @@ func modelCheckCmd() *cobra.Command {
 			ext := strings.ToLower(filepath.Ext(path))
 			switch ext {
 			case ".pt", ".pth", ".pkl", ".bin":
-				fmt.Fprintf(cmd.OutOrStdout(), "WARNING: %s uses an unsafe-deserialization format (arbitrary code can run on load).\n", filepath.Base(path))
-				fmt.Fprintln(cmd.OutOrStdout(), "  Recommendation: convert to safetensors (https://huggingface.co/docs/safetensors).")
+				output.printf("WARNING: %s uses an unsafe-deserialization format (arbitrary code can run on load).\n", filepath.Base(path))
+				output.println("  Recommendation: convert to safetensors (https://huggingface.co/docs/safetensors).")
+				if err := output.result(); err != nil {
+					return err
+				}
 				os.Exit(1)
 			case ".safetensors":
-				fmt.Fprintf(cmd.OutOrStdout(), "OK: %s is safetensors; deserialization is bounds-checked.\n", filepath.Base(path))
+				output.printf("OK: %s is safetensors; deserialization is bounds-checked.\n", filepath.Base(path))
 			case ".onnx":
-				fmt.Fprintf(cmd.OutOrStdout(), "OK: %s is ONNX; protobuf-defined schema (no code execution on load).\n", filepath.Base(path))
-				fmt.Fprintln(cmd.OutOrStdout(), "  Note: validate weights + ops via onnx.checker.check_model in CI.")
+				output.printf("OK: %s is ONNX; protobuf-defined schema (no code execution on load).\n", filepath.Base(path))
+				output.println("  Note: validate weights + ops via onnx.checker.check_model in CI.")
 			default:
-				fmt.Fprintf(cmd.OutOrStdout(), "model-check: unknown format %q for %s\n", ext, filepath.Base(path))
+				output.printf("model-check: unknown format %q for %s\n", ext, filepath.Base(path))
 			}
-			return nil
+			return output.result()
 		},
 	}
 }
@@ -376,7 +402,7 @@ func modelCheckCmd() *cobra.Command {
 // we treat stdout as authoritative when non-empty.
 func runCmd(ctx context.Context, bin string, args ...string) ([]byte, error) {
 	if ctx == nil {
-		ctx = context.Background()
+		return nil, fmt.Errorf("command context is required")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
@@ -385,6 +411,9 @@ func runCmd(ctx context.Context, bin string, args ...string) ([]byte, error) {
 	c.Stdout = &stdout
 	c.Stderr = &stderr
 	err := c.Run()
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if err != nil && stdout.Len() == 0 {
 		return nil, fmt.Errorf("%s: %w (stderr=%s)", bin, err, strings.TrimSpace(stderr.String()))
 	}
@@ -403,12 +432,13 @@ func policyValidateCmd() *cobra.Command {
 		Short: "Validate a Constellation policy DSL document",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			output := &commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
 			p, err := loadPolicyDocument(args[0])
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "OK: %s is a valid Constellation policy (%s)\n", args[0], p.Name)
-			return nil
+			output.printf("OK: %s is a valid Constellation policy (%s)\n", args[0], p.Name)
+			return output.result()
 		},
 	}
 }
@@ -420,13 +450,14 @@ func policyCheckCmd() *cobra.Command {
 		Short: "Validate and optionally evaluate a policy DSL document",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			output := &commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
 			p, err := loadPolicyDocument(args[0])
 			if err != nil {
 				return err
 			}
 			if strings.TrimSpace(recordPath) == "" {
-				fmt.Fprintf(cmd.OutOrStdout(), "OK: %s is a valid Constellation policy (%s)\n", args[0], p.Name)
-				return nil
+				output.printf("OK: %s is a valid Constellation policy (%s)\n", args[0], p.Name)
+				return output.result()
 			}
 			record, err := loadPolicyRecord(recordPath)
 			if err != nil {
@@ -434,15 +465,15 @@ func policyCheckCmd() *cobra.Command {
 			}
 			result := eval.Match(p, record)
 			if result.Matched {
-				fmt.Fprintf(cmd.OutOrStdout(), "MATCH: %s matched %s", p.Name, recordPath)
+				output.printf("MATCH: %s matched %s", p.Name, recordPath)
 				if len(result.FailedFields) > 0 {
-					fmt.Fprintf(cmd.OutOrStdout(), " fields=%s", strings.Join(result.FailedFields, ","))
+					output.printf(" fields=%s", strings.Join(result.FailedFields, ","))
 				}
-				fmt.Fprintln(cmd.OutOrStdout())
+				output.println()
 			} else {
-				fmt.Fprintf(cmd.OutOrStdout(), "NO MATCH: %s did not match %s\n", p.Name, recordPath)
+				output.printf("NO MATCH: %s did not match %s\n", p.Name, recordPath)
 			}
-			return nil
+			return output.result()
 		},
 	}
 	cmd.Flags().StringVar(&recordPath, "record", "", "Optional JSON record to evaluate against the policy")
@@ -508,6 +539,7 @@ func auditCmd() *cobra.Command {
 	c.AddCommand(&cobra.Command{
 		Use: "verify", Short: "Walk the audit chain and report any tamper",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			output := &commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
 			cfg, err := loadConfig()
 			if err != nil {
 				return err
@@ -515,22 +547,27 @@ func auditCmd() *cobra.Command {
 			if cfg.Server == "" {
 				return fmt.Errorf("not logged in; run `constellationctl login` first")
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			ctx, cancel := context.WithTimeout(cmd.Context(), 60*time.Second)
 			defer cancel()
-			req, _ := http.NewRequestWithContext(ctx, http.MethodPost,
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 				cfg.Server+"/api/v1/audit/verify", nil)
+			if err != nil {
+				return err
+			}
 			req.Header.Set("Authorization", "Bearer "+cfg.Token)
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				return err
 			}
-			defer resp.Body.Close()
-			b, _ := io.ReadAll(resp.Body)
-			fmt.Fprintln(cmd.OutOrStdout(), strings.TrimSpace(string(b)))
+			b, err := readCommandResponse(resp)
+			if err != nil {
+				return err
+			}
+			output.println(strings.TrimSpace(string(b)))
 			if resp.StatusCode >= 400 {
 				return fmt.Errorf("verify failed")
 			}
-			return nil
+			return output.result()
 		},
 	})
 	c.AddCommand(complianceExportCmd())
@@ -565,6 +602,7 @@ The list of valid frameworks + control IDs comes from the server:
    constellationctl audit compliance-export --list-frameworks
 `,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			output := &commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
 			cfg, err := loadConfig()
 			if err != nil {
 				return err
@@ -575,42 +613,24 @@ The list of valid frameworks + control IDs comes from the server:
 			if framework == "" || control == "" {
 				return fmt.Errorf("--framework and --control are required")
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			ctx, cancel := context.WithTimeout(cmd.Context(), 2*time.Minute)
 			defer cancel()
 
 			// 1. Pull the static mapping table for the framework.
 			mapURL := fmt.Sprintf("%s/api/v1/compliance/control-mappings?framework=%s",
-				cfg.Server, framework)
-			mapReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, mapURL, nil)
-			mapReq.Header.Set("Authorization", "Bearer "+cfg.Token)
-			mapResp, err := http.DefaultClient.Do(mapReq)
+				cfg.Server, url.QueryEscape(framework))
+			mappings, err := fetchComplianceEvidence(ctx, cfg, mapURL)
 			if err != nil {
 				return fmt.Errorf("fetch mappings: %w", err)
 			}
-			mapBody, _ := io.ReadAll(mapResp.Body)
-			mapResp.Body.Close()
-			if mapResp.StatusCode >= 400 {
-				return fmt.Errorf("mappings: %s", mapBody)
-			}
-			var mappings any
-			_ = json.Unmarshal(mapBody, &mappings)
 
 			// 2. Pull the audit rows demonstrating this control.
 			evtURL := fmt.Sprintf("%s/api/v1/audit/events?framework=%s&control=%s&limit=%d&with_controls=1",
-				cfg.Server, framework, control, limit)
-			evtReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, evtURL, nil)
-			evtReq.Header.Set("Authorization", "Bearer "+cfg.Token)
-			evtResp, err := http.DefaultClient.Do(evtReq)
+				cfg.Server, url.QueryEscape(framework), url.QueryEscape(control), limit)
+			events, err := fetchComplianceEvidence(ctx, cfg, evtURL)
 			if err != nil {
 				return fmt.Errorf("fetch events: %w", err)
 			}
-			evtBody, _ := io.ReadAll(evtResp.Body)
-			evtResp.Body.Close()
-			if evtResp.StatusCode >= 400 {
-				return fmt.Errorf("events: %s", evtBody)
-			}
-			var events any
-			_ = json.Unmarshal(evtBody, &events)
 
 			bundle := map[string]any{
 				"exported_at":  time.Now().UTC().Format(time.RFC3339),
@@ -623,17 +643,20 @@ The list of valid frameworks + control IDs comes from the server:
 					"The audit_events chain is tamper-evident; verify with " +
 					"`constellationctl audit verify` before submission.",
 			}
-			b, _ := json.MarshalIndent(bundle, "", "  ")
+			b, err := json.MarshalIndent(bundle, "", "  ")
+			if err != nil {
+				return err
+			}
 			if outPath != "" {
 				if err := os.WriteFile(outPath, b, 0o600); err != nil {
 					return err
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "wrote %s\n", outPath)
-				return nil
+				output.printf("wrote %s\n", outPath)
+				return output.result()
 			}
-			cmd.OutOrStdout().Write(b)
-			cmd.OutOrStdout().Write([]byte("\n"))
-			return nil
+			output.write(string(b))
+			output.println()
+			return output.result()
 		},
 	}
 	cmd.Flags().StringVar(&framework, "framework", "", "Framework ID (nist-sp-800-53-r5 | soc2-tsc-2017 | pci-dss-v4.0 | iso-27001-2022)")
@@ -641,4 +664,28 @@ The list of valid frameworks + control IDs comes from the server:
 	cmd.Flags().IntVar(&limit, "limit", 500, "Maximum audit rows to include (server caps at 500)")
 	cmd.Flags().StringVar(&outPath, "out", "", "Output file (default: stdout)")
 	return cmd
+}
+
+func fetchComplianceEvidence(ctx context.Context, cfg *config, endpoint string) (any, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+cfg.Token)
+	response, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	body, err := readCommandResponse(response)
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode >= http.StatusBadRequest {
+		return nil, fmt.Errorf("API returned HTTP %d", response.StatusCode)
+	}
+	var evidence any
+	if err := json.Unmarshal(body, &evidence); err != nil {
+		return nil, fmt.Errorf("decode evidence: %w", err)
+	}
+	return evidence, nil
 }

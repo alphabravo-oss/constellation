@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -58,19 +59,22 @@ func vulndbStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer resp.Body.Close()
-			b, _ := io.ReadAll(resp.Body)
+			b, err := readCommandResponse(resp)
+			if err != nil {
+				return err
+			}
 			if resp.StatusCode >= 400 {
 				return fmt.Errorf("status %d: %s", resp.StatusCode, string(b))
 			}
 			var pretty bytes.Buffer
+			out := &commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
 			if err := json.Indent(&pretty, b, "", "  "); err != nil {
-				cmd.OutOrStdout().Write(b)
-				return nil
+				out.write(string(b))
+				return out.result()
 			}
-			cmd.OutOrStdout().Write(pretty.Bytes())
-			fmt.Fprintln(cmd.OutOrStdout())
-			return nil
+			out.write(pretty.String())
+			out.println()
+			return out.result()
 		},
 	}
 }
@@ -124,21 +128,19 @@ func uploadVulnDBBundle(ctx context.Context, out io.Writer, cfg *config, manifes
 	// Stream the multipart body via an io.Pipe so we don't buffer the
 	// whole payload (bundles can be hundreds of MiB).
 	pr, pw := io.Pipe()
+	defer func() { _ = pr.Close() }()
 	mw := multipart.NewWriter(pw)
 
 	errCh := make(chan error, 1)
 	go func() {
-		defer pw.Close()
-		defer mw.Close()
-		if err := writePart(mw, "manifest", "manifest.json", manifestPath); err != nil {
-			errCh <- err
-			return
+		err := writePart(mw, "manifest", "manifest.json", manifestPath)
+		if err == nil {
+			err = writePart(mw, "payload", "bundle.jsonl.gz", payloadPath)
 		}
-		if err := writePart(mw, "payload", "bundle.jsonl.gz", payloadPath); err != nil {
-			errCh <- err
-			return
+		if err == nil {
+			err = mw.Close()
 		}
-		errCh <- nil
+		errCh <- errors.Join(err, pw.CloseWithError(err))
 	}()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
@@ -155,8 +157,14 @@ func uploadVulnDBBundle(ctx context.Context, out io.Writer, cfg *config, manifes
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body, err := readCommandResponse(resp)
+	if err != nil {
+		return err
+	}
+	// An early response must not leave the multipart producer blocked forever.
+	if err := pr.Close(); err != nil {
+		return err
+	}
 	if uploadErr := <-errCh; uploadErr != nil {
 		return fmt.Errorf("upload: %w", uploadErr)
 	}
@@ -164,13 +172,14 @@ func uploadVulnDBBundle(ctx context.Context, out io.Writer, cfg *config, manifes
 		return fmt.Errorf("import failed (status %d): %s", resp.StatusCode, string(body))
 	}
 	var pretty bytes.Buffer
+	output := &commandOutput{ctx: ctx, writer: out}
 	if err := json.Indent(&pretty, body, "", "  "); err != nil {
-		out.Write(body)
+		output.write(string(body))
 	} else {
-		out.Write(pretty.Bytes())
+		output.write(pretty.String())
 	}
-	fmt.Fprintln(out)
-	return nil
+	output.println()
+	return output.result()
 }
 
 func writePart(mw *multipart.Writer, field, filename, path string) error {
@@ -178,13 +187,13 @@ func writePart(mw *multipart.Writer, field, filename, path string) error {
 	if err != nil {
 		return fmt.Errorf("open %s: %w", path, err)
 	}
-	defer f.Close()
 	w, err := mw.CreateFormFile(field, filename)
 	if err != nil {
-		return err
+		return errors.Join(err, f.Close())
 	}
-	if _, err := io.Copy(w, f); err != nil {
-		return fmt.Errorf("stream %s: %w", path, err)
+	_, copyErr := io.Copy(w, f)
+	if copyErr != nil {
+		copyErr = fmt.Errorf("stream %s: %w", path, copyErr)
 	}
-	return nil
+	return errors.Join(copyErr, f.Close())
 }

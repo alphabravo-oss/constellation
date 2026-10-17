@@ -136,7 +136,11 @@ SELECT id::text, org_id::text, cluster_id::text, src_workload, dst_workload,
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "scanned %d candidate rows over last %dh\n", len(all), hours)
+	out := &commandOutput{ctx: ctx, writer: w}
+	out.printf("scanned %d candidate rows over last %dh\n", len(all), hours)
+	if err := out.result(); err != nil {
+		return err
+	}
 	if len(all) == 0 {
 		return nil
 	}
@@ -205,11 +209,11 @@ SELECT id::text, org_id::text, cluster_id::text, src_workload, dst_workload,
 		}
 	}
 	if dryRun {
-		fmt.Fprintf(w, "dry-run: would rewrite %d rows\n", rewritten)
+		out.printf("dry-run: would rewrite %d rows\n", rewritten)
 	} else {
-		fmt.Fprintf(w, "rewrote %d rows\n", rewritten)
+		out.printf("rewrote %d rows\n", rewritten)
 	}
-	return nil
+	return out.result()
 }
 
 type batchUpdate struct {
@@ -221,7 +225,7 @@ type batchUpdate struct {
 
 // applyUpdates addresses stable partition keys and commits labels with rebuilt
 // aggregates. It refuses windows whose raw history may already be incomplete.
-func applyUpdates(ctx context.Context, pool *pgxpool.Pool, ops []batchUpdate) error {
+func applyUpdates(ctx context.Context, pool *pgxpool.Pool, ops []batchUpdate) (resultErr error) {
 	if len(ops) == 0 {
 		return nil
 	}
@@ -229,7 +233,13 @@ func applyUpdates(ctx context.Context, pool *pgxpool.Pool, ops []batchUpdate) er
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(context.Background())
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := tx.Rollback(cleanupCtx); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
+			resultErr = errors.Join(resultErr, fmt.Errorf("rollback flow updates: %w", err))
+		}
+	}()
 	_, prunedBefore, err := flowrollup.Lock(ctx, tx, true)
 	if err != nil {
 		return err
@@ -276,13 +286,18 @@ SELECT host(ip), namespace, COALESCE(deployment, pod_name)
 	}
 	for rs.Next() {
 		var ip, ns, name string
-		if err := rs.Scan(&ip, &ns, &name); err == nil {
-			if a, ok := normalizeIPCLI(ip); ok {
-				pods[a] = ns + "/" + name
-			}
+		if err := rs.Scan(&ip, &ns, &name); err != nil {
+			rs.Close()
+			return nil, nil, fmt.Errorf("read pod_ips: %w", err)
+		}
+		if a, ok := normalizeIPCLI(ip); ok {
+			pods[a] = ns + "/" + name
 		}
 	}
 	rs.Close()
+	if err := rs.Err(); err != nil {
+		return nil, nil, fmt.Errorf("read pod_ips: %w", err)
+	}
 	rs, err = pool.Query(ctx, `
 SELECT host(cluster_ip), namespace, name
   FROM cluster_services
@@ -292,13 +307,18 @@ SELECT host(cluster_ip), namespace, name
 	}
 	for rs.Next() {
 		var ip, ns, name string
-		if err := rs.Scan(&ip, &ns, &name); err == nil {
-			if a, ok := normalizeIPCLI(ip); ok {
-				svcs[a] = ns + "/" + name
-			}
+		if err := rs.Scan(&ip, &ns, &name); err != nil {
+			rs.Close()
+			return nil, nil, fmt.Errorf("read cluster_services: %w", err)
+		}
+		if a, ok := normalizeIPCLI(ip); ok {
+			svcs[a] = ns + "/" + name
 		}
 	}
 	rs.Close()
+	if err := rs.Err(); err != nil {
+		return nil, nil, fmt.Errorf("read cluster_services: %w", err)
+	}
 	return pods, svcs, nil
 }
 

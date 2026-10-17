@@ -79,10 +79,11 @@ func federationJoinCmd(serverFlag *string) *cobra.Command {
 			if resp.MTLS {
 				mode = "mTLS (per-joint client cert issued)"
 			}
-			fmt.Fprintf(cmd.OutOrStdout(),
+			output := &commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
+			output.printf(
 				"Joined federation master %s as cluster_id=%s (state=%s, auth=%s)\n",
 				resp.MasterURL, resp.ClusterID, resp.State, mode)
-			return nil
+			return output.result()
 		},
 	}
 	cmd.Flags().StringVar(&masterURL, "master-url", "", "Federation master base URL (e.g. https://master.example.com)")

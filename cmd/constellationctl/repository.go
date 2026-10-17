@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"strings"
@@ -113,18 +114,7 @@ func repositoryScanCmd(serverFlag *string, email *string) *cobra.Command {
 			if err := (repositoryPackageReporter{client: cli}).Report(ctx, payload, &out); err != nil {
 				return err
 			}
-			if jsonOut {
-				raw, _ := json.MarshalIndent(out, "", "  ")
-				fmt.Fprintln(cmd.OutOrStdout(), string(raw))
-				return nil
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "reported repository=%s source_ref=%s packages=%d scan_target=%s evidence=%s",
-				repositoryRef, sourceRef, out.PackageCount, out.ScanTargetID, out.ScanEvidenceID)
-			if out.ScanJobID != "" {
-				fmt.Fprintf(cmd.OutOrStdout(), " scan_job=%s", out.ScanJobID)
-			}
-			fmt.Fprintln(cmd.OutOrStdout())
-			return nil
+			return writeRepositoryReport(cmd.Context(), cmd.OutOrStdout(), repositoryRef, sourceRef, out, jsonOut)
 		},
 	}
 	cmd.Flags().StringVar(&scanPath, "path", ".", "Repository checkout path to catalog")
@@ -247,4 +237,24 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func writeRepositoryReport(ctx context.Context, writer io.Writer, repositoryRef, sourceRef string, out repositoryReportResponse, jsonOut bool) error {
+	if jsonOut {
+		raw, err := json.MarshalIndent(out, "", "  ")
+		if err != nil {
+			return err
+		}
+		output := &commandOutput{ctx: ctx, writer: writer}
+		output.println(string(raw))
+		return output.result()
+	}
+	output := &commandOutput{ctx: ctx, writer: writer}
+	output.printf("reported repository=%s source_ref=%s packages=%d scan_target=%s evidence=%s",
+		repositoryRef, sourceRef, out.PackageCount, out.ScanTargetID, out.ScanEvidenceID)
+	if out.ScanJobID != "" {
+		output.printf(" scan_job=%s", out.ScanJobID)
+	}
+	output.println()
+	return output.result()
 }

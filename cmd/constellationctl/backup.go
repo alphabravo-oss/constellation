@@ -87,7 +87,9 @@ func backupCreateCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				_ = f.Close()
+				if err := f.Close(); err != nil {
+					return err
+				}
 				outPath = f.Name()
 			}
 			usingTemp := out == ""
@@ -124,7 +126,7 @@ func backupCreateCmd() *cobra.Command {
 			if usingTemp && objectURI != "" {
 				localPath = nil
 			}
-			_, _ = pool.Exec(ctx, `
+			_, err = pool.Exec(ctx, `
 INSERT INTO backups (id, org_id, mode, status, started_at, finished_at,
                      size_bytes, signed, signer_identity, format_version,
                      tables_included, local_path, s3_uri, object_uri)
@@ -132,22 +134,26 @@ VALUES (gen_random_uuid(), $1::uuid, 'org-backup', 'succeeded', NOW(), NOW(),
         $2, $3, $4, $5, $6, $7, $8, $9)`,
 				id, res.Bytes, signOpts.Mode != backup.SignModeNone && signOpts.Mode != "",
 				res.SignerIdentity, backup.FormatVersion, tables, localPath, nullableString(objectURI), nullableString(objectURI))
-			if objectURI != "" {
-				fmt.Fprintf(cmd.OutOrStdout(), "uploaded %s (%d bytes)\n", objectURI, res.Bytes)
-			} else {
-				fmt.Fprintf(cmd.OutOrStdout(), "wrote %s (%d bytes)\n", outPath, res.Bytes)
+			if err != nil {
+				return fmt.Errorf("backup artifact created but recording the catalog entry failed: %w", err)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "org=%s tables=%d root_hash=%s\n", name, len(res.Manifest.Tables), res.Manifest.RootHash)
+			output := &commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
+			if objectURI != "" {
+				output.printf("uploaded %s (%d bytes)\n", objectURI, res.Bytes)
+			} else {
+				output.printf("wrote %s (%d bytes)\n", outPath, res.Bytes)
+			}
+			output.printf("org=%s tables=%d root_hash=%s\n", name, len(res.Manifest.Tables), res.Manifest.RootHash)
 			if res.SignerIdentity != "" {
-				fmt.Fprintf(cmd.OutOrStdout(), "signed by %s\n", res.SignerIdentity)
+				output.printf("signed by %s\n", res.SignerIdentity)
 			}
 			if signOpts.Mode == backup.SignModeKeyless || (signOpts.Mode == backup.SignModeStaticKey && verifyKey != "") {
-				fmt.Fprintln(cmd.OutOrStdout(), "signature verified")
+				output.println("signature verified")
 			}
 			if usingTemp && objectURI != "" {
-				_ = os.Remove(outPath)
+				return errors.Join(output.result(), os.Remove(outPath))
 			}
-			return nil
+			return output.result()
 		},
 	}
 	c.Flags().StringVar(&dbURL, "database-url", "", "Postgres URL (or DATABASE_URL)")
@@ -161,12 +167,12 @@ VALUES (gen_random_uuid(), $1::uuid, 'org-backup', 'succeeded', NOW(), NOW(),
 	return c
 }
 
-func verifyCLIBackupAfterWrite(path string, mode backup.SignMode, verifyKey string) error {
+func verifyCLIBackupAfterWrite(path string, mode backup.SignMode, verifyKey string) (resultErr error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { resultErr = errors.Join(resultErr, f.Close()) }()
 	manifestBytes, sig, cert, err := extractCLIManifestAndSig(f)
 	if err != nil {
 		return err
@@ -180,17 +186,20 @@ func extractCLIManifestAndSig(r io.Reader) (manifest, sig, cert []byte, err erro
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	defer gz.Close()
+	defer func() { err = errors.Join(err, gz.Close()) }()
 	tr := tar.NewReader(gz)
 	for {
 		hdr, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		buf, _ := io.ReadAll(tr)
+		buf, err := io.ReadAll(tr)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("read backup entry: %w", err)
+		}
 		switch hdr.Name {
 		case "manifest.json":
 			manifest = buf
@@ -278,7 +287,11 @@ SELECT id, COALESCE(mode,'org-backup'), status, COALESCE(format_version,''),
 				return err
 			}
 			defer rows.Close()
-			fmt.Fprintf(cmd.OutOrStdout(), "%-36s %-12s %-10s %-10s %-12s %s\n", "ID", "MODE", "STATUS", "SIZE", "SIGNED", "WHEN")
+			output := &commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
+			output.printf("%-36s %-12s %-10s %-10s %-12s %s\n", "ID", "MODE", "STATUS", "SIZE", "SIGNED", "WHEN")
+			if err := output.result(); err != nil {
+				return err
+			}
 			for rows.Next() {
 				var id, mode, status, fmtVer, signer, s3uri, lp string
 				var signed bool
@@ -295,9 +308,12 @@ SELECT id, COALESCE(mode,'org-backup'), status, COALESCE(format_version,''),
 				if signed {
 					sgn = "yes"
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "%-36s %-12s %-10s %-10d %-12s %s\n", id, mode, status, size, sgn, ts)
+				output.printf("%-36s %-12s %-10s %-10d %-12s %s\n", id, mode, status, size, sgn, ts)
+				if err := output.result(); err != nil {
+					return err
+				}
 			}
-			return nil
+			return rows.Err()
 		},
 	}
 	c.Flags().StringVar(&dbURL, "database-url", "", "Postgres URL (or DATABASE_URL)")
@@ -321,12 +337,13 @@ func listViaServer(ctx context.Context, server string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("list backups: server returned %d", resp.StatusCode)
+		return errors.Join(fmt.Errorf("list backups: server returned %d", resp.StatusCode), resp.Body.Close())
 	}
-	_, err = io.Copy(out, resp.Body)
-	return err
+	// Preserve the configured Write contract rather than an embedded ReaderFrom
+	// implementation that can bypass an output wrapper's failure handling.
+	_, err = io.Copy(struct{ io.Writer }{out}, resp.Body)
+	return errors.Join(err, resp.Body.Close(), ctx.Err())
 }
 
 func backupRestoreCmd() *cobra.Command {
@@ -340,7 +357,7 @@ func backupRestoreCmd() *cobra.Command {
 		Use:   "restore <path>",
 		Short: "Restore a backup tarball into the destination database",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) (resultErr error) {
 			path := args[0]
 			if dbURL == "" {
 				dbURL = os.Getenv("DATABASE_URL")
@@ -359,7 +376,7 @@ func backupRestoreCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer f.Close()
+			defer func() { resultErr = errors.Join(resultErr, f.Close()) }()
 			pool, err := pgxpool.New(ctx, dbURL)
 			if err != nil {
 				return err
@@ -379,12 +396,13 @@ func backupRestoreCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Restored org=%s verified=%t signer=%s\n",
+			output := &commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
+			output.printf("Restored org=%s verified=%t signer=%s\n",
 				res.Manifest.OrgName, res.Verified, res.SignerIdentity)
 			for _, t := range res.Tables {
-				fmt.Fprintf(cmd.OutOrStdout(), "  %s: %d new / %d updated / %d skipped\n", t.Name, t.New, t.Updated, t.Skipped)
+				output.printf("  %s: %d new / %d updated / %d skipped\n", t.Name, t.New, t.Updated, t.Skipped)
 			}
-			return nil
+			return output.result()
 		},
 	}
 	c.Flags().StringVar(&dbURL, "database-url", "", "Postgres URL (or DATABASE_URL)")
@@ -400,11 +418,15 @@ func backupGenKeyCmd() *cobra.Command {
 		Short: "Generate a cosign-compatible ed25519 keypair for signing backups",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := cmd.Context().Err(); err != nil {
+				return err
+			}
 			if err := backup.GenerateEd25519Keypair(args[0], args[1]); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "wrote %s (private, 0600) and %s (public, 0644)\n", args[0], args[1])
-			return nil
+			output := &commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
+			output.printf("wrote %s (private, 0600) and %s (public, 0644)\n", args[0], args[1])
+			return output.result()
 		},
 	}
 }
