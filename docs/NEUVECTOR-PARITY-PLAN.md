@@ -78,6 +78,17 @@ positive enforcement remains separate isolated fixture evidence. See the complet
 877a1c2 deployment entry below and
 `/tmp/constellation-rollout-877a1c2-preparation/evidence/deployment-status.json`.
 
+The next qualified source correction extends categorical registry errors to
+DockerHub, GHCR, Generic V2, Nexus, OpenShift, Quay, Harbor, GitLab and JFrog
+catalog requests. Upstream bodies, URLs and parser diagnostics do not enter the
+tested API, persisted-status or audit errors; causes remain inspectable through
+error unwrapping. It passes 676 registry and 46 fresh-schema-180 handler test
+executions, vet, and unchanged scoped lint (332 findings, zero additions).
+Original-code controls fail 128 intended leaf assertions. This correction is
+source-qualified only; main remains on 877a1c2 until combined artifact validation
+and deployment. ECR SDK and shared V2 scanner-error follow-ups remain separate.
+See the catalog-error entry in `docs/security-testing.md`; no parent gate closes.
+
 Deployed schema180 preserves full unsigned native threat IDs and marks unproven
 historical maxima in compact row details. Its full-chain migration checks exact
 tenant/cluster tuples, raw-retention/watermark fences, unchanged traffic counters,
@@ -3765,6 +3776,12 @@ row saying `enforced`.
   fail closed on a dirty upgrade fixture and validate a repaired fixture;
   actual installations still need inventory, audited repair receipts, and a
   verified post-upgrade constraint before this item closes.
+  Main development was inventoried read-only on October 17 at schema 180:
+  zero group DPI bindings, zero orphan or wrong-organization rows, and the
+  validated `(org_id, group_id)` foreign key to groups. No repair was needed.
+  This covers the managed development installation only; other installations
+  and the broader binding acceptance remain open. The identity-checked receipt
+  is `/tmp/constellation-main-binding-inventory-fed732e/inventory-review.json`.
 - [ ] Add negative cross-tenant tests for backup restore, host/CIS ingestion,
   audit/event aggregation, exemptions, and agent-originated writes.
 - [ ] Derive scope from the authenticated subject and resolved cluster, never an

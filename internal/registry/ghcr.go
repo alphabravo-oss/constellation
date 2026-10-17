@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -43,21 +42,21 @@ func (g *GHCR) ListImages(ctx context.Context) ([]Image, error) {
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 	resp, err := g.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("ghcr: list: %w", err)
+		return nil, responseFailure("ghcr list", "request failed", 0, err)
 	}
 	body, readErr := readRegistryPage(resp, 4<<20)
 	if readErr != nil {
-		return nil, fmt.Errorf("registry: read response: %w", readErr)
+		return nil, responseFailure("ghcr list", "response read or close failed", resp.StatusCode, readErr)
 	}
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("ghcr: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, responseFailure("ghcr list", "response rejected", resp.StatusCode, nil)
 	}
 	var pkgs []struct {
 		Name      string    `json:"name"`
 		UpdatedAt time.Time `json:"updated_at"`
 	}
 	if err := json.Unmarshal(body, &pkgs); err != nil {
-		return nil, fmt.Errorf("ghcr: decode: %w", err)
+		return nil, responseFailure("ghcr list", "invalid list response", resp.StatusCode, err)
 	}
 	out := make([]Image, 0, len(pkgs))
 	for _, p := range pkgs {

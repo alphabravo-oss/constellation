@@ -187,14 +187,14 @@ func (q *Quay) ListImages(ctx context.Context) ([]Image, error) {
 	req.Header.Set("Authorization", "Bearer "+q.cfg.Token)
 	resp, err := q.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("quay: %w", err)
+		return nil, responseFailure("quay list", "request failed", 0, err)
 	}
 	body, readErr := readRegistryPage(resp, 4<<20)
 	if readErr != nil {
-		return nil, fmt.Errorf("registry: read response: %w", readErr)
+		return nil, responseFailure("quay list", "response read or close failed", resp.StatusCode, readErr)
 	}
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("quay: status %d", resp.StatusCode)
+		return nil, responseFailure("quay list", "response rejected", resp.StatusCode, nil)
 	}
 	var doc struct {
 		Repositories []struct {
@@ -203,7 +203,7 @@ func (q *Quay) ListImages(ctx context.Context) ([]Image, error) {
 		} `json:"repositories"`
 	}
 	if err := json.Unmarshal(body, &doc); err != nil {
-		return nil, err
+		return nil, responseFailure("quay list", "invalid list response", resp.StatusCode, err)
 	}
 	out := make([]Image, 0, len(doc.Repositories))
 	for _, r := range doc.Repositories {
@@ -293,20 +293,20 @@ func (h *Harbor) harborGetPaged(ctx context.Context, endpoint string) ([]namedEn
 		req.Header.Set("Accept", "application/json")
 		resp, err := h.client.Do(req)
 		if err != nil {
-			return nil, fmt.Errorf("harbor: %w", err)
+			return nil, responseFailure("harbor list", "request failed", 0, err)
 		}
 		body, readErr := readRegistryPage(resp, 8<<20)
 		if readErr != nil {
-			return nil, fmt.Errorf("harbor: %w", readErr)
+			return nil, responseFailure("harbor list", "response read or close failed", resp.StatusCode, readErr)
 		}
 		link := resp.Header.Get("Link")
 		status := resp.StatusCode
 		if status != 200 {
-			return nil, fmt.Errorf("harbor: status %d", status)
+			return nil, responseFailure("harbor list", "response rejected", status, nil)
 		}
 		var page1 []namedEntity
 		if err := json.Unmarshal(body, &page1); err != nil {
-			return nil, fmt.Errorf("harbor: decode list: %w", err)
+			return nil, responseFailure("harbor list", "invalid list response", status, err)
 		}
 		acc = append(acc, page1...)
 		// Stop when this page is short (or empty) and Harbor advertises no next page.
@@ -404,20 +404,20 @@ func gitlabGetPaged[T any](ctx context.Context, g *GitLab, endpoint string, extr
 		req.Header.Set("Accept", "application/json")
 		resp, err := g.client.Do(req)
 		if err != nil {
-			return nil, fmt.Errorf("gitlab: %w", err)
+			return nil, responseFailure("gitlab list", "request failed", 0, err)
 		}
 		body, readErr := readRegistryPage(resp, 8<<20)
 		if readErr != nil {
-			return nil, fmt.Errorf("gitlab: %w", readErr)
+			return nil, responseFailure("gitlab list", "response read or close failed", resp.StatusCode, readErr)
 		}
 		next := resp.Header.Get("X-Next-Page")
 		status := resp.StatusCode
 		if status != 200 {
-			return nil, fmt.Errorf("gitlab: status %d", status)
+			return nil, responseFailure("gitlab list", "response rejected", status, nil)
 		}
 		var pg []T
 		if err := json.Unmarshal(body, &pg); err != nil {
-			return nil, fmt.Errorf("gitlab: decode list: %w", err)
+			return nil, responseFailure("gitlab list", "invalid list response", status, err)
 		}
 		acc = append(acc, pg...)
 		page = next
@@ -501,7 +501,7 @@ func (j *JFrog) ListImages(ctx context.Context) ([]Image, error) {
 		PackageType string `json:"packageType"` // "Docker"
 	}
 	if err := json.Unmarshal(repoBody, &dockerRepos); err != nil {
-		return nil, fmt.Errorf("jfrog: decode repositories: %w", err)
+		return nil, responseFailure("jfrog list", "invalid list response", http.StatusOK, err)
 	}
 
 	// 2. For each Docker repo key, enumerate its images via the repo-scoped v2
@@ -550,14 +550,14 @@ func (j *JFrog) get(ctx context.Context, u string) ([]byte, error) {
 	}
 	resp, err := j.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("jfrog: %w", err)
+		return nil, responseFailure("jfrog list", "request failed", 0, err)
 	}
 	body, readErr := readRegistryPage(resp, 4<<20)
 	if readErr != nil {
-		return nil, fmt.Errorf("registry: read response: %w", readErr)
+		return nil, responseFailure("jfrog list", "response read or close failed", resp.StatusCode, readErr)
 	}
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("jfrog: status %d", resp.StatusCode)
+		return nil, responseFailure("jfrog list", "response rejected", resp.StatusCode, nil)
 	}
 	return body, nil
 }

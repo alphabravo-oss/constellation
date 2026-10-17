@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 )
 
@@ -45,14 +44,14 @@ func (d *DockerHub) ListImages(ctx context.Context) ([]Image, error) {
 		}
 		resp, err := d.client.Do(req)
 		if err != nil {
-			return out, fmt.Errorf("docker-hub: list: %w", err)
+			return out, responseFailure("docker-hub list", "request failed", 0, err)
 		}
 		body, readErr := readRegistryPage(resp, 4<<20)
 		if readErr != nil {
-			return out, fmt.Errorf("docker-hub: read list response: %w", readErr)
+			return out, responseFailure("docker-hub list", "response read or close failed", resp.StatusCode, readErr)
 		}
 		if resp.StatusCode != 200 {
-			return out, fmt.Errorf("docker-hub: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+			return out, responseFailure("docker-hub list", "response rejected", resp.StatusCode, nil)
 		}
 		var page struct {
 			Next    string `json:"next"`
@@ -63,7 +62,7 @@ func (d *DockerHub) ListImages(ctx context.Context) ([]Image, error) {
 			} `json:"results"`
 		}
 		if err := json.Unmarshal(body, &page); err != nil {
-			return out, fmt.Errorf("docker-hub: decode: %w", err)
+			return out, responseFailure("docker-hub list", "invalid list response", resp.StatusCode, err)
 		}
 		for _, r := range page.Results {
 			out = append(out, Image{

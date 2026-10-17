@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -74,20 +73,20 @@ func (r *OpenShift) ListImages(ctx context.Context) ([]Image, error) {
 	}
 	resp, err := r.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("openshift: catalog: %w", err)
+		return nil, responseFailure("openshift catalog", "request failed", 0, err)
 	}
 	body, readErr := readRegistryPage(resp, 8<<20)
 	if readErr != nil {
-		return nil, fmt.Errorf("registry: read response: %w", readErr)
+		return nil, responseFailure("openshift catalog", "response read or close failed", resp.StatusCode, readErr)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("openshift: catalog status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, responseFailure("openshift catalog", "response rejected", resp.StatusCode, nil)
 	}
 	var doc struct {
 		Repositories []string `json:"repositories"`
 	}
 	if err := json.Unmarshal(body, &doc); err != nil {
-		return nil, fmt.Errorf("openshift: decode catalog: %w", err)
+		return nil, responseFailure("openshift catalog", "invalid catalog response", resp.StatusCode, err)
 	}
 	out := make([]Image, 0, len(doc.Repositories))
 	for _, repo := range doc.Repositories {

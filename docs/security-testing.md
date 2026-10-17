@@ -1394,3 +1394,54 @@ Root verified 210 deployment evidence files. Evidence:
 The prepared inputs, failed bytecode-only seal attempt and subsequent reviewed
 seal are retained; no cluster mutation occurred during that failed seal attempt.
 No quality/security gate or broader acceptance row is closed by this deployment.
+
+### Completed docs-head CI and main binding inventory
+
+Hosted [run 39038892262](https://github.com/alphabravo-oss/constellation/actions/runs/39038892262)
+completed for `fed732e` with nine jobs passing and four failing. Frontend passes
+2,344 tests and browser acceptance passes 279 cases with no unexpected, flaky or
+skipped cases. Go unit records 3,124 passing and 739 skipped test events;
+integration records 8,742 passing and fourteen skipped events, including parent
+and subtest events. Lint, gosec and gitleaks reports are byte-identical to the
+877a1c2 run: 1,469, 153 and eleven findings respectively. The required gate still
+fails. Root sealed 31 evidence files in
+`/tmp/security-triage-39038892262/COMPLETED-MANIFEST.json`
+(SHA256 `dca1319cf262e72d848fe409a2eb8d43f817fa4e03a658aa6a51abf42ff5d5ef`).
+
+The four previously added gosec diagnostics concern backup credential transport
+and S3 delivery. They are separate from existing CLI report-file findings; this
+distinction does not waive either set of findings.
+
+A read-only transaction on the identity-checked main CNPG installation found
+schema 180, zero group DPI bindings, zero orphan or wrong-organization bindings,
+and the validated composite group foreign key. No data repair was performed.
+Receipt: `/tmp/constellation-main-binding-inventory-fed732e/inventory-review.json`.
+This inventory does not establish the state of other installations or close the
+broader tenant/cluster acceptance gate.
+
+### Catalog errors at API, status and audit boundaries
+
+The source follow-up to 877a1c2 uses the existing categorical error wrapper for
+DockerHub, GHCR, Generic V2, Nexus, OpenShift, Quay, Harbor, GitLab and JFrog
+catalog responses. Constant provider/stage labels and HTTP status replace raw
+upstream bodies, transport URLs and parser values. Wrapped causes remain
+available through `errors.Is`/`errors.As`. Existing bounded reads, close-error
+handling, pagination and partial-page behavior are preserved.
+
+The full registry race/shuffle/count-two suite passes 676 test executions.
+Fresh schema-180 handler tests pass 46 executions covering catalog failures,
+existing cloud-error behavior and credential-cache owner boundaries. The seven
+configurable providers exercise actual Test, SyncNow, List/Get, persisted status
+and walker audit paths against local TLS fixtures. Fixed-authority DockerHub and
+GHCR use injected transports. Original 877a1c2 production fails 100 connector
+and 28 handler leaf assertions as intended; there are no build failures or
+skipped cases. Including parent failures, these are 104 and thirty failure
+events. Both owned PostgreSQL fixtures are independently absent. Scoped vet
+passes; configured count-aware lint remains 332 findings with zero additions.
+
+Root verified all seven imported source hashes and 72 qualification records:
+`/tmp/constellation-registry-catalog-errors-877a1c2/evidence/FINAL-SEAL.json`
+(SHA256 `e695fb3a54dc569389e7bacbcda13d5b41219cd1e5e7c45a6c14a45e9efe40b4`).
+This is source qualification only; combined binaries, images and deployment are
+pending. ECR SDK and shared V2 scanner errors, live provider credentials and
+broader registry acceptance remain outside this bounded correction.
