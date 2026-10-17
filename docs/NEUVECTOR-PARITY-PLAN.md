@@ -4684,3 +4684,27 @@ The reviewed final seal binds three source files and 88 evidence files:
 This follow-up is source-qualified and awaits the next integrated artifact and
 live rollout; it is not part of deployed 314afad and does not close fleet delivery
 or overall release acceptance.
+
+
+### Registry V2 response completion qualification
+
+Manifest, digest, tag and token responses now require complete bounded reads and
+successful closure before exposing successful data. Manifest/tag limits remain
+8 MiB / 4 MiB; token responses gain a 1 MiB bound and single-document parsing.
+HEAD closes before returning a digest or issuing GET. The missing-digest GET drain
+is bounded and checked. Initial challenge retry, child-token reuse, platform
+selection order, metadata overlays and partial-repository behavior are preserved.
+Redirect/auth-destination policy and broader cloud-provider acceptance are separate.
+
+The full registry package passes 390 repeated race/shuffle executions with zero
+skips. Eight old-code regression functions fail by intended assertions. A final
+test-only extraction preserves the exact assertions; its two repeated executions
+and vet pass, with production and all other tests unchanged. Configured lint falls
+from 19 to 11, removing eight targeted diagnostics and adding none; the remaining
+cloud-auth/IBM/test findings stay open. The initial test-complexity warning and
+its correction remain in evidence. Root independently verified the 85-file seal:
+`/tmp/constellation-registry-v2-a274245/FINAL-MANIFEST.json`
+(SHA256 `40f78898ac267f3c225279bad1a5a3ff324b89c3f71d8ebdc3808238c4c56da1`).
+This source-qualified follow-up awaits an integrated artifact and live rollout;
+it is not included in deployed 314afad. No release gate or provider acceptance is
+waived by this bounded correction.

@@ -5,11 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	neturl "net/url"
 	"strings"
 	"time"
+)
+
+const (
+	manifestResponseLimit = 8 << 20
+	tagsResponseLimit     = 4 << 20
+	tokenResponseLimit    = 1 << 20
 )
 
 const manifestAccept = "application/vnd.oci.image.manifest.v1+json,application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.v2+json,application/vnd.docker.distribution.manifest.list.v2+json"
@@ -94,27 +99,96 @@ func inspectManifestViaV2(ctx context.Context, client *http.Client, ref, token, 
 	if host == "docker.io" {
 		v2Host = "registry-1.docker.io"
 	}
-	body, digest, contentType, err := getManifestBody(ctx, client, manifestURL(v2Host, repo, reference), manifestAccept, token)
+	body, digest, contentType, token, err := getManifestWithChallenge(ctx, client, manifestURL(v2Host, repo, reference), token)
 	if err != nil {
-		var unauth *errUnauthorized
-		if errors.As(err, &unauth) {
-			anonToken, terr := fetchTokenFromChallenge(ctx, client, unauth.challenge)
-			if terr != nil {
-				return nil, fmt.Errorf("registry: token grant: %w", terr)
-			}
-			body, digest, contentType, err = getManifestBody(ctx, client, manifestURL(v2Host, repo, reference), manifestAccept, anonToken)
-			if err != nil {
-				return nil, err
-			}
-			token = anonToken
-		} else {
-			return nil, err
-		}
+		return nil, err
 	}
 	if digest == "" && strings.HasPrefix(reference, "sha256:") {
 		digest = reference
 	}
 	return manifestMetadataFromBody(ctx, client, v2Host, host, repo, ref, body, digest, contentType, token, platform)
+}
+
+// getManifestWithChallenge retries the initial manifest once with an anonymous
+// challenge token. The same token is retained for any selected child manifest.
+func getManifestWithChallenge(ctx context.Context, client *http.Client, url, token string) ([]byte, string, string, string, error) {
+	body, digest, contentType, err := getManifestBody(ctx, client, url, manifestAccept, token)
+	if err == nil {
+		return body, digest, contentType, token, nil
+	}
+	var unauth *errUnauthorized
+	if !errors.As(err, &unauth) {
+		return nil, "", "", "", err
+	}
+	anonToken, err := fetchTokenFromChallenge(ctx, client, unauth.challenge)
+	if err != nil {
+		return nil, "", "", "", fmt.Errorf("registry: token grant: %w", err)
+	}
+	body, digest, contentType, err = getManifestBody(ctx, client, url, manifestAccept, anonToken)
+	return body, digest, contentType, anonToken, err
+}
+
+type manifestIndexEntry struct {
+	MediaType   string            `json:"mediaType"`
+	Digest      string            `json:"digest"`
+	Size        int64             `json:"size"`
+	Annotations map[string]string `json:"annotations"`
+	Platform    struct {
+		Architecture string `json:"architecture"`
+		OS           string `json:"os"`
+		Variant      string `json:"variant"`
+	} `json:"platform"`
+}
+
+func selectManifestPlatform(manifests []manifestIndexEntry, requested, digest string) (string, string, []string, error) {
+	architectures := make([]string, 0, len(manifests))
+	var selectedDigest, selectedPlatform string
+	for _, manifest := range manifests {
+		plat := platformString(manifest.Platform.OS, manifest.Platform.Architecture, manifest.Platform.Variant)
+		if plat != "" {
+			architectures = append(architectures, plat)
+		}
+		if selectedDigest == "" && platformMatches(requested, manifest.Platform.OS, manifest.Platform.Architecture, manifest.Platform.Variant) {
+			selectedDigest, selectedPlatform = manifest.Digest, plat
+		}
+	}
+	if selectedDigest == "" && strings.TrimSpace(requested) == "" && len(manifests) == 1 {
+		selectedDigest = manifests[0].Digest
+		selectedPlatform = platformString(manifests[0].Platform.OS, manifests[0].Platform.Architecture, manifests[0].Platform.Variant)
+	}
+	if selectedDigest == "" {
+		return "", "", nil, fmt.Errorf("registry: platform required for multi-platform manifest %s (available: %s)", digest, strings.Join(architectures, ","))
+	}
+	return selectedDigest, selectedPlatform, architectures, nil
+}
+
+func manifestIndexMetadata(ctx context.Context, client *http.Client, v2Host, refHost, repo, imageRef string, body []byte, digest, token, platform string) (*ManifestMetadata, error) {
+	var index struct {
+		Manifests []manifestIndexEntry `json:"manifests"`
+	}
+	if err := json.Unmarshal(body, &index); err != nil {
+		return nil, fmt.Errorf("registry: decode manifest index: %w", err)
+	}
+	selectedDigest, selectedPlatform, architectures, err := selectManifestPlatform(index.Manifests, platform, digest)
+	if err != nil {
+		return nil, err
+	}
+	childBody, childDigest, childContentType, err := getManifestBody(ctx, client, manifestURL(v2Host, repo, selectedDigest), manifestAccept, token)
+	if err != nil {
+		return nil, err
+	}
+	if childDigest == "" {
+		childDigest = selectedDigest
+	}
+	meta, err := manifestMetadataFromBody(ctx, client, v2Host, refHost, repo, refHost+"/"+repo+"@"+selectedDigest, childBody, childDigest, childContentType, token, "")
+	if err != nil {
+		return nil, err
+	}
+	meta.ImageRef = imageRef
+	meta.IndexDigest = digest
+	meta.Architectures = architectures
+	meta.SelectedPlatform = selectedPlatform
+	return meta, nil
 }
 
 func manifestMetadataFromBody(ctx context.Context, client *http.Client, v2Host, refHost, repo, imageRef string, body []byte, digest, contentType, token, platform string) (*ManifestMetadata, error) {
@@ -127,58 +201,7 @@ func manifestMetadataFromBody(ctx context.Context, client *http.Client, v2Host, 
 	}
 	mediaType := firstNonEmpty(header.MediaType, strings.Split(contentType, ";")[0])
 	if isManifestList(mediaType) {
-		var index struct {
-			Manifests []struct {
-				MediaType   string            `json:"mediaType"`
-				Digest      string            `json:"digest"`
-				Size        int64             `json:"size"`
-				Annotations map[string]string `json:"annotations"`
-				Platform    struct {
-					Architecture string `json:"architecture"`
-					OS           string `json:"os"`
-					Variant      string `json:"variant"`
-				} `json:"platform"`
-			} `json:"manifests"`
-		}
-		if err := json.Unmarshal(body, &index); err != nil {
-			return nil, fmt.Errorf("registry: decode manifest index: %w", err)
-		}
-		architectures := make([]string, 0, len(index.Manifests))
-		var selectedDigest string
-		var selectedPlatform string
-		for _, manifest := range index.Manifests {
-			plat := platformString(manifest.Platform.OS, manifest.Platform.Architecture, manifest.Platform.Variant)
-			if plat != "" {
-				architectures = append(architectures, plat)
-			}
-			if selectedDigest == "" && platformMatches(platform, manifest.Platform.OS, manifest.Platform.Architecture, manifest.Platform.Variant) {
-				selectedDigest = manifest.Digest
-				selectedPlatform = plat
-			}
-		}
-		if selectedDigest == "" && strings.TrimSpace(platform) == "" && len(index.Manifests) == 1 {
-			selectedDigest = index.Manifests[0].Digest
-			selectedPlatform = platformString(index.Manifests[0].Platform.OS, index.Manifests[0].Platform.Architecture, index.Manifests[0].Platform.Variant)
-		}
-		if selectedDigest == "" {
-			return nil, fmt.Errorf("registry: platform required for multi-platform manifest %s (available: %s)", digest, strings.Join(architectures, ","))
-		}
-		childBody, childDigest, childContentType, err := getManifestBody(ctx, client, manifestURL(v2Host, repo, selectedDigest), manifestAccept, token)
-		if err != nil {
-			return nil, err
-		}
-		if childDigest == "" {
-			childDigest = selectedDigest
-		}
-		meta, err := manifestMetadataFromBody(ctx, client, v2Host, refHost, repo, refHost+"/"+repo+"@"+selectedDigest, childBody, childDigest, childContentType, token, "")
-		if err != nil {
-			return nil, err
-		}
-		meta.ImageRef = imageRef
-		meta.IndexDigest = digest
-		meta.Architectures = architectures
-		meta.SelectedPlatform = selectedPlatform
-		return meta, nil
+		return manifestIndexMetadata(ctx, client, v2Host, refHost, repo, imageRef, body, digest, token, platform)
 	}
 
 	var manifest struct {
@@ -238,16 +261,15 @@ func getManifestBody(ctx context.Context, client *http.Client, url, accept, toke
 	if err != nil {
 		return nil, "", "", fmt.Errorf("registry: GET %s: %w", url, err)
 	}
-	defer resp.Body.Close()
+	body, err := readRegistryPage(resp, manifestResponseLimit)
+	if err != nil {
+		return nil, "", "", err
+	}
 	if resp.StatusCode == 401 {
 		return nil, "", "", &errUnauthorized{challenge: resp.Header.Get("Www-Authenticate")}
 	}
 	if resp.StatusCode >= 400 {
 		return nil, "", "", fmt.Errorf("registry: GET %s: status %d", url, resp.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	if err != nil {
-		return nil, "", "", err
 	}
 	return body, resp.Header.Get("Docker-Content-Digest"), resp.Header.Get("Content-Type"), nil
 }
@@ -270,7 +292,9 @@ func headManifest(ctx context.Context, client *http.Client, url, accept, token s
 	if err != nil {
 		return "", fmt.Errorf("registry: HEAD %s: %w", url, err)
 	}
-	defer resp.Body.Close()
+	if err := resp.Body.Close(); err != nil {
+		return "", fmt.Errorf("registry: close HEAD response: %w", err)
+	}
 	if resp.StatusCode == 401 {
 		return "", &errUnauthorized{challenge: resp.Header.Get("Www-Authenticate")}
 	}
@@ -300,7 +324,10 @@ func getManifestDigest(ctx context.Context, client *http.Client, url, accept, to
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	_, err = readRegistryPage(resp, manifestResponseLimit)
+	if err != nil {
+		return "", err
+	}
 	if resp.StatusCode == 401 {
 		return "", &errUnauthorized{challenge: resp.Header.Get("Www-Authenticate")}
 	}
@@ -310,7 +337,6 @@ func getManifestDigest(ctx context.Context, client *http.Client, url, accept, to
 	if digest := resp.Header.Get("Docker-Content-Digest"); digest != "" {
 		return digest, nil
 	}
-	_, _ = io.ReadAll(resp.Body)
 	return "", errors.New("registry: response missing Docker-Content-Digest even on GET")
 }
 
@@ -383,7 +409,10 @@ func fetchTokenFromChallenge(ctx context.Context, client *http.Client, challenge
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	body, err := readRegistryPage(resp, tokenResponseLimit)
+	if err != nil {
+		return "", err
+	}
 	if resp.StatusCode != 200 {
 		return "", fmt.Errorf("registry: token endpoint status %d", resp.StatusCode)
 	}
@@ -391,7 +420,7 @@ func fetchTokenFromChallenge(ctx context.Context, client *http.Client, challenge
 		Token       string `json:"token"`
 		AccessToken string `json:"access_token"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&tok); err != nil {
+	if err := json.Unmarshal(body, &tok); err != nil {
 		return "", err
 	}
 	if tok.Token != "" {
@@ -528,16 +557,15 @@ func getTagsPage(ctx context.Context, client *http.Client, url, token string) ([
 	if err != nil {
 		return nil, "", fmt.Errorf("registry: GET %s: %w", url, err)
 	}
-	defer resp.Body.Close()
+	body, err := readRegistryPage(resp, tagsResponseLimit)
+	if err != nil {
+		return nil, "", err
+	}
 	if resp.StatusCode == 401 {
 		return nil, "", &errUnauthorized{challenge: resp.Header.Get("Www-Authenticate")}
 	}
 	if resp.StatusCode >= 400 {
 		return nil, "", fmt.Errorf("registry: GET %s: status %d", url, resp.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if err != nil {
-		return nil, "", err
 	}
 	var doc struct {
 		Tags []string `json:"tags"`
