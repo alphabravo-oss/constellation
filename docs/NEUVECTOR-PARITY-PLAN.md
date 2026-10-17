@@ -774,6 +774,24 @@ failed hosted run. Evidence:
 `/tmp/constellation-compliance-sort-ef0d7a9/evidence-manifest.json`
 (SHA256 `f84cd7428cdc606fe8350c721aeed32c30bec112878359d322dd0305aa71aa29`).
 
+Source `be15c7c` requires complete discovery/token HTTP responses before OIDC
+identity acceptance. Decoded bodies are capped at1MiB; read and Close errors,
+invalid documents and unsuccessful provider responses produce categorical
+errors. The browser callback returns401 without provider response/URL details.
+Normal signature, issuer/audience, nonce, PKCE, roles and valid-session behavior
+remain; JWKS response policy and provider redirects are separate unchanged work.
+
+Qualification passes482 fresh180 repeated race/shuffle test executions without
+skips, plus78 focused unit executions and vet. Scoped lint decreases333→331 with
+no added findings or suppressions. Original signed-token controls fail eight
+expected executions; malformed-token controls still reject. Ten original browser
+failures include four concrete truncated/oversized response cases that issued a
+303 response, one session and two cookies. The candidate rejects those responses
+without issuing sessions/cookies and records the failure audit. Both owned
+PostgreSQL fixtures are absent. This source is committed but not deployed.
+Evidence: `/tmp/constellation-oidc-response-ef0d7a9/evidence/frozen-manifest.json`
+(SHA256 `b95a28d4c62fe3e1b6138d701a09cc357616ed275e7c73581e7edf64395c088c`).
+
 
 ## October 12 implementation continuation
 
