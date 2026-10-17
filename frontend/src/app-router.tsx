@@ -96,6 +96,7 @@ const PolicyCenterPage      = lazy(() => import("./pages/PolicyCenterPage").then
 const PoliciesPage          = lazy(() => import("./pages/PoliciesPage").then((m) => ({ default: m.PoliciesPage })));
 const VulnProfileFormPage = lazy(() => import("./pages/VulnProfileFormPage").then((m) => ({ default: m.VulnProfileFormPage })));
 const ResponseCatalogOverrideFormPage = lazy(() => import("./pages/ResponseCatalogOverrideFormPage").then((m) => ({ default: m.ResponseCatalogOverrideFormPage })));
+const BenchmarkExecutionFormPage = lazy(() => import("./pages/BenchmarkExecutionFormPage").then(m => ({ default: m.BenchmarkExecutionFormPage })));
 const ComplianceExemptionFormPage = lazy(() => import("./pages/ComplianceExemptionFormPage").then((m) => ({ default: m.ComplianceExemptionFormPage })));
 const ComplianceScheduleFormPage = lazy(() => import("./pages/ComplianceScheduleFormPage").then((m) => ({ default: m.ComplianceScheduleFormPage })));
 const AdmissionProfileImportPage = lazy(() => import("./pages/AdmissionProfileImportPage").then((m) => ({ default: m.AdmissionProfileImportPage })));
@@ -280,6 +281,8 @@ const cluster_vulnerability_profilesRoute = createRoute({ getParentRoute: () => 
 const cluster_vuln_profile_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "vuln-profiles/new", component: () => (<SuspenseRoute><VulnProfileFormPage /></SuspenseRoute>) });
 const cluster_vuln_profile_editRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "vuln-profiles/$profileId/edit", component: () => (<SuspenseRoute><VulnProfileFormPage /></SuspenseRoute>) });
 const cluster_response_catalog_editRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "response/$ruleId/edit", component: () => (<SuspenseRoute><ResponseCatalogOverrideFormPage /></SuspenseRoute>) });
+const cluster_compliance_benchmark_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "compliance/benchmarks/new", component: () => (<SuspenseRoute><BenchmarkExecutionFormPage /></SuspenseRoute>) });
+const cluster_compliance_benchmark_retryRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "compliance/benchmarks/$requestId/retry", component: () => (<SuspenseRoute><BenchmarkExecutionFormPage action="retry" /></SuspenseRoute>) });
 const cluster_compliance_exemption_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "compliance/exemptions/new", component: () => (<SuspenseRoute><ComplianceExemptionFormPage /></SuspenseRoute>) });
 const cluster_compliance_schedule_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "compliance/schedules/new", component: () => (<SuspenseRoute><ComplianceScheduleFormPage /></SuspenseRoute>) });
 const cluster_groupsRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "groups", component: () => (<SuspenseRoute><GroupsPage /></SuspenseRoute>) });
@@ -522,6 +525,8 @@ authenticatedRoute.addChildren([
   cluster_vuln_profile_newRoute,
   cluster_vuln_profile_editRoute,
   cluster_response_catalog_editRoute,
+  cluster_compliance_benchmark_newRoute,
+  cluster_compliance_benchmark_retryRoute,
   cluster_compliance_exemption_newRoute,
   cluster_compliance_schedule_newRoute,
   cluster_groupsRoute,

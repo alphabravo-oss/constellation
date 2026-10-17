@@ -4,6 +4,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { Download, PlayCircle, Plus, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
 import { compliance, type ComplianceCheck, type ComplianceChecksParams, type ComplianceChecksResponse, type ComplianceExemption, type ComplianceScheduleDB } from "@/api/client";
+import { BenchmarksWorkspace } from "./BenchmarksWorkspace";
 import { ComplianceEvidenceInventory } from "./ComplianceEvidenceInventory";
 import { useEntityClusterScope } from "./entity-detail-scope";
 import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
@@ -45,7 +46,7 @@ export function CompliancePage() {
   const navigate = useNavigate(); const qc = useQueryClient();
   const route = useInventoryRoute(); const search = route.params;
   const [requestedTab, setTab] = useTabParam("tab", "controls");
-  const tab = ["controls", "evidence", "schedules"].includes(requestedTab) ? requestedTab : "controls";
+  const tab = ["controls", "evidence", "schedules", "benchmarks"].includes(requestedTab) ? requestedTab : "controls";
   const listPath = `/clusters/${encodeURIComponent(clusterId ?? "")}/compliance`;
   const active = search.get("framework") || "all";
   const status = search.get("status") || "all";
@@ -228,6 +229,7 @@ export function CompliancePage() {
           </>}
         </div> },
         { value: "evidence", label: "Source evidence", content: <ComplianceEvidenceInventory clusterId={clusterId!} ready={scopeReady} active={tab === "evidence"} /> },
+        { value: "benchmarks", label: "Benchmarks", content: <BenchmarksWorkspace active={tab === "benchmarks"} /> },
         { value: "schedules", label: "Schedules", content: <SchedulesManager clusterId={clusterId!} listPath={listPath} scopeReady={scopeReady} /> },
       ]} />
     </>}

@@ -8,9 +8,10 @@ import { TablePreferencesProvider } from "@/contexts/TablePreferencesContext";
 import { TestRouter } from "@/test/router";
 import { compliance, type ComplianceCheck, type ComplianceChecksParams, type ComplianceChecksResponse } from "@/api/client";
 import { CompliancePage } from "./CompliancePage";
+import { benchPage } from "@/test/benchmark-fixtures";
 const scope = vi.hoisted(() => ({ id: "cluster", resolved: "cluster", loading: false, error: null as Error | null }));
 vi.mock("@/hooks/useCluster", () => ({ useCluster: () => ({ clusterId: scope.id, cluster: { id: scope.resolved }, isLoading: scope.loading, error: scope.error }) }));
-vi.mock("@/api/client", () => ({ compliance: { frameworks: vi.fn(), checks: vi.fn(), summary: vi.fn(), listExemptions: vi.fn(), revokeExemption: vi.fn(), evidence: vi.fn(), listDBSchedules: vi.fn(), exportChecksCSV: vi.fn() } }));
+vi.mock("@/api/client", () => ({ compliance: { frameworks: vi.fn(), checks: vi.fn(), summary: vi.fn(), listExemptions: vi.fn(), revokeExemption: vi.fn(), evidence: vi.fn(), listDBSchedules: vi.fn(), exportChecksCSV: vi.fn(), benchRequests: vi.fn(), benchRequest: vi.fn() } }));
 let root: Root; let host: HTMLDivElement; let client: QueryClient; let history: RouterHistory;
 let identity = { org_id: "org", user_id: "user" };
 const row = (id: number, status: string, framework = "cis"): ComplianceCheck => ({ id: `evidence-${id}`, cluster_id: scope.id, framework, control_id: "shared-control", title: `Evidence target ${id}`, description: "Collected control evidence", status: (status === "exempted" ? "fail" : status) as ComplianceCheck["status"], effective_status: status as ComplianceCheck["effective_status"], severity: "high", evidence: `Evidence ${id}`, evaluated_at: "2026-10-12T00:00:00Z" });
@@ -100,4 +101,18 @@ it("keeps the Controls verdict and metrics scoped to its own tab",async()=>{
  await act(async()=>history.back());
  await settle(()=>expect(host.querySelector('[data-testid="compliance-evidence-panel"]')).not.toBeNull());
  expect(host.querySelector('[data-testid="compliance-summary"]')).toBeNull();
+});
+
+it("opens dedicated benchmark history through URL tabs without showing control verdicts", async () => {
+ vi.mocked(compliance.benchRequests).mockResolvedValue(benchPage([]));
+ await render("?tab=benchmarks&context=keep#requests");
+ await settle(() => expect(host.textContent).toContain("0 durable requests"));
+ expect(host.querySelector('[data-testid="compliance-summary"]')).toBeNull();
+ expect(host.querySelector('[data-testid="benchmarks-workspace"]')).not.toBeNull();
+ await act(async () => button("Controls").dispatchEvent(new window.MouseEvent("mousedown", { bubbles: true, button: 0 })));
+ await settle(() => expect(host.querySelector('[data-testid="compliance-summary"]')).not.toBeNull());
+ await act(async () => history.back());
+ await settle(() => expect(host.querySelector('[data-testid="benchmarks-workspace"]')).not.toBeNull());
+ expect(history.location.search).toContain("context=keep");
+ expect(history.location.hash).toBe("#requests");
 });

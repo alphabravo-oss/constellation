@@ -763,7 +763,68 @@ export interface ComplianceRunDB {
 export interface ComplianceChecksParams { framework?: string; cluster_id?: string; profile?: string; control_id?: string; status?: string; q?: string; sort?: string; order?: "asc" | "desc"; limit?: number; offset?: number }
 export interface ComplianceChecksResponse { checks: ComplianceCheck[]; cluster_id?: string | null; framework?: string; profile?: string; control_id?: string; status?: string; q?: string; sort?: string; order?: "asc" | "desc"; limit?: number; offset?: number; total?: number; has_more?: boolean; summary?: Record<string, number> }
 
+export interface BenchmarkExecutionCounts {
+  total: number;
+  pass: number;
+  fail: number;
+  manual: number;
+  not_applicable: number;
+}
+export interface BenchmarkExecutionAttempt {
+  id: string;
+  request_id: string;
+  cluster_id: string;
+  runner_id: string;
+  claim_key: string;
+  node: string;
+  number: number;
+  status: string;
+  started_at: string;
+  lease_expires_at: string;
+  finished_at: string | null;
+  outcome: string;
+  report_sha256: string;
+  rows_ingested: number;
+  controls: BenchmarkExecutionCounts;
+}
+export interface BenchmarkExecutionRequest {
+  id: string;
+  request_key: string;
+  requested_cluster_id: string | null;
+  cluster_id: string | null;
+  profile: string;
+  benchmark: string;
+  status: string;
+  revision: string;
+  attempt_count: number;
+  requested_at: string;
+  completed_at: string | null;
+  active_attempt: BenchmarkExecutionAttempt | null;
+}
+export interface BenchmarkExecutionPage {
+  requests: BenchmarkExecutionRequest[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+  source: "durable_v2_requests";
+  legacy_requests_included: false;
+}
+export interface BenchmarkExecutionDetail {
+  request: BenchmarkExecutionRequest;
+  attempts: BenchmarkExecutionAttempt[];
+}
+
 export const compliance = {
+  benchRequests: (params: { cluster_id: string; limit: number; offset: number }) =>
+    api.get<BenchmarkExecutionPage>("/compliance/bench/requests", { params }).then(r => r.data),
+  benchRequest: (id: string, cluster_id: string) =>
+    api.get<BenchmarkExecutionDetail>(`/compliance/bench/requests/${encodeURIComponent(id)}`, { params: { cluster_id } }).then(r => r.data),
+  createBenchRequest: (cluster_id: string, body: { request_key: string; profile: "kube-bench"; benchmark: string }) =>
+    api.post<{ request: BenchmarkExecutionRequest }>("/compliance/bench/requests", body, { params: { cluster_id } }).then(r => r.data),
+  retryBenchRequest: (id: string, cluster_id: string, reviewed_revision: string) =>
+    api.post<{ request: BenchmarkExecutionRequest }>(`/compliance/bench/requests/${encodeURIComponent(id)}/retry`, { reviewed_revision }, { params: { cluster_id } }).then(r => r.data),
+
   frameworks: () => api.get<{ frameworks: Framework[] }>("/compliance/frameworks").then((r) => r.data),
   checks: (framework?: string | ComplianceChecksParams, cluster_id?: string, options?: Omit<ComplianceChecksParams, "framework" | "cluster_id">) =>
     api.get<ComplianceChecksResponse>("/compliance/checks", { params: typeof framework === "object" ? framework : { framework, cluster_id, ...options } }).then((r) => r.data),
