@@ -53,6 +53,38 @@ func normalizeBenchProfile(raw string) (string, bool) {
 	return compliancepkg.NormalizeBenchProfile(raw)
 }
 
+// Query selectors retain their historical precedence over the optional body.
+// Validate the whole body even when the query already supplies both selectors.
+func benchRunOptions(w http.ResponseWriter, r *http.Request) (string, string, error) {
+	profile := r.URL.Query().Get("profile")
+	benchmark := strings.TrimSpace(r.URL.Query().Get("benchmark"))
+	if r.Body == nil {
+		return profile, benchmark, nil
+	}
+	var input *struct {
+		Profile   string `json:"profile"`
+		Benchmark string `json:"benchmark"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&input); errors.Is(err, io.EOF) {
+		return profile, benchmark, nil
+	} else if err != nil || input == nil {
+		return "", "", errors.New("invalid benchmark request")
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return "", "", errors.New("invalid benchmark request")
+	}
+	if profile == "" {
+		profile = input.Profile
+	}
+	if benchmark == "" {
+		benchmark = strings.TrimSpace(input.Benchmark)
+	}
+	return profile, benchmark, nil
+}
+
 // RunBench enqueues an on-demand kube-bench/docker-bench run for the caller's org
 // (optionally scoped to a cluster). The runner services it out-of-band; this
 // handler only writes the request row and returns it.
@@ -62,24 +94,10 @@ func (c *Compliance) RunBench(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Accept profile + benchmark from either the query string or a small JSON body.
-	profileRaw := r.URL.Query().Get("profile")
-	benchmark := strings.TrimSpace(r.URL.Query().Get("benchmark"))
-	if r.Body != nil {
-		if body, _ := io.ReadAll(io.LimitReader(r.Body, 4<<10)); len(body) > 0 {
-			var in struct {
-				Profile   string `json:"profile"`
-				Benchmark string `json:"benchmark"`
-			}
-			if err := json.Unmarshal(body, &in); err == nil {
-				if profileRaw == "" {
-					profileRaw = in.Profile
-				}
-				if benchmark == "" {
-					benchmark = strings.TrimSpace(in.Benchmark)
-				}
-			}
-		}
+	profileRaw, benchmark, err := benchRunOptions(w, r)
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid benchmark request"})
+		return
 	}
 	profile, ok := normalizeBenchProfile(profileRaw)
 	if !ok {
@@ -138,7 +156,7 @@ RETURNING id::text, cluster_id, profile, benchmark, status, requested_at`,
 	httpx.WriteJSON(w, http.StatusAccepted, map[string]any{
 		"request": req,
 		"queued":  true,
-		"message": "bench run queued; the " + profile + " runner will pick it up and POST fresh results to /compliance/ingest",
+		"message": "bench run queued; the " + profile + " runner will pick it up and POST fresh results to /agent/compliance/ingest",
 	})
 }
 
