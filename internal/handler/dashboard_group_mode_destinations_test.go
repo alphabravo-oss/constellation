@@ -9,8 +9,9 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/alphabravocompany/constellation/internal/handler/findings"
 	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/internal/handler/findings"
 )
 
 func TestDashboardStrongestGroupModeDestinations(t *testing.T) {

@@ -12,12 +12,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
 	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 )
 
 // EventDTO keeps the physical (id,at) identity alongside the producer UUID.

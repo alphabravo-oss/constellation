@@ -3,15 +3,17 @@ package findings
 import (
 	"context"
 	"encoding/json"
-	"github.com/alphabravocompany/constellation/internal/db"
-	"github.com/alphabravocompany/constellation/internal/handler/authctx"
-	"github.com/alphabravocompany/constellation/pkg/audit"
-	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/internal/db"
+	"github.com/alphabravocompany/constellation/internal/handler/authctx"
+	"github.com/alphabravocompany/constellation/pkg/audit"
 )
 
 func TestFindingGetReturnsClusterScope(t *testing.T) {

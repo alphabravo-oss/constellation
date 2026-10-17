@@ -3,11 +3,12 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/alphabravocompany/constellation/internal/handler/platformrole"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/handler/platformrole"
 
 	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 	searchdsl "github.com/alphabravocompany/constellation/pkg/search/dsl"

@@ -11,9 +11,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+
 	evidence "github.com/alphabravocompany/constellation/internal/complianceevidence"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
-	"github.com/google/uuid"
 )
 
 func TestComplianceEvidenceInventoryFullScopeAndExport(t *testing.T) {

@@ -11,11 +11,12 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/alphabravocompany/constellation/internal/handler/authctx"
-	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/alphabravocompany/constellation/internal/handler/authctx"
+	"github.com/alphabravocompany/constellation/pkg/audit"
 )
 
 type reviewedPolicyFixture struct {

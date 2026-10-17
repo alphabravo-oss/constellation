@@ -9,10 +9,11 @@ package findings
 import (
 	"encoding/csv"
 	"fmt"
-	"github.com/google/uuid"
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"

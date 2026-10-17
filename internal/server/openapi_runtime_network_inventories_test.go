@@ -1,12 +1,13 @@
 package server
 
 import (
-	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 )
 
 func inventoryOperationParameters(t *testing.T, op map[string]any) map[string]map[string]any {

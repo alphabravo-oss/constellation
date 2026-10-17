@@ -13,9 +13,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/pkg/audit"
-	"github.com/google/uuid"
 )
 
 func TestFileProfileFullInventoryAndConditionalDelete(t *testing.T) {

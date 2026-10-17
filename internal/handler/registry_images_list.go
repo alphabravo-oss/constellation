@@ -7,9 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 )
 
 type registryImageRow struct {

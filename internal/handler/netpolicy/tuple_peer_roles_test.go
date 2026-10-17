@@ -2,9 +2,10 @@ package netpolicy
 
 import (
 	"context"
-	"github.com/google/uuid"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 func TestLifecycleTuplePeerRolesExactClusterOwnerAndUnknown(t *testing.T) {

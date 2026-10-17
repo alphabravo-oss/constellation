@@ -10,8 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/pkg/audit"
 )
 
 func TestAuditSelectedCohortValidation(t *testing.T) {

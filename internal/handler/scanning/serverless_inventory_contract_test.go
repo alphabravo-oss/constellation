@@ -5,13 +5,15 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
-	"github.com/alphabravocompany/constellation/internal/handler/authctx"
-	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
-	"github.com/google/uuid"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"testing"
+
+	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/internal/handler/authctx"
+	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 )
 
 func TestServerlessInventoryPostureTotalsContinuationAndMatchingCSV(t *testing.T) {

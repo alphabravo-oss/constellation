@@ -10,9 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alphabravocompany/constellation/internal/handler/sqlx"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/alphabravocompany/constellation/internal/handler/sqlx"
 )
 
 type deploymentListFilter struct {

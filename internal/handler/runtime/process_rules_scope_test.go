@@ -10,11 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/runtime/baseline"
-	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 )
 
 func TestProcessRulesClusterScopeAndPreconditions(t *testing.T) {

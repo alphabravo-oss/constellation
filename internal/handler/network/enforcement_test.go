@@ -3,12 +3,14 @@ package network
 import (
 	"context"
 	"fmt"
-	"github.com/alphabravocompany/constellation/internal/handler/authctx"
-	"github.com/google/uuid"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 
 	"github.com/alphabravocompany/constellation/internal/netpolicyapply"
 )

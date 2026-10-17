@@ -3,10 +3,11 @@ package policy
 import (
 	"encoding/json"
 	"errors"
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"net"
 	"net/http"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	chimw "github.com/go-chi/chi/v5/middleware"
 

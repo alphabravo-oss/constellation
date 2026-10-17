@@ -10,12 +10,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
 	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 )
 
 const sessionInventoryColumns = `id,session_id,cluster_id,node,workload_id,application,ip_proto,client_ip,client_port,server_ip,server_port,client_state,server_state,client_bytes,server_bytes,client_pkts,server_pkts,age,idle,ingress,severity,threat_id,updated_at,platform_role,application_label,protocol_label,client_state_label,server_state_label,bytes,packets`

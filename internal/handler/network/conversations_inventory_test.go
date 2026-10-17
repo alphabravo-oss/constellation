@@ -13,11 +13,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 	"github.com/alphabravocompany/constellation/pkg/livegraph"
-	"github.com/google/uuid"
 )
 
 type conversationTestResponse struct {

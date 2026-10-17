@@ -2,14 +2,16 @@ package compliance
 
 import (
 	"encoding/json"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
 	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 	"github.com/alphabravocompany/constellation/internal/handler/sqlx"
-	"github.com/google/uuid"
-	"net/http"
-	"strings"
-	"time"
 )
 
 const complianceEffectiveRowsSQL = `

@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/csv"
 	"encoding/json"
-	"github.com/google/uuid"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 func TestNodesFilteredInventoryAndCSV(t *testing.T) {

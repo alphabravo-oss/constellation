@@ -9,9 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	findinghandler "github.com/alphabravocompany/constellation/internal/handler/findings"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+
+	findinghandler "github.com/alphabravocompany/constellation/internal/handler/findings"
 )
 
 func TestAssetAndFindingPlatformRoleAPIExportParity(t *testing.T) {

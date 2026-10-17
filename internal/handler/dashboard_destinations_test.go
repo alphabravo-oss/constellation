@@ -7,8 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/alphabravocompany/constellation/internal/handler/findings"
 	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/internal/handler/findings"
 )
 
 func TestDashboardFixableDestinationAndWorkloadIdentity(t *testing.T) {

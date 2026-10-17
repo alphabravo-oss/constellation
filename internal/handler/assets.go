@@ -3,9 +3,10 @@ package handler
 import (
 	"encoding/json"
 	"errors"
-	"github.com/alphabravocompany/constellation/internal/handler/platformrole"
 	"net/http"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/handler/platformrole"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"

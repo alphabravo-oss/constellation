@@ -5,9 +5,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/scanner"
-	"github.com/google/uuid"
 )
 
 func TestScannerFindingUpdatesOnlySelectedRecurrence(t *testing.T) {

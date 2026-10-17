@@ -9,11 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	findinghandler "github.com/alphabravocompany/constellation/internal/handler/findings"
 	"github.com/alphabravocompany/constellation/pkg/audit"
-	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 )
 
 func TestFindingInstanceAuditScopeSurvivesRetention(t *testing.T) {

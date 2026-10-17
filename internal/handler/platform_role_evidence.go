@@ -6,9 +6,10 @@ import (
 	"net"
 	"strings"
 
-	"github.com/alphabravocompany/constellation/internal/handler/platformrole"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/alphabravocompany/constellation/internal/handler/platformrole"
 )
 
 // PlatformWorkloadIdentity keeps evidence with its actual cluster. Names alone

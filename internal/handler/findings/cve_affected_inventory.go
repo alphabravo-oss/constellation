@@ -8,11 +8,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
 	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
-	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 )
 
 // All views reuse canonical scan-finding IDs and the legacy digest/ref/repository

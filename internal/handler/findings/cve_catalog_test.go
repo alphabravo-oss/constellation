@@ -10,9 +10,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
-	"github.com/google/uuid"
 )
 
 func TestCVECatalogParserAndAuthorization(t *testing.T) {

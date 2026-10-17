@@ -10,8 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alphabravocompany/constellation/internal/handler/findings"
 	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/internal/handler/findings"
 )
 
 // Exercise actual tile source, destination pages/counts, rollups and CSV. A

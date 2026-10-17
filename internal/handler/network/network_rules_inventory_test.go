@@ -12,13 +12,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alphabravocompany/constellation/internal/db"
-	"github.com/alphabravocompany/constellation/internal/handler/authctx"
-	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/alphabravocompany/constellation/internal/db"
+	"github.com/alphabravocompany/constellation/internal/handler/authctx"
+	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 )
 
 type networkRulesInventoryResponse struct {

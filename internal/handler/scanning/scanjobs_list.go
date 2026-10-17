@@ -8,12 +8,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
 	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 	"github.com/alphabravocompany/constellation/internal/scanner"
-	"github.com/google/uuid"
 )
 
 const scanJobInventorySQL = `SELECT sj.id, sj.org_id, st.id AS target_id, st.type AS target_type, st.ref AS target_ref, st.cluster_id AS target_cluster_id,

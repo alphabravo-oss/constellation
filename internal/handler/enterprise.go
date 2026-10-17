@@ -9,9 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/pkg/audit"
-	"github.com/google/uuid"
 )
 
 type Enterprise struct {

@@ -3,11 +3,12 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"github.com/google/uuid"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 func TestDeploymentEmbeddedEvidencePlatformRoles(t *testing.T) {

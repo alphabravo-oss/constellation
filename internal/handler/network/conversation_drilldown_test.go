@@ -10,9 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/pkg/livegraph"
-	"github.com/google/uuid"
 )
 
 func TestConversationExactDrilldownsBeforePagination(t *testing.T) {
@@ -63,19 +64,29 @@ func TestConversationExactDrilldownsBeforePagination(t *testing.T) {
 		Total   int
 		HasMore bool `json:"has_more"`
 		Source  string
-	} { t.Helper(); req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/network/conversations?cluster_id="+cluster.String()+"&"+query, nil); req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{OrgID: org, UserID: uuid.New()})); w := httptest.NewRecorder(); handler.List(w, req); if w.Code != wantStatus {
-		t.Fatalf("%s: %d %s", query, w.Code, w.Body.String())
-	}; var body struct {
-		Conversations []struct {
-			From, To string
-			Bytes    int64
+	} {
+		t.Helper()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/network/conversations?cluster_id="+cluster.String()+"&"+query, nil)
+		req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{OrgID: org, UserID: uuid.New()}))
+		w := httptest.NewRecorder()
+		handler.List(w, req)
+		if w.Code != wantStatus {
+			t.Fatalf("%s: %d %s", query, w.Code, w.Body.String())
 		}
-		Total   int
-		HasMore bool `json:"has_more"`
-		Source  string
-	}; if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}; return body }
+		var body struct {
+			Conversations []struct {
+				From, To string
+				Bytes    int64
+			}
+			Total   int
+			HasMore bool `json:"has_more"`
+			Source  string
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		return body
+	}
 	for _, query := range []string{"from=default%2Fclient&to=default%2Fapi&verdict_group=blocked", "from=default%2Fclient&to=default%2Fapi&verdict_group=blocked&limit=1"} {
 		body := request(query, http.StatusOK)
 		if body.Total != 1 || len(body.Conversations) != 1 || body.Conversations[0].Bytes != 10 || body.Source == "live" || body.HasMore {

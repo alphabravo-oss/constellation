@@ -12,11 +12,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 	"github.com/alphabravocompany/constellation/pkg/runtime/baseline"
-	"github.com/google/uuid"
 )
 
 func TestBaselineInventoryReadOnlyFullCohortAndBundle(t *testing.T) {

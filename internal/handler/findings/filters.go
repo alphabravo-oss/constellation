@@ -6,9 +6,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/alphabravocompany/constellation/internal/handler/sqlx"
 	searchdsl "github.com/alphabravocompany/constellation/pkg/search/dsl"
-	"github.com/google/uuid"
 )
 
 // One predicate contract for instance pages, lifecycle totals, rollups and CSV.

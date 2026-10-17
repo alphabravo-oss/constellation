@@ -11,14 +11,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 	"github.com/alphabravocompany/constellation/internal/handler/platformrole"
 	compliancepkg "github.com/alphabravocompany/constellation/pkg/compliance"
 	"github.com/alphabravocompany/constellation/pkg/report"
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 )
 
 type Reports struct{ db *db.DB }

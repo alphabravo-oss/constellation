@@ -10,12 +10,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alphabravocompany/constellation/internal/db"
-	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/alphabravocompany/constellation/internal/db"
+	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 )
 
 func TestReportsFullEffectiveScopeAndExactWorkloadRoles(t *testing.T) {

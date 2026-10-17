@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/alphabravocompany/constellation/pkg/compliance"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/alphabravocompany/constellation/pkg/compliance"
 )
 
 const ExportLimit = 100000

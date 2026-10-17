@@ -7,8 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 )
 
 // Only running entries from the latest per-node snapshots are inventory rows.

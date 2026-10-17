@@ -7,9 +7,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
-	"github.com/google/uuid"
 )
 
 func TestEvidencePlatformRolesExactScopeAndInventories(t *testing.T) {

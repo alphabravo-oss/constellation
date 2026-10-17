@@ -6,8 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 )
 
 const nodeInventoryColumns = `node,os_id,os_version_id,kernel_release,arch,cni_name,cri_runtime,btf_present,nfqueue_capable,cpu_count,memory_bytes,package_count,package_source,container_count,process_count,cis_profile,cis_passed,cis_failed,cis_warned,cis_skipped,critical_vulns,high_vulns,medium_vulns,low_vulns,open_vulns,runtime_agent_version,runtime_agent_last_seen_at,scan_target_id,inventory_hash,scan_status,last_scanned_at,host_facts_observed_at,packages_observed_at,containers_observed_at,processes_observed_at,cis_observed_at,last_seen_at,runtime_agent_status,coverage_text,id`

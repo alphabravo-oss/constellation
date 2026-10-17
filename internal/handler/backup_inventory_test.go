@@ -10,8 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 )
 
 func TestBackupInventoryOptions(t *testing.T) {

@@ -9,12 +9,13 @@ import (
 	"os"
 	"testing"
 
-	"github.com/alphabravocompany/constellation/internal/db"
-	"github.com/alphabravocompany/constellation/internal/handler"
-	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/alphabravocompany/constellation/internal/db"
+	"github.com/alphabravocompany/constellation/internal/handler"
+	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 )
 
 func TestPcapActionResponsesExactPlatformRoles(t *testing.T) {

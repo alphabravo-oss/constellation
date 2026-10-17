@@ -13,8 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 )
 
 func TestRuntimeEventsInventoryPagesScopeFiltersAndCSV(t *testing.T) {

@@ -11,8 +11,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 )
 
 func TestImageInventoryServerFiltersSummaryContinuationAndCSV(t *testing.T) {

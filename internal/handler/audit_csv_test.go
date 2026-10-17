@@ -10,11 +10,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alphabravocompany/constellation/internal/db"
-	auditlog "github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/alphabravocompany/constellation/internal/db"
+	auditlog "github.com/alphabravocompany/constellation/pkg/audit"
 )
 
 func auditCSVRequest(t *testing.T, f *auditListFixture, org uuid.UUID, params url.Values) (*httptest.ResponseRecorder, [][]string) {
