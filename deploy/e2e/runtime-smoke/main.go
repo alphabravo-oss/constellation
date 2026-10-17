@@ -141,11 +141,11 @@ func main() {
 	fmt.Printf("dropped (chan full) : %d\n", dropped)
 
 	failed := false
-	if int(etrue) < *minExec {
+	if *minExec > 0 && etrue < uint64(*minExec) {
 		fmt.Fprintf(os.Stderr, "FAIL: /bin/true exec events %d < required %d\n", etrue, *minExec)
 		failed = true
 	}
-	if int(nc) < *minTCP {
+	if *minTCP > 0 && nc < uint64(*minTCP) {
 		fmt.Fprintf(os.Stderr, "FAIL: tcp_connect events %d < required %d\n", nc, *minTCP)
 		failed = true
 	}
