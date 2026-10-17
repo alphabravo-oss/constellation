@@ -13,7 +13,7 @@
 //  3. Render the compliance report for the target (org + cluster + framework)
 //     using pkg/report, signing the rendered bytes with cosign 2.x.
 //  4. Push the artifact + signature to every delivery target. Failures are
-//     logged but do not fail the run — the artifact is still on disk.
+//     recorded as run failures; the rendered artifact remains available on disk.
 //  5. UPDATE compliance_runs SET status='succeeded'|'failed', artifact_uri,
 //     artifact_signature, completed_at, summary.
 //
@@ -349,11 +349,23 @@ UPDATE compliance_schedules
 		sig = "sha256:" + hex.EncodeToString(h[:])
 	}
 
-	// Deliver to each target. Email/webhook/file/S3. Errors don't fail the run.
+	primaryURI, deliveryErr := d.deliverAll(ctx, s, localPath, artifact, sig, ext)
+	if deliveryErr != nil {
+		return errors.Join(deliveryErr, finalize("failed", primaryURI, sig, size, summary, deliveryErr))
+	}
+	return finalize("succeeded", primaryURI, sig, size, summary, nil)
+}
+
+// deliverAll attempts every configured destination and retains the local artifact
+// even when one or more deliveries fail. A rendered report is not delivery proof.
+func (d *daemon) deliverAll(ctx context.Context, s dueSchedule, localPath string, artifact []byte, sig, ext string) (string, error) {
+	filename := filepath.Base(localPath)
 	primaryURI := "file://" + localPath
+	var deliveryErrors []error
 	for _, t := range s.Delivery {
 		if err := d.deliver(ctx, t, s, localPath, artifact, sig, ext); err != nil {
 			d.logger.Warn("delivery failed", "kind", t.Kind, "err", err.Error())
+			deliveryErrors = append(deliveryErrors, fmt.Errorf("%s delivery: %w", t.Kind, err))
 			continue
 		}
 		// Prefer the externally-addressable URI when available.
@@ -367,7 +379,7 @@ UPDATE compliance_schedules
 		}
 	}
 
-	return finalize("succeeded", primaryURI, sig, size, summary, nil)
+	return primaryURI, errors.Join(deliveryErrors...)
 }
 
 // loadChecks pulls the first-class compliance evidence rows for the
@@ -568,19 +580,18 @@ func (d *daemon) deliverFile(target, localPath string, body []byte, sig string) 
 }
 
 func (d *daemon) deliverEmail(t compliancehandler.DeliveryTarget, s dueSchedule, body []byte, sig, filename string) error {
-	host := os.Getenv("SMTP_HOST")
+	if strings.TrimSpace(t.Target) == "" {
+		return errors.New("email delivery: target email required")
+	}
+	host := strings.TrimSpace(os.Getenv("SMTP_HOST"))
 	if host == "" {
-		d.logger.Warn("email delivery skipped: SMTP_HOST not set")
-		return nil
+		return errors.New("email delivery: SMTP_HOST is required")
 	}
 	user := os.Getenv("SMTP_USER")
 	pass := os.Getenv("SMTP_PASS")
 	from := os.Getenv("SMTP_FROM")
 	if from == "" {
 		from = user
-	}
-	if t.Target == "" {
-		return errors.New("email delivery: target email required")
 	}
 	message, err := makeReportEmail(from, t.Target, s.Name, s.Framework, sig, filename, body)
 	if err != nil {
