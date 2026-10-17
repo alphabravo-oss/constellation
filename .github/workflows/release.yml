@@ -61,6 +61,7 @@ jobs:
           - { role: frontend, dockerfile: deploy/docker/Dockerfile.frontend }
           - { role: runtime-agent, dockerfile: deploy/docker/Dockerfile.runtime-agent }
           - { role: admission, dockerfile: deploy/docker/Dockerfile.admission }
+          - { role: kube-bench-runner, dockerfile: deploy/docker/Dockerfile.kube-bench-runner }
           - { role: migrate, dockerfile: deploy/docker/Dockerfile.migrate }
           - { role: bootstrap, dockerfile: deploy/docker/Dockerfile.bootstrap }
           - { role: postgres, dockerfile: deploy/docker/Dockerfile.postgres, tag_prefix: "16.14-" }
@@ -75,7 +76,9 @@ jobs:
       - uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9 # v3
       - name: Read runtime pins
         id: runtime
-        run: echo "node-version=$(cat .node-version)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "node-version=$(cat .node-version)" >> "$GITHUB_OUTPUT"
+          echo "build-time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
       - id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
@@ -86,6 +89,8 @@ jobs:
           tags: ghcr.io/alphabravo-oss/constellation/${{ matrix.role }}:${{ matrix.tag_prefix }}${{ github.ref_name }}
           build-args: |
             VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+            BUILD_TIME=${{ steps.runtime.outputs.build-time }}
             NODE_VERSION=${{ steps.runtime.outputs.node-version }}
           provenance: mode=max
           sbom: true

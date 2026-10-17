@@ -14,12 +14,18 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 ARG VERSION=dev
+ARG COMMIT=dev
+ARG BUILD_TIME=
 ENV CGO_ENABLED=0 GOOS=linux GOFIPS140=v1.0.0
 RUN go build -trimpath -tags fips \
-      -ldflags="-s -w -X main.version=${VERSION}-fips" \
+      -ldflags="-s -w -X github.com/alphabravocompany/constellation/pkg/version.Version=${VERSION}-fips -X github.com/alphabravocompany/constellation/pkg/version.Commit=${COMMIT} -X github.com/alphabravocompany/constellation/pkg/version.BuildTime=${BUILD_TIME}" \
       -o /out/constellation-api ./cmd/constellation-api
 
 FROM ${WOLFI_FIPS_IMAGE} AS runtime
+ARG VERSION=dev
+ARG COMMIT=dev
+LABEL org.opencontainers.image.version="${VERSION}-fips" \
+      org.opencontainers.image.revision="${COMMIT}"
 RUN apk add --no-cache ca-certificates tzdata
 COPY --from=build /out/constellation-api /usr/local/bin/constellation-api
 RUN addgroup -S -g 10001 constellation && adduser -S -u 10001 -G constellation constellation
