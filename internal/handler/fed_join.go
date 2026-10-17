@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -95,14 +94,9 @@ func (h *Federation) JoinRemote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	masterURL := firstNonEmpty(req.MasterURL, os.Getenv("CONSTELLATION_FED_MASTER_URL"))
-	token := firstNonEmpty(req.Token, os.Getenv("CONSTELLATION_FED_MASTER_TOKEN"))
-	if strings.TrimSpace(masterURL) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "master_url is required (body or CONSTELLATION_FED_MASTER_URL)"})
-		return
-	}
-	if strings.TrimSpace(token) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "token is required (body or CONSTELLATION_FED_MASTER_TOKEN)"})
+	masterURL, token, err := resolveRemoteJoinConfig(req, os.Getenv("CONSTELLATION_FED_MASTER_URL"), os.Getenv("CONSTELLATION_FED_MASTER_TOKEN"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -140,10 +134,9 @@ func (h *Federation) JoinRemote(w http.ResponseWriter, r *http.Request) {
 // clusterID/clusterName default to a stable generated identity when empty, so a re-join
 // rotates the same member rather than registering a new one.
 func performRemoteJoin(ctx context.Context, pool *pgxpool.Pool, sealer auth.Sealer, client *http.Client, orgID uuid.UUID, masterURL, token, clusterID, clusterName string) (fedJoinRemoteResult, error) {
-	masterURL = strings.TrimRight(strings.TrimSpace(masterURL), "/")
-	endpoint, err := url.Parse(masterURL)
-	if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" {
-		return fedJoinRemoteResult{}, fmt.Errorf("federation: master endpoint must be an absolute HTTPS URL without credentials, query or fragment")
+	masterURL, err := normalizeRemoteMaster(masterURL)
+	if err != nil {
+		return fedJoinRemoteResult{}, err
 	}
 	clusterID = strings.TrimSpace(clusterID)
 	clusterName = strings.TrimSpace(clusterName)
