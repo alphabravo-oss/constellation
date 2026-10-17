@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -37,7 +36,7 @@ func (d *DockerHub) ListImages(ctx context.Context) ([]Image, error) {
 	for u != "" {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 		if err != nil {
-			return out, err
+			return out, errors.New("registry: invalid request endpoint")
 		}
 		if d.cfg.Token != "" {
 			req.Header.Set("Authorization", "Bearer "+d.cfg.Token)
@@ -48,8 +47,10 @@ func (d *DockerHub) ListImages(ctx context.Context) ([]Image, error) {
 		if err != nil {
 			return out, fmt.Errorf("docker-hub: list: %w", err)
 		}
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-		_ = resp.Body.Close()
+		body, readErr := readRegistryPage(resp, 4<<20)
+		if readErr != nil {
+			return out, fmt.Errorf("docker-hub: read list response: %w", readErr)
+		}
 		if resp.StatusCode != 200 {
 			return out, fmt.Errorf("docker-hub: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 		}

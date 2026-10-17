@@ -25,7 +25,6 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -128,7 +127,7 @@ func exchangeGCPAssertion(ctx context.Context, client *http.Client, tokenURI, as
 	form.Set("assertion", assertion)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURI, strings.NewReader(form.Encode()))
 	if err != nil {
-		return "", time.Time{}, err
+		return "", time.Time{}, errors.New("registry: invalid request endpoint")
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
@@ -212,7 +211,7 @@ func azureClientCredentialsRequest(ctx context.Context, tenant, clientID, client
 	form.Set("scope", scope)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
-		return nil, err
+		return nil, errors.New("registry: invalid request endpoint")
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
@@ -238,7 +237,7 @@ func azureIMDSToken(ctx context.Context, client *http.Client, resource, clientID
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, azureIMDSTokenURL+"?"+q.Encode(), nil)
 	if err != nil {
-		return "", time.Time{}, err
+		return "", time.Time{}, errors.New("registry: invalid request endpoint")
 	}
 	req.Header.Set("Metadata", "true")
 	return readOAuthToken(client, req, "imds")
@@ -257,7 +256,7 @@ func acrExchangeRefreshToken(ctx context.Context, client *http.Client, host, ten
 	endpoint := "https://" + host + "/oauth2/exchange"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
-		return "", err
+		return "", errors.New("registry: invalid request endpoint")
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
@@ -288,7 +287,7 @@ func acrExchangeAccessToken(ctx context.Context, client *http.Client, host, refr
 	endpoint := "https://" + host + "/oauth2/token"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
-		return "", time.Time{}, err
+		return "", time.Time{}, errors.New("registry: invalid request endpoint")
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
@@ -342,8 +341,10 @@ func doReadBody(client *http.Client, req *http.Request, what string) ([]byte, er
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", what, err)
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, readErr := readRegistryPage(resp, 1<<20)
+	if readErr != nil {
+		return nil, fmt.Errorf("registry: read response: %w", readErr)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("%s: status %d: %s", what, resp.StatusCode, strings.TrimSpace(string(body)))
 	}

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -64,7 +63,7 @@ func (r *IBMCloud) acquireToken(ctx context.Context) (string, error) {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.tokenURL(), strings.NewReader(form.Encode()))
 	if err != nil {
-		return "", err
+		return "", errors.New("registry: invalid request endpoint")
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
@@ -72,8 +71,10 @@ func (r *IBMCloud) acquireToken(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("ibmcloud: token exchange: %w", err)
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, readErr := readRegistryPage(resp, 1<<20)
+	if readErr != nil {
+		return "", fmt.Errorf("ibmcloud: read token response: %w", readErr)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("ibmcloud: token exchange status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
@@ -105,7 +106,7 @@ func (r *IBMCloud) ListImages(ctx context.Context) ([]Image, error) {
 	endpoint := "https://" + host + "/api/v1/images"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return nil, err
+		return nil, errors.New("registry: invalid request endpoint")
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Account", r.cfg.Account)
@@ -114,8 +115,10 @@ func (r *IBMCloud) ListImages(ctx context.Context) ([]Image, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ibmcloud: list images: %w", err)
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	body, readErr := readRegistryPage(resp, 8<<20)
+	if readErr != nil {
+		return nil, fmt.Errorf("registry: read response: %w", readErr)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("ibmcloud: list images status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
@@ -124,6 +127,10 @@ func (r *IBMCloud) ListImages(ctx context.Context) ([]Image, error) {
 		return nil, fmt.Errorf("ibmcloud: decode images: %w", err)
 	}
 
+	return collapseIBMImages(images), nil
+}
+
+func collapseIBMImages(images []ibmImage) []Image {
 	// Collapse RepoTags into one Image per repository, collecting its tags.
 	byRepo := map[string][]string{}
 	order := []string{}
@@ -145,7 +152,7 @@ func (r *IBMCloud) ListImages(ctx context.Context) ([]Image, error) {
 	for _, repo := range order {
 		out = append(out, Image{Repository: repo, Tags: byRepo[repo]})
 	}
-	return out, nil
+	return out
 }
 
 func (r *IBMCloud) ResolveDigest(ctx context.Context, ref string) (string, error) {

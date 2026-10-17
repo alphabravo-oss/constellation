@@ -9,8 +9,8 @@ package registry
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -74,7 +74,7 @@ func listCatalogV2(ctx context.Context, client *http.Client, kind string, cfg Co
 	endpoint := "https://" + host + "/v2/_catalog?n=500"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return nil, err
+		return nil, errors.New("registry: invalid request endpoint")
 	}
 	switch {
 	case strings.TrimSpace(cfg.Token) != "":
@@ -86,8 +86,10 @@ func listCatalogV2(ctx context.Context, client *http.Client, kind string, cfg Co
 	if err != nil {
 		return nil, fmt.Errorf("%s: catalog: %w", kind, err)
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	body, readErr := readRegistryPage(resp, 8<<20)
+	if readErr != nil {
+		return nil, fmt.Errorf("registry: read response: %w", readErr)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("%s: catalog status %d: %s", kind, resp.StatusCode, strings.TrimSpace(string(body)))
 	}

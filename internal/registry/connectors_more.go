@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -45,14 +44,19 @@ func (a *ArtifactRegistry) ListImages(ctx context.Context) ([]Image, error) {
 	}
 	url := fmt.Sprintf("https://artifactregistry.googleapis.com/v1/%s/dockerImages?pageSize=200",
 		strings.TrimPrefix(a.cfg.Endpoint, "/"))
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, errors.New("registry: invalid list request endpoint")
+	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := a.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("artifact-registry: %w", err)
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	body, readErr := readRegistryPage(resp, 4<<20)
+	if readErr != nil {
+		return nil, fmt.Errorf("registry: read response: %w", readErr)
+	}
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("artifact-registry: status %d: %s", resp.StatusCode, body)
 	}
@@ -112,14 +116,19 @@ func (a *ACR) ListImages(ctx context.Context) ([]Image, error) {
 	}
 	// v2 catalog endpoint — ACR supports it natively.
 	url := fmt.Sprintf("https://%s/v2/_catalog?n=500", a.cfg.Endpoint)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, errors.New("registry: invalid list request endpoint")
+	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := a.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("acr: %w", err)
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	body, readErr := readRegistryPage(resp, 4<<20)
+	if readErr != nil {
+		return nil, fmt.Errorf("registry: read response: %w", readErr)
+	}
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("acr: status %d", resp.StatusCode)
 	}
@@ -171,14 +180,19 @@ func (q *Quay) ListImages(ctx context.Context) ([]Image, error) {
 	if q.cfg.Username != "" {
 		endpoint += "&namespace=" + url.QueryEscape(q.cfg.Username)
 	}
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, errors.New("registry: invalid list request endpoint")
+	}
 	req.Header.Set("Authorization", "Bearer "+q.cfg.Token)
 	resp, err := q.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("quay: %w", err)
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	body, readErr := readRegistryPage(resp, 4<<20)
+	if readErr != nil {
+		return nil, fmt.Errorf("registry: read response: %w", readErr)
+	}
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("quay: status %d", resp.StatusCode)
 	}
@@ -425,8 +439,10 @@ func (g *GitLab) repoTags(ctx context.Context, base string, id int) []string {
 	if err != nil {
 		return nil
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	body, readErr := readRegistryPage(resp, 4<<20)
+	if readErr != nil {
+		return nil
+	}
 	if resp.StatusCode != 200 {
 		return nil
 	}
@@ -520,7 +536,7 @@ func (j *JFrog) ListImages(ctx context.Context) ([]Image, error) {
 func (j *JFrog) get(ctx context.Context, u string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return nil, err
+		return nil, errors.New("registry: invalid request endpoint")
 	}
 	req.Header.Set("Accept", "application/json")
 	if j.cfg.Token != "" {
@@ -536,8 +552,10 @@ func (j *JFrog) get(ctx context.Context, u string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("jfrog: %w", err)
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	body, readErr := readRegistryPage(resp, 4<<20)
+	if readErr != nil {
+		return nil, fmt.Errorf("registry: read response: %w", readErr)
+	}
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("jfrog: status %d", resp.StatusCode)
 	}

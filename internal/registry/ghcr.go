@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -37,7 +36,7 @@ func (g *GHCR) ListImages(ctx context.Context) ([]Image, error) {
 	url := fmt.Sprintf("https://api.github.com/users/%s/packages?package_type=container&per_page=100", owner)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return nil, errors.New("registry: invalid request endpoint")
 	}
 	req.Header.Set("Authorization", "Bearer "+g.cfg.Token)
 	req.Header.Set("Accept", "application/vnd.github+json")
@@ -46,8 +45,10 @@ func (g *GHCR) ListImages(ctx context.Context) ([]Image, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ghcr: list: %w", err)
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	body, readErr := readRegistryPage(resp, 4<<20)
+	if readErr != nil {
+		return nil, fmt.Errorf("registry: read response: %w", readErr)
+	}
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("ghcr: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}

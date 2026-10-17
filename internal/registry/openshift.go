@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -68,7 +67,7 @@ func (r *OpenShift) ListImages(ctx context.Context) ([]Image, error) {
 	endpoint := "https://" + host + "/v2/_catalog?n=500"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return nil, err
+		return nil, errors.New("registry: invalid request endpoint")
 	}
 	if err := r.setAuth(req); err != nil {
 		return nil, err
@@ -77,8 +76,10 @@ func (r *OpenShift) ListImages(ctx context.Context) ([]Image, error) {
 	if err != nil {
 		return nil, fmt.Errorf("openshift: catalog: %w", err)
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	body, readErr := readRegistryPage(resp, 8<<20)
+	if readErr != nil {
+		return nil, fmt.Errorf("registry: read response: %w", readErr)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("openshift: catalog status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
