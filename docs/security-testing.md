@@ -1482,3 +1482,31 @@ with `QUALIFIED-SHA256SUMS`
 (SHA256 `f180065c690055b0c56fb0882e5534a1b1667d356037905742ad2b3348b21bf6`).
 Combined binaries/images and deployment remain pending; benchmark workers remain
 disabled on main. No parent CIS or enforcement acceptance item closes here.
+
+
+### CLI private file publication (2026-10-17, source qualified)
+
+Seven CLI outputs now use the existing atomic file writer through a pinned
+parent directory: four image formats, IaC SARIF, policy CRD export and API-token
+configuration. Completed files have mode 0600, existing parent modes remain
+unchanged, known final symlinks/nonregular destinations are rejected, and a
+completed artifact survives a later stdout failure. Parent identity checks detect
+observed replacement; they do not lock pathnames. Registration YAML and compliance
+export are separate remaining adoptions.
+
+Both affected packages pass 312 race/shuffle/count-two test executions and vet.
+Eight database-dependent skips (four identities repeated twice) must execute in
+the combined fresh-database qualification. Replaying the seven original writes
+compiles and fails the intended four top-level tests with twelve subtest failures.
+Configured lint falls from 16 to 10: six G306 findings removed. Raw diagnostic
+identity comparison includes the unchanged complexity-52 function rename and
+existing CRD complexity improving from 70 to 60; these remain disclosed debt.
+No suppressions or lint configuration changes were made.
+
+The reviewed eight-file handoff is
+`/tmp/constellation-cli-publication-877a1c2/FINAL-HANDOFF/FINAL-MANIFEST.json`
+(SHA256 `50c639ef53fc7dceeee65e2b7c8f5d9337c4b8168bc85f09c8422bb98a589ba0`),
+with sixteen verified handoff records. Minimum free space during final stages was
+46,774,669,312 bytes on root and 3,059,589,120 bytes on /tmp. Combined database
+qualification, binaries, images and deployment remain pending. Main remains on
+877a1c2 / Helm revision 84; no parent acceptance item closes here.

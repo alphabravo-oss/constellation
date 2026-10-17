@@ -19,6 +19,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/alphabravocompany/constellation/internal/scanner"
+	"github.com/alphabravocompany/constellation/internal/securefiles"
 	"github.com/alphabravocompany/constellation/pkg/policy/dsl"
 	"github.com/alphabravocompany/constellation/pkg/policy/eval"
 	"github.com/alphabravocompany/constellation/pkg/sarif"
@@ -78,15 +79,19 @@ func loadConfig() (*config, error) {
 	return &c, nil
 }
 
-func saveConfig(c *config) error {
-	if err := os.MkdirAll(filepath.Dir(configPath()), 0o700); err != nil {
+func saveConfig(ctx context.Context, c *config) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	path := configPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	b, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(configPath(), b, 0o600)
+	return securefiles.WritePath(ctx, path, b)
 }
 
 // ---- commands ----
@@ -116,7 +121,7 @@ func loginCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return saveConfig(&config{Server: server, Token: token})
+			return saveConfig(cmd.Context(), &config{Server: server, Token: token})
 		}}
 	cmd.Flags().StringVar(&server, "server", "http://localhost:8080", "Constellation server URL")
 	cmd.Flags().StringVar(&email, "email", "", "Email")
@@ -125,6 +130,12 @@ func loginCmd() *cobra.Command {
 }
 
 func imageCheckCmd() *cobra.Command {
+	return imageCheckWithScanner(func(ctx context.Context, ref string, opts scanner.ScanOptions) (*scanner.ScanResult, error) {
+		return scanner.NewDefault().Scan(ctx, ref, opts)
+	})
+}
+
+func imageCheckWithScanner(scan func(context.Context, string, scanner.ScanOptions) (*scanner.ScanResult, error)) *cobra.Command {
 	var (
 		failOn       string
 		sarifOut     string
@@ -147,8 +158,7 @@ finding meets or exceeds --fail-on severity.`,
 			ctx, cancel := context.WithTimeout(cmd.Context(), 20*time.Minute)
 			defer cancel()
 
-			agg := scanner.NewDefault()
-			res, err := agg.Scan(ctx, args[0], scanner.ScanOptions{
+			res, err := scan(ctx, args[0], scanner.ScanOptions{
 				Insecure: insecure,
 				Platform: platform,
 				Timeout:  15 * time.Minute,
@@ -163,7 +173,7 @@ finding meets or exceeds --fail-on severity.`,
 				if err != nil {
 					return err
 				}
-				if err := os.WriteFile(sarifOut, b, 0o644); err != nil {
+				if err := securefiles.WritePath(ctx, sarifOut, b); err != nil {
 					return err
 				}
 				if !quiet {
@@ -175,7 +185,7 @@ finding meets or exceeds --fail-on severity.`,
 				if err != nil {
 					return err
 				}
-				if err := os.WriteFile(jsonOut, b, 0o644); err != nil {
+				if err := securefiles.WritePath(ctx, jsonOut, b); err != nil {
 					return err
 				}
 				if !quiet {
@@ -188,7 +198,7 @@ finding meets or exceeds --fail-on severity.`,
 				if err != nil {
 					return err
 				}
-				if err := os.WriteFile(spdxOut, b, 0o644); err != nil {
+				if err := securefiles.WritePath(ctx, spdxOut, b); err != nil {
 					return err
 				}
 				if !quiet {
@@ -201,7 +211,7 @@ finding meets or exceeds --fail-on severity.`,
 				if err != nil {
 					return err
 				}
-				if err := os.WriteFile(cyclonedxOut, b, 0o644); err != nil {
+				if err := securefiles.WritePath(ctx, cyclonedxOut, b); err != nil {
 					return err
 				}
 				if !quiet {
@@ -329,6 +339,10 @@ func severityRank(s string) int {
 }
 
 func iacCheckCmd() *cobra.Command {
+	return iacCheckWithRunner(runCmd)
+}
+
+func iacCheckWithRunner(run func(context.Context, string, ...string) ([]byte, error)) *cobra.Command {
 	var sarifOut, failOn string
 	cmd := &cobra.Command{
 		Use:   "iac-check <path>",
@@ -341,12 +355,12 @@ func iacCheckCmd() *cobra.Command {
 			if sarifOut != "" {
 				format = "sarif"
 			}
-			out, err := runCmd(cmd.Context(), "trivy", "config", "--quiet", "--format", format, args[0])
+			out, err := run(cmd.Context(), "trivy", "config", "--quiet", "--format", format, args[0])
 			if err != nil {
 				return fmt.Errorf("trivy config: %w", err)
 			}
 			if sarifOut != "" {
-				if err := os.WriteFile(sarifOut, out, 0o644); err != nil {
+				if err := securefiles.WritePath(cmd.Context(), sarifOut, out); err != nil {
 					return err
 				}
 				output.println("wrote SARIF:", sarifOut)

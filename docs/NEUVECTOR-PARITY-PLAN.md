@@ -17,6 +17,11 @@ understand the result, and prove that the control is enforced. Constellation's
 stronger multi-tenant, CNI-native, evidence, and correlation features remain
 first-class.
 
+The CLI publication follow-up qualifies seven selected outputs through the shared
+atomic private-file writer (312 test passes, eight database-dependent skips,
+vet passed). Combined database tests and deployment are pending; registration
+YAML and compliance exports remain separate work. See `docs/security-testing.md`.
+
 ## Plan rules
 
 - This file owns status. Audits and assessments are evidence, not task trackers.

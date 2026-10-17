@@ -242,7 +242,7 @@ func resolveClient(ctx context.Context, serverOverride, email string) (*authedCl
 	if err != nil {
 		return nil, err
 	}
-	if err := saveConfig(&config{Server: server, Token: cli.token}); err != nil {
+	if err := saveConfig(ctx, &config{Server: server, Token: cli.token}); err != nil {
 		return nil, fmt.Errorf("save login: %w", err)
 	}
 	return cli, nil

@@ -62,7 +62,7 @@ func commandOutputFixture(t *testing.T, status int) *atomic.Int64 {
 	}))
 	t.Cleanup(server.Close)
 	t.Setenv("CONSTELLATION_CONFIG", filepath.Join(t.TempDir(), "config.json"))
-	if err := saveConfig(&config{Server: server.URL, Token: "fixture-auth"}); err != nil {
+	if err := saveConfig(t.Context(), &config{Server: server.URL, Token: "fixture-auth"}); err != nil {
 		t.Fatal(err)
 	}
 	return &requests
