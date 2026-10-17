@@ -75,6 +75,11 @@
       "type": "object",
       "additionalProperties": true,
       "properties": {
+        "execDryRun": {
+          "type": "boolean",
+          "title": "Execution enforcer dry run",
+          "description": "Optional override. When omitted, preserve the agent default. Explicit true and false are both supported."
+        },
         "enabled": { "type": "boolean", "title": "Enable the runtime agent", "default": true },
         "enforcement": {
           "type": "object",

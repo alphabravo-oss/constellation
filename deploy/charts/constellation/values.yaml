@@ -568,6 +568,10 @@ runtimeAgent:
     bytesPerStream: 268435456
   image: {}
   args: []
+  # Optional execution-enforcer dry-run override. Omission keeps the agent's
+  # existing default; explicit true prevents executable enforcement effects.
+  # Explicit false is supported and does not arm the other enforcement gates.
+  # execDryRun: true
   resources:
     limits:   { cpu: "1",    memory: 1Gi }
     requests: { cpu: 200m,   memory: 256Mi }

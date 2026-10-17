@@ -194,6 +194,10 @@ spec:
               value: "{{ if and (eq .Values.runtimeAgent.enforcement.mode "protect") .Values.runtimeAgent.enforcement.exec }}true{{ else }}false{{ end }}"
             - name: CONSTELLATION_EXEC_ENFORCER_MODE
               value: "{{ if and (eq .Values.runtimeAgent.enforcement.mode "protect") .Values.runtimeAgent.enforcement.exec }}enforce{{ else }}monitor{{ end }}"
+            {{- if hasKey .Values.runtimeAgent "execDryRun" }}
+            - name: CONSTELLATION_EXEC_ENFORCER_DRYRUN
+              value: {{ .Values.runtimeAgent.execDryRun | quote }}
+            {{- end }}
             # Inline (NFQUEUE) network enforcement — arms ONLY when mode=protect AND
             # enforcement.network=true. Per-workload: a pod goes inline only with the
             # dpi.constellation.alphabravo.io/enforce label. Fail-open (--queue-bypass).
