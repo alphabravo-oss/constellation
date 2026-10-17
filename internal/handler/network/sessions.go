@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
@@ -185,13 +186,28 @@ ON CONFLICT (org_id, cluster_id, node, id) DO UPDATE SET
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	h.writeSessionIngestResponse(w, r, tok.OrgID, clusterID, node, accepted)
+}
+
+func (h *Network) writeSessionIngestResponse(w http.ResponseWriter, r *http.Request, orgID, clusterID uuid.UUID, node string, accepted int) {
+	// The snapshot is already committed and can safely be replaced on retry. Read
+	// settings before consuming commands: a failed read must neither disable
+	// detection nor discard pending kills from the unsuccessful response.
+	weakTLS := false
+	err := h.db.Pool().QueryRow(r.Context(),
+		`SELECT weak_tls_enabled FROM dpi_threat_settings WHERE org_id = $1 AND cluster_id = $2`,
+		orgID, clusterID).Scan(&weakTLS)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "read threat settings failed"})
+		return
+	}
 	// Deliver + consume pending session-kill requests for this node (NV session-kill).
 	// The agent issues dp ctrl_clear_session for each id it gets back.
 	kills := []int64{}
 	if kr, err := h.db.Pool().Query(r.Context(),
 		`DELETE FROM network_session_kills WHERE org_id = $1 AND cluster_id = $2 AND node = $3
  AND requested_at >= statement_timestamp() - interval '5 minutes' RETURNING session_id`,
-		tok.OrgID, clusterID, node); err == nil {
+		orgID, clusterID, node); err == nil {
 		defer kr.Close()
 		for kr.Next() {
 			var id int64
@@ -200,11 +216,6 @@ ON CONFLICT (org_id, cluster_id, node, id) DO UPDATE SET
 			}
 		}
 	}
-	// Carry the cluster's DPI toggle back so the agent applies it live via dp ctrl_set_threat.
-	weakTLS := false
-	_ = h.db.Pool().QueryRow(r.Context(),
-		`SELECT weak_tls_enabled FROM dpi_threat_settings WHERE org_id = $1 AND cluster_id = $2`,
-		tok.OrgID, clusterID).Scan(&weakTLS)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"accepted": accepted, "kill": kills, "weak_tls": weakTLS})
 }
 
