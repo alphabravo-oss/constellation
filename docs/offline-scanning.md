@@ -417,3 +417,11 @@ supply `--registry-id`, `--job-id`, `--control-plane`, and the scanner token thr
 it does not claim, renew or complete the job. Queue mode manages those steps.
 Upgrade scanners before enabling this API contract: older workers omit `job_id`
 and their configured-registry scans will fail credential authorization.
+
+For standalone `constellation-scanner` output, use `--ref` with `--json`,
+`--sarif`, or both. SARIF uses the shared SARIF2.1.0 exporter. Output directories
+must already exist, and the two formats must use different destinations.
+Completed files are published atomically with0600 permissions; destination
+symlinks and nonregular files are rejected. Encoding, writing or cancellation
+failures return a nonzero exit without logging scan completion. Publication is
+atomic per file: if the second output fails, the first completed report remains.

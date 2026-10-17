@@ -817,6 +817,24 @@ Combined source/evidence seal:
 `/tmp/constellation-backup-cli-service-bound/FINAL-SEAL.json`
 (SHA256 `b1859c18e464706cf9a3563c09f4f0d51a9aba273c546f8adfb1b85a619c99ab`).
 
+Source `0f33141` makes standalone scanner output truthful: --sarif writes the
+shared SARIF2.1.0 representation, and JSON/SARIF publication must finish before
+scan completion is logged. Output flags require --ref; conflicting destinations
+are rejected. The existing pinned-root private atomic writer preserves prior
+reports on encoding/write/cancellation failure. Parents must already exist and
+retain their permissions; publication is per file, so an earlier complete report
+remains when a later output fails.
+
+The scanner, shared writer and SARIF packages pass204 repeated race/shuffle test
+executions with no skips. Vet passes. Scoped lint44→43 removes the permissive
+output-file finding; existing main statement complexity moves67→68 and nested
+complexity7→6. No new issue location remains. One test-only G204 annotation
+explains execution of the current os.Executable test binary with fixed arguments;
+no production suppression was added. Original lint attempts are retained.
+The source is committed but not deployed. Evidence:
+`/tmp/constellation-scanner-output-ef0d7a9/evidence-manifest.json`
+(SHA256 `f2e3da18c458a0c7c64e4074a8a5cb2798ad7f4d99bc5aed79d781a5a0541a15`).
+
 
 ## October 12 implementation continuation
 
