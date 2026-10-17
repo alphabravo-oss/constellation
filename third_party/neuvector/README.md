@@ -78,6 +78,17 @@ the prior source if the build gate fails.
   This is a narrow downstream correctness backport, not a claim of upstream
   acceptance or a diagnosis of the separate Protect packet-evidence gap.
 
+- `011-connection-report-wall-time.patch` (2026-10-17): derive connection
+  observation timestamps from checked wall time minus the existing coarse Idle
+  duration. A native packet diagnostic observed a fresh matching allow report
+  whose startup-relative timestamp trailed the probe's wall second. Only the
+  two report timestamp paths change; timeout/Idle processing, debug/rate clocks,
+  aggregate keys/counters, preserved FirstSeenAt and latest-action selection stay
+  unchanged. Nonzero Idle still gives an approximate last-activity time, not an
+  exact historical packet timestamp. Invalid or unrepresentable wall time fails
+  before any aggregate or rate-counter mutation. Actual reporter boundary and
+  negative-control tests live in `tests/native-policy/connect_report.c`.
+
 New patches must use vendor-relative `a/` and `b/` paths (for example
 `a/dp/ctrl.c`). Verify forward/reverse/forward application, declared-patch clean
 `--diff`, undeclared drift detection, and repeated sync before review.

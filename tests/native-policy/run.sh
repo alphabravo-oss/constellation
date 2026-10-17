@@ -11,6 +11,7 @@ case "${1:-matcher}" in
   connect) binary=/native-connect-report-standard ;;
   connect-pattern) binary=/native-connect-report-pattern ;;
   connect-unpatched) binary=/native-connect-report-unpatched ;;
+  connect-wall-unpatched) binary=/native-connect-report-wall-unpatched ;;
   *) echo 'Unknown native acceptance entry point.' >&2; exit 2 ;;
 esac
 exec env -u DOCKER_HOST -u DOCKER_CONTEXT -u DOCKER_TLS -u DOCKER_TLS_VERIFY -u DOCKER_CERT_PATH \

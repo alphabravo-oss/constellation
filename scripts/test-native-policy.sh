@@ -59,6 +59,7 @@ export CONSTELLATION_NATIVE_POLICY_IMAGE_ID="$image_id"
 for variant in connect connect-pattern; do
   bash tests/native-policy/run.sh "$variant" >"$artifact_dir/$variant.log" 2>&1
   grep -Fx 'PASS 97 actual dp_ctrl_connect_report assertions' "$artifact_dir/$variant.log" >/dev/null
+  grep -Fx 'PASS checked report wall-clock boundaries idle failures and mutation safety' "$artifact_dir/$variant.log" >/dev/null
 done
 if bash tests/native-policy/run.sh connect-unpatched >"$artifact_dir/connect-unpatched.log" 2>&1; then
   echo 'Unpatched native reporter unexpectedly passed its deterministic negative control.' >&2
@@ -68,6 +69,18 @@ else
   if [[ "$negative_status" != 1 ]] || ! grep -Fx \
     'identical HTTP1001 expected buckets=1 actual=2' "$artifact_dir/connect-unpatched.log" >/dev/null; then
     echo 'Unpatched negative control failed for an unexpected reason.' >&2
+    exit 1
+  fi
+fi
+if bash tests/native-policy/run.sh connect-wall-unpatched >"$artifact_dir/connect-wall-unpatched.log" 2>&1; then
+  echo 'Original report clock unexpectedly passed its deterministic boundary negative.' >&2
+  exit 1
+else
+  negative_status=$?
+  if [[ "$negative_status" != 1 ]] || ! grep -Fx \
+    'wall boundary expected126 actual125' "$artifact_dir/connect-wall-unpatched.log" >/dev/null || \
+    ! grep -Fx 'PASS 97 actual dp_ctrl_connect_report assertions' "$artifact_dir/connect-wall-unpatched.log" >/dev/null; then
+    echo 'Original report-clock negative failed for an unexpected reason.' >&2
     exit 1
   fi
 fi

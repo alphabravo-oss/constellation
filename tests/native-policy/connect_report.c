@@ -23,6 +23,15 @@ extern void dp_rate_limiter_reset(dp_rate_limter_t *, uint16_t, uint16_t);
 extern time_t g_start_time;
 extern uint32_t g_seconds;
 static unsigned assertions;
+static time_t wall_now;
+
+// Link-time wrapping is test-only. Production calls the actual time(3).
+time_t __wrap_time(time_t *destination)
+{
+    if (destination != NULL) *destination = wall_now;
+    return wall_now;
+}
+
 #define REQUIRE(expr, name) do { assertions++; if (!(expr)) { \
     fprintf(stderr, "FAIL %s at line %d\n", name, __LINE__); exit(1); } } while (0)
 
@@ -49,7 +58,7 @@ static void reset(void)
 {
     dp_thread_data_t *t = &g_dp_thread_data[0];
     memset(t, 0, sizeof(*t));
-    g_start_time = 100; g_seconds = 0;
+    g_start_time = 100; g_seconds = 0; wall_now = 100;
     for (unsigned i = 0; i < 2; i++) {
         REQUIRE(rcu_map_init(&t->conn4_map[i], 16, offsetof(test_node_t, node),
                             conn4_match, conn4_hash) != NULL, "actual map initialize");
@@ -112,7 +121,7 @@ static void folding(void)
     DPMsgSession s = session();
     DPMonitorMetric m = {.EpSessCurIn = 1, .EpSessIn12 = 2, .EpByteIn12 = 3};
     report(&s, &m, 1, 0);
-    g_seconds = 5;
+    g_seconds = 5; wall_now = 105;
     s.ClientPort++; // Existing aggregate intentionally ignores TCP client port.
     s.PolicyAction = DP_POLICY_ACTION_DENY;
     s.Severity = 3; s.ThreatID = 77;
@@ -187,7 +196,7 @@ static void map_swap(void)
     DPMsgSession s = session();
     report(&s, NULL, 1, 0);
     g_dp_thread_data[0].conn4_map_cur = 1;
-    g_seconds = 7;
+    g_seconds = 7; wall_now = 107;
     report(&s, NULL, 1, 0);
     DPMsgConnect c = lookup(&s);
     REQUIRE(c.FirstSeenAt == 107 && c.Sessions == 1, "new batch is not cumulative old map state");
@@ -197,12 +206,109 @@ static void map_swap(void)
     puts("PASS independent selected map/batch identity");
 }
 
+static void wall_clock_boundaries(void)
+{
+    reset();
+    DPMsgSession s = session();
+    // Coarse timer has not ticked yet, but a fresh packet already arrived in
+    // the next wall-clock second. The old reporter emits125 instead of126.
+    g_seconds = 25; wall_now = 126;
+    REQUIRE(get_current_time() == 125, "coarse timer remains unchanged");
+    report(&s, NULL, 1, 0);
+    DPMsgConnect c = lookup(&s);
+    if (c.FirstSeenAt != 126 || c.LastSeenAt != 126) {
+        fprintf(stderr, "wall boundary expected126 actual%u\n", c.FirstSeenAt);
+    }
+    REQUIRE(c.FirstSeenAt == 126 && c.LastSeenAt == 126,
+            "fresh observation uses wall second despite unticked coarse clock");
+    wall_now = 127; s.PolicyAction = DP_POLICY_ACTION_DENY;
+    report(&s, NULL, 1, 1);
+    c = lookup(&s);
+    REQUIRE(c.FirstSeenAt == 126 && c.LastSeenAt == 127 &&
+            c.PolicyAction == DP_POLICY_ACTION_DENY && c.Sessions == 2,
+            "merged observation uses wall time and preserves first/action/count semantics");
+    wall_now = 140; s.ServerPort++; s.Idle = 3;
+    report(&s, NULL, 1, 1);
+    c = lookup(&s);
+    REQUIRE(c.FirstSeenAt == 137 && c.LastSeenAt == 137,
+            "nonzero coarse Idle remains subtracted from wall time");
+    REQUIRE(get_current_time() == 125, "reporting never advances timer clock");
+    cleanup();
+}
+
+static void clock_failures_do_not_mutate(void)
+{
+    reset();
+    DPMsgSession s = session();
+    report(&s, NULL, 1, 0);
+    DPMsgConnect original = lookup(&s);
+    dp_thread_data_t *thread = &g_dp_thread_data[0];
+    dp_rate_limter_t limiter = thread->conn4_rl;
+    uint32_t count = thread->conn4_map_cnt[0];
+    struct { time_t now; uint16_t idle; } invalid[] = {
+        {-1, 0}, {-2, 0}, {2, 3}, {(time_t)UINT32_MAX + 1, 0},
+    };
+    for (unsigned i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++) {
+        wall_now = invalid[i].now; s.Idle = invalid[i].idle;
+        s.ClientBytes = 999; s.PolicyAction = DP_POLICY_ACTION_DENY;
+        rcu_read_lock();
+        int result = dp_ctrl_connect_report(&s, NULL, 1, 1);
+        rcu_read_unlock();
+        REQUIRE(result == -1, "bad wall time rejected");
+        DPMsgConnect unchanged = lookup(&s);
+        REQUIRE(memcmp(&original, &unchanged, sizeof(original)) == 0,
+                "bad clock never mutates existing aggregate");
+        REQUIRE(thread->conn4_map_cnt[0] == count &&
+                memcmp(&limiter, &thread->conn4_rl, sizeof(limiter)) == 0,
+                "bad clock never changes map count or rate limiter");
+        // Also reject a new tuple without allocating a bucket or rate token.
+        s.ServerPort++;
+        rcu_read_lock();
+        result = dp_ctrl_connect_report(&s, NULL, 1, 1);
+        rcu_read_unlock();
+        REQUIRE(result == -1 && thread->conn4_map_cnt[0] == count &&
+                memcmp(&limiter, &thread->conn4_rl, sizeof(limiter)) == 0,
+                "bad clock cannot create new aggregate");
+        s.ServerPort--;
+    }
+    cleanup();
+}
+
+static void wall_clock_wire_bounds(void)
+{
+    reset();
+    DPMsgSession s = session();
+    wall_now = 0;
+    report(&s, NULL, 1, 0);
+    DPMsgConnect c = lookup(&s);
+    REQUIRE(c.FirstSeenAt == 0 && c.LastSeenAt == 0,
+            "representable Unix epoch zero remains valid");
+    wall_now = (time_t)UINT32_MAX;
+    s.ServerPort++;
+    report(&s, NULL, 1, 0);
+    c = lookup(&s);
+    REQUIRE(c.FirstSeenAt == UINT32_MAX && c.LastSeenAt == UINT32_MAX,
+            "maximum representable wall timestamp remains valid");
+    s.ServerPort++; s.Idle = UINT16_MAX;
+    report(&s, NULL, 1, 0);
+    c = lookup(&s);
+    REQUIRE(c.FirstSeenAt == UINT32_MAX - UINT16_MAX &&
+            c.LastSeenAt == UINT32_MAX - UINT16_MAX,
+            "maximum wire Idle remains subtracted without truncation");
+    cleanup();
+}
+
 int main(void)
 {
     g_debug_levels = 0; THREAD_ID = 0;
     rcu_register_thread();
     folding(); applications(); dimensions(); map_swap();
-    rcu_unregister_thread();
+    // Preserve the existing97assertions and their original expected results.
     printf("PASS %u actual dp_ctrl_connect_report assertions\n", assertions);
+    unsigned prior = assertions;
+    wall_clock_boundaries(); clock_failures_do_not_mutate(); wall_clock_wire_bounds();
+    printf("PASS %u report wall-clock assertions\n", assertions - prior);
+    puts("PASS checked report wall-clock boundaries idle failures and mutation safety");
+    rcu_unregister_thread();
     return 0;
 }

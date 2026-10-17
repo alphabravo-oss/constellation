@@ -38,7 +38,7 @@ that consumes the wire formats defined here).
 
 Modifications
 -------------
-Two declared downstream patches are retained (recorded 2026-10-17):
+Three declared downstream patches are retained (recorded 2026-10-17):
 - local-patches/000-existing-threat-controls.patch records only the threat-toggle
   IPC and threat defaults already present in snapshot 6a8057c; it adds no behavior
   relative to that snapshot and corrects the prior pristine-mirror claim.
@@ -46,6 +46,12 @@ Two declared downstream patches are retained (recorded 2026-10-17):
   connection lookup correctness fix.
 It zero-initializes conn4_key_t and sets application from DPMsgSession in
 DP IPv4 connection reporting; upstream conn4_match already compares this field.
+- local-patches/011-connection-report-wall-time.patch is the reviewed report-only
+  timestamp correction: use checked wall time minus existing coarse Idle rather
+  than the startup-relative timer. Native directed-packet diagnostics observed
+  the one-second timestamp boundary failure; the existing strict matcher stays
+  unchanged. Nonzero Idle remains an approximate last-activity duration. No
+  timeout, rate/debug clock, aggregate identity or enforcement semantics change.
 All other upstream source remains unchanged. The patch records the original
 upstream revision and the actual-native regression test; it is not represented
 as an upstream release. Build artifacts (.objs/, .deps/, *.o, *.d,

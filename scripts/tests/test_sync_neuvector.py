@@ -9,6 +9,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 PATCH_NAME = "010-connection-lookup-application.patch"
+PATCH_NAMES = (PATCH_NAME, "011-connection-report-wall-time.patch")
 
 
 class VendorSyncTest(unittest.TestCase):
@@ -25,8 +26,10 @@ class VendorSyncTest(unittest.TestCase):
         for name in ["base.h", "defs.h", "LICENSE"]:
             shutil.copyfile(ROOT / "third_party/neuvector" / name, self.upstream / name)
         shutil.copyfile(ROOT / "third_party/neuvector/dp/ctrl.c", self.upstream / "dp/ctrl.c")
-        patch = (ROOT / "third_party/neuvector/local-patches" / PATCH_NAME).read_bytes()
-        self.command(["patch", "-R", "-p1", "--batch", "--fuzz=0", "--no-backup-if-mismatch"], self.upstream, patch)
+        declared = {name: (ROOT / "third_party/neuvector/local-patches" / name).read_bytes()
+                    for name in PATCH_NAMES}
+        for name in reversed(PATCH_NAMES):
+            self.command(["patch", "-R", "-p1", "--batch", "--fuzz=0", "--no-backup-if-mismatch"], self.upstream, declared[name])
         self.command(["git", "init", "-q"], self.upstream)
         self.command(["git", "add", "."], self.upstream)
         self.command(["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
@@ -38,8 +41,9 @@ class VendorSyncTest(unittest.TestCase):
         (self.vendor / "NOTICE").write_text(f"Source rev:   {self.revision}\nSource tag:   fixture\nVendored at:  2026-10-17\n")
         self.patches = self.vendor / "local-patches"
         self.patches.mkdir()
-        (self.patches / PATCH_NAME).write_bytes(patch)
-        self.command(["patch", "-p1", "--batch", "--fuzz=0", "--no-backup-if-mismatch"], self.vendor, patch)
+        for name in PATCH_NAMES:
+            (self.patches / name).write_bytes(declared[name])
+            self.command(["patch", "-p1", "--batch", "--fuzz=0", "--no-backup-if-mismatch"], self.vendor, declared[name])
         self.control = self.vendor / "dp/ctrl.c"
 
     def tearDown(self):
@@ -54,11 +58,12 @@ class VendorSyncTest(unittest.TestCase):
                     for p in target.rglob("*") if p.is_file()}
         expected = snapshot()
         patch_paths = sorted((target / "local-patches").glob("*.patch"))
-        self.assertEqual(len(patch_paths), 2)
+        self.assertEqual([p.name for p in patch_paths], ["000-existing-threat-controls.patch", *PATCH_NAMES])
         for path in reversed(patch_paths):
             self.command(["patch", "-R", "-p1", "--batch", "--fuzz=0", "--no-backup-if-mismatch"], target, path.read_bytes())
         self.assertNotIn(b"key.application = log->Application;", (target / "dp/ctrl.c").read_bytes())
         self.assertNotIn(b"ctrl_set_threat", (target / "dp/ctrl.c").read_bytes())
+        self.assertNotIn(b"dp_ctrl_connect_timestamp", (target / "dp/ctrl.c").read_bytes())
         for path in patch_paths:
             self.command(["patch", "-p1", "--batch", "--fuzz=0", "--no-backup-if-mismatch"], target, path.read_bytes())
         self.assertEqual(snapshot(), expected)
@@ -86,7 +91,7 @@ class VendorSyncTest(unittest.TestCase):
         self.sync()
         self.sync("--diff")
         self.assertEqual(source, self.control.read_bytes())
-        self.assertEqual([p.name for p in self.patches.iterdir()], [PATCH_NAME])
+        self.assertEqual(sorted(p.name for p in self.patches.iterdir()), list(PATCH_NAMES))
 
     def test_undeclared_drift_is_detected_and_preserved_after_repeated_sync(self):
         with self.control.open("a") as f:
@@ -104,7 +109,7 @@ class VendorSyncTest(unittest.TestCase):
         self.sync()
         self.sync("--diff")
         self.assertEqual(source, self.control.read_bytes())
-        self.assertEqual(len(list(self.patches.glob("*.patch"))), 2)
+        self.assertEqual(len(list(self.patches.glob("*.patch"))), len(PATCH_NAMES) + 1)
 
     def test_invalid_declared_patch_fails_without_replacing_source(self):
         (self.patches / "020-invalid.patch").write_text("not a patch\n")

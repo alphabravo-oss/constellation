@@ -23,6 +23,24 @@ stack values produces a deterministic failure (two HTTP1001 buckets instead of
 one). The negative compiler option is not used by the standard binary. It does
 not explain or waive the separate Protect packet-evidence failure.
 
+A test-only link-time `time()` wrapper supplies a wall clock independently of
+those coarse timer globals. Existing 97 regression expectations are retained;
+advancing both clocks together preserves their original event-time intentions.
+Additional actual-reporter tests hold coarse time125 while wall time126 receives
+an idle-zero report, exercise both new and merged observations and nonzero Idle,
+and reject failed/negative/underflow/out-of-wire-range clock values before map
+or rate-counter mutation. Epoch zero, maximum uint32 wall time and uint16 Idle
+remain representable. Only the test executable wraps time; the daemon calls the
+real wall clock.
+
+A second deterministic negative reverses only the wall-report patch while
+retaining the application-key fix. It must pass the original97assertions and
+then fail with exact expected126/actual125 at the clock boundary. The original
+application-key negative remains required. Timestamp reporting still subtracts
+coarse Idle, so nonzero-idle/end reports are approximate last activity, not exact
+historical packet wall timestamps. This native proof does not replace a newly
+qualified strict24probe CNI packet run with the resulting runtime image.
+
 The first Go test runs the production runtime-policy sync worker against an
 owned HTTP fixture. The second uses the production Go IPC encoder over a
 private Unix datagram socket and feeds those exact datagrams to the native

@@ -4,6 +4,7 @@ set -euo pipefail
 cd /src
 native_flags='-fno-inline -fno-ipa-cp -fno-ipa-sra -ffunction-sections -fdata-sections'
 patch_file=/src/third_party/neuvector/local-patches/010-connection-lookup-application.patch
+wall_patch=/src/third_party/neuvector/local-patches/011-connection-report-wall-time.patch
 fixed_source="$(mktemp)"
 cp third_party/neuvector/dp/ctrl.c "$fixed_source"
 trap 'cp "$fixed_source" /src/third_party/neuvector/dp/ctrl.c; rm -f "$fixed_source"' EXIT
@@ -16,12 +17,12 @@ compile_entrypoint() {
     gcc -Wall -Wextra -Werror -Os -Ithird_party/neuvector/dp \
         -include third_party/neuvector/base.h -include third_party/neuvector/defs.h \
         tests/native-policy/connect_report.c "$directory"/*.o \
-        -o "/native-connect-report-${variant}" -Wl,--gc-sections \
+        -o "/native-connect-report-${variant}" -Wl,--gc-sections -Wl,--wrap=time \
         -lpcap -lpcre2-8 -ljansson -ljemalloc -pthread -lurcu -lurcu-cds \
         -lrt -lstdc++ -lm -lnetfilter_queue -lhs
     sha256sum "$directory"/*.o > "/native-connect-${variant}-objects.sha256"
 }
-for variant in standard unpatched pattern; do
+for variant in standard unpatched pattern wall-unpatched; do
     mkdir "/native-connect-${variant}-objects"
     cp /native-objects/*.o "/native-connect-${variant}-objects/"
 done
@@ -40,6 +41,15 @@ make -B -C third_party/neuvector/dp .objs/ctrl.o \
     EXTRA_CFLAGS="$native_flags -ftrivial-auto-var-init=pattern"
 cp third_party/neuvector/dp/.objs/ctrl.o /native-connect-pattern-objects/ctrl.o
 compile_entrypoint pattern
+# Keep the application-key fix in place while reversing only wall timestamps.
+# This negative must fail the actual reporter's unticked-clock boundary check.
+cp "$fixed_source" third_party/neuvector/dp/ctrl.c
+(cd third_party/neuvector && patch -R -p1 --batch --fuzz=0 --no-backup-if-mismatch --silent < "$wall_patch")
+sha256sum third_party/neuvector/dp/ctrl.c > /native-connect-wall-unpatched-source.sha256
+make -B -C third_party/neuvector/dp .objs/ctrl.o EXTRA_CFLAGS="$native_flags"
+cp third_party/neuvector/dp/.objs/ctrl.o /native-connect-wall-unpatched-objects/ctrl.o
+compile_entrypoint wall-unpatched
+cp "$fixed_source" third_party/neuvector/dp/ctrl.c
 sha256sum -c /native-connect-fixed-source.sha256
 sha256sum /native-connect-report-* >> /native-harness.sha256
 gcc --version > /native-compiler.txt
