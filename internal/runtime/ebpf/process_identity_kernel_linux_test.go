@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"math"
 	"os"
 	"os/exec"
 	"runtime"
@@ -49,10 +48,11 @@ func TestProcessIdentityRealKernelLifecycle(t *testing.T) {
 	}
 	child, input, ready := startProcessIdentityKernelChild(t, ctx)
 	defer func() { _ = input.Close() }()
-	if child.Process.Pid <= 1 || child.Process.Pid > math.MaxUint32 {
+	childPID, err := strconv.ParseUint(strconv.Itoa(child.Process.Pid), 10, 32)
+	if err != nil || childPID <= 1 {
 		t.Fatal("invalid owned child PID")
 	}
-	pid := uint32(child.Process.Pid)
+	pid := uint32(childPID)
 	event := awaitKernelProcessEvent(t, ctx, events, pid)
 	if event.StartBootNS == 0 || event.CgroupID == 0 {
 		t.Fatalf("missing real kernel source identity: %+v", event)
