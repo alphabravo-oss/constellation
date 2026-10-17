@@ -475,8 +475,8 @@ rules before allocation/IPC; rejected candidates preserve prior confirmed source
 and report uncertainty. Agent/DP race qualification passes 796 executions; two
 DB-gated skips are separately resolved by fresh180 replay tests. Real native
 full-wrapper/keyed acceptance passes 70 assertions twice, including negative
-controls. These are controlled tuple tests; the new strict 24-probe Flannel run
-is pending. Evidence: `/tmp/constellation-terminal-default-638ca7e/`.
+controls. These controlled tuple tests precede the actual Flannel results below.
+Evidence: `/tmp/constellation-terminal-default-638ca7e/`.
 
 PCAP persistence review found no existing main capture records/files, but expiry
 metadata had no production cleanup caller. Durable storage enablement is held
@@ -505,7 +505,11 @@ Further source fixes are committed through `7d54c3d`, not yet deployed:
 - Registry `7d54c3d` rejects Harbor/GitLab page read/close errors and overflow,
   including failures after valid-looking JSON or on a later page. Invalid request
   errors omit endpoint credentials/query data. Ninety executions pass; two lint
-  findings are removed. Other connector read seams are separately under review.
+  findings are removed. Follow-up `b862c65` checks twelve remaining enumeration/authentication
+  reads across ten primary connectors and six auth flows. Its 240 race/shuffle
+  executions pass without skips; 48 unpatched negative controls fail as expected.
+  Failed tokens are not cached; GitLab tags/JFrog per-repository fallback is preserved.
+  Scoped registry lint drops from 30 to 19 with no additions.
 - Retention `8e67508` adds explicit chart-gated, leader-cancelable cleanup on a
   pinned durable root: 100 candidates per cycle, fair UUID cursor, exact expired
   row locking and removal-failure retry. Missing/replaced roots retain receipts;
@@ -516,7 +520,15 @@ Further source fixes are committed through `7d54c3d`, not yet deployed:
   `5328083` copies the port list before validation. The new regression fails on
   original source; the fixed whole netpolicy package passes ten race/shuffle
   repetitions. Existing caller normalization/audit behavior is preserved. The
-  combined candidate is undergoing full fresh180 qualification before image build.
+  combined `7d54c3d` candidate passes 2,926 fresh180 executions without skips
+  across runtime/server/handler/auth/registry/netpolicy. The exact API/CLI image
+  passes actual PVC replacement and leader-driven expiry acceptance: identical
+  uploaded bytes/hash survive a changed API Pod on the same claim; the elected
+  one-minute background loop removes two expired receipts and the expired file
+  while preserving unexpired evidence. Private permissions and same-session
+  access pass. Owned namespace/PVC/PV/tunnel cleanup is complete. Evidence:
+  `/tmp/pcap-retention-pvc-proof/evidence-manifest.json`. Main enablement awaits
+  a reviewed rollout; this does not qualify real capture, RWX or node failure.
 
 The first real Flannel run with exact `6a8057c` passes four baseline and all four
 monitor probes, including unmatched violation/RID0 without temporary-open grace.
@@ -526,6 +538,39 @@ barrier. No protect-mode pass or wrong-action conclusion is claimed. Native
 aggregate timestamp and clock-phase semantics are under investigation; bounded
 diagnostic work does not relax acceptance. All owned resources are removed.
 Evidence: `/tmp/constellation-flannel-policy-terminal6a8057c/` (54 sealed files).
+
+The diagnostic-only follow-up retains exact `6a8057c` production code and passes
+all 24 real packet probes: five denied requests, 19 exact server observations
+and 16 fresh native-verdict probes across monitor, protect, scoped policy change
+and owned-native-process stopped bypass. The Python verifier initially compared
+Go's base64 MAC bytes with a colon-form endpoint string and rejected the proof.
+Fix `b4fb38d` decodes exactly six bytes; malformed/foreign MAC, stale timestamp,
+wrong source, missing verdict/queue and denied-server controls remain rejected.
+Independent revalidation of byte-identical evidence passes; the original exit1
+is preserved. All nonce-owned Docker resources are removed. This qualifies only
+the disposable single-node Flannel fixture, not other CNIs, BPF, HA or node loss.
+The prior missing-event run remains a real failure; this pass does not establish
+its cause. Evidence: `/tmp/constellation-flannel-mac-revalidation/` and original
+52-file seal `bd7a0c26ce2b4246008f92fcb55976a3f0add9152ff98de398a2c6e2543da9cb`.
+
+
+Hosted run `39016297844` at `f309982` reports 172 gosec findings. The quality
+job stops before lint because the new chart test imports undeclared PyYAML.
+`e4a8d7f` installs PyYAML 6.0.3 and Helm 3.21.0 explicitly and audits the Python
+test dependency. All 110 tooling tests pass in an isolated local Python 3.14.4
+environment. Hosted `39016927220` then passes the pinned Python 3.12.14 tooling,
+endpoint/plan, format, shell and workflow checks. Quality reaches the lint gate
+and reports 1,515 findings; gosec remains 172. Main stays on Helm81; these source
+checks do not establish release completion.
+
+A local-only history candidate from `e4a8d7f` preserves 585 commits/44 local refs
+outside four exact redacted credential blobs and one explicitly removed invalidated
+signature. Eight synthetic tests and all-object secret-removal checks pass; private
+original backups are separate. Unmodified full-history gitleaks remains nonzero
+with 19 classified benign/redacted-context findings. No published refs or trust
+material were changed. External key-use information and an explicit reviewed
+public-history decision remain outstanding; this stale snapshot cannot replace
+later branch work. Evidence: `/tmp/constellation-history-local-20261017-3115588e/`.
 
 ## October 12 implementation continuation
 

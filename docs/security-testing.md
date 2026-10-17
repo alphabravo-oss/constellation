@@ -701,17 +701,59 @@ IdP redirect; no scanner-wide exclusion is used. Federation environment-token
 binding passes34 fresh180 plus28 focused executions, including an actual hostile
 TLS receiver and explicit-token control. Harbor/GitLab bounded response reading
 passes90 executions and rejects read/close failures and secret-bearing invalid
-request errors. Other connector seams remain under separate review.
+request errors. Follow-up b862c65 covers twelve remaining enumeration/authentication reads:
+240 race/shuffle executions pass without skips, 48 unpatched negative controls
+fail, and scoped registry lint drops 30→19 without additions. Existing best-effort
+GitLab tags/JFrog repository fallback remains explicit.
 
 Retained capture cleanup is now chart-gated/default-off, pinned to a verified
 single/shared durable root and fair across failed/locked receipts. Its88 focused
 fresh180/21 chart checks pass. Broad8e runtime/server qualification exposed a
 shared GroupEdge port-slice race (1345pass/1fail/0skip). Defensive copy5328083
 passes the original failing regression and ten race repetitions of netpolicy;
-combined full qualification is running before any main API/storage rollout.
+combined `7d54c3d` full qualification passes 2,926 fresh180 executions without
+skips. Exact image `7d54c3d` passes actual PVC replacement and leader-driven expiry:
+the same capture/hash/session and 0700/0600 permissions survive replacement; the
+elected minute-loop removes two expired receipts/file while unexpired bytes
+survive. All owned fixture namespace/PVC/PV/tunnels are removed. Main rollout
+is still pending; no real capture/RWX/node-loss claim.
 
-Exact6a Flannel now passes all four monitor probes, including finite default
-violation without temporary-open. Full acceptance still fails at the first
-protect-a named-allow probe: server/queue evidence exists, fresh native evidence
-is missing. Timestamp/aggregation diagnostics are pending; no strict matcher
-relaxation or full CNI pass is claimed. Owned fixture cleanup is verified.
+The first exact6a Flannel run passes all four monitor probes but fails at the
+first protect-a named-allow probe because fresh native evidence is missing. A
+subsequent diagnostic-only run passes all 24 strict packet probes. Its Python
+verifier initially rejects base64 native MAC versus colon-form endpoint encoding;
+b4fb38d compares the exact six bytes. Independent revalidation of unchanged
+evidence passes five denied/19 server observations/16 fresh native verdict probes.
+Negative controls still reject foreign/malformed MAC, stale verdict and scope/
+queue/server mismatches. Original failures remain sealed; all owned resources
+are removed. Single-node disposable Flannel only; no other CNI/BPF/HA/node-loss
+claim or assertion about the cause of the earlier missing event.
+
+Hosted f309982 run `39016297844` reports 172 gosec findings. Quality stops before
+lint because chart tests lack declared PyYAML. Source `e4a8d7f` declares PyYAML 6.0.3
+and Helm 3.21.0, with dependency audit. All 110 tooling tests pass in an isolated
+local Python 3.14.4 environment. Hosted run `39016927220` then passes pinned 3.12.14
+tooling, endpoint/plan, format, shell and workflow checks. Lint reports 1,515 and
+gosec 172; those blocking gates remain failed.
+
+SAML browser-cookie G124 findings are narrowly annotated: the IdP returns through
+a cross-site HTTP-POST, requiring SameSite=None on the Secure/HttpOnly five-minute
+single-use binding cookie and its deletion response. Existing nonce/expiry/replay/
+cookie/session tests pass 34 fresh180 executions without skips; scoped G124 scan
+reports zero findings. An initial run against the default pre-existing local test
+database failed session issuance; it is retained as failed environment evidence,
+not used for qualification. No cookie behavior or scanner-wide policy changed.
+
+A local-only history-remediation candidate for source `e4a8d7f` is frozen at
+`/tmp/constellation-history-local-20261017-3115588e/frozen-manifest.json`.
+Eight synthetic parser/Git tests and every-commit preservation checks pass:
+585 commits and 44 local refs retain all non-secret content, modes, authors,
+committers, messages and parent order. Four exact credential-bearing blobs are
+redacted, and one invalidated historical signature is explicitly removed while
+its original remains in a separate private backup. All 14,016 candidate objects
+contain zero original key/JWT/base64 matches; the four original blob IDs are absent.
+Full unchanged gitleaks still exits 1 with 19 classified findings (nine previously
+reviewed, six local-history benign variants, four redacted-placeholder/public-cert
+contexts). This is not a green gate. No current checkout/ref, published history,
+certificate trust or external JWT state is changed; later commits require a new
+candidate before any reviewed publication decision.
