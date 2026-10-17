@@ -1210,3 +1210,34 @@ its correction remain in evidence. Root independently verified the 85-file seal:
 This source-qualified follow-up awaits an integrated artifact and live rollout;
 it is not included in deployed 314afad. No release gate or provider acceptance is
 waived by this bounded correction.
+
+
+### AWS Lambda package download qualification
+
+Lambda package downloads now publish a private file atomically only after bounded
+copy, successful response closure, cancellation checks and pinned-directory
+identity checks. Failed reads, response closure, overflow or file finalization
+preserve a previous complete package and leave no partial first download. The
+response is closed exactly once on success and failure paths. Categorized errors
+keep presigned URLs and transport credentials out of job summaries while retaining
+errors.Is/As causes. Existing size defaults and accepted HTTP statuses remain;
+an unrepresentable overflow-check limit fails before dispatch. Redirect policy,
+archive extraction and cloud SDK behavior are unchanged.
+
+The final AWS/shared-writer suite passes 112 repeated race/shuffle test executions
+with zero skips. Nine public-path old-code functions fail by intended assertions;
+the compatibility shim does not replace the old public downloader. Vet passes,
+and scoped configured lint falls from nine to six with no new finding signatures
+or suppressions. Response-ownership helper changes and test fixture extractions
+were followed by the full scoped suite and fresh negative controls. Original
+preparation and all attempt logs are preserved. Root independently checked the
+62-file seal and all three imported source hashes:
+`/tmp/constellation-lambda-download-a557389/evidence/qualified-manifest.json`
+(SHA256 `98e78e3c23c118cdc0f4f061362886588a2dd9b82b35ad8c4f96ccb011e10b08`).
+
+This qualifies atomic visibility, not power-loss directory durability. A detected
+postpublication directory change may leave a complete artifact while returning
+failure, which prevents catalog/report advancement. Tests use injected transports
+and no cloud credentials. This source-only follow-up awaits integrated artifacts
+and deployment; deployed source remains 314afad. Broader serverless acceptance and
+release gates remain open.
