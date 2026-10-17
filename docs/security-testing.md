@@ -483,7 +483,14 @@ kernel tests provide the kernel evidence. The combined fresh178 suite passes
 privileged kernel run passes twice. The first recovery drill completed its
 scheduled backup but stopped at a fixture queue-order assertion before restore.
 The corrected harness gives its proof job first FIFO position while retaining
-the exact-job assertion; the retry is pending. Recovery and rollout evidence is
-being collected under `/tmp/constellation-response-ce667d1/`.
+the exact-job assertion. Its retry passes scheduled backup, WAL/PITR boundary,
+session/configuration and credential recovery, wrong-key rejection, restored-key
+recovery, audit continuity and fresh login. The recovered pod restart/reconnect
+takes 196 seconds, including CNPG's 180-second smart-shutdown window. This is
+isolated single-node recovery; off-host recovery and real-node failure remain
+deferred. The candidate is deployed at Helm77/schema178 with all application
+deployments and the runtime DaemonSet ready; live v2 queue authorization checks
+pass, and process/dataplane enforcement remain disabled. Recovery and rollout
+evidence is retained under `/tmp/constellation-response-ce667d1/`.
 The repository's global security and quality gates remain failing and no findings
 have been suppressed by this candidate.

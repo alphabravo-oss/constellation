@@ -65,6 +65,13 @@ infrastructure continuation after the selected console scope. Off-host recovery
 and deliberate real-node failure remain deferred. The checklist remains **66
 checked / 87 open**; bounded fixes below do not close their parent acceptance gates.
 
+Current main development deployment: **Helm77/schema178**, API/runtime-agent
+source **ce667d1**; other roles retain the prior qualified images. All seven
+deployments and the runtime DaemonSet are ready. Process and native dataplane
+enforcement remain disabled. Live v2 queue reads pass; anonymous, foreign-cluster
+and duplicate-node selectors return 401/403/400. The live queue and policy bundle
+are empty, so positive content/enforcement remains separate test evidence.
+
 Frozen candidate source **034f2baf49c1** includes:
 
 - Legacy backup list/detail/download reads require exact organization ownership;
@@ -103,7 +110,7 @@ these skips are not claimed as qualification. Scanner proxy tests cover separate
 TLS names, proxy authentication isolation, oversized headers, complete large
 bodies and misleading CONNECT body framing. The scanner changed-source lint and
 vet checks pass without new suppressions. The combined frozen-source fresh-database suite passes **3,370 executions with
-zero failures/skips**. The candidate is deployed on the main development cluster
+zero failures/skips**. That candidate was deployed on the main development cluster
 at **Helm76/schema177**: API/scanner use `security-20261017-034f2baf49c1`;
 discoverer/operator/runtime-agent use `recovery-20261017-034f2baf49c1`. All seven
 application deployments and the runtime-agent DaemonSet are ready. API health and
@@ -205,9 +212,17 @@ opt-in kernel test and child helper across two runs; the separate privileged
 kernel suite passes twice without skips. The isolated CNPG recovery drill is
 being rerun after correcting fixture queue ordering: the demo seed already has
 an older pending scan, so the proof job must explicitly take the first FIFO
-position. The exact-job/registry assertion is retained. The first attempt
-completed its scheduled backup but stopped before restore. This is not recovery
-acceptance. Evidence: `/tmp/constellation-response-ce667d1/`.
+position. The exact-job/registry assertion is retained. The retry passes scheduled
+backup, WAL/PITR boundary, required extensions, retained session/configuration,
+encrypted credential recovery, wrong-key rejection and restored-key recovery,
+audit continuity and fresh login. The restored pod restart/reconnect takes 196
+seconds (including CNPG's 180-second smart-shutdown window). This isolated
+single-node proof is neither off-host recovery nor HA acceptance. The qualified
+candidate is deployed as Helm77. Its unchanged bootstrap hook initially waited
+for an evicted image; restoring the exact cached bootstrap image completed the
+upgrade. Generated compiler cache older than 48 hours was removed to recover
+19.7 GB and prevent repeated image eviction. Evidence:
+`/tmp/constellation-response-ce667d1/`.
 
 Commit `3f08263` adds DLP/signature cluster ownership checks before reads,
 mutations and builtin seeding; agent bundles resolve the authenticated cluster
@@ -228,11 +243,45 @@ credential/RBAC, OpenAPI and rendered-runner chart checks pass. Evidence:
 execution completion/retry remains unqualified. Ingest/enqueue atomic audit and
 claimed benchmark propagation are separate follow-ups.
 
-These DLP/compliance commits and the in-progress per-workload policy scope batch
-are not included in the `ce667d1` images or the current main deployment. Review of
-workload scope found and is correcting old-agent protocol compatibility and
-native IP/port matching gaps. Transport tests alone do not close the CNI packet
-acceptance gate. Generated-policy merge/audit hardening is also in progress.
+Commit `590084b` closes the generated/public-learned merge audit gap and makes
+edge-generated policy create/update/retraction audits transactional. Row locks
+preserve authored/federated rules and existing posture; concurrent first inserts
+retry safely, while an edge refuses a newly appeared policy it does not own.
+Audits reflect the final edge ownership marks and persisted version. The full
+runtime fresh178 suite passes 802 executions without skips. Separate edge-entity
+completion audit remains a follow-up; policy audit is now atomic. Evidence:
+`/tmp/security-generated-qualified-db/`.
+
+Commit `c04cf85` makes compliance ingest/enqueue audits atomic and holds exact
+cluster ownership through all writes. The runner validates claim receipts and
+honors the claimed benchmark, including removing a configured pin for automatic
+detection; malformed receipts and redirects fail. Fresh178 qualification passes
+104 executions without skips. Commit `6c4a1cc` rejects malformed, extra, oversized
+and unreadable benchmark request bodies before enqueue/audit, with 40 fresh178
+executions. Neither supplies a completion/retry ledger. The current deployment
+has no benchmark workers; scheduled one-shot chart jobs do not drain requests.
+A separately versioned execution lifecycle and opt-in worker are in progress.
+
+Commit `bf91ead` scopes native policy tables to exact discovered pod UID and
+currently registered interface addresses/MACs, fences registration/restart
+changes, serializes fragments and scoped removal, and preserves default/action,
+nested application attribution and ICMP behavior. Bundles require `protocol=2`;
+legacy requests receive 426, requiring coordinated agent replacement and removal
+of previously programmed legacy tables. Unit qualification passes 650 executions
+with two DB skips, resolved by 26 fresh177 executions without skips. Independent
+review caught and corrected native port/IP translation, shared-pod namespace,
+keepalive-generation and nested application-rule-ID issues. These are source and
+IPC checks, including Go assertions against native matcher semantics; actual
+native parser/matcher and CNI packet acceptance remain separate work. Root
+OpenAPI contracts pass. Evidence: `/tmp/run1-owned-final-manifest.json` and
+`/tmp/run1-fresh177-final/`.
+
+Commit `5c35b82` guards scanner free-capacity overflow and removes four other
+unnecessary numeric narrowing conversions. Its 406 unit and 38 fresh178
+executions pass without skips; five G115 findings are removed with no new lint
+findings. All these post-`ce667d1` changes are combined in frozen candidate
+`6c4a1cc`, under qualification at `/tmp/constellation-scope-6c4a1cc/`; they are
+not yet in the main deployment.
 
 ## October 12 implementation continuation
 
