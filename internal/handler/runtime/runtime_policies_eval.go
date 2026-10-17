@@ -136,7 +136,7 @@ func ruleMatches(r *dp.PolicyRule, f EvaluatedFlow) bool {
 	if len(r.Apps) > 0 {
 		anyMatch := false
 		for _, a := range r.Apps {
-			if a.App == 0 || int32(a.App) == f.Application {
+			if a.App == 0 || int64(a.App) == int64(f.Application) {
 				anyMatch = true
 				break
 			}

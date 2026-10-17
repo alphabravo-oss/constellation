@@ -204,7 +204,8 @@ VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),
 	var nbeFlagged, nbeDenied int
 	for i := range rows {
 		row := &rows[i]
-		if row.SrcWorkload == "" || row.DstWorkload == "" || row.Protocol == "" {
+		application, validApplication := handler.NetworkApplicationID(row.Application)
+		if !validApplication || row.SrcWorkload == "" || row.DstWorkload == "" || row.Protocol == "" {
 			rejected++
 			continue
 		}
@@ -309,7 +310,7 @@ VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),
 			row.Bytes, row.Packets, verdict,
 			source, row.At.UTC(),
 			row.ClientBytes, row.ServerBytes, row.Sessions,
-			int32(row.Application), policyAction,
+			application, policyAction,
 			int64(row.PolicyID), int32(row.ThreatID), int16(row.Severity),
 			strings.ToLower(strings.TrimSpace(row.EPMAC)),
 			strings.ToLower(strings.TrimSpace(row.Fqdn)),

@@ -392,7 +392,7 @@ func TestThreatCategory(t *testing.T) {
 		{50000, "ips"}, // above MaxWafRuleID -> falls back to ips bucket
 	}
 	for _, c := range cases {
-		if got := threatCategory(c.id); got != c.want {
+		if got := threatCategory(int64(c.id)); got != c.want {
 			t.Errorf("threatCategory(%d) = %q want %q", c.id, got, c.want)
 		}
 	}

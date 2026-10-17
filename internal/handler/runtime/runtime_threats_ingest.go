@@ -104,6 +104,13 @@ type ThreatIngestRow struct {
 	ReportedAt time.Time `json:"reported_at,omitempty"`
 }
 
+// runtimeThreatApplication also rejects the no-signature sentinel, which is
+// valid on flow records but cannot represent a runtime threat observation.
+func runtimeThreatApplication(row *ThreatIngestRow) (int32, bool) {
+	application, valid := handler.NetworkApplicationID(row.Application)
+	return application, valid && row.ThreatID != 0
+}
+
 // ThreatIngestResponse summarizes the result of a bulk POST.
 type ThreatIngestResponse struct {
 	Accepted int `json:"accepted"`
@@ -196,10 +203,10 @@ VALUES ($1,$2, NULLIF($3,''), NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), NULLI
 	pending := make([]pendingThreatAlert, 0, len(rows))
 	for i := range rows {
 		row := &rows[i]
-		if row.ThreatID == 0 {
-			// A zero ThreatID means "no signature fired" — dp shouldn't
-			// emit a threat log for that, but defend against agents that
-			// upload bad rows anyway.
+		application, valid := runtimeThreatApplication(row)
+		if !valid {
+			// Reject the no-signature sentinel and application values the
+			// native uint16 record cannot emit before persistence or alerting.
 			rejected++
 			continue
 		}
@@ -235,7 +242,7 @@ VALUES ($1,$2, NULLIF($3,''), NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), NULLI
 			tok.OrgID, cid, strings.TrimSpace(row.Node), strings.ToLower(strings.TrimSpace(row.EPMAC)),
 			workloadID, namespace, podName,
 			int32(row.ThreatID), int16(row.Severity), int16(row.Action),
-			int32(row.Application), strings.TrimSpace(row.Msg), int64(row.DlpNameHash),
+			application, strings.TrimSpace(row.Msg), int64(row.DlpNameHash),
 			int16(row.IPProto), int32(row.EtherType),
 			strings.TrimSpace(row.SrcIP), row.SrcPort, strings.TrimSpace(row.DstIP), row.DstPort,
 			int16(row.ICMPCode), int16(row.ICMPType),
@@ -479,7 +486,7 @@ SELECT id::text, org_id::text, cluster_id::text,
 	}
 	t.PlatformRole = roles[0]
 	t.ThreatName = resolveThreatName(uint32(t.ThreatID))
-	t.Category = threatCategory(t.ThreatID)
+	t.Category = threatCategory(int64(t.ThreatID))
 	t.Packet = packet
 	if preview := parsePacketL7(packet, t.DstPort); preview != nil {
 		t.L7 = preview
@@ -511,7 +518,7 @@ func pathTail(p string) string {
 // 2001-2027, e.g. PING_DEATH, TCP_SMURF, SQL_INJECTION) — is "ips". The old filter keyed on
 // dlp_name_hash, which mislabeled every built-in IPS signature (hash=0) as 'waf' and put real
 // custom WAF hits (hash>0) in 'dlp'; the threat_id range is the authoritative discriminator.
-func threatCategory(threatID int32) string {
+func threatCategory(threatID int64) string {
 	switch {
 	case threatID >= 40000 && threatID < 50000:
 		return "waf"
