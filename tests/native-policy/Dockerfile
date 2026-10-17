@@ -1,4 +1,4 @@
-# Test-only build: compile unchanged vendored sources, expose selected local
+# Test-only build: compile vendored sources plus declared patches, expose local
 # symbols in COPIED objects, and link a disposable policy-matcher entry point.
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY third_party/neuvector/ /src/third_party/neuvector/
-COPY tests/native-policy/matcher.c tests/native-policy/Dockerfile /src/tests/native-policy/
+COPY tests/native-policy/ /src/tests/native-policy/
 RUN find third_party/neuvector -type d \( -name .objs -o -name .deps \) -prune -exec rm -rf '{}' + \
     && rm -f third_party/neuvector/dp/dp \
     && find third_party/neuvector -type f -print0 | sort -z | xargs -0 sha256sum > /native-source.sha256 \
@@ -29,6 +29,7 @@ RUN find third_party/neuvector -type d \( -name .objs -o -name .deps \) -prune -
         -Wl,--gc-sections -lpcap -lpcre2-8 -ljansson -ljemalloc -pthread \
         -lurcu -lurcu-cds -lrt -lstdc++ -lm -lnetfilter_queue -lhs \
     && sha256sum /native-policy-matcher > /native-harness.sha256 \
-    && sha256sum tests/native-policy/matcher.c tests/native-policy/Dockerfile > /native-harness-source.sha256
+    && bash tests/native-policy/connect-report-build.sh \
+    && sha256sum tests/native-policy/matcher.c tests/native-policy/connect_report.c tests/native-policy/connect-report-build.sh tests/native-policy/Dockerfile tests/native-policy/run.sh > /native-harness-source.sha256
 USER 65534:65534
 ENTRYPOINT ["/native-policy-matcher"]

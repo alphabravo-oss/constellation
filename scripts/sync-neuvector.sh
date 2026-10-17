@@ -36,6 +36,7 @@
 #   4   build validation failure
 #   5   unexpected error
 set -euo pipefail
+export LC_ALL=C
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENDOR_DIR="${REPO_ROOT}/third_party/neuvector"
@@ -76,6 +77,7 @@ need git
 need rsync
 need diff
 need sed
+need patch
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -130,43 +132,40 @@ vendor_one() {
 }
 
 # compute_drift: produces a unified diff between the *current vendored tree*
-# and the *upstream tree at the recorded revision*. If non-empty, someone
-# has been editing the vendored files. Emits the diff to stdout.
-compute_drift() {
+# and the upstream tree at the recorded revision plus declared patches.
+# Nonempty output is undeclared drift, with stable patch -p1 paths.
+compute_drift() (
     local recorded="$1"
     local upstream_dir="$2"
-    local tmp="${TMPDIR:-/tmp}/constellation-neuvector-clean.$$"
-    mkdir -p "${tmp}/dp"
-    rsync -a --exclude='.objs/' --exclude='.deps/' --exclude='*.o' --exclude='*.d' \
-        --exclude='compile_commands.json' \
-        "${upstream_dir}/dp/" "${tmp}/dp/"
-    cp "${upstream_dir}/base.h" "${tmp}/" 2>/dev/null || true
-    cp "${upstream_dir}/defs.h" "${tmp}/" 2>/dev/null || true
-    # Compare ours to a clean upstream-at-recorded-rev. Use -r -N -u so new
-    # local files (which would be drift) appear as additions.
-    #
-    # Build artifacts left over from a previous `make dp` run inside the
-    # vendored tree must be ignored — they're not source and aren't covered
-    # by the vendoring guarantee. Same exclusions we use on the rsync side.
-    diff -ruN \
+    local tmp
+    tmp="$(mktemp -d "${TMPDIR:-/tmp}/constellation-neuvector-clean.${recorded:0:12}.XXXXXXXX")"
+    trap 'rm -rf "$tmp"' EXIT
+    mkdir -p "${tmp}/a/dp" "${tmp}/b"
+    vendor_one "${upstream_dir}/dp/" "${tmp}/a/dp/"
+    cp "${upstream_dir}/base.h" "${upstream_dir}/defs.h" "${tmp}/a/"
+    # Declared patches define the expected source; they are not undeclared drift.
+    apply_local_patches "${tmp}/a"
+    vendor_one "${VENDOR_DIR}/" "${tmp}/b/"
+    # Relative a/ and b/ prefixes produce a reusable patch with patch -p1.
+    local compare_status=0
+    ( cd "${tmp}" && diff -ruN \
         --exclude='local-patches' \
         --exclude='LICENSE' --exclude='NOTICE' --exclude='README.md' \
-        --exclude='.objs' --exclude='.deps' \
-        --exclude='*.o' --exclude='*.d' \
-        --exclude='compile_commands.json' \
-        "${tmp}" "${VENDOR_DIR}" || true
-    rm -rf "${tmp}"
-}
+        --exclude='.objs' --exclude='.deps' --exclude='*.o' --exclude='*.d' \
+        --exclude='compile_commands.json' a b ) || compare_status=$?
+    (( compare_status <= 1 )) || die "could not compare expected vendor source" 5
+)
 
 # apply_local_patches: lexically applies every *.patch under
 # local-patches/. Fails loudly on the first non-applying patch.
 apply_local_patches() {
     [[ -d "${LOCAL_PATCHES_DIR}" ]] || return 0
+    local destination="${1:-${VENDOR_DIR}}"
     local applied=0
     for p in "${LOCAL_PATCHES_DIR}"/*.patch; do
         [[ -e "${p}" ]] || continue
         log "applying local patch: $(basename "${p}")"
-        ( cd "${VENDOR_DIR}" && patch -p1 --silent < "${p}" ) \
+        ( cd "${destination}" && patch -p1 --batch --forward --fuzz=0 --no-backup-if-mismatch --silent < "${p}" ) \
             || die "patch failed to apply: $(basename "${p}")" 3
         applied=$((applied + 1))
     done
@@ -220,11 +219,11 @@ cmd_diff() {
     log "vendored revision recorded in NOTICE: ${recorded}"
     local upstream_dir
     upstream_dir="$(fetch_upstream "${recorded}")"
-    log "comparing vendored tree vs. clean upstream@${recorded}"
+    log "comparing vendored tree vs. upstream@${recorded} plus declared patches"
     local drift
     drift="$(compute_drift "${recorded}" "${upstream_dir}")"
     if [[ -z "${drift}" ]]; then
-        log "no drift: vendored tree is byte-identical to upstream@${recorded}"
+        log "no drift: vendored tree matches upstream@${recorded} plus declared patches"
         exit 0
     fi
     echo "${drift}"
@@ -232,7 +231,7 @@ cmd_diff() {
     exit 2
 }
 
-cmd_sync() {
+cmd_sync() (
     [[ -n "${rev}" ]] || die "--sync requires --rev <upstream-ref>" 1
     local recorded
     recorded="$(notice_rev)"
@@ -248,7 +247,14 @@ cmd_sync() {
     if [[ -n "${drift}" ]]; then
         mkdir -p "${LOCAL_PATCHES_DIR}"
         local drift_file
-        drift_file="${LOCAL_PATCHES_DIR}/000-pre-sync-drift-$(date -u +%Y%m%d%H%M%S).patch"
+        # Append after the last declared patch: drift is relative to that patched tree.
+        local last_patch="000"
+        for p in "${LOCAL_PATCHES_DIR}"/*.patch; do
+            if [[ -e "$p" ]]; then
+                last_patch="$(basename "$p")"
+            fi
+        done
+        drift_file="${LOCAL_PATCHES_DIR}/${last_patch}.post-sync-drift-$(date -u +%Y%m%d%H%M%S)-$$.patch"
         echo "${drift}" > "${drift_file}"
         log "captured pre-sync drift → $(realpath --relative-to="${REPO_ROOT}" "${drift_file}")"
     fi
@@ -259,18 +265,26 @@ cmd_sync() {
     new_rev="$(git -C "${upstream_dir}" rev-parse HEAD)"
     new_tag="$(git -C "${upstream_dir}" describe --tags --always)"
 
-    # Re-vendor. Trailing slashes on rsync sources matter — they mean
-    # "contents of" not "the directory itself". Match upstream layout.
+    # Validate the complete new candidate before replacing any current source.
+    local staging
+    staging="$(mktemp -d "${TMPDIR:-/tmp}/constellation-neuvector-sync.XXXXXXXX")"
+    local source_replaced=0
+    local sync_status=0
+    trap 'sync_status=$?; if [[ "$sync_status" != 0 && "$source_replaced" == 1 ]]; then
+        log "restoring prior vendor source after failed sync"
+        vendor_one "$staging/previous/dp/" "$VENDOR_DIR/dp/"
+        cp "$staging/previous/base.h" "$staging/previous/defs.h" \
+           "$staging/previous/LICENSE" "$staging/previous/NOTICE" "$VENDOR_DIR/"
+    fi; rm -rf "$staging"; exit "$sync_status"' EXIT
+    mkdir -p "${staging}/candidate/dp" "${staging}/previous"
+    vendor_one "${upstream_dir}/dp/" "${staging}/candidate/dp/"
+    cp "${upstream_dir}/base.h" "${upstream_dir}/defs.h" "${upstream_dir}/LICENSE" "${staging}/candidate/"
+    apply_local_patches "${staging}/candidate"
+    vendor_one "${VENDOR_DIR}/" "${staging}/previous/"
     log "vendoring ${new_tag} (${new_rev:0:12}) → third_party/neuvector/"
-    rm -rf "${VENDOR_DIR}/dp"
-    mkdir -p "${VENDOR_DIR}/dp"
-    vendor_one "${upstream_dir}/dp/" "${VENDOR_DIR}/dp/"
-    cp "${upstream_dir}/base.h" "${VENDOR_DIR}/base.h"
-    cp "${upstream_dir}/defs.h" "${VENDOR_DIR}/defs.h"
-    cp "${upstream_dir}/LICENSE" "${VENDOR_DIR}/LICENSE"
-
-    # Re-apply local patches (including any drift we captured above).
-    apply_local_patches
+    source_replaced=1
+    vendor_one "${staging}/candidate/dp/" "${VENDOR_DIR}/dp/"
+    cp "${staging}/candidate/base.h" "${staging}/candidate/defs.h" "${staging}/candidate/LICENSE" "${VENDOR_DIR}/"
 
     # Refresh NOTICE provenance.
     update_notice "${new_rev}" "${new_tag}"
@@ -279,16 +293,14 @@ cmd_sync() {
     # Build gate — if this fails, the operator wants to know before
     # committing.
     if ! run_build; then
-        die "build validation failed; the vendored tree is in an INVALID state.
-Inspect the build output above. If the upstream rev is incompatible, revert with
-  git checkout -- third_party/neuvector/" 4
+        die "build validation failed; restoring prior vendor source (captured drift patches are preserved)" 4
     fi
 
     log "sync complete. Next steps:"
     log "  - inspect: git -C ${REPO_ROOT} status third_party/neuvector/"
     log "  - test:    go test ./internal/runtime/dp/..."
     log "  - commit:  git add third_party/neuvector/ && git commit -m 'vendor: bump neuvector to ${new_tag}'"
-}
+)
 
 case "${mode}" in
     diff) cmd_diff ;;

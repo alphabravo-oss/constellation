@@ -2651,7 +2651,7 @@ int dp_ctrl_connect_report(DPMsgSession *log, DPMonitorMetric *metric, int count
 
     // TODO: Only care IPv4 sessions
     if (likely(log->EtherType == ETH_P_IP)) {
-        conn4_key_t key;
+        conn4_key_t key = {0};
 
         DEBUG_LOGGER(DBG_MAC_FORMAT" "DBG_IPV4_FORMAT":%u => "DBG_IPV4_FORMAT":%u"
                      " app=%u policy=%u action=%d sess=%d violate=%d threat=%u severity=%d\n",
@@ -2692,6 +2692,7 @@ int dp_ctrl_connect_report(DPMsgSession *log, DPMonitorMetric *metric, int count
             key.ingress = false;
         }
         key.port = log->ServerPort;
+        key.application = log->Application;
         key.ipproto = log->IPProto;
         key.pol_id = log->PolicyId;
 
