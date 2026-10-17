@@ -24,7 +24,7 @@ func TestRestartAndReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer q.Close()
+	defer closeQueue(t, q)
 	if q.Producer() != producer {
 		t.Fatal("producer changed across restart")
 	}
@@ -70,7 +70,7 @@ func TestBoundedQueueRetainsOldest(t *testing.T) {
 		if err != nil || string(b.Body) != `[1]` {
 			t.Fatalf("oldest overwritten: %+v %v", b, err)
 		}
-		q.Close()
+		closeQueue(t, q)
 	}
 }
 
@@ -81,12 +81,12 @@ func TestExclusiveOwnerAndDestination(t *testing.T) {
 		t.Fatal(err)
 	}
 	if other, err := Open(dir, "a", 1000, 10); err == nil {
-		other.Close()
+		closeQueue(t, other)
 		t.Fatal("two writers acquired queue")
 	}
-	q.Close()
+	closeQueue(t, q)
 	if other, err := Open(dir, "b", 1000, 10); err == nil {
-		other.Close()
+		closeQueue(t, other)
 		t.Fatal("destination rebound")
 	}
 }
@@ -97,22 +97,23 @@ func TestCrashBetweenBatchAndState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := os.ReadFile(filepath.Join(dir, "state.json"))
+	root := openTestRoot(t, dir)
+	state, err := root.ReadFile("state.json")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err = q.Enqueue([]byte(`[1]`), 1); err != nil {
 		t.Fatal(err)
 	}
-	q.Close()
-	if err = os.WriteFile(filepath.Join(dir, "state.json"), state, 0600); err != nil {
+	closeQueue(t, q)
+	if err = root.WriteFile("state.json", state, 0600); err != nil {
 		t.Fatal(err)
 	}
 	q, err = Open(dir, "a", 1000, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer q.Close()
+	defer closeQueue(t, q)
 	if err = q.Ack(1); err != nil {
 		t.Fatal(err)
 	}
@@ -134,12 +135,33 @@ func TestMissingIdentityNeverResetsPendingData(t *testing.T) {
 	if err = q.Enqueue([]byte(`[1]`), 1); err != nil {
 		t.Fatal(err)
 	}
-	q.Close()
+	closeQueue(t, q)
 	if err = os.Remove(filepath.Join(dir, "state.json")); err != nil {
 		t.Fatal(err)
 	}
 	if q, err = Open(dir, "a", 1000, 10); err == nil {
-		q.Close()
+		closeQueue(t, q)
 		t.Fatal("lost producer identity was regenerated")
 	}
+}
+
+func closeQueue(t *testing.T, q *Queue) {
+	t.Helper()
+	if err := q.Close(); err != nil {
+		t.Error(err)
+	}
+}
+
+func openTestRoot(t *testing.T, dir string) *os.Root {
+	t.Helper()
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := root.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	return root
 }

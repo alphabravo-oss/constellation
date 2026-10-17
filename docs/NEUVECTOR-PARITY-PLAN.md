@@ -4656,3 +4656,31 @@ the separately built standalone backup binary or the later private registry/spoo
 preparations. Hosted quality 1,495, gosec 156 and historical gitleaks still block the
 required gate. Overall acceptance remains 66 checked / 87 open; broader CNI, HA,
 disconnected and recovery boundaries remain unchanged.
+
+
+### Telemetry spool ownership and lifecycle qualification
+
+The disk queue now pins its private directory and checks directory/lock identity.
+A lifetime directory-inode flock closes the reviewed in-flight lock-file
+replacement race; the existing file flock retains ordinary legacy exclusion.
+Close serializes with active operations, and closed or identity-lost queues cannot
+resume delivery mutations. Atomic private writes retain directory fsync; state
+and batch reads reject symlinks and nonregular files. Existing queue metadata and
+batch formats remain compatible. This is advisory exclusion among cooperating
+updated queues, not protection from privileged writers or an old process ignoring
+the directory lock after lock-file replacement.
+
+Final queue/shared-writer qualification passes 60 repeated race/shuffle executions
+without skips. Fresh schema-180 runtime callers pass 66 more, including lost-ack
+replay; their evidence precedes only production import grouping, whose exact
+import set and remaining bytes are unchanged. Both old-behavior controls fail by
+intended assertions: four in-flight ownership failures and six closed/root/state
+identity failures. Vet passes; scoped configured lint falls from 15 to zero,
+without suppressions or configuration changes. The owned database is absent.
+Initial lint findings and two Python-only evidence-packaging errors are preserved.
+The reviewed final seal binds three source files and 88 evidence files:
+`/tmp/constellation-telemetryspool-7831c59/evidence/FINAL-SEAL.json`
+(SHA256 `b57feaf1a093bf957af4e8fb7bde1a432ef937b6a9237fa117b67be4bf50ab20`).
+This follow-up is source-qualified and awaits the next integrated artifact and
+live rollout; it is not part of deployed 314afad and does not close fleet delivery
+or overall release acceptance.
