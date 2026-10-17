@@ -8904,6 +8904,328 @@
           "state"
         ],
         "additionalProperties": false
+      },
+      "BenchExecutionCounts": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "pass": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "fail": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "manual": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "not_applicable": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "total",
+          "pass",
+          "fail",
+          "manual",
+          "not_applicable"
+        ],
+        "description": "Source evaluated controls before framework expansion. Failed controls can occur in a successfully ingested report."
+      },
+      "BenchExecutionAttempt": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "runner_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "claim_key": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "node": {
+            "type": "string"
+          },
+          "number": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "succeeded",
+              "failed",
+              "interrupted"
+            ]
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lease_expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "report_sha256": {
+            "type": "string"
+          },
+          "rows_ingested": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "controls": {
+            "$ref": "#/components/schemas/BenchExecutionCounts"
+          }
+        },
+        "required": [
+          "id",
+          "request_id",
+          "cluster_id",
+          "runner_id",
+          "claim_key",
+          "node",
+          "number",
+          "status",
+          "started_at",
+          "lease_expires_at",
+          "finished_at",
+          "outcome",
+          "report_sha256",
+          "rows_ingested",
+          "controls"
+        ],
+        "description": "One bounded execution. Runner and node are reported attribution, not independently authenticated node identity. rows_ingested may exceed source control counts due to framework expansion. An expired running lease is presented as interrupted. An explicit interrupted outcome is a failed terminal execution; interrupted status projects lease expiry and may retain null finished_at until reviewed retry closes it."
+      },
+      "BenchExecutionRequest": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "request_key": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "requested_cluster_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cluster_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "kube-bench"
+            ]
+          },
+          "benchmark": {
+            "type": "string",
+            "maxLength": 128,
+            "pattern": "^([A-Za-z0-9][A-Za-z0-9_.-]*)?$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed",
+              "interrupted"
+            ]
+          },
+          "revision": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "description": "Opaque decimal revision; preserve as a string when reviewing or retrying."
+          },
+          "attempt_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3
+          },
+          "requested_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "active_attempt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BenchExecutionAttempt"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "request_key",
+          "requested_cluster_id",
+          "cluster_id",
+          "profile",
+          "benchmark",
+          "status",
+          "revision",
+          "attempt_count",
+          "requested_at",
+          "completed_at",
+          "active_attempt"
+        ],
+        "description": "Durable v2 request. Queued means persisted, without a worker-availability or coverage guarantee. The first claim permanently binds an organization-wide request to its cluster. Succeeded means a valid report was ingested, not that controls passed or the cluster is fully covered. Legacy pending/claimed requests are excluded and never replayed automatically."
+      },
+      "BenchExecutionReceipt": {
+        "type": "object",
+        "properties": {
+          "request": {
+            "$ref": "#/components/schemas/BenchExecutionRequest"
+          }
+        },
+        "required": [
+          "request"
+        ]
+      },
+      "BenchExecutionDetail": {
+        "type": "object",
+        "properties": {
+          "request": {
+            "$ref": "#/components/schemas/BenchExecutionRequest"
+          },
+          "attempts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BenchExecutionAttempt"
+            }
+          }
+        },
+        "required": [
+          "request",
+          "attempts"
+        ]
+      },
+      "BenchExecutionList": {
+        "type": "object",
+        "properties": {
+          "requests": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BenchExecutionRequest"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "durable_v2_requests"
+            ]
+          },
+          "legacy_requests_included": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          }
+        },
+        "required": [
+          "requests",
+          "total",
+          "limit",
+          "offset",
+          "has_more",
+          "source",
+          "legacy_requests_included"
+        ]
+      },
+      "BenchExecutionError": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ]
       }
     },
     "responses": {
@@ -9134,6 +9456,380 @@
           }
         ],
         "summary": "Claim a benchmark request for the authenticated cluster"
+      }
+    },
+    "/api/v1/agent/compliance/bench/requests/claim": {
+      "post": {
+        "summary": "Claim one durable benchmark execution",
+        "description": "Requires runtime-agent authentication. The server resolves an owned cluster from the credential and atomically claims one eligible queued kube-bench request, records its attempt and audit, and binds an unbound request to that cluster. Retry an uncertain response with the same claim_key, runner_id and node to recover that active attempt. A new claim key must not be used to repeat uncertain work. Independent workers use SKIP LOCKED; the lease starts at ten minutes. Node and runner identifiers are attribution only.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Owned cluster. User omission selects organization-wide scope; agent omission resolves the exact token-bound cluster. Duplicate or conflicting selectors are rejected."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current execution receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed body, unknown fields, invalid identifier, duplicate selector or invalid pagination",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied or agent cluster/credential mismatch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Owned cluster or request not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Scope, storage or audit unavailable. A failed commit acknowledgement can leave the outcome uncertain; refresh or reuse the same request/claim key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "No eligible queued request"
+          },
+          "409": {
+            "description": "Claim key identifies an expired, terminal or mismatched execution"
+          }
+        },
+        "security": [
+          {
+            "runtimeAgent": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "claim_key": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "runner_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "node": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 253
+                  }
+                },
+                "required": [
+                  "claim_key",
+                  "runner_id",
+                  "node"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agent/compliance/bench/requests/{id}/heartbeat": {
+      "post": {
+        "summary": "Renew the current benchmark attempt lease",
+        "description": "Requires the same runtime-agent token, exact cluster and active attempt. Extends an unexpired running lease to ten minutes from server time, capped at fifteen minutes from attempt start. Expired or terminal attempts cannot be revived.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Owned cluster. User omission selects organization-wide scope; agent omission resolves the exact token-bound cluster. Duplicate or conflicting selectors are rejected."
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current execution receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed body, unknown fields, invalid identifier, duplicate selector or invalid pagination",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied or agent cluster/credential mismatch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Owned cluster or request not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Scope, storage or audit unavailable. A failed commit acknowledgement can leave the outcome uncertain; refresh or reuse the same request/claim key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Attempt is stale, terminal or expired"
+          }
+        },
+        "security": [
+          {
+            "runtimeAgent": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "attempt_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                },
+                "required": [
+                  "attempt_id"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agent/compliance/bench/requests/{id}/result": {
+      "post": {
+        "summary": "Commit a benchmark result and execution receipt",
+        "description": "Requires the same runtime-agent token, exact cluster and active attempt. A report_ingested result carries the kube-bench JSON object and SHA-256 of its compact JSON bytes (Go json.Compact, not key sorting), bounded to 16 MiB. The envelope is bounded to 16 MiB plus 64 KiB. The server validates source controls and parses evidence with the request benchmark. Evidence, attempt, request and audit commit atomically. FAIL controls remain a valid completed scan. An identical terminal outcome and digest returns the prior receipt without refreshing evidence or audit; a different result conflicts. Bounded failure outcomes carry no report, digest or raw stderr.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Owned cluster. User omission selects organization-wide scope; agent omission resolves the exact token-bound cluster. Duplicate or conflicting selectors are rejected."
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current execution receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed body, unknown fields, invalid identifier, duplicate selector or invalid pagination",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied or agent cluster/credential mismatch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Owned cluster or request not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Scope, storage or audit unavailable. A failed commit acknowledgement can leave the outcome uncertain; refresh or reuse the same request/claim key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Attempt expired, became stale or already has a different result"
+          }
+        },
+        "security": [
+          {
+            "runtimeAgent": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "attempt_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "outcome": {
+                    "type": "string",
+                    "enum": [
+                      "report_ingested",
+                      "exec_failed",
+                      "timeout",
+                      "invalid_report",
+                      "interrupted"
+                    ]
+                  },
+                  "report_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "report": {
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "attempt_id",
+                  "outcome"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/agent/compliance/ingest": {
@@ -13736,6 +14432,421 @@
           }
         },
         "summary": "Create claim"
+      }
+    },
+    "/api/v1/compliance/bench/requests": {
+      "get": {
+        "summary": "List durable benchmark executions",
+        "description": "Requires read-findings permission. Lists v2 requests in the authenticated organization and selected cluster, including eligible unbound organization-wide requests. Legacy pending/claimed requests are excluded. Pagination and total share a database snapshot; expired leases are shown as interrupted without automatically rerunning work.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Owned cluster. User omission selects organization-wide scope; agent omission resolves the exact token-bound cluster. Duplicate or conflicting selectors are rejected."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483647,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current execution state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed body, unknown fields, invalid identifier, duplicate selector or invalid pagination",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied or agent cluster/credential mismatch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Owned cluster or request not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Scope, storage or audit unavailable. A failed commit acknowledgement can leave the outcome uncertain; refresh or reuse the same request/claim key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Queue a durable kube-bench execution",
+        "description": "Requires user JWT/PAT manage-policies permission. Persists request and audit atomically. A canonical nonzero UUID request_key identifies these exact normalized selectors within the organization; reuse it after an uncertain response. Identical replay returns the same request, conflicting selectors return 409. The opt-in worker must be deployed separately; this API does not execute benchmarks. Only kube-bench is supported; docker-bench returns 422.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Owned cluster. User omission selects organization-wide scope; agent omission resolves the exact token-bound cluster. Duplicate or conflicting selectors are rejected."
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Current execution receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed body, unknown fields, invalid identifier, duplicate selector or invalid pagination",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied or agent cluster/credential mismatch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Owned cluster or request not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Scope, storage or audit unavailable. A failed commit acknowledgement can leave the outcome uncertain; refresh or reuse the same request/claim key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request key already identifies different selectors"
+          },
+          "422": {
+            "description": "Execution profile is unsupported"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "request_key": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "profile": {
+                    "type": "string",
+                    "default": "kube-bench"
+                  },
+                  "benchmark": {
+                    "type": "string",
+                    "maxLength": 128,
+                    "pattern": "^([A-Za-z0-9][A-Za-z0-9_.-]*)?$"
+                  }
+                },
+                "required": [
+                  "request_key"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/compliance/bench/requests/{id}": {
+      "get": {
+        "summary": "Inspect a benchmark execution and attempts",
+        "description": "Requires read-findings permission. Returns the selected durable request and ordered attempt history within the authenticated organization and optional cluster.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Owned cluster. User omission selects organization-wide scope; agent omission resolves the exact token-bound cluster. Duplicate or conflicting selectors are rejected."
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current execution state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed body, unknown fields, invalid identifier, duplicate selector or invalid pagination",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied or agent cluster/credential mismatch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Owned cluster or request not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Scope, storage or audit unavailable. A failed commit acknowledgement can leave the outcome uncertain; refresh or reuse the same request/claim key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/compliance/bench/requests/{id}/retry": {
+      "post": {
+        "summary": "Retry a reviewed failed or interrupted execution",
+        "description": "Requires manage-policies permission. The exact reviewed_revision must still match a failed or interrupted request, with fewer than three attempts. Retry retains the bound cluster, clears the active attempt and queues a new attempt atomically with audit. Expired prior leases are closed as interrupted. No automatic replay: a stale or already-retried revision returns 409 and must be refreshed and reviewed.",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Owned cluster. User omission selects organization-wide scope; agent omission resolves the exact token-bound cluster. Duplicate or conflicting selectors are rejected."
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Current execution receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed body, unknown fields, invalid identifier, duplicate selector or invalid pagination",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied or agent cluster/credential mismatch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Owned cluster or request not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Scope, storage or audit unavailable. A failed commit acknowledgement can leave the outcome uncertain; refresh or reuse the same request/claim key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchExecutionError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale revision, nonretryable state or three-attempt limit reached"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reviewed_revision": {
+                    "type": "string",
+                    "pattern": "^[1-9][0-9]*$",
+                    "description": "Opaque decimal revision; preserve as a string when reviewing or retrying."
+                  }
+                },
+                "required": [
+                  "reviewed_revision"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/compliance/bench/run": {

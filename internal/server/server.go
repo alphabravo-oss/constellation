@@ -1135,6 +1135,10 @@ func (s *Server) buildRouter() chi.Router {
 			// ingest) drains the queue in watch mode.
 			r.Post("/compliance/bench/run", s.requireVerb(rbac.VerbManagePolicies, compl.RunBench))
 			r.Post("/compliance/bench/claim", s.requireVerb(rbac.VerbManagePolicies, compl.ClaimBenchRun))
+			r.Post("/compliance/bench/requests", s.requireVerb(rbac.VerbManagePolicies, compl.CreateBenchRequest))
+			r.Get("/compliance/bench/requests", s.requireVerb(rbac.VerbReadFindings, compl.ListBenchRequests))
+			r.Get("/compliance/bench/requests/{id}", s.requireVerb(rbac.VerbReadFindings, compl.GetBenchRequest))
+			r.Post("/compliance/bench/requests/{id}/retry", s.requireVerb(rbac.VerbManagePolicies, compl.RetryBenchRequest))
 
 			// Wave N8: production-grade scheduled compliance runs backed by the
 			// compliance_schedules + compliance_runs tables (migration 039). The
@@ -1597,6 +1601,9 @@ func (s *Server) buildRouter() chi.Router {
 			)
 			r.Post("/agent/compliance/ingest", agentCompliance.AgentIngest)
 			r.Post("/agent/compliance/bench/claim", agentCompliance.AgentClaimBenchRun)
+			r.Post("/agent/compliance/bench/requests/claim", agentCompliance.ClaimBenchRequest)
+			r.Post("/agent/compliance/bench/requests/{id}/heartbeat", agentCompliance.HeartbeatBenchRequest)
+			r.Post("/agent/compliance/bench/requests/{id}/result", agentCompliance.ResultBenchRequest)
 		})
 
 		// D1: federation sync (per-cluster fed credential auth, NOT user JWT). A joint

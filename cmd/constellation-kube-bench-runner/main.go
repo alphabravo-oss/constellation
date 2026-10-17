@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -52,20 +53,32 @@ type config struct {
 	// watchInterval > 0 turns the runner into a resident poller for on-demand
 	// run requests (CMP-RUN-31). Zero = one-shot CronJob mode.
 	watchInterval time.Duration
+	durableWorker bool
+	spoolDir      string
+	runnerID      string
 }
 
-func main() {
+func main() { os.Exit(runMain()) }
+
+func runMain() int {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: obslog.Level()})).With("svc", "constellation-kube-bench-runner")
 	version.LogStartup(logger, componentName)
 
 	cfg, err := loadConfig()
 	if err != nil {
 		logger.Error("config", "err", err.Error())
-		os.Exit(2)
+		return 2
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
+	if cfg.durableWorker {
+		if err := runExecutionWorker(ctx, http.DefaultClient, cfg, logger); err != nil {
+			logger.Error("durable benchmark worker unavailable", "err", err.Error())
+			return 1
+		}
+		return 0
+	}
 
 	// CMP-RUN-31: watch mode. When BENCH_WATCH_INTERVAL is set the runner stays
 	// resident and polls the control plane for on-demand run requests
@@ -74,12 +87,12 @@ func main() {
 	// the historical one-shot CronJob behaviour.
 	if cfg.watchInterval > 0 {
 		watchLoop(ctx, http.DefaultClient, cfg, logger)
-		return
+		return 0
 	}
 
 	if err := runAndIngest(ctx, http.DefaultClient, cfg, logger); err != nil {
 		logger.Error("bench run", "err", err.Error())
-		os.Exit(1)
+		return 1
 	}
 
 	// Best-effort heartbeat so the runner shows up in the components table like
@@ -89,6 +102,7 @@ func main() {
 			logger.Warn("heartbeat failed", "err", err.Error())
 		}
 	}
+	return 0
 }
 
 // runAndIngest execs the benchmark and POSTs the report to /compliance/ingest,
@@ -250,7 +264,7 @@ func loadConfig() (config, error) {
 		return config{}, errors.New("ingest token required (set CONSTELLATION_KUBE_BENCH_RUNNER_TOKEN or RUNTIME_AGENT_TOKEN[_FILE])")
 	}
 
-	return config{
+	cfg := config{
 		hbCfg:     hbCfg,
 		apiURL:    apiURL,
 		token:     token,
@@ -264,7 +278,11 @@ func loadConfig() (config, error) {
 		// cluster-level run — the ingest handler then keys on the cluster alone.
 		node:          strings.TrimSpace(os.Getenv("NODE_NAME")),
 		watchInterval: watchInterval,
-	}, nil
+	}
+	if err := configureExecutionWorker(&cfg); err != nil {
+		return config{}, err
+	}
+	return cfg, nil
 }
 
 // runBenchmark execs the upstream benchmark binary and returns its stdout (the
@@ -273,11 +291,14 @@ func runBenchmark(ctx context.Context, binary string, args []string) ([]byte, er
 	runCtx, cancel := context.WithTimeout(ctx, benchRunTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, binary, args...)
-	var stdout, stderr bytes.Buffer
+	var stdout boundedBenchOutput
 	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	cmd.Stderr = io.Discard
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("%s %s: %w (stderr: %s)", binary, strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+		if runCtx.Err() != nil {
+			return nil, runCtx.Err()
+		}
+		return nil, errors.New("benchmark execution failed")
 	}
 	out := bytes.TrimSpace(stdout.Bytes())
 	if len(out) == 0 {

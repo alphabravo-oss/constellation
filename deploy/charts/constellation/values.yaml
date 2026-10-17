@@ -355,6 +355,35 @@ dockerBenchRunner:
     requests: { cpu: 50m,  memory: 64Mi }
 
 # ---------------------------------------------------------------------------
+# Durable benchmark worker (opt-in)
+# ---------------------------------------------------------------------------
+# Durable on-demand execution is separate from scheduled benchmark CronJobs.
+# One worker inspects its assigned node; it does not establish fleet coverage.
+kubeBenchWorker:
+  enabled: false
+  image:
+    repository: ""
+    tag: ""
+  interval: "30s"
+  benchmark: ""
+  args: ""
+  clusterId: ""
+  state:
+    # Required: a durable PVC, exclusive to this worker (never emptyDir).
+    existingClaim: ""
+  nodeSelector: {}
+  tolerations: []
+  hostVolumes: []
+  hostVolumeMounts: []
+  resources:
+    limits: { cpu: 200m, memory: 256Mi }
+    requests: { cpu: 50m, memory: 64Mi }
+# No qualified image currently bundles docker-bench-security plus configuration.
+# Enabling this explicitly fails chart rendering instead of creating a fake job.
+dockerBenchWorker:
+  enabled: false
+
+# ---------------------------------------------------------------------------
 # Admission webhook
 # ---------------------------------------------------------------------------
 # The admission Deployment serves /validate over HTTPS. TLS material is
