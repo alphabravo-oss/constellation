@@ -864,6 +864,34 @@ Final 90-file evidence seal:
 `/tmp/constellation-native-report-clock-f3cc8c5/qualification-final-evidence-manifest.json`
 (SHA256 `3ef9ba77742f7289e550d9913397b4b15c98331abecc261a0fb86406339e7a87`).
 
+Hosted `39026348360` at `c309a21` completes frontend (2344 tests/158 files),
+browser (279 cases), Go unit/integration, FIPS, dependency audits and govulncheck
+successfully. Unit/integration report 732/14 skips. Quality remains1504, gosec163
+and redacted historical gitleaks11; the required gate fails. Formatting, shell
+lint, actionlint, tooling, endpoint mapping and parity-plan checks pass. Normalized
+lint identities match the prior ef0d7a9 run. This qualifies the sorting-test
+correction without changing the previous failed result; later backend commits
+are outside this hosted run. All22 evidence artifacts are independently verified:
+`/tmp/security-triage-39026348360/completed-manifest.json`
+(SHA256 `174ab5baf6da151fa1496382c256747a4d7e66f759d3c63fa54356b30cf6ebd8`).
+
+Combined exact source `314afad` passes 4586 fresh180 repeated race/shuffle test
+executions across14 packages, with zero failures and four explicit opt-in skips
+(native fixture generator and Flannel acceptance, twice each). Both migrations
+and seeding complete; all2596 tracked source blobs remain unchanged and the
+owned PostgreSQL container is absent. This includes the final bounded-service
+backup CLI source together with OIDC, scanner, backup, server and runtime changes.
+
+The first launcher incorrectly inherited umask077, producing four permission
+fixture failures before being stopped with exit143. Those results are preserved.
+The two affected tests pass four executions with child umask022, then the entire
+combined run passes with that same mask. No product change or weakened assertion
+was needed; evidence remains private. This is combined backend qualification,
+not strict packet acceptance or deployment. Evidence:
+`/tmp/constellation-integrated-314afad/combined-db-evidence-manifest.json`
+(SHA256 `024399a77d511e9f94136c81c6db78c8d76140a887ce2b53f23c4258f81cc760`).
+
+
 
 ## October 12 implementation continuation
 
