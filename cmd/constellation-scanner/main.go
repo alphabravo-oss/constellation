@@ -570,7 +570,8 @@ func (w *worker) lastError() string {
 }
 
 func (w *worker) executeJob(ctx context.Context, j *scanJob) {
-	w.logger.Info("scan start", "job_id", j.ID, "target_id", j.TargetID, "target_type", j.TargetType, "target_ref", j.TargetRef)
+	// TargetRef can itself be a presigned serverless URL; log stable identities.
+	w.logger.Info("scan start", "job_id", j.ID, "target_id", j.TargetID, "target_type", j.TargetType)
 	var (
 		res     *scanner.ScanResult
 		err     error
@@ -820,7 +821,8 @@ func looksLikeArtifactSource(s string) bool {
 // aggregator over the extracted directory (Syft SBOM + vuln matching), with no deployed
 // agent. The scratch directory is always cleaned up.
 func (w *worker) scanServerlessArtifact(ctx context.Context, j *scanJob, source string) (*scanner.ScanResult, error) {
-	w.logger.Info("serverless artifact scan", "job_id", j.ID, "source", source)
+	// Artifact sources may be presigned URLs; keep credentials out of logs.
+	w.logger.Info("serverless artifact scan", "job_id", j.ID)
 	unpacked, err := scanner.FetchServerlessArtifact(ctx, scanner.ServerlessArtifact{
 		Source:     source,
 		HTTPClient: w.artifactHTTPClient,

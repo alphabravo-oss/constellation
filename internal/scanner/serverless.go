@@ -6,9 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,7 +39,9 @@ type ServerlessArtifact struct {
 	Source string
 
 	// HTTPClient, when set, is used for https/http downloads. Defaults to a 5-minute
-	// client. Tests inject a client pointed at an httptest server.
+	// client. Untrusted downloads preserve client timeout, cookies and redirect
+	// policy and proxy, but use a restricted transport. Custom transports require
+	// the explicit trusted AllowPrivateTargets mode.
 	HTTPClient *http.Client
 
 	// MaxArtifactBytes / MaxUnpackedBytes / MaxFiles override the safety caps when > 0.
@@ -50,7 +50,7 @@ type ServerlessArtifact struct {
 	MaxFiles         int
 
 	// AllowPrivateTargets bypasses the SSRF guard that otherwise rejects http(s)
-	// sources resolving to loopback/link-local/private space. Only trusted callers
+	// sources connecting to loopback/link-local/private space. Only trusted callers
 	// (tests, in-cluster mirrors) should set it.
 	AllowPrivateTargets bool
 }
@@ -93,7 +93,7 @@ func FetchServerlessArtifact(ctx context.Context, art ServerlessArtifact) (*Unpa
 		return nil, err
 	}
 	if isTemp {
-		defer os.Remove(localZip)
+		defer func() { _ = os.Remove(localZip) }()
 	}
 
 	dir, err := os.MkdirTemp("", "constellation-serverless-*")
@@ -140,30 +140,22 @@ func downloadArtifact(ctx context.Context, art ServerlessArtifact, source string
 		client = &http.Client{Timeout: 5 * time.Minute}
 	}
 	if !art.AllowPrivateTargets {
-		if err := guardServerlessTarget(ctx, source); err != nil {
+		secured, cleanup, err := restrictedArtifactClient(client, defaultArtifactDialer())
+		if err != nil {
 			return "", false, err
 		}
-		// Copy the client so we can re-validate every redirect hop without mutating
-		// a shared/injected client; otherwise a 3xx to 169.254.169.254 would bypass
-		// the pre-flight IP check (SSRF).
-		c := *client
-		c.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 10 {
-				return errors.New("serverless: too many redirects")
-			}
-			return guardServerlessTarget(req.Context(), req.URL.String())
-		}
-		client = &c
+		defer cleanup()
+		client = secured
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, source, nil)
 	if err != nil {
-		return "", false, fmt.Errorf("serverless: request: %w", err)
+		return "", false, errors.New("serverless: invalid artifact request")
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", false, fmt.Errorf("serverless: download: %w", err)
+		return "", false, &artifactDownloadError{cause: err}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return "", false, fmt.Errorf("serverless: download status %d", resp.StatusCode)
 	}
@@ -191,47 +183,13 @@ func downloadArtifact(ctx context.Context, art ServerlessArtifact, source string
 	return f.Name(), true, nil
 }
 
-// guardServerlessTarget blocks server-side request forgery: it resolves the URL
-// host and rejects any target landing on loopback, link-local (which includes the
-// 169.254.169.254 cloud metadata endpoint), or private / unspecified address space.
-// ponytail: coarse deny-by-range with a single AllowPrivateTargets escape hatch;
-// upgrade path is an explicit CIDR allowlist on ServerlessArtifact plus a custom
-// DialContext to also close the DNS-rebinding TOCTOU window.
-func guardServerlessTarget(ctx context.Context, rawURL string) error {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return fmt.Errorf("serverless: parse url: %w", err)
-	}
-	host := u.Hostname()
-	if host == "" {
-		return errors.New("serverless: empty artifact host")
-	}
-	ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
-	if err != nil {
-		return fmt.Errorf("serverless: resolve %q: %w", host, err)
-	}
-	for _, ip := range ips {
-		if isDisallowedTargetIP(ip) {
-			return fmt.Errorf("serverless: refusing artifact host %q resolving to disallowed address %s", host, ip)
-		}
-	}
-	return nil
-}
+// Both the request URL and malformed redirect Location errors can contain
+// presigned credentials. Keep errors.Is/As for callers without serializing that
+// underlying text into job errors or logs.
+type artifactDownloadError struct{ cause error }
 
-// isDisallowedTargetIP reports whether ip is in a range the scanner must never
-// reach when fetching an attacker-influenced artifact URL.
-func isDisallowedTargetIP(ip net.IP) bool {
-	return ip.IsLoopback() ||
-		ip.IsLinkLocalUnicast() ||
-		ip.IsLinkLocalMulticast() ||
-		ip.IsPrivate() ||
-		ip.IsUnspecified()
-}
+func (e *artifactDownloadError) Error() string { return "serverless: artifact download failed" }
+func (e *artifactDownloadError) Unwrap() error { return e.cause }
 
 // unzipInto extracts zipPath into dir with zip-slip, total-size, and file-count guards.
 func unzipInto(zipPath, dir string, maxBytes int64, maxFiles int) (int, int64, error) {
