@@ -11,7 +11,8 @@
 //     status=running and update next_run_at = cron.Next(now), so a parallel
 //     scheduler can't double-fire (the row update is the lock).
 //  3. Render the compliance report for the target (org + cluster + framework)
-//     using pkg/report, signing the rendered bytes with cosign 2.x.
+//     using pkg/report, signing the rendered bytes with cosign 2.x when configured.
+//     Configured signing errors fail the run before any delivery.
 //  4. Push the artifact + signature to every delivery target. Failures are
 //     recorded as run failures; the rendered artifact remains available on disk.
 //  5. UPDATE compliance_runs SET status='succeeded'|'failed', artifact_uri,
@@ -324,7 +325,7 @@ UPDATE compliance_schedules
 
 	sig, err := d.signArtifact(ctx, artifactRoot, filename, localPath, artifact)
 	if err != nil {
-		return errors.Join(err, finalize("failed", "", "", 0, summary, err))
+		return errors.Join(err, finalize("failed", "file://"+localPath, "", size, summary, err))
 	}
 
 	primaryURI, deliveryErr := d.deliverAll(ctx, s, localPath, artifact, sig, ext)
@@ -343,8 +344,8 @@ func complianceFrameworkName(id string) string {
 	return id
 }
 
-// signArtifact retains best-effort signing and the established checksum fallback.
-// A successful signature must be persisted beside the artifact before delivery.
+// signArtifact requires a configured signer to produce and persist a signature
+// before delivery. With no signer, the established explicit checksum fallback applies.
 func (d *daemon) signArtifact(ctx context.Context, root *os.Root, filename, localPath string, artifact []byte) (string, error) {
 	if d.signer == nil {
 		h := sha256.Sum256(artifact)
@@ -353,7 +354,10 @@ func (d *daemon) signArtifact(ctx context.Context, root *os.Root, filename, loca
 	sig, err := d.signer.Sign(ctx, localPath)
 	if err != nil {
 		d.logger.Warn("cosign sign", "err", err.Error())
-		return "", nil
+		return "", fmt.Errorf("sign compliance artifact: %w", err)
+	}
+	if strings.TrimSpace(sig) == "" {
+		return "", errors.New("sign compliance artifact: empty signature")
 	}
 	if err := securefiles.WriteFile(root, filename+".sig", []byte(sig), 0o600); err != nil {
 		return "", err

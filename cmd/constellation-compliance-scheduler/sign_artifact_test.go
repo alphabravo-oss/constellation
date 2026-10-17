@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -70,7 +71,7 @@ func TestArtifactSigningPersistsPrivateSignatureAndPropagatesWriteFailure(t *tes
 	}
 }
 
-func TestArtifactSigningFailureRemainsBestEffort(t *testing.T) {
+func TestConfiguredArtifactSigningFailureIsAnError(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "cosign")
 	if err := writeSecurityFixture(bin, []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
 		t.Fatal(err)
@@ -78,7 +79,23 @@ func TestArtifactSigningFailureRemainsBestEffort(t *testing.T) {
 	var logged strings.Builder
 	d := daemon{signer: &cosignSigner{bin: bin}, logger: slog.New(slog.NewTextHandler(&logged, nil))}
 	sig, err := d.signArtifact(t.Context(), nil, "report.csv", "unused", nil)
-	if err != nil || sig != "" || !strings.Contains(logged.String(), "cosign sign") {
-		t.Fatalf("best-effort signing behavior changed: %q %v", sig, err)
+	if err == nil || sig != "" || !strings.Contains(logged.String(), "cosign sign") {
+		t.Fatalf("configured signing failure was ignored: %q %v", sig, err)
+	}
+}
+
+func TestConfiguredArtifactSigningRejectsEmptySignature(t *testing.T) {
+	for _, output := range []string{"", " \t\n"} {
+		t.Run(fmt.Sprintf("bytes-%d", len(output)), func(t *testing.T) {
+			bin := filepath.Join(t.TempDir(), "cosign")
+			if err := writeSecurityFixture(bin, []byte("#!/bin/sh\nprintf '"+output+"'\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			d := daemon{signer: &cosignSigner{bin: bin}, logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+			sig, err := d.signArtifact(t.Context(), nil, "report.csv", "unused", nil)
+			if err == nil || sig != "" || !strings.Contains(err.Error(), "empty signature") {
+				t.Fatalf("empty configured signature accepted: %q %v", sig, err)
+			}
+		})
 	}
 }
