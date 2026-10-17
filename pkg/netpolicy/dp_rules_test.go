@@ -129,7 +129,7 @@ func TestBuildDPRules_SkipFlowsNotMatchingTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Only the DNS allow — the flow doesn't touch default/api.
-	if len(rules) != 1 || !(rules[0].Port == 53 && rules[0].IPProto == 17) {
+	if len(rules) != 1 || rules[0].Port != 53 || rules[0].IPProto != 17 {
 		t.Errorf("expected only DNS rule, got %+v", rules)
 	}
 }

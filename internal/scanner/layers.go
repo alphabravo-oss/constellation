@@ -366,8 +366,8 @@ func historyFromConfig(cfg *v1.ConfigFile) []LayerHistoryEntry {
 	out := make([]LayerHistoryEntry, 0, len(cfg.History))
 	for _, h := range cfg.History {
 		created := ""
-		if !h.Created.Time.IsZero() {
-			created = h.Created.Time.UTC().Format("2006-01-02T15:04:05Z")
+		if !h.Created.IsZero() {
+			created = h.Created.UTC().Format("2006-01-02T15:04:05Z")
 		}
 		out = append(out, LayerHistoryEntry{
 			CreatedBy:  h.CreatedBy,

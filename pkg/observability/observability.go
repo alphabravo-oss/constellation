@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -80,7 +81,7 @@ func Init(ctx context.Context, serviceName string) (*Telemetry, error) {
 		With(slog.String("service", serviceName))
 
 	reg := prometheus.NewRegistry()
-	reg.MustRegister(prometheus.NewGoCollector(), prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
+	reg.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 
 	httpHist := prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "constellation_http_request_duration_seconds",

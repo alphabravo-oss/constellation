@@ -42,8 +42,8 @@ func fakeIdP(t *testing.T) (*httptest.Server, *rsa.PrivateKey) {
 		})
 	})
 	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
-		nBytes := priv.PublicKey.N.Bytes()
-		eBytes := big.NewInt(int64(priv.PublicKey.E)).Bytes()
+		nBytes := priv.N.Bytes()
+		eBytes := big.NewInt(int64(priv.E)).Bytes()
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"keys": []map[string]any{{
 				"kty": "RSA",
@@ -164,8 +164,8 @@ func TestOIDC_RejectsBadSignature(t *testing.T) {
 	})
 	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
 		// JWKS advertises the *good* public key.
-		nBytes := priv.PublicKey.N.Bytes()
-		eBytes := big.NewInt(int64(priv.PublicKey.E)).Bytes()
+		nBytes := priv.N.Bytes()
+		eBytes := big.NewInt(int64(priv.E)).Bytes()
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"keys": []map[string]any{{
 				"kty": "RSA", "kid": "good", "alg": "RS256",
@@ -224,8 +224,8 @@ func claimIdP(t *testing.T, claimName string, values []any) *httptest.Server {
 		})
 	})
 	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
-		nBytes := priv.PublicKey.N.Bytes()
-		eBytes := big.NewInt(int64(priv.PublicKey.E)).Bytes()
+		nBytes := priv.N.Bytes()
+		eBytes := big.NewInt(int64(priv.E)).Bytes()
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"keys": []map[string]any{{
 				"kty": "RSA", "kid": "test", "alg": "RS256",
@@ -315,8 +315,8 @@ func nonceIdP(t *testing.T, tokenNonce string) *httptest.Server {
 		})
 	})
 	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
-		nBytes := priv.PublicKey.N.Bytes()
-		eBytes := big.NewInt(int64(priv.PublicKey.E)).Bytes()
+		nBytes := priv.N.Bytes()
+		eBytes := big.NewInt(int64(priv.E)).Bytes()
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"keys": []map[string]any{{
 				"kty": "RSA", "kid": "test", "alg": "RS256",

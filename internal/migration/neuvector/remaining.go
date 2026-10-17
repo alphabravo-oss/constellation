@@ -502,13 +502,16 @@ func registryCredentialsPresent(node *yaml.Node) bool {
 	if node == nil {
 		return false
 	}
-	if node.Kind == yaml.MappingNode {
+	switch node.Kind {
+	case yaml.DocumentNode, yaml.ScalarNode, yaml.AliasNode:
+		return false
+	case yaml.MappingNode:
 		for i := 0; i+1 < len(node.Content); i += 2 {
 			if registryCredentialField(node.Content[i].Value) || registryCredentialsPresent(node.Content[i+1]) {
 				return true
 			}
 		}
-	} else if node.Kind == yaml.SequenceNode {
+	case yaml.SequenceNode:
 		for _, item := range node.Content {
 			if registryCredentialsPresent(item) {
 				return true

@@ -110,10 +110,7 @@ var http2Preface = []byte("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
 // the WAF/DLP path which examines pseudo-headers + selected headers; it does NOT
 // reassemble continuations or maintain cross-frame state.
 func parseHTTP2(flow Flow, dir Direction, payload []byte) *L7Event {
-	rest := payload
-	if bytes.HasPrefix(rest, http2Preface) {
-		rest = rest[len(http2Preface):]
-	}
+	rest := bytes.TrimPrefix(payload, http2Preface)
 	if len(rest) < 9 {
 		return nil
 	}

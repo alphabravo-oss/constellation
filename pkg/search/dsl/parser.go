@@ -134,19 +134,19 @@ func tokenize(q string) []token {
 	i := 0
 	for i < len(q) {
 		c := q[i]
-		switch {
-		case c == ' ' || c == '\t':
+		switch c {
+		case ' ', '\t':
 			i++
-		case c == '(':
+		case '(':
 			out = append(out, token{kind: "lparen", val: "("})
 			i++
-		case c == ')':
+		case ')':
 			out = append(out, token{kind: "rparen", val: ")"})
 			i++
-		case c == ':':
+		case ':':
 			out = append(out, token{kind: "colon", val: ":"})
 			i++
-		case c == '"':
+		case '"':
 			j := i + 1
 			for j < len(q) && q[j] != '"' {
 				j++
@@ -158,9 +158,10 @@ func tokenize(q string) []token {
 			depth := 0
 			for j < len(q) {
 				c := q[j]
-				if c == '[' {
+				switch c {
+				case '[':
 					depth++
-				} else if c == ']' {
+				case ']':
 					depth--
 				}
 				if depth == 0 && (c == ' ' || c == '\t' || c == ':' || c == '(' || c == ')') {
@@ -169,11 +170,12 @@ func tokenize(q string) []token {
 				j++
 			}
 			val := q[i:j]
-			if strings.EqualFold(val, "OR") {
+			switch {
+			case strings.EqualFold(val, "OR"):
 				out = append(out, token{kind: "or", val: "OR"})
-			} else if strings.EqualFold(val, "AND") {
-				// AND is the implicit default, ignore
-			} else {
+			case strings.EqualFold(val, "AND"):
+				// AND is the implicit default, ignore.
+			default:
 				out = append(out, token{kind: "ident", val: val})
 			}
 			i = j
@@ -260,20 +262,9 @@ func (p *parser) parseTerm() (node, error) {
 		}
 		term = termNode{field: p.defaultField, val: field}
 	} else {
-		p.eat()
-		v := p.peek()
-		if v == nil || v.kind != "ident" {
-			return nil, fmt.Errorf("search: expected value after %q:", field)
-		}
-		val := p.eat().val
-		// Colons inside unquoted values occur in package URLs and RFC3339 times.
-		for next := p.peek(); next != nil && next.kind == "colon"; next = p.peek() {
-			p.eat()
-			part := p.eat()
-			if part == nil || part.kind != "ident" {
-				return nil, fmt.Errorf("search: expected value after colon in %q", field)
-			}
-			val += ":" + part.val
+		val, err := p.parseFieldValue(field)
+		if err != nil {
+			return nil, err
 		}
 		if strings.HasPrefix(val, "!") {
 			negate = !negate
@@ -285,6 +276,27 @@ func (p *parser) parseTerm() (node, error) {
 		return unaryNode{inner: term}, nil
 	}
 	return term, nil
+}
+
+// parseFieldValue consumes a colon and its value, retaining unquoted colon
+// segments used by package URLs and timestamps.
+func (p *parser) parseFieldValue(field string) (string, error) {
+	p.eat()
+	v := p.peek()
+	if v == nil || v.kind != "ident" {
+		return "", fmt.Errorf("search: expected value after %q", field)
+	}
+	val := p.eat().val
+	// Colons inside unquoted values occur in package URLs and RFC3339 times.
+	for next := p.peek(); next != nil && next.kind == "colon"; next = p.peek() {
+		p.eat()
+		part := p.eat()
+		if part == nil || part.kind != "ident" {
+			return "", fmt.Errorf("search: expected value after colon in %q", field)
+		}
+		val += ":" + part.val
+	}
+	return val, nil
 }
 
 // ---- emit (SQL) ----
@@ -347,6 +359,8 @@ func emitTerm(t termNode, s Schema, args *[]any) (string, error) {
 	}
 	// Default: case-insensitive equality / ILIKE substring on strings.
 	switch f.Type {
+	case FieldString:
+		return emitStringTerm(f.Column, val, s.LiteralSubstrings, args)
 	case FieldInt:
 		i, err := strconv.ParseInt(val, 10, 64)
 		if err != nil {
@@ -376,11 +390,15 @@ func emitTerm(t termNode, s Schema, args *[]any) (string, error) {
 		*args = append(*args, t)
 		return fmt.Sprintf("%s = $%d", f.Column, len(*args)), nil
 	}
-	if s.LiteralSubstrings {
+	return emitStringTerm(f.Column, val, s.LiteralSubstrings, args)
+}
+
+func emitStringTerm(column, val string, literal bool, args *[]any) (string, error) {
+	if literal {
 		val = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(val)
 	}
 	*args = append(*args, "%"+val+"%")
-	return fmt.Sprintf("%s ILIKE $%d", f.Column, len(*args)), nil
+	return fmt.Sprintf("%s ILIKE $%d", column, len(*args)), nil
 }
 
 func parseTimeRange(in string) (time.Time, time.Time, error) {

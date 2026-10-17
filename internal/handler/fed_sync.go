@@ -443,7 +443,7 @@ INSERT INTO fed_runtime_profiles (org_id, rule_kind, rule_key, payload, cfg_type
 VALUES ($1,$2,$3,$4,'fed')
 ON CONFLICT (org_id, rule_kind, rule_key) DO UPDATE SET
     payload=EXCLUDED.payload, cfg_type='fed', updated_at=NOW()`,
-			orgID, rev.Kind, rev.RuleID, []byte(payload))
+			orgID, rev.Kind, rev.RuleID, payload)
 		return err
 	case fedKindFileProfile + "_delete", fedKindHostProcessProfile + "_delete", fedKindRuntimeDLP + "_delete":
 		// Tombstone: the master removed this runtime profile. Drop the joint's fed

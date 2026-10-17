@@ -173,10 +173,10 @@ func claimPendingRun(ctx context.Context, client *http.Client, cfg config) (bool
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxReportBytes))
-	switch {
-	case resp.StatusCode == http.StatusNoContent:
+	switch resp.StatusCode {
+	case http.StatusNoContent:
 		return false, nil
-	case resp.StatusCode == http.StatusOK:
+	case http.StatusOK:
 		return true, nil
 	default:
 		return false, fmt.Errorf("claim returned %d", resp.StatusCode)
