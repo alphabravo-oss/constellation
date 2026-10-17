@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Join actual pod/CRI identity and independently verify packet/server evidence."""
 import argparse
+import base64
 import ipaddress
 import json
 from pathlib import Path
@@ -14,6 +15,17 @@ import uuid
 
 def read_json(path):
     return json.loads(Path(path).read_text())
+
+
+def native_mac(value):
+    # Go encodes net.HardwareAddr ([]byte) as base64; endpoint identity uses
+    # HardwareAddr.String(). Compare the same six bytes, never a display guess.
+    if not isinstance(value, str):
+        raise ValueError("native MAC must be a base64 string")
+    raw = base64.b64decode(value, validate=True)
+    if len(raw) != 6 or base64.b64encode(raw).decode("ascii") != value:
+        raise ValueError("native MAC must encode exactly six bytes")
+    return raw.hex(":")
 
 
 def build_identity(directory, arguments):
@@ -117,7 +129,7 @@ def verify(directory):
             if endpoint["Namespace"] != pod["namespace"] or endpoint["PodName"] != pod["name"] or pod["ip"] not in endpoint["IPs"]:
                 raise ValueError("native endpoint ownership mismatch")
             for event in probe["native"]:
-                if event["EPMAC"] != endpoint["MAC"] or event["ClientIP"] != client["ip"] or event["ServerIP"] != pod["ip"] or event["ServerPort"] != probe["port"] or event["IPProto"] != 6:
+                if native_mac(event["EPMAC"]) != endpoint["MAC"] or event["ClientIP"] != client["ip"] or event["ServerIP"] != pod["ip"] or event["ServerPort"] != probe["port"] or event["IPProto"] != 6:
                     raise ValueError("native verdict has foreign scope")
                 if probe.get("application", 0) and event.get("Application") != probe["application"]:
                     raise ValueError("nested HTTP application attribution missing")
@@ -152,7 +164,8 @@ class EvidenceContractTests(unittest.TestCase):
                     deny = not allowed
                     nonce = f"{phase}-{pod['name']}-{port}"
                     source = 40000 + len(probes)
-                    event = dict(EPMAC=endpoints[index]["MAC"], ClientIP="10.233.0.12", ServerIP=pod["ip"],
+                    encoded_mac = base64.b64encode(bytes.fromhex(endpoints[index]["MAC"].replace(":", ""))).decode("ascii")
+                    event = dict(EPMAC=encoded_mac, ClientIP="10.233.0.12", ServerIP=pod["ip"],
                                  ServerPort=port, IPProto=6, PolicyAction=action, PolicyID=policy_id, Application=application, FirstSeenAt=100)
                     probes.append(dict(phase=phase, pod=pod["name"], nonce=nonce, port=port, source_port=source,
                                        allowed=not deny, require_native=native, native=[event] if native else [],
@@ -183,11 +196,18 @@ class EvidenceContractTests(unittest.TestCase):
                         changed_logs[probe["pod"]].append(dict(nonce=probe["nonce"], pod=probe["pod"], port=probe["port"], remote="10.233.0.12:40000"))
                     elif mutation == "missing native": probe["native"] = []
                     elif mutation == "old aggregate": probe["native"][0]["FirstSeenAt"] = 99
-                    elif mutation == "foreign MAC": probe["native"][0]["EPMAC"] = "02:ff:ff:ff:ff:ff"
+                    elif mutation == "foreign MAC": probe["native"][0]["EPMAC"] = "Av//////"
                     elif mutation == "no queue traversal": probe["queue_packets_after"] = probe["queue_packets_before"]
                     else: changed_logs["server-a"][0]["remote"] = "10.42.0.1:40000"
                     self.persist(Path(directory), changed, changed_logs)
                     with self.assertRaises(ValueError): verify(directory)
+
+    def test_native_mac_wire_encoding_is_exact(self):
+        self.assertEqual(native_mac("Bu3DyAQA"), "06:ed:c3:c8:04:00")
+        self.assertEqual(native_mac("ikFLhfPT"), "8a:41:4b:85:f3:d3")
+        for value in (None, [], "", "06:ed:c3:c8:04:00", "Bu3DyAQA\n", "Bu3DyAQ=", "Bu3DyAQA/w==", "!!!!!!", "é"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                native_mac(value)
 
     def test_scope_of_address(self):
         subnet = ipaddress.ip_network("10.233.0.0/16")
