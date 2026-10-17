@@ -169,7 +169,7 @@ func (r *GroupMembershipReconciler) writeMembership(ctx context.Context, orgID, 
 	if err != nil {
 		return "", false, err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 	var lockedOrgID uuid.UUID
 	if err := tx.QueryRow(ctx, `SELECT id FROM orgs WHERE id=$1 FOR KEY SHARE`, orgID).Scan(&lockedOrgID); err != nil {
 		return "", false, err
@@ -239,14 +239,12 @@ func (r *GroupMembershipReconciler) writeMembership(ctx context.Context, orgID, 
 			}
 		}
 	}
-	removedPolicies := []*RuntimePolicy{}
 	for _, edge := range edges {
-		owned, err := retractEdgePoliciesTx(ctx, tx, orgID, edge.ClusterID, edge.ID, edge.Mode,
-			netpolicy.GroupEdge{FromGroup: edge.FromGroup, ToGroup: edge.ToGroup})
+		_, err := r.edges.retractAndAuditEdgePoliciesTx(ctx, tx, orgID, edge.ClusterID, edge.ID, edge.Mode,
+			netpolicy.GroupEdge{FromGroup: edge.FromGroup, ToGroup: edge.ToGroup}, nil)
 		if err != nil {
 			return name, false, err
 		}
-		removedPolicies = append(removedPolicies, owned...)
 	}
 	membersJSON, err := json.Marshal(nextMembers)
 	if err != nil {
@@ -270,22 +268,18 @@ func (r *GroupMembershipReconciler) writeMembership(ctx context.Context, orgID, 
 			return name, false, err
 		}
 	}
-	createdPolicies := []*RuntimePolicy{}
 	for _, edge := range edges {
-		_, created, err := r.edges.expandTx(ctx, tx, orgID, edge.ClusterID, netpolicy.GroupEdge{
+		_, _, err := r.edges.expandTx(ctx, tx, orgID, edge.ClusterID, netpolicy.GroupEdge{
 			ID: edge.ID.String(), FromGroup: edge.FromGroup, ToGroup: edge.ToGroup,
 			Ports: edge.Ports, Mode: edge.Mode, Comment: edge.Comment,
 		}, nil)
 		if err != nil {
 			return name, false, err
 		}
-		createdPolicies = append(createdPolicies, created...)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return name, false, err
 	}
-	r.edges.auditRemovedPolicies(ctx, orgID, nil, removedPolicies)
-	r.edges.auditCreatedPolicies(ctx, orgID, nil, createdPolicies)
 	return name, true, nil
 }
 

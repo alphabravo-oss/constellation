@@ -32,7 +32,6 @@ import (
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
 	"github.com/alphabravocompany/constellation/internal/runtime/dp"
-	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/netpolicy"
 )
 
@@ -84,7 +83,7 @@ func (h *RuntimePoliciesHTTP) Generate(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := h.generateInternal(r.Context(), sub.OrgID, req)
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		writeGeneratedPolicyError(w, err)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, res)
@@ -112,108 +111,33 @@ func (h *RuntimePoliciesHTTP) ApplyGenerated(w http.ResponseWriter, r *http.Requ
 	}
 	gen, err := h.generateInternal(r.Context(), sub.OrgID, req)
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		writeGeneratedPolicyError(w, err)
 		return
 	}
-	// P2-2: everything we synthesize from observed flows is provenance=learned.
-	// We persist the provenance tag in the rules JSONB (rides an extra `cfg`
-	// key that the dp decoder ignores) so a later regeneration can tell learned
-	// rules apart from operator-authored ones and merge non-destructively.
-	learned := netpolicy.Tag(gen.Rules, netpolicy.CfgTypeLearned)
-
-	// If a policy with this (workload,name) already exists, MERGE instead of
-	// 409: replace the learned rules with the fresh set but keep every
-	// user/fed-authored rule the operator added by hand.
-	existing, err := h.store.GetByName(r.Context(), sub.OrgID, req.ClusterID, req.Workload, req.Name)
+	policy := &RuntimePolicy{OrgID: sub.OrgID, ClusterID: req.ClusterID, Workload: req.Workload, Namespace: namespaceOrDerived(req), Name: req.Name, Mode: PolicyModeMonitor, DefAction: gen.DefAction, ApplyDir: gen.ApplyDir, CreatedBy: &sub.UserID}
+	saved, created, err := h.store.applyLearnedPolicy(r.Context(), policy, gen.Rules, &sub.UserID, requestIDFrom(r))
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		writeGeneratedPolicyError(w, err)
 		return
 	}
-	if existing != nil {
-		got, err := h.mergeRegenerated(r, sub.OrgID, sub.UserID, existing, learned, gen)
-		if err != nil {
-			jsonError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		httpx.WriteJSON(w, http.StatusOK, got)
-		return
+	status := http.StatusOK
+	if created {
+		status = http.StatusCreated
 	}
-
-	rulesJSON, err := json.Marshal(learned)
-	if err != nil {
-		jsonError(w, http.StatusInternalServerError, "encode rules: "+err.Error())
-		return
-	}
-	policy := &RuntimePolicy{
-		OrgID: sub.OrgID, ClusterID: req.ClusterID,
-		Workload: req.Workload, Namespace: namespaceOrDerived(req),
-		Name:      req.Name,
-		Mode:      PolicyModeMonitor, // always monitor on auto-gen
-		DefAction: gen.DefAction,
-		ApplyDir:  gen.ApplyDir,
-		Rules:     rulesJSON,
-		CreatedBy: &sub.UserID,
-	}
-	id, err := h.store.Insert(r.Context(), policy, requestIDFrom(r))
-	if err != nil {
-		if strings.Contains(err.Error(), "duplicate") {
-			// Lost a create race; fall back to the merge path.
-			existing, gerr := h.store.GetByName(r.Context(), sub.OrgID, req.ClusterID, req.Workload, req.Name)
-			if gerr == nil && existing != nil {
-				got, merr := h.mergeRegenerated(r, sub.OrgID, sub.UserID, existing, learned, gen)
-				if merr == nil {
-					httpx.WriteJSON(w, http.StatusOK, got)
-					return
-				}
-			}
-			jsonError(w, http.StatusConflict, "policy with this name already exists")
-			return
-		}
-		jsonError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	got, _ := h.store.Get(r.Context(), sub.OrgID, id)
-	httpx.WriteJSON(w, http.StatusCreated, got)
-}
-
-// mergeRegenerated merges freshly-learned rules into an existing policy row,
-// preserving user/fed-authored rules, and writes the result back (bumping
-// version via the runtime_policies trigger). Mode is intentionally left
-// untouched — regeneration must not silently re-arm or disarm enforcement.
-func (h *RuntimePoliciesHTTP) mergeRegenerated(r *http.Request, orgID, userID uuid.UUID,
-	existing *RuntimePolicy, learned []*netpolicy.SourcedRule, gen *GenerateResponse) (*RuntimePolicy, error) {
-	prior, err := netpolicy.DecodeSourced(existing.Rules)
-	if err != nil {
-		return nil, err
-	}
-	merged := netpolicy.MergeRules(prior, learned)
-	rulesJSON, err := json.Marshal(merged)
-	if err != nil {
-		return nil, err
-	}
-	// Preserve any operator-tuned def_action/apply_dir the row already carries;
-	// only the rule set is regenerated.
-	_, err = h.store.db.Pool().Exec(r.Context(), `
-UPDATE runtime_policies SET rules = $1::jsonb, updated_by = $2
- WHERE id = $3 AND org_id = $4`, string(rulesJSON), userID, existing.ID, orgID)
-	if err != nil {
-		return nil, err
-	}
-	got, err := h.store.Get(r.Context(), orgID, existing.ID)
-	if err != nil {
-		return nil, err
-	}
-	if h.store.auditLog != nil {
-		_ = h.store.auditLog.LogPolicyEvent(r.Context(), orgID, &userID,
-			audit.ActionPolicyUpdate, ptrSnap(existing), ptrSnap(got), requestIDFrom(r))
-	}
-	return got, nil
+	httpx.WriteJSON(w, status, saved)
 }
 
 // generateInternal is the shared work both endpoints do.
 func (h *RuntimePoliciesHTTP) generateInternal(ctx context.Context, orgID uuid.UUID, req GenerateRequest) (*GenerateResponse, error) {
 	if req.ClusterID == uuid.Nil || req.Workload == "" {
 		return nil, errBadRequest("cluster_id and workload are required")
+	}
+	var owned bool
+	if err := h.store.db.Pool().QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM clusters WHERE id=$1 AND org_id=$2)`, req.ClusterID, orgID).Scan(&owned); err != nil {
+		return nil, err
+	}
+	if !owned {
+		return nil, errLegacyPolicyClusterNotFound
 	}
 	// Default an omitted window to 24h BEFORE clamping (matches /simulate); clampInt's
 	// min of 1 would otherwise turn 0 into 1h, silently narrowing the flow window.

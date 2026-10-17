@@ -76,15 +76,14 @@ func (s *GroupEdgeStore) Upsert(ctx context.Context, orgID, clusterID uuid.UUID,
 	if err != nil {
 		return GroupEdgeRow{}, err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 	row, removed, err := s.upsertTx(ctx, tx, orgID, clusterID, e, by)
 	if err != nil {
 		return GroupEdgeRow{}, err
 	}
-	var created []*RuntimePolicy
 	if len(removed) != 0 {
 		e.ID = row.ID.String()
-		_, created, err = s.expandTx(ctx, tx, orgID, clusterID, e, by)
+		_, _, err = s.expandTx(ctx, tx, orgID, clusterID, e, by)
 		if err != nil {
 			return GroupEdgeRow{}, err
 		}
@@ -92,8 +91,6 @@ func (s *GroupEdgeStore) Upsert(ctx context.Context, orgID, clusterID uuid.UUID,
 	if err := tx.Commit(ctx); err != nil {
 		return GroupEdgeRow{}, err
 	}
-	s.auditRemovedPolicies(ctx, orgID, by, removed)
-	s.auditCreatedPolicies(ctx, orgID, by, created)
 	return row, nil
 }
 
@@ -110,7 +107,7 @@ func (s *GroupEdgeStore) upsertTx(ctx context.Context, tx pgx.Tx, orgID, cluster
 		return GroupEdgeRow{}, nil, err
 	}
 	var lockedClusterID uuid.UUID
-	if err := tx.QueryRow(ctx, `SELECT id FROM clusters WHERE id=$1 AND org_id=$2 FOR KEY SHARE`, clusterID, orgID).Scan(&lockedClusterID); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT id FROM clusters WHERE id=$1 AND org_id=$2 FOR SHARE`, clusterID, orgID).Scan(&lockedClusterID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return GroupEdgeRow{}, nil, errEdgeClusterNotFound
 		}
@@ -146,7 +143,7 @@ SELECT id FROM groups
 	}
 	var removed []*RuntimePolicy
 	if err == nil && (existingMode != e.Mode || !samePorts) {
-		removed, err = retractEdgePoliciesTx(ctx, tx, orgID, clusterID, existingID, existingMode, e)
+		removed, err = s.retractAndAuditEdgePoliciesTx(ctx, tx, orgID, clusterID, existingID, existingMode, e, by)
 		if err != nil {
 			return GroupEdgeRow{}, nil, err
 		}
@@ -177,21 +174,19 @@ func (s *GroupEdgeStore) UpsertAndExpand(ctx context.Context, orgID, clusterID u
 	if err != nil {
 		return GroupEdgeRow{}, ExpandResult{}, err
 	}
-	defer tx.Rollback(ctx)
-	row, removed, err := s.upsertTx(ctx, tx, orgID, clusterID, edge, by)
+	defer func() { _ = tx.Rollback(ctx) }()
+	row, _, err := s.upsertTx(ctx, tx, orgID, clusterID, edge, by)
 	if err != nil {
 		return GroupEdgeRow{}, ExpandResult{}, err
 	}
 	edge.ID = row.ID.String()
-	result, createdPolicies, err := s.expandTx(ctx, tx, orgID, clusterID, edge, by)
+	result, _, err := s.expandTx(ctx, tx, orgID, clusterID, edge, by)
 	if err != nil {
 		return GroupEdgeRow{}, ExpandResult{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return GroupEdgeRow{}, ExpandResult{}, err
 	}
-	s.auditRemovedPolicies(ctx, orgID, by, removed)
-	s.auditCreatedPolicies(ctx, orgID, by, createdPolicies)
 	return row, result, nil
 }
 
@@ -227,11 +222,15 @@ SELECT id, cluster_id, from_group, to_group, ports, mode, comment, updated_at
 // Mixed or legacy policies have ambiguous policy-level posture, so deletion
 // refuses them rather than weakening authored enforcement or leaving stale rules.
 func (s *GroupEdgeStore) Delete(ctx context.Context, orgID, id uuid.UUID) error {
+	return s.deleteEdgeWithActor(ctx, orgID, id, nil)
+}
+
+func (s *GroupEdgeStore) deleteEdgeWithActor(ctx context.Context, orgID, id uuid.UUID, by *uuid.UUID) error {
 	tx, err := s.db.Pool().Begin(ctx)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 	var lockedOrgID uuid.UUID
 	if err := tx.QueryRow(ctx, `SELECT id FROM orgs WHERE id=$1 FOR KEY SHARE`, orgID).Scan(&lockedOrgID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -248,8 +247,14 @@ SELECT id, cluster_id, from_group, to_group, ports, mode, comment, updated_at
 	if err != nil {
 		return err
 	}
+	if err := requireLegacyPolicyCluster(ctx, tx, orgID, row.ClusterID); err != nil {
+		if errors.Is(err, errLegacyPolicyClusterNotFound) {
+			return errEdgeNotFound
+		}
+		return err
+	}
 	edge := netpolicy.GroupEdge{FromGroup: row.FromGroup, ToGroup: row.ToGroup}
-	removed, err := retractEdgePoliciesTx(ctx, tx, orgID, row.ClusterID, id, row.Mode, edge)
+	_, err = s.retractAndAuditEdgePoliciesTx(ctx, tx, orgID, row.ClusterID, id, row.Mode, edge, by)
 	if err != nil {
 		return err
 	}
@@ -259,7 +264,6 @@ SELECT id, cluster_id, from_group, to_group, ports, mode, comment, updated_at
 	if err := tx.Commit(ctx); err != nil {
 		return err
 	}
-	s.auditRemovedPolicies(ctx, orgID, nil, removed)
 	return nil
 }
 
@@ -307,16 +311,6 @@ func retractEdgePoliciesTx(ctx context.Context, tx pgx.Tx, orgID, clusterID, edg
 		}
 	}
 	return owned, nil
-}
-
-func (s *GroupEdgeStore) auditRemovedPolicies(ctx context.Context, orgID uuid.UUID, by *uuid.UUID, removed []*RuntimePolicy) {
-	if s.pol != nil && s.pol.auditLog != nil {
-		for _, policy := range removed {
-			if err := s.pol.auditLog.LogPolicyDelete(ctx, orgID, by, snapshot(policy), ""); err != nil {
-				slog.Default().Warn("edge retraction policy audit failed after commit", "policy_id", policy.ID, "error", err)
-			}
-		}
-	}
 }
 
 func splitEdgeRules(raw json.RawMessage, edgeID uuid.UUID) ([]json.RawMessage, bool, error) {
@@ -431,15 +425,14 @@ func (s *GroupEdgeStore) Expand(ctx context.Context, orgID, clusterID uuid.UUID,
 	if err != nil {
 		return ExpandResult{}, err
 	}
-	defer tx.Rollback(ctx)
-	result, createdPolicies, err := s.expandTx(ctx, tx, orgID, clusterID, e, by)
+	defer func() { _ = tx.Rollback(ctx) }()
+	result, _, err := s.expandTx(ctx, tx, orgID, clusterID, e, by)
 	if err != nil {
 		return ExpandResult{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return ExpandResult{}, err
 	}
-	s.auditCreatedPolicies(ctx, orgID, by, createdPolicies)
 	return result, nil
 }
 
@@ -454,7 +447,7 @@ func (s *GroupEdgeStore) expandTx(ctx context.Context, tx pgx.Tx, orgID, cluster
 	if err := tx.QueryRow(ctx, `SELECT id FROM orgs WHERE id=$1 FOR KEY SHARE`, orgID).Scan(&lockedOrgID); err != nil {
 		return ExpandResult{}, nil, err
 	}
-	if err := tx.QueryRow(ctx, `SELECT id FROM clusters WHERE id=$1 AND org_id=$2 FOR KEY SHARE`, clusterID, orgID).Scan(&lockedClusterID); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT id FROM clusters WHERE id=$1 AND org_id=$2 FOR SHARE`, clusterID, orgID).Scan(&lockedClusterID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ExpandResult{}, nil, errEdgeClusterNotFound
 		}
@@ -535,54 +528,20 @@ SELECT id, cluster_id, from_group, to_group, ports, mode, comment, updated_at
 		if m == "" {
 			continue
 		}
-		rules, defAction, applyDir, err := netpolicy.BuildDPRules(m, flows, opts)
+		policy := &RuntimePolicy{OrgID: orgID, ClusterID: clusterID, Workload: m, Namespace: namespaceOfWorkload(m), Name: name, Mode: policyMode, CreatedBy: by}
+		saved, created, err := s.expandMemberPolicyTx(ctx, tx, policy, flows, opts, edgeID, by)
 		if err != nil {
 			return ExpandResult{}, nil, err
 		}
-		if len(rules) == 0 {
+		if saved == nil {
 			continue
 		}
-		policy := &RuntimePolicy{
-			OrgID: orgID, ClusterID: clusterID,
-			Workload: m, Namespace: namespaceOfWorkload(m), Name: name,
-			Mode: policyMode, DefAction: defAction, ApplyDir: applyDir,
-			CreatedBy: by,
-		}
-		var existingRules json.RawMessage
-		err = tx.QueryRow(ctx, `SELECT rules FROM runtime_policies
- WHERE org_id=$1 AND cluster_id=$2 AND workload=$3 AND name=$4 FOR UPDATE`,
-			orgID, clusterID, m, name).Scan(&existingRules)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return ExpandResult{}, nil, err
-		}
-		if err == nil {
-			if _, owned, err := splitEdgeRules(existingRules, edgeID); err != nil || !owned {
-				return ExpandResult{}, nil, errEdgePolicyOwnership
-			}
-		}
-		policyID, created, err := s.pol.upsertLearnedPolicyTx(ctx, tx, policy, rules, by)
-		if err != nil {
-			return ExpandResult{}, nil, err
-		}
 		if created {
-			createdPolicies = append(createdPolicies, policy)
-		}
-		if err := markEdgeRules(ctx, tx, policyID, orgID, edgeID); err != nil {
-			return ExpandResult{}, nil, err
+			createdPolicies = append(createdPolicies, saved)
 		}
 		res.Policies = append(res.Policies, m)
 	}
 	return res, createdPolicies, nil
-}
-
-func (s *GroupEdgeStore) auditCreatedPolicies(ctx context.Context, orgID uuid.UUID, by *uuid.UUID, createdPolicies []*RuntimePolicy) {
-	if s.pol != nil && s.pol.auditLog != nil {
-		for _, policy := range createdPolicies {
-			if err := s.pol.auditLog.LogPolicyCreate(ctx, orgID, by, snapshot(policy), ""); err != nil {
-				slog.Default().Warn("edge expansion policy audit failed after commit", "policy_id", policy.ID, "error", err)
-			}
-		}
-	}
 }
 
 // edgePolicyPosture maps an edge's authored mode (discover|monitor|protect, already normalized
@@ -847,7 +806,7 @@ func (h *GroupEdgesHTTP) Delete(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAuditAttempt(w, r, sub, "group_rule_edge.delete", row.ID.String(), row, nil) {
 		return
 	}
-	if err := h.store.Delete(r.Context(), sub.OrgID, id); err != nil {
+	if err := h.store.deleteEdgeWithActor(r.Context(), sub.OrgID, id, &sub.UserID); err != nil {
 		if errors.Is(err, errEdgeNotFound) {
 			jsonError(w, http.StatusNotFound, "not found")
 		} else if errors.Is(err, errEdgePolicyOwnership) {

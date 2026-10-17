@@ -26,7 +26,6 @@ import (
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/runtime/dp"
 	"github.com/alphabravocompany/constellation/pkg/audit"
-	"github.com/alphabravocompany/constellation/pkg/netpolicy"
 )
 
 // PolicyMode mirrors the CHECK constraint on runtime_policies.mode.
@@ -274,105 +273,12 @@ func (s *RuntimePolicyStore) ListForCluster(ctx context.Context, orgID, clusterI
 // INSERT (always monitor for machine-seeded rows); an existing row's mode is
 // never changed here, so re-expansion cannot re-arm or disarm enforcement.
 // Returns the resulting policy ID.
-func (s *RuntimePolicyStore) UpsertLearnedPolicy(ctx context.Context, p *RuntimePolicy,
-	learned []*dp.PolicyRule, by *uuid.UUID) (uuid.UUID, error) {
-	tagged := netpolicy.Tag(learned, netpolicy.CfgTypeLearned)
-	existing, err := s.GetByName(ctx, p.OrgID, p.ClusterID, p.Workload, p.Name)
+func (s *RuntimePolicyStore) UpsertLearnedPolicy(ctx context.Context, p *RuntimePolicy, learned []*dp.PolicyRule, by *uuid.UUID) (uuid.UUID, error) {
+	saved, _, err := s.applyLearnedPolicy(ctx, p, learned, by, "")
 	if err != nil {
 		return uuid.Nil, err
 	}
-	if existing == nil {
-		enc, err := json.Marshal(tagged)
-		if err != nil {
-			return uuid.Nil, err
-		}
-		p.Rules = enc
-		if p.Mode == "" {
-			p.Mode = PolicyModeMonitor // SAFETY: seeded rows ship in monitor
-		}
-		return s.Insert(ctx, p, "")
-	}
-	prior, err := netpolicy.DecodeSourced(existing.Rules)
-	if err != nil {
-		return uuid.Nil, err
-	}
-	merged := netpolicy.MergeRules(prior, tagged)
-	enc, err := json.Marshal(merged)
-	if err != nil {
-		return uuid.Nil, err
-	}
-	if _, err := s.db.Pool().Exec(ctx,
-		`UPDATE runtime_policies SET rules = $1::jsonb, updated_by = $2
-		  WHERE id = $3 AND org_id = $4`,
-		string(enc), by, existing.ID, p.OrgID); err != nil {
-		return uuid.Nil, err
-	}
-	return existing.ID, nil
-}
-
-func (s *RuntimePolicyStore) upsertLearnedPolicyTx(ctx context.Context, tx pgx.Tx, policy *RuntimePolicy,
-	learned []*dp.PolicyRule, by *uuid.UUID) (uuid.UUID, bool, error) {
-	var existing *RuntimePolicy
-	row := tx.QueryRow(ctx, `SELECT `+policySelectCols+`
- FROM runtime_policies
- WHERE org_id=$1 AND cluster_id=$2 AND workload=$3 AND name=$4
- FOR UPDATE`, policy.OrgID, policy.ClusterID, policy.Workload, policy.Name)
-	current, err := scanPolicy(row)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return uuid.Nil, false, err
-	}
-	if err == nil {
-		existing = current
-	}
-	tagged := netpolicy.Tag(learned, netpolicy.CfgTypeLearned)
-	if existing == nil {
-		return insertLearnedPolicyTx(ctx, tx, policy, tagged, by)
-	}
-	prior, err := netpolicy.DecodeSourced(existing.Rules)
-	if err != nil {
-		return uuid.Nil, false, err
-	}
-	merged := netpolicy.MergeRules(prior, tagged)
-	encoded, err := json.Marshal(merged)
-	if err != nil {
-		return uuid.Nil, false, err
-	}
-	if _, err := tx.Exec(ctx, `UPDATE runtime_policies SET rules=$1::jsonb, updated_by=$2 WHERE id=$3 AND org_id=$4`,
-		string(encoded), by, existing.ID, policy.OrgID); err != nil {
-		return uuid.Nil, false, err
-	}
-	return existing.ID, false, nil
-}
-
-func insertLearnedPolicyTx(ctx context.Context, tx pgx.Tx, policy *RuntimePolicy, tagged []*netpolicy.SourcedRule, by *uuid.UUID) (uuid.UUID, bool, error) {
-	encoded, err := json.Marshal(tagged)
-	if err != nil {
-		return uuid.Nil, false, err
-	}
-	if policy.Mode == "" {
-		policy.Mode = PolicyModeMonitor
-	}
-	if !policy.Mode.Valid() || policy.Workload == "" || policy.Namespace == "" || policy.Name == "" {
-		return uuid.Nil, false, errors.New("invalid learned policy")
-	}
-	policy.Rules = encoded
-	direction, err := policyDatabaseDirection(policy)
-	if err != nil {
-		return uuid.Nil, false, err
-	}
-	var dpPolicyID int64
-	if err := tx.QueryRow(ctx, `
-INSERT INTO runtime_policies
-  (org_id, cluster_id, workload, namespace, name, mode, def_action, apply_dir, rules, version, created_by, updated_by)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,1,$10,$10)
-RETURNING id, dp_policy_id`, policy.OrgID, policy.ClusterID, policy.Workload, policy.Namespace,
-		policy.Name, string(policy.Mode), int16(policy.DefAction), direction, string(policy.Rules), by).
-		Scan(&policy.ID, &dpPolicyID); err != nil {
-		return uuid.Nil, false, err
-	}
-	policy.DPPolicyID = dpPolicyID
-	policy.Version = 1
-	return policy.ID, true, nil
+	return saved.ID, nil
 }
 
 // GetByName fetches one policy by its natural key (org, cluster, workload,
