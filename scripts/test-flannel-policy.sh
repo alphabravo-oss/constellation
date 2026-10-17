@@ -15,7 +15,6 @@ work="$(realpath "$work")"
 source_root="$work/source"
 [[ "$work" == /tmp/constellation-flannel-policy-* ]] || { echo 'Evidence must use a dedicated /tmp/constellation-flannel-policy-* directory.' >&2; exit 1; }
 docker_local() { env -u DOCKER_HOST -u DOCKER_CONTEXT -u DOCKER_TLS -u DOCKER_TLS_VERIFY -u DOCKER_CERT_PATH docker --host unix:///var/run/docker.sock "$@"; }
-k3d_local() { env -u DOCKER_CONTEXT -u DOCKER_TLS -u DOCKER_TLS_VERIFY -u DOCKER_CERT_PATH DOCKER_HOST=unix:///var/run/docker.sock k3d "$@"; }
 docker_storage="$(docker_local info --format '{{.DockerRootDir}}')"
 [[ -d "$docker_storage" ]] || { echo 'Local Docker storage path unavailable; refusing to guess disk headroom.' >&2; exit 1; }
 free_kib() { df --output=avail "$docker_storage" | tail -1 | tr -d ' '; }
@@ -37,7 +36,7 @@ prepare() {
 }
 if [[ "$mode" == prepare ]]; then prepare; exit; fi
 [[ "$mode" == run && "${CONSTELLATION_FLANNEL_POLICY_APPROVED_RUN:-0}" == 1 ]] || { echo 'Run requires a separate root-reviewed fixture execution signal.' >&2; exit 1; }
-for executable in k3d kubectl docker python3; do command -v "$executable" >/dev/null; done
+for executable in kubectl docker python3; do command -v "$executable" >/dev/null; done
 (( $(df --output=avail "$work" | tail -1 | tr -d ' ') >= 2 * 1024 * 1024 )) || { echo 'At least2GiB of evidence/tmp space required.' >&2; exit 1; }
 (( $(free_kib) >= 48 * 1024 * 1024 )) || { echo 'At least48GiB free required before isolated cluster creation.' >&2; exit 1; }
 (cd /; sha256sum -c "$work/binaries.sha256")
@@ -45,7 +44,7 @@ sha256sum -c "$work/source.sha256"
 nonce="$(python3 -c 'import secrets; print(secrets.token_hex(6))')"
 cluster="flannel-policy-$nonce"
 namespace="packet-proof-$nonce"
-node="k3d-$cluster-server-0"
+node="$cluster-server-0"
 driver="flannel-policy-driver-$nonce"
 fixture_image="constellation/flannel-policy-fixture:$nonce"
 base_tag="constellation/flannel-policy-base:$nonce"
@@ -70,12 +69,11 @@ cleanup() {
   if [[ "$created" == 1 ]]; then
     owned="$(docker_local inspect "$node" --format '{{index .Config.Labels "constellation.flannel-proof"}}' 2>/dev/null || true)"
     if [[ "$owned" == "$nonce" ]]; then
-      k3d_local cluster delete "$cluster" > "$work/cleanup.log" 2>&1 || status=1
-      # A failed k3d cleanup may leave its exact owned node. Never touch peers.
-      if docker_local inspect "$node" >/dev/null 2>&1; then
-        if [[ "$(docker_local inspect "$node" --format '{{index .Config.Labels "constellation.flannel-proof"}}')" == "$nonce" ]]; then docker_local rm -f -v "$node" >/dev/null || status=1
-        else echo 'Node identity changed; refusing deletion.' >&2; status=1; fi
-      fi
+      docker_local logs "$node" > "$work/cluster.log" 2>&1 || status=1
+      actual_node="$(docker_local inspect "$node" --format '{{.Id}}')"
+      expected_node="$(cat "$work/node-id.txt" 2>/dev/null || true)"
+      if [[ -z "$expected_node" || "$actual_node" == "$expected_node" ]]; then docker_local rm -f -v "$actual_node" >/dev/null || status=1
+      else echo 'Node generation changed; refusing deletion.' >&2; status=1; fi
     elif docker_local inspect "$node" >/dev/null 2>&1; then
       echo 'Node ownership changed: refusing cluster deletion.' >&2; status=1
     fi
@@ -106,15 +104,17 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-# This check reads names only; never dump cluster tokens/configuration.
-if k3d_local cluster list -o json | python3 -c 'import json,sys; raise SystemExit(0 if any(c["name"]==sys.argv[1] for c in json.load(sys.stdin)) else 1)' "$cluster"; then echo 'Generated cluster already exists; refusing reuse.' >&2; exit 1; fi
+# Refuse every generated-name collision before creating any owned resource.
+if docker_local inspect "$node" >/dev/null 2>&1; then echo 'Generated node exists; refusing reuse.' >&2; exit 1; fi
 for tag in "$fixture_image" "$base_tag"; do
   if docker_local image inspect "$tag" >/dev/null 2>&1; then echo 'Generated image tag exists; refusing reuse.' >&2; exit 1; fi
 done
 if docker_local inspect "$driver" >/dev/null 2>&1; then echo 'Generated driver exists; refusing reuse.' >&2; exit 1; fi
 script_pid=$$
 (while true; do sleep 2; if (( $(free_kib) < 40 * 1024 * 1024 )); then echo 'Disk safety floor reached; stopping owned test.' > "$work/disk-stop.txt"; kill -TERM "$script_pid"; exit; fi; done) & monitor=$!
-docker_local image inspect rancher/k3s:v1.35.5-k3s1 --format '{{.Id}}' > "$work/k3s-image-id.txt"
+node_image_id='sha256:2074403abe1bded11ef3dde09d457e13be8e0b64c218b1c4f8269b4565cfbc65'
+[[ "$(docker_local image inspect rancher/k3s:v1.35.5-k3s1 --format '{{.Id}}')" == "$node_image_id" ]] || { echo 'Qualified k3s image changed.' >&2; exit 1; }
+printf '%s\n' "$node_image_id" > "$work/k3s-image-id.txt"
 base_created=1; docker_local tag "$runtime_id" "$base_tag"
 fixture_created=1
 docker_local build --pull=false --network=none --build-arg "PROOF_NONCE=$nonce" --build-arg "RUNTIME_IMAGE=$base_tag" -t "$fixture_image" "$work/build" > "$work/build.log" 2>&1
@@ -140,21 +140,42 @@ for volume in "${volume_names[@]}"; do
   docker_local volume create --label "constellation.flannel-proof=$nonce" "$volume" >> "$work/volume-names.txt"
 done
 created=1
-k3d_local cluster create "$cluster" --servers 1 --agents 0 --no-lb --no-image-volume --network "$network" --runtime-label "constellation.flannel-proof=$nonce@server:0" --volume "${volume_names[0]}:/var/lib/cni@server:0" --volume "${volume_names[1]}:/var/lib/kubelet@server:0" --volume "${volume_names[2]}:/var/lib/rancher/k3s@server:0" --volume "${volume_names[3]}:/var/log@server:0" --api-port 127.0.0.1:0 --servers-memory 2g --image rancher/k3s:v1.35.5-k3s1 --kubeconfig-update-default=false --kubeconfig-switch-context=false --wait --timeout 180s --k3s-arg '--disable=traefik,servicelb,metrics-server,local-storage,coredns@server:0' --k3s-arg '--cluster-cidr=10.233.0.0/16@server:0' --k3s-arg '--service-cidr=10.234.0.0/16@server:0' > "$work/cluster.log" 2>&1
-k3d_local kubeconfig get "$cluster" > "$work/kubeconfig"
-k=(kubectl --kubeconfig "$work/kubeconfig")
-[[ "$("${k[@]}" config current-context)" == "k3d-$cluster" ]]
+docker_local create --name "$node" --hostname "$node" --label "constellation.flannel-proof=$nonce" --label "constellation.test.cluster=$cluster" --privileged --network "$network_id" --memory 2g --cpus 2 --publish 127.0.0.1::6443 --tmpfs /run --tmpfs /var/run --mount "type=volume,source=${volume_names[0]},target=/var/lib/cni" --mount "type=volume,source=${volume_names[1]},target=/var/lib/kubelet" --mount "type=volume,source=${volume_names[2]},target=/var/lib/rancher/k3s" --mount "type=volume,source=${volume_names[3]},target=/var/log" "$node_image_id" server --node-name "$node" --tls-san 127.0.0.1 --write-kubeconfig-mode 600 --disable traefik,servicelb,metrics-server,local-storage,coredns --cluster-cidr 10.233.0.0/16 --service-cidr 10.234.0.0/16 --flannel-backend vxlan --flannel-iface eth0 > "$work/node-id.txt"
+docker_local start "$node" > "$work/cluster.log"
 [[ "$(docker_local inspect "$node" --format '{{.HostConfig.PidMode}}')" != host ]]
-[[ "$(docker_local inspect "$node" --format '{{.HostConfig.NetworkMode}}')" != host ]]
-[[ "$(docker_local inspect "$node" --format '{{index .Config.Labels "k3d.cluster"}}')" == "$cluster" ]]
+[[ "$(docker_local inspect "$node" --format '{{.HostConfig.NetworkMode}}')" == "$network_id" ]]
+[[ "$(docker_local inspect "$node" --format '{{index .Config.Labels "constellation.flannel-proof"}}')" == "$nonce" ]]
 docker_local inspect "$node" --format '{{json .Mounts}}' > "$work/node-mounts.json"
 python3 - "$work/node-mounts.json" "${volume_names[@]}" <<'MOUNTS'
 import json,sys
 mounts=json.load(open(sys.argv[1]))
 actual={m['Name'] for m in mounts if m['Type']=='volume'}
-if actual!=set(sys.argv[2:]): raise SystemExit('Unexpected node volume identity; refusing driver start')
+if actual!=set(sys.argv[2:]) or any(m['Type']=='bind' for m in mounts): raise SystemExit('Unexpected node mounts; refusing fixture start')
 MOUNTS
-k3d_local image import --mode direct "$fixture_image" -c "$cluster" > "$work/import.log" 2>&1
+ready=0
+for ((attempt=0;attempt<120;attempt++)); do
+  if docker_local exec "$node" test -s /etc/rancher/k3s/k3s.yaml; then ready=1; break; fi
+  sleep 1
+done
+[[ "$ready" == 1 ]] || { docker_local logs "$node" > "$work/cluster.log" 2>&1; echo 'Owned k3s did not write private kubeconfig.' >&2; exit 1; }
+docker_local cp "$node:/etc/rancher/k3s/k3s.yaml" "$work/kubeconfig"
+port="$(docker_local port "$node" 6443/tcp)"
+[[ "$port" =~ ^127\.0\.0\.1:[0-9]+$ ]] || { echo 'API is not bound only to ephemeral loopback.' >&2; exit 1; }
+context="isolated-$cluster"
+k=(kubectl --kubeconfig "$work/kubeconfig")
+"${k[@]}" config set-cluster default --server="https://$port" >/dev/null
+"${k[@]}" config rename-context default "$context" >/dev/null
+k+=(--context "$context")
+ready=0
+for ((attempt=0;attempt<60;attempt++)); do
+  if "${k[@]}" --request-timeout=3s get --raw /readyz > "$work/readyz.txt" 2>/dev/null; then ready=1; break; fi
+  sleep 1
+done
+[[ "$ready" == 1 ]] || { docker_local logs "$node" > "$work/cluster.log" 2>&1; echo 'Owned k3s API unavailable.' >&2; exit 1; }
+"${k[@]}" wait --for=condition=Ready "node/$node" --timeout=180s
+# Stream into this exact owned node, with both pipe statuses checked; no tools
+# container, Docker socket, import volume, or host filesystem enters the node.
+docker_local save "$fixture_image" | docker_local exec -i "$node" k3s ctr --namespace k8s.io images import - > "$work/import.log" 2>&1
 "${k[@]}" create namespace "$namespace" >/dev/null
 sed "s|FIXTURE_IMAGE|$fixture_image|g" tests/flannel-policy/pods.yaml > "$work/pods.yaml"
 "${k[@]}" -n "$namespace" apply -f "$work/pods.yaml" >/dev/null
