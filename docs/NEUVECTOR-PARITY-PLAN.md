@@ -357,7 +357,7 @@ Commit `dd41417` adds the cluster Benchmarks tab, paged history/details and
 separate queue/retry forms. Uncertain create receipts retain the same request key;
 stale retries require refreshed review; technical IDs/digests remain disclosed
 on demand. Focused tests pass 99 executions on Node22. The root's full pinned
-Node24.21.0 suite passes 2,336 tests without skips; typecheck and production build
+Node 24.21.0 suite passes 2,336 tests without skips; typecheck and production build
 pass. Evidence: `/tmp/constellation-bench-frontend-full.json`.
 
 Commit `1cb1045` validates runtime PID/count/ring-buffer bounds and preserves
@@ -417,7 +417,7 @@ regular and hook dependency image, not only changed images. Live health, bundle
 protocol and response authorization smoke pass; enforcement remains disabled.
 
 Schema180 source `5b82b12` passes 2,930 combined fresh-database executions without
-failures/skips and 2,344 frontend tests on pinned Node24.21.0. A full migration-chain
+failures/skips and 2,344 frontend tests on pinned Node 24.21.0. A full migration-chain
 179→180 drill preserves every non-target field and traffic counter, repairs only
 proven retained cohorts, repeats without changes and rejects unsafe Down without
 mutation. API/migration/frontend image payloads and exact build provenance pass.
@@ -709,7 +709,7 @@ production suppressions changed, and this source is not yet deployed. Evidence:
 (SHA256 `d6f355dc918af69ee6c9c52365e5078d74a4fd234f3f46330bd929a49d96a14b`).
 
 Hosted `39022267072` at `a6b20a2` has completed. Unit/integration, browser,
-frontend, FIPS, dependency and govulncheck jobs pass. Lint1505, gosec163 and
+frontend, FIPS, dependency and govulncheck jobs pass. Lint1505, gosec 163 and
 historical gitleaks remain blocking; the required gate fails. These counts
 precede `46df2d6`; they do not qualify later signing or CLI changes.
 
@@ -750,7 +750,7 @@ Evidence:
 The additive OpenAPI correction `f3cc8c5` documents the signing contract and
 actual one-off202 asynchronous receipt / schedule200 response. Static checks
 cover 48 positive/negative instances, 891 local references and unchanged other
-operations/existing schemas. Hosted run39024761342 at ef0d7a9 also passes
+operations/existing schemas. Hosted run 39024761342 at ef0d7a9 also passes
 TestGenerateOpenAPI, TestOpenAPICompleteness and TestOpenAPINoNewStubs. This
 qualifies the contract checks, not deployment. Static evidence:
 `/tmp/constellation-backup-signing-contract-76c3262.l30cb6p5/evidence/frozen-manifest.json`
@@ -758,7 +758,7 @@ qualifies the contract checks, not deployment. Static evidence:
 
 Hosted `39024761342` at `ef0d7a9` has completed: Go unit/integration, browser,
 FIPS, dependency and govulncheck jobs pass. Frontend fails one timing-sensitive
-compliance sorting test; quality reports1504 findings, gosec163, and historical
+compliance sorting test; quality reports 1504 findings, gosec 163, and historical
 gitleaks remains failed. The required gate fails; no thresholds or exits changed.
 Completed CI and the bound OpenAPI/lint/security checkpoint are recorded in
 `/tmp/security-triage-39024761342/completed-manifest.json`
@@ -767,22 +767,22 @@ Completed CI and the bound OpenAPI/lint/security checkpoint are recorded in
 Test-only correction `730e531` holds the sort response until the loading state is
 observed, then waits for the rendered ascending header before asserting history
 navigation. This removes the request-versus-render race while retaining server
-sorting and row assertions. All15 focused tests and all2344 frontend tests across
-158 files pass on Node24.21.0. The other598 frontend blobs match ef0d7a9; no product
+sorting and row assertions. All 15 focused tests and all 2344 frontend tests across
+158 files pass on Node 24.21.0. The other 598 frontend blobs match ef0d7a9; no product
 code or warning suppression changed. This local result does not rewrite the
 failed hosted run. Evidence:
 `/tmp/constellation-compliance-sort-ef0d7a9/evidence-manifest.json`
 (SHA256 `f84cd7428cdc606fe8350c721aeed32c30bec112878359d322dd0305aa71aa29`).
 
 Source `be15c7c` requires complete discovery/token HTTP responses before OIDC
-identity acceptance. Decoded bodies are capped at1MiB; read and Close errors,
+identity acceptance. Decoded bodies are capped at 1 MiB; read and Close errors,
 invalid documents and unsuccessful provider responses produce categorical
-errors. The browser callback returns401 without provider response/URL details.
+errors. The browser callback returns 401 without provider response/URL details.
 Normal signature, issuer/audience, nonce, PKCE, roles and valid-session behavior
 remain; JWKS response policy and provider redirects are separate unchanged work.
 
-Qualification passes482 fresh180 repeated race/shuffle test executions without
-skips, plus78 focused unit executions and vet. Scoped lint decreases333→331 with
+Qualification passes 482 fresh180 repeated race/shuffle test executions without
+skips, plus 78 focused unit executions and vet. Scoped lint decreases 333→331 with
 no added findings or suppressions. Original signed-token controls fail eight
 expected executions; malformed-token controls still reject. Ten original browser
 failures include four concrete truncated/oversized response cases that issued a
@@ -798,15 +798,15 @@ signing flags. pg_dump receives a private libpq service profile instead of a DSN
 in its arguments; password remains in the child environment. Bounded complete
 service reads reject a valid truncated prefix before it can choose a target.
 Help/parse failures no longer expose inherited database/endpoint defaults.
-Signature inspection caps all decompressed bytes at512MiB, including framing and
+Signature inspection caps all decompressed bytes at 512 MiB, including framing and
 trailing data, and validates the gzip trailer. Actual S3 service acceptance and
 full disaster recovery remain unqualified.
 
-The original CLI snapshot passes208 top-level /402 including-subtest fresh180
-race/shuffle executions without skips, vet and builds. A network-none realPG16
+The original CLI snapshot passes 208 top-level /402 including-subtest fresh180
+race/shuffle executions without skips, vet and builds. A network-none real PG16
 fixture checks URI/keyword/multihost export, authentication/TLS failures, private
 modes, redaction and readable dump contents; eight owned containers are absent.
-The two-file bounded-reader follow-up separately passes30 standalone repeated
+The two-file bounded-reader follow-up separately passes 30 standalone repeated
 race/shuffle executions, tagged vet, a fresh build and actual help. Its negative
 control reproduces the exact original valid-prefix/omitted-target failure.
 The original full DB/PG16 proof is retained as ancestor evidence, not relabelled
@@ -818,7 +818,7 @@ Combined source/evidence seal:
 (SHA256 `b1859c18e464706cf9a3563c09f4f0d51a9aba273c546f8adfb1b85a619c99ab`).
 
 Source `0f33141` makes standalone scanner output truthful: --sarif writes the
-shared SARIF2.1.0 representation, and JSON/SARIF publication must finish before
+shared SARIF 2.1.0 representation, and JSON/SARIF publication must finish before
 scan completion is logged. Output flags require --ref; conflicting destinations
 are rejected. The existing pinned-root private atomic writer preserves prior
 reports on encoding/write/cancellation failure. Parents must already exist and
@@ -826,14 +826,43 @@ retain their permissions; publication is per file, so an earlier complete report
 remains when a later output fails.
 
 The scanner, shared writer and SARIF packages pass204 repeated race/shuffle test
-executions with no skips. Vet passes. Scoped lint44→43 removes the permissive
-output-file finding; existing main statement complexity moves67→68 and nested
-complexity7→6. No new issue location remains. One test-only G204 annotation
+executions with no skips. Vet passes. Scoped lint 44→43 removes the permissive
+output-file finding; existing main statement complexity moves 67→68 and nested
+complexity 7→6. No new issue location remains. One test-only G204 annotation
 explains execution of the current os.Executable test binary with fixed arguments;
 no production suppression was added. Original lint attempts are retained.
 The source is committed but not deployed. Evidence:
 `/tmp/constellation-scanner-output-ef0d7a9/evidence-manifest.json`
 (SHA256 `f2e3da18c458a0c7c64e4074a8a5cb2798ad7f4d99bc5aed79d781a5a0541a15`).
+
+Source `ad0a3a1` uses checked wall time for native connection reports while
+preserving the existing coarse timer used for expiry and rate accounting. The
+reported timestamp subtracts the existing Idle duration; nonzero Idle remains
+an approximation of historical last activity. Failed, negative, overflowing or
+underflowing time values are rejected before connection-map/counter mutation.
+The strict packet matcher, 35-second deadline and 24-probe matrix are unchanged.
+
+Fresh native tests pass both reporter variants with 97 existing plus 66 new
+assertions each. Reversing the clock patch reproduces the exact one-second
+mismatch; the existing application-key negative remains. The generator and two
+race/shuffle parser/matcher executions pass without skips, including 70 matcher
+assertions per execution. Seven vendor-sync tests pass, and the imported shell
+scripts pass ShellCheck. The normal production daemon compiles all 51 C units
+with canonical -Os flags, required libraries/rpath and no test time wrapper.
+Its 23 linked library hashes and package inventory match the qualified parent.
+DP SHA256: `e00f06c52439f109c8e95c225eec94e94766b643ff1b697124c6a14934a84eb3`.
+
+Qualification preserves the failed builder-format preflight, raw-index FROM
+attempt and subsequent make failure. The production recipe was corrected to
+use the locally verified tag, canonical serial make without command-line linker
+overrides, and visible compiler failures. The hidden make error from the earlier
+attempt remains unproven; the final corrected build and verification pass.
+Evidence binds the ten-file overlay on f3cc8c5 through local-only synthetic
+snapshot e0e3fa775a59; it is not a published release identity. The new integrated
+Go runtime and strict packet run are still required before runtime rollout.
+Final 90-file evidence seal:
+`/tmp/constellation-native-report-clock-f3cc8c5/qualification-final-evidence-manifest.json`
+(SHA256 `3ef9ba77742f7289e550d9913397b4b15c98331abecc261a0fb86406339e7a87`).
 
 
 ## October 12 implementation continuation
@@ -2063,7 +2092,7 @@ keeps internal error details out of the interface.
 Validation passes **1,887 frontend tests across 137 files**, full frontend lint,
 production typecheck/build, affected Go vet, generated OpenAPI and server contract
 checks. The broader runtime package passes **568 fresh PostgreSQL race/shuffle
-executions**, count2, without failures or skips; **36 separate Asset/Finding role
+executions**, count 2, without failures or skips; **36 separate Asset/Finding role
 executions** also pass. Profile fixtures cover over 600 profiles, over 1,000
 retained events, truly older cached identities, duplicate owners, revision
 conflicts, full matching counts/CSV and malformed or stale frontend evidence.
@@ -2129,7 +2158,7 @@ the full run; three old callback-signature expectations were corrected, then all
 73 cases in that file passed. No production edit followed that run. Full lint,
 production build/typecheck, affected Go vet, OpenAPI/contracts and endpoint-map
 checks pass. The combined Deployment backend passes **42 fresh PostgreSQL
-race/shuffle executions**, count2, with no failures or skips. Fixtures cover
+race/shuffle executions**, count 2, with no failures or skips. Fixtures cover
 over 1,300 findings, repeated UUID observations, legacy lifecycle values and
 100,005 matches producing a correctly labeled 100,000-row CSV. Image/file-risk
 fixtures cover exact and missing digests, reused tags, cross-tenant children,
@@ -2226,7 +2255,7 @@ workspaces. These are bounded adopter checks, not complete accessibility parity.
 
 The production source passes **2,061 frontend tests in 142 files**, global lint
 and production typecheck/build. Fresh PostgreSQL 16/schema173 qualification
-passes **452 race/shuffle/count2 executions** across server, inventory-list,
+passes **452 race/shuffle/count 2 executions** across server, inventory-list,
 component-revision and secondary-network suites with no skips. Fixtures cover
 more than 1,000 records, both 100,001-row CSV caps, tenant/sibling isolation,
 nullable measurements and strict query validation. Go vet, generated
@@ -2294,7 +2323,7 @@ passes exact selectors/revisions without broadening custom read allowlists.
 
 The final build passes **2,091 frontend tests in 143 files**, lint and production
 typecheck/build. **228 fresh PostgreSQL 16/schema174 executions** pass with race,
-shuffle, count2 and no skips across finding, scanner, server and affected handler
+shuffle, count 2 and no skips across finding, scanner, server and affected handler
 contracts; focused asset/federation and occurrence suites also pass. OpenAPI,
 affected Go vet and **118 endpoint mappings** pass. Evidence:
 `/tmp/finding-instance-frontend-qualified-tests.log`,
@@ -2403,7 +2432,7 @@ production-image browser suite passes **275 cases**, one worker, without retries
 the runtime run requalifies three existing cases plus the new disabled-policy
 re-enable case, so these counts are not added as distinct suite totals. The
 fresh seeded PostgreSQL 16/schema177 affected-handler suite passes **1,346
-race/shuffle/count2 executions**, supplemented by **four Backup inventory
+race/shuffle/count 2 executions**, supplemented by **four Backup inventory
 executions** on a separate fresh database. Evidence:
 `/tmp/console-parity-frontend-tests.log`,
 `/tmp/evidence-workflow-qualified-browser.log`,

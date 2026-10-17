@@ -106,23 +106,23 @@ Keep package B and DB-05 open until their full restore/deployment acceptance exi
 export one organization's portable archive. Use `--out` for a local artifact,
 `--s3=s3://bucket/prefix` for upload, or both. Generated filenames include the
 organization name, time and job UUID; repeated jobs do not share an S3 object
-name. Temporary workspaces use0700 permissions and artifacts use0600. Explicit
+name. Temporary workspaces use 0700 permissions and artifacts use 0600. Explicit
 output directories must already exist; their permissions are not changed.
 
 Choose either `--sign-key=/path/to/private.pem` or `--sign-keyless`.
 `--verify-key=/path/to/public.pem` requires static-key signing and verifies the
 completed archive before upload. An explicit empty key or conflicting signing
 options fails before work begins. Omitting signing flags produces unsigned
-output. Signature inspection allows up to512MiB of decompressed data, including
+output. Signature inspection allows up to 512 MiB of decompressed data, including
 tar framing and trailing bytes, and checks the gzip trailer.
 
 The standalone `--mode=pg-dump` exports the whole database through the matching
 PostgreSQL client. It rejects signing/verification flags. Supply the connection
 through `DATABASE_URL` to avoid putting credentials in the command invocation.
-The child receives a temporary0600 service profile and its password through
+The child receives a temporary 0600 service profile and its password through
 `PGPASSWORD`; this keeps the DSN out of child arguments, but does not hide the
 child environment from the same user or privileged processes. Service-file
-reads must complete within1MiB. Unsupported non-password values are rejected
+reads must complete within 1 MiB. Unsupported non-password values are rejected
 instead of being trimmed or silently changing the database target.
 
 Upload or catalog acknowledgement failures return an error. A completed local
