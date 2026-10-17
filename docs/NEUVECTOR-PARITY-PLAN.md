@@ -708,11 +708,10 @@ production suppressions changed, and this source is not yet deployed. Evidence:
 `/tmp/constellation-client-ip-a6b20a2/evidence-manifest.json`
 (SHA256 `d6f355dc918af69ee6c9c52365e5078d74a4fd234f3f46330bd929a49d96a14b`).
 
-Hosted `39022267072` at `a6b20a2` has completed quality/security reports:
-lint1505 and gosec163 remain blocking; historical gitleaks also fails. Unit,
-frontend, FIPS and dependency jobs pass; browser/integration are still running
-at this checkpoint. These counts precede `46df2d6`; they do not qualify later
-signing or CLI changes.
+Hosted `39022267072` at `a6b20a2` has completed. Unit/integration, browser,
+frontend, FIPS, dependency and govulncheck jobs pass. Lint1505, gosec163 and
+historical gitleaks remain blocking; the required gate fails. These counts
+precede `46df2d6`; they do not qualify later signing or CLI changes.
 
 Source `76c3262` validates backup signing requests before job, audit or artifact
 creation. A bounded 64KiB single JSON object rejects malformed/trailing documents,
@@ -730,6 +729,32 @@ is preserved separately. All three owned database fixtures are verified removed.
 This source is not yet deployed; CLI flag/transport work remains separate.
 Evidence: `/tmp/constellation-backup-signing-4e5b62c/evidence/frozen-manifest.json`
 (SHA256 `3b12d66aa6e9f45533f9f1c2cb54c93b4945fa426ccdd5c3e6e8bb8822fe680d`).
+
+The strict diagnostic run of the unchanged `5b417c0` runtime candidate records
+18 probes, of which 17 complete all criteria (13 fresh native verdicts and four
+qualified denials); it does not pass the required 24 probes. Probe18 reaches the
+exact server endpoint and advances its queue46→56. Its post-cursor native Allow
+record has the expected endpoint, IPs, TCP port18081, application1001 and RID11,
+but reports FirstSeenAt/LastSeenAt1792232195 against StartedAt1792232196. A later
+end record repeats that timestamp. Raw receipt times prove the report arrived;
+the freshness predicate, rather than missing export, rejects this observed case.
+The native coarse clock is a supported cause of this one-second discrepancy;
+causes of prior runs without raw records remain unproven. The diagnostic leaves
+the strict matcher, 35-second deadline and 24-probe matrix unchanged. All nine
+owned fixture resources are absent. Root verification matches all 76 evidence
+sizes/hashes. No runtime rollout or acceptance row follows from this failed run.
+Evidence:
+`/tmp/constellation-flannel-policy-clock-diagnostic5b417c0/actual-packet-evidence-manifest.json`
+(SHA256 `2c5828967f4d96c1c3040bb117caf5ea626152134bc690b92d3989737ac77b2e`).
+
+The additive OpenAPI correction `f3cc8c5` documents the signing contract and
+actual one-off202 asynchronous receipt / schedule200 response. Static checks
+cover 48 positive/negative instances, 891 local references and unchanged other
+operations/existing schemas. These checks do not replace the integrated Go
+OpenAPI test or qualify deployment. Evidence:
+`/tmp/constellation-backup-signing-contract-76c3262.l30cb6p5/evidence/frozen-manifest.json`
+(SHA256 `9b1d26bdb72e3fc6affe830528c9388e5b5ba5c0a74341b0a7e7c024312f77c7`).
+
 
 ## October 12 implementation continuation
 
