@@ -124,7 +124,8 @@ func pcapFilePath(id uuid.UUID) string {
 
 // PcapHTTP wraps the DB + the on-disk store with HTTP handlers.
 type PcapHTTP struct {
-	db *db.DB
+	db        *db.DB
+	retention pcapRetentionCursor
 }
 
 func NewPcapHTTP(d *db.DB) *PcapHTTP { return &PcapHTTP{db: d} }
@@ -671,42 +672,6 @@ func (h *PcapHTTP) getByID(ctx context.Context, orgID, id uuid.UUID) (*PcapCaptu
 		`SELECT `+pcapCols+` FROM runtime_pcap_captures WHERE id = $1 AND org_id = $2`,
 		id, orgID)
 	return scanPcap(row)
-}
-
-// SweepExpired removes captures past their expires_at + the on-disk file.
-// Called by the server's background reaper (set up next to the rollback
-// watcher). Errors logged + counted; one bad row doesn't stop the sweep.
-func (h *PcapHTTP) SweepExpired(ctx context.Context, logger *slog.Logger) (int, error) {
-	rows, err := h.db.Pool().Query(ctx, `
-DELETE FROM runtime_pcap_captures WHERE expires_at < NOW() RETURNING id`)
-	if err != nil {
-		return 0, err
-	}
-	defer rows.Close()
-	ids := []uuid.UUID{}
-	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
-			return 0, err
-		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
-		return 0, err
-	}
-	rows.Close()
-	// DELETE locks rows before removal, like operator Delete. An upload already
-	// holding the row lock finishes first; its published file is then removed.
-	for _, id := range ids {
-		if err := removePcapFile(id); err != nil && logger != nil {
-			logger.Warn("pcap expired file remove", slog.String("id", id.String()), slog.String("err", err.Error()))
-		}
-	}
-
-	if logger != nil {
-		logger.Info("pcap sweep", slog.Int("removed", len(ids)))
-	}
-	return len(ids), nil
 }
 
 func normalizeStartCaptureRequest(req StartCaptureRequest) (StartCaptureRequest, error) {

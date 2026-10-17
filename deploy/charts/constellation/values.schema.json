@@ -41,6 +41,11 @@
               "type": "boolean",
               "default": false
             },
+            "retentionEnabled": {
+              "type": "boolean",
+              "default": false,
+              "description": "Enable bounded expiry only on this verified single-RWO or shared-RWX claim"
+            },
             "existingClaim": {
               "type": "string",
               "maxLength": 253,

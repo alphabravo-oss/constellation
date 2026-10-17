@@ -185,6 +185,8 @@ api:
     enabled: false
     existingClaim: ""
     accessMode: ReadWriteOnce
+    # Expire DB-backed captures only after this same durable claim is verified.
+    retentionEnabled: false
   service:
     type: ClusterIP
     port: 8080

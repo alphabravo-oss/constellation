@@ -455,14 +455,25 @@ func exercisePcapRemovalWhileUploading(t *testing.T, operation string) {
 	}
 	requirePcapRowLocked(t, f, id) // Actual database conflict, not just timing.
 	removed := removePcapConcurrently(t, f, id, operation)
-	select {
-	case err := <-removed:
-		t.Fatalf("removal bypassed upload lock: %v", err)
-	case <-time.After(30 * time.Millisecond):
+	if operation == "expiry" {
+		// Maintenance skips an in-flight upload and retries next cycle.
+		requirePcapRemovalReceipt(t, removed)
+	} else {
+		select {
+		case err := <-removed:
+			t.Fatalf("removal bypassed upload lock: %v", err)
+		case <-time.After(30 * time.Millisecond):
+		}
 	}
 	release.Do(func() { close(reader.release) })
 	requirePcapUploadReceipt(t, uploaded)
-	requirePcapRemovalReceipt(t, removed)
+	if operation == "expiry" {
+		if n, err := f.h.SweepExpired(t.Context(), nil); n != 1 || err != nil {
+			t.Fatalf("expiry retry=%d %v", n, err)
+		}
+	} else {
+		requirePcapRemovalReceipt(t, removed)
+	}
 	if _, err := f.root.Stat(pcapFileName(id)); !os.IsNotExist(err) {
 		t.Fatal("serialized removal left published artifact")
 	}

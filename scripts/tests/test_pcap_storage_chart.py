@@ -74,6 +74,23 @@ class PcapStorageChartTests(unittest.TestCase):
         pod = self.pod(self.render(*values, "api.env.CONSTELLATION_DATA_DIR=/var/lib/constellation-pcap"))
         self.assertEqual(sum(e["name"] == "CONSTELLATION_DATA_DIR" for e in pod["containers"][0]["env"]), 1)
 
+    def test_retention_is_opt_in_and_cannot_bypass_durable_storage(self):
+        environment = self.pod(self.render())["containers"][0]["env"]
+        self.assertIn({"name": "CONSTELLATION_PCAP_RETENTION_ENABLED", "value": "false"}, environment)
+        self.assertIn("requires verified durable", self.render("api.pcapStorage.retentionEnabled=true", fails=True))
+        self.assertIn("conflicts", self.render("api.env.CONSTELLATION_PCAP_RETENTION_ENABLED=true", fails=True))
+        for mode, replicas in (("ReadWriteOnce", 1), ("ReadWriteMany", 2)):
+            with self.subTest(mode=mode):
+                values = ("api.pcapStorage.enabled=true", "api.pcapStorage.existingClaim=owned-pcap",
+                          "api.pcapStorage.retentionEnabled=true", f"api.pcapStorage.accessMode={mode}",
+                          f"api.replicas={replicas}")
+                environment = self.pod(self.render(*values))["containers"][0]["env"]
+                self.assertIn({"name": "CONSTELLATION_PCAP_RETENTION_ENABLED", "value": "true"}, environment)
+                self.assertIn("conflicts", self.render(*values, "api.env.CONSTELLATION_PCAP_RETENTION_ENABLED=false", fails=True))
+                environment = self.pod(self.render(*values, "api.env.CONSTELLATION_PCAP_RETENTION_ENABLED=true"))["containers"][0]["env"]
+                self.assertEqual(sum(e["name"] == "CONSTELLATION_PCAP_RETENTION_ENABLED" for e in environment), 1)
+        self.assertIn("boolean", self.render(string_values=("api.pcapStorage.retentionEnabled=true",), fails=True))
+
     def test_invalid_modes_names_and_boolean_strings_are_rejected(self):
         for field in ("api.pcapStorage.accessMode=ReadOnlyMany",
                       "api.pcapStorage.existingClaim=../foreign"):

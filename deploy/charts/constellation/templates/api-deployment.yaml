@@ -130,8 +130,10 @@ spec:
             - name: CONSTELLATION_DATA_DIR
               value: /var/lib/constellation-pcap
 {{- end }}
+            - name: CONSTELLATION_PCAP_RETENTION_ENABLED
+              value: {{ ternary "true" "false" (and .Values.api.pcapStorage.enabled .Values.api.pcapStorage.retentionEnabled) | quote }}
 {{- range $k, $v := .Values.api.env }}
-{{- if not (and $.Values.api.pcapStorage.enabled (eq $k "CONSTELLATION_DATA_DIR")) }}
+{{- if and (ne $k "CONSTELLATION_PCAP_RETENTION_ENABLED") (not (and $.Values.api.pcapStorage.enabled (eq $k "CONSTELLATION_DATA_DIR"))) }}
             - name: {{ $k }}
               value: "{{ $v }}"
 {{- end }}

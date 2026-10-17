@@ -74,12 +74,7 @@ func (s *Server) startSingletonLoops(ctx context.Context) {
 		strings.TrimSpace(os.Getenv("CONSTELLATION_FED_MASTER_URL")),
 		strings.TrimSpace(os.Getenv("CONSTELLATION_FED_MASTER_TOKEN")), 0, s.tel.Logger)
 
-	// Wave A5: auto-rollback watcher. Demotes enforce-mode runtime_policies
-	// back to monitor when their deny-rate spikes past threshold.
-	rollbackStore := runtime.NewRuntimePolicyStore(s.db, s.auditLog)
-	rollbackWatcher := runtime.NewPolicyRollbackWatcher(rollbackStore,
-		runtime.DefaultRollbackConfig(), s.tel.Logger)
-	go rollbackWatcher.Run(ctx)
+	s.startRuntimeMaintenance(ctx)
 
 	// P2-1: ATMO auto mode-elevation worker. Leader-gated background driver that
 	// periodically re-evaluates the discover→monitor→protect candidates and

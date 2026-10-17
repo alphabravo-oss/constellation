@@ -45,6 +45,16 @@
 {{- end }}
 {{- end }}
 
+{{- if and .Values.api.pcapStorage.retentionEnabled (not .Values.api.pcapStorage.enabled) }}
+{{- fail "api.pcapStorage.retentionEnabled requires verified durable api.pcapStorage.enabled storage" }}
+{{- end }}
+{{- if hasKey .Values.api.env "CONSTELLATION_PCAP_RETENTION_ENABLED" }}
+{{- $expected := ternary "true" "false" (and .Values.api.pcapStorage.enabled .Values.api.pcapStorage.retentionEnabled) }}
+{{- if ne (lower (trim (toString (index .Values.api.env "CONSTELLATION_PCAP_RETENTION_ENABLED")))) $expected }}
+{{- fail "api.env.CONSTELLATION_PCAP_RETENTION_ENABLED conflicts with chart-controlled api.pcapStorage.retentionEnabled" }}
+{{- end }}
+{{- end }}
+
 {{- if and .Values.api.enabled .Values.api.pcapStorage.enabled }}
 {{- $storage := .Values.api.pcapStorage }}
 {{- $claimName := required "api.pcapStorage.enabled requires an existing durable PVC (api.pcapStorage.existingClaim)" $storage.existingClaim }}
