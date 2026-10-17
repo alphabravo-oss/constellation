@@ -1,11 +1,13 @@
 # CNPG backup, recovery and cutover
 
 The chart supports CNPG-I Barman Cloud backups and recovery into a new cluster.
-The main development deployment now runs **PostgreSQL 16.14 on CNPG**, schema
-**172**, with its original StatefulSet stopped and retained for rollback. The
-October 12 cutover and separate-cluster restore passed application continuity
-checks; see [main cutover evidence](#main-development-cutover). Local RustFS
-backup does not establish an off-host recovery target or independent failure domains.
+The main development deployment runs **PostgreSQL 16.14 on CNPG**. The October
+12 cutover at schema172 retained the stopped original StatefulSet and passed
+application continuity checks with a separate restored cluster; see
+[main cutover evidence](#main-development-cutover). Later deployments and schema
+versions are recorded in the [canonical parity plan](NEUVECTOR-PARITY-PLAN.md).
+Local RustFS backup does not establish an off-host recovery target or independent
+failure domains.
 
 Install a compatible CloudNativePG operator and Barman Cloud plugin separately.
 Create an ObjectStore resource with externally managed credentials, trusted TLS,
