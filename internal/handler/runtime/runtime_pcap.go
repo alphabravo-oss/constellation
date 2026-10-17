@@ -24,8 +24,6 @@ package runtime
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -44,6 +42,7 @@ import (
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
+	"github.com/alphabravocompany/constellation/internal/securefiles"
 )
 
 // PcapCaptureStatus mirrors the CHECK constraint.
@@ -373,12 +372,18 @@ func (h *PcapHTTP) Download(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusConflict, "capture not completed yet (status="+string(got.Status)+")")
 		return
 	}
-	f, err := os.Open(pcapFilePath(id))
+	root, err := securefiles.OpenPrivateDir(pcapDataDir())
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, "pcap file missing on server: "+err.Error())
+		jsonError(w, http.StatusInternalServerError, "pcap store unavailable")
 		return
 	}
-	defer f.Close()
+	defer func() { _ = root.Close() }()
+	f, err := openPcapFile(root, id)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "pcap file unavailable on server")
+		return
+	}
+	defer func() { _ = f.Close() }()
 	w.Header().Set("Content-Type", "application/vnd.tcpdump.pcap")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+id.String()+`.pcap"`)
 	if got.FileSizeBytes > 0 {
@@ -410,7 +415,7 @@ func (h *PcapHTTP) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Best-effort file removal — log if it fails, don't break the row delete.
-	if rmErr := os.Remove(pcapFilePath(id)); rmErr != nil && !os.IsNotExist(rmErr) {
+	if rmErr := removePcapFile(id); rmErr != nil && !os.IsNotExist(rmErr) {
 		slog.Default().Warn("pcap file remove",
 			slog.String("id", id.String()), slog.String("err", rmErr.Error()))
 	}
@@ -514,7 +519,10 @@ UPDATE runtime_pcap_captures
 
 // Upload accepts the multipart .pcap body from the runtime-agent. Caps at
 // maxPcapBytes via http.MaxBytesReader; writes to <DataDir>/pcaps/<id>.pcap
-// atomically (write to <id>.pcap.partial, then rename).
+// privately and atomically beneath the configured store. The exact running row
+// stays locked until publication and receipt commit, serializing concurrent
+// uploads/deletes. Filesystem and database commits cannot be one transaction;
+// a failed/unknown commit retains complete private bytes for reconciliation.
 func (h *PcapHTTP) Upload(w http.ResponseWriter, r *http.Request) {
 	tok, ok := handler.RuntimeAgentTokenFrom(r.Context())
 	if !ok {
@@ -537,73 +545,12 @@ func (h *PcapHTTP) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxPcapBytes+1024)
 
-	// Verify the capture belongs to this org + is in running state.
-	got, err := h.getByID(r.Context(), tok.OrgID, id)
-	if err != nil || got == nil || got.ClusterID != boundCluster {
-		jsonError(w, http.StatusNotFound, "not found")
-		return
-	}
-	if got.Status != PcapStatusRunning {
-		jsonError(w, http.StatusConflict,
-			"capture not running (status="+string(got.Status)+")")
+	got, failure := h.uploadCapture(r.Context(), id, tok.OrgID, boundCluster, r.Body)
+	if failure != nil {
+		jsonError(w, failure.status, failure.message)
 		return
 	}
 
-	// Resolve metadata before accepting bytes so lookup failure cannot occur
-	// after a successful file write solely to decorate the response.
-	if err := h.capturePlatformRoles(r.Context(), tok.OrgID, []*PcapCapture{got}); err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	role := got.PlatformRole
-	if err := os.MkdirAll(pcapDataDir(), 0o755); err != nil {
-		jsonError(w, http.StatusInternalServerError, "mkdir: "+err.Error())
-		return
-	}
-	path := pcapFilePath(id)
-	tmp := path + ".partial"
-	f, err := os.Create(tmp)
-	if err != nil {
-		jsonError(w, http.StatusInternalServerError, "create: "+err.Error())
-		return
-	}
-	hasher := sha256.New()
-	mw := io.MultiWriter(f, hasher)
-	written, copyErr := io.Copy(mw, r.Body)
-	_ = f.Close()
-	if copyErr != nil {
-		_ = os.Remove(tmp)
-		jsonError(w, http.StatusBadRequest, "upload: "+copyErr.Error())
-		return
-	}
-	if written > maxPcapBytes {
-		_ = os.Remove(tmp)
-		jsonError(w, http.StatusRequestEntityTooLarge,
-			fmt.Sprintf("pcap %d bytes > limit %d", written, maxPcapBytes))
-		return
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		jsonError(w, http.StatusInternalServerError, "rename: "+err.Error())
-		return
-	}
-	sum := hex.EncodeToString(hasher.Sum(nil))
-
-	// Stamp the row.
-	got, err = scanPcap(h.db.Pool().QueryRow(r.Context(), `
-UPDATE runtime_pcap_captures
-   SET status = 'completed',
-       file_path = $1,
-       file_size_bytes = $2,
-       sha256 = $3,
-       completed_at = NOW()
-	 WHERE id = $4 AND org_id = $5 AND cluster_id = $6 RETURNING `+pcapCols,
-		path, written, sum, id, tok.OrgID, boundCluster))
-	if err != nil {
-		jsonError(w, http.StatusInternalServerError, "update: "+err.Error())
-		return
-	}
-	got.PlatformRole = role
 	httpx.WriteJSON(w, http.StatusOK, got)
 }
 
@@ -732,7 +679,7 @@ func (h *PcapHTTP) getByID(ctx context.Context, orgID, id uuid.UUID) (*PcapCaptu
 // watcher). Errors logged + counted; one bad row doesn't stop the sweep.
 func (h *PcapHTTP) SweepExpired(ctx context.Context, logger *slog.Logger) (int, error) {
 	rows, err := h.db.Pool().Query(ctx, `
-SELECT id FROM runtime_pcap_captures WHERE expires_at < NOW()`)
+DELETE FROM runtime_pcap_captures WHERE expires_at < NOW() RETURNING id`)
 	if err != nil {
 		return 0, err
 	}
@@ -740,22 +687,23 @@ SELECT id FROM runtime_pcap_captures WHERE expires_at < NOW()`)
 	ids := []uuid.UUID{}
 	for rows.Next() {
 		var id uuid.UUID
-		if err := rows.Scan(&id); err == nil {
-			ids = append(ids, id)
+		if err := rows.Scan(&id); err != nil {
+			return 0, err
 		}
+		ids = append(ids, id)
 	}
-	rows.Close()
-	for _, id := range ids {
-		_ = os.Remove(pcapFilePath(id))
-	}
-	if len(ids) == 0 {
-		return 0, nil
-	}
-	if _, err := h.db.Pool().Exec(ctx,
-		`DELETE FROM runtime_pcap_captures WHERE id = ANY($1::uuid[])`,
-		ids); err != nil {
+	if err := rows.Err(); err != nil {
 		return 0, err
 	}
+	rows.Close()
+	// DELETE locks rows before removal, like operator Delete. An upload already
+	// holding the row lock finishes first; its published file is then removed.
+	for _, id := range ids {
+		if err := removePcapFile(id); err != nil && logger != nil {
+			logger.Warn("pcap expired file remove", slog.String("id", id.String()), slog.String("err", err.Error()))
+		}
+	}
+
 	if logger != nil {
 		logger.Info("pcap sweep", slog.Int("removed", len(ids)))
 	}
