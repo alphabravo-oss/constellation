@@ -27,7 +27,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/securefiles"
 )
 
 // Trigger describes why a workload is being quarantined.
@@ -102,12 +105,15 @@ type CollectorSet struct {
 
 // Quarantine is the executable orchestrator.
 type Quarantine struct {
+	mu         sync.RWMutex
+	outputRoot *os.Root
 	opts       Options
 	collectors CollectorSet
 }
 
 // New constructs a Quarantine. cols may have nil fields; missing collectors emit a
 // log warning and are skipped (useful in early-build environments).
+// The returned instance owns a pinned output directory; callers must call Close.
 func New(opts Options, cols CollectorSet) (*Quarantine, error) {
 	if opts.OutputDir == "" {
 		return nil, errors.New("quarantine: OutputDir required")
@@ -124,14 +130,59 @@ func New(opts Options, cols CollectorSet) (*Quarantine, error) {
 	if opts.LogLines == 0 {
 		opts.LogLines = 200
 	}
-	if err := os.MkdirAll(opts.OutputDir, 0o755); err != nil {
-		return nil, fmt.Errorf("quarantine: mkdir output: %w", err)
+	absolute, err := filepath.Abs(opts.OutputDir)
+	if err != nil {
+		return nil, fmt.Errorf("quarantine: resolve output: %w", err)
 	}
-	return &Quarantine{opts: opts, collectors: cols}, nil
+	opts.OutputDir = absolute
+	root, err := securefiles.OpenPrivateDir(absolute)
+	if err != nil {
+		return nil, fmt.Errorf("quarantine: open private output: %w", err)
+	}
+	return &Quarantine{opts: opts, collectors: cols, outputRoot: root}, nil
+}
+
+// Close waits for active Execute calls and releases the pinned output directory.
+// It is safe to call repeatedly; Execute after Close returns an error.
+func (q *Quarantine) Close() error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.outputRoot == nil {
+		return nil
+	}
+	err := q.outputRoot.Close()
+	q.outputRoot = nil
+	return err
+}
+
+func (q *Quarantine) checkOutputDirectory() error {
+	if q.outputRoot == nil {
+		return errors.New("quarantine: output directory is closed")
+	}
+	current, err := os.Lstat(q.opts.OutputDir)
+	if err != nil {
+		return fmt.Errorf("quarantine: inspect output directory: %w", err)
+	}
+	pinned, err := q.outputRoot.Stat(".")
+	if err != nil {
+		return fmt.Errorf("quarantine: inspect pinned output: %w", err)
+	}
+	if !current.IsDir() || current.Mode()&os.ModeSymlink != 0 || !os.SameFile(current, pinned) {
+		return errors.New("quarantine: configured output directory changed; artifact path is unavailable")
+	}
+	return nil
 }
 
 // Execute runs the response and writes the tarball. Returns the Result.
 func (q *Quarantine) Execute(ctx context.Context, t Target, trig Trigger) (*Result, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := q.checkOutputDirectory(); err != nil {
+		return nil, err
+	}
 	now := time.Now().UTC()
 	parts := map[string][]byte{}
 	components := []string{}
@@ -161,31 +212,9 @@ func (q *Quarantine) Execute(ctx context.Context, t Target, trig Trigger) (*Resu
 		}
 	}
 
-	// 3. Procfs snapshot
-	if q.collectors.Proc != nil && t.PID > 0 {
-		files, err := q.collectors.Proc(ctx, t.PID)
-		if err != nil {
-			q.opts.Logger.Warn("quarantine: proc snapshot failed", slog.String("err", err.Error()))
-		} else {
-			for name, raw := range files {
-				parts["proc/"+name] = raw
-			}
-			components = append(components, "proc")
-		}
-	}
-
-	// 4. Logs
-	if q.collectors.Logs != nil {
-		logs, err := q.collectors.Logs(ctx, t.Namespace, t.Pod, q.opts.LogLines)
-		if err != nil {
-			q.opts.Logger.Warn("quarantine: logs failed", slog.String("err", err.Error()))
-		} else {
-			for c, lines := range logs {
-				parts["logs/"+c+".log"] = []byte(strings.Join(lines, "\n"))
-			}
-			components = append(components, "logs")
-		}
-	}
+	// 3–4. Best-effort procfs snapshot and container logs.
+	components = q.collectProc(ctx, t, parts, components)
+	components = q.collectLogs(ctx, t, parts, components)
 
 	// 5. Manifest
 	manifest := buildManifest(t, trig, now, parts)
@@ -193,13 +222,21 @@ func (q *Quarantine) Execute(ctx context.Context, t Target, trig Trigger) (*Resu
 	parts["manifest.json"] = manifestBytes
 
 	// 6. Tarball
-	tarballPath := filepath.Join(q.opts.OutputDir,
-		fmt.Sprintf("quarantine-%s-%d.tar.gz", sanitize(t.WorkloadID), now.UnixNano()))
-	written, err := writeTarball(tarballPath, parts)
+	name := fmt.Sprintf("quarantine-%s-%d.tar.gz", sanitize(t.WorkloadID), now.UnixNano())
+	tarballPath := filepath.Join(q.opts.OutputDir, name)
+	written, err := writeTarball(ctx, q.outputRoot, name, parts)
 	if err != nil {
 		return nil, fmt.Errorf("quarantine: write tarball: %w", err)
 	}
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := q.checkOutputDirectory(); err != nil {
+		// The complete private artifact remains in the pinned directory. Do not
+		// claim that its configured pathname still identifies that directory.
+		return nil, err
+	}
 	hash := manifest.SHA256
 	return &Result{
 		TarballPath:  tarballPath,
@@ -209,6 +246,36 @@ func (q *Quarantine) Execute(ctx context.Context, t Target, trig Trigger) (*Resu
 		CapturedAt:   now,
 		NetPolicy:    netpolYAML,
 	}, nil
+}
+
+func (q *Quarantine) collectProc(ctx context.Context, t Target, parts map[string][]byte, components []string) []string {
+	if q.collectors.Proc == nil || t.PID <= 0 {
+		return components
+	}
+	files, err := q.collectors.Proc(ctx, t.PID)
+	if err != nil {
+		q.opts.Logger.Warn("quarantine: proc snapshot failed", slog.String("err", err.Error()))
+		return components
+	}
+	for name, raw := range files {
+		parts["proc/"+name] = raw
+	}
+	return append(components, "proc")
+}
+
+func (q *Quarantine) collectLogs(ctx context.Context, t Target, parts map[string][]byte, components []string) []string {
+	if q.collectors.Logs == nil {
+		return components
+	}
+	logs, err := q.collectors.Logs(ctx, t.Namespace, t.Pod, q.opts.LogLines)
+	if err != nil {
+		q.opts.Logger.Warn("quarantine: logs failed", slog.String("err", err.Error()))
+		return components
+	}
+	for container, lines := range logs {
+		parts["logs/"+container+".log"] = []byte(strings.Join(lines, "\n"))
+	}
+	return append(components, "logs")
 }
 
 // Manifest is the on-disk JSON describing the snapshot contents.
@@ -260,50 +327,36 @@ func buildManifest(t Target, trig Trigger, at time.Time, parts map[string][]byte
 	}
 }
 
-func writeTarball(path string, parts map[string][]byte) (int64, error) {
-	f, err := os.Create(path)
-	if err != nil {
-		return 0, err
-	}
-	defer f.Close()
-	gz := gzip.NewWriter(f)
-	defer gz.Close()
-	tw := tar.NewWriter(gz)
-	defer tw.Close()
+func writeTarball(ctx context.Context, root *os.Root, name string, parts map[string][]byte) (int64, error) {
+	return securefiles.WriteStream(root, name, 0o600, func(destination io.Writer) error {
+		return encodeTarball(ctx, destination, parts)
+	})
+}
 
+func encodeTarball(ctx context.Context, destination io.Writer, parts map[string][]byte) error {
+	gz := gzip.NewWriter(destination)
+	tw := tar.NewWriter(gz)
 	names := make([]string, 0, len(parts))
-	for n := range parts {
-		names = append(names, n)
+	for name := range parts {
+		names = append(names, name)
 	}
 	sort.Strings(names)
-	var bytesIn int64
-	for _, n := range names {
-		body := parts[n]
-		hdr := &tar.Header{
-			Name:    n,
-			Size:    int64(len(body)),
-			Mode:    0o600,
-			ModTime: time.Now(),
+	var writeErr error
+	for _, name := range names {
+		if writeErr = ctx.Err(); writeErr != nil {
+			break
 		}
-		if err := tw.WriteHeader(hdr); err != nil {
-			return 0, err
+		body := parts[name]
+		header := &tar.Header{Name: name, Size: int64(len(body)), Mode: 0o600, ModTime: time.Now()}
+		if writeErr = tw.WriteHeader(header); writeErr != nil {
+			break
 		}
-		if _, err := tw.Write(body); err != nil {
-			return 0, err
+		if _, writeErr = tw.Write(body); writeErr != nil {
+			break
 		}
-		bytesIn += int64(len(body))
 	}
-	if err := tw.Close(); err != nil {
-		return 0, err
-	}
-	if err := gz.Close(); err != nil {
-		return 0, err
-	}
-	info, err := f.Stat()
-	if err != nil {
-		return bytesIn, nil
-	}
-	return info.Size(), nil
+	// Both finalizers may write buffered bytes and must complete before publish.
+	return errors.Join(writeErr, tw.Close(), gz.Close(), ctx.Err())
 }
 
 func sanitize(s string) string {

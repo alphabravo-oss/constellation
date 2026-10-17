@@ -104,42 +104,62 @@ func WriteFile(root *os.Root, name string, body []byte, mode os.FileMode) error 
 
 // CopyFile writes a stream without loading a large archive into memory.
 func CopyFile(root *os.Root, name string, source io.Reader, mode os.FileMode) error {
+	_, err := WriteStream(root, name, mode, func(destination io.Writer) error {
+		_, err := io.Copy(destination, source)
+		return err
+	})
+	return err
+}
+
+// WriteStream atomically publishes a completed stream and reports its file size.
+// A callback or finalization failure preserves the prior artifact. The callback
+// must finish all buffered writers before returning and must not retain writer.
+func WriteStream(root *os.Root, name string, mode os.FileMode, produce func(io.Writer) error) (int64, error) {
 	if !filepath.IsLocal(name) || filepath.Base(name) != name || name == "." {
-		return errors.New("artifact name must be a single relative filename")
+		return 0, errors.New("artifact name must be a single relative filename")
 	}
 	if mode != 0o600 && mode != 0o644 {
-		return errors.New("unsupported artifact permissions")
+		return 0, errors.New("unsupported artifact permissions")
+	}
+	if produce == nil {
+		return 0, errors.New("artifact stream producer is required")
 	}
 	if info, err := root.Lstat(name); err == nil && !info.Mode().IsRegular() {
-		return errors.New("artifact destination must be a regular file")
+		return 0, errors.New("artifact destination must be a regular file")
 	} else if err != nil && !os.IsNotExist(err) {
-		return err
+		return 0, err
 	}
 	token := make([]byte, 16)
 	if _, err := rand.Read(token); err != nil {
-		return err
+		return 0, err
 	}
 	temporary := ".pending-" + hex.EncodeToString(token)
 	file, err := root.OpenFile(temporary, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer func() { _ = root.Remove(temporary) }()
-	if _, err = io.Copy(file, source); err == nil {
+	err = produce(file)
+	if err == nil {
 		err = file.Chmod(mode)
 	}
 	if err == nil {
 		err = file.Sync()
 	}
-	closeErr := file.Close()
+	var size int64
 	if err == nil {
-		err = closeErr
+		var info os.FileInfo
+		info, err = file.Stat()
+		if err == nil {
+			size = info.Size()
+		}
 	}
+	err = errors.Join(err, file.Close())
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if err = root.Rename(temporary, name); err != nil {
-		return fmt.Errorf("publish artifact: %w", err)
+		return 0, fmt.Errorf("publish artifact: %w", err)
 	}
-	return nil
+	return size, nil
 }
