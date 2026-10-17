@@ -173,8 +173,15 @@ func evidenceClusterIDParam(r *http.Request) (*uuid.UUID, error) {
 // Ingest accepts kube-bench JSON and persists expanded check rows. Returns the count of
 // rows inserted (with cross-framework expansions counted separately).
 func (c *Compliance) Ingest(w http.ResponseWriter, r *http.Request) {
-	subj, _ := authctx.SubjectFrom(r.Context())
-	body, err := io.ReadAll(io.LimitReader(r.Body, 16<<20))
+	scope, ok := c.userWriteScope(w, r)
+	if ok {
+		c.ingest(w, r, scope)
+	}
+}
+
+func (c *Compliance) ingest(w http.ResponseWriter, r *http.Request, scope complianceWriteScope) {
+	r.Body = http.MaxBytesReader(w, r.Body, 16<<20)
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad body"})
 		return
@@ -197,17 +204,7 @@ func (c *Compliance) Ingest(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	// CMP-CLOBBER-03: attribute host-bench rows to the reporting cluster/node so two
-	// clusters (or two nodes) in one org no longer clobber each other. The runner sends
-	// ?cluster_id= (from CONSTELLATION_CLUSTER_ID) and, where applicable, ?node=. Both are
-	// optional: a missing cluster_id stays NULL (org-wide, matching the pre-136 behaviour),
-	// and node defaults to "" (non-NULL) so it participates in the composite unique index
-	// from migration 136.
-	clusterArg, err := sqlx.ParseClusterIDParam(r)
-	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
+	clusterArg := scope.clusterID
 	node := strings.TrimSpace(r.URL.Query().Get("node"))
 	tx, err := c.db.Pool().Begin(r.Context())
 	if err != nil {
@@ -254,7 +251,7 @@ DO UPDATE SET
     tags_v2 = EXCLUDED.tags_v2,
     remediation = EXCLUDED.remediation,
     evaluated_at = NOW()`,
-			subj.OrgID, clusterArg, node, ck.Framework, ck.ControlID, ck.Title, ck.Description, ck.Status, ck.Severity, ck.Evidence, tagsRaw, ck.Remediation,
+			scope.orgID, clusterArg, node, ck.Framework, ck.ControlID, ck.Title, ck.Description, ck.Status, ck.Severity, ck.Evidence, tagsRaw, ck.Remediation,
 		); err != nil {
 			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -269,17 +266,16 @@ DO UPDATE SET
 	// cluster (CMP-CLOBBER-03) the RT-2 hook loads that cluster's rules; an unattributed
 	// (org-wide) scan falls back to the org-scoped rules (uuid.Nil).
 	fireCluster := uuid.Nil
-	if cid, ok := clusterArg.(uuid.UUID); ok {
-		fireCluster = cid
+	if clusterArg != nil {
+		fireCluster = *clusterArg
 	}
-	c.alerts.fire(r.Context(), subj.OrgID, fireCluster, failures)
-	uid := subj.UserID
-	oid := subj.OrgID
-	_, _, _ = c.audit.Log(r.Context(), audit.Event{
-		OrgID: &oid, ActorID: &uid,
-		Action:     "compliance.ingest",
-		TargetKind: "compliance",
-		After:      map[string]any{"rows": len(checks)},
-	})
+	c.alerts.fire(r.Context(), scope.orgID, fireCluster, failures)
+	if c.audit != nil {
+		_, _, _ = c.audit.Log(r.Context(), audit.Event{
+			OrgID: &scope.orgID, ActorID: scope.actorID,
+			Action: "compliance.ingest", TargetKind: "compliance",
+			After: map[string]any{"rows": len(checks), "cluster_id": scope.clusterID, "agent_token_id": scope.agentID},
+		})
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ingested": len(checks)})
 }

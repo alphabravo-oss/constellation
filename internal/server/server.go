@@ -1588,6 +1588,15 @@ func (s *Server) buildRouter() chi.Router {
 				s.dispatcher,
 			)
 			r.Post("/host-cis:report", hostCIS.Report)
+			// Benchmark runners use the cluster-bound credential already mounted by
+			// the chart; user authoring routes retain JWT/PAT and policy RBAC.
+			agentCompliance := compliance.NewCompliance(s.db, s.auditLog).WithResponseAlerts(
+				runtime.NewResponseDispatch(s.db, s.dispatcher),
+				policy.NewResponseRuleDefs(s.db, s.auditLog).WithDispatcher(s.dispatcher).Evaluate,
+				s.dispatcher,
+			)
+			r.Post("/agent/compliance/ingest", agentCompliance.AgentIngest)
+			r.Post("/agent/compliance/bench/claim", agentCompliance.AgentClaimBenchRun)
 		})
 
 		// D1: federation sync (per-cluster fed credential auth, NOT user JWT). A joint

@@ -36,7 +36,7 @@ const (
 	benchRunTimeout  = 5 * time.Minute
 	maxReportBytes   = 16 << 20
 	componentName    = "kube-bench-runner"
-	ingestPathFormat = "/api/v1/compliance/ingest?profile=%s"
+	ingestPathFormat = "/api/v1/agent/compliance/ingest?profile=%s"
 )
 
 type config struct {
@@ -158,7 +158,7 @@ func watchLoop(ctx context.Context, client *http.Client, cfg config, logger *slo
 func claimPendingRun(ctx context.Context, client *http.Client, cfg config) (bool, error) {
 	reqCtx, cancel := context.WithTimeout(ctx, postTimeout)
 	defer cancel()
-	endpoint := strings.TrimRight(cfg.apiURL, "/") + "/api/v1/compliance/bench/claim?profile=" + url.QueryEscape(cfg.profile)
+	endpoint := strings.TrimRight(cfg.apiURL, "/") + "/api/v1/agent/compliance/bench/claim?profile=" + url.QueryEscape(cfg.profile)
 	if cfg.clusterID != "" {
 		endpoint += "&cluster_id=" + url.QueryEscape(cfg.clusterID)
 	}

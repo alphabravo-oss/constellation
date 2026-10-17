@@ -31,9 +31,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
-	"github.com/alphabravocompany/constellation/internal/handler/sqlx"
+
 	"github.com/alphabravocompany/constellation/pkg/audit"
 )
 
@@ -64,7 +63,10 @@ func normalizeBenchProfile(raw string) (string, bool) {
 // (optionally scoped to a cluster). The runner services it out-of-band; this
 // handler only writes the request row and returns it.
 func (c *Compliance) RunBench(w http.ResponseWriter, r *http.Request) {
-	subj, _ := authctx.SubjectFrom(r.Context())
+	scope, authorized := c.userWriteScope(w, r)
+	if !authorized {
+		return
+	}
 
 	// Accept profile + benchmark from either the query string or a small JSON body.
 	profileRaw := r.URL.Query().Get("profile")
@@ -91,22 +93,21 @@ func (c *Compliance) RunBench(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	clusterArg, err := sqlx.ParseClusterIDParam(r)
-	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-
+	clusterArg := scope.clusterID
 	var req BenchRunRequest
 	var clusterID *uuid.UUID
 	var requestedAt time.Time
 	if err := c.db.Pool().QueryRow(r.Context(), `
 INSERT INTO compliance_bench_run_requests (org_id, cluster_id, profile, benchmark, requested_by)
-VALUES ($1, $2, $3, $4, $5)
+SELECT $1, $2, $3, $4, $5 WHERE $2::uuid IS NULL OR EXISTS(SELECT 1 FROM clusters WHERE id=$2 AND org_id=$1)
 RETURNING id::text, cluster_id, profile, benchmark, status, requested_at`,
-		subj.OrgID, clusterArg, profile, benchmark, subj.UserID,
+		scope.orgID, clusterArg, profile, benchmark, scope.actorID,
 	).Scan(&req.ID, &clusterID, &req.Profile, &req.Benchmark, &req.Status, &requestedAt); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found"})
+			return
+		}
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "enqueue unavailable"})
 		return
 	}
 	req.RequestedAt = requestedAt.UTC().Format(time.RFC3339)
@@ -115,11 +116,10 @@ RETURNING id::text, cluster_id, profile, benchmark, status, requested_at`,
 	}
 
 	if c.audit != nil {
-		oid := subj.OrgID
-		uid := subj.UserID
+		oid := scope.orgID
 		_, _, _ = c.audit.Log(r.Context(), audit.Event{
 			OrgID:      &oid,
-			ActorID:    &uid,
+			ActorID:    scope.actorID,
 			Action:     "compliance.bench.run_requested",
 			TargetKind: "compliance_bench_run",
 			TargetID:   req.ID,
@@ -138,45 +138,59 @@ RETURNING id::text, cluster_id, profile, benchmark, status, requested_at`,
 // cluster's requests plus org-wide (cluster_id IS NULL) requests. Returns 200
 // with the claimed request, or 204 when the queue is empty.
 func (c *Compliance) ClaimBenchRun(w http.ResponseWriter, r *http.Request) {
-	subj, _ := authctx.SubjectFrom(r.Context())
+	scope, ok := c.userWriteScope(w, r)
+	if ok {
+		c.claimBenchRun(w, r, scope)
+	}
+}
 
+func (c *Compliance) claimBenchRun(w http.ResponseWriter, r *http.Request, scope complianceWriteScope) {
 	profile, ok := normalizeBenchProfile(r.URL.Query().Get("profile"))
 	if !ok {
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown profile (want kube-bench or docker-bench)"})
 		return
 	}
-	clusterArg, err := sqlx.ParseClusterIDParam(r)
+	ctx := r.Context()
+	tx, err := c.db.Pool().Begin(ctx)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "claim unavailable"})
 		return
 	}
-
-	// FOR UPDATE SKIP LOCKED so two runners polling concurrently never claim the
-	// same row. A NULL clusterArg (runner sent no cluster_id) matches any request.
+	defer func() { _ = tx.Rollback(ctx) }()
 	var req BenchRunRequest
 	var clusterID *uuid.UUID
 	var requestedAt time.Time
-	err = c.db.Pool().QueryRow(r.Context(), `
-UPDATE compliance_bench_run_requests
-   SET status = 'claimed', claimed_at = NOW()
- WHERE id = (
-     SELECT id FROM compliance_bench_run_requests
-      WHERE org_id = $1
-        AND status = 'pending'
-        AND profile = $2
-        AND ($3::uuid IS NULL OR cluster_id IS NULL OR cluster_id = $3)
-      ORDER BY requested_at
-      FOR UPDATE SKIP LOCKED
-      LIMIT 1)
-RETURNING id::text, cluster_id, profile, benchmark, status, requested_at`,
-		subj.OrgID, profile, clusterArg,
-	).Scan(&req.ID, &clusterID, &req.Profile, &req.Benchmark, &req.Status, &requestedAt)
+	var inherited bool
+	err = tx.QueryRow(ctx, `WITH candidate AS (
+ SELECT r.id,r.cluster_id FROM compliance_bench_run_requests r
+ WHERE r.org_id=$1 AND r.status='pending' AND r.profile=$2
+ AND ($3::uuid IS NULL OR r.cluster_id IS NULL OR r.cluster_id=$3)
+ AND (r.cluster_id IS NULL OR EXISTS(SELECT 1 FROM clusters c WHERE c.id=r.cluster_id AND c.org_id=$1))
+ ORDER BY r.requested_at,r.id FOR UPDATE SKIP LOCKED LIMIT 1)
+ UPDATE compliance_bench_run_requests req SET status='claimed',claimed_at=NOW(),cluster_id=COALESCE(req.cluster_id,$3::uuid)
+ FROM candidate WHERE req.id=candidate.id
+ RETURNING req.id::text,req.cluster_id,req.profile,req.benchmark,req.status,req.requested_at,candidate.cluster_id IS NULL`,
+		scope.orgID, profile, scope.clusterID).Scan(&req.ID, &clusterID, &req.Profile, &req.Benchmark, &req.Status, &requestedAt, &inherited)
+	if errors.Is(err, pgx.ErrNoRows) {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "claim unavailable"})
+		return
+	}
+	logger := c.audit
+	if logger == nil {
+		logger = audit.New(c.db.Pool())
+	}
+	_, _, err = logger.LogInTx(ctx, tx, audit.Event{OrgID: &scope.orgID, ActorID: scope.actorID, Action: "compliance.bench.claimed", TargetKind: "compliance_bench_run", TargetID: req.ID,
+		Before: map[string]any{"org_wide": inherited}, After: map[string]any{"cluster_id": clusterID, "agent_token_id": scope.agentID, "profile": profile}})
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "claim unavailable"})
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "claim unavailable"})
 		return
 	}
 	req.RequestedAt = requestedAt.UTC().Format(time.RFC3339)
