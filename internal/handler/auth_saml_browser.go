@@ -84,6 +84,8 @@ func samlBrowserRequest(r *http.Request) bool {
 }
 
 func setSAMLBrowserCookie(w http.ResponseWriter, nonce string) {
+	// #nosec G124 -- SAML HTTP-POST returns cross-site from the IdP. This Secure,
+	// HttpOnly cookie binds a five-minute single-use nonce to the initiating browser.
 	http.SetCookie(w, &http.Cookie{
 		Name: samlBrowserCookieName, Value: nonce, Path: "/",
 		Secure: true, HttpOnly: true, SameSite: http.SameSiteNoneMode,
@@ -92,6 +94,8 @@ func setSAMLBrowserCookie(w http.ResponseWriter, nonce string) {
 }
 
 func clearSAMLBrowserCookie(w http.ResponseWriter) {
+	// #nosec G124 -- Clear the same cross-site SAML binding cookie, retaining
+	// Secure/HttpOnly and SameSite=None so the IdP POST response can delete it.
 	http.SetCookie(w, &http.Cookie{
 		Name: samlBrowserCookieName, Value: "", Path: "/",
 		Secure: true, HttpOnly: true, SameSite: http.SameSiteNoneMode,
