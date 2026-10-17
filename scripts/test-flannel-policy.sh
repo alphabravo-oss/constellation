@@ -14,7 +14,31 @@ mkdir -p "$work/build" "$work/driver-evidence"
 work="$(realpath "$work")"
 source_root="$work/source"
 [[ "$work" == /tmp/constellation-flannel-policy-* ]] || { echo 'Evidence must use a dedicated /tmp/constellation-flannel-policy-* directory.' >&2; exit 1; }
-docker_local() { env -u DOCKER_HOST -u DOCKER_CONTEXT -u DOCKER_TLS -u DOCKER_TLS_VERIFY -u DOCKER_CERT_PATH docker --host unix:///var/run/docker.sock "$@"; }
+docker_command=(env -u DOCKER_HOST -u DOCKER_CONTEXT -u DOCKER_TLS -u DOCKER_TLS_VERIFY -u DOCKER_CERT_PATH docker --host unix:///var/run/docker.sock)
+docker_local() { "${docker_command[@]}" "$@"; }
+foreground=''
+run_owned_wait() {
+  "$@" & foreground=$!
+  local result=0
+  wait "$foreground" || result=$?
+  foreground=''
+  return "$result"
+}
+stop_owned_wait() {
+  if [[ -n "$foreground" && "$(ps -o ppid= -p "$foreground" 2>/dev/null | tr -d ' ')" == "$$" ]]; then kill -TERM "$foreground" 2>/dev/null || true; fi
+}
+if [[ "$mode" == self-test ]]; then
+  interrupted=0
+  trap 'stop_owned_wait; interrupted=1' TERM
+  parent=$$
+  (sleep 0.1; kill -TERM "$parent") & signaler=$!
+  started=$SECONDS
+  if run_owned_wait sleep 30; then echo 'Owned wait unexpectedly completed.' >&2; exit 1; fi
+  wait "$signaler"
+  [[ "$interrupted" == 1 && $((SECONDS-started)) -lt 3 ]] || { echo 'Owned wait did not interrupt promptly.' >&2; exit 1; }
+  echo 'Owned-child cancellation self-test passed.'
+  exit
+fi
 docker_storage="$(docker_local info --format '{{.DockerRootDir}}')"
 [[ -d "$docker_storage" ]] || { echo 'Local Docker storage path unavailable; refusing to guess disk headroom.' >&2; exit 1; }
 free_kib() { df --output=avail "$docker_storage" | tail -1 | tr -d ' '; }
@@ -57,6 +81,7 @@ created=0; monitor=''; driver_created=0; base_created=0; fixture_created=0
 cleanup() {
   status=$?
   trap - EXIT INT TERM
+  stop_owned_wait
   [[ -z "$monitor" ]] || kill "$monitor" 2>/dev/null || true
   if [[ "$driver_created" == 1 ]]; then
     if docker_local inspect "$driver" >/dev/null 2>&1; then
@@ -117,7 +142,7 @@ node_image_id='sha256:2074403abe1bded11ef3dde09d457e13be8e0b64c218b1c4f8269b4565
 printf '%s\n' "$node_image_id" > "$work/k3s-image-id.txt"
 base_created=1; docker_local tag "$runtime_id" "$base_tag"
 fixture_created=1
-docker_local build --pull=false --network=none --build-arg "PROOF_NONCE=$nonce" --build-arg "RUNTIME_IMAGE=$base_tag" -t "$fixture_image" "$work/build" > "$work/build.log" 2>&1
+run_owned_wait "${docker_command[@]}" build --pull=false --network=none --build-arg "PROOF_NONCE=$nonce" --build-arg "RUNTIME_IMAGE=$base_tag" -t "$fixture_image" "$work/build" > "$work/build.log" 2>&1
 docker_local image inspect "$fixture_image" --format '{{.Id}}' > "$work/fixture-image-id.txt"
 docker_local run --rm -i --network none --cap-drop ALL --read-only --entrypoint /bin/sh "$runtime_id" -s > "$work/native-provenance.sha256" <<'PROVENANCE'
 set -eu
@@ -172,27 +197,33 @@ for ((attempt=0;attempt<60;attempt++)); do
   sleep 1
 done
 [[ "$ready" == 1 ]] || { docker_local logs "$node" > "$work/cluster.log" 2>&1; echo 'Owned k3s API unavailable.' >&2; exit 1; }
-"${k[@]}" wait --for=condition=Ready "node/$node" --timeout=180s
+run_owned_wait "${k[@]}" wait --for=create "node/$node" --timeout=180s
+run_owned_wait "${k[@]}" wait --for=condition=Ready "node/$node" --timeout=180s
 # Stream into this exact owned node, with both pipe statuses checked; no tools
 # container, Docker socket, import volume, or host filesystem enters the node.
-docker_local save "$fixture_image" | docker_local exec -i "$node" k3s ctr --namespace k8s.io images import - > "$work/import.log" 2>&1
+"${docker_command[@]}" save "$fixture_image" | "${docker_command[@]}" exec -i "$node" /bin/ctr --address /run/k3s/containerd/containerd.sock --namespace k8s.io images import - > "$work/import.log" 2>&1 &
+foreground=$!
+import_result=0
+wait "$foreground" || import_result=$?
+foreground=''
+[[ "$import_result" == 0 ]] || exit "$import_result"
 "${k[@]}" create namespace "$namespace" >/dev/null
 sed "s|FIXTURE_IMAGE|$fixture_image|g" tests/flannel-policy/pods.yaml > "$work/pods.yaml"
 "${k[@]}" -n "$namespace" apply -f "$work/pods.yaml" >/dev/null
-"${k[@]}" -n "$namespace" wait --for=condition=Ready pod --all --timeout=180s
+run_owned_wait "${k[@]}" -n "$namespace" wait --for=condition=Ready pod --all --timeout=180s
 "${k[@]}" -n "$namespace" get pods -o json > "$work/pods.json"
 docker_local exec "$node" cat /var/lib/rancher/k3s/agent/etc/cni/net.d/10-flannel.conflist > "$work/flannel.json"
 for pod in server-a server-b client; do
   container="$(python3 -c 'import json,sys; p=next(p for p in json.load(open(sys.argv[1]))["items"] if p["metadata"]["name"]==sys.argv[2]); print(p["status"]["containerStatuses"][0]["containerID"].removeprefix("containerd://"))' "$work/pods.json" "$pod")"
   [[ "$container" =~ ^[0-9a-f]{64}$ ]]
-  docker_local exec "$node" k3s crictl inspect "$container" > "$work/cri-$pod.json"
+  docker_local exec "$node" /bin/crictl --config=/var/lib/rancher/k3s/agent/etc/crictl.yaml inspect "$container" > "$work/cri-$pod.json"
   pid="$(python3 -c 'import json,sys; p=int(json.load(open(sys.argv[1]))["info"]["pid"]); assert 1<p<=2147483647; print(p)' "$work/cri-$pod.json")"
   docker_local exec "$node" readlink "/proc/$pid/ns/net" > "$work/netns-$pod.txt"
 done
 python3 tests/flannel-policy/verify_evidence.py identity "$work" --cluster "$cluster" --namespace "$namespace" --node "$node" --node-pidns "$(docker_local exec "$node" readlink /proc/self/ns/pid)" --node-netns "$(docker_local exec "$node" readlink /proc/self/ns/net)" --host-pidns "$(readlink /proc/self/ns/pid)" --host-netns "$(readlink /proc/self/ns/net)" --runtime-image "$runtime_id" > "$work/driver-evidence/identity.json"
 driver_created=1
-docker_local create --name "$driver" --label "constellation.test.cluster=$cluster" --label "constellation.flannel-proof=$nonce" --pid="container:$node" --network="container:$node" --ipc=private --read-only --cap-drop ALL --cap-add NET_ADMIN --cap-add NET_RAW --cap-add SYS_ADMIN --cap-add SYS_PTRACE --security-opt no-new-privileges:true --pids-limit 128 --memory 1g --cpus 1.5 --tmpfs /tmp:rw,nosuid,noexec,size=64m --mount "type=bind,source=$work/driver-evidence,target=/evidence" --env CONSTELLATION_FLANNEL_POLICY_RUN=1 --env GOMAXPROCS=2 --entrypoint /usr/local/bin/flannel-policy-driver "$fixture_image" -test.run '^TestFlannelRuntimePolicyPacketAcceptance$' -test.v -test.timeout=8m > "$work/driver-container-id.txt"
-docker_local start -a "$driver" > "$work/driver.log" 2>&1 || result=$?
+docker_local create --name "$driver" --label "constellation.test.cluster=$cluster" --label "constellation.flannel-proof=$nonce" --pid="container:$node" --network="container:$node" --ipc=private --read-only --cap-drop ALL --cap-add NET_ADMIN --cap-add NET_RAW --cap-add SYS_ADMIN --cap-add SYS_PTRACE --security-opt no-new-privileges:true --security-opt apparmor=unconfined --pids-limit 128 --memory 1g --cpus 1.5 --tmpfs /tmp:rw,nosuid,noexec,size=64m --mount "type=bind,source=$work/driver-evidence,target=/evidence" --env CONSTELLATION_FLANNEL_POLICY_RUN=1 --env GOMAXPROCS=2 --entrypoint /usr/local/bin/flannel-policy-driver "$fixture_image" -test.run '^TestFlannelRuntimePolicyPacketAcceptance$' -test.v -test.timeout=8m > "$work/driver-container-id.txt"
+run_owned_wait "${docker_command[@]}" start -a "$driver" > "$work/driver.log" 2>&1 || result=$?
 result="${result:-0}"
 container_exit="$(docker_local inspect "$driver" --format '{{.State.ExitCode}}')"
 [[ "$container_exit" == 0 ]] || result="$container_exit"

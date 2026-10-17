@@ -156,6 +156,9 @@ func (s *flannelScenario) probe(phase string, client, pod flannelPod, port uint1
 	if err == nil && native {
 		err = waitFlannelNative(s.t.Context(), s.events, client, pod, mac, &probe)
 	}
+	if native {
+		probe.Observed, probe.ObservedLimit = s.events.observed(probe, client.IP, pod.IP)
+	}
 	s.probes = append(s.probes, probe)
 	if err != nil {
 		s.t.Fatal(err)

@@ -61,6 +61,22 @@ func (events *flannelEvents) cursor() int {
 	return len(events.rows)
 }
 
+func (events *flannelEvents) observed(probe flannelProbe, clientIP, serverIP string) ([]dp.Connection, bool) {
+	events.mu.Lock()
+	defer events.mu.Unlock()
+	var rows []dp.Connection
+	for index, row := range events.rows {
+		if index < probe.EventCursor || int64(row.FirstSeenAt) < probe.StartedAt || row.IPProto != dp.IPProtoTCP || row.ServerPort != probe.Port || row.ClientIP.String() != clientIP || row.ServerIP.String() != serverIP {
+			continue
+		}
+		if len(rows) == 128 {
+			return rows, true
+		}
+		rows = append(rows, row)
+	}
+	return rows, false
+}
+
 type flannelProbe struct {
 	StartedAt     int64           `json:"started_at"`
 	EventCursor   int             `json:"event_cursor"`
@@ -79,6 +95,8 @@ type flannelProbe struct {
 	Response      json.RawMessage `json:"response,omitempty"`
 	Error         string          `json:"error,omitempty"`
 	Native        []dp.Connection `json:"native"`
+	Observed      []dp.Connection `json:"observed_native,omitempty"`
+	ObservedLimit bool            `json:"observed_native_truncated,omitempty"`
 }
 
 type flannelObservation struct {
@@ -422,5 +440,27 @@ func TestFlannelNativeEvidenceRejectsDelayedEarlierAggregate(t *testing.T) {
 	events.rows = append(events.rows, row)
 	if len(events.matching(probe, "10.233.0.12", "10.233.0.10", mac.String())) != 1 {
 		t.Fatal("fresh native aggregate rejected")
+	}
+}
+
+func TestFlannelNativeEvidenceDiagnosticsStayScopedAndBounded(t *testing.T) {
+	probe := flannelProbe{EventCursor: 1, StartedAt: 100, Port: 18081}
+	row := dp.Connection{ClientIP: net.ParseIP("10.233.0.12"), ServerIP: net.ParseIP("10.233.0.10"), ServerPort: 18081, IPProto: dp.IPProtoTCP, PolicyAction: dp.PolicyActionOpen, FirstSeenAt: 100}
+	events := &flannelEvents{rows: []dp.Connection{row}}
+	old := row
+	old.FirstSeenAt = 99
+	foreign := row
+	foreign.ClientIP = net.ParseIP("192.0.2.1")
+	events.rows = append(events.rows, old, foreign, row)
+	rows, truncated := events.observed(probe, "10.233.0.12", "10.233.0.10")
+	if len(rows) != 1 || truncated || rows[0].PolicyAction != dp.PolicyActionOpen {
+		t.Fatal("diagnostic lost unexpected action or included stale/foreign evidence")
+	}
+	for range 128 {
+		events.rows = append(events.rows, row)
+	}
+	rows, truncated = events.observed(probe, "10.233.0.12", "10.233.0.10")
+	if len(rows) != 128 || !truncated {
+		t.Fatal("diagnostic capture exceeded its explicit bound")
 	}
 }

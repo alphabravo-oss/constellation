@@ -27,7 +27,7 @@ have no service-account tokens, Services, host mounts, privileges, or persistenc
 The test driver joins only this owned k3s node's PID/network namespaces, with a
 private IPC/mount filesystem. It receives only exact pod identity evidence, not
 Docker/CRI sockets or kubeconfig. Limited capabilities allow pod setns and NFQUEUE;
-no explicit BPF, PERFMON, or SYS_MODULE capability is requested, and no host-network or host-PID mode is used. SYS_ADMIN remains a powerful shared-kernel capability, required here only for namespace setns; this is not a security sandbox for untrusted code. The disposable k3s node still
+no explicit BPF, PERFMON, or SYS_MODULE capability is requested, and no host-network or host-PID mode is used. The test driver explicitly uses AppArmor unconfined to inspect the owned pods across their process labels; Docker default seccomp and no-new-privileges remain enabled. Actual driver and all three pod labels must be unconfined and are recorded before namespace ownership checks or any DP startup. No host AppArmor profile is loaded or modified. The earlier namespace-read denial is consistent with cross-profile AppArmor mediation, but no kernel audit denial was captured, so attribution remains an inference. SYS_ADMIN remains a powerful shared-kernel capability, required here only for namespace setns; this is not a security sandbox for untrusted code. The disposable k3s node still
 shares the host kernel; this is disposable-container isolation, not off-host proof.
 
 The driver refuses host namespace identity, foreign subnets, duplicate PID/UID/IP,
@@ -39,7 +39,7 @@ previous verdict evidence. Native TCP Connection records aggregate source ports
 as zero, so the exact source port comes from server observations, not an invented
 native field. A denial requires a new matching native MAC/IP/server-port/action/
 policy-ID verdict, NFQUEUE packet-counter increase, and absence of the nonce in
-actual server logs. A timeout alone never passes.
+actual server logs. A timeout alone never passes. Failure evidence also retains at most128 native rows per probe after its cursor/time barrier and for its exact fixture IP pair, TCP and server port; unexpected action/ID/flags remain diagnostic only and never satisfy the expected verdict. Truncation is explicit.
 
 Phases prove both baseline ports, monitor-mode violations while both remain
 reachable, Protect A while B remains monitor, opposite allowed ports under Protect

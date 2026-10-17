@@ -13,13 +13,16 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 
 	"github.com/google/uuid"
+	"golang.org/x/sys/unix"
 
 	"github.com/alphabravocompany/constellation/internal/runtime/dp"
 )
@@ -127,7 +130,43 @@ func loadFlannelIdentity() (flannelIdentity, error) {
 	for index := range identity.Pods {
 		identity.Pods[index].NodeNetNS = identity.NodeNetNS
 	}
+	if err := captureFlannelSecurityLabels(identity.Pods); err != nil {
+		return identity, err
+	}
 	return identity, checkFlannelPods(identity.Pods)
+}
+
+// This deliberate driver-only AppArmor exception never changes host profiles.
+// Capture actual labels before inspecting pod namespace links or starting DP.
+func captureFlannelSecurityLabels(pods []flannelPod) error {
+	labels := make(map[string]string, len(pods)+1)
+	for _, target := range append([]flannelPod{{Name: "driver", PID: os.Getpid()}}, pods...) {
+		body, err := os.ReadFile("/proc/" + strconv.Itoa(target.PID) + "/attr/current")
+		if err != nil {
+			return fmt.Errorf("read %s AppArmor label: %w", target.Name, err)
+		}
+		labels[target.Name] = strings.TrimSpace(string(body))
+	}
+	body, err := json.MarshalIndent(labels, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile("/evidence/security-labels.json", append(body, '\n'), 0o600); err != nil {
+		return err
+	}
+	return validateFlannelSecurityLabels(labels)
+}
+
+func validateFlannelSecurityLabels(labels map[string]string) error {
+	if len(labels) != 4 {
+		return errors.New("exact driver and three pod AppArmor labels required")
+	}
+	for _, name := range []string{"driver", "client", "server-a", "server-b"} {
+		if labels[name] != "unconfined" {
+			return fmt.Errorf("unexpected %s AppArmor label %q", name, labels[name])
+		}
+	}
+	return nil
 }
 
 func checkFlannelPods(pods []flannelPod) error {
@@ -136,7 +175,7 @@ func checkFlannelPods(pods []flannelPod) error {
 		if err != nil {
 			return err
 		}
-		namespace, nsErr := root.Readlink("ns/net")
+		namespace, nsErr := flannelPodNamespace(root)
 		cgroup, cgErr := root.ReadFile("cgroup")
 		closeErr := root.Close()
 		if err := errors.Join(nsErr, cgErr, closeErr); err != nil {
@@ -148,6 +187,29 @@ func checkFlannelPods(pods []flannelPod) error {
 		}
 	}
 	return nil
+}
+
+func flannelPodNamespace(root *os.Root) (string, error) {
+	// Root.Readlink traverses ns using an O_RDONLY directory open, but proc's
+	// non-owner ns directory is search-only (0511). Keep the pinned PID directory
+	// and resolve this fixed literal with readlinkat, without adding DAC caps.
+	directory, err := root.Open(".")
+	if err != nil {
+		return "", err
+	}
+	fd := directory.Fd()
+	if fd > math.MaxInt {
+		return "", errors.Join(errors.New("invalid proc directory descriptor"), directory.Close())
+	}
+	var buffer [128]byte
+	n, readErr := unix.Readlinkat(int(fd), "ns/net", buffer[:])
+	if err := errors.Join(readErr, directory.Close()); err != nil {
+		return "", err
+	}
+	if n <= 0 || n >= len(buffer) {
+		return "", errors.New("empty or truncated pod namespace link")
+	}
+	return string(buffer[:n]), nil
 }
 
 func flannelLister(identity flannelIdentity) dp.ContainerLister {
@@ -219,6 +281,67 @@ func TestFlannelFixtureRejectsScopeEscapeAndReusedIdentity(t *testing.T) {
 	}
 }
 
+func TestFlannelFixtureRejectsUnexpectedSecurityLabels(t *testing.T) {
+	labels := map[string]string{"driver": "unconfined", "client": "unconfined", "server-a": "unconfined", "server-b": "unconfined"}
+	if err := validateFlannelSecurityLabels(labels); err != nil {
+		t.Fatal(err)
+	}
+	for name := range labels {
+		labels[name] = "docker-default (enforce)"
+		if err := validateFlannelSecurityLabels(labels); err == nil {
+			t.Fatalf("unexpected %s profile accepted", name)
+		}
+		labels[name] = "unconfined"
+	}
+	delete(labels, "client")
+	if err := validateFlannelSecurityLabels(labels); err == nil {
+		t.Fatal("missing pod label accepted")
+	}
+}
+
+func TestFlannelFixtureReadlinkSearchOnly(t *testing.T) {
+	if path := os.Getenv("CONSTELLATION_FLANNEL_SEARCH_ONLY_TEST"); path != "" {
+		assertFlannelSearchOnlyLink(t, path)
+		return
+	}
+	directory, err := os.MkdirTemp("", "flannel-search-only-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := unix.Chmod(directory+"/ns", 0o700); err != nil {
+			t.Error(err)
+		}
+		if err := os.RemoveAll(directory); err != nil {
+			t.Error(err)
+		}
+	})
+	for _, err := range []error{unix.Chmod(directory, 0o755), os.Mkdir(directory+"/ns", 0o700), os.Symlink("net:[12345]", directory+"/ns/net"), unix.Chmod(directory+"/ns", 0o111)} {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	executable, err := os.Open("/proc/self/exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := executable.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	command := exec.CommandContext(t.Context(), "/proc/self/fd/3", "-test.run=^TestFlannelFixtureReadlinkSearchOnly$")
+	command.ExtraFiles = []*os.File{executable}
+	command.Env = append(os.Environ(), "CONSTELLATION_FLANNEL_SEARCH_ONLY_TEST="+directory)
+	if os.Geteuid() == 0 {
+		// The owned child has no capabilities and cannot borrow root's DAC bypass.
+		command.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 65534, Gid: 65534}}
+	}
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("unprivileged search-only regression: %v\n%s", err, output)
+	}
+}
+
 func TestFlannelFixturePoliciesRequireRealBindingsAndStampAppIDs(t *testing.T) {
 	identity := fixtureFlannelIdentity()
 	policies := flannelPolicies(identity)
@@ -230,5 +353,25 @@ func TestFlannelFixturePoliciesRequireRealBindingsAndStampAppIDs(t *testing.T) {
 		if len(merged.Rules) != 1 || len(merged.Rules[0].Apps) != 1 || int64(merged.Rules[0].Apps[0].RuleID) != policy.DPPolicyID {
 			t.Fatal("fixture does not exercise nested native attribution")
 		}
+	}
+}
+
+func assertFlannelSearchOnlyLink(t *testing.T, path string) {
+	t.Helper()
+	root, err := os.OpenRoot(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := root.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	if _, err := root.Readlink("ns/net"); !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("expected traversal read denial, got %v", err)
+	}
+	got, err := flannelPodNamespace(root)
+	if err != nil || got != "net:[12345]" {
+		t.Fatalf("pinned literal readlink failed: %q, %v", got, err)
 	}
 }
