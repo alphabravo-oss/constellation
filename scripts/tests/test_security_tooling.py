@@ -57,7 +57,8 @@ printf '{"Issues":[]}'
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Error 23", result.stderr)
-        self.assertIn("./...", self.calls.read_text())
+        self.assertEqual(self.calls.read_text().splitlines()[-2:], ["/module/cmd/api", "/module/internal/app"])
+        self.assertNotIn("./...", self.calls.read_text())
         self.assertNotIn("skipping", result.stdout + result.stderr)
 
     def test_make_lint_requires_tool(self):
@@ -67,6 +68,17 @@ printf '{"Issues":[]}'
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("is required", result.stderr)
+
+    def test_lint_discovery_failure_or_empty_result_blocks(self):
+        executable = self.executable("golangci-lint", 'touch "$CALLS"\n')
+        self.environment["GOLANGCI_LINT"] = str(executable)
+        for body in ("exit 9\n", "exit 0\n"):
+            with self.subTest(body=body):
+                self.executable("go", body)
+                result = subprocess.run(["bash", "scripts/lint-go.sh"], cwd=ROOT,
+                                        env=self.environment, capture_output=True, text=True, check=False)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(self.calls.exists())
 
     def test_format_uses_module_scope_and_blocks_differences_and_errors(self):
         for body, expected in (("exit 0\n", 0), ('echo "format diff"\n', 1), ("exit 9\n", 9)):

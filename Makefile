@@ -66,9 +66,7 @@ vet:
 	$(GO) vet ./...
 
 lint:
-	@command -v "$(GOLANGCI_LINT)" >/dev/null || { echo "golangci-lint is required; run make tools" >&2; exit 1; }
-	@mkdir -p "$${ARTIFACT_DIR:-test-results/tooling}"
-	$(GOLANGCI_LINT) run --output.json.path="$${ARTIFACT_DIR:-test-results/tooling}/golangci-lint.json" ./...
+	GOLANGCI_LINT="$(GOLANGCI_LINT)" bash scripts/lint-go.sh
 
 .PHONY: tools fmt lint-shell test-tooling check-endpoint-mapping check-parity-plan test-race test-integration security check vet frontend-test
 tools:
