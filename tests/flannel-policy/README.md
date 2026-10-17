@@ -20,7 +20,7 @@ flag alone is not authorization:
 CONSTELLATION_FLANNEL_POLICY_APPROVED_RUN=1 bash scripts/test-flannel-policy.sh run
 ```
 
-The run creates a new random `constellation-flannel-policy-*` k3d cluster and
+The run creates a new random `flannel-policy-*` k3d cluster and
 `packet-proof-*` namespace. It never updates/switches the default kubeconfig or
 uses the existing convergence cluster. The API binds loopback only; fixture pods
 have no service-account tokens, Services, host mounts, privileges, or persistence.

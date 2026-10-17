@@ -43,7 +43,7 @@ for executable in k3d kubectl docker python3; do command -v "$executable" >/dev/
 (cd /; sha256sum -c "$work/binaries.sha256")
 sha256sum -c "$work/source.sha256"
 nonce="$(python3 -c 'import secrets; print(secrets.token_hex(6))')"
-cluster="constellation-flannel-policy-$nonce"
+cluster="flannel-policy-$nonce"
 namespace="packet-proof-$nonce"
 node="k3d-$cluster-server-0"
 driver="flannel-policy-driver-$nonce"

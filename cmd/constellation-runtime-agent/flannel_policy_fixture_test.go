@@ -48,7 +48,7 @@ type flannelIdentity struct {
 	Pods          []flannelPod `json:"pods"`
 }
 
-var flannelNamePattern = regexp.MustCompile(`^constellation-flannel-policy-[0-9a-f]{12}$`)
+var flannelNamePattern = regexp.MustCompile(`^flannel-policy-[0-9a-f]{12}$`)
 var flannelContainerPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var flannelNamespacePattern = regexp.MustCompile(`^packet-proof-[0-9a-f]{12}$`)
 var flannelNSPattern = regexp.MustCompile(`^(pid|net):\[[1-9][0-9]*\]$`)
@@ -196,7 +196,7 @@ func flannelBundleServer(cluster string, payload *atomic.Pointer[runtimePolicyBu
 }
 
 func fixtureFlannelIdentity() flannelIdentity {
-	id := flannelIdentity{ClusterName: "constellation-flannel-policy-abcdef123456", Namespace: "packet-proof-abcdef123456", NodeContainer: "k3d-constellation-flannel-policy-abcdef123456-server-0", NodePIDNS: "pid:[100]", NodeNetNS: "net:[200]", HostPIDNS: "pid:[1]", HostNetNS: "net:[2]", CNI: "flannel", RuntimeImage: "sha256:58a1dfe1ce01f77007243106143edceb3db0071cbcbd2765b2be267679a0ff8e"}
+	id := flannelIdentity{ClusterName: "flannel-policy-abcdef123456", Namespace: "packet-proof-abcdef123456", NodeContainer: "k3d-flannel-policy-abcdef123456-server-0", NodePIDNS: "pid:[100]", NodeNetNS: "net:[200]", HostPIDNS: "pid:[1]", HostNetNS: "net:[2]", CNI: "flannel", RuntimeImage: "sha256:58a1dfe1ce01f77007243106143edceb3db0071cbcbd2765b2be267679a0ff8e"}
 	for index, name := range []string{"server-a", "server-b", "client"} {
 		id.Pods = append(id.Pods, flannelPod{Name: name, Namespace: id.Namespace, UID: uuid.NewString(), ContainerID: strings.Repeat(strconv.Itoa(index+1), 64), PID: index + 10, IP: fmt.Sprintf("10.233.0.%d", index+10), NetNS: fmt.Sprintf("net:[%d]", index+300)})
 	}
