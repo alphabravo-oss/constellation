@@ -217,7 +217,7 @@ SELECT id, COALESCE(mode,'org-backup'), status,
        COALESCE(s3_uri,''), COALESCE(tables_included,'{}'::text[]),
        COALESCE(error,'')
   FROM backups
- WHERE org_id=$1 OR org_id IS NULL
+ WHERE org_id=$1
  ORDER BY started_at DESC LIMIT 50`, subj.OrgID)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
@@ -262,7 +262,7 @@ SELECT id, COALESCE(mode,'org-backup'), status,
        COALESCE(s3_uri,''), COALESCE(tables_included,'{}'::text[]),
        COALESCE(error,'')
   FROM backups
- WHERE id=$1 AND (org_id=$2 OR org_id IS NULL)`, id, subj.OrgID).Scan(
+ WHERE id=$1 AND org_id=$2`, id, subj.OrgID).Scan(
 		&s.ID, &s.Mode, &s.Status, &s.StartedAt, &finished,
 		&s.SizeBytes, &s.SHA256, &s.Signed, &s.SignerIdentity, &s.FormatVersion,
 		&s.S3URI, &s.TablesIncluded, &s.ErrorMessage,
@@ -294,7 +294,7 @@ func (h *Backups) Download(w http.ResponseWriter, r *http.Request) {
 	var path, status string
 	err = h.db.Pool().QueryRow(r.Context(), `
 SELECT COALESCE(local_path,''), status FROM backups
- WHERE id=$1 AND (org_id=$2 OR org_id IS NULL)`, id, subj.OrgID).Scan(&path, &status)
+ WHERE id=$1 AND org_id=$2`, id, subj.OrgID).Scan(&path, &status)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			jsonError(w, http.StatusNotFound, "not found")

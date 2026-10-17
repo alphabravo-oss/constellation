@@ -20,6 +20,7 @@
 package runtime
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -79,6 +80,21 @@ func (h *RuntimePoliciesHTTP) AgentPolicyBundle(w http.ResponseWriter, r *http.R
 	}
 	if !exists {
 		jsonError(w, http.StatusNotFound, "cluster not found")
+		return
+	}
+	// Organization membership alone is insufficient: a cluster-bound agent must
+	// not program another cluster's policy bundle from the same organization.
+	boundCluster, err := handler.ResolveAgentClusterID(r.Context(), h.store.db, tok)
+	if err != nil {
+		if errors.Is(err, handler.ErrAgentClusterScope) {
+			jsonError(w, http.StatusForbidden, "agent token cluster scope mismatch")
+			return
+		}
+		jsonError(w, http.StatusInternalServerError, "resolve cluster failed")
+		return
+	}
+	if boundCluster == nil || *boundCluster != clusterID {
+		jsonError(w, http.StatusForbidden, "agent token cluster scope mismatch")
 		return
 	}
 

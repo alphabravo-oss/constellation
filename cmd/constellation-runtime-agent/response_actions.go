@@ -159,22 +159,37 @@ func (r *responder) killProcess(a responseAction) (bool, string) {
 
 // killProcessDecision is the pure guard for a kill_process action. It refuses:
 //   - system pids (<= 1): never kill init or the kernel.
+//   - missing requested or live comm: a bare pid is not a verified target.
 //   - comm mismatch: the pid's live comm differs from the requested comm, which
 //     means the pid was recycled — killing it would hit the wrong process.
-//   - container mismatch: the pid is not in the requested container.
+//   - missing live container identity or mismatch when a container was requested.
 //
-// When a verification input is empty (unknown) that check is skipped (fail-open
-// on that dimension), but at least an in-range pid is always required.
+// Failed /proc reads must never remove a requested identity constraint.
 func killProcessDecision(a responseAction, procComm, procContainerID string) (bool, string) {
 	if a.PID <= 1 {
 		return false, "invalid pid"
 	}
-	if want := strings.TrimSpace(a.Comm); want != "" && procComm != "" && want != procComm {
+	wantComm := strings.TrimSpace(a.Comm)
+	if wantComm == "" {
+		return false, "missing target comm"
+	}
+	procComm = strings.TrimSpace(procComm)
+	if procComm == "" {
+		return false, "process comm unavailable"
+	}
+	if wantComm != procComm {
 		return false, "comm mismatch"
 	}
-	if want := normalizeContainerID(a.ContainerID); want != "" && procContainerID != "" &&
-		want != normalizeContainerID(procContainerID) {
-		return false, "container mismatch"
+	if want := normalizeContainerID(a.ContainerID); want != "" {
+		actual := normalizeContainerID(procContainerID)
+		if actual == "" {
+			return false, "process container unavailable"
+		}
+		if want != actual {
+			return false, "container mismatch"
+		}
+	} else if strings.TrimSpace(a.ContainerID) != "" {
+		return false, "invalid target container"
 	}
 	return true, ""
 }
@@ -213,8 +228,8 @@ func (r *responder) killSession(ctx context.Context, a responseAction) (bool, st
 
 // conntrackDeleteArgs builds the `conntrack -D ...` argument vector for a
 // 5-tuple, or (nil, reason) when the tuple is too incomplete to target safely.
-// Requiring both endpoints avoids a wildcard delete that would tear down every
-// flow to a host.
+// Both IPs, ports and the protocol must be explicit; omitting either port would
+// delete multiple connections rather than the requested session.
 func conntrackDeleteArgs(a responseAction) ([]string, string) {
 	src := strings.TrimSpace(a.SrcIP)
 	dst := strings.TrimSpace(a.DstIP)
@@ -222,20 +237,14 @@ func conntrackDeleteArgs(a responseAction) ([]string, string) {
 		return nil, "invalid src/dst ip"
 	}
 	proto := strings.ToLower(strings.TrimSpace(a.Protocol))
-	if proto == "" {
-		proto = "tcp"
-	}
 	if proto != "tcp" && proto != "udp" {
 		return nil, "unsupported protocol"
 	}
-	args := []string{"-D", "-s", src, "-d", dst, "-p", proto}
-	if a.SrcPort > 0 {
-		args = append(args, "--sport", strconv.Itoa(a.SrcPort))
+	if a.SrcPort < 1 || a.SrcPort > 65535 || a.DstPort < 1 || a.DstPort > 65535 {
+		return nil, "invalid src/dst port"
 	}
-	if a.DstPort > 0 {
-		args = append(args, "--dport", strconv.Itoa(a.DstPort))
-	}
-	return args, ""
+	return []string{"-D", "-s", src, "-d", dst, "-p", proto,
+		"--sport", strconv.Itoa(a.SrcPort), "--dport", strconv.Itoa(a.DstPort)}, ""
 }
 
 func responderProcRoot(hostRoot string) string {
