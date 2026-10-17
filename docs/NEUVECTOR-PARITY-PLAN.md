@@ -65,8 +65,8 @@ infrastructure continuation after the selected console scope. Off-host recovery
 and deliberate real-node failure remain deferred. The checklist remains **66
 checked / 87 open**; bounded fixes below do not close their parent acceptance gates.
 
-Current main development deployment: **Helm80/schema179**, runtime-agent source
-**950ca77**; API, migration and frontend source **1cb1045**. Other roles retain
+Current main development deployment: **Helm81/schema180**, runtime-agent source
+**950ca77**; API, migration and frontend source **5b82b12**. Other roles retain
 the prior qualified images. The execution dry-run setting is explicitly preserved
 by chart **8beefb4**. All seven deployments and the runtime DaemonSet are ready. Process and
 native dataplane enforcement and benchmark workers remain disabled. Live v2 queue
@@ -75,20 +75,21 @@ reads pass; anonymous, foreign-cluster and duplicate-node selectors return
 and enforcement remain separate fixture evidence. Scoped policy bundles require
 protocol v2; legacy bundle reads return 426. Exact-image backup/PITR, restored
 credentials/audit/login, wrong-key rejection and restored pod restart pass
-(196 seconds); a fresh main-cluster backup completed before migration. Public
+(201 seconds, including exact high unsigned IDs and incomplete metadata); a fresh
+main-cluster backup completed before migration. Public
 login branding/provider visibility pass; the stored bootstrap credential returns
 401, so authenticated main-browser navigation is not claimed. Deployment evidence:
-`/tmp/constellation-upload-950ca77/evidence/deployment-status.json` (runtime80)
-and `/tmp/constellation-bench-1cb1045/evidence/deployment-status.json` (API79).
+`/tmp/constellation-threat180-5b82b12/evidence/deployment-status.json`.
 
-The schema180 candidate preserves full unsigned native threat IDs and marks
-unrecoverable historical maxima in compact row details. Its migration proof
-checks exact tenant/cluster tuples, raw-retention and watermark fences, unchanged
-traffic counters, lock ordering and guarded downgrade. Forty-six fresh-database
-executions and 101 frontend tests pass; scoped lint removes six findings with
-none added. It requires a controlled stop/replace and remains undeployed pending
-exact-artifact qualification. See `docs/security-testing.md` for the rollout
-constraints. This bounded correction does not close a broader acceptance item.
+Deployed schema180 preserves full unsigned native threat IDs and marks unproven
+historical maxima in compact row details. Its full-chain migration checks exact
+tenant/cluster tuples, raw-retention/watermark fences, unchanged traffic counters,
+lock ordering and guarded downgrade. Qualification passes 2,930 fresh-database
+executions and 2,344 frontend tests. Controlled stop/replace completed; 838 main
+historical rollups retain an explicit incomplete marker. Live health, queue
+authorization, image identities and public frontend assets pass. See
+`docs/security-testing.md` for the roll-forward constraints. This bounded
+correction does not close a broader acceptance item.
 
 Frozen candidate source **034f2baf49c1** includes:
 
@@ -398,7 +399,7 @@ changed-source lint pass with five G115 findings removed and no new findings.
 Commit `10018b8` removes two obsolete unused policy helpers. These later source
 changes are not in the frozen `1cb1045` deployment candidate. Threat-ID uint32
 storage and historical aggregate repair still require a separate migration.
-Latest hosted quality at `21b7c73` reports 1,548 findings; security and quality
+Earlier hosted quality at `21b7c73` reports 1,548 findings; security and quality
 remain blocking, with no gate waiver or historical secret rewrite.
 
 ### Further qualified source and runtime rollout
@@ -423,9 +424,12 @@ A fresh main backup completed. Exact-image CNPG scheduled RustFS backup/PITR,
 existing session/configuration/encrypted credentials/audit/login, wrong-key
 rejection and retained-key recovery pass. High unsigned IDs and incomplete
 aggregate metadata remain identical after restore and PostgreSQL pod restart
-(201 seconds). Owned namespace deletion is requested; graceful cleanup is
-pending. This is a single-node, same-host recovery proof. Controlled main rollout
-remains pending image-cache and final deployment guards. Evidence:
+(201 seconds). Owned namespace and PV cleanup completed normally. This is a single-node,
+same-host recovery proof. Controlled main rollout completed at Helm81/schema180.
+The original final verifier counted a historical Succeeded frontend Pod and held
+the API off after successful Helm completion. Exact deployment UID/template,
+active ReplicaSet ownership and OCI identity verification restored the qualified
+API; no old binary or schema rollback occurred. Evidence:
 `/tmp/constellation-threat180-5b82b12/`.
 
 PCAP source `68e75a6` confines private atomic uploads/downloads/removal and holds
@@ -452,7 +456,7 @@ explicit monitor allow traversed NFQUEUE and matched native RID11. The strict
 with TmpOpen=true instead of the required violation. This exposes native
 unknown-peer grace beyond the earlier matcher proof; protect/other-scope/restart
 acceptance is not claimed. All owned resources were removed, and main enforcement
-remains disabled. Scoped default-rule translation is under review; arbitrary
+remains disabled. Scoped default-rule translation is committed as `6a8057c`; arbitrary
 policy-address membership and a global strict-mode toggle are rejected because
 they change scope or direction semantics. Immutable evidence:
 `/tmp/constellation-flannel-policy-reviewed/attempt-native-temporary-open-confirmed-20261017/summary.json`.
@@ -462,6 +466,30 @@ occurrences (nine confirmed benign fixtures/prose/storage keys and two historica
 operational credentials). Full-history remediation and external trust coverage
 remain unresolved. No allowlist or history rewrite was applied. That run was
 subsequently cancelled by a newer push; latest-head checks remain separate.
+
+Native fix `6a8057c` appends finite-order, endpoint/direction-scoped terminal
+rules after authored rules and ICMP normalization. It preserves default RID0
+and avoids unknown-peer temporary-open grace without changing vendor code,
+global strict mode or peer membership. Expanded tables are capped at 65,536
+rules before allocation/IPC; rejected candidates preserve prior confirmed source
+and report uncertainty. Agent/DP race qualification passes 796 executions; two
+DB-gated skips are separately resolved by fresh180 replay tests. Real native
+full-wrapper/keyed acceptance passes 70 assertions twice, including negative
+controls. These are controlled tuple tests; the new strict 24-probe Flannel run
+is pending. Evidence: `/tmp/constellation-terminal-default-638ca7e/`.
+
+PCAP persistence review found no existing main capture records/files, but expiry
+metadata had no production cleanup caller. Durable storage enablement is held
+for bounded, fair, cancelable retention qualification and explicit shared-root
+configuration. A 2Gi local-path request is not a hard quota. Existing isolated
+synthetic capture persistence proof does not establish aggregate capacity bounds.
+
+Hosted run `39013221479` at `5b82b12` completes unit, integration, frontend,
+browser, FIPS and dependency/vulnerability checks successfully, while quality
+(1,535 findings), gosec (179) and historical gitleaks (11) remain blocking.
+The import-format issue is corrected in `c9b6a66`; unsigned smoke counter narrowing
+is corrected in `5642dca`. Later source requires new hosted checks. No gate waiver,
+blanket suppression or historical rewrite is applied.
 
 ## October 12 implementation continuation
 

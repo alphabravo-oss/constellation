@@ -641,8 +641,8 @@ downgrade proof passes, as do exact API/migration/frontend image checks. The fre
 main backup is complete. Enhanced exact-image CNPG scheduled backup/PITR and
 201-second PostgreSQL pod restart preserve exact high unsigned threat IDs and
 incomplete aggregate metadata, alongside session/configuration/credentials/audit
-and wrong-key checks. Main schema180 deployment remains pending; isolated
-namespace graceful cleanup was requested. This does not qualify HA, off-host
+and wrong-key checks. Main schema180 deployment completed at Helm81; isolated
+namespace and owned PV cleanup completed normally. This does not qualify HA, off-host
 recovery or node loss. Evidence: `cnpg-recovery-summary.json` under the candidate
 evidence directory.
 
@@ -662,3 +662,27 @@ but unmatched monitor traffic enters unknown-peer temporary OPEN. The fixture
 records queue/server/native evidence and cleans all owned resources. It does not
 claim protect-mode or full CNI acceptance. The canonical plan records the exact
 immutable failure evidence and bounded production-fix work.
+
+
+Helm81/schema180 controlled replacement uses API/migrate/frontend5b82b12 and
+unchanged runtime950ca77. All regular/hook image graphs were checked; five exact
+helper images have verified CRI pins with prior labels retained. A cache script
+path-construction error stopped before image/API changes and was corrected with
+an execution-path regression. After successful migration/Helm, a verifier counted
+an old terminal frontend Pod and held API0. Root verified exact deployment
+UID/template, current ReplicaSet ownership and OCI identities, then restored the
+qualified API. Seven deployments/runtime are ready; live health, tenant queue
+checks and public frontend bytes pass. Main retains 838 incomplete rollup maxima.
+No old-image/schema rollback occurred. Evidence:
+`/tmp/constellation-threat180-rollout-5b82b12/`.
+
+Native6a8057c terminal defaults preserve endpoint/direction/RID0 and explicit rule
+precedence, with a 65,536 expanded-row limit before allocation/IPC. Controlled
+full-wrapper proof passes70 assertions twice; agent/DP tests pass796 executions
+and the two DB-gated replay cases pass separately on fresh180. Real Flannel proof
+remains pending. Main enforcement remains disabled.
+
+PCAP retention metadata was not wired to a background sweeper. Main durable
+storage enablement awaits bounded fair cleanup and explicit shared-root guards;
+local-path capacity requests are not quotas. No existing main capture records or
+files were found in the read-only preflight; recheck before changing storage.
