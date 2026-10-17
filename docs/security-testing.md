@@ -620,3 +620,35 @@ ingests before reopening traffic. ALTER TYPE can rewrite retained tables and
 requires exclusive locks. Prefer roll-forward. Down refuses high IDs or
 incomplete history before changing data/schema; reverting old binaries requires
 a qualified restore or a separately reviewed compatibility migration.
+
+
+## Runtime80 and subsequent bounded fixes
+
+Helm80 deploys exact runtime950ca77 with redirect refusal, after 582 full-runtime
+fresh179 passes and four explicit opt-in skips. Native/BPF dependencies are
+unchanged. Chart8beefb4 persists the existing execution dry-run flag; main process,
+file, exec, native and DLP enforcement remain false. API/migration/frontend stay
+on1cb1045/schema179. OCI index, platform manifest and config digests are verified
+separately; Docker's containerd image store reports an index as image ID. Initial
+cache validation incorrectly compared it with a config digest and stopped before
+deployment. The corrected exact-chain guard passes. Two unchanged ephemeral-job
+images had been evicted; exact prior bootstrap/migrate artifacts were reimported.
+Deployment evidence: `/tmp/constellation-upload-950ca77/`.
+
+Schema180 exact5b82b12 broader qualification passes 2,930 fresh-database executions
+without skips and 2,344 frontend tests. Full-chain179→180 preservation and guarded
+downgrade proof passes, as do exact API/migration/frontend image checks. The fresh
+main backup is complete; enhanced exact-image CNPG recovery remains pending.
+
+PCAP private-file and serialized completion source68e75a6 passes64 focused179
+executions. Source638ca7e rejects status-only completion and receipt downgrades;
+verified downloads require matching private bytes, size and SHA256. Its62 focused
+180 executions and6 API-contract executions pass. Full runtime/PVC restart proof
+is pending; no main durable storage enablement is claimed. Failed or unknown
+commit can retain a private complete orphan, without reporting success.
+
+Flannel actual-packet acceptance is currently failed: native named allow works,
+but unmatched monitor traffic enters unknown-peer temporary OPEN. The fixture
+records queue/server/native evidence and cleans all owned resources. It does not
+claim protect-mode or full CNI acceptance. The canonical plan records the exact
+immutable failure evidence and bounded production-fix work.
