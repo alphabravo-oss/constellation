@@ -17,7 +17,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"time"
 
@@ -430,17 +429,9 @@ func (c *countingWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-// ExportToFile is a convenience that writes a backup to a local path. Closes the file
-// on return (via os.File.Close()) and returns the result.
+// ExportToFile atomically replaces an explicit local output with a private file.
+// Existing regular outputs may be overwritten; caller-owned parent permissions
+// are never changed. A failed producer preserves the previous complete output.
 func ExportToFile(ctx context.Context, pool *pgxpool.Pool, path string, opts ExportOptions) (*ExportResult, error) {
-	f, err := os.Create(path)
-	if err != nil {
-		return nil, err
-	}
-	opts.Out = f
-	res, err := Export(ctx, pool, opts)
-	if cerr := f.Close(); cerr != nil && err == nil {
-		err = cerr
-	}
-	return res, err
+	return exportArtifact(ctx, pool, path, false, opts)
 }

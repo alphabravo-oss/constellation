@@ -192,7 +192,7 @@ func (s *Server) startSingletonLoops(ctx context.Context) {
 	// no schedules it is a pure no-op; it never enables/deletes/enforces anything on live
 	// workloads, only reading org data into a tarball and pruning its own old artifacts.
 	go backup.RunScheduleExecutor(ctx, s.db.Pool(), backup.ScheduleExecutorConfig{
-		BackupDir:   env("CONSTELLATION_BACKUP_DIR", "/var/lib/constellation/backups"),
+		BackupDir:   os.Getenv("CONSTELLATION_BACKUP_DIR"),
 		SignKeyPath: os.Getenv("CONSTELLATION_BACKUP_SIGN_KEY"),
 	}, s.tel.Logger)
 

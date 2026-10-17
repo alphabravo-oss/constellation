@@ -24,7 +24,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -130,15 +129,19 @@ func retentionVictims(recs []backupRecord, keepLast, maxAgeDays int, now time.Ti
 // schedules and applying retention. It is safe to run under leader election (all state
 // lives in Postgres; a single leader owns the loop). With no schedule rows it is a no-op.
 func RunScheduleExecutor(ctx context.Context, pool *pgxpool.Pool, cfg ScheduleExecutorConfig, logger *slog.Logger) {
+	configuredDir := cfg.BackupDir
 	cfg.normalize()
 	if pool == nil {
 		return
 	}
-	// Ensure the artifact dir exists (mirrors handler.NewBackups); fall back to /tmp.
-	if err := os.MkdirAll(cfg.BackupDir, 0o700); err != nil {
-		cfg.BackupDir = filepath.Join(os.TempDir(), "constellation-backups")
-		_ = os.MkdirAll(cfg.BackupDir, 0o700)
+	dir, err := ManagedArtifactDir(configuredDir)
+	if err != nil {
+		if logger != nil {
+			logger.Error("backup executor: artifact directory unavailable", slog.String("err", err.Error()))
+		}
+		return
 	}
+	cfg.BackupDir = dir
 	ticker := time.NewTicker(cfg.Interval)
 	defer ticker.Stop()
 	for {
@@ -197,8 +200,7 @@ VALUES ($1, $2, 'org-backup', 'running', NOW(), $3, $4)`, id, s.OrgID, signed, F
 		return
 	}
 
-	stamp := now.Format("20060102T150405Z")
-	fname := fmt.Sprintf("constellation-backup-%s-%s.tar.gz", s.OrgName, stamp)
+	fname := ArtifactName(s.OrgName, id, now)
 	path := filepath.Join(cfg.BackupDir, fname)
 
 	opts := ExportOptions{
@@ -215,7 +217,7 @@ VALUES ($1, $2, 'org-backup', 'running', NOW(), $3, $4)`, id, s.OrgID, signed, F
 		opts.Sign.Mode = SignModeKeyless
 	}
 
-	res, err := ExportToFile(ctx, pool, path, opts)
+	res, err := ExportManaged(ctx, pool, cfg.BackupDir, fname, opts)
 	if err != nil {
 		_, _ = pool.Exec(ctx, `UPDATE backups SET status='failed', error=$2, finished_at=NOW() WHERE id=$1`, id, "export: "+err.Error())
 		recordScheduleRun(ctx, pool, s, now, "failed", "export: "+err.Error())
@@ -282,20 +284,50 @@ SELECT id, started_at, COALESCE(local_path,'')
 		}
 		recs = append(recs, r)
 	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		if logger != nil {
+			logger.Warn("backup executor: retention iteration failed", slog.String("err", err.Error()))
+		}
+		return 0
+	}
 	rows.Close()
 
 	victims := retentionVictims(recs, keepLast, maxAgeDays, now)
 	pruned := 0
 	for _, v := range victims {
-		if _, err := pool.Exec(ctx, `DELETE FROM backups WHERE id=$1`, v.ID); err != nil {
-			continue
+		if pruneBackupRecord(ctx, pool, orgID, v, logger) {
+			pruned++
 		}
-		if v.LocalPath != "" {
-			_ = os.Remove(v.LocalPath)
-		}
-		pruned++
 	}
 	return pruned
+}
+
+// pruneBackupRecord preserves legacy shared paths (including foreign or orphaned
+// catalog references). This is conservative accounting, not an atomic filesystem
+// and database transaction or a guarantee about concurrent external CLI writers.
+func pruneBackupRecord(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, v backupRecord, logger *slog.Logger) bool {
+	if v.LocalPath != "" {
+		if err := removeUnsharedArtifact(ctx, pool, v); err != nil {
+			if logger != nil {
+				logger.Warn("backup executor: artifact cleanup failed", slog.String("backup", v.ID.String()), slog.String("err", err.Error()))
+			}
+			return false
+		}
+	}
+	result, err := pool.Exec(ctx, `DELETE FROM backups WHERE id=$1 AND org_id=$2`, v.ID, orgID)
+	return err == nil && result.RowsAffected() == 1
+}
+
+func removeUnsharedArtifact(ctx context.Context, pool *pgxpool.Pool, v backupRecord) error {
+	var shared bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM backups WHERE local_path=$1 AND id<>$2)`, v.LocalPath, v.ID).Scan(&shared); err != nil {
+		return err
+	}
+	if shared {
+		return nil
+	}
+	return RemoveArtifact(v.LocalPath)
 }
 
 // recordScheduleRun advances next_run_at and stamps last_* on the schedule row.

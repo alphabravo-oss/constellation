@@ -23,8 +23,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -43,25 +43,18 @@ import (
 
 // Backups is the HTTP handler.
 type Backups struct {
-	db    *db.DB
-	audit *audit.Logger
-	dir   string
+	db     *db.DB
+	audit  *audit.Logger
+	dir    string
+	dirErr error
 }
 
 // NewBackups returns a fresh handler. The artifact directory is resolved from
 // CONSTELLATION_BACKUP_DIR or defaults to /var/lib/constellation/backups (created on
-// first use; falls back to /tmp/constellation-backups when the canonical dir is unwritable).
+// first use; only an implicit default may fall back to a private temp directory).
 func NewBackups(d *db.DB, a *audit.Logger) *Backups {
-	dir := os.Getenv("CONSTELLATION_BACKUP_DIR")
-	if dir == "" {
-		dir = "/var/lib/constellation/backups"
-	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		// Fallback under /tmp so dev / unprivileged installs still work.
-		dir = filepath.Join(os.TempDir(), "constellation-backups")
-		_ = os.MkdirAll(dir, 0o700)
-	}
-	return &Backups{db: d, audit: a, dir: dir}
+	dir, err := backup.ManagedArtifactDir(os.Getenv("CONSTELLATION_BACKUP_DIR"))
+	return &Backups{db: d, audit: a, dir: dir, dirErr: err}
 }
 
 // ---- DTOs ----
@@ -109,6 +102,10 @@ func (h *Backups) Create(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusUnauthorized, "no subject")
 		return
 	}
+	if h.dirErr != nil {
+		jsonError(w, http.StatusInternalServerError, "backup artifact directory unavailable")
+		return
+	}
 	var req createBackupRequest
 	_ = json.NewDecoder(r.Body).Decode(&req) // body optional
 	id := uuid.New()
@@ -146,8 +143,7 @@ func (h *Backups) runBackupJob(id uuid.UUID, orgID, userID, signMode string) {
 		return
 	}
 
-	stamp := time.Now().UTC().Format("20060102T150405Z")
-	fname := fmt.Sprintf("constellation-backup-%s-%s.tar.gz", orgName, stamp)
+	fname := backup.ArtifactName(orgName, id, time.Now())
 	path := filepath.Join(h.dir, fname)
 
 	opts := backup.ExportOptions{
@@ -166,7 +162,7 @@ func (h *Backups) runBackupJob(id uuid.UUID, orgID, userID, signMode string) {
 		// none — pass through
 	}
 
-	res, err := backup.ExportToFile(ctx, h.db.Pool(), path, opts)
+	res, err := backup.ExportManaged(ctx, h.db.Pool(), h.dir, fname, opts)
 	if err != nil {
 		h.markFailed(ctx, id, "export: "+err.Error())
 		return
@@ -311,15 +307,20 @@ SELECT COALESCE(local_path,''), status FROM backups
 		jsonError(w, http.StatusGone, "backup artifact has been pruned or uploaded to S3 only")
 		return
 	}
-	f, err := os.Open(path)
+	f, err := backup.OpenArtifact(path)
 	if err != nil {
-		jsonError(w, http.StatusGone, "artifact unavailable: "+err.Error())
+		jsonError(w, http.StatusGone, "artifact unavailable")
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	w.Header().Set("Content-Type", "application/gzip")
-	w.Header().Set("Content-Disposition", `attachment; filename="`+filepath.Base(path)+`"`)
-	_, _ = io.Copy(w, f)
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filepath.Base(path)}))
+	if _, err := io.Copy(w, f); err != nil {
+		return
+	}
+	if err := f.Close(); err != nil {
+		return
+	}
 	_, _, _ = h.audit.Log(r.Context(), audit.Event{
 		OrgID:      &subj.OrgID,
 		ActorID:    &subj.UserID,
