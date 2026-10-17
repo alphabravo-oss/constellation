@@ -57,11 +57,34 @@ static int query_matcher(json_t *query, const char *name)
     // Call the actual native policy wrapper as well as its keyed matcher.
     // No subnet overrides are configured: native's ordinary empty inventory
     // classification applies, with no FQDN/unknown-address fixture substitutes.
-    dpi_policy_lookup_by_key(handle, key.sip, key.dip, key.dport, key.proto,
-                             key.app, ingress, &description, NULL);
+    if (json_is_true(json_object_get(query, "packet"))) {
+        struct iphdr ip = { .saddr = key.sip, .daddr = key.dip };
+        dpi_session_t session = {0};
+        dpi_packet_t packet = {
+            .pkt = (uint8_t *)&ip, .session = &session, .ep = endpoint->ep,
+            .eth_type = ETH_P_IP, .ip_proto = key.proto, .dport = key.dport,
+            .flags = ingress ? DPI_PKT_FLAG_INGRESS : 0,
+        };
+        // This is the full packet policy wrapper, including unknown-address
+        // grace. No policy-address or internal-subnet inventory is installed.
+        dpi_policy_lookup(&packet, handle, key.app, true, false, &description, 0);
+    } else {
+        dpi_policy_lookup_by_key(handle, key.sip, key.dip, key.dport, key.proto,
+                                 key.app, ingress, &description, NULL);
+    }
     rcu_read_unlock();
+    if (json_is_true(json_object_get(query, "finite_order")) && description.order == UINT32_MAX) {
+        fprintf(stderr, "%s: reviewed default retained implicit native order\n",name);
+        return -1;
+    }
     int expected_action = json_integer_value(json_object_get(query, "action"));
     uint32_t expected_id = json_integer_value(json_object_get(query, "id"));
+    json_t *expected_tmp = json_object_get(query, "tmp_open");
+    if (expected_tmp && json_is_true(expected_tmp) !=
+        ((description.flags & POLICY_DESC_TMP_OPEN) != 0)) {
+        fprintf(stderr, "%s: unexpected native temporary-open flag: %u\n", name, description.flags);
+        return -1;
+    }
     if (description.action != expected_action || description.id != expected_id) {
         fprintf(stderr, "%s: native action=%u id=%u, expected action=%d id=%u\n",
                 name, description.action, description.id, expected_action, expected_id);
@@ -114,6 +137,8 @@ int main(void)
         fprintf(stderr, "cannot initialize native policy subsystem\n");
         return EXIT_FAILURE;
     }
+    timer_wheel_init(&th_timer);
+    dpi_unknown_ip_init();
     char *line = NULL;
     size_t capacity = 0, assertions = 0;
     int status = EXIT_SUCCESS;

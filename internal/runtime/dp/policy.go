@@ -103,6 +103,19 @@ type policyCfgReq struct {
 // keys/punctuation of the envelope. Mirrors NeuVector's maxMsgSize = 8120.
 const maxPolicyMsgSize = 8120
 
+// MaxExpandedPolicyRules bounds the per-endpoint wire rule table, including
+// generated defaults and ICMP compatibility rows. It keeps native uint32 rule
+// order finite and limits transfer work; it is not a per-fragment limit.
+const MaxExpandedPolicyRules = 65536
+
+// ValidatePolicyRuleCount runs before allocation, serialization and IPC.
+func ValidatePolicyRuleCount(count int) error {
+	if count < 0 || count > MaxExpandedPolicyRules {
+		return fmt.Errorf("dp policy: expanded table has %d rules; limit is %d; reduce rules or endpoint IPv4 addresses", count, MaxExpandedPolicyRules)
+	}
+	return nil
+}
+
 // initialRulesPerMsg is the first-pass estimate of how many rules fit in
 // one datagram. NeuVector's agent starts here and adapts down if the
 // marshalled payload exceeds maxPolicyMsgSize.
@@ -139,8 +152,8 @@ func (c *dpClient) pushPolicy(policy *WorkloadPolicy, cmd uint) error {
 
 // Caller holds policyMu across every fragment (native has one staging handle).
 func (c *dpClient) pushPolicyLocked(policy *WorkloadPolicy, cmd uint) error {
-	if policy == nil {
-		return fmt.Errorf("dp policy: nil policy")
+	if err := validatePolicySubmission(policy); err != nil {
+		return err
 	}
 	rules := policy.Rules
 	first := true
@@ -623,4 +636,11 @@ func (s *Supervisor) ConfigureDetector(macs []string, dlpRules []*DLPRule, wafRu
 		WafRuleIds:   defaultSessionRIDs(),
 		WafRuleType:  WAFRuleTypeOutside,
 	}})
+}
+
+func validatePolicySubmission(policy *WorkloadPolicy) error {
+	if policy == nil {
+		return fmt.Errorf("dp policy: nil policy")
+	}
+	return ValidatePolicyRuleCount(len(policy.Rules))
 }

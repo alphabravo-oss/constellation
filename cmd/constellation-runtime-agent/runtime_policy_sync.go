@@ -318,7 +318,11 @@ func (w *RuntimePolicySyncWorker) reconcileMAC(mac string, plan runtimePolicySco
 		}
 		return
 	}
-	policy := scopedICMPPolicy(wanted, icmp)
+	policy, err := scopedNativePolicy(wanted, icmp)
+	if err != nil {
+		w.rejectExpandedPolicy(mac, identity, gen, previous, known, err)
+		return
+	}
 	fingerprint := fingerprintWorkloadPolicy(policy)
 	if known && !previous.Dirty && previous.Fingerprint == fingerprint {
 		return

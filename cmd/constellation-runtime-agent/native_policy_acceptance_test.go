@@ -69,6 +69,7 @@ func TestGenerateNativeRuntimePolicyFixture(t *testing.T) {
 	scenario.icmpTransitions()
 	scenario.partialTransfer()
 	scenario.scopedLifecycle()
+	scenario.packetDefaultScopes()
 	root, err := os.OpenRoot(directory)
 	if err != nil {
 		t.Fatal(err)

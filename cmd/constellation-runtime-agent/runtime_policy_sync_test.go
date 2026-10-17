@@ -164,7 +164,7 @@ func TestRuntimePolicyDefaultOnlyRemovalAndSemanticChangesAreScoped(t *testing.T
 		t.Fatal("removal cleared the wrong workload")
 	}
 	last := dataplane.calls[1]
-	if last.command != dp.CmdModify || last.policy.MACs[0] != scopedMACB || len(last.policy.Rules) != 0 || last.policy.DefAction != dp.PolicyActionViolate {
+	if last.command != dp.CmdModify || last.policy.MACs[0] != scopedMACB || len(last.policy.Rules) != 4 || last.policy.DefAction != dp.PolicyActionViolate {
 		t.Fatal("default-only monitor policy was deleted instead of installed")
 	}
 }
@@ -303,13 +303,18 @@ func assertScopedICMPBaseline(t *testing.T, calls []scopedPolicyCall) {
 			scoped = call.policy
 		}
 	}
-	if scoped == nil || len(scoped.Rules) != 4 {
+	if scoped == nil || len(scoped.Rules) != 8 {
 		t.Fatalf("missing independent ICMP compatibility table: %+v", scoped)
 	}
 	for index := 0; index < 2; index++ {
 		rule := scoped.Rules[index]
 		if rule.IPProto != dp.IPProtoICMP || rule.Action != dp.PolicyActionAllow || rule.Ingress != (index == 1) || !icmpCompatibilityMatchesLocal(rule, "10.0.0.2") {
 			t.Fatalf("ICMP baseline changed: %+v", rule)
+		}
+	}
+	for _, rule := range scoped.Rules[4:] {
+		if rule.IPProto == dp.IPProtoICMP {
+			t.Fatal("terminal defaults broadened ICMP scope")
 		}
 	}
 	if scoped.Rules[2].IPProto != dp.IPProtoTCP || scoped.Rules[3].IPProto != dp.IPProtoUDP || scoped.Rules[2].Action != dp.PolicyActionDeny {

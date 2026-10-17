@@ -50,6 +50,11 @@ func TestNativeRuntimePolicyAcceptance(t *testing.T) {
 	if output, err := command.CombinedOutput(); err == nil || !bytes.Contains(output, []byte("native action=")) {
 		t.Fatalf("native assertion failed to detect wrong expected action: err=%v output=%s", err, output)
 	}
+	command = nativeMatcherCommand(t, image)
+	command.Stdin = bytes.NewReader(corruptNativePacketExpectation(t, input))
+	if output, err := command.CombinedOutput(); err == nil || !bytes.Contains(output, []byte("native action=")) {
+		t.Fatalf("full packet wrapper failed to detect wrong expected action: err=%v output=%s", err, output)
+	}
 	for _, rejected := range []string{"{not-json}\n", "{\"unknown_control\":{}}\n"} {
 		command := nativeMatcherCommand(t, image)
 		command.Stdin = strings.NewReader(rejected)
@@ -138,6 +143,9 @@ func captureNativePolicyFragments(t *testing.T, client *dpClient, server *captur
 		if len(messages) != 1 {
 			t.Fatal("actual Go policy transfer did not finish")
 		}
+		if len(messages[0]) > maxPolicyMsgSize {
+			t.Fatalf("native policy datagram exceeds safe payload: %d", len(messages[0]))
+		}
 		var parsed policyCfgReq
 		if err := json.Unmarshal(messages[0], &parsed); err != nil {
 			t.Fatal(err)
@@ -217,4 +225,28 @@ func readNativePolicyFixtures(t *testing.T, directory string) []byte {
 		t.Fatal(err)
 	}
 	return body
+}
+
+// Prove the full packet wrapper is asserted independently of keyed matching.
+func corruptNativePacketExpectation(t *testing.T, input []byte) []byte {
+	t.Helper()
+	var output bytes.Buffer
+	changed := false
+	for _, line := range bytes.Split(bytes.TrimSpace(input), []byte("\n")) {
+		var command map[string]any
+		if err := json.Unmarshal(line, &command); err != nil {
+			t.Fatal(err)
+		}
+		if query, ok := command["lookup"].(map[string]any); ok && query["packet"] == true && !changed {
+			query["action"] = PolicyActionAllow
+			changed = true
+		}
+		if err := json.NewEncoder(&output).Encode(command); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !changed {
+		t.Fatal("no full packet query to invalidate")
+	}
+	return output.Bytes()
 }
