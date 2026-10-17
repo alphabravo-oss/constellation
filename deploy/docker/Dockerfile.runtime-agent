@@ -149,7 +149,7 @@ LABEL org.opencontainers.image.version="${VERSION}" \
 # either — crictl is downloaded in the stage above and copied in.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates tzdata \
-      iproute2 iptables ethtool tcpdump kmod procps \
+      iproute2 iptables conntrack ethtool tcpdump kmod procps \
       libpcap0.8 libpcre2-8-0 \
       libnetfilter-queue1 libnfnetlink0 libmnl0 \
       libvectorscan5 libjansson4 libjemalloc2 \
