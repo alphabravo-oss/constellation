@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -72,23 +71,19 @@ func NewOIDCClient(ctx context.Context, cfg OIDCConfig) (*OIDCClient, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		strings.TrimRight(cfg.IssuerURL, "/")+"/.well-known/openid-configuration", nil)
 	if err != nil {
-		return nil, err
+		return nil, errors.New("oidc: invalid discovery request")
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("oidc: discovery: %w", err)
+		return nil, oidcResponseError("discovery", "request failed", err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("oidc: discovery status %d", resp.StatusCode)
-	}
-	body, err := io.ReadAll(resp.Body)
+	body, err := readOIDCResponse(resp, "discovery")
 	if err != nil {
-		return nil, fmt.Errorf("oidc: discovery body: %w", err)
+		return nil, err
 	}
 	var pm providerMetadata
 	if err := json.Unmarshal(body, &pm); err != nil {
-		return nil, fmt.Errorf("oidc: discovery decode: %w", err)
+		return nil, errors.New("oidc: invalid discovery response")
 	}
 	if pm.AuthURL == "" || pm.TokenURL == "" {
 		return nil, errors.New("oidc: discovery missing required endpoints")
@@ -178,24 +173,23 @@ func (c *OIDCClient) Exchange(ctx context.Context, code, verifier, expectedNonce
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.provider.TokenURL,
 		strings.NewReader(form.Encode()))
 	if err != nil {
-		return nil, "", err
+		return nil, "", errors.New("oidc: invalid token request")
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, "", fmt.Errorf("oidc: token: %w", err)
+		return nil, "", oidcResponseError("token", "request failed", err)
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 {
-		return nil, "", fmt.Errorf("oidc: token status %d: %s", resp.StatusCode, body)
+	body, err := readOIDCResponse(resp, "token")
+	if err != nil {
+		return nil, "", err
 	}
 	var tokens struct {
 		IDToken     string `json:"id_token"`
 		AccessToken string `json:"access_token"`
 	}
 	if err := json.Unmarshal(body, &tokens); err != nil {
-		return nil, "", fmt.Errorf("oidc: token decode: %w", err)
+		return nil, "", errors.New("oidc: invalid token response")
 	}
 	claims, err := c.verifyIDToken(ctx, tokens.IDToken)
 	if err != nil {

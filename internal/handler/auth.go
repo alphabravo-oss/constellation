@@ -725,7 +725,9 @@ func (a *Auth) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		// RSP-AUDIT-05: a failed OIDC code exchange / id_token validation is a failed login
 		// attempt on the OIDC path — audit it (identity unknown pre-validation, so no username).
 		a.auditLoginFailure(r.Context(), r, nil, nil, "", "oidc_exchange_failed")
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
+		// Provider/JWKS/parser errors can contain upstream bytes or URLs. The
+		// browser receives a stable category; no identity is issued on failure.
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "oidc authentication failed"})
 		return
 	}
 	// Route OIDC through the shared linked-session tail (like SAML/LDAP) so its id_token groups are
