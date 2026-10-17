@@ -94,16 +94,18 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 ARG VERSION=dev
+ARG COMMIT=dev
+ARG BUILD_TIME=
 ARG FIPS=0
 ENV CGO_ENABLED=0 GOOS=linux
 RUN if [ "${FIPS}" = "1" ] || [ "${FIPS}" = "true" ]; then \
         echo ">> building Go agent in FIPS 140-3 mode (GOFIPS140=v1.0.0 -tags fips)" >&2 ; \
         GOFIPS140=v1.0.0 go build -trimpath -tags fips \
-          -ldflags="-s -w -X main.version=${VERSION}-fips" \
+          -ldflags="-s -w -X github.com/alphabravocompany/constellation/pkg/version.Version=${VERSION}-fips -X github.com/alphabravocompany/constellation/pkg/version.Commit=${COMMIT} -X github.com/alphabravocompany/constellation/pkg/version.BuildTime=${BUILD_TIME}" \
           -o /out/constellation-runtime-agent ./cmd/constellation-runtime-agent ; \
     else \
         go build -trimpath \
-          -ldflags="-s -w -X main.version=${VERSION}" \
+          -ldflags="-s -w -X github.com/alphabravocompany/constellation/pkg/version.Version=${VERSION} -X github.com/alphabravocompany/constellation/pkg/version.Commit=${COMMIT} -X github.com/alphabravocompany/constellation/pkg/version.BuildTime=${BUILD_TIME}" \
           -o /out/constellation-runtime-agent ./cmd/constellation-runtime-agent ; \
     fi
 
@@ -137,6 +139,10 @@ RUN ARCH="$(uname -m)" && case "$ARCH" in \
  && chmod +x /usr/local/bin/crictl
 
 FROM debian:${DEBIAN_TAG} AS runtime
+ARG VERSION=dev
+ARG COMMIT=dev
+LABEL org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${COMMIT}"
 # Only the packages the agent + dp actually need at runtime. Notably NO bpftool: it's a
 # build-time codegen tool (bpf/Makefile → vmlinux.h) and dragged in ~570 CVEs; the agent
 # loads its BPF object at runtime via the pure-Go cilium/ebpf library, not the CLI. NO curl
