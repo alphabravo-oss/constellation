@@ -15,8 +15,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func responseRulesYAMLRequest(router http.Handler, method, path, body string, orgID, userID uuid.UUID) *httptest.ResponseRecorder {
-	request := withSubj(httptest.NewRequest(method, path, strings.NewReader(body)), orgID, userID)
+func responseRulesYAMLRequest(ctx context.Context, router http.Handler, method, path, body string, orgID, userID uuid.UUID) *httptest.ResponseRecorder {
+	request := withSubj(httptest.NewRequestWithContext(ctx, method, path, strings.NewReader(body)), orgID, userID)
 	if method == http.MethodPost {
 		request.Header.Set("Content-Type", "application/yaml; charset=utf-8")
 	}
@@ -73,14 +73,14 @@ func TestResponseRulesV2YAMLExportImportScopedAndAudited(t *testing.T) {
 	router := responseRuleV2Router(database, pool)
 
 	path := "/api/v1/response-rules-v2:export?cluster_id=" + clusterID.String()
-	blocked := responseRulesYAMLRequest(router, http.MethodGet, path, "", orgID, userID)
+	blocked := responseRulesYAMLRequest(t.Context(), router, http.MethodGet, path, "", orgID, userID)
 	if blocked.Code != http.StatusUnprocessableEntity || strings.Contains(blocked.Body.String(), "severity") || strings.Contains(blocked.Body.String(), "high") {
 		t.Fatalf("action params export must fail closed, status=%d body=%s", blocked.Code, blocked.Body.String())
 	}
 	if _, err := pool.Exec(context.Background(), `UPDATE response_rules_v2 SET actions=$1 WHERE id=$2`, `[ {"kind":"notify","target":"security-team","params":{"receiver":"security-team"}}, {"kind":"quarantine","params":{"isolate":"true"}} ]`, clusterRuleID); err != nil {
 		t.Fatal(err)
 	}
-	exported := responseRulesYAMLRequest(router, http.MethodGet, path, "", orgID, userID)
+	exported := responseRulesYAMLRequest(t.Context(), router, http.MethodGet, path, "", orgID, userID)
 	if exported.Code != http.StatusOK || !strings.HasPrefix(exported.Header().Get("Content-Type"), "application/yaml") {
 		t.Fatalf("export status=%d content-type=%q body=%s", exported.Code, exported.Header().Get("Content-Type"), exported.Body.String())
 	}
@@ -94,7 +94,7 @@ func TestResponseRulesV2YAMLExportImportScopedAndAudited(t *testing.T) {
 	if strings.Contains(exported.Body.String(), orgID.String()) || strings.Contains(exported.Body.String(), clusterID.String()) {
 		t.Fatalf("export must not include tenant or cluster identifiers: %s", exported.Body.String())
 	}
-	global := responseRulesYAMLRequest(router, http.MethodGet, "/api/v1/response-rules-v2:export", "", orgID, userID)
+	global := responseRulesYAMLRequest(t.Context(), router, http.MethodGet, "/api/v1/response-rules-v2:export", "", orgID, userID)
 	if global.Code != http.StatusOK || !strings.Contains(global.Body.String(), "yaml-global") || strings.Contains(global.Body.String(), "yaml-cluster") {
 		t.Fatalf("global export status=%d body=%s", global.Code, global.Body.String())
 	}
@@ -105,7 +105,7 @@ func TestResponseRulesV2YAMLExportImportScopedAndAudited(t *testing.T) {
 	}
 	targetClusterID := seedResponseRuleV2Cluster(t, pool, targetOrgID, "yaml-target")
 	importPath := "/api/v1/response-rules-v2:import?cluster_id=" + targetClusterID.String()
-	imported := responseRulesYAMLRequest(router, http.MethodPost, importPath, exported.Body.String(), targetOrgID, targetUserID)
+	imported := responseRulesYAMLRequest(t.Context(), router, http.MethodPost, importPath, exported.Body.String(), targetOrgID, targetUserID)
 	if imported.Code != http.StatusOK {
 		t.Fatalf("import status=%d body=%s", imported.Code, imported.Body.String())
 	}
@@ -127,11 +127,11 @@ func TestResponseRulesV2YAMLExportImportScopedAndAudited(t *testing.T) {
 	if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM audit_events WHERE id IN ($1,$2) AND org_id=$3 AND actor_id=$4 AND action IN ('response_rule_v2.import_attempt','response_rule_v2.import')`, result.AttemptAuditID, result.CompletionAuditID, targetOrgID, targetUserID).Scan(&auditCount); err != nil || auditCount != 2 {
 		t.Fatalf("audit count=%d err=%v", auditCount, err)
 	}
-	foreign := responseRulesYAMLRequest(router, http.MethodPost, "/api/v1/response-rules-v2:import?cluster_id="+clusterID.String(), exported.Body.String(), targetOrgID, targetUserID)
+	foreign := responseRulesYAMLRequest(t.Context(), router, http.MethodPost, "/api/v1/response-rules-v2:import?cluster_id="+clusterID.String(), exported.Body.String(), targetOrgID, targetUserID)
 	if foreign.Code != http.StatusNotFound {
 		t.Fatalf("foreign cluster import status=%d body=%s", foreign.Code, foreign.Body.String())
 	}
-	wrongScope := responseRulesYAMLRequest(router, http.MethodPost, "/api/v1/response-rules-v2:import", exported.Body.String(), targetOrgID, targetUserID)
+	wrongScope := responseRulesYAMLRequest(t.Context(), router, http.MethodPost, "/api/v1/response-rules-v2:import", exported.Body.String(), targetOrgID, targetUserID)
 	if wrongScope.Code != http.StatusBadRequest {
 		t.Fatalf("wrong-scope import status=%d body=%s", wrongScope.Code, wrongScope.Body.String())
 	}
@@ -143,12 +143,12 @@ func TestResponseRulesV2YAMLExportImportScopedAndAudited(t *testing.T) {
 	if _, err := pool.Exec(context.Background(), `UPDATE response_rules_v2 SET actions=$1 WHERE id=$2`, legacyActions, clusterRuleID); err != nil {
 		t.Fatal(err)
 	}
-	normalized := responseRulesYAMLRequest(router, http.MethodGet, path, "", orgID, userID)
+	normalized := responseRulesYAMLRequest(t.Context(), router, http.MethodGet, path, "", orgID, userID)
 	if normalized.Code != http.StatusOK || !strings.Contains(normalized.Body.String(), "security-team") || strings.Contains(normalized.Body.String(), sourceReceiverID.String()) {
 		t.Fatalf("receiver ID export status=%d body=%s", normalized.Code, normalized.Body.String())
 	}
 	importByID := strings.ReplaceAll(exported.Body.String(), "security-team", sourceReceiverID.String())
-	rejected := responseRulesYAMLRequest(router, http.MethodPost, importPath+"&on_conflict=replace", importByID, targetOrgID, targetUserID)
+	rejected := responseRulesYAMLRequest(t.Context(), router, http.MethodPost, importPath+"&on_conflict=replace", importByID, targetOrgID, targetUserID)
 	if rejected.Code != http.StatusBadRequest {
 		t.Fatalf("receiver ID import status=%d body=%s", rejected.Code, rejected.Body.String())
 	}
@@ -165,21 +165,21 @@ func TestResponseRulesV2YAMLImportConflictsAndRollback(t *testing.T) {
 	firstRule := "  - name: yaml-first\n    enabled: true\n    priority: 10\n    event_type: runtime\n    conditions: []\n    actions: []\n    workload_match: {}\n"
 	secondRule := "  - name: yaml-second\n    enabled: true\n    priority: 20\n    event_type: runtime\n    conditions: []\n    actions: []\n    workload_match: {}\n"
 	fixture := responseRulesYAMLFixture("global", firstRule+secondRule)
-	response := responseRulesYAMLRequest(router, http.MethodPost, path, fixture, orgID, userID)
+	response := responseRulesYAMLRequest(t.Context(), router, http.MethodPost, path, fixture, orgID, userID)
 	if response.Code != http.StatusOK {
 		t.Fatalf("first import status=%d body=%s", response.Code, response.Body.String())
 	}
-	response = responseRulesYAMLRequest(router, http.MethodPost, path, fixture, orgID, userID)
+	response = responseRulesYAMLRequest(t.Context(), router, http.MethodPost, path, fixture, orgID, userID)
 	if response.Code != http.StatusConflict {
 		t.Fatalf("default conflict status=%d body=%s", response.Code, response.Body.String())
 	}
-	response = responseRulesYAMLRequest(router, http.MethodPost, path+"?on_conflict=skip", fixture, orgID, userID)
+	response = responseRulesYAMLRequest(t.Context(), router, http.MethodPost, path+"?on_conflict=skip", fixture, orgID, userID)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"skipped":2`) {
 		t.Fatalf("skip status=%d body=%s", response.Code, response.Body.String())
 	}
 	updated := strings.Replace(fixture, "priority: 10", "priority: 40", 1)
 	updated = strings.Replace(updated, "  - name: yaml-second\n", "  - name: yaml-second\n    on_conflict: skip\n", 1)
-	response = responseRulesYAMLRequest(router, http.MethodPost, path+"?on_conflict=replace", updated, orgID, userID)
+	response = responseRulesYAMLRequest(t.Context(), router, http.MethodPost, path+"?on_conflict=replace", updated, orgID, userID)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"replaced":1`) || !strings.Contains(response.Body.String(), `"skipped":1`) {
 		t.Fatalf("replace status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -189,7 +189,7 @@ func TestResponseRulesV2YAMLImportConflictsAndRollback(t *testing.T) {
 	}
 
 	atomic := responseRulesYAMLFixture("global", strings.Replace(firstRule, "yaml-first", "yaml-new", 1)+secondRule)
-	response = responseRulesYAMLRequest(router, http.MethodPost, path, atomic, orgID, userID)
+	response = responseRulesYAMLRequest(t.Context(), router, http.MethodPost, path, atomic, orgID, userID)
 	if response.Code != http.StatusConflict {
 		t.Fatalf("atomic conflict status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -199,7 +199,7 @@ func TestResponseRulesV2YAMLImportConflictsAndRollback(t *testing.T) {
 	}
 	clusterID := seedResponseRuleV2Cluster(t, pool, orgID, "yaml-conflict")
 	otherScope := responseRulesYAMLFixture("cluster", strings.Replace(firstRule, "yaml-first", "yaml-second", 1))
-	response = responseRulesYAMLRequest(router, http.MethodPost, path+"?cluster_id="+clusterID.String()+"&on_conflict=replace", otherScope, orgID, userID)
+	response = responseRulesYAMLRequest(t.Context(), router, http.MethodPost, path+"?cluster_id="+clusterID.String()+"&on_conflict=replace", otherScope, orgID, userID)
 	if response.Code != http.StatusConflict {
 		t.Fatalf("cross-scope conflict status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -247,7 +247,7 @@ func TestResponseRulesV2YAMLRejectsUnsafeDocumentsAndAuditUnavailable(t *testing
 	orgID, userID := seedOrgUser(t, pool)
 	router := chi.NewRouter()
 	router.Post("/api/v1/response-rules-v2:import", NewResponseRulesV2(database, nil).ImportYAML)
-	response := responseRulesYAMLRequest(router, http.MethodPost, "/api/v1/response-rules-v2:import", base, orgID, userID)
+	response := responseRulesYAMLRequest(t.Context(), router, http.MethodPost, "/api/v1/response-rules-v2:import", base, orgID, userID)
 	if response.Code != http.StatusServiceUnavailable {
 		t.Fatalf("audit unavailable status=%d body=%s", response.Code, response.Body.String())
 	}

@@ -119,7 +119,7 @@ func (f *migrationRemainingFixture) preview(export string) migrationRemainingPre
 
 func (f *migrationRemainingFixture) call(fn http.HandlerFunc, method, id string, want int) map[string]json.RawMessage {
 	f.t.Helper()
-	req := migrationActionRequest(method, "/api/v1/migration/imports/"+id, id, f.org, f.user)
+	req := migrationActionRequest(f.t.Context(), method, "/api/v1/migration/imports/"+id, id, f.org, f.user)
 	w := httptest.NewRecorder()
 	fn(w, req)
 	if w.Code != want {
@@ -337,7 +337,7 @@ func TestMigrationRemainingRegistryCollisionIsAtomic(t *testing.T) {
 	const query = `SELECT to_jsonb(r) FROM registries r WHERE org_id=$1 AND name=$2`
 	before := f.snapshot(query, f.org, name)
 	w := httptest.NewRecorder()
-	f.h.MigrationApply(w, migrationActionRequest(http.MethodPost, "/migration/apply", preview.ImportID, f.org, f.user))
+	f.h.MigrationApply(w, migrationActionRequest(t.Context(), http.MethodPost, "/migration/apply", preview.ImportID, f.org, f.user))
 	if w.Code != http.StatusConflict {
 		t.Fatalf("registry collision status=%d want 409: %s", w.Code, w.Body.String())
 	}

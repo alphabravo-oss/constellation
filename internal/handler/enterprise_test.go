@@ -276,14 +276,14 @@ VALUES ($1, 'nv-1001-block-latest-tag', 'existing', 'kyverno', 'admission', 'exi
 		t.Fatalf("preview should report unsupported file profile, got %+v", preview.Unsupported)
 	}
 
-	previewBundleReq := migrationActionRequest(http.MethodGet, "/api/v1/migration/imports/"+preview.ImportID+"/rollback-bundle", preview.ImportID, orgID, userID)
+	previewBundleReq := migrationActionRequest(t.Context(), http.MethodGet, "/api/v1/migration/imports/"+preview.ImportID+"/rollback-bundle", preview.ImportID, orgID, userID)
 	previewBundleW := httptest.NewRecorder()
 	h.MigrationRollbackBundle(previewBundleW, previewBundleReq)
 	if previewBundleW.Code != http.StatusConflict {
 		t.Fatalf("preview rollback bundle status=%d body=%s", previewBundleW.Code, previewBundleW.Body.String())
 	}
 
-	applyReq := migrationActionRequest(http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":apply", preview.ImportID, orgID, userID)
+	applyReq := migrationActionRequest(t.Context(), http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":apply", preview.ImportID, orgID, userID)
 	applyW := httptest.NewRecorder()
 	h.MigrationApply(applyW, applyReq)
 	if applyW.Code != http.StatusOK {
@@ -296,7 +296,7 @@ VALUES ($1, 'nv-1001-block-latest-tag', 'existing', 'kyverno', 'admission', 'exi
 	if policyCount != 2 {
 		t.Fatalf("apply should upsert two policies, got %d", policyCount)
 	}
-	bundleReq := migrationActionRequest(http.MethodGet, "/api/v1/migration/imports/"+preview.ImportID+"/rollback-bundle", preview.ImportID, orgID, userID)
+	bundleReq := migrationActionRequest(t.Context(), http.MethodGet, "/api/v1/migration/imports/"+preview.ImportID+"/rollback-bundle", preview.ImportID, orgID, userID)
 	bundleW := httptest.NewRecorder()
 	h.MigrationRollbackBundle(bundleW, bundleReq)
 	if bundleW.Code != http.StatusOK {
@@ -323,7 +323,7 @@ VALUES ($1, 'nv-1001-block-latest-tag', 'existing', 'kyverno', 'admission', 'exi
 		t.Fatalf("existing policy was not updated")
 	}
 
-	secondApplyReq := migrationActionRequest(http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":apply", preview.ImportID, orgID, userID)
+	secondApplyReq := migrationActionRequest(t.Context(), http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":apply", preview.ImportID, orgID, userID)
 	secondApplyW := httptest.NewRecorder()
 	h.MigrationApply(secondApplyW, secondApplyReq)
 	if secondApplyW.Code != http.StatusOK {
@@ -339,7 +339,7 @@ VALUES ($1, 'nv-1001-block-latest-tag', 'existing', 'kyverno', 'admission', 'exi
 		t.Fatalf("second apply should be idempotent: %+v", secondApply)
 	}
 
-	rollbackReq := migrationActionRequest(http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":rollback", preview.ImportID, orgID, userID)
+	rollbackReq := migrationActionRequest(t.Context(), http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":rollback", preview.ImportID, orgID, userID)
 	rollbackW := httptest.NewRecorder()
 	h.MigrationRollback(rollbackW, rollbackReq)
 	if rollbackW.Code != http.StatusOK {
@@ -358,7 +358,7 @@ VALUES ($1, 'nv-1001-block-latest-tag', 'existing', 'kyverno', 'admission', 'exi
 		t.Fatalf("rollback did not restore original spec: %q", updatedSpec)
 	}
 
-	badApplyReq := migrationActionRequest(http.MethodPost, "/api/v1/migration/imports/not-a-uuid:apply", "not-a-uuid", orgID, userID)
+	badApplyReq := migrationActionRequest(t.Context(), http.MethodPost, "/api/v1/migration/imports/not-a-uuid:apply", "not-a-uuid", orgID, userID)
 	badApplyW := httptest.NewRecorder()
 	h.MigrationApply(badApplyW, badApplyReq)
 	if badApplyW.Code != http.StatusBadRequest {
@@ -429,7 +429,7 @@ VALUES
 	}
 	for _, tc := range subjects {
 		t.Run(tc.name+"/apply", func(t *testing.T) {
-			req := migrationActionRequestWithSubject(http.MethodPost, "/api/v1/migration/imports/"+previewedID.String()+":apply", previewedID.String(), tc.subj)
+			req := migrationActionRequestWithSubject(t.Context(), http.MethodPost, "/api/v1/migration/imports/"+previewedID.String()+":apply", previewedID.String(), tc.subj)
 			w := httptest.NewRecorder()
 			h.MigrationApply(w, req)
 			if w.Code != http.StatusForbidden {
@@ -437,7 +437,7 @@ VALUES
 			}
 		})
 		t.Run(tc.name+"/rollback", func(t *testing.T) {
-			req := migrationActionRequestWithSubject(http.MethodPost, "/api/v1/migration/imports/"+appliedID.String()+":rollback", appliedID.String(), tc.subj)
+			req := migrationActionRequestWithSubject(t.Context(), http.MethodPost, "/api/v1/migration/imports/"+appliedID.String()+":rollback", appliedID.String(), tc.subj)
 			w := httptest.NewRecorder()
 			h.MigrationRollback(w, req)
 			if w.Code != http.StatusForbidden {
@@ -445,7 +445,7 @@ VALUES
 			}
 		})
 		t.Run(tc.name+"/rollback bundle", func(t *testing.T) {
-			req := migrationActionRequestWithSubject(http.MethodGet, "/api/v1/migration/imports/"+appliedID.String()+"/rollback-bundle", appliedID.String(), tc.subj)
+			req := migrationActionRequestWithSubject(t.Context(), http.MethodGet, "/api/v1/migration/imports/"+appliedID.String()+"/rollback-bundle", appliedID.String(), tc.subj)
 			w := httptest.NewRecorder()
 			h.MigrationRollbackBundle(w, req)
 			if w.Code != http.StatusForbidden {
@@ -505,7 +505,7 @@ func TestEnterpriseMigrationApplyNativeAdmissionExceptionRules(t *testing.T) {
 		t.Fatalf("unexpected preview summary: %+v", preview.Summary)
 	}
 
-	applyReq := migrationActionRequest(http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":apply", preview.ImportID, orgID, userID)
+	applyReq := migrationActionRequest(t.Context(), http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":apply", preview.ImportID, orgID, userID)
 	applyW := httptest.NewRecorder()
 	h.MigrationApply(applyW, applyReq)
 	if applyW.Code != http.StatusOK {
@@ -619,7 +619,7 @@ items:
 		t.Fatalf("preview dlp provenance missing: %+v", dlp)
 	}
 
-	applyReq := migrationActionRequest(http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":apply", preview.ImportID, orgID, userID)
+	applyReq := migrationActionRequest(t.Context(), http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":apply", preview.ImportID, orgID, userID)
 	applyW := httptest.NewRecorder()
 	h.MigrationApply(applyW, applyReq)
 	if applyW.Code != http.StatusOK {
@@ -658,7 +658,7 @@ SELECT apply_dir, mode, patterns::text
 		t.Fatalf("runtime dlp provenance = %s/%s/%s", dlpSource, dlpCfgType, dlpSourcePath)
 	}
 
-	rollbackReq := migrationActionRequest(http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":rollback", preview.ImportID, orgID, userID)
+	rollbackReq := migrationActionRequest(t.Context(), http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":rollback", preview.ImportID, orgID, userID)
 	rollbackW := httptest.NewRecorder()
 	h.MigrationRollback(rollbackW, rollbackReq)
 	if rollbackW.Code != http.StatusOK {
@@ -743,7 +743,7 @@ spec:
 		t.Fatalf("expected one DPI update preview, summary=%+v rules=%+v", preview.Summary, preview.DPIRules)
 	}
 
-	applyReq := migrationActionRequest(http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":apply", preview.ImportID, orgID, userID)
+	applyReq := migrationActionRequest(t.Context(), http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":apply", preview.ImportID, orgID, userID)
 	applyW := httptest.NewRecorder()
 	h.MigrationApply(applyW, applyReq)
 	if applyW.Code != http.StatusOK {
@@ -762,7 +762,7 @@ SELECT category, apply_dir, severity, mode, patterns::text, COALESCE(scope_macs:
 		t.Fatalf("apply did not update expected WAF fields: category=%s dir=%d severity=%d mode=%s patterns=%s scope=%s", category, applyDir, severity, mode, patterns, scope)
 	}
 
-	rollbackReq := migrationActionRequest(http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":rollback", preview.ImportID, orgID, userID)
+	rollbackReq := migrationActionRequest(t.Context(), http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":rollback", preview.ImportID, orgID, userID)
 	rollbackW := httptest.NewRecorder()
 	h.MigrationRollback(rollbackW, rollbackReq)
 	if rollbackW.Code != http.StatusOK {
@@ -854,7 +854,7 @@ waf_groups:
 		t.Fatalf("expected missing WAF group as unsupported, summary=%+v unsupported=%+v", preview.Summary, preview.Unsupported)
 	}
 
-	applyReq := migrationActionRequest(http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":apply", preview.ImportID, orgID, userID)
+	applyReq := migrationActionRequest(t.Context(), http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":apply", preview.ImportID, orgID, userID)
 	applyW := httptest.NewRecorder()
 	h.MigrationApply(applyW, applyReq)
 	if applyW.Code != http.StatusOK {
@@ -882,7 +882,7 @@ SELECT sensor_kind, sensor_id
 		t.Fatalf("unexpected group binding kind=%s sensor=%s", sensorKind, sensorID)
 	}
 
-	rollbackReq := migrationActionRequest(http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":rollback", preview.ImportID, orgID, userID)
+	rollbackReq := migrationActionRequest(t.Context(), http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":rollback", preview.ImportID, orgID, userID)
 	rollbackW := httptest.NewRecorder()
 	h.MigrationRollback(rollbackW, rollbackReq)
 	if rollbackW.Code != http.StatusOK {
@@ -977,7 +977,7 @@ dlp_groups:
 		t.Fatalf("binding should resolve to same-import group by name: %+v", preview.DPIBindings)
 	}
 
-	applyReq := migrationActionRequest(http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":apply", preview.ImportID, orgID, userID)
+	applyReq := migrationActionRequest(t.Context(), http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":apply", preview.ImportID, orgID, userID)
 	applyW := httptest.NewRecorder()
 	h.MigrationApply(applyW, applyReq)
 	if applyW.Code != http.StatusOK {
@@ -1012,7 +1012,7 @@ SELECT id, members::text, criteria::text
 		t.Fatalf("expected imported DLP binding, got %d", bindings)
 	}
 
-	rollbackReq := migrationActionRequest(http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":rollback", preview.ImportID, orgID, userID)
+	rollbackReq := migrationActionRequest(t.Context(), http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":rollback", preview.ImportID, orgID, userID)
 	rollbackW := httptest.NewRecorder()
 	h.MigrationRollback(rollbackW, rollbackReq)
 	if rollbackW.Code != http.StatusOK {
@@ -1116,7 +1116,7 @@ network_rules:
 		t.Fatalf("unexpected network rule preview: %+v", preview.NetworkRules)
 	}
 
-	applyReq := migrationActionRequest(http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":apply", preview.ImportID, orgID, userID)
+	applyReq := migrationActionRequest(t.Context(), http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":apply", preview.ImportID, orgID, userID)
 	applyW := httptest.NewRecorder()
 	h.MigrationApply(applyW, applyReq)
 	if applyW.Code != http.StatusOK {
@@ -1143,7 +1143,7 @@ SELECT ports::text, mode, comment
 		t.Fatalf("unexpected network edge ports=%s mode=%s comment=%s", portsText, mode, comment)
 	}
 
-	rollbackReq := migrationActionRequest(http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":rollback", preview.ImportID, orgID, userID)
+	rollbackReq := migrationActionRequest(t.Context(), http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":rollback", preview.ImportID, orgID, userID)
 	rollbackW := httptest.NewRecorder()
 	h.MigrationRollback(rollbackW, rollbackReq)
 	if rollbackW.Code != http.StatusOK {
@@ -1233,7 +1233,7 @@ profiles:
 		t.Fatalf("file profile did not resolve target workload: %+v", preview.FileProfiles)
 	}
 
-	applyReq := migrationActionRequest(http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":apply", preview.ImportID, orgID, userID)
+	applyReq := migrationActionRequest(t.Context(), http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":apply", preview.ImportID, orgID, userID)
 	applyW := httptest.NewRecorder()
 	h.MigrationApply(applyW, applyReq)
 	if applyW.Code != http.StatusOK {
@@ -1263,7 +1263,7 @@ SELECT s.mode, r.filter, r.behavior, r.applications
 		t.Fatalf("unexpected file profile row: mode=%s filter=%s behavior=%s apps=%v", mode, filter, behavior, applications)
 	}
 
-	rollbackReq := migrationActionRequest(http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":rollback", preview.ImportID, orgID, userID)
+	rollbackReq := migrationActionRequest(t.Context(), http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":rollback", preview.ImportID, orgID, userID)
 	rollbackW := httptest.NewRecorder()
 	h.MigrationRollback(rollbackW, rollbackReq)
 	if rollbackW.Code != http.StatusOK {
@@ -1362,7 +1362,7 @@ process_profiles:
 		t.Fatalf("process profile did not resolve target workload: %+v", preview.ProcessProfiles)
 	}
 
-	applyReq := migrationActionRequest(http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":apply", preview.ImportID, orgID, userID)
+	applyReq := migrationActionRequest(t.Context(), http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":apply", preview.ImportID, orgID, userID)
 	applyW := httptest.NewRecorder()
 	h.MigrationApply(applyW, applyReq)
 	if applyW.Code != http.StatusOK {
@@ -1396,7 +1396,7 @@ SELECT s.mode,
 		t.Fatalf("unexpected process profile rows: mode=%s allowPath=%s allowUpdate=%v denyUser=%s", mode, allowPath, allowUpdate, denyUser)
 	}
 
-	rollbackReq := migrationActionRequest(http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":rollback", preview.ImportID, orgID, userID)
+	rollbackReq := migrationActionRequest(t.Context(), http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":rollback", preview.ImportID, orgID, userID)
 	rollbackW := httptest.NewRecorder()
 	h.MigrationRollback(rollbackW, rollbackReq)
 	if rollbackW.Code != http.StatusOK {
@@ -1486,7 +1486,7 @@ VALUES ($1,$2,$3,'nv.api.default','nv.db.default','[{"protocol":"TCP","port":808
 		t.Fatalf("expected one network update preview, summary=%+v rules=%+v", preview.Summary, preview.NetworkRules)
 	}
 
-	applyReq := migrationActionRequest(http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":apply", preview.ImportID, orgID, userID)
+	applyReq := migrationActionRequest(t.Context(), http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":apply", preview.ImportID, orgID, userID)
 	applyW := httptest.NewRecorder()
 	h.MigrationApply(applyW, applyReq)
 	if applyW.Code != http.StatusOK {
@@ -1500,7 +1500,7 @@ VALUES ($1,$2,$3,'nv.api.default','nv.db.default','[{"protocol":"TCP","port":808
 		t.Fatalf("apply did not update edge: ports=%s mode=%s comment=%s", portsText, mode, comment)
 	}
 
-	rollbackReq := migrationActionRequest(http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":rollback", preview.ImportID, orgID, userID)
+	rollbackReq := migrationActionRequest(t.Context(), http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":rollback", preview.ImportID, orgID, userID)
 	rollbackW := httptest.NewRecorder()
 	h.MigrationRollback(rollbackW, rollbackReq)
 	if rollbackW.Code != http.StatusOK {
@@ -1523,8 +1523,8 @@ func hasPortableGroupCriterion(criteria []portableGroupCriterion, key, op, value
 	return false
 }
 
-func migrationActionRequest(method, path, importID string, orgID, userID uuid.UUID) *http.Request {
-	return migrationActionRequestWithSubject(method, path, importID, Subject{
+func migrationActionRequest(ctx context.Context, method, path, importID string, orgID, userID uuid.UUID) *http.Request {
+	return migrationActionRequestWithSubject(ctx, method, path, importID, Subject{
 		UserID: userID,
 		OrgID:  orgID,
 		Assignments: []rbac.RoleAssignment{{
@@ -1534,12 +1534,12 @@ func migrationActionRequest(method, path, importID string, orgID, userID uuid.UU
 	})
 }
 
-func migrationActionRequestWithSubject(method, path, importID string, subj Subject) *http.Request {
-	req := httptest.NewRequest(method, path, nil)
+func migrationActionRequestWithSubject(ctx context.Context, method, path, importID string, subj Subject) *http.Request {
+	req := httptest.NewRequestWithContext(ctx, method, path, nil)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", importID)
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
-	return req.WithContext(WithSubject(req.Context(), subj))
+	requestCtx := context.WithValue(ctx, chi.RouteCtxKey, rctx)
+	return req.WithContext(WithSubject(requestCtx, subj))
 }
 
 func ensureMigrationImportsTestTable(t *testing.T, d *db.DB) {

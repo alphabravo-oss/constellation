@@ -120,7 +120,7 @@ func TestMigrationRemainingRequiresRegistryPermission(t *testing.T) {
 	fixture := newMigrationRemainingFixture(t)
 	preview := fixture.preview(migrationRemainingExport(t, nil))
 	subject := Subject{OrgID: fixture.org, UserID: fixture.user, Assignments: []rbac.RoleAssignment{{Role: rbac.RoleSecurityAdmin, Scope: rbac.Scope{OrgID: fixture.org}}}, TokenScopes: []rbac.Verb{rbac.VerbManagePolicies}}
-	request := migrationActionRequestWithSubject(http.MethodPost, "/migration/apply", preview.ImportID, subject)
+	request := migrationActionRequestWithSubject(t.Context(), http.MethodPost, "/migration/apply", preview.ImportID, subject)
 	response := httptest.NewRecorder()
 	fixture.h.MigrationApply(response, request)
 	if response.Code != http.StatusForbidden {
@@ -128,7 +128,7 @@ func TestMigrationRemainingRequiresRegistryPermission(t *testing.T) {
 	}
 	fixture.counts(0, 0)
 	fixture.call(fixture.h.MigrationApply, http.MethodPost, preview.ImportID, http.StatusOK)
-	request = migrationActionRequestWithSubject(http.MethodPost, "/migration/rollback", preview.ImportID, subject)
+	request = migrationActionRequestWithSubject(t.Context(), http.MethodPost, "/migration/rollback", preview.ImportID, subject)
 	response = httptest.NewRecorder()
 	fixture.h.MigrationRollback(response, request)
 	if response.Code != http.StatusForbidden {

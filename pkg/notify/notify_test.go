@@ -174,7 +174,7 @@ func TestSyslog_SDEscaping(t *testing.T) {
 }
 
 func TestSyslog_SendOverUDP(t *testing.T) {
-	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	pc, err := (&net.ListenConfig{}).ListenPacket(t.Context(), "udp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +285,7 @@ func TestSyslog_SendToMTLSCollector(t *testing.T) {
 				defer conn.Close()
 				_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
 				tlsConn := conn.(*tls.Conn)
-				if handshakeErr := tlsConn.Handshake(); handshakeErr != nil {
+				if handshakeErr := tlsConn.HandshakeContext(t.Context()); handshakeErr != nil {
 					results <- collectorResult{err: handshakeErr}
 					return
 				}
@@ -493,7 +493,7 @@ func TestSyslog_LevelAndCategoryFilter(t *testing.T) {
 }
 
 func TestSyslog_FilterSkipsSendWhenEmpty(t *testing.T) {
-	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	pc, err := (&net.ListenConfig{}).ListenPacket(t.Context(), "udp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}

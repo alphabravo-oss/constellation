@@ -67,7 +67,7 @@ VALUES ($1,$2,'neuvector',$3,$4::jsonb,$5)`, importID, fixture.org, importID.Str
 		t.Fatal(err)
 	}
 	response := httptest.NewRecorder()
-	fixture.h.MigrationApply(response, migrationActionRequest(http.MethodPost, "/migration/apply", importID.String(), fixture.org, fixture.user))
+	fixture.h.MigrationApply(response, migrationActionRequest(t.Context(), http.MethodPost, "/migration/apply", importID.String(), fixture.org, fixture.user))
 	if response.Code != http.StatusConflict {
 		t.Fatalf("referenced group changed: status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -202,13 +202,13 @@ VALUES ($1,$2,'neuvector',$3,$4::jsonb,$5)`, importID, fixture.org, importID.Str
 		t.Fatal(err)
 	}
 	apply := httptest.NewRecorder()
-	fixture.h.MigrationApply(apply, migrationActionRequest(http.MethodPost, "/migration/apply", importID.String(), fixture.org, fixture.user))
+	fixture.h.MigrationApply(apply, migrationActionRequest(t.Context(), http.MethodPost, "/migration/apply", importID.String(), fixture.org, fixture.user))
 	if apply.Code != http.StatusOK {
 		t.Fatalf("apply status=%d body=%s", apply.Code, apply.Body.String())
 	}
 	fixture.seedEdge("guard-created", "external")
 	rollback := httptest.NewRecorder()
-	fixture.h.MigrationRollback(rollback, migrationActionRequest(http.MethodPost, "/migration/rollback", importID.String(), fixture.org, fixture.user))
+	fixture.h.MigrationRollback(rollback, migrationActionRequest(t.Context(), http.MethodPost, "/migration/rollback", importID.String(), fixture.org, fixture.user))
 	if rollback.Code != http.StatusConflict {
 		t.Fatalf("referenced rollback status=%d body=%s", rollback.Code, rollback.Body.String())
 	}
@@ -225,7 +225,7 @@ SELECT (SELECT status FROM migration_imports WHERE id=$1), (SELECT count(*) FROM
 		t.Fatal(err)
 	}
 	rollback = httptest.NewRecorder()
-	fixture.h.MigrationRollback(rollback, migrationActionRequest(http.MethodPost, "/migration/rollback", importID.String(), fixture.org, fixture.user))
+	fixture.h.MigrationRollback(rollback, migrationActionRequest(t.Context(), http.MethodPost, "/migration/rollback", importID.String(), fixture.org, fixture.user))
 	if rollback.Code != http.StatusOK {
 		t.Fatalf("retry rollback status=%d body=%s", rollback.Code, rollback.Body.String())
 	}

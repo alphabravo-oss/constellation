@@ -32,7 +32,7 @@ func TestReadinessNoDP(t *testing.T) {
 // TestHealthzAlwaysAlive — /healthz returns 200 unconditionally; that's the
 // whole point of the liveness path (any non-200 makes kubelet kill the pod).
 func TestHealthzAlwaysAlive(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	// Don't actually bind a port; just exercise the handler through a mux.
 	mux := http.NewServeMux()
@@ -42,7 +42,11 @@ func TestHealthzAlwaysAlive(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	resp, err := http.Get(srv.URL + "/healthz")
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/healthz", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := srv.Client().Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,5 +58,4 @@ func TestHealthzAlwaysAlive(t *testing.T) {
 	if !strings.Contains(string(body), `"alive"`) {
 		t.Errorf("unexpected body: %s", body)
 	}
-	_ = ctx
 }

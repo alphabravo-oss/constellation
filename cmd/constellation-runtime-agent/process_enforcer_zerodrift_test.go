@@ -14,7 +14,7 @@ import (
 // drift cause, so the server can distinguish a zero-drift kill from a baseline kill instead
 // of only seeing Blocked=true. Uses a real short-lived process so the SIGKILL actually lands.
 func TestProcessEnforcerOnKillCarriesReason(t *testing.T) {
-	cmd := exec.Command("sleep", "30")
+	cmd := exec.CommandContext(t.Context(), "sleep", "30")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start sleep: %v", err)
 	}
