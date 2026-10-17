@@ -53,6 +53,12 @@ helm template recovery-source "$chart" -n "$namespace" -f "$fixtures/source-valu
 "${k[@]}" apply -f "$work/source.yaml" >/dev/null
 "${k[@]}" wait --for=condition=Ready cluster/recovery-source-postgres --timeout=600s
 sql() { "${k[@]}" exec "$1-1" -c postgres -- psql -U postgres -d constellation -v ON_ERROR_STOP=1 -Atc "$2"; }
+threat_snapshot() {
+  sql "$1" "SELECT jsonb_build_object(
+    'threats',(SELECT jsonb_agg(to_jsonb(t)) FROM runtime_threats t WHERE node='recovery-uint32-proof'),
+    'flows',(SELECT jsonb_agg(to_jsonb(f)) FROM network_flows f WHERE src_workload='recovery-uint32-proof/raw'),
+    'rollups',(SELECT jsonb_agg(to_jsonb(r)) FROM network_flow_rollups r WHERE src_workload='recovery-uint32-proof/aggregate'))"
+}
 "${k[@]}" port-forward svc/recovery-source-postgres-rw "$pg_port:5432" >"$work/pg-forward.log" 2>&1 &
 pg_forward=$!
 for ((n=0;n<30;n++)); do
@@ -66,6 +72,25 @@ goose -dir db/migrations postgres "$DATABASE_URL" up >>"$work/migrations.log" 2>
 go run ./cmd/constellation-seed >"$work/seed.log" 2>&1
 python3 "$fixtures/check_api.py" prepare "$api_port" "$work"
 "${k[@]}" exec -i recovery-source-postgres-1 -c postgres -- psql -U postgres -d constellation -v ON_ERROR_STOP=1 <"$work/scanner.sql" >"$work/scanner-seed.log"
+# Exercise the full unsigned range and explicitly incomplete aggregate metadata.
+# A future raw timestamp keeps the background fold from changing this fixture;
+# the aggregate uses a different tuple and must retain its independent counters.
+sql recovery-source-postgres "
+INSERT INTO runtime_threats(org_id,cluster_id,node,threat_id,severity,reported_at,packet)
+ SELECT org_id,id,'recovery-uint32-proof',4294967295,7,now(),decode('aabbcc','hex') FROM clusters ORDER BY id LIMIT 1;
+INSERT INTO network_flows(org_id,cluster_id,src_workload,dst_workload,protocol,at,threat_id,bytes,packets)
+ SELECT org_id,id,'recovery-uint32-proof/raw','recovery/peer','tcp',now()+interval '2 hours',4294967295,123,4 FROM clusters ORDER BY id LIMIT 1;
+INSERT INTO network_flow_rollups(org_id,cluster_id,src_workload,dst_workload,protocol,bucket,max_at,flow_count,max_threat_id,threat_id_complete,sum_bytes,sum_packets)
+ SELECT org_id,id,'recovery-uint32-proof/aggregate','recovery/peer','tcp',date_trunc('hour',now()),now(),2,2147483648,false,12345,456 FROM clusters ORDER BY id LIMIT 1;" >/dev/null
+threat_snapshot recovery-source-postgres >"$work/threat-source.json"
+python3 - "$work/threat-source.json" <<'PY'
+import json, sys
+snapshot = json.load(open(sys.argv[1]))
+assert all(len(snapshot[key]) == 1 for key in ('threats', 'flows', 'rollups'))
+assert snapshot['threats'][0]['threat_id'] == snapshot['flows'][0]['threat_id'] == 4294967295
+assert snapshot['rollups'][0]['max_threat_id'] == 2147483648
+assert snapshot['rollups'][0]['threat_id_complete'] is False
+PY
 sql recovery-source-postgres "CREATE TABLE recovery_proof(id int PRIMARY KEY, evidence text NOT NULL); INSERT INTO recovery_proof VALUES (1,'base-backup');" >/dev/null
 # Delay schedule creation until migrations/fixtures are committed.
 helm template recovery-source "$chart" -n "$namespace" -f "$fixtures/source-values.yaml" \
@@ -125,6 +150,8 @@ helm template recovery-target "$chart" -n "$namespace" -f "$fixtures/source-valu
 "${k[@]}" wait --for=condition=Ready cluster/recovery-target-postgres --timeout=600s
 [[ "$(sql recovery-target-postgres 'SELECT string_agg(id::text,chr(44) ORDER BY id) FROM recovery_proof')" == 1,2 ]]
 [[ "$(sql recovery-target-postgres "SELECT count(*) FROM pg_extension WHERE extname IN ('vector','pgcrypto','pg_trgm')")" == 3 ]]
+threat_snapshot recovery-target-postgres >"$work/threat-restored.json"
+cmp "$work/threat-source.json" "$work/threat-restored.json"
 kill "$api_forward"; wait "$api_forward" 2>/dev/null || true; api_forward=""
 sed 's/recovery-source-database-url/recovery-target-database-url/' "$work/api-source.yaml" >"$work/api-target.yaml"
 "${k[@]}" apply -f "$work/api-target.yaml" >/dev/null
@@ -145,6 +172,8 @@ for ((n=0;n<60;n++)); do
 done
 python3 "$fixtures/check_api.py" restored "$api_port" "$work"
 echo "Target pod restart and authenticated recovery: $(($(date +%s) - restart_started)) seconds" >"$work/restart-result.txt"
+threat_snapshot recovery-target-postgres >"$work/threat-restarted.json"
+cmp "$work/threat-source.json" "$work/threat-restarted.json"
 cat "$work/restart-result.txt"
 # The recovered DB alone must not decrypt integration secrets with a different KEK.
 kill "$api_forward"; wait "$api_forward" 2>/dev/null || true; api_forward=""
