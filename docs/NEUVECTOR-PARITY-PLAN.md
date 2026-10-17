@@ -311,11 +311,50 @@ The first isolated source database waited for evicted cached dependencies;
 restoring their exact local images allowed the drill to proceed. Private drill
 evidence: `/tmp/constellation-cnpg-test.sgYbTe/`.
 
-Hosted run `39009181481` at `200f8c4` has green frontend, unit, FIPS, vulnerability
-and dependency jobs; browser/integration are still running at this checkpoint.
+Hosted run `39009181481` at `200f8c4` completed: frontend, unit, integration,
+browser, FIPS, vulnerability and dependency jobs pass.
 Quality remains red with 1,566 findings (previously 1,695), and gosec remains red
 with 205 findings (previously 218). Gitleaks also remains red. Reports:
 `/tmp/constellation-ci-39009181481/`. These reductions do not waive any gate.
+
+Commit `1760d26` corrects canonical service linker metadata and passes source
+commit/build time through release and Make builds. Six linker recipes and five
+actual service binaries (including FIPS mode) report the expected triplet. The
+release matrix/push inventory now includes kube-bench-runner, and published
+verification uses the PostgreSQL 16.14 tag prefix. Helm source release checks
+pass; mocked signature-tool dispatch confirms all 12 role references and runner
+failure propagation, without claiming published signature verification. Evidence:
+`/tmp/constellation-build-metadata/`.
+
+Commit `5f1fe42` adds schema179 benchmark execution requests, token/cluster-bound
+leased attempts, atomic evidence/completion audits, duplicate receipts and
+reviewed retries capped at three attempts. The worker journals intent/results,
+refuses uncertain reruns and requires persistent private storage. Dedicated
+fresh179 qualification passes 208 race/shuffle executions without skips; scoped
+lint/vet are clean. Independent review fixes configured-cluster assertion before
+claim and post-lock terminal-claim races. The worker remains disabled, with actual
+bundled-image and live queue-drain qualification still separate. See
+[benchmark execution](compliance-benchmark-execution.md) and
+`/tmp/bench-v2-reviewed-db/`.
+
+Commit `dd41417` adds the cluster Benchmarks tab, paged history/details and
+separate queue/retry forms. Uncertain create receipts retain the same request key;
+stale retries require refreshed review; technical IDs/digests remain disclosed
+on demand. Focused tests pass 99 executions on Node22. The root's full pinned
+Node24.21.0 suite passes 2,336 tests without skips; typecheck and production build
+pass. Evidence: `/tmp/constellation-bench-frontend-full.json`.
+
+Commit `1cb1045` validates runtime PID/count/ring-buffer bounds and preserves
+intentional bounded signature indexing. Fifteen scoped G115 findings are removed
+without suppressions; configured lint decreases 183 to 168 with no new issue
+signatures. Qualification passes 764 unit executions and two fresh178 DB
+executions resolving the two opt-in DB skips. Evidence:
+`/tmp/quality-runtime-numeric-summary.json`.
+
+These four batches plus prior edge-entity auditing/native tests are combined in
+frozen candidate `1cb1045` at `/tmp/constellation-bench-1cb1045/`. Combined fresh179
+checks and API/runtime/migrate/frontend images are being qualified. Main remains
+Helm78/schema178 until those checks and exact-image recovery pass.
 
 ## October 12 implementation continuation
 
