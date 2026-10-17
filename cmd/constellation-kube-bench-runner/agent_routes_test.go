@@ -54,7 +54,7 @@ func TestChartBenchmarkRunnerUsesBoundAgentRoutes(t *testing.T) {
 	if err := runAndIngest(t.Context(), server.Client(), cfg, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
 		t.Fatal(err)
 	}
-	if claimed, err := claimPendingRun(t.Context(), server.Client(), cfg); err != nil || claimed {
+	if claimed, err := claimPendingRun(t.Context(), server.Client(), cfg); err != nil || claimed != nil {
 		t.Fatalf("empty claim %v %v", claimed, err)
 	}
 	if len(paths) != 2 {

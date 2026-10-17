@@ -180,6 +180,11 @@ func (c *Compliance) Ingest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *Compliance) ingest(w http.ResponseWriter, r *http.Request, scope complianceWriteScope) {
+	benchmark := strings.TrimSpace(r.URL.Query().Get("benchmark"))
+	if !compliancepkg.ValidBenchmarkID(benchmark) {
+		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid benchmark identifier"})
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, 16<<20)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -195,23 +200,26 @@ func (c *Compliance) ingest(w http.ResponseWriter, r *http.Request, scope compli
 	case "", "kube-bench", "kubebench":
 		// ?benchmark= (from the runner's BENCH_VERSION) overrides the report's
 		// per-control CIS profile id; empty keeps the report-derived tagging.
-		checks, err = compliancepkg.IngestKubeBenchProfile(body, r.URL.Query().Get("benchmark"))
+		checks, err = compliancepkg.IngestKubeBenchProfile(body, benchmark)
 	default:
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown profile"})
 		return
 	}
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid benchmark report"})
 		return
 	}
 	clusterArg := scope.clusterID
 	node := strings.TrimSpace(r.URL.Query().Get("node"))
 	tx, err := c.db.Pool().Begin(r.Context())
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "ingest unavailable"})
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
+	if !scope.lockCluster(w, r, tx) {
+		return
+	}
 	var failures []complianceFailure
 	for _, ck := range checks {
 		if strings.EqualFold(ck.Status, "fail") {
@@ -253,12 +261,19 @@ DO UPDATE SET
     evaluated_at = NOW()`,
 			scope.orgID, clusterArg, node, ck.Framework, ck.ControlID, ck.Title, ck.Description, ck.Status, ck.Severity, ck.Evidence, tagsRaw, ck.Remediation,
 		); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "ingest unavailable"})
+			return
+		}
+	}
+	if c.audit != nil {
+		_, _, err := c.audit.LogInTx(r.Context(), tx, audit.Event{OrgID: &scope.orgID, ActorID: scope.actorID, Action: "compliance.ingest", TargetKind: "compliance", After: map[string]any{"rows": len(checks), "cluster_id": scope.clusterID, "agent_token_id": scope.agentID}})
+		if err != nil {
+			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "ingest unavailable"})
 			return
 		}
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "ingest unavailable"})
 		return
 	}
 	// Close the compliance->response loop: failed controls fire response rules,
@@ -270,12 +285,5 @@ DO UPDATE SET
 		fireCluster = *clusterArg
 	}
 	c.alerts.fire(r.Context(), scope.orgID, fireCluster, failures)
-	if c.audit != nil {
-		_, _, _ = c.audit.Log(r.Context(), audit.Event{
-			OrgID: &scope.orgID, ActorID: scope.actorID,
-			Action: "compliance.ingest", TargetKind: "compliance",
-			After: map[string]any{"rows": len(checks), "cluster_id": scope.clusterID, "agent_token_id": scope.agentID},
-		})
-	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ingested": len(checks)})
 }

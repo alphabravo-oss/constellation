@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
@@ -106,4 +107,27 @@ func (c *Compliance) AgentClaimBenchRun(w http.ResponseWriter, r *http.Request) 
 	if ok {
 		c.claimBenchRun(w, r, scope)
 	}
+}
+
+// Hold ownership stable through evidence/request writes and their audit record.
+// FOR SHARE also fences non-key org_id updates, unlike FOR KEY SHARE.
+func (scope complianceWriteScope) lockCluster(w http.ResponseWriter, r *http.Request, tx pgx.Tx) bool {
+	if scope.clusterID == nil {
+		return true
+	}
+	var id uuid.UUID
+	err := tx.QueryRow(r.Context(), `SELECT id FROM clusters WHERE id=$1 AND org_id=$2 FOR SHARE`, scope.clusterID, scope.orgID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		status, message := http.StatusNotFound, "cluster not found"
+		if scope.agentID != nil {
+			status, message = http.StatusForbidden, "agent token cluster scope mismatch"
+		}
+		httpx.WriteJSON(w, status, map[string]string{"error": message})
+		return false
+	}
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "cluster unavailable"})
+		return false
+	}
+	return true
 }
