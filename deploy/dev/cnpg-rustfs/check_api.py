@@ -93,11 +93,15 @@ def check(mode, root, request):
         save(root, "registry-proof.json", {"id": registry_id, "job_id": job_id, "credentials": credentials})
         # Only the disposable harness seeds the pending target. The real claim
         # endpoint assigns the scanner identity and lease before any release.
+        # The demo seed includes pending scans. Put this proof first in FIFO
+        # order without altering their state or accepting an unrelated claim.
         (root / "registry-job.sql").write_text(
             "INSERT INTO scan_targets (id,org_id,type,ref,source_type,registry_id) "
             f"SELECT '{target_id}',org_id,'image','registry.invalid/proof:latest','registry',id FROM registries WHERE id='{registry_id}';\n"
-            "INSERT INTO scan_jobs (id,org_id,target_id,status) "
-            f"SELECT '{job_id}',org_id,id,'pending' FROM scan_targets WHERE id='{target_id}';\n")
+            "INSERT INTO scan_jobs (id,org_id,target_id,status,requested_at) "
+            f"SELECT '{job_id}',st.org_id,st.id,'pending',"
+            "LEAST(now(),COALESCE((SELECT min(sj.requested_at) FROM scan_jobs sj WHERE sj.org_id=st.org_id),now()))-interval '1 second' "
+            f"FROM scan_targets st WHERE st.id='{target_id}';\n")
         return
     else:
         require(mode in ("source", "restored", "wrong-key"), "Expected prepare, fixture, source, restored or wrong-key")
