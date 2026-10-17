@@ -207,7 +207,7 @@ Content-Length: 19
 ### POST /api/v1/auth/login
 ```
 {
-    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiJhZGM3YmY0Zi0wOGQ3LTQ0MjctYWI5Zi02YzkxMzhiZGYyMjQiLCJvaWQiOiJmNTRmZTJjMS0zODY4LTQwNjktOThmMi03NDQ4N2MxMmJlODMiLCJlbWFpbCI6ImFkbWluQGRlbW8udGVzdCIsInJvbGVzIjpbIlN1cGVyQWRtaW4iLCJTdXBlckFkbWluIiwiU3VwZXJBZG1pbiIsIlN1cGVyQWRtaW4iXSwiaXNzIjoiY29uc3RlbGxhdGlvbiIsInN1YiI6ImFkYzdiZjRmLTA4ZDctNDQyNy1hYjlmLTZjOTEzOGJkZjIyNCIsImF1ZCI6WyJjb25zdGVsbGF0aW9uLWFwaSJdLCJleHAiOjE3Nzg1OTg5MzIsImlhdCI6MTc3ODU5NTMzMiwianRpIjoiY2MxYTVlYjctOWZlNi00OWFlLWJlNjYtMmE4OTBmMmExMTU4In0.e20vTXDhGdO1nldfVnG2eHP2vyf2EhWG3dGQ2xCFr58",
+    "token": "[REDACTED: historical access token omitted]",
     "expires_at": "2026-05-12T15:15:32.928873506Z"
 }
 ```
