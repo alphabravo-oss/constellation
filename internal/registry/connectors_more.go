@@ -271,17 +271,22 @@ func (h *Harbor) harborGetPaged(ctx context.Context, endpoint string) ([]namedEn
 	var acc []namedEntity
 	for page := 1; ; page++ {
 		u := fmt.Sprintf("%s?page=%d&page_size=%d", endpoint, page, pageSize)
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			return nil, errors.New("harbor: invalid list request endpoint")
+		}
 		req.SetBasicAuth(h.cfg.Username, h.cfg.Password)
 		req.Header.Set("Accept", "application/json")
 		resp, err := h.client.Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("harbor: %w", err)
 		}
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+		body, readErr := readRegistryPage(resp, 8<<20)
+		if readErr != nil {
+			return nil, fmt.Errorf("harbor: %w", readErr)
+		}
 		link := resp.Header.Get("Link")
 		status := resp.StatusCode
-		resp.Body.Close()
 		if status != 200 {
 			return nil, fmt.Errorf("harbor: status %d", status)
 		}
@@ -377,17 +382,22 @@ func gitlabGetPaged[T any](ctx context.Context, g *GitLab, endpoint string, extr
 			}
 		}
 		u := endpoint + "?" + q.Encode()
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			return nil, errors.New("gitlab: invalid list request endpoint")
+		}
 		req.Header.Set("PRIVATE-TOKEN", g.cfg.Token)
 		req.Header.Set("Accept", "application/json")
 		resp, err := g.client.Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("gitlab: %w", err)
 		}
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+		body, readErr := readRegistryPage(resp, 8<<20)
+		if readErr != nil {
+			return nil, fmt.Errorf("gitlab: %w", readErr)
+		}
 		next := resp.Header.Get("X-Next-Page")
 		status := resp.StatusCode
-		resp.Body.Close()
 		if status != 200 {
 			return nil, fmt.Errorf("gitlab: status %d", status)
 		}
