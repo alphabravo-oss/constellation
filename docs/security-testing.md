@@ -1445,3 +1445,40 @@ Root verified all seven imported source hashes and 72 qualification records:
 This is source qualification only; combined binaries, images and deployment are
 pending. ECR SDK and shared V2 scanner errors, live provider credentials and
 broader registry acceptance remain outside this bounded correction.
+
+### Complete evidence before a passing CIS result
+
+The CIS follow-up reads module and plain SSH evidence through pinned roots with
+bounded bytes, lines, tree entries and depth. A module observed loaded or built
+into the running kernel fails. Complete, coherent running-kernel inventory can
+establish absence; missing, malformed, unreadable, truncated, symlinked or
+otherwise incomplete inventory cannot pass. An available but unloaded module
+warns. Blacklist/install text alone does not prove effective disabling. The
+conservative tree check can produce more skipped results where module trees
+contain symlinks, including build/source links.
+
+SSH checks consume the complete bounded configuration and check read/close
+failures before returning a verdict. Plain supported settings retain first-value
+semantics; Include, Match and unsupported syntax require review. Incomplete reads
+skip. Directory completion accepts only a terminal EOF through a bounded linear
+error chain; joined failures and cyclic or excessive wrapping cannot hide behind
+EOF. This inspects configuration evidence, not the effective running sshd state.
+
+Final fresh-schema-180 race/shuffle/count-two qualification passes 252 hostscan
+and 624 runtime-agent test executions. Both packages pass vet. Four skips are
+the two explicit native/Flannel opt-in fixtures repeated twice, not new packet
+acceptance. Count-aware configured lint improves from 176 to 172 with zero added
+occurrences. The exact owned PostgreSQL fixture is independently absent.
+
+Six original-behavior controls fail as intended (35 failure events and two
+passing controls). Injected old module/read helpers preserve original logic but
+substitute test IO; this does not claim a natural-host execution of old code.
+Earlier 234-pass and 252-pass attempts were rejected for new lint findings and
+remain in the evidence. Final-source tests include all corrected EOF controls.
+Root verified 119 sealed records and the three imported source hashes:
+`/tmp/constellation-cis-evidence-877a1c2/handoff/qualified-manifest.json`
+(SHA256 `8b1ec347e94c888a1fa26949297b206e3c307fc3614658d266b421989a145826`),
+with `QUALIFIED-SHA256SUMS`
+(SHA256 `f180065c690055b0c56fb0882e5534a1b1667d356037905742ad2b3348b21bf6`).
+Combined binaries/images and deployment remain pending; benchmark workers remain
+disabled on main. No parent CIS or enforcement acceptance item closes here.

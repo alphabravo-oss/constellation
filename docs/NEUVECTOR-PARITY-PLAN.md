@@ -89,6 +89,16 @@ source-qualified only; main remains on 877a1c2 until combined artifact validatio
 and deployment. ECR SDK and shared V2 scanner-error follow-ups remain separate.
 See the catalog-error entry in `docs/security-testing.md`; no parent gate closes.
 
+The qualified CIS follow-up requires complete bounded evidence before reporting
+module absence or a passing plain SSH setting. Loaded or built-in modules fail;
+incomplete inventories skip, available unloaded modules warn, and conditional or
+unsupported SSH configuration requires review. Static blacklist text alone does
+not establish effective disabling. Final fresh-schema tests pass 876 executions
+across hostscan/runtime-agent, with four explicit native/Flannel opt-in skips;
+vet passes and scoped lint removes four findings with none added. This is also
+source qualification pending combined artifacts and deployment, not a benchmark
+execution or broader CIS acceptance claim.
+
 Deployed schema180 preserves full unsigned native threat IDs and marks unproven
 historical maxima in compact row details. Its full-chain migration checks exact
 tenant/cluster tuples, raw-retention/watermark fences, unchanged traffic counters,
