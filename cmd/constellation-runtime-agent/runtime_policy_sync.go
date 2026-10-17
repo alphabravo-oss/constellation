@@ -37,6 +37,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -185,18 +186,12 @@ func (w *RuntimePolicySyncWorker) SyncOnce(ctx context.Context) {
 	if strings.TrimSpace(w.cfg.ClusterID) == "" || w.cfg.DPSup == nil {
 		return
 	}
-	policies, err := w.fetch(ctx)
+	policies, merged, err := w.fetchMerged(ctx)
 	if err != nil {
 		w.errors.Add(1)
 		w.cfg.Logger.Warn("runtime policy sync: fetch failed", slog.String("err", err.Error()))
 		return
 	}
-
-	// Scope the merged table to tap MACs UNION inline-enforce MACs. An inline
-	// (NFQUEUE) workload is skipped by the tap reconciler, so its verdict-capable
-	// ep is absent from TapMACs; without unioning EnforceMACs the policy table
-	// never reaches it and dp default-allows the very workload we put inline.
-	merged := buildMergedWorkloadPolicy(policies, unionMACs(w.cfg.DPSup.TapMACs(), w.cfg.DPSup.EnforceMACs()))
 
 	// Feed the FQDN allow-set every successful sync (cheap, idempotent) so the
 	// resolver only learns IPs for names an active rule references. This is the
@@ -277,6 +272,25 @@ func (w *RuntimePolicySyncWorker) SyncOnce(ctx context.Context) {
 		slog.Int("policies", len(policies)))
 }
 
+// fetchMerged prepares a complete validated bundle before the sync can mutate
+// resolver, policy, or fingerprint state.
+func (w *RuntimePolicySyncWorker) fetchMerged(ctx context.Context) ([]runtimePolicyWire, *dp.WorkloadPolicy, error) {
+	policies, err := w.fetch(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Scope the merged table to tap MACs UNION inline-enforce MACs. An inline
+	// (NFQUEUE) workload is skipped by the tap reconciler, so its verdict-capable
+	// ep is absent from TapMACs; without unioning EnforceMACs the policy table
+	// never reaches it and dp default-allows the very workload we put inline.
+	merged := buildMergedWorkloadPolicy(policies, unionMACs(w.cfg.DPSup.TapMACs(), w.cfg.DPSup.EnforceMACs()))
+	if merged == nil {
+		return nil, nil, errors.New("runtime policy sync: invalid wire identity")
+	}
+	return policies, merged, nil
+}
+
 // buildMergedWorkloadPolicy folds every non-disabled policy into one node-level
 // WorkloadPolicy. Mode mapping is applied per source policy: monitor demotes
 // every deny → violate (logged, not dropped); enforce keeps deny; disabled
@@ -326,9 +340,9 @@ func buildMergedWorkloadPolicy(policies []runtimePolicyWire, macs []string) *dp.
 			continue
 		}
 		monitor := p.Mode == "monitor"
-		var wireID uint32
-		if p.DPPolicyID > 0 {
-			wireID = uint32(p.DPPolicyID)
+		wireID, err := networkPolicyWireID(p.DPPolicyID)
+		if err != nil {
+			return nil
 		}
 		for _, r := range p.Rules {
 			if r == nil {
@@ -448,6 +462,9 @@ func (w *RuntimePolicySyncWorker) fetch(ctx context.Context) ([]runtimePolicyWir
 	var out runtimePolicyBundle
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, fmt.Errorf("decode: %w", err)
+	}
+	if err := validateNetworkPolicyWireIDs(out.Policies); err != nil {
+		return nil, err
 	}
 	return out.Policies, nil
 }
