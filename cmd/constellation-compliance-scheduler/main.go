@@ -67,6 +67,7 @@ import (
 	evidence "github.com/alphabravocompany/constellation/internal/complianceevidence"
 	compliancehandler "github.com/alphabravocompany/constellation/internal/handler/compliance"
 	"github.com/alphabravocompany/constellation/internal/obslog"
+	"github.com/alphabravocompany/constellation/internal/securefiles"
 	"github.com/alphabravocompany/constellation/pkg/compliance"
 	"github.com/alphabravocompany/constellation/pkg/report"
 	"github.com/alphabravocompany/constellation/pkg/version"
@@ -85,8 +86,14 @@ func main() {
 		fmt.Fprintln(os.Stderr, "DATABASE_URL required")
 		os.Exit(2)
 	}
-	if err := os.MkdirAll(*outDir, 0o755); err != nil {
+	artifactRoot, err := securefiles.OpenPrivateDir(*outDir)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "mkdir %s: %v\n", *outDir, err)
+		os.Exit(1)
+	}
+
+	if err := artifactRoot.Close(); err != nil {
+		fmt.Fprintln(os.Stderr, "close artifact directory:", err)
 		os.Exit(1)
 	}
 
@@ -277,8 +284,7 @@ UPDATE compliance_schedules
 
 	checks, summary, err := d.loadChecks(ctx, s)
 	if err != nil {
-		finalize("failed", "", "", 0, summary, err)
-		return err
+		return errors.Join(err, finalize("failed", "", "", 0, summary, err))
 	}
 
 	orgName, clusterName, err := d.resolveNames(ctx, s.OrgID, s.ClusterID)
@@ -306,16 +312,19 @@ UPDATE compliance_schedules
 		SourceLabel: "Current retained multi-source evidence; effective exemptions; graded rate excludes manual/exempted/not-applicable", SourceTotal: summary["total"], SourceReturned: len(checks), SourceTruncated: summary["truncated"] == 1,
 	})
 	if err != nil {
-		finalize("failed", "", "", 0, summary, err)
-		return err
+		return errors.Join(err, finalize("failed", "", "", 0, summary, err))
 	}
 
 	stamp := time.Now().UTC().Format("20060102T150405Z")
-	filename := fmt.Sprintf("%s-%s-%s.%s", safeName(s.Name), s.Framework, stamp, ext)
+	filename := fmt.Sprintf("%s-%s-%s-%s.%s", safeName(s.Name), safeName(s.Framework), stamp, runID, ext)
 	localPath := filepath.Join(d.outDir, filename)
-	if err := os.WriteFile(localPath, artifact, 0o644); err != nil {
-		finalize("failed", "", "", 0, summary, err)
-		return err
+	artifactRoot, err := securefiles.OpenPrivateDir(d.outDir)
+	if err != nil {
+		return errors.Join(err, finalize("failed", "", "", 0, summary, err))
+	}
+	defer func() { _ = artifactRoot.Close() }()
+	if err := securefiles.WriteFile(artifactRoot, filename, artifact, 0o600); err != nil {
+		return errors.Join(err, finalize("failed", "", "", 0, summary, err))
 	}
 	artifactFormat, artifactMediaType, artifactFilename = ext, report.ArtifactMediaType(ext), filename
 	size := int64(len(artifact))
@@ -329,7 +338,9 @@ UPDATE compliance_schedules
 		} else {
 			sig = raw
 			// Persist the signature next to the artifact so cosign verify-blob works.
-			_ = os.WriteFile(localPath+".sig", []byte(sig), 0o644)
+			if err := securefiles.WriteFile(artifactRoot, filename+".sig", []byte(sig), 0o600); err != nil {
+				return errors.Join(err, finalize("failed", "", "", 0, summary, err))
+			}
 		}
 	} else {
 		// Fallback: sha256 the artifact so the UI can show *something* in
@@ -503,22 +514,7 @@ func sarifLevel(severity string) string {
 func (d *daemon) deliver(ctx context.Context, t compliancehandler.DeliveryTarget, s dueSchedule, localPath string, body []byte, sig, ext string) error {
 	switch t.Kind {
 	case "file":
-		if t.Target == "" {
-			return errors.New("file delivery: target required")
-		}
-		dir := strings.TrimPrefix(t.Target, "file://")
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return err
-		}
-		dest := filepath.Join(dir, filepath.Base(localPath))
-		if err := os.WriteFile(dest, body, 0o644); err != nil {
-			return err
-		}
-		if sig != "" {
-			_ = os.WriteFile(dest+".sig", []byte(sig), 0o644)
-		}
-		d.logger.Info("delivered: file", "path", dest)
-		return nil
+		return d.deliverFile(t.Target, localPath, body, sig)
 	case "email":
 		return d.deliverEmail(t, s, body, sig, filepath.Base(localPath))
 	case "s3":
@@ -528,6 +524,47 @@ func (d *daemon) deliver(ctx context.Context, t compliancehandler.DeliveryTarget
 	default:
 		return fmt.Errorf("unknown delivery kind %q", t.Kind)
 	}
+}
+
+func (d *daemon) deliverFile(target, localPath string, body []byte, sig string) error {
+	if target == "" {
+		return errors.New("file delivery: target required")
+	}
+	dir := strings.TrimPrefix(target, "file://")
+	trusted, err := filepath.Abs(d.outDir)
+	if err != nil {
+		return err
+	}
+	destination, err := filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+	relative, err := filepath.Rel(trusted, destination)
+	if err != nil || !filepath.IsLocal(relative) {
+		return errors.New("file delivery target must be within REPORT_OUT_DIR")
+	}
+	parent, err := securefiles.OpenPrivateDir(d.outDir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = parent.Close() }()
+	root, err := securefiles.OpenPrivateSubdir(parent, relative)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	name := filepath.Base(localPath)
+	if err = securefiles.WriteFile(root, name, body, 0o600); err != nil {
+		return err
+	}
+	if sig != "" {
+		if err = securefiles.WriteFile(root, name+".sig", []byte(sig), 0o600); err != nil {
+			return err
+		}
+	}
+	dest := filepath.Join(dir, name)
+	d.logger.Info("delivered: file", "path", dest)
+	return nil
 }
 
 func (d *daemon) deliverEmail(t compliancehandler.DeliveryTarget, s dueSchedule, body []byte, sig, filename string) error {
@@ -625,7 +662,7 @@ func (d *daemon) deliverWebhook(ctx context.Context, t compliancehandler.Deliver
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		return fmt.Errorf("webhook %s: %d %s", url, resp.StatusCode, strings.TrimSpace(string(body)))
@@ -659,22 +696,76 @@ func ensureCosignKey(outDir string, logger *slog.Logger) (*cosignSigner, error) 
 	}
 	// Generate an ephemeral key if absent.
 	keyDir := filepath.Join(outDir, ".cosign")
-	if err := os.MkdirAll(keyDir, 0o700); err != nil {
+	keyRoot, err := securefiles.OpenPrivateDir(keyDir)
+	if err != nil {
 		return nil, err
 	}
+	defer func() { _ = keyRoot.Close() }()
 	keyPath := filepath.Join(keyDir, "cosign.key")
 	pubPath := filepath.Join(keyDir, "cosign.pub")
-	if _, err := os.Stat(keyPath); err == nil {
+	existing, err := hardenGeneratedKey(keyRoot)
+	if err != nil {
+		return nil, err
+	}
+	if existing {
 		return &cosignSigner{bin: bin, keyPath: keyPath, password: pw}, nil
 	}
-	cmd := exec.Command(bin, "generate-key-pair", "--output-key-prefix", filepath.Join(keyDir, "cosign"))
-	cmd.Env = append(os.Environ(), "COSIGN_PASSWORD="+pw)
-	out, err := cmd.CombinedOutput()
+	// cosign chooses its output permissions. Generate in an isolated private
+	// staging directory, then atomically publish the key pair with explicit
+	// private/public permissions, never through pre-existing output symlinks.
+	staging, err := os.MkdirTemp("", "compliance-cosign-*")
 	if err != nil {
-		return nil, fmt.Errorf("cosign generate-key-pair: %w (%s)", err, strings.TrimSpace(string(out)))
+		return nil, err
+	}
+	defer func() { _ = os.RemoveAll(staging) }()
+	cmd := exec.Command(bin, "generate-key-pair", "--output-key-prefix", filepath.Join(staging, "cosign"))
+	cmd.Env = append(os.Environ(), "COSIGN_PASSWORD="+pw)
+	if _, err := cmd.CombinedOutput(); err != nil {
+		return nil, fmt.Errorf("cosign generate-key-pair: %w", err)
+	}
+	generated, err := os.OpenRoot(staging)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = generated.Close() }()
+	privateKey, err := generated.ReadFile("cosign.key")
+	if err != nil {
+		return nil, err
+	}
+	publicKey, err := generated.ReadFile("cosign.pub")
+	if err != nil {
+		return nil, err
+	}
+	if len(privateKey) == 0 || len(publicKey) == 0 {
+		return nil, errors.New("cosign generated an empty key pair")
+	}
+	if err = securefiles.WriteFile(keyRoot, "cosign.pub", publicKey, 0o644); err != nil {
+		return nil, err
+	}
+	if err = securefiles.WriteFile(keyRoot, "cosign.key", privateKey, 0o600); err != nil {
+		return nil, err
 	}
 	logger.Info("generated cosign key", "key", keyPath, "pub", pubPath)
 	return &cosignSigner{bin: bin, keyPath: keyPath, password: pw}, nil
+}
+
+func hardenGeneratedKey(root *os.Root) (bool, error) {
+	info, err := root.Lstat("cosign.key")
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !info.Mode().IsRegular() {
+		return false, errors.New("generated signing key must be a regular file")
+	}
+	file, err := root.Open("cosign.key")
+	if err != nil {
+		return false, err
+	}
+	chmodErr := file.Chmod(0o600)
+	return true, errors.Join(chmodErr, file.Close())
 }
 
 // Sign produces a base64 cosign signature over the artifact at path. Returns the

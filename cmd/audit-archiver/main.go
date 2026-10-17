@@ -32,6 +32,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/alphabravocompany/constellation/internal/securefiles"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/backup"
 	"github.com/alphabravocompany/constellation/pkg/observability"
@@ -105,7 +106,7 @@ func main() {
 	prefix := flag.String("prefix", env("AUDIT_PREFIX", "audit"), "Object key prefix")
 	window := flag.Duration("window", envDuration("FREEZE_WINDOW", 24*time.Hour), "Window size to freeze")
 	dryRun := flag.Bool("dry-run", false, "Write to local files instead of S3")
-	outDir := flag.String("out-dir", env("AUDIT_OUT_DIR", os.TempDir()), "Local output directory for --dry-run")
+	outDir := flag.String("out-dir", env("AUDIT_OUT_DIR", filepath.Join(os.TempDir(), "constellation-audit")), "Local output directory for --dry-run")
 	signMode := flag.String("sign-mode", env("AUDIT_SIGN_MODE", string(backup.SignModeNone)), "Manifest signing mode: none, static-key, keyless")
 	signKey := flag.String("sign-key", env("AUDIT_SIGN_KEY", ""), "PEM ed25519 private key path for --sign-mode=static-key")
 	cosignBin := flag.String("cosign-bin", env("COSIGN_BIN", "cosign"), "cosign binary path for --sign-mode=keyless")
@@ -204,12 +205,12 @@ SELECT id, org_id, actor_id, actor_ip::text, action, target_kind, target_id, bef
 	keys := makeArchiveKeys(*prefix, start, end)
 
 	// Write to a temp file (gzip), checksum, then upload or move locally.
-	tmpPath := filepath.Join(os.TempDir(), fmt.Sprintf("audit-%s.jsonl.gz", start.Format("20060102T150405Z")))
-	f, err := os.Create(tmpPath)
+	f, err := os.CreateTemp("", "constellation-audit-*.jsonl.gz")
 	if err != nil {
 		fatal(1, "temp file", err)
 	}
-	defer os.Remove(tmpPath)
+	tmpPath := f.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
 	gz := gzip.NewWriter(f)
 	enc := json.NewEncoder(gz)
 
@@ -218,7 +219,7 @@ SELECT id, org_id, actor_id, actor_ip::text, action, target_kind, target_id, bef
 	var count int64
 
 	for rows.Next() {
-		var row map[string]any = make(map[string]any)
+		row := make(map[string]any)
 		var id int64
 		var orgID, actorID *string
 		var actorIP, action, targetKind, targetID, prevHash, chainHash, requestID *string
@@ -416,11 +417,11 @@ func signArchiveManifest(manifest archiveManifest, opts backup.SignerOptions) ([
 }
 
 func fileSHA256(path string) (string, error) {
-	f, err := os.Open(path)
+	f, err := openArchiveFile(path)
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
 		return "", err
@@ -430,45 +431,30 @@ func fileSHA256(path string) (string, error) {
 
 func writeLocalArtifacts(outDir string, keys archiveKeys, archivePath string, manifest, sig, cert []byte) error {
 	if outDir == "" {
-		outDir = os.TempDir()
+		outDir = filepath.Join(os.TempDir(), "constellation-audit")
 	}
-	if err := os.MkdirAll(outDir, 0o755); err != nil {
+	root, err := securefiles.OpenPrivateDir(outDir)
+	if err != nil {
 		return err
 	}
-	if err := copyFile(filepath.Join(outDir, filepath.Base(keys.Archive)), archivePath, 0o644); err != nil {
+	defer func() { _ = root.Close() }()
+	source, err := openArchiveFile(archivePath)
+	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(outDir, filepath.Base(keys.Manifest)), manifest, 0o644); err != nil {
+	defer func() { _ = source.Close() }()
+	if err = securefiles.CopyFile(root, filepath.Base(keys.Archive), source, 0o600); err != nil {
 		return err
 	}
-	if len(sig) > 0 {
-		if err := os.WriteFile(filepath.Join(outDir, filepath.Base(keys.Signature)), sig, 0o644); err != nil {
-			return err
+	for name, body := range map[string][]byte{keys.Manifest: manifest, keys.Signature: sig, keys.Cert: cert} {
+		if len(body) == 0 {
+			continue
 		}
-	}
-	if len(cert) > 0 {
-		if err := os.WriteFile(filepath.Join(outDir, filepath.Base(keys.Cert)), cert, 0o644); err != nil {
+		if err = securefiles.WriteFile(root, filepath.Base(name), body, 0o600); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-func copyFile(dst, src string, mode os.FileMode) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		_ = out.Close()
-		return err
-	}
-	return out.Close()
 }
 
 type objectUploader interface {
@@ -505,11 +491,11 @@ func uploadArchive(ctx context.Context, client objectUploader, bucket string, ke
 }
 
 func putFile(ctx context.Context, client objectUploader, bucket, key, path, contentType, contentEncoding string, metadata map[string]string) error {
-	f, err := os.Open(path)
+	f, err := openArchiveFile(path)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	return putObject(ctx, client, bucket, key, f, contentType, contentEncoding, metadata)
 }
 
@@ -559,4 +545,15 @@ func payloadSHA256(r io.Reader) (string, error) {
 		return "", err
 	}
 	return base64.StdEncoding.EncodeToString(h.Sum(nil)), nil
+}
+
+// openArchiveFile pins the source directory and refuses a leaf symlink escaping
+// it; archive paths come from this job's private tempfile or explicit test input.
+func openArchiveFile(path string) (*os.File, error) {
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = root.Close() }()
+	return root.Open(filepath.Base(path))
 }
