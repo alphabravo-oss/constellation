@@ -13,7 +13,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -176,14 +175,15 @@ func sessionUploadLoop(
 					logger.Info("session killed via dp ctrl_clear_session", slog.Uint64("id", uint64(id)))
 				}
 			}
-			// Apply the cluster's weak-TLS detection toggle live (only when it changes).
-			if weakTLSApplied == nil || *weakTLSApplied != resp.WeakTLS {
-				if err := sup.SetWeakTLSDetection(resp.WeakTLS); err != nil {
-					logger.Warn("set weak-TLS detection failed", slog.Bool("enable", resp.WeakTLS), slog.String("err", err.Error()))
+			// Apply only an explicit server setting. Older/partial control envelopes
+			// that omit the toggle must preserve the currently applied configuration.
+			if weakTLSSettingChanged(weakTLSApplied, resp.WeakTLS) {
+				if err := sup.SetWeakTLSDetection(*resp.WeakTLS); err != nil {
+					logger.Warn("set weak-TLS detection failed", slog.Bool("enable", *resp.WeakTLS), slog.String("err", err.Error()))
 				} else {
-					v := resp.WeakTLS
+					v := *resp.WeakTLS
 					weakTLSApplied = &v
-					logger.Info("weak-TLS detection applied", slog.Bool("enabled", resp.WeakTLS))
+					logger.Info("weak-TLS detection applied", slog.Bool("enabled", v))
 				}
 			}
 		}
@@ -193,7 +193,7 @@ func sessionUploadLoop(
 type sessionUploadResp struct {
 	Accepted int      `json:"accepted"`
 	Kill     []uint32 `json:"kill"`
-	WeakTLS  bool     `json:"weak_tls"`
+	WeakTLS  *bool    `json:"weak_tls"`
 }
 
 // postSessionBatch uploads the snapshot and returns the server's response (kill ids +
@@ -224,12 +224,13 @@ func postSessionBatch(ctx context.Context, client *http.Client, url, token strin
 			lastErr = err
 			continue
 		}
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 65536))
-		_ = resp.Body.Close()
+		respBody, err := readSessionResponse(resp)
+		if err != nil {
+			lastErr = err
+			continue
+		}
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			var parsed sessionUploadResp
-			_ = json.Unmarshal(respBody, &parsed)
-			return &parsed, nil
+			return parseSessionResponse(respBody)
 		}
 		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
 			return nil, fmt.Errorf("server %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
