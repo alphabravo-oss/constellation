@@ -776,6 +776,7 @@ func (a *Auth) SAMLLogin(w http.ResponseWriter, r *http.Request) {
 	if browser {
 		setSAMLBrowserCookie(w, relayState)
 	}
+	// #nosec G710 -- Destination comes from configured IdP metadata; StartLogin query-escapes caller RelayState.
 	http.Redirect(w, r, redirectURL, http.StatusFound)
 }
 

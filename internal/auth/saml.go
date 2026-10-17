@@ -136,7 +136,9 @@ func (p *SAMLProvider) StartLogin(relayState string) (string, error) {
 		return "", fmt.Errorf("saml: build AuthnRequest: %w", err)
 	}
 	p.storePending(req.ID)
-	u, err := req.Redirect(relayState, &p.sp)
+	// crewjam's Redirect appends RelayState to RawQuery before signing it.
+	// Encode the opaque value so it cannot add query fields or a fragment.
+	u, err := req.Redirect(url.QueryEscape(relayState), &p.sp)
 	if err != nil {
 		return "", fmt.Errorf("saml: redirect URL: %w", err)
 	}
