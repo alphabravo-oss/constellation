@@ -70,6 +70,9 @@ const maxInFlightUploads = 4
 // reused instead of reopened per batch.
 var sharedUploadClient = &http.Client{
 	Timeout: 10 * time.Second,
+	// API upload endpoints never redirect. Refuse every hop so a 307/308
+	// cannot replay captured telemetry or turn an unrelated response into an ACK.
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	Transport: &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
 		MaxIdleConns:          100,
