@@ -419,9 +419,14 @@ failures/skips and 2,344 frontend tests on pinned Node24.21.0. A full migration-
 179→180 drill preserves every non-target field and traffic counter, repairs only
 proven retained cohorts, repeats without changes and rejects unsafe Down without
 mutation. API/migration/frontend image payloads and exact build provenance pass.
-A fresh main backup completed; exact-image CNPG recovery including high unsigned
-IDs and incomplete aggregate metadata is running. Controlled rollout remains
-pending that proof. Evidence: `/tmp/constellation-threat180-5b82b12/`.
+A fresh main backup completed. Exact-image CNPG scheduled RustFS backup/PITR,
+existing session/configuration/encrypted credentials/audit/login, wrong-key
+rejection and retained-key recovery pass. High unsigned IDs and incomplete
+aggregate metadata remain identical after restore and PostgreSQL pod restart
+(201 seconds). Owned namespace deletion is requested; graceful cleanup is
+pending. This is a single-node, same-host recovery proof. Controlled main rollout
+remains pending image-cache and final deployment guards. Evidence:
+`/tmp/constellation-threat180-5b82b12/`.
 
 PCAP source `68e75a6` confines private atomic uploads/downloads/removal and holds
 the exact capture row through completion, preventing deletion races and false
@@ -429,8 +434,13 @@ success after database failure. Sixty-four fresh179 executions pass; scoped lint
 removes four findings with none added. Source `638ca7e` prevents status-only
 completion and late failure notifications from downgrading committed uploads;
 downloads verify actual size and SHA256 before returning bytes. Sixty-two focused
-fresh180 executions pass, plus six API-contract executions. Full-package and
-actual durable-PVC restart qualification remain pending. Chart support requires
+fresh180 executions pass, plus six API-contract executions. Full runtime
+qualification passes 890 executions without skips. An actual isolated RWO PVC
+retains a synthetic capture through Recreate API replacement: identical bytes
+and SHA256, unchanged PVC UID, private 0700/0600 permissions, same session and
+terminal-state rejection. This does not qualify real capture, shared RWX, node
+loss or off-host recovery. Evidence: `/tmp/pcap-pvc-proof/result.json`.
+Chart support requires
 an explicitly owned Bound filesystem claim: one replica/Recreate for RWO, shared
 RWX for multiple replicas. No ephemeral-storage durability claim or main PVC
 enablement is made. A failed or unknown completion can leave a complete private

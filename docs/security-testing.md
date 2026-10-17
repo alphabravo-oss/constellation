@@ -638,13 +638,23 @@ Deployment evidence: `/tmp/constellation-upload-950ca77/`.
 Schema180 exact5b82b12 broader qualification passes 2,930 fresh-database executions
 without skips and 2,344 frontend tests. Full-chain179→180 preservation and guarded
 downgrade proof passes, as do exact API/migration/frontend image checks. The fresh
-main backup is complete; enhanced exact-image CNPG recovery remains pending.
+main backup is complete. Enhanced exact-image CNPG scheduled backup/PITR and
+201-second PostgreSQL pod restart preserve exact high unsigned threat IDs and
+incomplete aggregate metadata, alongside session/configuration/credentials/audit
+and wrong-key checks. Main schema180 deployment remains pending; isolated
+namespace graceful cleanup was requested. This does not qualify HA, off-host
+recovery or node loss. Evidence: `cnpg-recovery-summary.json` under the candidate
+evidence directory.
 
 PCAP private-file and serialized completion source68e75a6 passes64 focused179
 executions. Source638ca7e rejects status-only completion and receipt downgrades;
 verified downloads require matching private bytes, size and SHA256. Its62 focused
-180 executions and6 API-contract executions pass. Full runtime/PVC restart proof
-is pending; no main durable storage enablement is claimed. Failed or unknown
+180 executions and6 API-contract executions pass. Full runtime qualification
+passes890 executions without skips. Actual isolated RWO PVC proof retains an
+identical synthetic capture and private permissions through API replacement,
+with the same PVC and authenticated session. No main durable storage enablement,
+real traffic capture, RWX or node-loss acceptance is claimed. Evidence:
+`/tmp/pcap-pvc-proof/result.json`. Failed or unknown
 commit can retain a private complete orphan, without reporting success.
 
 Flannel actual-packet acceptance is currently failed: native named allow works,
