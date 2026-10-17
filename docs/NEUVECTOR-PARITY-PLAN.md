@@ -690,6 +690,30 @@ frontend, FIPS and dependency/vulnerability checks pass. Lint1509, gosec166 and
 historical gitleaks remain failed. These are blocking results, not a baseline
 waiver. No overall parity acceptance row is closed by these bounded corrections.
 
+Source `46df2d6` closes a remaining proxy-header rate-limit bypass. The trusted
+socket peer is checked before client-IP resolution; only `X-Forwarded-For` is
+used, walking trusted hops from right to left until the first untrusted address.
+Client-controlled prefixes, `True-Client-IP` and `X-Real-IP` cannot override that
+address. Missing/invalid trusted suffixes and excessive chains retain the socket
+address. Explicit federation transport trust is unchanged. Broad private-network
+defaults remain a documented compatibility assumption; operators must configure
+actual proxy ranges and append or overwrite verified forwarding evidence.
+
+The full server package passes 494 fresh180 repeated race/shuffle executions,
+with zero skips. All three spoofing paths defeat the original limiter twice;
+the candidate rejects request11 and preserves the caller's request. Vet passes.
+Compared with hosted39020011292, scoped server lint decreases74→73 with no added
+findings; the remaining73 still fail the unchanged gate. No scanner settings or
+production suppressions changed, and this source is not yet deployed. Evidence:
+`/tmp/constellation-client-ip-a6b20a2/evidence-manifest.json`
+(SHA256 `d6f355dc918af69ee6c9c52365e5078d74a4fd234f3f46330bd929a49d96a14b`).
+
+Hosted `39022267072` at `a6b20a2` has completed quality/security reports:
+lint1505 and gosec163 remain blocking; historical gitleaks also fails. Unit,
+frontend, FIPS and dependency jobs pass; browser/integration are still running
+at this checkpoint. These counts precede `46df2d6`; they do not qualify later
+signing or CLI changes.
+
 ## October 12 implementation continuation
 
 The user selected **Astronomer-style console behavior and workflows** as the
