@@ -2249,6 +2249,8 @@ export interface NetworkWorkload {
 }
 
 export interface ConversationEntry {
+  /** Missing on legacy servers; false means historical signed MAX lost information. */
+  threat_id_complete?: boolean;
   protocol: string;
   application: string;
   port: number;
@@ -2440,6 +2442,8 @@ export interface NetworkFlow {
   /** dp-only: L7 application id (third_party/neuvector/dp/apis.h). 0 = unknown. */
   application_id?: number;
 
+  /** Whether the retained aggregate signature maximum is proven complete. */
+  threat_id_complete?: boolean;
   /** dp-only: NeuVector signature ID if this flow tripped a threat detector. */
   threat_id?: number;
   /** Resolved threat name for threat_id — lets the inspector label the threat even when

@@ -231,7 +231,7 @@ type deploymentNetworkFlowDTO struct {
 	Bytes           int64     `json:"bytes"`
 	Packets         int64     `json:"packets"`
 	Sessions        int64     `json:"sessions,omitempty"`
-	ThreatID        int       `json:"threat_id,omitempty"`
+	ThreatID        int64     `json:"threat_id,omitempty"`
 	Severity        int       `json:"severity,omitempty"`
 	LastSeenAt      time.Time `json:"last_seen_at"`
 }
@@ -793,9 +793,9 @@ SELECT id::text,
 	out := []deploymentThreatPivotDTO{}
 	for rows.Next() {
 		var id, rowClusterID, workloadID, rowNamespace, podName, node, epmac, msg string
-		var threatID, application int32
+		var application int32
 		var severity, action, ipProto int16
-		var dlpNameHash int64
+		var threatID, dlpNameHash int64
 		var srcIP, dstIP string
 		var srcPort, dstPort, pktLen, capLen int
 		var pktIngress, sessIngress bool
@@ -809,7 +809,7 @@ SELECT id::text,
 		if dlpNameHash > 0 {
 			kind = "dlp"
 		}
-		threatName := NeuVectorThreatName(uint32(threatID))
+		threatName := NetworkThreatName(threatID)
 		title := threatName
 		if kind == "dlp" {
 			title = "DLP " + title

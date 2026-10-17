@@ -121,7 +121,7 @@ func (h *RuntimeThreats) threatInventory(w http.ResponseWriter, r *http.Request,
 	scan := func(row inventorylist.Row) (RuntimeThreatRow, error) {
 		var t RuntimeThreatRow
 		err := row.Scan(&t.ID, &t.OrgID, &t.ClusterID, &t.Node, &t.EPMAC, &t.WorkloadID, &t.Namespace, &t.PodName, &t.ThreatID, &t.Severity, &t.Action, &t.Application, &t.Msg, &t.IPProto, &t.SrcIP, &t.SrcPort, &t.DstIP, &t.DstPort, &t.PktLen, &t.CapLen, &t.PktIngress, &t.SessIngress, &t.ReportedAt, &t.At, &t.Category, &t.PlatformRole)
-		t.ThreatName = resolveThreatName(uint32(t.ThreatID))
+		t.ThreatName = storedThreatName(t.ThreatID)
 		return t, err
 	}
 	if csv {

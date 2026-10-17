@@ -41,7 +41,7 @@ INSERT INTO network_flow_rollups (
     org_id, cluster_id, src_workload, dst_workload, protocol, l7_protocol, dst_port, verdict, bucket,
     sum_bytes, sum_packets, flow_count, max_at, min_src_addr, min_dst_addr, min_src_port,
     has_dp, has_hubble, has_bpf, min_source, sum_client_bytes, sum_server_bytes, sum_sessions,
-    max_threat_id, max_severity, max_application, fqdn)
+    max_threat_id, max_severity, max_application, fqdn, threat_id_complete)
 SELECT f.org_id, f.cluster_id, f.src_workload, f.dst_workload, f.protocol,
        COALESCE(f.l7_protocol, ''), COALESCE(f.dst_port, 0), COALESCE(f.verdict, ''),
        date_trunc('hour', f.at),
@@ -49,7 +49,7 @@ SELECT f.org_id, f.cluster_id, f.src_workload, f.dst_workload, f.protocol,
        COALESCE(MIN(f.src_addr), ''), COALESCE(MIN(f.dst_addr), ''), COALESCE(MIN(f.src_port), 0),
        bool_or(f.source = 'dp'), bool_or(f.source = 'hubble'), bool_or(f.source = 'bpf'), COALESCE(MIN(f.source), ''),
        SUM(COALESCE(f.client_bytes, 0))::bigint, SUM(COALESCE(f.server_bytes, 0))::bigint, SUM(COALESCE(f.sessions, 0))::bigint,
-       MAX(f.threat_id), MAX(f.severity), MAX(f.application), COALESCE(MIN(NULLIF(f.fqdn, '')), '')
+       MAX(f.threat_id), MAX(f.severity), MAX(f.application), COALESCE(MIN(NULLIF(f.fqdn, '')), ''), true
   FROM network_flows f
  WHERE f.cluster_id IS NOT NULL
    AND /*predicate*/
@@ -72,6 +72,7 @@ DO UPDATE SET
     sum_client_bytes = network_flow_rollups.sum_client_bytes + EXCLUDED.sum_client_bytes,
     sum_server_bytes = network_flow_rollups.sum_server_bytes + EXCLUDED.sum_server_bytes,
     sum_sessions     = network_flow_rollups.sum_sessions + EXCLUDED.sum_sessions,
+    threat_id_complete = network_flow_rollups.threat_id_complete AND EXCLUDED.threat_id_complete,
     max_threat_id    = GREATEST(network_flow_rollups.max_threat_id, EXCLUDED.max_threat_id),
     max_severity     = GREATEST(network_flow_rollups.max_severity, EXCLUDED.max_severity),
     max_application  = GREATEST(network_flow_rollups.max_application, EXCLUDED.max_application),

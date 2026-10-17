@@ -79,6 +79,15 @@ login branding/provider visibility pass; the stored bootstrap credential returns
 401, so authenticated main-browser navigation is not claimed. Deployment evidence:
 `/tmp/constellation-bench-1cb1045/evidence/deployment-status.json`.
 
+The schema180 candidate preserves full unsigned native threat IDs and marks
+unrecoverable historical maxima in compact row details. Its migration proof
+checks exact tenant/cluster tuples, raw-retention and watermark fences, unchanged
+traffic counters, lock ordering and guarded downgrade. Forty-six fresh-database
+executions and 101 frontend tests pass; scoped lint removes six findings with
+none added. It requires a controlled stop/replace and remains undeployed pending
+exact-artifact qualification. See `docs/security-testing.md` for the rollout
+constraints. This bounded correction does not close a broader acceptance item.
+
 Frozen candidate source **034f2baf49c1** includes:
 
 - Legacy backup list/detail/download reads require exact organization ownership;

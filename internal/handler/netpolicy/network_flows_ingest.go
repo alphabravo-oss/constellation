@@ -183,7 +183,7 @@ VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),
         NULLIF($7,0),NULLIF($8,0),$9,NULLIF($10,''),$11,$12,$13,$14,$15,
         NULLIF($16,0::bigint), NULLIF($17,0::bigint), NULLIF($18,0::bigint),
         NULLIF($19,0::int), NULLIF($20,''),
-        NULLIF($21,0::bigint), NULLIF($22,0::int), NULLIF($23,0::smallint),
+        NULLIF($21,0::bigint), NULLIF($22,0::bigint), NULLIF($23,0::smallint),
         NULLIF($24,''), NULLIF($25,'')) RETURNING id`
 
 	var accepted, rejected int
@@ -311,7 +311,7 @@ VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),
 			source, row.At.UTC(),
 			row.ClientBytes, row.ServerBytes, row.Sessions,
 			application, policyAction,
-			int64(row.PolicyID), int32(row.ThreatID), int16(row.Severity),
+			int64(row.PolicyID), int64(row.ThreatID), int16(row.Severity),
 			strings.ToLower(strings.TrimSpace(row.EPMAC)),
 			strings.ToLower(strings.TrimSpace(row.Fqdn)),
 		)

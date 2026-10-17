@@ -241,7 +241,7 @@ VALUES ($1,$2, NULLIF($3,''), NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), NULLI
 		if _, err := tx.Exec(r.Context(), insertSQL,
 			tok.OrgID, cid, strings.TrimSpace(row.Node), strings.ToLower(strings.TrimSpace(row.EPMAC)),
 			workloadID, namespace, podName,
-			int32(row.ThreatID), int16(row.Severity), int16(row.Action),
+			int64(row.ThreatID), int16(row.Severity), int16(row.Action),
 			application, strings.TrimSpace(row.Msg), int64(row.DlpNameHash),
 			int16(row.IPProto), int32(row.EtherType),
 			strings.TrimSpace(row.SrcIP), row.SrcPort, strings.TrimSpace(row.DstIP), row.DstPort,
@@ -355,7 +355,7 @@ type RuntimeThreatRow struct {
 	WorkloadID   string    `json:"workload_id,omitempty"`
 	Namespace    string    `json:"namespace,omitempty"`
 	PodName      string    `json:"pod_name,omitempty"`
-	ThreatID     int32     `json:"threat_id"`
+	ThreatID     int64     `json:"threat_id"`
 	ThreatName   string    `json:"threat_name,omitempty"` // pretty label derived from ID
 	Category     string    `json:"category,omitempty"`    // "ips" | "dlp" | "waf", derived from threat_id range
 	Severity     int16     `json:"severity"`
@@ -485,8 +485,8 @@ SELECT id::text, org_id::text, cluster_id::text,
 		return
 	}
 	t.PlatformRole = roles[0]
-	t.ThreatName = resolveThreatName(uint32(t.ThreatID))
-	t.Category = threatCategory(int64(t.ThreatID))
+	t.ThreatName = storedThreatName(t.ThreatID)
+	t.Category = threatCategory(t.ThreatID)
 	t.Packet = packet
 	if preview := parsePacketL7(packet, t.DstPort); preview != nil {
 		t.L7 = preview
@@ -545,4 +545,11 @@ func clampInt(n, lo, hi int) int {
 		return hi
 	}
 	return n
+}
+
+func storedThreatName(value int64) string {
+	if id, ok := handler.NetworkThreatID(value); ok {
+		return resolveThreatName(id)
+	}
+	return fmt.Sprintf("signature %d", value)
 }

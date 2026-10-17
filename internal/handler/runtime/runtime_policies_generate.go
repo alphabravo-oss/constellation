@@ -9,7 +9,7 @@
 //	  returns: the inserted RuntimePolicy (mode=monitor)
 //
 // Strategy: query network_flows for the workload in the window, EXCLUDE any
-// flow with threat_id > 0 (don't whitelist attack traffic), feed the result
+// flow with threat_id != 0 (don't whitelist attack traffic), feed the result
 // into pkg/netpolicy.BuildDPRules + GenerateNative/Cilium/Calico. The
 // caller decides whether to preview (just :generate) or apply (which
 // creates a monitor-mode runtime_policies row).
@@ -53,7 +53,7 @@ type GenerateResponse struct {
 	Workload        string           `json:"workload"`
 	FlowsSeen       int              `json:"flows_seen"`       // before threat filtering
 	FlowsKept       int              `json:"flows_kept"`       // after threat filtering
-	ThreatsExcluded int              `json:"threats_excluded"` // flows dropped because threat_id > 0
+	ThreatsExcluded int              `json:"threats_excluded"` // flows dropped because threat_id != 0
 	Rules           []*dp.PolicyRule `json:"rules"`
 	DefAction       uint8            `json:"def_action"`
 	ApplyDir        int              `json:"apply_dir"`
@@ -186,7 +186,7 @@ func (h *RuntimePoliciesHTTP) generateInternal(ctx context.Context, orgID uuid.U
 }
 
 // fetchFlowsForGeneration pulls network_flows for the workload, excluding
-// any row with threat_id > 0. Returns the converted netpolicy.Flow slice
+// any row with threat_id != 0. Returns the converted netpolicy.Flow slice
 // PLUS the seen/excluded counters so callers can show the operator what
 // was filtered.
 //
@@ -216,12 +216,12 @@ SELECT src_workload, dst_workload,
 	for rows.Next() {
 		var src, dst, srcAddr, dstAddr, proto, l7, lastSeen, fqdn string
 		var port int
-		var threatID int32
+		var threatID int64
 		if err := rows.Scan(&src, &dst, &srcAddr, &dstAddr, &port, &proto, &l7, &threatID, &lastSeen, &fqdn); err != nil {
 			return nil, 0, 0, err
 		}
 		seen++
-		if threatID > 0 {
+		if threatID != 0 {
 			// Threat flow — DON'T add it to the allow list. dp's signature
 			// engine already produces alert/deny verdicts on these; the
 			// auto-gen output should reinforce that, not regress it.

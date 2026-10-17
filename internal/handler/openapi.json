@@ -5420,7 +5420,9 @@
           },
           "threat_id": {
             "type": "integer",
-            "minimum": 0
+            "minimum": 0,
+            "format": "int64",
+            "maximum": 4294967295
           },
           "application": {
             "type": "integer",
@@ -6808,6 +6810,12 @@
           "violating": {
             "type": "integer",
             "minimum": 0
+          },
+          "threat_id_incomplete": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "description": "Number of matching aggregate rows whose historical unsigned threat-ID maximum is unproven. Independent of pagination and source_complete row-count coverage."
           }
         },
         "required": [
@@ -6818,7 +6826,8 @@
           "packets",
           "sessions",
           "blocked",
-          "violating"
+          "violating",
+          "threat_id_incomplete"
         ]
       },
       "PcapInventorySummary": {
@@ -6932,7 +6941,10 @@
           },
           "threat_id": {
             "type": "integer",
-            "minimum": 0
+            "minimum": 0,
+            "format": "int64",
+            "maximum": 4294967295,
+            "description": "Unsigned threat identifier; zero means no signature ID reported. When threat_id_complete is false this is only a known observed representative, not a recovered maximum."
           },
           "last_seen_at": {
             "type": "string",
@@ -6953,6 +6965,10 @@
               "core"
             ],
             "description": "Exact organization/cluster/workload classification; unresolved or ambiguous identities remain unclassified."
+          },
+          "threat_id_complete": {
+            "type": "boolean",
+            "description": "True when the unsigned threat-ID maximum is proven for this aggregate. False preserves a known observed ID only: pruned or partial historical raw evidence cannot reconstruct the maximum. This is metadata completeness, not a clean-security result."
           }
         },
         "required": [
@@ -6970,7 +6986,8 @@
           "threat_id",
           "last_seen_at",
           "from_platform_role",
-          "to_platform_role"
+          "to_platform_role",
+          "threat_id_complete"
         ]
       },
       "PcapInventoryRecord": {
@@ -9226,6 +9243,178 @@
         "required": [
           "error"
         ]
+      },
+      "NetworkConversationEntry": {
+        "type": "object",
+        "required": [
+          "protocol",
+          "application",
+          "port",
+          "verdict",
+          "bytes",
+          "client_bytes",
+          "server_bytes",
+          "packets",
+          "sessions",
+          "severity",
+          "threat_id",
+          "threat_id_complete",
+          "last_seen_at"
+        ],
+        "properties": {
+          "protocol": {
+            "type": "string"
+          },
+          "application": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 65535
+          },
+          "verdict": {
+            "type": "string"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "client_bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "server_bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "packets": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sessions": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "severity": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "threat_id": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64",
+            "maximum": 4294967295,
+            "description": "Unsigned threat identifier; zero means no signature ID reported. When threat_id_complete is false this is only a known observed representative, not a recovered maximum."
+          },
+          "threat_id_complete": {
+            "type": "boolean",
+            "description": "True when the unsigned threat-ID maximum is proven for this aggregate. False preserves a known observed ID only: pruned or partial historical raw evidence cannot reconstruct the maximum. This is metadata completeness, not a clean-security result."
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "NetworkConversationEntriesResponse": {
+        "type": "object",
+        "required": [
+          "from",
+          "to",
+          "window_hours",
+          "entries",
+          "totals"
+        ],
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "window_hours": {
+            "type": "integer"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NetworkConversationEntry"
+            }
+          },
+          "totals": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "from_platform_role": {
+            "type": "string"
+          },
+          "to_platform_role": {
+            "type": "string"
+          }
+        }
+      },
+      "NetworkMapFlow": {
+        "type": "object",
+        "required": [
+          "threat_id_complete"
+        ],
+        "additionalProperties": true,
+        "description": "Aggregated network edge. Other map fields retain their existing representation; threat metadata may be absent when no DP signature was reported.",
+        "properties": {
+          "threat_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 4294967295,
+            "description": "Known observed unsigned threat identifier; only a proven maximum when threat_id_complete is true."
+          },
+          "threat_id_complete": {
+            "type": "boolean",
+            "description": "True when the unsigned threat-ID maximum is proven for this aggregate. False preserves a known observed ID only: pruned or partial historical raw evidence cannot reconstruct the maximum. This is metadata completeness, not a clean-security result."
+          },
+          "threat_name": {
+            "type": "string"
+          }
+        }
+      },
+      "NetworkMapResponse": {
+        "type": "object",
+        "required": [
+          "summary",
+          "workloads",
+          "flows",
+          "recent_flows"
+        ],
+        "properties": {
+          "summary": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "workloads": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "flows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NetworkMapFlow"
+            }
+          },
+          "recent_flows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        }
       }
     },
     "responses": {
@@ -23803,20 +23992,27 @@
       "get": {
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Retained network observations with explicit historical threat-maximum completeness.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkConversationEntriesResponse"
+                }
+              }
+            }
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
         },
         "summary": "Get entries",
-        "description": " Platform roles use exact tenant/cluster workload ownership, including pod owners; ambiguous names stay unclassified. Metadata lookup failures return an error. Capture action responses include evaluated roles, and metadata failure prevents the new capture/claim/status/upload operation."
+        "description": " Platform roles use exact tenant/cluster workload ownership, including pod owners; ambiguous names stay unclassified. Metadata lookup failures return an error. Capture action responses include evaluated roles, and metadata failure prevents the new capture/claim/status/upload operation. Aggregate threat_id_complete distinguishes a proven unsigned maximum from a known observed representative in incomplete historical evidence. It does not establish a clean workload."
       }
     },
     "/api/v1/network/conversations/streams": {
       "get": {
         "summary": "List conversation stream aggregates",
-        "description": "Read-only inventory requiring read-findings and an exact owned cluster plus directed from/to workload identities. All source filters apply before aggregate tuples, then q/protocol filters, full totals, stable sorting and pagination share one repeatable-read snapshot of retained hourly rollups. No live graph fallback or 200-row detail cap applies. row_id is the raw protocol/application/destination-port/verdict aggregate tuple, not a physical event ID. Roles use exact source-cluster ownership; ambiguous workload names remain unclassified. source_complete describes this retained rollup cohort, not packet collection coverage. Duplicate query parameters and invalid page/sort/filter values are rejected. Missing hours defaults to 24; explicitly supplied hours must be an integer from 1 to 720.",
+        "description": "Read-only inventory requiring read-findings and an exact owned cluster plus directed from/to workload identities. All source filters apply before aggregate tuples, then q/protocol filters, full totals, stable sorting and pagination share one repeatable-read snapshot of retained hourly rollups. No live graph fallback or 200-row detail cap applies. row_id is the raw protocol/application/destination-port/verdict aggregate tuple, not a physical event ID. Roles use exact source-cluster ownership; ambiguous workload names remain unclassified. source_complete describes this retained rollup cohort, not packet collection coverage. Duplicate query parameters and invalid page/sort/filter values are rejected. Missing hours defaults to 24; explicitly supplied hours must be an integer from 1 to 720. Threat IDs cover 0..4294967295. Incomplete historical maxima remain explicit; threat sorting places them last in both directions. The full matching summary includes threat_id_incomplete. CSV places Threat maximum complete immediately after Threat ID.",
         "parameters": [
           {
             "name": "cluster_id",
@@ -24080,7 +24276,7 @@
     "/api/v1/network/conversations/streams.csv": {
       "get": {
         "summary": "Export matching conversation stream aggregates",
-        "description": "Read-only inventory requiring read-findings and an exact owned cluster plus directed from/to workload identities. All source filters apply before aggregate tuples, then q/protocol filters, full totals, stable sorting and pagination share one repeatable-read snapshot of retained hourly rollups. No live graph fallback or 200-row detail cap applies. row_id is the raw protocol/application/destination-port/verdict aggregate tuple, not a physical event ID. Roles use exact source-cluster ownership; ambiguous workload names remain unclassified. source_complete describes this retained rollup cohort, not packet collection coverage. Duplicate query parameters and invalid page/sort/filter values are rejected. Missing hours defaults to 24; explicitly supplied hours must be an integer from 1 to 720. CSV validates but ignores page selection and exports matching rows in server order up to 100,000, with explicit total, limit and truncation headers. Visible table columns do not restrict this export.",
+        "description": "Read-only inventory requiring read-findings and an exact owned cluster plus directed from/to workload identities. All source filters apply before aggregate tuples, then q/protocol filters, full totals, stable sorting and pagination share one repeatable-read snapshot of retained hourly rollups. No live graph fallback or 200-row detail cap applies. row_id is the raw protocol/application/destination-port/verdict aggregate tuple, not a physical event ID. Roles use exact source-cluster ownership; ambiguous workload names remain unclassified. source_complete describes this retained rollup cohort, not packet collection coverage. Duplicate query parameters and invalid page/sort/filter values are rejected. Missing hours defaults to 24; explicitly supplied hours must be an integer from 1 to 720. CSV validates but ignores page selection and exports matching rows in server order up to 100,000, with explicit total, limit and truncation headers. Visible table columns do not restrict this export. Threat IDs cover 0..4294967295. Incomplete historical maxima remain explicit; threat sorting places them last in both directions. The full matching summary includes threat_id_incomplete. CSV places Threat maximum complete immediately after Threat ID.",
         "parameters": [
           {
             "name": "cluster_id",
@@ -24405,7 +24601,19 @@
     "/api/v1/network/map": {
       "get": {
         "summary": "Cluster-scoped Network Traffic Map workloads and observed flow edges",
-        "description": " Read responses carry platform-role metadata resolved from exact organization/cluster/workload identity. Network map flows and recent entries use src_platform_role/dst_platform_role; threats and captures use platform_role. Unknown or ambiguous identities return an empty role string; older APIs may omit role fields. Classification does not change collection, detection or enforcement. Workload platform_role is always explicit: core or empty for evaluated unknown, including namespace-scoped IPs and ambiguous same-name workload kinds. Exact pod ownership and actual source cluster determine custom-install roles. Map rows sharing an identity across clusters cannot borrow one cluster\u2019s labels."
+        "description": " Read responses carry platform-role metadata resolved from exact organization/cluster/workload identity. Network map flows and recent entries use src_platform_role/dst_platform_role; threats and captures use platform_role. Unknown or ambiguous identities return an empty role string; older APIs may omit role fields. Classification does not change collection, detection or enforcement. Workload platform_role is always explicit: core or empty for evaluated unknown, including namespace-scoped IPs and ambiguous same-name workload kinds. Exact pod ownership and actual source cluster determine custom-install roles. Map rows sharing an identity across clusters cannot borrow one cluster\u2019s labels. Aggregate threat_id_complete distinguishes a proven unsigned maximum from a known observed representative in incomplete historical evidence. It does not establish a clean workload.",
+        "responses": {
+          "200": {
+            "description": "Retained network observations with explicit historical threat-maximum completeness.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkMapResponse"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/network/peers": {

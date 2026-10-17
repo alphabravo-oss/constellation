@@ -17,3 +17,24 @@ it.each(["cluster","org","page","summary","echo","identity","date","role","missi
 it("normalizes capture IPv6 exactly and rejects broadened tuple echoes",()=>{expect(normalizedCaptureIP("2001:0DB8:0000::1")).toBe("2001:db8::1");expect(normalizedCaptureIP("::ffff:192.0.2.1")).toBe("192.0.2.1");const request={...pcapRequest,src_ip:"2001:0DB8::1"};const data=capturePage(pcapRequest,[{...captureRow(),src_ip:"2001:db8::1"}]);data.filters.src_ip="2001:db8::1";expect(pcapInventoryMatches(data,request,"org")).toBe(true);data.captures[0].src_ip="2001:db8::2";expect(pcapInventoryMatches(data,request,"org")).toBe(false);});
 
 it.each(["file_count", "file_size_mb"])("rejects malformed optional capture setting %s", field => { const data = capturePage(pcapRequest); Object.assign(data.captures[0], { [field]: "not a number" }); expect(pcapInventoryMatches(data, pcapRequest, "org")).toBe(false); Object.assign(data.captures[0], { [field]: -1 }); expect(pcapInventoryMatches(data, pcapRequest, "org")).toBe(false); });
+
+it("preserves full uint32 threat IDs and explicit historical uncertainty including zero", () => {
+  for (const threat_id of [0, 2147483647, 2147483648, 4294967295]) {
+    const data = streamPage(streamRequest, [{ ...streamRow(), threat_id, threat_id_complete: false }]);
+    data.summary.threat_id_incomplete = 1;
+    data.totals.threat_id_incomplete = 1;
+    expect(streamInventoryMatches(data, streamRequest)).toBe(true);
+  }
+});
+it.each([-1, 4294967296, NaN])("rejects non-wire threat ID %s", threat_id => {
+  expect(streamInventoryMatches(streamPage(streamRequest, [{ ...streamRow(), threat_id }]), streamRequest)).toBe(false);
+});
+it("rejects fabricated completeness flags and impossible incomplete totals", () => {
+  const data = streamPage(streamRequest);
+  Object.assign(data.entries[0], { threat_id_complete: "true" });
+  expect(streamInventoryMatches(data, streamRequest)).toBe(false);
+  data.entries[0].threat_id_complete = false;
+  data.summary.threat_id_incomplete = data.total + 1;
+  data.totals.threat_id_incomplete = data.total + 1;
+  expect(streamInventoryMatches(data, streamRequest)).toBe(false);
+});

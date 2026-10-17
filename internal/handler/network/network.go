@@ -366,6 +366,7 @@ SELECT cluster_id::text, src_workload, dst_workload, protocol, l7_protocol, dst_
        COALESCE(SUM(sum_server_bytes)::bigint, 0) AS server_bytes,
        COALESCE(SUM(sum_sessions)::bigint, 0)     AS sessions,
        MAX(max_threat_id)                          AS max_threat_id,
+       BOOL_AND(threat_id_complete)                AS threat_id_complete,
        MAX(max_severity)                           AS max_severity,
        MAX(max_application)                        AS max_application,
        COALESCE(MIN(NULLIF(fqdn, '')), '')         AS fqdn
@@ -396,7 +397,9 @@ SELECT cluster_id::text, src_workload, dst_workload, protocol, l7_protocol, dst_
 		var hasDP, hasHubble, hasBPF bool
 		var anySource string
 		var clientBytes, serverBytes, sessions int64
-		var maxThreatID, maxApplication *int32
+		var maxThreatID *int64
+		var maxApplication *int32
+		var threatComplete bool
 		var maxSeverity *int16
 		var fqdn string
 		if err := rows.Scan(&cluster, &src, &dst, &proto, &l7, &port, &v,
@@ -404,7 +407,7 @@ SELECT cluster_id::text, src_workload, dst_workload, protocol, l7_protocol, dst_
 			&bytes, &packets, &samples, &last,
 			&hasDP, &hasHubble, &hasBPF, &anySource,
 			&clientBytes, &serverBytes, &sessions,
-			&maxThreatID, &maxSeverity, &maxApplication, &fqdn,
+			&maxThreatID, &threatComplete, &maxSeverity, &maxApplication, &fqdn,
 		); err != nil {
 			return nil, err
 		}
@@ -424,8 +427,9 @@ SELECT cluster_id::text, src_workload, dst_workload, protocol, l7_protocol, dst_
 			"src_addr":   srcAddr, "dst_addr": dstAddr, "src_port": srcPort,
 			"protocol": strings.ToUpper(proto), "l7_protocol": strings.ToUpper(l7),
 			"dst_port": port, "verdict": strings.ToLower(v), "state": stateForVerdict(v),
-			"traffic_scope": trafficScope(src, dst),
-			"bytes":         bytes, "packets": packets, "samples": samples,
+			"traffic_scope":      trafficScope(src, dst),
+			"threat_id_complete": threatComplete,
+			"bytes":              bytes, "packets": packets, "samples": samples,
 			"source":       source,
 			"last_seen_at": last.UTC().Format(time.RFC3339),
 		}
@@ -470,12 +474,14 @@ SELECT cluster_id::text, src_workload, dst_workload, protocol, l7_protocol, dst_
 // get a generic label here (the full CRS rule name lives in the runtime package, which the
 // threats-list endpoint uses). This lets the edge/inspector show a name even without the
 // full runtime_threats row.
-func threatNameForFlow(id int32) string {
+func threatNameForFlow(id int64) string {
 	if id >= 40000 && id <= 49999 {
 		return fmt.Sprintf("WAF signature %d", id)
 	}
-	if n := handler.NeuVectorThreatName(uint32(id)); n != "" {
-		return n
+	if wireID, valid := handler.NetworkThreatID(id); valid {
+		if n := handler.NeuVectorThreatName(wireID); n != "" {
+			return n
+		}
 	}
 	return fmt.Sprintf("signature %d", id)
 }

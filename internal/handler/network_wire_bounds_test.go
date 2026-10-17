@@ -18,3 +18,17 @@ func TestNetworkApplicationIDNativeRange(t *testing.T) {
 		}
 	}
 }
+
+func TestNetworkThreatIDUnsignedRange(t *testing.T) {
+	for _, value := range []int64{0, 1, math.MaxInt32, math.MaxInt32 + 1, math.MaxUint32} {
+		got, ok := NetworkThreatID(value)
+		if !ok || int64(got) != value {
+			t.Fatalf("ID %d => %d/%v", value, got, ok)
+		}
+	}
+	for _, value := range []int64{-1, math.MinInt32, math.MaxUint32 + 1} {
+		if _, ok := NetworkThreatID(value); ok {
+			t.Fatalf("invalid ID %d", value)
+		}
+	}
+}

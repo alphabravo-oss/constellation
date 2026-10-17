@@ -26,7 +26,7 @@ type conversationStream struct {
 	ToPlatformRole   string `json:"to_platform_role"`
 }
 
-var streamSorts = map[string]string{"protocol": "protocol", "application": "application", "port": "port", "verdict": "verdict", "bytes": "bytes", "client_bytes": "client_bytes", "server_bytes": "server_bytes", "packets": "packets", "sessions": "sessions", "severity": "severity", "threat": "threat_id", "last_seen": "last_seen_at"}
+var streamSorts = map[string]string{"protocol": "protocol", "application": "application", "port": "port", "verdict": "verdict", "bytes": "bytes", "client_bytes": "client_bytes", "server_bytes": "server_bytes", "packets": "packets", "sessions": "sessions", "severity": "severity", "threat": "CASE WHEN threat_id_complete THEN threat_id END", "last_seen": "last_seen_at"}
 
 type streamOptions struct {
 	conversationOptions
@@ -93,22 +93,22 @@ func streamDefinition(org uuid.UUID, o streamOptions) inventorylist.Definition {
  SELECT jsonb_build_array(protocol,l7_protocol,dst_port,verdict)::text AS id,upper(protocol) AS protocol,upper(COALESCE(l7_protocol,'')) AS application,
  COALESCE(dst_port,0) AS port,lower(verdict) AS verdict,SUM(sum_bytes)::bigint AS bytes,COALESCE(SUM(sum_client_bytes),0)::bigint AS client_bytes,
  COALESCE(SUM(sum_server_bytes),0)::bigint AS server_bytes,SUM(sum_packets)::bigint AS packets,COALESCE(SUM(sum_sessions),0)::bigint AS sessions,
- COALESCE(MAX(max_severity),0)::int AS severity,COALESCE(MAX(max_threat_id),0)::int AS threat_id,MAX(max_at) AS last_seen_at
+ COALESCE(MAX(max_severity),0)::int AS severity,COALESCE(MAX(max_threat_id),0)::bigint AS threat_id,BOOL_AND(threat_id_complete) AS threat_id_complete,MAX(max_at) AS last_seen_at
  FROM scoped GROUP BY protocol,l7_protocol,dst_port,verdict
  ), roles AS MATERIALIZED (SELECT ` + fromRole + ` AS from_role,` + toRole + ` AS to_role)
  SELECT a.*,roles.from_role,roles.to_role FROM aggregated a CROSS JOIN roles`,
-		Columns: "id,protocol,application,port,verdict,bytes,client_bytes,server_bytes,packets,sessions,severity,threat_id,last_seen_at,from_platform_role,to_platform_role",
+		Columns: "id,protocol,application,port,verdict,bytes,client_bytes,server_bytes,packets,sessions,severity,threat_id,threat_id_complete,last_seen_at,from_platform_role,to_platform_role",
 		Args:    []any{org, o.ClusterID, o.Hours, o.Verdict, o.Namespace, o.GroupActive, o.GroupMembers, o.Port, o.Peer, o.Application, o.From, o.To, o.VerdictGroup, o.Search, o.Protocol},
 		Where:   `($14::text='' OR strpos(lower(concat_ws(' ',protocol,application,port::text,verdict)),$14)>0) AND ($15::text='' OR lower(protocol)=$15)`,
 		Summary: `jsonb_build_object('total',count(*),'bytes',COALESCE(sum(bytes),0),'client_bytes',COALESCE(sum(client_bytes),0),'server_bytes',COALESCE(sum(server_bytes),0),
- 'packets',COALESCE(sum(packets),0),'sessions',COALESCE(sum(sessions),0),'blocked',count(*) FILTER(WHERE verdict IN ('deny','denied','block','blocked')),'violating',count(*) FILTER(WHERE verdict IN ('alert','violate')))`,
+ 'packets',COALESCE(sum(packets),0),'sessions',COALESCE(sum(sessions),0),'blocked',count(*) FILTER(WHERE verdict IN ('deny','denied','block','blocked')),'violating',count(*) FILTER(WHERE verdict IN ('alert','violate')),'threat_id_incomplete',count(*) FILTER(WHERE NOT threat_id_complete))`,
 	}
 }
 
 func scanStream(row inventorylist.Row) (conversationStream, error) {
 	var item conversationStream
 	var last time.Time
-	err := row.Scan(&item.RowID, &item.Protocol, &item.Application, &item.Port, &item.Verdict, &item.Bytes, &item.ClientBytes, &item.ServerBytes, &item.Packets, &item.Sessions, &item.Severity, &item.ThreatID, &last, &item.FromPlatformRole, &item.ToPlatformRole)
+	err := row.Scan(&item.RowID, &item.Protocol, &item.Application, &item.Port, &item.Verdict, &item.Bytes, &item.ClientBytes, &item.ServerBytes, &item.Packets, &item.Sessions, &item.Severity, &item.ThreatID, &item.ThreatIDComplete, &last, &item.FromPlatformRole, &item.ToPlatformRole)
 	item.LastSeenAt = last.UTC().Format(time.RFC3339Nano)
 	return item, err
 }
@@ -156,8 +156,8 @@ func (h *NetworkConversations) writeStreamInventory(w http.ResponseWriter, r *ht
 	d := streamDefinition(subj.OrgID, o)
 	if export {
 		body, meta, err := inventorylist.CSV(r.Context(), h.db.Pool(), d, o.Options, scanStream,
-			[]string{"Aggregate tuple ID", "Cluster ID", "From", "To", "Protocol", "Application", "Port", "Verdict", "Bytes", "Client bytes", "Server bytes", "Packets", "Sessions", "Severity", "Threat ID", "Last observed", "from_platform_role", "to_platform_role"}, func(row conversationStream) []string {
-				return []string{row.RowID, o.ClusterID.String(), o.From, o.To, row.Protocol, row.Application, strconv.Itoa(row.Port), row.Verdict, strconv.FormatInt(row.Bytes, 10), strconv.FormatInt(row.ClientBytes, 10), strconv.FormatInt(row.ServerBytes, 10), strconv.FormatInt(row.Packets, 10), strconv.FormatInt(row.Sessions, 10), strconv.Itoa(row.Severity), strconv.Itoa(row.ThreatID), row.LastSeenAt, row.FromPlatformRole, row.ToPlatformRole}
+			[]string{"Aggregate tuple ID", "Cluster ID", "From", "To", "Protocol", "Application", "Port", "Verdict", "Bytes", "Client bytes", "Server bytes", "Packets", "Sessions", "Severity", "Threat ID", "Threat maximum complete", "Last observed", "from_platform_role", "to_platform_role"}, func(row conversationStream) []string {
+				return []string{row.RowID, o.ClusterID.String(), o.From, o.To, row.Protocol, row.Application, strconv.Itoa(row.Port), row.Verdict, strconv.FormatInt(row.Bytes, 10), strconv.FormatInt(row.ClientBytes, 10), strconv.FormatInt(row.ServerBytes, 10), strconv.FormatInt(row.Packets, 10), strconv.FormatInt(row.Sessions, 10), strconv.Itoa(row.Severity), strconv.FormatInt(row.ThreatID, 10), strconv.FormatBool(row.ThreatIDComplete), row.LastSeenAt, row.FromPlatformRole, row.ToPlatformRole}
 			})
 		if err != nil {
 			conversationReadError(w)

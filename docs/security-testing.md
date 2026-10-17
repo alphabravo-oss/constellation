@@ -587,3 +587,36 @@ enforcement and benchmark workers remain disabled. Public login preserves
 Constellation/by AlphaBravo and hides unconfigured SSO. The later procps and
 application-ID source fixes are qualified separately and are not deployed as a
 worker or added to the frozen API artifact.
+
+
+## Unsigned threat identifiers (schema 180 candidate)
+
+The candidate preserves the native uint32 range through threat/flow ingestion,
+rollups, reads, CSV and UI. The database uses BIGINT with bounds 0..4294967295;
+new runtime records still reject ID zero. Policy generation excludes every
+nonzero threat signature. Existing wrapped negative IDs are decoded exactly.
+Historical nonnegative rollup maxima, including zero, may have hidden larger
+unsigned IDs. They remain explicitly incomplete unless retained raw rows prove
+the entire organization/cluster/tuple bucket at the locked watermark and retention
+fence. Migration repairs metadata only; traffic counters remain unchanged.
+Late folds preserve uncertainty; a complete rebuild can restore completeness.
+Map and conversation rows disclose an unproven maximum locally, with the full
+matching incomplete count available in existing Details. Incomplete maxima sort
+last in both directions. This adds no page-wide explanatory banner.
+
+Frozen qualification passes 46 fresh-PostgreSQL race/shuffle executions without
+skips, 101 focused Node24 frontend tests, whole-project TypeScript checking and
+Go compilation. Scoped configured lint removes six G115 findings and adds none.
+Evidence: `/tmp/threat180-manifest.json`, `/tmp/threat180-frozen-db/integration.json`
+and `/tmp/threat180-release-notes.json`. These are candidate results, not a
+schema180 deployment claim.
+
+This migration requires a controlled stop/replace of all old API readers/writers.
+Do not use mixed old int32 readers with new unsigned writes. Before migration,
+measure table/index sizes, free space, lock timeout and maintenance duration;
+qualify a backup and review the affected historical cohort. Stop old readers and
+writers, migrate, start only compatible binaries and verify boundary reads and
+ingests before reopening traffic. ALTER TYPE can rewrite retained tables and
+requires exclusive locks. Prefer roll-forward. Down refuses high IDs or
+incomplete history before changing data/schema; reverting old binaries requires
+a qualified restore or a separately reviewed compatibility migration.

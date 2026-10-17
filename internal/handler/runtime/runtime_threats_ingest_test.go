@@ -452,7 +452,7 @@ func TestRuntimeThreats_CategoryFilter(t *testing.T) {
 
 	// listCategory issues GET /runtime-threats?category=<cat> as the org's user and returns the
 	// threat_ids (restricted to this test's node) so cross-test rows don't interfere.
-	listCategory := func(cat string) []int32 {
+	listCategory := func(cat string) []int64 {
 		t.Helper()
 		lreq := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/runtime-threats?category="+cat, nil)
 		lreq = lreq.WithContext(authctx.WithSubject(ctx, authctx.Subject{OrgID: orgID}))
@@ -467,7 +467,7 @@ func TestRuntimeThreats_CategoryFilter(t *testing.T) {
 		if err := json.NewDecoder(lw.Body).Decode(&resp); err != nil {
 			t.Fatalf("decode list: %v", err)
 		}
-		var ids []int32
+		var ids []int64
 		for _, tr := range resp.Threats {
 			if tr.Node == node {
 				ids = append(ids, tr.ThreatID)

@@ -1,5 +1,5 @@
 import { NetworkPeerEvidence } from "./NetworkPeerEvidence";
-import { StreamsTab, PcapWorkspaceTab } from "./NetworkSecondaryInventory";
+import { StreamsTab, PcapWorkspaceTab, ThreatMaximum } from "./NetworkSecondaryInventory";
 export { StreamsTab, PcapWorkspaceTab } from "./NetworkSecondaryInventory";
 import { INVENTORY_MAX_PAGE } from "@/lib/inventory-pagination";
 import { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -2249,6 +2249,7 @@ function FlowTab({ flow, threats }: { flow: NetworkFlow; threats: RuntimeThreat[
         <Field label="Samples" value={flow.samples.toLocaleString()} />
         <Field label="Last seen" value={new Date(flow.last_seen_at).toLocaleString()} />
         <Field label="Verdict" value={flow.verdict} tone={flow.state} />
+        <div><dt className="text-[10px] text-muted-foreground">Signature maximum</dt><dd><ThreatMaximum id={flow.threat_id} complete={flow.threat_id_complete} /></dd></div>
       </dl>
       {hasThreat && (
         <div
@@ -2283,6 +2284,9 @@ function ThreatTab({ flow, threats }: { flow: NetworkFlow; threats: RuntimeThrea
   const [drilldownID, setDrilldownID] = useState<string | null>(null);
   const matched = matchFlowThreats(flow, threats);
   if (matched.length === 0) {
+    if (flow.threat_id_complete !== true && !(flow.threat_id && flow.threat_id > 0)) {
+      return <div className="text-xs" data-testid="network-threat-tab"><ThreatMaximum id={flow.threat_id} complete={flow.threat_id_complete} /></div>;
+    }
     // The flow carries a threat_id (dp flagged it) but the packet-level runtime_threats row
     // isn't loaded — it aged out of the window or was purged. Be honest: name the threat
     // rather than implying nothing happened.
@@ -2298,6 +2302,7 @@ function ThreatTab({ flow, threats }: { flow: NetworkFlow; threats: RuntimeThrea
               dp flagged this signature on the conversation, but the packet-level detail is no
               longer retained (older than the threat window or cleared). The signature id and
               name above are from the flow record.
+              {flow.threat_id_complete !== true && <span className="block"><ThreatMaximum id={flow.threat_id} complete={flow.threat_id_complete} /></span>}
             </p>
           </div>
         </div>

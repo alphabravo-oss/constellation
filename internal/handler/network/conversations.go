@@ -189,18 +189,19 @@ func (h *NetworkConversations) ListCSV(w http.ResponseWriter, r *http.Request) {
 // server_bytes is to→from (responses); so an operator sees in/out per stream. mapped_port,
 // xff, and per-session rows are omitted: the rollups don't carry them (no fabrication).
 type conversationEntryDTO struct {
-	Protocol    string `json:"protocol"`
-	Application string `json:"application"`
-	Port        int    `json:"port"`
-	Verdict     string `json:"verdict"`
-	Bytes       int64  `json:"bytes"`
-	ClientBytes int64  `json:"client_bytes"`
-	ServerBytes int64  `json:"server_bytes"`
-	Packets     int64  `json:"packets"`
-	Sessions    int64  `json:"sessions"`
-	Severity    int    `json:"severity"`
-	ThreatID    int    `json:"threat_id"`
-	LastSeenAt  string `json:"last_seen_at"`
+	Protocol         string `json:"protocol"`
+	Application      string `json:"application"`
+	Port             int    `json:"port"`
+	Verdict          string `json:"verdict"`
+	Bytes            int64  `json:"bytes"`
+	ClientBytes      int64  `json:"client_bytes"`
+	ServerBytes      int64  `json:"server_bytes"`
+	Packets          int64  `json:"packets"`
+	Sessions         int64  `json:"sessions"`
+	Severity         int    `json:"severity"`
+	ThreatID         int64  `json:"threat_id"`
+	ThreatIDComplete bool   `json:"threat_id_complete"`
+	LastSeenAt       string `json:"last_seen_at"`
 }
 
 // Detail returns the full per-stream breakdown of one from→to conversation — every
@@ -233,7 +234,7 @@ SELECT protocol, COALESCE(l7_protocol,''), COALESCE(dst_port,0), verdict,
        SUM(sum_bytes)::bigint, SUM(sum_packets)::bigint,
        COALESCE(SUM(sum_client_bytes),0)::bigint, COALESCE(SUM(sum_server_bytes),0)::bigint,
        COALESCE(SUM(sum_sessions),0)::bigint,
-       COALESCE(MAX(max_severity),0)::int, COALESCE(MAX(max_threat_id),0)::int, MAX(max_at)
+       COALESCE(MAX(max_severity),0)::int, COALESCE(MAX(max_threat_id),0)::bigint, BOOL_AND(threat_id_complete), MAX(max_at)
   FROM network_flow_rollups
  WHERE org_id = $1
    AND ($2::text = '' OR cluster_id::text = $2)
@@ -254,7 +255,7 @@ SELECT protocol, COALESCE(l7_protocol,''), COALESCE(dst_port,0), verdict,
 		var l7 string
 		var last time.Time
 		if err := rows.Scan(&e.Protocol, &l7, &e.Port, &e.Verdict, &e.Bytes, &e.Packets,
-			&e.ClientBytes, &e.ServerBytes, &e.Sessions, &e.Severity, &e.ThreatID, &last); err != nil {
+			&e.ClientBytes, &e.ServerBytes, &e.Sessions, &e.Severity, &e.ThreatID, &e.ThreatIDComplete, &last); err != nil {
 			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read conversation entries"})
 			return
 		}
