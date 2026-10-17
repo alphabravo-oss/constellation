@@ -9,8 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alphabravocompany/constellation/internal/testutil/pgfixture"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/alphabravocompany/constellation/internal/testutil/pgfixture"
 )
 
 func threatMigration(t *testing.T, up bool) string {
