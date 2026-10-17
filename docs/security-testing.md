@@ -1183,9 +1183,9 @@ Initial lint findings and two Python-only evidence-packaging errors are preserve
 The reviewed final seal binds three source files and 88 evidence files:
 `/tmp/constellation-telemetryspool-7831c59/evidence/FINAL-SEAL.json`
 (SHA256 `b57feaf1a093bf957af4e8fb7bde1a432ef937b6a9237fa117b67be4bf50ab20`).
-This follow-up is source-qualified and awaits the next integrated artifact and
-live rollout; it is not part of deployed 314afad and does not close fleet delivery
-or overall release acceptance.
+This follow-up is included in the combined qualification and deployed 877a1c2
+artifact set recorded below. Fleet delivery and overall release acceptance remain
+open.
 
 
 ### Registry V2 response completion qualification
@@ -1207,9 +1207,9 @@ cloud-auth/IBM/test findings stay open. The initial test-complexity warning and
 its correction remain in evidence. Root independently verified the 85-file seal:
 `/tmp/constellation-registry-v2-a274245/FINAL-MANIFEST.json`
 (SHA256 `40f78898ac267f3c225279bad1a5a3ff324b89c3f71d8ebdc3808238c4c56da1`).
-This source-qualified follow-up awaits an integrated artifact and live rollout;
-it is not included in deployed 314afad. No release gate or provider acceptance is
-waived by this bounded correction.
+This follow-up is included in the combined qualification and deployed 877a1c2
+artifact set recorded below. No release gate or provider acceptance is waived by
+this bounded correction.
 
 
 ### AWS Lambda package download qualification
@@ -1238,9 +1238,9 @@ preparation and all attempt logs are preserved. Root independently checked the
 This qualifies atomic visibility, not power-loss directory durability. A detected
 postpublication directory change may leave a complete artifact while returning
 failure, which prevents catalog/report advancement. Tests use injected transports
-and no cloud credentials. This source-only follow-up awaits integrated artifacts
-and deployment; deployed source remains 314afad. Broader serverless acceptance and
-release gates remain open.
+and no cloud credentials. This follow-up is included in combined qualification
+and deployed 877a1c2, recorded below. Broader serverless acceptance and release
+gates remain open.
 
 
 ### Cloud registry credential-cache isolation qualification
@@ -1275,12 +1275,13 @@ suite production lineage and absence of all four owned caller-test databases.
 Evidence: `/tmp/constellation-registry-cache-51abb25/FINAL-MANIFEST.json`
 (SHA256 `65578c941d2a92a6a766668c271253ef9152aa94afbb8351a66c71ed0f76351a`).
 
-This is source qualification, not real cloud-credential acceptance or deployment.
+This source qualification does not establish real cloud-credential acceptance.
+Combined qualification and deployment of 877a1c2 are recorded below.
 ECR AuthToken currently has no non-test repository caller; its exported capability
 and the live list/digest credential checks have distinct reachability. Existing
 authentication destinations/redirects and broader provider acceptance are unchanged.
 The cloud/IBM error-message correction is qualified in the following section.
-Deployed source remains 314afad; integrated artifacts and rollout are still due.
+This correction is included in the deployed 877a1c2 artifact set.
 
 
 ### Cloud registry error redaction qualification
@@ -1305,5 +1306,91 @@ fixture response variable. Evidence:
 This prevents new disclosures in those paths; it does not rewrite historical audit
 or log data. DockerHub/GHCR, other catalog connectors, generic V2/Nexus/OpenShift,
 V2 challenge/manifest/tag errors and ECR SDK errors remain separate review work.
-This is source qualification only. Deployed source remains 314afad; combined
-qualification, new images and rollout remain due. No release gate is closed here.
+Combined qualification, image verification and deployment of this correction in
+877a1c2 are recorded below. No release gate is closed here.
+
+
+### Combined qualification and hosted checks for 877a1c2
+
+Exact source `877a1c2` combines the telemetry ownership, complete registry V2
+response, private Lambda download, cloud credential-cache isolation and cloud/IBM
+error-redaction fixes above. A fresh owned PostgreSQL 16 database was migrated to
+schema 180 twice and seeded. Sixteen packages pass 5,064 repeated race/shuffle test
+executions, with zero failures and four explicit native/Flannel opt-in fixture
+skips. Vet passes for all sixteen packages. All five Go1.26.9 linux/amd64 binaries
+build successfully; all 2,609 frozen source blobs remain unchanged. The owned
+database was removed and independently confirmed absent.
+
+Root verified all 48 qualification records and the five binary hashes and modes.
+Evidence: `/tmp/constellation-integrated-next-preparation/evidence/combined-qualification-summary.json`
+(SHA256 `a2c4f49f61fadd7e7fb2e478ac6042067928c08bd4dcaaa736c677e34333bd9b`).
+The qualification manifest is
+`/tmp/constellation-integrated-next-preparation/evidence/qualification-evidence-manifest.json`
+(SHA256 `a1d5fba6ca32778432cfec1790d8968d60f5ba2460887c2decfa2cf19bf8733d`).
+
+Three images copy only the new Go payloads over the exact qualified 314afad
+parents. Parent layers and runtime configuration are preserved apart from reviewed
+version labels. Supported nonroot help checks pass; native DP, BPF and 23 native
+library hashes and dependency mappings remain unchanged. All thirteen temporary
+verification containers are independently absent. This is a verified thin image
+assembly, not a fresh native/BPF pipeline build or a new 877 packet acceptance run.
+The strict 24-probe Flannel evidence above remains specific to source 314afad.
+Assembly receipt:
+`/tmp/constellation-images-877a1c2-preparation/execution/ASSEMBLY-RECEIPT.json`
+(SHA256 `12ead4cb43276e797b1569a95784d0a1324acc1239e9ccfdead3a1d8f49bb275`).
+
+Hosted [run 39035438259](https://github.com/alphabravo-oss/constellation/actions/runs/39035438259)
+completed for exact source 877a1c2: nine jobs pass and four fail. Frontend passes
+2,344 tests and browser acceptance passes 279 cases with no failures, retries
+classified as flaky, or skips. Go unit records 3,124 passes and 739 skips;
+integration records 8,742 passes and fourteen skips. These hosted totals are
+separate from the owned-database qualification above. FIPS and dependency and
+vulnerability checks pass. Overall CI remains failed: configured lint is 1,469,
+standalone gosec 153, historical gitleaks eleven, and the required gate fails.
+Normalized comparison against the prior 314afad run removes 26 lint and three
+gosec findings with none added; this is not a claim of zero additions against the
+original PR baseline. No gate, suppression or configuration was relaxed. Root
+verified the completed reports and sealed thirty evidence files:
+`/tmp/security-triage-39035438259/COMPLETED-MANIFEST.json`
+(SHA256 `8a0733816c3343de5592bab1d8e322b95b0836691cb769b58cf71b4180242a35`).
+
+The separately prepared CIS and remaining catalog-error corrections are outside
+this source and artifact set. Real provider credentials, broader enforcement,
+other CNIs, HA, disconnected delivery and remaining recovery acceptance are still
+open. Off-host recovery and deliberate real-node failure remain deferred. No
+parent acceptance checkbox is closed by this qualification.
+
+
+### Main deployment of the qualified 877a1c2 candidate
+
+Main development now runs **Helm 84 / schema 180**. API, scanner and runtime-agent
+use exact source `877a1c2`, including the five follow-ups above. The API image also
+contains the matching CLI. Migration and frontend remain on `5b82b12`; the freshly
+built standalone backup binary is not part of this workload update.
+
+The normal Helm upgrade followed a new completed CNPG backup (UID
+`aa4a7208-4056-4ed6-9ff9-6c94daaad0d3`, completed `2026-10-17T13:56:05Z`). The server
+dry-run and installed manifest differ only in the three role images and matching
+API init-container image; hook revision names advance normally. All seven
+deployments and the runtime DaemonSet are ready. All thirteen image dependencies
+and original pins remain verified, with three new image pins added. Six live
+payload hashes match the qualified API, CLI, scanner, runtime, native DP and BPF.
+The retained PCAP PVC/PV, private directory mode, Recreate strategy and elected
+API lease ownership are preserved. Enforcement remains disabled, monitor mode and
+execution dry-run remain enabled, and benchmark workers remain disabled.
+
+Post-upgrade health/readiness return 200. Policy protocol 2 succeeds, the unsafe
+legacy protocol returns 426, and an unknown cluster returns 404. Response protocol
+2 succeeds; anonymous, foreign-cluster and duplicate-node requests return 401,
+403 and 400 respectively. Live policy and response queues remain empty, so these
+checks do not establish positive enforcement. The exact owned smoke port-forward
+was terminated and its process and listener independently confirmed absent.
+Public login recheck confirms “Constellation” / “by AlphaBravo” and no SSO button;
+authenticated navigation remains unverified without a valid user session.
+
+Root verified 210 deployment evidence files. Evidence:
+`/tmp/constellation-rollout-877a1c2-preparation/deployment-evidence-manifest.json`
+(SHA256 `05a0e2ca8471ffbfd4f449c35f201052e4510c914fb2ff5d48fb0cc90932f7f6`).
+The prepared inputs, failed bytecode-only seal attempt and subsequent reviewed
+seal are retained; no cluster mutation occurred during that failed seal attempt.
+No quality/security gate or broader acceptance row is closed by this deployment.
