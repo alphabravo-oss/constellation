@@ -187,7 +187,7 @@ VALUES ($1,$2,$3,$4,$5,$6,
         NULLIF($7,'')::inet, NULLIF($8,'')::inet, NULLIF($9,0), NULLIF($10,''),
         NULLIF($11,''), NULLIF($12,''), NULLIF($13,0), NULLIF($14,0))
 RETURNING `+pcapCols,
-		sub.OrgID, req.ClusterID, req.Workload, ns, sub.UserID, int16(req.DurationS),
+		sub.OrgID, req.ClusterID, req.Workload, ns, sub.UserID, req.DurationS,
 		req.SrcIP, req.DstIP, req.DstPort, req.Protocol,
 		req.BPFFilter, req.Interface, req.FileCount, req.FileSizeMB))
 	if err != nil {

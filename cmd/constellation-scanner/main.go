@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"net/http"
 	neturl "net/url"
 	"os"
@@ -1721,12 +1722,25 @@ func scannerCacheDirHealth(path string, includeUsage bool) map[string]any {
 	}
 	var stat syscall.Statfs_t
 	if err := syscall.Statfs(path, &stat); err == nil {
-		out["free_bytes"] = int64(stat.Bavail) * int64(stat.Bsize)
+		if free, ok := scannerCacheFreeBytes(stat); ok {
+			out["free_bytes"] = free
+		}
 	}
 	if includeUsage {
 		addScannerCacheUsage(out, path)
 	}
 	return out
+}
+
+func scannerCacheFreeBytes(stat syscall.Statfs_t) (int64, bool) {
+	if stat.Bsize <= 0 || stat.Bavail > math.MaxInt64 {
+		return 0, false
+	}
+	blocks := int64(stat.Bavail)
+	if blocks > math.MaxInt64/stat.Bsize {
+		return 0, false
+	}
+	return blocks * stat.Bsize, true
 }
 
 func addScannerCacheUsage(out map[string]any, root string) {

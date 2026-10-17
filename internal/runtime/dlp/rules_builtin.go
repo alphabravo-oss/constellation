@@ -2,6 +2,7 @@ package dlp
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -173,7 +174,7 @@ func looksLikeIBAN(s string) bool {
 		case r >= '0' && r <= '9':
 			digits.WriteRune(r)
 		case r >= 'A' && r <= 'Z':
-			digits.WriteString(itoa(int(r - 'A' + 10)))
+			digits.WriteString(strconv.Itoa(int(r - 'A' + 10)))
 		default:
 			return false
 		}
@@ -184,13 +185,6 @@ func looksLikeIBAN(s string) bool {
 		mod = (mod*10 + int(r-'0')) % 97
 	}
 	return mod == 1
-}
-
-func itoa(n int) string {
-	if n < 10 {
-		return string('0' + rune(n))
-	}
-	return string('0'+rune(n/10)) + string('0'+rune(n%10))
 }
 
 // rxStripBlanks deletes whitespace + dashes (used by Luhn pre-check).
