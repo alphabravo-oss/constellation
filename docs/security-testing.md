@@ -757,3 +757,35 @@ reviewed, six local-history benign variants, four redacted-placeholder/public-ce
 contexts). This is not a green gate. No current checkout/ref, published history,
 certificate trust or external JWT state is changed; later commits require a new
 candidate before any reviewed publication decision.
+
+## Session controls, snapshot privacy and native accounting
+
+Source `5b417c0` additionally rejects incomplete, oversized, malformed or null
+session-control responses and preserves the applied weak-TLS setting when the
+server omits it. Explicit true/false still apply. Seventy repeated race-test
+executions pass without skips; eight unpatched negative-control executions fail
+as expected. Runtime package lint remains 107 findings with none added; existing
+upload-loop complexity decreases from 31 to 30. This is not yet deployed.
+
+Source `16956f6` makes quarantine snapshot output private and atomic through the
+shared securefiles streaming writer. Producer, sync, stat, close and publication
+errors propagate; root substitution cannot return a misleading artifact path.
+Forty-two core and 176 fresh180 consumer executions pass without skips; scoped
+lint falls from ten to four with none added. Restore and best-effort collection
+semantics remain unchanged. Snapshot collection is currently a library path,
+not an active production integration.
+
+Source `faf627d` initializes the actual native connection lookup key and sets its
+application identifier before lookup. The reporter regression passes 97 assertions
+under both standard and deterministic initialization flags; the unpatched control
+reproduces duplicate connection buckets. Existing matcher assertions pass 70×2.
+Declared vendor patches and sync/restore handling now have 14 shell/Python tests.
+The initial native proof explicitly reused seven verified objects; a full native
+rebuild is in progress and no new runtime image is deployed. Evidence manifests:
+`/tmp/constellation-native-connect-package6a8057c/review-manifest.json`,
+`/tmp/constellation-quarantine-private-1304c6f/frozen-manifest.json` and
+`/tmp/constellation-session-control-review/qualification-summary.json`.
+
+Hosted `39016927220` has completed: unit/integration, browser, frontend, FIPS
+and all dependency checks pass. Quality, gosec and historical gitleaks remain
+blocking failures. No broad scanner exclusion or lowered threshold was added.
