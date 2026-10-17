@@ -44,3 +44,27 @@
 {{- fail "recovery source must differ from the destination archive identity" }}
 {{- end }}
 {{- end }}
+
+{{- if and .Values.api.enabled .Values.api.pcapStorage.enabled }}
+{{- $storage := .Values.api.pcapStorage }}
+{{- $claimName := required "api.pcapStorage.enabled requires an existing durable PVC (api.pcapStorage.existingClaim)" $storage.existingClaim }}
+{{- if and (eq $storage.accessMode "ReadWriteOnce") (ne (int .Values.api.replicas) 1) }}
+{{- fail "ReadWriteOnce PCAP storage requires exactly one API replica; use shared ReadWriteMany storage for multiple replicas" }}
+{{- end }}
+{{- if hasKey .Values.api.env "CONSTELLATION_DATA_DIR" }}
+{{- if ne (trim (toString (index .Values.api.env "CONSTELLATION_DATA_DIR"))) "/var/lib/constellation-pcap" }}
+{{- fail "api.env.CONSTELLATION_DATA_DIR conflicts with the durable PCAP mount /var/lib/constellation-pcap" }}
+{{- end }}
+{{- end }}
+{{/* Offline rendering cannot inspect a claim. Live install/upgrade validates an
+     existing claim; deployment preflight must also verify Bound/accessModes. */}}
+{{- $claim := lookup "v1" "PersistentVolumeClaim" .Release.Namespace $claimName }}
+{{- if $claim }}
+{{- if ne (dig "status" "phase" "" $claim) "Bound" }}
+{{- fail "PCAP storage PVC must be Bound before enabling API packet evidence" }}
+{{- end }}
+{{- if not (has $storage.accessMode $claim.spec.accessModes) }}
+{{- fail "PCAP storage PVC accessModes do not match api.pcapStorage.accessMode" }}
+{{- end }}
+{{- end }}
+{{- end }}

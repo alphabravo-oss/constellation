@@ -177,6 +177,14 @@ api:
     # repository: ghcr.io/alphabravo-oss/constellation/api
     # tag: v0.2.0
   args: []
+  # Durable packet evidence is opt-in and always uses an operator-owned PVC.
+  # Single-replica RWO uses Recreate; multiple replicas require shared RWX.
+  # The claim must be Bound and writable by the configured API UID/fsGroup.
+  # No ephemeral fallback: disabled keeps the existing storage configuration.
+  pcapStorage:
+    enabled: false
+    existingClaim: ""
+    accessMode: ReadWriteOnce
   service:
     type: ClusterIP
     port: 8080

@@ -32,6 +32,36 @@
         "partitionStatisticsMaintenanceEnabled": { "type": "boolean", "title": "Maintain partitioned parent statistics", "default": true },
         "supportBundleSigningKeySecret": { "type": "string", "title": "Existing support-bundle signing key Secret", "default": "" },
         "supportBundleSigningKeySecretKey": { "type": "string", "title": "Signing key field in Secret", "minLength": 1, "default": "private-key.pem" },
+        "pcapStorage": {
+          "type": "object",
+          "title": "Durable packet capture storage",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "existingClaim": {
+              "type": "string",
+              "maxLength": 253,
+              "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+              "default": ""
+            },
+            "accessMode": {
+              "type": "string",
+              "enum": [
+                "ReadWriteOnce",
+                "ReadWriteMany"
+              ],
+              "default": "ReadWriteOnce"
+            }
+          },
+          "required": [
+            "enabled",
+            "existingClaim",
+            "accessMode"
+          ]
+        },
         "leaderElection": {
           "type": "object",
           "title": "Leader election",
