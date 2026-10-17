@@ -750,10 +750,29 @@ Evidence:
 The additive OpenAPI correction `f3cc8c5` documents the signing contract and
 actual one-off202 asynchronous receipt / schedule200 response. Static checks
 cover 48 positive/negative instances, 891 local references and unchanged other
-operations/existing schemas. These checks do not replace the integrated Go
-OpenAPI test or qualify deployment. Evidence:
+operations/existing schemas. Hosted run39024761342 at ef0d7a9 also passes
+TestGenerateOpenAPI, TestOpenAPICompleteness and TestOpenAPINoNewStubs. This
+qualifies the contract checks, not deployment. Static evidence:
 `/tmp/constellation-backup-signing-contract-76c3262.l30cb6p5/evidence/frozen-manifest.json`
 (SHA256 `9b1d26bdb72e3fc6affe830528c9388e5b5ba5c0a74341b0a7e7c024312f77c7`).
+
+Hosted `39024761342` at `ef0d7a9` has completed: Go unit/integration, browser,
+FIPS, dependency and govulncheck jobs pass. Frontend fails one timing-sensitive
+compliance sorting test; quality reports1504 findings, gosec163, and historical
+gitleaks remains failed. The required gate fails; no thresholds or exits changed.
+Completed CI and the bound OpenAPI/lint/security checkpoint are recorded in
+`/tmp/security-triage-39024761342/completed-manifest.json`
+(SHA256 `c6fe1fa6ae88aae26fb8dd0984de7ae14c39c32799a24e9d22aef38e06a7c99c`).
+
+Test-only correction `730e531` holds the sort response until the loading state is
+observed, then waits for the rendered ascending header before asserting history
+navigation. This removes the request-versus-render race while retaining server
+sorting and row assertions. All15 focused tests and all2344 frontend tests across
+158 files pass on Node24.21.0. The other598 frontend blobs match ef0d7a9; no product
+code or warning suppression changed. This local result does not rewrite the
+failed hosted run. Evidence:
+`/tmp/constellation-compliance-sort-ef0d7a9/evidence-manifest.json`
+(SHA256 `f84cd7428cdc606fe8350c721aeed32c30bec112878359d322dd0305aa71aa29`).
 
 
 ## October 12 implementation continuation
