@@ -65,22 +65,18 @@ infrastructure continuation after the selected console scope. Off-host recovery
 and deliberate real-node failure remain deferred. The checklist remains **66
 checked / 87 open**; bounded fixes below do not close their parent acceptance gates.
 
-Current main development deployment: **Helm82/schema180**, runtime-agent source
-**950ca77**; API source **7d54c3d**, migration/frontend source **5b82b12**. Capture
-storage is mounted on a retained RWO volume with leader-driven expiry enabled.
-Other roles retain their prior qualified images. Chart **7d54c3d** preserves the
-explicit execution dry-run setting introduced in **8beefb4**. All seven deployments and the runtime DaemonSet are ready. Process and
-native dataplane enforcement and benchmark workers remain disabled. Live v2 queue
-reads pass; anonymous, foreign-cluster and duplicate-node selectors return
-401/403/400. The live queue and policy bundle are empty, so positive execution
-and enforcement remain separate fixture evidence. Scoped policy bundles require
-protocol v2; legacy bundle reads return 426. Exact-image backup/PITR, restored
-credentials/audit/login, wrong-key rejection and restored pod restart pass
-(201 seconds, including exact high unsigned IDs and incomplete metadata); a fresh
-main-cluster backup completed before migration. Public
-login branding/provider visibility pass; the stored bootstrap credential returns
-401, so authenticated main-browser navigation is not claimed. Deployment evidence:
-`/tmp/constellation-pcap-main-7d54c3d/evidence/deployment-status.json`.
+Current main development deployment: **Helm83/schema180**, API/scanner/runtime-agent
+source **314afad**; migration/frontend source **5b82b12**. All seven deployments
+and the runtime DaemonSet are ready. Exact live payload hashes, health/readiness,
+policy protocol and queue authorization checks pass. Original retained PCAP
+storage, privacy, Recreate and current API leader ownership are preserved.
+Enforcement and benchmark workers remain disabled; execution dry-run is true.
+A fresh CNPG backup completed before the three-image update. Public login branding
+and configured-provider visibility pass; authenticated browser navigation remains
+unverified without a user session. The live bundle and response queue are empty;
+positive enforcement remains separate isolated fixture evidence. See the completed
+314afad deployment entry below and
+`/tmp/constellation-rollout-314afad/evidence/deployment-status.json`.
 
 Deployed schema180 preserves full unsigned native threat IDs and marks unproven
 historical maxima in compact row details. Its full-chain migration checks exact
@@ -4622,3 +4618,41 @@ until the end-to-end acceptance evidence exists.
 
 When those documents disagree with the current tree or this plan, verify the
 code and update this plan. Do not add status checklists to the evidence files.
+
+
+### Main deployment of the qualified 314afad candidate
+
+Main development now runs **Helm 83 / schema 180**. API, scanner and runtime-agent
+use exact source `314afad`; the API image also contains its qualified CLI.
+Migration/frontend remain at `5b82b12`. A fresh CNPG plugin backup completed at
+2026-10-17 11:56:36 UTC before the normal Helm upgrade. All three candidate images
+were imported and pinned by exact OCI identity, preserving every existing pin.
+The reviewed render changes only those three images and the API migration-wait
+init image. Normal migration/bootstrap hooks completed; all seven deployments
+and the runtime DaemonSet are ready.
+
+Live checks verify all six Go/native/BPF payload hashes, health/readiness 200,
+protocol-v2 policy reads, legacy 426, unknown-cluster 404, anonymous 401,
+foreign-cluster 403 and duplicate-node 400. The live policy and response queues
+are empty; positive enforcement remains the separate strict Flannel fixture.
+The original retained PCAP PVC/PV, private 0700:10001:10001 directory, Recreate
+strategy and new API leader ownership are preserved. Enforcement remains off,
+execution dry-run true and benchmark workers off. Public browser login shows
+“Constellation” / “by AlphaBravo”, email/password and no unconfigured SSO option.
+Authenticated browser navigation remains unverified without a user session;
+preview preload diagnostics and unauthenticated 401 responses are retained.
+
+The initial read-only payload wrapper used `runtime` where the rollout receipt
+uses `runtimeAgent`; its KeyError is preserved. The corrected role mapping passes
+all payload checks. No workload or acceptance change was needed. The frozen
+preparation README describes its earlier unexecuted state; the completed phase
+receipts and deployment status supersede it. Evidence binds 135 files:
+`/tmp/constellation-rollout-314afad/deployment-evidence-manifest.json`
+(SHA256 `c50be2f8a698f1dacadb17bb9811187973c6b032e0696eacafd4a977b732cd29`).
+
+This rollout includes the previously source-only API, OIDC, proxy, backup,
+signing, scanner and native report-clock fixes through 314afad. It does not deploy
+the separately built standalone backup binary or the later private registry/spool
+preparations. Hosted quality 1,495, gosec 156 and historical gitleaks still block the
+required gate. Overall acceptance remains 66 checked / 87 open; broader CNI, HA,
+disconnected and recovery boundaries remain unchanged.

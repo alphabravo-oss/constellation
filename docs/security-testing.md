@@ -1120,3 +1120,41 @@ hashes are preserved. No gate waiver or overall release-complete claim follows.
 Completed evidence:
 `/tmp/security-triage-39028433987/COMPLETED-MANIFEST.json`
 (SHA256 `7731efd3a798b8fed77c90092b6e3eeb69b89d373eca33eb681ad8193aecf889`).
+
+
+### Main deployment of the qualified 314afad candidate
+
+Main development now runs **Helm 83 / schema 180**. API, scanner and runtime-agent
+use exact source `314afad`; the API image also contains its qualified CLI.
+Migration/frontend remain at `5b82b12`. A fresh CNPG plugin backup completed at
+2026-10-17 11:56:36 UTC before the normal Helm upgrade. All three candidate images
+were imported and pinned by exact OCI identity, preserving every existing pin.
+The reviewed render changes only those three images and the API migration-wait
+init image. Normal migration/bootstrap hooks completed; all seven deployments
+and the runtime DaemonSet are ready.
+
+Live checks verify all six Go/native/BPF payload hashes, health/readiness 200,
+protocol-v2 policy reads, legacy 426, unknown-cluster 404, anonymous 401,
+foreign-cluster 403 and duplicate-node 400. The live policy and response queues
+are empty; positive enforcement remains the separate strict Flannel fixture.
+The original retained PCAP PVC/PV, private 0700:10001:10001 directory, Recreate
+strategy and new API leader ownership are preserved. Enforcement remains off,
+execution dry-run true and benchmark workers off. Public browser login shows
+“Constellation” / “by AlphaBravo”, email/password and no unconfigured SSO option.
+Authenticated browser navigation remains unverified without a user session;
+preview preload diagnostics and unauthenticated 401 responses are retained.
+
+The initial read-only payload wrapper used `runtime` where the rollout receipt
+uses `runtimeAgent`; its KeyError is preserved. The corrected role mapping passes
+all payload checks. No workload or acceptance change was needed. The frozen
+preparation README describes its earlier unexecuted state; the completed phase
+receipts and deployment status supersede it. Evidence binds 135 files:
+`/tmp/constellation-rollout-314afad/deployment-evidence-manifest.json`
+(SHA256 `c50be2f8a698f1dacadb17bb9811187973c6b032e0696eacafd4a977b732cd29`).
+
+This rollout includes the previously source-only API, OIDC, proxy, backup,
+signing, scanner and native report-clock fixes through 314afad. It does not deploy
+the separately built standalone backup binary or the later private registry/spool
+preparations. Hosted quality 1,495, gosec 156 and historical gitleaks still block the
+required gate. Overall acceptance remains 66 checked / 87 open; broader CNI, HA,
+disconnected and recovery boundaries remain unchanged.
