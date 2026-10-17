@@ -49,7 +49,7 @@ func TestPcapActionResponsesExactPlatformRoles(t *testing.T) {
 	h := NewPcapHTTP(database)
 	call := func(method, path string, body []byte, agent bool, handle http.HandlerFunc) PcapCapture {
 		t.Helper()
-		req := httptest.NewRequest(method, path, bytes.NewReader(body))
+		req := httptest.NewRequestWithContext(t.Context(), method, path, bytes.NewReader(body))
 		if agent {
 			req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(), token))
 		} else {
@@ -155,7 +155,7 @@ func TestPcapRoleLookupFailureDoesNotCommitActions(t *testing.T) {
 	t.Cleanup(restricted.Close)
 	h := NewPcapHTTP(db.NewFromPool(restricted))
 	body, _ := json.Marshal(StartCaptureRequest{ClusterID: cluster, Workload: "custom-install/api", DurationS: 30})
-	req := httptest.NewRequest(http.MethodPost, "/runtime-pcap/start", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/runtime-pcap/start", bytes.NewReader(body))
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{OrgID: org, UserID: uuid.New()}))
 	res := httptest.NewRecorder()
 	h.Start(res, req)
@@ -170,7 +170,7 @@ func TestPcapRoleLookupFailureDoesNotCommitActions(t *testing.T) {
 	if err := pool.QueryRow(ctx, `INSERT INTO runtime_pcap_captures(org_id,cluster_id,workload,namespace,requested_by) VALUES($1,$2,'custom-install/api','custom-install',$3) RETURNING id`, org, cluster, uuid.New()).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
-	req = httptest.NewRequest(http.MethodGet, "/runtime-pcap/claim?cluster_id="+cluster.String()+"&node=node-a", nil)
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/runtime-pcap/claim?cluster_id="+cluster.String()+"&node=node-a", nil)
 	req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(), token))
 	res = httptest.NewRecorder()
 	h.Claim(res, req)
@@ -189,7 +189,7 @@ func TestPcapRoleLookupFailureDoesNotCommitActions(t *testing.T) {
 		if endpoint == "status" {
 			body = []byte(`{"status":"failed"}`)
 		}
-		req = httptest.NewRequest(http.MethodPost, "/runtime-pcap/"+id.String()+"/"+endpoint, bytes.NewReader(body))
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/runtime-pcap/"+id.String()+"/"+endpoint, bytes.NewReader(body))
 		req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(), token))
 		res = httptest.NewRecorder()
 		if endpoint == "upload" {

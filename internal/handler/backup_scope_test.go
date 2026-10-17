@@ -10,9 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/pkg/audit"
 )
 
 func TestBackupsLegacyReadsRequireExactOwner(t *testing.T) {
@@ -50,7 +51,7 @@ func TestBackupsLegacyReadsRequireExactOwner(t *testing.T) {
 	h := &Backups{db: d, audit: audit.New(pool)}
 	request := func(method string, id uuid.UUID, org uuid.UUID, authenticated bool) *httptest.ResponseRecorder {
 		t.Helper()
-		r := httptest.NewRequest(http.MethodGet, "/backups/"+id.String(), nil)
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/backups/"+id.String(), nil)
 		if authenticated {
 			r = r.WithContext(WithSubject(r.Context(), Subject{OrgID: org}))
 		}

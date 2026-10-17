@@ -23,7 +23,7 @@ func TestCVECatalogParserAndAuthorization(t *testing.T) {
 				if export && (strings.HasPrefix(query, "offset=") || strings.HasPrefix(query, "limit=")) {
 					continue
 				}
-				if _, err := parseCVECatalog(httptest.NewRequest("GET", "/cve/search?"+query, nil), export); err == nil {
+				if _, err := parseCVECatalog(httptest.NewRequestWithContext(t.Context(), "GET", "/cve/search?"+query, nil), export); err == nil {
 					t.Fatal("malformed query accepted")
 				}
 			}
@@ -31,16 +31,16 @@ func TestCVECatalogParserAndAuthorization(t *testing.T) {
 	}
 	for _, handler := range []func(http.ResponseWriter, *http.Request){(&CVE{}).Search, (&CVE{}).SearchCSV} {
 		w := httptest.NewRecorder()
-		handler(w, httptest.NewRequest("GET", "/cve/search", nil))
+		handler(w, httptest.NewRequestWithContext(t.Context(), "GET", "/cve/search", nil))
 		if w.Code != 401 {
 			t.Fatalf("anonymous=%d", w.Code)
 		}
 	}
-	query, err := parseCVECatalog(httptest.NewRequest("GET", "/cve/search?limit=201&offset=2147483647", nil), false)
+	query, err := parseCVECatalog(httptest.NewRequestWithContext(t.Context(), "GET", "/cve/search?limit=201&offset=2147483647", nil), false)
 	if err != nil || query.limit != 50 || query.offset != inventorylist.MaxOffset {
 		t.Fatalf("legacy default/deep offset: %+v %v", query, err)
 	}
-	query, err = parseCVECatalog(httptest.NewRequest("GET", "/cve/search.csv?limit=oops&offset=-1", nil), true)
+	query, err = parseCVECatalog(httptest.NewRequestWithContext(t.Context(), "GET", "/cve/search.csv?limit=oops&offset=-1", nil), true)
 	if err != nil || query.limit != 100001 || query.offset != 0 {
 		t.Fatalf("matching CSV used page bounds: %+v %v", query, err)
 	}

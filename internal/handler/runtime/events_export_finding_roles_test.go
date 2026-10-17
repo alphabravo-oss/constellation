@@ -39,7 +39,7 @@ func TestEventsExportFindingRolesPreserveExactRecurrencesAndSource(t *testing.T)
 	if _, err := p.Exec(ctx, `INSERT INTO findings(id,org_id,asset_id,cluster_id,target_type,target_ref,kind,title,severity,first_seen_at) VALUES($1,$2,$3,$4,'workload','orbit/api','runtime','recurrence','high',NOW()-INTERVAL '1 second'),($1,$2,$3,$4,'workload','orbit/api','runtime','recurrence','high',NOW()),(gen_random_uuid(),$2,$3,$5,'workload','orbit/api','runtime','sibling','high',NOW()),(gen_random_uuid(),$2,$3,$4,'workload','ambiguous/api','runtime','ambiguous','high',NOW()),(gen_random_uuid(),$2,$3,$4,'image','orbit/api','runtime','image','high',NOW()),(gen_random_uuid(),$2,$3,$6,'workload','kube-system/api','runtime','unowned-cluster','high',NOW()),(gen_random_uuid(),$7,$3,$6,'workload','orbit/api','runtime','foreign','high',NOW())`, repeat, org, asset, cluster, sibling, foreign, foreignOrg); err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest("GET", "/events:export?hours=24", nil)
+	req := httptest.NewRequestWithContext(t.Context(), "GET", "/events:export?hours=24", nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{OrgID: org}))
 	res := httptest.NewRecorder()
 	NewEventsExport(p).Export(res, req)

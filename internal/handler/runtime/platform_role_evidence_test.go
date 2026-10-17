@@ -101,7 +101,7 @@ func TestEvidencePlatformRolesExactScopeAndInventories(t *testing.T) {
 		records = append(records, record{id, identity, expected[i]})
 	}
 	request := func(path string, handle http.HandlerFunc) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
 		req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{OrgID: org, UserID: uuid.New()}))
 		result := httptest.NewRecorder()
 		handle(result, req)

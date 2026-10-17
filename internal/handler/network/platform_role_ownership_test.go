@@ -73,7 +73,7 @@ func TestNetworkEvidenceRolesPodOwnershipAndKindAmbiguity(t *testing.T) {
 	}
 	request := func(path string, handle http.HandlerFunc) *httptest.ResponseRecorder {
 		t.Helper()
-		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
 		req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{OrgID: org, UserID: uuid.New()}))
 		res := httptest.NewRecorder()
 		handle(res, req)
@@ -233,7 +233,7 @@ func TestNetworkRoleLookupFailureIsVisible(t *testing.T) {
 		{"/network/conversations?cluster_id=" + cluster.String(), NewNetworkConversations(scoped).WithLiveGraph(live).List},
 		{"/network/conversations/entries?cluster_id=" + cluster.String() + "&from=custom-install/api&to=payments/api", NewNetworkConversations(scoped).Detail},
 	} {
-		req := httptest.NewRequest(http.MethodGet, item.path, nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, item.path, nil)
 		req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{OrgID: org, UserID: uuid.New()}))
 		res := httptest.NewRecorder()
 		item.handle(res, req)

@@ -45,7 +45,7 @@ func TestImageAcceptances_ReviewedScope(t *testing.T) {
 			body["accepted_until"] = expiry
 		}
 		data, _ := json.Marshal(body)
-		r := acceptanceRequest("POST", "/", asset, acceptance, user, wantedOrg, string(data))
+		r := acceptanceRequest(t.Context(), "POST", "/", asset, acceptance, user, wantedOrg, string(data))
 		w := httptest.NewRecorder()
 		if revoke {
 			h.Revoke(w, r)
@@ -137,7 +137,8 @@ func TestImageAcceptances_ReviewedScope(t *testing.T) {
 	}
 
 	t.Run("identity locked through write", func(t *testing.T) {
-		r := httptest.NewRequest(http.MethodPost, "/", nil)
+		ctx := t.Context()
+		r := httptest.NewRequestWithContext(ctx, http.MethodPost, "/", nil)
 		tx, gotDigest, gotCluster, ok := h.lockReviewedImage(httptest.NewRecorder(), r, org, asset, imageAcceptanceScope{ExpectedImageDigest: digest, ClusterID: cluster.String()})
 		if !ok {
 			t.Fatal("review lock failed")

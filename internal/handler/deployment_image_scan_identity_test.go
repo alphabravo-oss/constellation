@@ -77,7 +77,7 @@ func TestDeploymentImageScanIdentity(t *testing.T) {
 			exec(`DELETE FROM image_workload_links WHERE org_id=$1`, org)
 			exec(`INSERT INTO image_workload_links(org_id,cluster_id,deployment_id,workload_id,namespace,name,kind,image_ref,image_ref_normalized,image_repository,image_tag,image_digest) VALUES($1,$2,$3,'apps/api','apps','api','Deployment',$4,$5,$6,$7,$8)`, org, cluster, deployment, tc.imageRef, tc.normalized, tc.repository, tc.tag, tc.digest)
 			for attempt := 0; attempt < 2; attempt++ {
-				images, err := h.deploymentImages(httptest.NewRequest("GET", "/", nil), org, deployment)
+				images, err := h.deploymentImages(httptest.NewRequestWithContext(t.Context(), "GET", "/", nil), org, deployment)
 				if err != nil || len(images) != 1 {
 					t.Fatalf("images=%+v err=%v", images, err)
 				}
@@ -94,7 +94,7 @@ func TestDeploymentImageScanIdentity(t *testing.T) {
 				if tc.want == uuid.Nil && (images[0].LastScannedAt != nil || images[0].FindingCount != 0 || images[0].CriticalCount != 0 || images[0].MaxRiskScore != 0) {
 					t.Fatalf("unmatched digest borrowed scan evidence: %+v", images[0])
 				}
-				risks, err := h.deploymentFileRisks(httptest.NewRequest("GET", "/", nil), org, deployment)
+				risks, err := h.deploymentFileRisks(httptest.NewRequestWithContext(t.Context(), "GET", "/", nil), org, deployment)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -112,11 +112,11 @@ func TestDeploymentImageScanIdentity(t *testing.T) {
 		exec(`DELETE FROM image_workload_links WHERE org_id=$1`, org)
 		exec(`INSERT INTO image_workload_links(org_id,cluster_id,deployment_id,workload_id,namespace,name,kind,image_ref,image_ref_normalized,image_digest) VALUES($1,$2,$3,'apps/api','apps','api','Deployment','wrong-org','wrong-org','sha256:abcdef'),($1,$2,$4,'apps/api','apps','api','Deployment','wrong-cluster','wrong-cluster','sha256:abcdef')`, org, foreignCluster, foreignDeployment, deployment)
 		for _, target := range []uuid.UUID{deployment, foreignDeployment} {
-			images, err := h.deploymentImages(httptest.NewRequest("GET", "/", nil), org, target)
+			images, err := h.deploymentImages(httptest.NewRequestWithContext(t.Context(), "GET", "/", nil), org, target)
 			if err != nil || len(images) != 0 {
 				t.Fatalf("target=%s images=%+v err=%v", target, images, err)
 			}
-			risks, err := h.deploymentFileRisks(httptest.NewRequest("GET", "/", nil), org, target)
+			risks, err := h.deploymentFileRisks(httptest.NewRequestWithContext(t.Context(), "GET", "/", nil), org, target)
 			if err != nil || len(risks) != 0 {
 				t.Fatalf("target=%s file risks=%+v err=%v", target, risks, err)
 			}

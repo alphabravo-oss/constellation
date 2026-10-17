@@ -56,7 +56,7 @@ func TestScanJobsInventoryContinuationAndExport(t *testing.T) {
 	}
 	h := NewScanJobs(d, nil)
 	request := func(query string, export bool) *httptest.ResponseRecorder {
-		r := httptest.NewRequest(http.MethodGet, "/api/v1/scan-jobs?"+query, nil)
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scan-jobs?"+query, nil)
 		r = r.WithContext(authctx.WithSubject(r.Context(), authctx.Subject{OrgID: org, UserID: uuid.New()}))
 		w := httptest.NewRecorder()
 		if export {

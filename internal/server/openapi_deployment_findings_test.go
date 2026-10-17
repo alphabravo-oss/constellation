@@ -29,7 +29,7 @@ func TestDeploymentFindingInventoryRoutesRequireAuthentication(t *testing.T) {
 			t.Errorf("missing dedicated route %s", pattern)
 		}
 		w := httptest.NewRecorder()
-		s.router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, strings.ReplaceAll(pattern, "{id}", "00000000-0000-4000-8000-000000000001"), nil))
+		s.router.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), http.MethodGet, strings.ReplaceAll(pattern, "{id}", "00000000-0000-4000-8000-000000000001"), nil))
 		if w.Code != http.StatusUnauthorized {
 			t.Errorf("%s status=%d; authentication must precede evidence lookup", pattern, w.Code)
 		}

@@ -98,7 +98,7 @@ func TestAssetAndFindingPlatformRoleAPIExportParity(t *testing.T) {
 		findingsExpected[f.id.String()] = fr
 	}
 	request := func(h http.HandlerFunc, path, id string) *httptest.ResponseRecorder {
-		r := httptest.NewRequest("GET", path, nil)
+		r := httptest.NewRequestWithContext(t.Context(), "GET", path, nil)
 		r = r.WithContext(WithSubject(r.Context(), Subject{OrgID: org, UserID: uuid.New()}))
 		rc := chi.NewRouteContext()
 		rc.URLParams.Add("id", id)

@@ -44,7 +44,7 @@ func TestLifecycleTuplePeerRolesExactClusterOwnerAndUnknown(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	items, err := NewNetworkPolicies(d).observedPolicyLifecycleCatalog(httptest.NewRequest("GET", "/network/policies/lifecycle", nil), org.String(), &networkPolicyCluster{ID: cluster.String(), Name: "selected"}, "")
+	items, err := NewNetworkPolicies(d).observedPolicyLifecycleCatalog(httptest.NewRequestWithContext(t.Context(), "GET", "/network/policies/lifecycle", nil), org.String(), &networkPolicyCluster{ID: cluster.String(), Name: "selected"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}

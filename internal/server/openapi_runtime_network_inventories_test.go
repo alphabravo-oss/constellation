@@ -194,7 +194,7 @@ func TestRuntimeNetworkInventoryCSVRoutesRequireAuthentication(t *testing.T) {
 	for _, path := range []string{"/api/v1/network/conversations.csv", "/api/v1/network/sessions.csv", "/api/v1/runtime-threats.csv", "/api/v1/events.csv"} {
 		t.Run(path, func(t *testing.T) {
 			response := httptest.NewRecorder()
-			server.router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+			server.router.ServeHTTP(response, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
 			if response.Code != http.StatusUnauthorized {
 				t.Fatalf("CSV must use authenticated read route: status=%d body=%s", response.Code, response.Body.String())
 			}

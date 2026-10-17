@@ -59,7 +59,7 @@ func TestRuntimeAndTimelineRolesKeepExactEvidenceScope(t *testing.T) {
 		}
 	}
 	request := func(path string, fn http.HandlerFunc) *httptest.ResponseRecorder {
-		r := httptest.NewRequest(http.MethodGet, path, nil)
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
 		r = r.WithContext(authctx.WithSubject(r.Context(), authctx.Subject{OrgID: org}))
 		w := httptest.NewRecorder()
 		fn(w, r)

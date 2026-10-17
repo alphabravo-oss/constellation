@@ -203,7 +203,7 @@ INSERT INTO events (
 
 	body, _ := json.Marshal(map[string]string{"mode": "monitor", "reason": "validated observed file set"})
 	rec := httptest.NewRecorder()
-	req := baselineRequest(http.MethodPost, "/api/v1/runtime/file-profiles/default%2Fapi/mode?cluster_id="+clusterID.String(), workloadID, bytes.NewReader(body), orgID, userID)
+	req := baselineRequest(t.Context(), http.MethodPost, "/api/v1/runtime/file-profiles/default%2Fapi/mode?cluster_id="+clusterID.String(), workloadID, bytes.NewReader(body), orgID, userID)
 	NewFileProfiles(d, nil).SetMode(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("set mode status=%d body=%s", rec.Code, rec.Body.String())
@@ -221,7 +221,7 @@ INSERT INTO events (
 		"reason":       "add sensitive token file monitor",
 	})
 	rec = httptest.NewRecorder()
-	req = fileProfileRuleRequest(http.MethodPost, "/api/v1/runtime/file-profiles/default%2Fapi/rules?cluster_id="+clusterID.String(), workloadID, "", bytes.NewReader(body), orgID, userID)
+	req = fileProfileRuleRequest(t.Context(), http.MethodPost, "/api/v1/runtime/file-profiles/default%2Fapi/rules?cluster_id="+clusterID.String(), workloadID, "", bytes.NewReader(body), orgID, userID)
 	NewFileProfiles(d, nil).CreateRule(rec, req)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create rule status=%d body=%s", rec.Code, rec.Body.String())
@@ -249,7 +249,7 @@ INSERT INTO events (
 		"reason":       "enforce token file access",
 	})
 	rec = httptest.NewRecorder()
-	req = fileProfileRuleRequest(http.MethodPut, "/api/v1/runtime/file-profiles/default%2Fapi/rules/"+created.ID+"?cluster_id="+clusterID.String(), workloadID, created.ID, bytes.NewReader(body), orgID, userID)
+	req = fileProfileRuleRequest(t.Context(), http.MethodPut, "/api/v1/runtime/file-profiles/default%2Fapi/rules/"+created.ID+"?cluster_id="+clusterID.String(), workloadID, created.ID, bytes.NewReader(body), orgID, userID)
 	NewFileProfiles(d, nil).UpdateRule(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("update rule status=%d body=%s", rec.Code, rec.Body.String())
@@ -263,7 +263,7 @@ INSERT INTO events (
 		"reason":       "documented startup probe exception",
 	})
 	rec = httptest.NewRecorder()
-	req = fileProfileExceptionRequest(http.MethodPost, "/api/v1/runtime/file-profiles/default%2Fapi/exceptions?cluster_id="+clusterID.String(), workloadID, "", bytes.NewReader(body), orgID, userID)
+	req = fileProfileExceptionRequest(t.Context(), http.MethodPost, "/api/v1/runtime/file-profiles/default%2Fapi/exceptions?cluster_id="+clusterID.String(), workloadID, "", bytes.NewReader(body), orgID, userID)
 	NewFileProfiles(d, nil).CreateException(rec, req)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create exception status=%d body=%s", rec.Code, rec.Body.String())
@@ -279,7 +279,7 @@ INSERT INTO events (
 	}
 
 	rec = httptest.NewRecorder()
-	req = baselineRequest(http.MethodGet, "/api/v1/runtime/file-profiles/default%2Fapi/export?cluster_id="+clusterID.String(), workloadID, nil, orgID, userID)
+	req = baselineRequest(t.Context(), http.MethodGet, "/api/v1/runtime/file-profiles/default%2Fapi/export?cluster_id="+clusterID.String(), workloadID, nil, orgID, userID)
 	NewFileProfiles(d, nil).Export(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("export status=%d body=%s", rec.Code, rec.Body.String())
@@ -299,7 +299,7 @@ INSERT INTO events (
 	}
 
 	rec = httptest.NewRecorder()
-	req = baselineRequest(http.MethodGet, "/api/v1/runtime/file-profiles/default%2Fapi?cluster_id="+clusterID.String(), workloadID, nil, orgID, userID)
+	req = baselineRequest(t.Context(), http.MethodGet, "/api/v1/runtime/file-profiles/default%2Fapi?cluster_id="+clusterID.String(), workloadID, nil, orgID, userID)
 	NewFileProfiles(d, nil).Get(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("get status=%d body=%s", rec.Code, rec.Body.String())
@@ -357,7 +357,7 @@ INSERT INTO events (
 
 	body, _ = json.Marshal(map[string]string{"mode": "enforce", "reason": "turn on token file protection"})
 	rec = httptest.NewRecorder()
-	req = baselineRequest(http.MethodPost, "/api/v1/runtime/file-profiles/default%2Fapi/mode?cluster_id="+clusterID.String(), workloadID, bytes.NewReader(body), orgID, userID)
+	req = baselineRequest(t.Context(), http.MethodPost, "/api/v1/runtime/file-profiles/default%2Fapi/mode?cluster_id="+clusterID.String(), workloadID, bytes.NewReader(body), orgID, userID)
 	NewFileProfiles(d, nil).SetMode(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("set enforce mode status=%d body=%s", rec.Code, rec.Body.String())
@@ -395,7 +395,7 @@ INSERT INTO events (
 	}
 
 	rec = httptest.NewRecorder()
-	req = baselineRequest(http.MethodGet, "/api/v1/runtime/file-profiles/default%2Fapi?cluster_id="+clusterID.String(), workloadID, nil, orgID, userID)
+	req = baselineRequest(t.Context(), http.MethodGet, "/api/v1/runtime/file-profiles/default%2Fapi?cluster_id="+clusterID.String(), workloadID, nil, orgID, userID)
 	NewFileProfiles(d, nil).Get(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("get after watch status=%d body=%s", rec.Code, rec.Body.String())
@@ -414,7 +414,7 @@ INSERT INTO events (
 
 	body, _ = json.Marshal(map[string]string{"reason": "remove stale token monitor"})
 	rec = httptest.NewRecorder()
-	req = fileProfileRuleRequest(http.MethodDelete, "/api/v1/runtime/file-profiles/default%2Fapi/rules/"+created.ID+"?cluster_id="+clusterID.String(), workloadID, created.ID, bytes.NewReader(body), orgID, userID)
+	req = fileProfileRuleRequest(t.Context(), http.MethodDelete, "/api/v1/runtime/file-profiles/default%2Fapi/rules/"+created.ID+"?cluster_id="+clusterID.String(), workloadID, created.ID, bytes.NewReader(body), orgID, userID)
 	NewFileProfiles(d, nil).DeleteRule(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("delete rule status=%d body=%s", rec.Code, rec.Body.String())
@@ -426,7 +426,7 @@ INSERT INTO events (
 		"reason":  "restore approved file profile bundle",
 	})
 	rec = httptest.NewRecorder()
-	req = baselineRequest(http.MethodPost, "/api/v1/runtime/file-profiles/default%2Fapi:import?cluster_id="+clusterID.String(), workloadID, bytes.NewReader(body), orgID, userID)
+	req = baselineRequest(t.Context(), http.MethodPost, "/api/v1/runtime/file-profiles/default%2Fapi:import?cluster_id="+clusterID.String(), workloadID, bytes.NewReader(body), orgID, userID)
 	NewFileProfiles(d, nil).Import(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("import status=%d body=%s", rec.Code, rec.Body.String())
@@ -440,7 +440,7 @@ INSERT INTO events (
 	}
 
 	rec = httptest.NewRecorder()
-	req = baselineRequest(http.MethodGet, "/api/v1/runtime/file-profiles/default%2Fapi?cluster_id="+clusterID.String(), workloadID, nil, orgID, userID)
+	req = baselineRequest(t.Context(), http.MethodGet, "/api/v1/runtime/file-profiles/default%2Fapi?cluster_id="+clusterID.String(), workloadID, nil, orgID, userID)
 	NewFileProfiles(d, nil).Get(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("get after import status=%d body=%s", rec.Code, rec.Body.String())
@@ -740,20 +740,19 @@ SELECT COALESCE(jsonb_agg(to_jsonb(i) ORDER BY i.cluster_id, i.rule_id), '[]'::j
 	}
 }
 
-func fileProfileRuleRequest(method, target, workloadID, ruleID string, body *bytes.Reader, orgID, userID uuid.UUID) *http.Request {
-	req := baselineRequest(method, target, workloadID, body, orgID, userID)
-	rctx := chi.RouteContext(req.Context())
-	if ruleID != "" {
-		rctx.URLParams.Add("rule_id", ruleID)
-	}
-	return req
+func fileProfileRuleRequest(ctx context.Context, method, target, workloadID, ruleID string, body *bytes.Reader, orgID, userID uuid.UUID) *http.Request {
+	req := baselineRequest(ctx, method, target, workloadID, body, orgID, userID)
+	return fileProfileRequestWithRouteID(req, "rule_id", ruleID)
 }
 
-func fileProfileExceptionRequest(method, target, workloadID, exceptionID string, body *bytes.Reader, orgID, userID uuid.UUID) *http.Request {
-	req := baselineRequest(method, target, workloadID, body, orgID, userID)
-	rctx := chi.RouteContext(req.Context())
-	if exceptionID != "" {
-		rctx.URLParams.Add("exception_id", exceptionID)
+func fileProfileExceptionRequest(ctx context.Context, method, target, workloadID, exceptionID string, body *bytes.Reader, orgID, userID uuid.UUID) *http.Request {
+	req := baselineRequest(ctx, method, target, workloadID, body, orgID, userID)
+	return fileProfileRequestWithRouteID(req, "exception_id", exceptionID)
+}
+
+func fileProfileRequestWithRouteID(req *http.Request, key, id string) *http.Request {
+	if id != "" {
+		chi.RouteContext(req.Context()).URLParams.Add(key, id)
 	}
 	return req
 }

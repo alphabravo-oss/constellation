@@ -28,7 +28,7 @@ func TestBackupInventoryRoutesAndOpenAPIContract(t *testing.T) {
 			t.Fatal("missing dedicated route", path)
 		}
 		w := httptest.NewRecorder()
-		s.router.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+		s.router.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), "GET", path, nil))
 		if w.Code != 401 {
 			t.Fatalf("unauth%d %s", w.Code, w.Body.String())
 		}

@@ -63,8 +63,8 @@ func startSAMLBrowserTestLogin(t *testing.T, handler *Auth) *http.Cookie {
 	return cookie
 }
 
-func samlBrowserTestACS(cookie *http.Cookie, relay string) *http.Request {
-	request := httptest.NewRequest(http.MethodPost, "https://console.example.com/api/v1/auth/saml/acs", strings.NewReader(url.Values{
+func samlBrowserTestACS(ctx context.Context, cookie *http.Cookie, relay string) *http.Request {
+	request := httptest.NewRequestWithContext(ctx, http.MethodPost, "https://console.example.com/api/v1/auth/saml/acs", strings.NewReader(url.Values{
 		"RelayState": {relay}, "SAMLResponse": {"secret-assertion"},
 	}.Encode()))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -90,11 +90,11 @@ func TestSAMLBrowserBindingRejectsBeforeAssertionParsing(t *testing.T) {
 		t.Run(scenario, func(t *testing.T) {
 			handler := samlBrowserTestHandler(t)
 			cookie := startSAMLBrowserTestLogin(t, handler)
-			request := samlBrowserTestACS(cookie, cookie.Value)
+			request := samlBrowserTestACS(t.Context(), cookie, cookie.Value)
 			want := http.StatusForbidden
 			switch scenario {
 			case "unsolicited":
-				request = samlBrowserTestACS(nil, "")
+				request = samlBrowserTestACS(t.Context(), nil, "")
 			case "missing-cookie":
 				request.Header.Del("Cookie")
 			case "wrong-browser":
@@ -102,11 +102,11 @@ func TestSAMLBrowserBindingRejectsBeforeAssertionParsing(t *testing.T) {
 				if other.Value == cookie.Value {
 					t.Fatal("nonce reused")
 				}
-				request = samlBrowserTestACS(cookie, other.Value)
+				request = samlBrowserTestACS(t.Context(), cookie, other.Value)
 			case "missing-relay":
-				request = samlBrowserTestACS(cookie, "")
+				request = samlBrowserTestACS(t.Context(), cookie, "")
 			case "query-only-relay":
-				request = samlBrowserTestACS(cookie, "")
+				request = samlBrowserTestACS(t.Context(), cookie, "")
 				request.URL.RawQuery = url.Values{"RelayState": {cookie.Value}}.Encode()
 			case "duplicate-relay":
 				request = httptest.NewRequestWithContext(t.Context(), http.MethodPost, request.URL.String(), strings.NewReader("SAMLResponse=secret-assertion&RelayState="+cookie.Value+"&RelayState="+cookie.Value))
@@ -173,7 +173,7 @@ func TestSAMLBrowserBindingSingleUseAndRedactedParserError(t *testing.T) {
 		go func() {
 			defer workers.Done()
 			response := httptest.NewRecorder()
-			handler.SAMLACS(response, samlBrowserTestACS(cookie, cookie.Value))
+			handler.SAMLACS(response, samlBrowserTestACS(t.Context(), cookie, cookie.Value))
 			if response.Code != http.StatusUnauthorized && response.Code != http.StatusForbidden {
 				t.Errorf("unexpected status: %d", response.Code)
 			}
@@ -193,7 +193,7 @@ func TestSAMLBrowserBindingDoesNotBypassRealParser(t *testing.T) {
 	handler := samlBrowserTestHandler(t)
 	cookie := startSAMLBrowserTestLogin(t, handler)
 	response := httptest.NewRecorder()
-	handler.SAMLACS(response, samlBrowserTestACS(cookie, cookie.Value))
+	handler.SAMLACS(response, samlBrowserTestACS(t.Context(), cookie, cookie.Value))
 	if response.Code != http.StatusUnauthorized || strings.Contains(response.Body.String(), "secret-assertion") {
 		t.Fatalf("invalid assertion accepted or disclosed: %d %s", response.Code, response.Body.String())
 	}
@@ -220,7 +220,7 @@ func TestSAMLBrowserBindingSessionAndCLICompatibility(t *testing.T) {
 	})
 	cookie := startSAMLBrowserTestLogin(t, handler)
 	response := httptest.NewRecorder()
-	request := samlBrowserTestACS(cookie, cookie.Value)
+	request := samlBrowserTestACS(t.Context(), cookie, cookie.Value)
 	request.Header.Del("Origin")
 	handler.SAMLACS(response, request)
 	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/clusters" || strings.Contains(response.Body.String(), `"token"`) {

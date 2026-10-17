@@ -36,7 +36,7 @@ func TestProfileInventoryRoutesRequireAuthentication(t *testing.T) {
 				t.Fatal("inventory needs its own registered route, not a workload detail fallback")
 			}
 			response := httptest.NewRecorder()
-			s.router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+			s.router.ServeHTTP(response, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
 			if response.Code != http.StatusUnauthorized {
 				t.Fatalf("inventory must require authentication: status=%d body=%s", response.Code, response.Body.String())
 			}

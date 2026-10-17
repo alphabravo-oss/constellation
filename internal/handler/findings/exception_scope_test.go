@@ -29,7 +29,7 @@ func TestFindingGetReturnsClusterScope(t *testing.T) {
 		org    uuid.UUID
 		status int
 	}{{org, 200}, {uuid.New(), 404}} {
-		req := httptest.NewRequest("GET", "/", nil)
+		req := httptest.NewRequestWithContext(t.Context(), "GET", "/", nil)
 		rc := chi.NewRouteContext()
 		rc.URLParams.Add("id", id.String())
 		req = req.WithContext(context.WithValue(authctx.WithSubject(req.Context(), authctx.Subject{OrgID: tc.org}), chi.RouteCtxKey, rc))
@@ -105,7 +105,7 @@ func TestVulnerabilityExceptionsClusterScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := func(cluster string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest("GET", "/?cluster_id="+cluster, nil)
+		req := httptest.NewRequestWithContext(t.Context(), "GET", "/?cluster_id="+cluster, nil)
 		req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{OrgID: org}))
 		w := httptest.NewRecorder()
 		NewVulnerabilityExceptions(d).List(w, req)
@@ -174,7 +174,7 @@ func (f *exceptionEvidenceFixture) log(t *testing.T, actor uuid.UUID, action, ki
 }
 func (f *exceptionEvidenceFixture) list(t *testing.T, cluster string) []vulnerabilityExceptionDTO {
 	t.Helper()
-	req := httptest.NewRequest("GET", "/?cluster_id="+cluster, nil)
+	req := httptest.NewRequestWithContext(t.Context(), "GET", "/?cluster_id="+cluster, nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{OrgID: f.org, UserID: f.actor}))
 	w := httptest.NewRecorder()
 	NewVulnerabilityExceptions(f.d).List(w, req)

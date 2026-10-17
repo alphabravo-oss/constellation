@@ -49,17 +49,17 @@ func reviewedFixture(t *testing.T) reviewedPolicyFixture {
 	}
 	return f
 }
-func (f reviewedPolicyFixture) request(id, org uuid.UUID, operation string, body any) *httptest.ResponseRecorder {
+func (f reviewedPolicyFixture) request(ctx context.Context, id, org uuid.UUID, operation string, body any) *httptest.ResponseRecorder {
 	var buf bytes.Buffer
 	_ = json.NewEncoder(&buf).Encode(body)
 	path := "/runtime-policies/" + id.String() + "/reviewed"
 	if operation != "update" && operation != "delete" {
 		path += "/" + operation
 	}
-	req := httptest.NewRequest("POST", path, &buf)
+	req := httptest.NewRequestWithContext(ctx, "POST", path, &buf)
 	rc := chi.NewRouteContext()
 	rc.URLParams.Add("id", id.String())
-	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rc)
+	ctx = context.WithValue(ctx, chi.RouteCtxKey, rc)
 	req = req.WithContext(authctx.WithSubject(ctx, authctx.Subject{OrgID: org, UserID: f.actor}))
 	res := httptest.NewRecorder()
 	switch operation {
@@ -91,7 +91,7 @@ func TestRuntimePolicyReviewedRevisionAndExactScope(t *testing.T) {
 		version      string
 		want         int
 	}{{f.org, f.cluster, "", 428}, {f.org, f.cluster, "01", 400}, {f.org, f.cluster, "+1", 400}, {f.org, f.cluster, "9223372036854775808", 400}, {f.org, f.cluster, "0", 400}, {f.org, f.sibling, "1", 404}, {f.org, f.foreignCluster, "1", 404}, {f.foreignOrg, f.foreignCluster, "1", 404}} {
-		res := f.request(f.id, c.org, "update", map[string]any{"cluster_id": c.cluster, "expected_version": c.version, "name": "do not save"})
+		res := f.request(t.Context(), f.id, c.org, "update", map[string]any{"cluster_id": c.cluster, "expected_version": c.version, "name": "do not save"})
 		if res.Code != c.want {
 			t.Fatalf("guard %d want%d %s", res.Code, c.want, res.Body.String())
 		}
@@ -105,7 +105,7 @@ func TestRuntimePolicyReviewedRevisionAndExactScope(t *testing.T) {
 		if operation == "update" {
 			body["name"] = "name-only edit"
 		}
-		res := f.request(f.id, f.org, operation, body)
+		res := f.request(t.Context(), f.id, f.org, operation, body)
 		if res.Code != http.StatusOK {
 			t.Fatalf("%s %d %s", operation, res.Code, res.Body.String())
 		}
@@ -119,7 +119,7 @@ func TestRuntimePolicyReviewedRevisionAndExactScope(t *testing.T) {
 		}
 		beforeCount := f.countAudit(t)
 		for _, staleOperation := range []string{"update", "promote", "demote", "disable", "delete"} {
-			stale := f.request(f.id, f.org, staleOperation, map[string]any{"cluster_id": f.cluster, "expected_version": strconv.Itoa(version - 1)})
+			stale := f.request(t.Context(), f.id, f.org, staleOperation, map[string]any{"cluster_id": f.cluster, "expected_version": strconv.Itoa(version - 1)})
 			if stale.Code != 409 {
 				t.Fatalf("stale%s %d %s", staleOperation, stale.Code, stale.Body.String())
 			}
@@ -131,7 +131,7 @@ func TestRuntimePolicyReviewedRevisionAndExactScope(t *testing.T) {
 	if f.countAudit(t) != 4 {
 		t.Fatal("missing successful atomic audit")
 	}
-	res := f.request(f.id, f.org, "delete", map[string]any{"cluster_id": f.cluster, "expected_version": strconv.Itoa(version)})
+	res := f.request(t.Context(), f.id, f.org, "delete", map[string]any{"cluster_id": f.cluster, "expected_version": strconv.Itoa(version)})
 	var receipt map[string]any
 	_ = json.Unmarshal(res.Body.Bytes(), &receipt)
 	if res.Code != 200 || receipt["deleted"] != f.id.String() || receipt["revision"] != strconv.Itoa(version) || receipt["cluster_id"] != f.cluster.String() || receipt["workload"] != "app/api" || f.countAudit(t) != 5 {
@@ -149,7 +149,7 @@ func TestRuntimePolicyReviewedConcurrentWriteOneWinner(t *testing.T) {
 		wg.Add(1)
 		go func(name string) {
 			defer wg.Done()
-			res := f.request(f.id, f.org, "update", map[string]any{"cluster_id": f.cluster, "expected_version": "1", "name": name})
+			res := f.request(t.Context(), f.id, f.org, "update", map[string]any{"cluster_id": f.cluster, "expected_version": "1", "name": name})
 			codes <- res.Code
 		}(name)
 	}
@@ -184,7 +184,7 @@ func TestRuntimePolicyReviewedAuditFailureRollsBackAndLegacyRenameInvalidates(t 
 		_, _ = pool.Exec(ctx, `DROP FUNCTION IF EXISTS `+function+`()`)
 	})
 	for _, operation := range []string{"update", "promote", "delete"} {
-		res := f.request(f.id, f.org, operation, map[string]any{"cluster_id": f.cluster, "expected_version": "1"})
+		res := f.request(t.Context(), f.id, f.org, operation, map[string]any{"cluster_id": f.cluster, "expected_version": "1"})
 		if res.Code != 500 {
 			t.Fatalf("audit %s %d %s", operation, res.Code, res.Body.String())
 		}
@@ -197,7 +197,7 @@ func TestRuntimePolicyReviewedAuditFailureRollsBackAndLegacyRenameInvalidates(t 
 		t.Fatal(err)
 	}
 	// An old replica's name-only edit still advances the same revision.
-	req := httptest.NewRequest("PUT", "/runtime-policies/"+f.id.String(), bytes.NewBufferString(`{"name":"legacy rename"}`))
+	req := httptest.NewRequestWithContext(t.Context(), "PUT", "/runtime-policies/"+f.id.String(), bytes.NewBufferString(`{"name":"legacy rename"}`))
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{OrgID: f.org, UserID: f.actor}))
 	res := httptest.NewRecorder()
 	f.h.Update(res, req)
@@ -208,7 +208,7 @@ func TestRuntimePolicyReviewedAuditFailureRollsBackAndLegacyRenameInvalidates(t 
 	if err != nil || got.Revision != "2" {
 		t.Fatalf("legacy revision %+v %v", got, err)
 	}
-	stale := f.request(f.id, f.org, "update", map[string]any{"cluster_id": f.cluster, "expected_version": "1"})
+	stale := f.request(t.Context(), f.id, f.org, "update", map[string]any{"cluster_id": f.cluster, "expected_version": "1"})
 	if stale.Code != 409 {
 		t.Fatalf("legacy stale %d %s", stale.Code, stale.Body.String())
 	}
@@ -229,7 +229,7 @@ func TestRuntimePolicyReviewedOldReplicaNameWriteBumpsRevision(t *testing.T) {
 	if err != nil || after.Revision != "2" || !after.UpdatedAt.After(before.UpdatedAt) {
 		t.Fatalf("old replica revision %+v %v", after, err)
 	}
-	res := f.request(f.id, f.org, "update", map[string]any{"cluster_id": f.cluster, "expected_version": "1", "name": "stale overwrite"})
+	res := f.request(t.Context(), f.id, f.org, "update", map[string]any{"cluster_id": f.cluster, "expected_version": "1", "name": "stale overwrite"})
 	if res.Code != 409 || f.countAudit(t) != 0 {
 		t.Fatalf("old replica stale %d %s", res.Code, res.Body.String())
 	}

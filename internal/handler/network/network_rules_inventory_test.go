@@ -86,7 +86,7 @@ func TestNetworkRulesInventoryFullCohortPagingFiltersAndCSV(t *testing.T) {
 		if export {
 			path += ".csv"
 		}
-		r := httptest.NewRequest("GET", path+"?"+query, nil)
+		r := httptest.NewRequestWithContext(t.Context(), "GET", path+"?"+query, nil)
 		rc := chi.NewRouteContext()
 		rc.URLParams.Add("id", cl.String())
 		r = r.WithContext(authctx.WithSubject(context.WithValue(r.Context(), chi.RouteCtxKey, rc), authctx.Subject{OrgID: org, UserID: uuid.New()}))
@@ -208,7 +208,7 @@ func TestNetworkRulesInventoryDeterministicVerdictAndCollisionIdentity(t *testin
 	router.Get("/clusters/{id}/network-rules/inventory", NewNetwork(d).NetworkRulesInventory)
 	request := func(query string) networkRulesInventoryResponse {
 		t.Helper()
-		req := httptest.NewRequest(http.MethodGet, "/clusters/"+cluster.String()+"/network-rules/inventory?"+query, nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/clusters/"+cluster.String()+"/network-rules/inventory?"+query, nil)
 		req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{OrgID: org, UserID: actor}))
 		res := httptest.NewRecorder()
 		router.ServeHTTP(res, req)
@@ -229,7 +229,7 @@ func TestNetworkRulesInventoryDeterministicVerdictAndCollisionIdentity(t *testin
 		t.Fatalf("hash collision identities %+v %+v", one, two)
 	}
 	legacyRes := httptest.NewRecorder()
-	legacyReq := httptest.NewRequest("GET", "/clusters/"+cluster.String()+"/network-rules", nil)
+	legacyReq := httptest.NewRequestWithContext(t.Context(), "GET", "/clusters/"+cluster.String()+"/network-rules", nil)
 	legacyReq = legacyReq.WithContext(authctx.WithSubject(legacyReq.Context(), authctx.Subject{OrgID: org, UserID: actor}))
 	legacyRouter := chi.NewRouter()
 	legacyRouter.Get("/clusters/{id}/network-rules", NewNetwork(d).NetworkRules)
@@ -293,7 +293,7 @@ func TestNetworkRulesInventoryReadFailureIsUnavailable(t *testing.T) {
 	router.Get("/clusters/{id}/network-rules/inventory", h.NetworkRulesInventory)
 	router.Get("/clusters/{id}/network-rules/inventory.csv", h.NetworkRulesInventoryCSV)
 	for _, suffix := range []string{"", ".csv"} {
-		req := httptest.NewRequest("GET", "/clusters/"+cluster.String()+"/network-rules/inventory"+suffix, nil)
+		req := httptest.NewRequestWithContext(t.Context(), "GET", "/clusters/"+cluster.String()+"/network-rules/inventory"+suffix, nil)
 		req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{OrgID: org, UserID: actor}))
 		res := httptest.NewRecorder()
 		router.ServeHTTP(res, req)

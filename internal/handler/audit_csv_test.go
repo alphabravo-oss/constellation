@@ -20,7 +20,7 @@ import (
 
 func auditCSVRequest(t *testing.T, f *auditListFixture, org uuid.UUID, params url.Values) (*httptest.ResponseRecorder, [][]string) {
 	t.Helper()
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/audit/events.csv?"+params.Encode(), nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/audit/events.csv?"+params.Encode(), nil)
 	request = request.WithContext(WithSubject(t.Context(), Subject{OrgID: org}))
 	response := httptest.NewRecorder()
 	NewAudit(f.database).ExportCSV(response, request)

@@ -49,7 +49,7 @@ func TestTimelineDashboardCohortsExactCountsAndScope(t *testing.T) {
 		}
 	}
 	request := func(path string, fn http.HandlerFunc) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
 		req = req.WithContext(WithSubject(req.Context(), Subject{OrgID: org, UserID: uuid.New()}))
 		w := httptest.NewRecorder()
 		fn(w, req)
@@ -202,7 +202,7 @@ func TestTimelineEventExportCapAndStablePages(t *testing.T) {
 	}
 	h := NewSecurityTimeline(d)
 	request := func(path string, fn http.HandlerFunc) *httptest.ResponseRecorder {
-		r := httptest.NewRequest(http.MethodGet, path, nil)
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
 		r = r.WithContext(WithSubject(r.Context(), Subject{OrgID: org}))
 		w := httptest.NewRecorder()
 		fn(w, r)
@@ -256,14 +256,14 @@ func TestTimelineReadFailuresDoNotReportEmptySuccess(t *testing.T) {
 	h := NewSecurityTimeline(d)
 	for _, fn := range []http.HandlerFunc{h.List, h.ExportCSV} {
 		w := httptest.NewRecorder()
-		fn(w, httptest.NewRequest(http.MethodGet, "/api/v1/security/timeline?type=runtime_event", nil))
+		fn(w, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/security/timeline?type=runtime_event", nil))
 		if w.Code != http.StatusUnauthorized {
 			t.Fatalf("missing subject=%d", w.Code)
 		}
 	}
 	d.Close()
 	for _, fn := range []http.HandlerFunc{h.List, h.ExportCSV} {
-		r := httptest.NewRequest(http.MethodGet, "/api/v1/security/timeline?type=runtime_event&hours=24", nil)
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/security/timeline?type=runtime_event&hours=24", nil)
 		r = r.WithContext(WithSubject(r.Context(), Subject{OrgID: uuid.New()}))
 		w := httptest.NewRecorder()
 		fn(w, r)

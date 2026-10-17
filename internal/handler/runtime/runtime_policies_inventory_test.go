@@ -51,7 +51,7 @@ func TestRuntimePolicyManagementInventoryIncludesDisabledButAgentDoesNot(t *test
 		}
 	}
 	// Disabling an existing management row must leave it discoverable and editable.
-	disabled := f.request(f.id, f.org, "disable", map[string]any{"cluster_id": f.cluster, "expected_version": "1"})
+	disabled := f.request(t.Context(), f.id, f.org, "disable", map[string]any{"cluster_id": f.cluster, "expected_version": "1"})
 	if disabled.Code != 200 {
 		t.Fatalf("disable%d %s", disabled.Code, disabled.Body.String())
 	}

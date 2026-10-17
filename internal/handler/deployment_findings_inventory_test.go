@@ -134,10 +134,10 @@ func TestDeploymentFindingsInventoryFullSourceOwnershipAndExport(t *testing.T) {
 	h := NewDeployments(d, nil)
 	request := func(id uuid.UUID, query string, export, auth bool) *httptest.ResponseRecorder {
 		t.Helper()
-		r := httptest.NewRequest("GET", "/deployments/"+id.String()+"/findings?"+query, nil)
+		r := httptest.NewRequestWithContext(t.Context(), "GET", "/deployments/"+id.String()+"/findings?"+query, nil)
 		route := chi.NewRouteContext()
 		route.URLParams.Add("id", id.String())
-		r = r.WithContext(context.WithValue(ctx, chi.RouteCtxKey, route))
+		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, route))
 		if auth {
 			r = r.WithContext(WithSubject(r.Context(), Subject{OrgID: org}))
 		}
@@ -339,10 +339,10 @@ func TestDeploymentFindingsCSVCapRetainsCompleteSummary(t *testing.T) {
  SELECT $1,$2,$3,'runtime','Retained '||n,'high','open','workload','prod/cap','2026-10-01','2026-10-12' FROM generate_series(1,100005)n`, org, cluster, asset)
 	h := NewDeployments(d, nil)
 	request := func(export bool) *httptest.ResponseRecorder {
-		r := httptest.NewRequest("GET", "/deployments/"+deployment.String()+"/findings?cluster_id="+cluster.String()+"&limit=1&offset=2147483647&sort=finding&order=asc", nil)
+		r := httptest.NewRequestWithContext(t.Context(), "GET", "/deployments/"+deployment.String()+"/findings?cluster_id="+cluster.String()+"&limit=1&offset=2147483647&sort=finding&order=asc", nil)
 		route := chi.NewRouteContext()
 		route.URLParams.Add("id", deployment.String())
-		r = r.WithContext(context.WithValue(WithSubject(ctx, Subject{OrgID: org}), chi.RouteCtxKey, route))
+		r = r.WithContext(context.WithValue(WithSubject(r.Context(), Subject{OrgID: org}), chi.RouteCtxKey, route))
 		w := httptest.NewRecorder()
 		if export {
 			h.FindingsCSV(w, r)

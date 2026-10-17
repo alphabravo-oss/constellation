@@ -45,7 +45,7 @@ func TestAssetImageDisplayIdentityAcrossListDetailSortAndExport(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		r := httptest.NewRequest("GET", "/assets/"+id.String(), nil).WithContext(WithSubject(ctx, Subject{OrgID: org}))
+		r := httptest.NewRequestWithContext(t.Context(), "GET", "/assets/"+id.String(), nil).WithContext(WithSubject(t.Context(), Subject{OrgID: org}))
 		route := chi.NewRouteContext()
 		route.URLParams.Add("id", id.String())
 		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, route))
@@ -65,7 +65,7 @@ func TestAssetImageDisplayIdentityAcrossListDetailSortAndExport(t *testing.T) {
 		}
 	}
 	request := func(export bool) *httptest.ResponseRecorder {
-		r := httptest.NewRequest("GET", "/assets?cluster_id="+cluster.String()+"&sort=asset&order=asc", nil).WithContext(WithSubject(ctx, Subject{OrgID: org}))
+		r := httptest.NewRequestWithContext(t.Context(), "GET", "/assets?cluster_id="+cluster.String()+"&sort=asset&order=asc", nil).WithContext(WithSubject(t.Context(), Subject{OrgID: org}))
 		w := httptest.NewRecorder()
 		if export {
 			h.ExportCSV(w, r)
@@ -91,7 +91,7 @@ func TestAssetImageDisplayIdentityAcrossListDetailSortAndExport(t *testing.T) {
 			t.Fatal("sort must follow display names")
 		}
 	}
-	r := httptest.NewRequest("GET", "/assets?cluster_id="+cluster.String()+"&search=registry%3A5000%2Fteam%2Fapi%3Av2", nil).WithContext(WithSubject(ctx, Subject{OrgID: org}))
+	r := httptest.NewRequestWithContext(t.Context(), "GET", "/assets?cluster_id="+cluster.String()+"&search=registry%3A5000%2Fteam%2Fapi%3Av2", nil).WithContext(WithSubject(t.Context(), Subject{OrgID: org}))
 	w := httptest.NewRecorder()
 	h.List(w, r)
 	var found struct {

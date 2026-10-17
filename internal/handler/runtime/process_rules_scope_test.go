@@ -50,7 +50,7 @@ func TestProcessRulesClusterScopeAndPreconditions(t *testing.T) {
 			target += "?cluster_id=" + cluster
 		}
 		raw, _ := json.Marshal(body)
-		req := baselineRequest(method, target, "default/api", bytes.NewReader(raw), subject, user)
+		req := baselineRequest(t.Context(), method, target, "default/api", bytes.NewReader(raw), subject, user)
 		chi.RouteContext(req.Context()).URLParams.Add("rule_id", rule)
 		out := httptest.NewRecorder()
 		handler(out, req)
@@ -128,7 +128,7 @@ func TestProcessRulesClusterScopeAndPreconditions(t *testing.T) {
 	if out.Code != http.StatusConflict {
 		t.Fatalf("stale update=%d %s", out.Code, out.Body.String())
 	}
-	deleteReq := baselineRequest(http.MethodDelete, "/rules?cluster_id="+a.String()+"&expected_updated_at="+old, "default/api", nil, org, user)
+	deleteReq := baselineRequest(t.Context(), http.MethodDelete, "/rules?cluster_id="+a.String()+"&expected_updated_at="+old, "default/api", nil, org, user)
 	chi.RouteContext(deleteReq.Context()).URLParams.Add("rule_id", created[a].RuleID)
 	out = httptest.NewRecorder()
 	h.DeleteRule(out, deleteReq)
@@ -184,7 +184,7 @@ func TestBaselinesModePreconditionIsAtomic(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := httptest.NewRecorder()
-	req := baselineRequest(http.MethodPost, "/mode?cluster_id="+cluster.String(), "default/api", bytes.NewReader([]byte(`{"mode":"enforce","expected_mode":"learn","reason":"stale review"}`)), org, user)
+	req := baselineRequest(t.Context(), http.MethodPost, "/mode?cluster_id="+cluster.String(), "default/api", bytes.NewReader([]byte(`{"mode":"enforce","expected_mode":"learn","reason":"stale review"}`)), org, user)
 	h.SetMode(out, req)
 	if out.Code != http.StatusConflict {
 		t.Fatalf("stale mode=%d %s", out.Code, out.Body.String())
@@ -197,7 +197,7 @@ func TestBaselinesModePreconditionIsAtomic(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM process_baseline_transitions WHERE org_id=$1`, org).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("failed transition appended history: count%d err%v", count, err)
 	}
-	req = baselineRequest(http.MethodPost, "/mode?cluster_id="+cluster.String(), "default/api", bytes.NewReader([]byte(`{"mode":"enforce","expected_mode":"monitor","reason":"current review"}`)), org, user)
+	req = baselineRequest(t.Context(), http.MethodPost, "/mode?cluster_id="+cluster.String(), "default/api", bytes.NewReader([]byte(`{"mode":"enforce","expected_mode":"monitor","reason":"current review"}`)), org, user)
 	out = httptest.NewRecorder()
 	h.SetMode(out, req)
 	if out.Code != http.StatusOK {

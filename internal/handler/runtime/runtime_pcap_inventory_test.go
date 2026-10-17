@@ -41,7 +41,7 @@ func TestPcapInventoryFullScopePagesAndCSV(t *testing.T) {
 	base := "cluster_id=" + cluster.String()
 	call := func(query string, export bool) *httptest.ResponseRecorder {
 		t.Helper()
-		r := httptest.NewRequest("GET", "/runtime-pcap/inventory?"+query, nil)
+		r := httptest.NewRequestWithContext(t.Context(), "GET", "/runtime-pcap/inventory?"+query, nil)
 		r = r.WithContext(authctx.WithSubject(t.Context(), authctx.Subject{OrgID: org}))
 		w := httptest.NewRecorder()
 		if export {
@@ -128,7 +128,7 @@ func TestPcapInventoryFullScopePagesAndCSV(t *testing.T) {
 	if w := call(base+"&group=missing", false); w.Code != 400 {
 		t.Fatal("missing group not rejected")
 	}
-	r := httptest.NewRequest("GET", "/runtime-pcap/inventory?"+base, nil)
+	r := httptest.NewRequestWithContext(t.Context(), "GET", "/runtime-pcap/inventory?"+base, nil)
 	for _, export := range []bool{false, true} {
 		w := httptest.NewRecorder()
 		if export {
@@ -164,7 +164,7 @@ func TestPcapInventoryCSVFullCap(t *testing.T) {
 	exec(`INSERT INTO runtime_pcap_captures(org_id,cluster_id,requested_by,workload,namespace,packet_count,file_size_bytes)
  SELECT $1,$2,$3,'prod/a','prod',n,n*10 FROM generate_series(1,100001)n`, org, cluster, user)
 	h := NewPcapHTTP(d)
-	r := httptest.NewRequest("GET", "/runtime-pcap/inventory.csv?cluster_id="+cluster.String()+"&offset=2147483647&limit=1&sort=packets&order=asc", nil)
+	r := httptest.NewRequestWithContext(t.Context(), "GET", "/runtime-pcap/inventory.csv?cluster_id="+cluster.String()+"&offset=2147483647&limit=1&sort=packets&order=asc", nil)
 	r = r.WithContext(authctx.WithSubject(t.Context(), authctx.Subject{OrgID: org}))
 	w := httptest.NewRecorder()
 	h.InventoryCSV(w, r)

@@ -40,15 +40,15 @@ func moveRuleFixture(t *testing.T) (*db.DB, uuid.UUID, uuid.UUID, uuid.UUID) {
 	return database, orgID, userID, clusterID
 }
 
-func moveRuleRequest(database *db.DB, orgID, userID, clusterID uuid.UUID, from string, withAudit bool) *httptest.ResponseRecorder {
+func moveRuleRequest(ctx context.Context, database *db.DB, orgID, userID, clusterID uuid.UUID, from string, withAudit bool) *httptest.ResponseRecorder {
 	handler := NewNetwork(database)
 	if withAudit {
 		handler.WithAudit(audit.New(database.Pool()))
 	}
 	router := chi.NewRouter()
 	router.Post("/clusters/{id}/network-rules:move-top", handler.MoveNetworkRuleToTop)
-	request := httptest.NewRequest(http.MethodPost, "/clusters/"+clusterID.String()+"/network-rules:move-top", strings.NewReader(`{"from":"`+from+`","to":"default/db"}`))
-	request = request.WithContext(authctx.WithSubject(request.Context(), authctx.Subject{OrgID: orgID, UserID: userID}))
+	request := httptest.NewRequestWithContext(ctx, http.MethodPost, "/clusters/"+clusterID.String()+"/network-rules:move-top", strings.NewReader(`{"from":"`+from+`","to":"default/db"}`))
+	request = request.WithContext(authctx.WithSubject(ctx, authctx.Subject{OrgID: orgID, UserID: userID}))
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	return response
@@ -56,7 +56,7 @@ func moveRuleRequest(database *db.DB, orgID, userID, clusterID uuid.UUID, from s
 
 func TestMoveNetworkRuleToTopAuditsAndChangesExistingRule(t *testing.T) {
 	database, orgID, userID, clusterID := moveRuleFixture(t)
-	response := moveRuleRequest(database, orgID, userID, clusterID, "default/lower", true)
+	response := moveRuleRequest(t.Context(), database, orgID, userID, clusterID, "default/lower", true)
 	if response.Code != http.StatusOK {
 		t.Fatalf("move status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -95,7 +95,7 @@ func TestMoveNetworkRuleToTopRejectsMissingScopeRuleAndAudit(t *testing.T) {
 		{"audit absent", clusterID, "default/lower", false, http.StatusServiceUnavailable},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			response := moveRuleRequest(database, orgID, userID, test.clusterID, test.from, test.withAudit)
+			response := moveRuleRequest(t.Context(), database, orgID, userID, test.clusterID, test.from, test.withAudit)
 			if response.Code != test.status {
 				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 			}
@@ -118,7 +118,7 @@ func TestMoveNetworkRuleToTopSerializesConcurrentMoves(t *testing.T) {
 		group.Add(1)
 		go func() {
 			defer group.Done()
-			statuses <- moveRuleRequest(database, orgID, userID, clusterID, from, true).Code
+			statuses <- moveRuleRequest(t.Context(), database, orgID, userID, clusterID, from, true).Code
 		}()
 	}
 	group.Wait()
@@ -188,7 +188,7 @@ func TestMoveNetworkRuleToTopRollsBackWhenCompletionAuditFails(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = database.Pool().Exec(context.Background(), `ALTER TABLE audit_events DROP CONSTRAINT `+constraint)
 	})
-	response := moveRuleRequest(database, orgID, userID, clusterID, "default/lower", true)
+	response := moveRuleRequest(t.Context(), database, orgID, userID, clusterID, "default/lower", true)
 	if response.Code != http.StatusServiceUnavailable {
 		t.Fatalf("move status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -219,7 +219,7 @@ func TestUpsertNetworkRulePreservesExplicitPrecedence(t *testing.T) {
 		{"positive", `,"priority":42`, 42},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			request := httptest.NewRequest(http.MethodPut, "/clusters/"+clusterID.String()+"/network-rules", strings.NewReader(`{"from":"default/lower","to":"default/db","disable":true,"comment":"edited"`+tc.priorityJSON+`}`))
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPut, "/clusters/"+clusterID.String()+"/network-rules", strings.NewReader(`{"from":"default/lower","to":"default/db","disable":true,"comment":"edited"`+tc.priorityJSON+`}`))
 			request = request.WithContext(authctx.WithSubject(request.Context(), authctx.Subject{OrgID: orgID, UserID: userID}))
 			response := httptest.NewRecorder()
 			router.ServeHTTP(response, request)

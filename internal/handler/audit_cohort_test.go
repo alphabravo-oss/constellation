@@ -17,15 +17,15 @@ import (
 
 func TestAuditSelectedCohortValidation(t *testing.T) {
 	for _, query := range []string{"event_ids=-1", "event_ids=0", "event_ids=01", "event_ids=1,,2", "event_ids=9223372036854775808", "event_ids=1&event_ids=2", "event_ids=1&cluster_id=" + uuid.NewString(), "event_ids=1&event_id=1", "event_ids=1&action=test", "event_ids=" + strings.Repeat("1,", 20) + "1", "event_ids=1;bad"} {
-		if _, _, err := auditEventCohort(httptest.NewRequest("GET", "/?"+query, nil)); err == nil {
+		if _, _, err := auditEventCohort(httptest.NewRequestWithContext(t.Context(), "GET", "/?"+query, nil)); err == nil {
 			t.Errorf("accepted %q", query)
 		}
 	}
-	ids, set, err := auditEventCohort(httptest.NewRequest("GET", "/?event_ids=42,42,43", nil))
+	ids, set, err := auditEventCohort(httptest.NewRequestWithContext(t.Context(), "GET", "/?event_ids=42,42,43", nil))
 	if err != nil || !set || len(ids) != 2 {
 		t.Fatalf("deduplicated cohort: %v %v %v", ids, set, err)
 	}
-	ids, set, err = auditEventCohort(httptest.NewRequest("GET", "/?event_ids=", nil))
+	ids, set, err = auditEventCohort(httptest.NewRequestWithContext(t.Context(), "GET", "/?event_ids=", nil))
 	if err != nil || !set || ids == nil || len(ids) != 0 {
 		t.Fatalf("empty cohort widened: %v %v %v", ids, set, err)
 	}
@@ -58,7 +58,7 @@ func TestDashboardAuditSelectedCohortStaysExact(t *testing.T) {
 	}
 	foreign := insert(other, "foreign")
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/api/v1/dashboard/summary", nil)
+	req := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/dashboard/summary", nil)
 	req = req.WithContext(WithSubject(req.Context(), Subject{OrgID: org}))
 	NewDashboard(d).Summary(rec, req)
 	if rec.Code != 200 {
@@ -81,7 +81,7 @@ func TestDashboardAuditSelectedCohortStaysExact(t *testing.T) {
 	newer := insert(org, "newer.after.dashboard")
 	read := func(query string) []auditDTO {
 		t.Helper()
-		req := httptest.NewRequest("GET", "/api/v1/audit/events?"+query, nil)
+		req := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/audit/events?"+query, nil)
 		req = req.WithContext(WithSubject(req.Context(), Subject{OrgID: org}))
 		rec := httptest.NewRecorder()
 		NewAudit(d).List(rec, req)

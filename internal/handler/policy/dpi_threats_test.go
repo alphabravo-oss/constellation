@@ -41,8 +41,8 @@ func TestDPIThreatSettingsScopeAtomicCleanupAndCAS(t *testing.T) {
 	}
 	h := NewPolicies(d, nil, nil)
 	call := func(fn http.HandlerFunc, method string, c uuid.UUID, body string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(method, "/policies/dpi-threats?cluster_id="+c.String(), strings.NewReader(body))
-		req = req.WithContext(authctx.WithSubject(ctx, authctx.Subject{OrgID: org, UserID: user}))
+		req := httptest.NewRequestWithContext(t.Context(), method, "/policies/dpi-threats?cluster_id="+c.String(), strings.NewReader(body))
+		req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{OrgID: org, UserID: user}))
 		out := httptest.NewRecorder()
 		fn(out, req)
 		return out

@@ -213,7 +213,7 @@ func TestBaselineInventoryReadOnlyFullCohortAndBundle(t *testing.T) {
 		{"POST", "/runtime/baselines/apps%2Fshared/rules", `{"name":"reviewed","path":"/bin/reviewed","action":"allow"}`},
 		{"PUT", "/runtime/baselines/apps%2Fshared/rules/missing", `{"name":"reviewed","path":"/bin/reviewed","action":"deny"}`},
 	} {
-		request := baselineRequest(endpoint.method, endpoint.path+"?cluster_id="+cluster.String(), "apps/shared", bytes.NewReader([]byte(endpoint.body)), org, uuid.New())
+		request := baselineRequest(t.Context(), endpoint.method, endpoint.path+"?cluster_id="+cluster.String(), "apps/shared", bytes.NewReader([]byte(endpoint.body)), org, uuid.New())
 		response := httptest.NewRecorder()
 		switch {
 		case endpoint.method == "GET":
@@ -231,7 +231,7 @@ func TestBaselineInventoryReadOnlyFullCohortAndBundle(t *testing.T) {
 	}
 	// A detail read keeps its sample DTO but refreshes the full cached allowed set.
 	detailResponse := httptest.NewRecorder()
-	h.Get(detailResponse, baselineRequest("GET", "/runtime/baselines/apps%2Fapp-0001?cluster_id="+cluster.String(), "apps/app-0001", nil, org, uuid.New()))
+	h.Get(detailResponse, baselineRequest(t.Context(), "GET", "/runtime/baselines/apps%2Fapp-0001?cluster_id="+cluster.String(), "apps/app-0001", nil, org, uuid.New()))
 	if detailResponse.Code != 200 {
 		t.Fatalf("detail %d %s", detailResponse.Code, detailResponse.Body.String())
 	}
@@ -252,7 +252,7 @@ func TestBaselineInventoryReadOnlyFullCohortAndBundle(t *testing.T) {
 	actor := uuid.New()
 	exec(`INSERT INTO users(id,org_id,email,display_name,password_hash) VALUES($1,$2,$3,'reviewer','x')`, actor, org, actor.String()+"@baseline.test")
 	modeResponse := httptest.NewRecorder()
-	h.SetMode(modeResponse, baselineRequest("POST", "/runtime/baselines/apps%2Fapp-0001/mode?cluster_id="+cluster.String(), "apps/app-0001", bytes.NewReader([]byte(`{"mode":"enforce","expected_mode":"monitor","reason":"reviewed full retained identities"}`)), org, actor))
+	h.SetMode(modeResponse, baselineRequest(t.Context(), "POST", "/runtime/baselines/apps%2Fapp-0001/mode?cluster_id="+cluster.String(), "apps/app-0001", bytes.NewReader([]byte(`{"mode":"enforce","expected_mode":"monitor","reason":"reviewed full retained identities"}`)), org, actor))
 	if modeResponse.Code != 200 {
 		t.Fatalf("mode %d %s", modeResponse.Code, modeResponse.Body.String())
 	}

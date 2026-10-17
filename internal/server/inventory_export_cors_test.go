@@ -15,7 +15,7 @@ func TestInventoryExportReceiptsExposedOnlyToAllowedBrowserOrigin(t *testing.T) 
 	t.Cleanup(s.db.Close)
 	for _, origin := range []string{"http://localhost:5173", "https://untrusted.example.test", ""} {
 		t.Run(origin, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/api/v1/backups/inventory.csv", nil)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/backups/inventory.csv", nil)
 			if origin != "" {
 				req.Header.Set("Origin", origin)
 			}

@@ -50,7 +50,7 @@ func TestFindingsServerFilterParity(t *testing.T) {
 	}
 	values := url.Values{"cluster_id": {cluster.String()}, "kind": {"vulnerability"}, "lifecycle": {"open"}, "fixable": {"true"}, "q": {"openssl !status:suppressed kev:true canonical:trivy"}}
 	request := func(handler http.HandlerFunc, values url.Values) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodGet, "/?"+values.Encode(), nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/?"+values.Encode(), nil)
 		req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{OrgID: org, UserID: uuid.New()}))
 		w := httptest.NewRecorder()
 		handler(w, req)

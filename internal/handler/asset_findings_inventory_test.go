@@ -48,10 +48,10 @@ func TestAssetFindingsFullInventoryAndExport(t *testing.T) {
 	h := NewAssets(d)
 	request := func(id uuid.UUID, query string, export bool, auth bool) *httptest.ResponseRecorder {
 		t.Helper()
-		r := httptest.NewRequest("GET", "/assets/"+id.String()+"/findings?"+query, nil)
+		r := httptest.NewRequestWithContext(t.Context(), "GET", "/assets/"+id.String()+"/findings?"+query, nil)
 		rc := chi.NewRouteContext()
 		rc.URLParams.Add("id", id.String())
-		r = r.WithContext(context.WithValue(ctx, chi.RouteCtxKey, rc))
+		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rc))
 		if auth {
 			r = r.WithContext(WithSubject(r.Context(), Subject{OrgID: org}))
 		}
@@ -63,10 +63,10 @@ func TestAssetFindingsFullInventoryAndExport(t *testing.T) {
 		}
 		return w
 	}
-	legacyRequest := httptest.NewRequest("GET", "/assets/"+asset.String(), nil)
+	legacyRequest := httptest.NewRequestWithContext(t.Context(), "GET", "/assets/"+asset.String(), nil)
 	legacyRoute := chi.NewRouteContext()
 	legacyRoute.URLParams.Add("id", asset.String())
-	legacyRequest = legacyRequest.WithContext(context.WithValue(WithSubject(ctx, Subject{OrgID: org}), chi.RouteCtxKey, legacyRoute))
+	legacyRequest = legacyRequest.WithContext(context.WithValue(WithSubject(legacyRequest.Context(), Subject{OrgID: org}), chi.RouteCtxKey, legacyRoute))
 	legacyResponse := httptest.NewRecorder()
 	h.Get(legacyResponse, legacyRequest)
 	if legacyResponse.Code != 200 {
@@ -235,7 +235,7 @@ func TestAssetFindingsFullInventoryAndExport(t *testing.T) {
 func TestAssetsGetReadFailureIsNotMissingOrEmpty(t *testing.T) {
 	d := openTestDB(t)
 	d.Close()
-	r := httptest.NewRequest("GET", "/assets/test", nil)
+	r := httptest.NewRequestWithContext(t.Context(), "GET", "/assets/test", nil)
 	rc := chi.NewRouteContext()
 	rc.URLParams.Add("id", uuid.NewString())
 	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rc))

@@ -47,7 +47,7 @@ func TestConversationStreamInventoryCompleteScopePagesAndCSV(t *testing.T) {
 	base := "cluster_id=" + cluster.String() + "&from=prod%2Fapi&to=prod%2Fdb&hours=24"
 	call := func(query string, export bool) *httptest.ResponseRecorder {
 		t.Helper()
-		r := httptest.NewRequest("GET", "/network/conversations/streams?"+query, nil)
+		r := httptest.NewRequestWithContext(t.Context(), "GET", "/network/conversations/streams?"+query, nil)
 		r = r.WithContext(authctx.WithSubject(t.Context(), authctx.Subject{OrgID: org}))
 		w := httptest.NewRecorder()
 		if export {
@@ -136,7 +136,7 @@ func TestConversationStreamInventoryCompleteScopePagesAndCSV(t *testing.T) {
 	if w := call(base+"&group=missing", false); w.Code != 400 {
 		t.Fatal("missing group not rejected")
 	}
-	r := httptest.NewRequest("GET", "/network/conversations/streams?"+base, nil)
+	r := httptest.NewRequestWithContext(t.Context(), "GET", "/network/conversations/streams?"+base, nil)
 	for _, export := range []bool{false, true} {
 		w := httptest.NewRecorder()
 		if export {
@@ -172,7 +172,7 @@ func TestConversationStreamInventoryCSVFullCap(t *testing.T) {
 	exec(`INSERT INTO network_flow_rollups(org_id,cluster_id,src_workload,dst_workload,protocol,l7_protocol,dst_port,verdict,bucket,max_at,sum_bytes,sum_packets)
  SELECT $1,$2,'prod/a','prod/b','tcp','app-'||n,443,'allow',date_trunc('hour',now()),now(),n,1 FROM generate_series(1,100001)n`, org, cluster)
 	h := NewNetworkConversations(d)
-	r := httptest.NewRequest("GET", "/network/conversations/streams.csv?cluster_id="+cluster.String()+"&from=prod%2Fa&to=prod%2Fb&offset=2147483647&limit=1&sort=bytes&order=asc", nil)
+	r := httptest.NewRequestWithContext(t.Context(), "GET", "/network/conversations/streams.csv?cluster_id="+cluster.String()+"&from=prod%2Fa&to=prod%2Fb&offset=2147483647&limit=1&sort=bytes&order=asc", nil)
 	r = r.WithContext(authctx.WithSubject(t.Context(), authctx.Subject{OrgID: org}))
 	w := httptest.NewRecorder()
 	h.EntriesCSV(w, r)

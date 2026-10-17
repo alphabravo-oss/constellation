@@ -41,7 +41,7 @@ func TestFindingInstanceAuditScopeSurvivesRetention(t *testing.T) {
 	h := findinghandler.NewFindings(d, audit.New(d.Pool()), nil)
 	for _, at := range []time.Time{a, b} {
 		body := bytes.NewBufferString(`{"reason":"exact scope","reviewed_revision":"1"}`)
-		r := httptest.NewRequest("POST", "/finding-instances/"+id.String()+"/suppress?first_seen_at="+url.QueryEscape(at.Format(time.RFC3339Nano)), body)
+		r := httptest.NewRequestWithContext(t.Context(), "POST", "/finding-instances/"+id.String()+"/suppress?first_seen_at="+url.QueryEscape(at.Format(time.RFC3339Nano)), body)
 		rc := chi.NewRouteContext()
 		rc.URLParams.Add("id", id.String())
 		ctx := context.WithValue(r.Context(), chi.RouteCtxKey, rc)
@@ -59,7 +59,7 @@ func TestFindingInstanceAuditScopeSurvivesRetention(t *testing.T) {
 	}
 	read := func(cluster uuid.UUID) []auditDTO {
 		t.Helper()
-		r := httptest.NewRequest("GET", "/audit?cluster_id="+cluster.String(), nil)
+		r := httptest.NewRequestWithContext(t.Context(), "GET", "/audit?cluster_id="+cluster.String(), nil)
 		r = r.WithContext(authctx.WithSubject(r.Context(), authctx.Subject{OrgID: org}))
 		w := httptest.NewRecorder()
 		NewAudit(d).List(w, r)

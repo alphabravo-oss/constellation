@@ -382,7 +382,11 @@ func TestHTTPClient_ProxyAndTLS(t *testing.T) {
 	c = Default()
 	c.EgressProxy = EgressProxy{HTTPSProxy: proxy.URL}
 	cl = c.HTTPClient(2 * time.Second)
-	resp, err := cl.Get("http://example.invalid/whatever")
+	httpRequest, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://example.invalid/whatever", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := cl.Do(httpRequest)
 	if err == nil {
 		_ = resp.Body.Close()
 	}

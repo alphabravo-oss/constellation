@@ -64,7 +64,7 @@ func TestSecondaryNetworkInventoryRoutesAndContracts(t *testing.T) {
 					t.Errorf("missing exact route %s", path)
 				}
 				w := httptest.NewRecorder()
-				s.router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+				s.router.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
 				if w.Code != http.StatusUnauthorized {
 					t.Errorf("%s must authenticate before evidence lookup: %d", path, w.Code)
 				}

@@ -60,7 +60,7 @@ func TestEventsExportPreservesRowsAndEnrichesExactThreatRoles(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(single.Close)
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/events:export?hours=24", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/events:export?hours=24", nil)
 	r = r.WithContext(authctx.WithSubject(r.Context(), authctx.Subject{OrgID: org}))
 	w := httptest.NewRecorder()
 	NewEventsExport(single).Export(w, r)
@@ -161,7 +161,7 @@ func TestEventsExportInitialAndPartialFailuresStayValidJSON(t *testing.T) {
 	}
 	t.Cleanup(failing.Close)
 	invoke := func(export *EventsExport) *httptest.ResponseRecorder {
-		r := httptest.NewRequest(http.MethodGet, "/api/v1/events:export", nil)
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/events:export", nil)
 		r = r.WithContext(authctx.WithSubject(r.Context(), authctx.Subject{OrgID: org}))
 		w := httptest.NewRecorder()
 		export.Export(w, r)

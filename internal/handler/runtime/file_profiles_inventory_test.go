@@ -23,7 +23,7 @@ func TestFileProfileFullInventoryAndConditionalDelete(t *testing.T) {
 	d := openTestDB(t)
 	t.Cleanup(d.Close)
 	pool := d.Pool()
-	ctx := context.Background()
+	ctx := t.Context()
 	org, user, cluster, otherOrg, otherCluster := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id=ANY($1::uuid[])`, []uuid.UUID{org, otherOrg})
@@ -67,7 +67,7 @@ func TestFileProfileFullInventoryAndConditionalDelete(t *testing.T) {
 	get := func(query string, export bool) *httptest.ResponseRecorder {
 		t.Helper()
 		rec := httptest.NewRecorder()
-		req := baselineRequest(http.MethodGet, "/api/v1/runtime/file-profiles/inventory?cluster_id="+cluster.String()+query, "", nil, org, user)
+		req := baselineRequest(ctx, http.MethodGet, "/api/v1/runtime/file-profiles/inventory?cluster_id="+cluster.String()+query, "", nil, org, user)
 		if export {
 			h.InventoryCSV(rec, req)
 		} else {
@@ -88,6 +88,7 @@ func TestFileProfileFullInventoryAndConditionalDelete(t *testing.T) {
 		return data
 	}
 	t.Run("full summary traversal and read only", func(t *testing.T) {
+		ctx := t.Context()
 		ids := map[string]bool{}
 		for offset := 0; offset < 208; offset += 100 {
 			data := read(fmt.Sprintf("&sort=workload&order=asc&offset=%d", offset))
@@ -146,6 +147,7 @@ func TestFileProfileFullInventoryAndConditionalDelete(t *testing.T) {
 		}
 	})
 	t.Run("deep empty continuation and strict query scope", func(t *testing.T) {
+		ctx := t.Context()
 		if data := read("&offset=2000000"); data.Total != 207 || len(data.Profiles) != 0 || data.HasMore {
 			t.Fatalf("deep %+v", data)
 		}
@@ -157,13 +159,14 @@ func TestFileProfileFullInventoryAndConditionalDelete(t *testing.T) {
 		}
 		for _, id := range []uuid.UUID{otherCluster, uuid.New()} {
 			rec := httptest.NewRecorder()
-			h.Inventory(rec, baselineRequest(http.MethodGet, "/?cluster_id="+id.String(), "", nil, org, user))
+			h.Inventory(rec, baselineRequest(ctx, http.MethodGet, "/?cluster_id="+id.String(), "", nil, org, user))
 			if rec.Code != 404 {
 				t.Fatalf("foreign/missing cluster=%d", rec.Code)
 			}
 		}
 	})
 	t.Run("persisted and rule-only profiles and canonical metadata without list side effects", func(t *testing.T) {
+		ctx := t.Context()
 		exec(`INSERT INTO file_profile_states(org_id,cluster_id,workload_id,namespace,name,mode) VALUES($1,$2,'prod/workload-000','aaa-stale','wrong','monitor'),($1,$2,'retired/saved','wrong','wrong','enforce')`, org, cluster)
 		rule := uuid.New()
 		exec(`INSERT INTO file_profile_rules(id,org_id,cluster_id,workload_id,filter,path,behavior) VALUES($1,$2,$3,'retired/rule-only','/rule-only','/rule-only','monitor_change')`, rule, org, cluster)
@@ -181,7 +184,7 @@ func TestFileProfileFullInventoryAndConditionalDelete(t *testing.T) {
 			}
 		}
 		rec := httptest.NewRecorder()
-		h.Get(rec, baselineRequest(http.MethodGet, "/?cluster_id="+cluster.String(), "prod/shared", nil, org, user))
+		h.Get(rec, baselineRequest(ctx, http.MethodGet, "/?cluster_id="+cluster.String(), "prod/shared", nil, org, user))
 		if rec.Code != 409 {
 			t.Fatalf("ambiguous detail %d %s", rec.Code, rec.Body.String())
 		}
@@ -191,8 +194,8 @@ func TestFileProfileFullInventoryAndConditionalDelete(t *testing.T) {
 			t.Fatal(err)
 		}
 		exec(`INSERT INTO cluster_init_bundles(org_id,cluster_id,name,expires_at,runtime_agent_token_id,kek_fingerprint,contents_encrypted) VALUES($1,$2,$3,now()+interval '1 hour',$4,'test','\x00'::bytea)`, org, cluster, "file-inventory-"+tokenID.String(), tokenID)
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/?cluster_id="+cluster.String(), nil)
-		req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(), &handler.RuntimeAgentToken{ID: tokenID, OrgID: org}))
+		req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/?cluster_id="+cluster.String(), nil)
+		req = req.WithContext(handler.WithRuntimeAgentToken(ctx, &handler.RuntimeAgentToken{ID: tokenID, OrgID: org}))
 		h.AgentRulesBundle(rec, req)
 		if rec.Code != 200 {
 			t.Fatalf("agent bundle %d %s", rec.Code, rec.Body.String())
@@ -206,13 +209,14 @@ func TestFileProfileFullInventoryAndConditionalDelete(t *testing.T) {
 		}
 	})
 	t.Run("reviewed update preserves exact microsecond revision and rejects stale writer", func(t *testing.T) {
+		ctx := t.Context()
 		rule := uuid.New()
 		stamp := time.Now().UTC().Truncate(time.Microsecond)
 		exec(`INSERT INTO file_profile_rules(id,org_id,cluster_id,workload_id,filter,path,behavior,updated_at) VALUES($1,$2,$3,'prod/workload-000','/update-reviewed','/update-reviewed','monitor_change',$4)`, rule, org, cluster, stamp)
 		call := func(expected string) *httptest.ResponseRecorder {
 			body, _ := json.Marshal(map[string]string{"reason": "reviewed edit", "description": "reviewed new description", "expected_updated_at": expected})
 			rec := httptest.NewRecorder()
-			h.UpdateRule(rec, fileProfileRuleRequest(http.MethodPut, "/?cluster_id="+cluster.String(), "prod/workload-000", rule.String(), bytes.NewReader(body), org, user))
+			h.UpdateRule(rec, fileProfileRuleRequest(ctx, http.MethodPut, "/?cluster_id="+cluster.String(), "prod/workload-000", rule.String(), bytes.NewReader(body), org, user))
 			return rec
 		}
 		if rec := call(stamp.Add(-time.Second).Format(time.RFC3339Nano)); rec.Code != 409 {
@@ -240,13 +244,14 @@ func TestFileProfileFullInventoryAndConditionalDelete(t *testing.T) {
 		}
 	})
 	t.Run("reviewed delete atomic conflict no audit and competing writers", func(t *testing.T) {
+		ctx := t.Context()
 		rule := uuid.New()
 		stamp := time.Now().UTC().Truncate(time.Microsecond)
 		exec(`INSERT INTO file_profile_rules(id,org_id,cluster_id,workload_id,filter,path,behavior,updated_at) VALUES($1,$2,$3,'prod/workload-204','/reviewed','/reviewed','monitor_change',$4)`, rule, org, cluster, stamp)
 		call := func(expected string) *httptest.ResponseRecorder {
 			body, _ := json.Marshal(map[string]string{"reason": "reviewed removal", "expected_updated_at": expected})
 			rec := httptest.NewRecorder()
-			h.DeleteRule(rec, fileProfileRuleRequest(http.MethodDelete, "/?cluster_id="+cluster.String(), "prod/workload-204", rule.String(), bytes.NewReader(body), org, user))
+			h.DeleteRule(rec, fileProfileRuleRequest(ctx, http.MethodDelete, "/?cluster_id="+cluster.String(), "prod/workload-204", rule.String(), bytes.NewReader(body), org, user))
 			return rec
 		}
 		if rec := call(stamp.Add(-time.Second).Format(time.RFC3339Nano)); rec.Code != 409 {

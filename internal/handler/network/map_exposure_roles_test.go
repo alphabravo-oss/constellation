@@ -82,7 +82,7 @@ func TestNetworkMapAndExposureExactEndpointRoles(t *testing.T) {
 	h := NewNetwork(database)
 	call := func(scope uuid.UUID, endpoint string, handle http.HandlerFunc) []byte {
 		t.Helper()
-		req := httptest.NewRequest(http.MethodGet, endpoint+"?cluster_id="+scope.String(), nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, endpoint+"?cluster_id="+scope.String(), nil)
 		req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{OrgID: org, UserID: uuid.New()}))
 		res := httptest.NewRecorder()
 		handle(res, req)
@@ -185,7 +185,7 @@ func TestNetworkMapAndExposureExactEndpointRoles(t *testing.T) {
 		path   string
 		handle http.HandlerFunc
 	}{{"/network/map", h.Map}, {"/network/exposure", h.Exposure}} {
-		req := httptest.NewRequest(http.MethodGet, endpoint.path+"?cluster_id="+foreign.String(), nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, endpoint.path+"?cluster_id="+foreign.String(), nil)
 		req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{OrgID: org, UserID: uuid.New()}))
 		res := httptest.NewRecorder()
 		endpoint.handle(res, req)
@@ -238,7 +238,7 @@ func TestNetworkMapAndExposureRoleLookupFailure(t *testing.T) {
 		path   string
 		handle http.HandlerFunc
 	}{{"/network/map", h.Map}, {"/network/exposure", h.Exposure}} {
-		req := httptest.NewRequest(http.MethodGet, item.path+"?cluster_id="+cluster.String(), nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, item.path+"?cluster_id="+cluster.String(), nil)
 		req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{OrgID: org, UserID: uuid.New()}))
 		res := httptest.NewRecorder()
 		item.handle(res, req)
@@ -282,7 +282,7 @@ func TestNetworkMapLegacyMultiClusterGraphRolesAreAmbiguous(t *testing.T) {
 			}
 		}
 	}
-	req := httptest.NewRequest(http.MethodGet, "/network/map", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/network/map", nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{OrgID: org, UserID: uuid.New()}))
 	res := httptest.NewRecorder()
 	NewNetwork(database).Map(res, req)

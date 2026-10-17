@@ -117,7 +117,7 @@ func TestNetworkFlowPlatformRolesRetainExactCluster(t *testing.T) {
 		}
 	}
 	for _, scope := range []string{"?cluster_id=" + cluster.String(), "?cluster_id=" + sibling.String()} {
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/network/map"+scope, nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/network/map"+scope, nil)
 		req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{OrgID: org, UserID: uuid.New()}))
 		response := httptest.NewRecorder()
 		NewNetwork(database).Map(response, req)

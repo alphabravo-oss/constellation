@@ -29,7 +29,7 @@ func TestRoutingRevisionPreconditions(t *testing.T) {
 	subject := Subject{OrgID: orgID, UserID: userID}
 	put := func(subj Subject, yaml, match string) *httptest.ResponseRecorder {
 		body, _ := json.Marshal(map[string]string{"yaml": yaml})
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/routing.yaml", strings.NewReader(string(body)))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/routing.yaml", strings.NewReader(string(body)))
 		req = req.WithContext(WithSubject(req.Context(), subj))
 		if match != "" {
 			req.Header.Set("If-Match", match)
@@ -39,7 +39,7 @@ func TestRoutingRevisionPreconditions(t *testing.T) {
 		return w
 	}
 	get := func() *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/routing.yaml", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/routing.yaml", nil)
 		req = req.WithContext(WithSubject(req.Context(), subject))
 		w := httptest.NewRecorder()
 		h.GetRoutingYAML(w, req)

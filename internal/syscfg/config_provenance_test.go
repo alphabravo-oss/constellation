@@ -161,7 +161,11 @@ func TestProviderAppliedRevisionAndLiveHTTPReload(t *testing.T) {
 	}
 	client := provider.HTTPClient(ctx, orgID, time.Second)
 	defer client.CloseIdleConnections()
-	response, err := client.Get("http://config-reload.invalid/test")
+	httpRequest, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://config-reload.invalid/test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := client.Do(httpRequest)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -58,7 +58,7 @@ func TestBackupInventoryFullOwnedSourceLatestAndCSV(t *testing.T) {
 	h := &Backups{db: d}
 	request := func(raw string, export, auth bool, canceled bool) *httptest.ResponseRecorder {
 		t.Helper()
-		r := httptest.NewRequest("GET", "/backups/inventory?"+raw, nil)
+		r := httptest.NewRequestWithContext(t.Context(), "GET", "/backups/inventory?"+raw, nil)
 		if auth {
 			r = r.WithContext(WithSubject(r.Context(), Subject{OrgID: org}))
 		}
