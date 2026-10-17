@@ -4,11 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
@@ -60,22 +61,6 @@ type serverlessFunctionDTO struct {
 	HighFindings       int             `json:"high_findings"`
 	LastSeenAt         time.Time       `json:"last_seen_at"`
 	Metadata           json.RawMessage `json:"metadata,omitempty"`
-}
-
-type serverlessFunctionMetadata struct {
-	FunctionName       string          `json:"function_name"`
-	Provider           string          `json:"provider"`
-	AccountID          string          `json:"account_id"`
-	Region             string          `json:"region"`
-	Runtime            string          `json:"runtime"`
-	Version            string          `json:"version"`
-	Architecture       string          `json:"architecture"`
-	PackageCount       int             `json:"package_count"`
-	Role               string          `json:"role"`
-	Handler            string          `json:"handler"`
-	PackageType        string          `json:"package_type"`
-	Layers             []string        `json:"layers"`
-	PermissionAnalysis json.RawMessage `json:"permission_analysis"`
 }
 
 type serverlessEvidenceDTO struct {

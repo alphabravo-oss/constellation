@@ -261,7 +261,7 @@ func TestNetworkSessionFullInventoryAndCSV(t *testing.T) {
 					t.Fatalf("invalid %s %d %s", query, w.Code, w.Body.String())
 				}
 			}
-			r := httptest.NewRequest(http.MethodGet, "/network/sessions?cluster_id="+cluster.String(), nil)
+			r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/network/sessions?cluster_id="+cluster.String(), nil)
 			w := httptest.NewRecorder()
 			serve(w, r)
 			if w.Code != 401 {

@@ -267,7 +267,7 @@ func NormalizeScanSourceType(sourceType, targetType string) string {
 // Mirrors pkg/risk's high-level shape but stays local so we don't pull pkg/risk into the
 // handler dep tree.
 func severityToScore(sev string, cvss float64, kev bool) int {
-	base := 0
+	var base int
 	switch sev {
 	case "critical":
 		base = 90

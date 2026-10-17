@@ -32,7 +32,7 @@ func instanceRequest(t *testing.T, f *exceptionEvidenceFixture, id uuid.UUID, pa
 	if body != nil {
 		method = "POST"
 	}
-	r := httptest.NewRequest(method, path+"?"+query, &b)
+	r := httptest.NewRequestWithContext(t.Context(), method, path+"?"+query, &b)
 	rc := chi.NewRouteContext()
 	rc.URLParams.Add("id", id.String())
 	ctx := context.WithValue(r.Context(), chi.RouteCtxKey, rc)
@@ -91,9 +91,10 @@ func TestFindingInstancesExactReadsMutationsAndComments(t *testing.T) {
 	for _, body := range []map[string]any{{"reason": "reviewed"}, {"reason": "reviewed", "reviewed_revision": "01"}, {"reason": "reviewed", "reviewed_revision": "2"}} {
 		w := instanceRequest(t, f, id, "/finding-instances/"+id.String()+"/suppress", exactQuery(first), body, h.Suppress)
 		want := 409
-		if body["reviewed_revision"] == nil {
+		switch body["reviewed_revision"] {
+		case nil:
 			want = 428
-		} else if body["reviewed_revision"] == "01" {
+		case "01":
 			want = 400
 		}
 		if w.Code != want {

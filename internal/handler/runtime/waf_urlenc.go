@@ -35,8 +35,8 @@ func urlEncodeTolerant(pcre string) string {
 	n := len(s)
 	for i := 0; i < n; {
 		c := s[i]
-		switch {
-		case c == '\\':
+		switch c {
+		case '\\':
 			if i+1 >= n {
 				b.WriteByte(c)
 				i++
@@ -60,15 +60,15 @@ func urlEncodeTolerant(pcre string) string {
 				b.WriteByte(s[i+1])
 			}
 			i += 2
-		case c == '[':
+		case '[':
 			j := classEnd(s, i)
 			b.WriteString(augmentClass(s[i:j]))
 			i = j
-		case c == '(':
+		case '(':
 			j := groupOpenerEnd(s, i)
 			b.WriteString(s[i:j])
 			i = j
-		case c == '{':
+		case '{':
 			j := i + 1
 			for j < n && s[j] != '}' {
 				j++

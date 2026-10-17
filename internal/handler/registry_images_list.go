@@ -50,9 +50,10 @@ func registryImageDefinition(r *http.Request, org, registry uuid.UUID) (inventor
 		args = append(args, q)
 		where = append(where, "strpos(lower(repository),lower($3::text))>0")
 	}
-	if scan == "scanned" {
+	switch scan {
+	case "scanned":
 		where = append(where, "scanned")
-	} else if scan == "unscanned" {
+	case "unscanned":
 		where = append(where, "NOT scanned")
 	}
 	switch severity {

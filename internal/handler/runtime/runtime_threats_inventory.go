@@ -76,7 +76,6 @@ func (h *RuntimeThreats) threatInventory(w http.ResponseWriter, r *http.Request,
 			return
 		}
 		cluster = &id
-		clusterRaw = id.String()
 		var owned bool
 		if e = h.db.Pool().QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM clusters WHERE org_id=$1 AND id=$2)`, sub.OrgID, id).Scan(&owned); e != nil {
 			jsonError(w, 500, "threat scope unavailable")

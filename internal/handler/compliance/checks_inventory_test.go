@@ -73,7 +73,7 @@ func TestComplianceChecksInventory(t *testing.T) {
 	h := NewCompliance(d, nil)
 	request := func(serve func(http.ResponseWriter, *http.Request), owner uuid.UUID, params string) *httptest.ResponseRecorder {
 		t.Helper()
-		r := httptest.NewRequest(http.MethodGet, "/api/v1/compliance/checks?"+params, nil)
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/compliance/checks?"+params, nil)
 		r = r.WithContext(authctx.WithSubject(r.Context(), authctx.Subject{OrgID: owner}))
 		w := httptest.NewRecorder()
 		serve(w, r)

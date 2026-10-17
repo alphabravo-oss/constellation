@@ -113,7 +113,8 @@ func affectedInventoryDefinition(r *http.Request, org uuid.UUID, cveID, view str
 	namespace := strings.TrimSpace(values.Get("namespace"))
 	source := strings.ReplaceAll(affectedSourcePrefix, "{{match}}", affectedImageMatch)
 	args := []any{org, cveID, cluster, namespace, severity}
-	columns, summary, search, defaultSort := "", "", "", "risk"
+	var columns, summary, search string
+	defaultSort := "risk"
 	var sorts map[string]string
 	switch view {
 	case "images":

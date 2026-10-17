@@ -73,7 +73,7 @@ func TestPeersRolesExactSourceIdentityAndVisibility(t *testing.T) {
 	add(org, foreign, "orbit/api", "app/client", "10.42.0.98", 1000)
 	request := func(path string, handle http.HandlerFunc) *httptest.ResponseRecorder {
 		t.Helper()
-		req := httptest.NewRequest("GET", path, nil)
+		req := httptest.NewRequestWithContext(t.Context(), "GET", path, nil)
 		req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{OrgID: org, UserID: uuid.New()}))
 		res := httptest.NewRecorder()
 		handle(res, req)
@@ -186,7 +186,7 @@ func TestPeersRejectsMalformedVisibilityAndDuplicateQuery(t *testing.T) {
 	h := NewNetwork(nil)
 	for _, path := range []string{"/network/peers?workload=a/b&hide_platform=yes", "/network/peers?workload=a/b&workload=c/d", "/network/peers?workload=a/b;hide_platform=true"} {
 		res := httptest.NewRecorder()
-		h.Peers(res, httptest.NewRequest("GET", path, nil))
+		h.Peers(res, httptest.NewRequestWithContext(t.Context(), "GET", path, nil))
 		if res.Code != 400 {
 			t.Fatalf("%s: %d", path, res.Code)
 		}

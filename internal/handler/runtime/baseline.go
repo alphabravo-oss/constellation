@@ -492,9 +492,8 @@ func (h *Baselines) BaselineMode(orgID uuid.UUID, workloadID string) (baseline.M
 func (h *Baselines) BaselineModeForCluster(orgID, clusterID uuid.UUID, workloadID string) (baseline.Mode, map[string]struct{}, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	clusterKey := ""
 	if clusterID != uuid.Nil {
-		clusterKey = clusterID.String()
+		clusterKey := clusterID.String()
 		if st, ok := h.state[clusterKey+"::"+workloadID]; ok && sameBaselineScope(st, orgID, clusterKey, workloadID) {
 			return baselineModeSet(st)
 		}

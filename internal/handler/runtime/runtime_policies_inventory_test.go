@@ -17,7 +17,7 @@ func TestRuntimePolicyManagementInventoryIncludesDisabledButAgentDoesNot(t *test
 	if _, err := pool.Exec(ctx, `INSERT INTO runtime_policies(org_id,cluster_id,workload,namespace,name,mode) VALUES($1,$2,'app/disabled','app','disabled','disabled'),($1,$2,'app/enforced','app','enforced','enforce'),($1,$3,'app/sibling','app','sibling','disabled'),($4,$5,'app/foreign','app','foreign','disabled')`, f.org, f.cluster, f.sibling, f.foreignOrg, f.foreignCluster); err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest("GET", "/runtime-policies?cluster_id="+f.cluster.String(), nil)
+	req := httptest.NewRequestWithContext(t.Context(), "GET", "/runtime-policies?cluster_id="+f.cluster.String(), nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{OrgID: f.org, UserID: f.actor}))
 	res := httptest.NewRecorder()
 	f.h.List(res, req)
@@ -76,7 +76,7 @@ func TestRuntimePolicyManagementInventoryIncludesDisabledButAgentDoesNot(t *test
 		t.Fatalf("agent afterdisable %+v %v", agent, err)
 	}
 	for _, cluster := range []uuid.UUID{f.foreignCluster, uuid.New()} {
-		r := httptest.NewRequest("GET", "/runtime-policies?cluster_id="+cluster.String(), nil)
+		r := httptest.NewRequestWithContext(t.Context(), "GET", "/runtime-policies?cluster_id="+cluster.String(), nil)
 		r = r.WithContext(authctx.WithSubject(r.Context(), authctx.Subject{OrgID: f.org}))
 		w := httptest.NewRecorder()
 		f.h.List(w, r)

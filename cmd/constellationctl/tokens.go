@@ -45,6 +45,7 @@ with the given scope set. The raw token value is printed to stdout exactly once;
 stores only sha256(raw) and cannot reveal it again. Use the printed value as a Bearer
 token in the Authorization header.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			output := commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
 			if name == "" {
 				return errors.New("--name required")
 			}
@@ -79,16 +80,16 @@ token in the Authorization header.`,
 			if err := json.Unmarshal(resp, &out); err != nil {
 				return fmt.Errorf("decode response: %w", err)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Token created: %s (%s)\n", out.Name, out.ID)
-			fmt.Fprintf(cmd.OutOrStdout(), "Scopes:        %s\n", strings.Join(out.Scopes, ", "))
-			fmt.Fprintln(cmd.OutOrStdout(), "")
-			fmt.Fprintln(cmd.OutOrStdout(), "Raw token (will not be shown again):")
-			fmt.Fprintln(cmd.OutOrStdout(), out.RawToken)
+			output.printf("Token created: %s (%s)\n", out.Name, out.ID)
+			output.printf("Scopes:        %s\n", strings.Join(out.Scopes, ", "))
+			output.println("")
+			output.println("Raw token (will not be shown again):")
+			output.println(out.RawToken)
 			if out.Hint != "" {
-				fmt.Fprintln(cmd.OutOrStdout(), "")
-				fmt.Fprintln(cmd.OutOrStdout(), out.Hint)
+				output.println("")
+				output.println(out.Hint)
 			}
-			return nil
+			return output.result()
 		},
 	}
 	cmd.Flags().StringVar(&name, "name", "", "Display name (e.g. jenkins-prod)")
@@ -105,13 +106,14 @@ func tokensListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List API tokens for the calling org",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			output := commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
 			resp, err := apiCall(cmd.Context(), http.MethodGet, "/api/v1/api-tokens", nil)
 			if err != nil {
 				return err
 			}
 			if jsonOut {
-				fmt.Fprintln(cmd.OutOrStdout(), string(resp))
-				return nil
+				output.println(string(resp))
+				return output.result()
 			}
 			var out struct {
 				Tokens []struct {
@@ -129,17 +131,24 @@ func tokensListCmd() *cobra.Command {
 				return fmt.Errorf("decode response: %w", err)
 			}
 			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-			fmt.Fprintln(tw, "ID\tNAME\tATTACHED\tSCOPES\tSTATUS\tEXPIRES\tLAST USED")
+			output.writer = tw
+			output.println("ID\tNAME\tATTACHED\tSCOPES\tSTATUS\tEXPIRES\tLAST USED")
 			for _, t := range out.Tokens {
 				attached := t.AttachedToKind
 				if t.AttachedToLabel != "" {
 					attached = fmt.Sprintf("%s (%s)", t.AttachedToKind, t.AttachedToLabel)
 				}
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				output.printf("%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 					t.ID, t.Name, attached, strings.Join(t.Scopes, ","), t.Status,
 					ifEmpty(t.ExpiresAt, "never"), ifEmpty(t.LastUsedAt, "-"))
 			}
-			return tw.Flush()
+			if err := output.result(); err != nil {
+				return err
+			}
+			if err := tw.Flush(); err != nil {
+				return fmt.Errorf("write command output: %w", err)
+			}
+			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Emit raw JSON response")
@@ -152,6 +161,7 @@ func tokensRotateCmd() *cobra.Command {
 		Short: "Rotate an API token: revoke old, mint new with same scopes/expiry",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			output := commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
 			id := args[0]
 			resp, err := apiCall(cmd.Context(), http.MethodPost, "/api/v1/api-tokens/"+id+"/rotate", map[string]any{})
 			if err != nil {
@@ -167,16 +177,16 @@ func tokensRotateCmd() *cobra.Command {
 			if err := json.Unmarshal(resp, &out); err != nil {
 				return fmt.Errorf("decode response: %w", err)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Token rotated. New id: %s (replaces %s)\n", out.ID, id)
-			fmt.Fprintf(cmd.OutOrStdout(), "Scopes: %s\n", strings.Join(out.Scopes, ", "))
-			fmt.Fprintln(cmd.OutOrStdout(), "")
-			fmt.Fprintln(cmd.OutOrStdout(), "New raw token (the previous token is revoked):")
-			fmt.Fprintln(cmd.OutOrStdout(), out.RawToken)
+			output.printf("Token rotated. New id: %s (replaces %s)\n", out.ID, id)
+			output.printf("Scopes: %s\n", strings.Join(out.Scopes, ", "))
+			output.println("")
+			output.println("New raw token (the previous token is revoked):")
+			output.println(out.RawToken)
 			if out.Hint != "" {
-				fmt.Fprintln(cmd.OutOrStdout(), "")
-				fmt.Fprintln(cmd.OutOrStdout(), out.Hint)
+				output.println("")
+				output.println(out.Hint)
 			}
-			return nil
+			return output.result()
 		},
 	}
 }
@@ -187,12 +197,13 @@ func tokensRevokeCmd() *cobra.Command {
 		Short: "Revoke an API token (sets revoked_at)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			output := commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
 			id := args[0]
 			if _, err := apiCall(cmd.Context(), http.MethodDelete, "/api/v1/api-tokens/"+id, nil); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Token %s revoked.\n", id)
-			return nil
+			output.printf("Token %s revoked.\n", id)
+			return output.result()
 		},
 	}
 }
@@ -247,7 +258,7 @@ func apiCall(ctx context.Context, method, path string, body any) ([]byte, error)
 		return nil, errors.New("not logged in; run `constellationctl login` first (or set CONSTELLATION_SERVER + CONSTELLATION_TOKEN)")
 	}
 	if ctx == nil {
-		ctx = context.Background()
+		return nil, errors.New("request context is required")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -271,10 +282,12 @@ func apiCall(ctx context.Context, method, path string, body any) ([]byte, error)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-	rb, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("%s %s -> %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(rb)))
+	rb, err := readCommandResponse(resp)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("%s %s -> %d", method, path, resp.StatusCode)
 	}
 	return rb, nil
 }

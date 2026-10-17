@@ -56,7 +56,7 @@ func TestComplianceEvidenceInventoryFullScopeAndExport(t *testing.T) {
 	handler := NewCompliance(database, nil)
 	read := func(path string, export bool) *httptest.ResponseRecorder {
 		t.Helper()
-		r := httptest.NewRequest(http.MethodGet, path, nil)
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
 		r = r.WithContext(authctx.WithSubject(ctx, authctx.Subject{OrgID: org}))
 		w := httptest.NewRecorder()
 		if export {

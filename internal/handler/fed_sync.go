@@ -312,7 +312,7 @@ SELECT secret, cluster_id, client_cert_pem, client_key_enc, master_ca_pem
 		return nil
 	}
 
-	var maxRev int64 = since
+	maxRev := since
 	for _, rev := range sr.Revisions {
 		if err := applyFedRevision(ctx, pool, orgID, rev); err != nil {
 			return err

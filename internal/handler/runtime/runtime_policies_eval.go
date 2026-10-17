@@ -191,7 +191,7 @@ func ipMatches(low, high net.IP, flowAddr string) bool {
 }
 
 func isUnspecifiedRuleIP(ip net.IP) bool {
-	if ip == nil || len(ip) == 0 {
+	if len(ip) == 0 {
 		return true
 	}
 	if ip.IsUnspecified() {

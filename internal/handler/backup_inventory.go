@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -104,7 +105,7 @@ func (h *Backups) readInventory(ctx context.Context, org uuid.UUID, o backupInve
 		return out, err
 	}
 	latest, err := scanBackupInventory(tx.QueryRow(ctx, `SELECT `+backupInventorySelect+` FROM backups WHERE org_id=$1 AND status='succeeded' ORDER BY started_at DESC,id ASC LIMIT 1`, org))
-	if err != nil && err != pgx.ErrNoRows {
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return out, err
 	}
 	if err == nil {

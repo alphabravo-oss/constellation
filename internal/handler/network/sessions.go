@@ -516,13 +516,3 @@ func appLabel(proto, port int) string {
 	}
 	return ipProtoName(proto)
 }
-
-// tcpStateName maps dp's TCP state (the standard Linux linux/tcp.h enum dp uses:
-// TCP_ESTABLISHED=1 … TCP_CLOSING=11) to a readable label. 0 → "" (non-TCP / unset).
-func tcpStateName(s int) string {
-	names := []string{"", "ESTABLISHED", "SYN_SENT", "SYN_RECV", "FIN_WAIT1", "FIN_WAIT2", "TIME_WAIT", "CLOSE", "CLOSE_WAIT", "LAST_ACK", "LISTEN", "CLOSING"}
-	if s >= 0 && s < len(names) {
-		return names[s]
-	}
-	return fmt.Sprintf("state-%d", s)
-}

@@ -56,7 +56,7 @@ func TestReportsFullEffectiveScopeAndExactWorkloadRoles(t *testing.T) {
 	}
 	request := func(handler http.HandlerFunc, path string) *httptest.ResponseRecorder {
 		t.Helper()
-		r := httptest.NewRequest("GET", path, nil)
+		r := httptest.NewRequestWithContext(t.Context(), "GET", path, nil)
 		r = r.WithContext(authctx.WithSubject(r.Context(), authctx.Subject{OrgID: org}))
 		w := httptest.NewRecorder()
 		handler(w, r)
@@ -174,7 +174,7 @@ func TestComplianceArtifactActualMetadataIsImmutableAndLegacyUnknown(t *testing.
 	router.Get("/compliance/runs/{id}/artifact", h.Artifact)
 	router.Get("/compliance/schedules/{id}/runs", h.Runs)
 	request := func(tenant uuid.UUID, path string) *httptest.ResponseRecorder {
-		r := httptest.NewRequest("GET", path, nil)
+		r := httptest.NewRequestWithContext(t.Context(), "GET", path, nil)
 		r = r.WithContext(authctx.WithSubject(r.Context(), authctx.Subject{OrgID: tenant}))
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, r)

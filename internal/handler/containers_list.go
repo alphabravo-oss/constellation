@@ -84,9 +84,10 @@ func containerInventoryDefinition(r *http.Request, org, cluster uuid.UUID) (inve
 			parts = append(parts, key+"="+bind(value))
 		}
 	}
-	if role == "core" {
+	switch role {
+	case "core":
 		parts = append(parts, "platform_role='core'")
-	} else if role == "none" {
+	case "none":
 		parts = append(parts, "platform_role=''")
 	}
 	sql := "WITH enriched AS (" + strings.ReplaceAll(containerInventorySQL, "{{platform}}", platformRoleSQL("c.namespace", "COALESCE(exact_owner.labels,'{}'::jsonb)")) + ") SELECT * FROM enriched WHERE " + strings.Join(parts, " AND ")

@@ -40,7 +40,7 @@ func TestRuntimeThreatInventoryFullCohortAndCSV(t *testing.T) {
 	h := NewRuntimeThreats(d)
 	request := func(query string, csv bool, code int) *httptest.ResponseRecorder {
 		t.Helper()
-		r := httptest.NewRequest(http.MethodGet, "/runtime-threats?"+query, nil)
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/runtime-threats?"+query, nil)
 		r = r.WithContext(authctx.WithSubject(r.Context(), authctx.Subject{OrgID: org, UserID: uuid.New()}))
 		w := httptest.NewRecorder()
 		if csv {
@@ -133,7 +133,7 @@ func TestRuntimeThreatInventoryFullCohortAndCSV(t *testing.T) {
 	}
 	request("cluster_id="+foreignCluster.String(), false, 404)
 	request("cluster_id="+uuid.NewString(), true, 404)
-	r := httptest.NewRequest(http.MethodGet, "/runtime-threats", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/runtime-threats", nil)
 	w := httptest.NewRecorder()
 	h.List(w, r)
 	if w.Code != 401 {

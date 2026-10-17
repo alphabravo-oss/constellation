@@ -4,11 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -49,18 +50,6 @@ type repositoryScanDTO struct {
 	HighFindings      int                        `json:"high_findings"`
 	LastSeenAt        time.Time                  `json:"last_seen_at"`
 	Metadata          json.RawMessage            `json:"metadata,omitempty"`
-}
-
-type repositoryScanMetadata struct {
-	RepositoryRef string `json:"repository_ref"`
-	RepositoryURL string `json:"repository_url"`
-	SourceRef     string `json:"source_ref"`
-	CommitSHA     string `json:"commit_sha"`
-	Branch        string `json:"branch"`
-	Path          string `json:"path"`
-	Workflow      string `json:"workflow"`
-	RunID         string `json:"run_id"`
-	PackageCount  int    `json:"package_count"`
 }
 
 type repositoryEvidenceDTO struct {

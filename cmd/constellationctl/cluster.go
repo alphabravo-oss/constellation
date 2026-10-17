@@ -63,6 +63,7 @@ func clusterCreateCmd(serverFlag *string) *cobra.Command {
     --distro=k3s --region=us-east-1 --expiry=720h \
     --output cluster-init.yaml`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			outputWriter := commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
 			name := strings.TrimSpace(args[0])
 			cli, err := resolveClient(cmd.Context(), *serverFlag, email)
 			if err != nil {
@@ -86,20 +87,20 @@ func clusterCreateCmd(serverFlag *string) *cobra.Command {
 				if err := os.WriteFile(output, []byte(resp.YAML), 0o600); err != nil {
 					return fmt.Errorf("write %s: %w", output, err)
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "Wrote %s (cluster_id=%s, expires_at=%s)\n",
+				outputWriter.printf("Wrote %s (cluster_id=%s, expires_at=%s)\n",
 					output, resp.ClusterID, resp.ExpiresAt.Format(time.RFC3339))
-				fmt.Fprintln(cmd.OutOrStdout(), "Install on the target cluster with:")
-				fmt.Fprintf(cmd.OutOrStdout(),
+				outputWriter.println("Install on the target cluster with:")
+				outputWriter.printf(
 					"  kubectl create ns constellation-system\n"+
 						"  kubectl -n constellation-system create secret generic constellation-init-bundle \\\n"+
 						"    --from-file=bundle.yaml=%s\n"+
 						"  helm install constellation deploy/charts/constellation -n constellation-system \\\n"+
 						"    --set initBundle.secretName=constellation-init-bundle\n", output)
-				return nil
+				return outputWriter.result()
 			}
 			// No --output: print to stdout.
-			fmt.Fprintln(cmd.OutOrStdout(), resp.YAML)
-			return nil
+			outputWriter.println(resp.YAML)
+			return outputWriter.result()
 		},
 	}
 	cmd.Flags().StringVar(&distro, "distro", "kubernetes", "Cluster distro (kubernetes|k3s|eks|gke|aks|openshift)")
@@ -116,6 +117,7 @@ func clusterListCmd(serverFlag *string) *cobra.Command {
 		Use:   "list",
 		Short: "List cluster init-bundles",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			outputWriter := commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
 			cli, err := resolveClient(cmd.Context(), *serverFlag, email)
 			if err != nil {
 				return err
@@ -126,12 +128,12 @@ func clusterListCmd(serverFlag *string) *cobra.Command {
 			if err := cli.getJSON(cmd.Context(), "/api/v1/cluster-init-bundles", &resp); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "%-36s  %-24s  %-10s  %-25s\n", "ID", "NAME", "STATUS", "EXPIRES")
+			outputWriter.printf("%-36s  %-24s  %-10s  %-25s\n", "ID", "NAME", "STATUS", "EXPIRES")
 			for _, b := range resp.Bundles {
-				fmt.Fprintf(cmd.OutOrStdout(), "%-36s  %-24s  %-10s  %-25s\n",
+				outputWriter.printf("%-36s  %-24s  %-10s  %-25s\n",
 					b.ID, truncateStr(b.Name, 24), b.Status, b.ExpiresAt.Format(time.RFC3339))
 			}
-			return nil
+			return outputWriter.result()
 		},
 	}
 	cmd.Flags().StringVar(&email, "email", "", "Email to log into if not already authenticated")
@@ -148,6 +150,7 @@ func clusterRotateCmd(serverFlag *string) *cobra.Command {
 		Short: "Rotate a cluster init-bundle (revokes prior tokens, mints replacement)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			outputWriter := commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
 			cli, err := resolveClient(cmd.Context(), *serverFlag, email)
 			if err != nil {
 				return err
@@ -160,11 +163,11 @@ func clusterRotateCmd(serverFlag *string) *cobra.Command {
 				if err := os.WriteFile(output, []byte(resp.YAML), 0o600); err != nil {
 					return err
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "Rotated. New bundle id=%s; wrote %s\n", resp.ID, output)
-				return nil
+				outputWriter.printf("Rotated. New bundle id=%s; wrote %s\n", resp.ID, output)
+				return outputWriter.result()
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), resp.YAML)
-			return nil
+			outputWriter.println(resp.YAML)
+			return outputWriter.result()
 		},
 	}
 	cmd.Flags().StringVar(&output, "output", "", "Write replacement YAML here")
@@ -179,6 +182,7 @@ func clusterRevokeCmd(serverFlag *string) *cobra.Command {
 		Short: "Revoke a cluster init-bundle (cascades to its scanner + runtime-agent tokens)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			outputWriter := commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
 			cli, err := resolveClient(cmd.Context(), *serverFlag, email)
 			if err != nil {
 				return err
@@ -187,8 +191,8 @@ func clusterRevokeCmd(serverFlag *string) *cobra.Command {
 			if err := cli.deleteJSON(cmd.Context(), "/api/v1/cluster-init-bundles/"+args[0], &resp); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Revoked bundle %s\n", args[0])
-			return nil
+			outputWriter.printf("Revoked bundle %s\n", args[0])
+			return outputWriter.result()
 		},
 	}
 	cmd.Flags().StringVar(&email, "email", "", "Email to log into if not already authenticated")
@@ -227,7 +231,9 @@ func resolveClient(ctx context.Context, serverOverride, email string) (*authedCl
 	}
 	pw := os.Getenv("CONSTELLATION_PASSWORD")
 	if pw == "" {
-		fmt.Fprint(os.Stderr, "Password: ")
+		if _, err := fmt.Fprint(os.Stderr, "Password: "); err != nil {
+			return nil, fmt.Errorf("write password prompt: %w", err)
+		}
 		if _, err := fmt.Fscan(os.Stdin, &pw); err != nil {
 			return nil, fmt.Errorf("read password: %w", err)
 		}
@@ -275,13 +281,12 @@ func (c *authedClient) do(ctx context.Context, method, path string, body any, ou
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
-	rb, err := io.ReadAll(resp.Body)
+	rb, err := readCommandResponse(resp)
 	if err != nil {
-		return fmt.Errorf("read API response: %w", err)
+		return err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("%s %s -> %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(rb)))
+		return fmt.Errorf("%s %s -> %d", method, path, resp.StatusCode)
 	}
 	if out != nil && len(rb) > 0 {
 		return json.Unmarshal(rb, out)

@@ -141,9 +141,9 @@ func tryHTTP(pkt []byte) *HTTPRequestPreview {
 				value = value[:256] + "…"
 			}
 			headers[name] = value
-			if len(headers) >= 8 {
-				break
-			}
+		}
+		if len(headers) >= 8 {
+			break
 		}
 	}
 	if len(headers) > 0 {

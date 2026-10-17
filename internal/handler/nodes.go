@@ -343,39 +343,6 @@ func normalizeNodeSummary(item *NodeSummary) {
 	}
 }
 
-func summarizeNodes(nodes []NodeSummary) map[string]any {
-	summary := map[string]any{
-		"nodes":                 len(nodes),
-		"runtime_agent_healthy": 0,
-		"runtime_agent_stale":   0,
-		"runtime_agent_missing": 0,
-		"scan_completed":        0,
-		"scan_gaps":             0,
-		"critical_vulns":        0,
-		"high_vulns":            0,
-		"cis_failed":            0,
-	}
-	for _, node := range nodes {
-		switch node.RuntimeAgentStatus {
-		case "healthy":
-			summary["runtime_agent_healthy"] = summary["runtime_agent_healthy"].(int) + 1
-		case "stale":
-			summary["runtime_agent_stale"] = summary["runtime_agent_stale"].(int) + 1
-		default:
-			summary["runtime_agent_missing"] = summary["runtime_agent_missing"].(int) + 1
-		}
-		if node.ScanStatus == "completed" {
-			summary["scan_completed"] = summary["scan_completed"].(int) + 1
-		} else {
-			summary["scan_gaps"] = summary["scan_gaps"].(int) + 1
-		}
-		summary["critical_vulns"] = summary["critical_vulns"].(int) + node.CriticalVulns
-		summary["high_vulns"] = summary["high_vulns"].(int) + node.HighVulns
-		summary["cis_failed"] = summary["cis_failed"].(int) + node.CISFailed
-	}
-	return summary
-}
-
 func (h *Nodes) nodePayload(r *http.Request, orgID, clusterID uuid.UUID, node, table, column string) (json.RawMessage, error) {
 	switch table {
 	case "host_facts", "host_packages", "host_containers", "host_processes", "host_cis":

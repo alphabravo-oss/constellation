@@ -190,7 +190,7 @@ func TestFileProfileFullInventoryAndConditionalDelete(t *testing.T) {
 			t.Fatal(err)
 		}
 		exec(`INSERT INTO cluster_init_bundles(org_id,cluster_id,name,expires_at,runtime_agent_token_id,kek_fingerprint,contents_encrypted) VALUES($1,$2,$3,now()+interval '1 hour',$4,'test','\x00'::bytea)`, org, cluster, "file-inventory-"+tokenID.String(), tokenID)
-		req := httptest.NewRequest(http.MethodGet, "/?cluster_id="+cluster.String(), nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/?cluster_id="+cluster.String(), nil)
 		req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(), &handler.RuntimeAgentToken{ID: tokenID, OrgID: org}))
 		h.AgentRulesBundle(rec, req)
 		if rec.Code != 200 {

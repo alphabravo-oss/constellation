@@ -173,7 +173,7 @@ func TestNodeVulnerabilitiesInventoryAndCSV(t *testing.T) {
 	t.Run("matching CSV includes the complete filtered cohort in identical order", func(t *testing.T) {
 		for _, query := range []string{"sort=package&order=desc", "severity=high&fixable=true&sort=cve&order=asc", "q=" + url.QueryEscape("%_\\"), "q=missing"} {
 			all := []NodeVulnerabilityRow{}
-			total := 0
+			var total int
 			for offset := 0; ; offset += 500 {
 				page := read(query + "&limit=500&offset=" + strconv.Itoa(offset))
 				total = page.Total

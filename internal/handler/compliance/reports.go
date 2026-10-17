@@ -140,7 +140,7 @@ func reportChecks(ctx context.Context, tx pgx.Tx, org uuid.UUID, cluster *uuid.U
 func (h *Reports) serveCompliance(w http.ResponseWriter, r *http.Request, asPDF bool) {
 	sub, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
-		http.Error(w, "auth required", 401)
+		http.Error(w, "auth required", http.StatusUnauthorized)
 		return
 	}
 	q, cluster, err := reportQuery(r)
@@ -203,7 +203,7 @@ func (h *Reports) serveCompliance(w http.ResponseWriter, r *http.Request, asPDF 
 func (h *Reports) serveExecutive(w http.ResponseWriter, r *http.Request, asPDF bool) {
 	sub, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
-		http.Error(w, "auth required", 401)
+		http.Error(w, "auth required", http.StatusUnauthorized)
 		return
 	}
 	_, cluster, err := reportQuery(r)

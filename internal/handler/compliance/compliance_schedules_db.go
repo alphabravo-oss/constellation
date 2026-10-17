@@ -618,21 +618,6 @@ func defaultFrameworkIDs() []string {
 	}
 }
 
-func contentTypeFor(format string) string {
-	switch strings.ToLower(format) {
-	case "pdf":
-		return "application/pdf"
-	case "json":
-		return "application/json"
-	case "sarif":
-		return "application/sarif+json"
-	case "csv":
-		return "text/csv"
-	default:
-		return "application/octet-stream"
-	}
-}
-
 // urlEscape is unused now but reserved for the future S3 pre-signer path. Keeping
 // it here so go vet stays quiet if a build wires it next iteration.
 var _ = url.QueryEscape
