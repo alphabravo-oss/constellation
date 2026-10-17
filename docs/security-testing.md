@@ -18,6 +18,10 @@ The enclosing workspace is not modified by these runners.
 ```sh
 make tools
 export PATH="$HOME/.local/bin:$PATH"
+# Install Helm v3.21.0, then use an isolated Python environment.
+python3.12 -m venv /tmp/constellation-tooling-venv
+. /tmp/constellation-tooling-venv/bin/activate
+python3 -m pip install --requirement scripts/requirements-tooling.txt
 make test-tooling
 make lint fmt lint-shell
 make test-race
@@ -112,6 +116,8 @@ platforms install these same versions manually. GitHub Actions use commit SHAs.
 | ShellCheck | 0.11.0 | [Official release and asset digest](https://github.com/koalaman/shellcheck/releases/tag/v0.11.0) |
 | pip-audit | 2.10.0 | [Published package metadata](https://pypi.org/project/pip-audit/2.10.0/) |
 | Python (CI tooling) | 3.12.14 | [Official security release](https://www.python.org/downloads/release/python-31214/); available in Actions' Python versions manifest for Ubuntu 24.04 |
+| PyYAML (chart tests) | 6.0.3 | [Published package metadata](https://pypi.org/project/PyYAML/6.0.3/); `scripts/requirements-tooling.txt`, included in dependency audit |
+| Helm (CI chart tests) | 3.21.0 | [Official release](https://github.com/helm/helm/releases/tag/v3.21.0); explicit quality-job pin |
 | Node / npm | 24.21.0 / 11.19.0 | [Official Node release index](https://nodejs.org/dist/index.json); `.node-version` and frontend engines/packageManager match |
 
 Node 24 LTS preserves the release workflow's existing major version and supports

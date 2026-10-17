@@ -33,6 +33,10 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12.14"
+      - uses: azure/setup-helm@bf6a7d304bc2fdb57e0331155b7ebf2c504acf0a # v4
+        with:
+          version: v3.21.0
+      - run: python3 -m pip install --requirement scripts/requirements-tooling.txt
       - run: make test-tooling
       - run: make check-endpoint-mapping
       - run: make check-parity-plan
@@ -173,6 +177,7 @@ jobs:
           /tmp/pip-audit/bin/pip install pip-audit==2.10.0
           mkdir -p artifacts
           /tmp/pip-audit/bin/pip-audit --requirement tools/constellation-test-suite/requirements.txt --format json --output artifacts/pip-audit.json
+          /tmp/pip-audit/bin/pip-audit --requirement scripts/requirements-tooling.txt --format json --output artifacts/pip-audit-tooling.json
       - if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

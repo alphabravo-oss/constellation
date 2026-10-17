@@ -1,0 +1,2 @@
+# YAML parsing for Helm-rendered storage and runtime contracts.
+PyYAML==6.0.3
