@@ -491,6 +491,42 @@ The import-format issue is corrected in `c9b6a66`; unsigned smoke counter narrow
 is corrected in `5642dca`. Later source requires new hosted checks. No gate waiver,
 blanket suppression or historical rewrite is applied.
 
+Further source fixes are committed through `7d54c3d`, not yet deployed:
+
+- SAML `69a1db9` query-escapes opaque RelayState before the library builds/signs
+  its redirect. The unpatched negative control injects query fields/fragments;
+  all 188 auth executions pass after correction. A narrow G710 annotation records
+  the reviewed administrator-configured IdP destination boundary. Test helper
+  cleanup `c42d85b` leaves no new auth lint findings; no broad suppression is used.
+- Federation `8e50edf` binds the configured deployment token to its exact normalized
+  configured master URL. Alternate destinations require an explicit caller token.
+  The actual hostile TLS receiver receives no implicit credential; 34 fresh180
+  and 28 focused executions pass with no added lint findings.
+- Registry `7d54c3d` rejects Harbor/GitLab page read/close errors and overflow,
+  including failures after valid-looking JSON or on a later page. Invalid request
+  errors omit endpoint credentials/query data. Ninety executions pass; two lint
+  findings are removed. Other connector read seams are separately under review.
+- Retention `8e67508` adds explicit chart-gated, leader-cancelable cleanup on a
+  pinned durable root: 100 candidates per cycle, fair UUID cursor, exact expired
+  row locking and removal-failure retry. Missing/replaced roots retain receipts;
+  no arbitrary orphan scan is added. Eighty-eight fresh180 and 21 chart tests pass.
+  This is not a byte quota or an off-host storage claim.
+- Broader runtime/server qualification at `8e67508` exposed a shared-port-slice
+  normalization race: 1,345 passes, one race failure, no skips (server436 passes).
+  `5328083` copies the port list before validation. The new regression fails on
+  original source; the fixed whole netpolicy package passes ten race/shuffle
+  repetitions. Existing caller normalization/audit behavior is preserved. The
+  combined candidate is undergoing full fresh180 qualification before image build.
+
+The first real Flannel run with exact `6a8057c` passes four baseline and all four
+monitor probes, including unmatched violation/RID0 without temporary-open grace.
+It then fails at protect-a named allow: the exact request reaches the server and
+NFQUEUE advances, but no fresh matching native event is received under the strict
+barrier. No protect-mode pass or wrong-action conclusion is claimed. Native
+aggregate timestamp and clock-phase semantics are under investigation; bounded
+diagnostic work does not relax acceptance. All owned resources are removed.
+Evidence: `/tmp/constellation-flannel-policy-terminal6a8057c/` (54 sealed files).
+
 ## October 12 implementation continuation
 
 The user selected **Astronomer-style console behavior and workflows** as the

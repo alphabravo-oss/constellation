@@ -686,3 +686,26 @@ PCAP retention metadata was not wired to a background sweeper. Main durable
 storage enablement awaits bounded fair cleanup and explicit shared-root guards;
 local-path capacity requests are not quotas. No existing main capture records or
 files were found in the read-only preflight; recheck before changing storage.
+
+
+Additional source qualification through7d54c3d (not yet main-deployed): SAML
+RelayState query encoding passes188 auth executions and unpatched injection
+negative controls. The G710 annotation is limited to the reviewed metadata-bound
+IdP redirect; no scanner-wide exclusion is used. Federation environment-token
+binding passes34 fresh180 plus28 focused executions, including an actual hostile
+TLS receiver and explicit-token control. Harbor/GitLab bounded response reading
+passes90 executions and rejects read/close failures and secret-bearing invalid
+request errors. Other connector seams remain under separate review.
+
+Retained capture cleanup is now chart-gated/default-off, pinned to a verified
+single/shared durable root and fair across failed/locked receipts. Its88 focused
+fresh180/21 chart checks pass. Broad8e runtime/server qualification exposed a
+shared GroupEdge port-slice race (1345pass/1fail/0skip). Defensive copy5328083
+passes the original failing regression and ten race repetitions of netpolicy;
+combined full qualification is running before any main API/storage rollout.
+
+Exact6a Flannel now passes all four monitor probes, including finite default
+violation without temporary-open. Full acceptance still fails at the first
+protect-a named-allow probe: server/queue evidence exists, fresh native evidence
+is missing. Timestamp/aggregation diagnostics are pending; no strict matcher
+relaxation or full CNI pass is claimed. Owned fixture cleanup is verified.
