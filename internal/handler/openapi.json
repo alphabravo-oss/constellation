@@ -1051,7 +1051,7 @@
           },
           "duration_s": {
             "type": "integer",
-            "description": "Defaults to 30 seconds; clamped to 5–300 seconds."
+            "description": "Defaults to 30 seconds; clamped to 5\u2013300 seconds."
           },
           "src_ip": {
             "type": "string"
@@ -9138,7 +9138,7 @@
     },
     "/api/v1/agent/compliance/ingest": {
       "post": {
-        "description": "Requires runtime-agent authentication, independent of user JWT/PAT manage-policies routes. The server resolves an owned cluster from the token; unresolved, conflicting or foreign binding is forbidden. Duplicate or malformed selectors are rejected. Upserts benchmark controls only into that exact cluster. User JWT/PAT credentials are not accepted here.",
+        "description": "Requires runtime-agent authentication, independent of user JWT/PAT manage-policies routes. The server resolves an owned cluster from the token; unresolved, conflicting or foreign binding is forbidden. Duplicate or malformed selectors are rejected. Upserts benchmark controls only into that exact cluster. User JWT/PAT credentials are not accepted here. Evidence and configured audit commit atomically; persistence or audit failure returns 500 without committed evidence. Reports are limited to 16 MiB.",
         "parameters": [
           {
             "description": "Optional assertion of the cluster resolved from the runtime-agent token. Sibling, foreign, unknown or ambiguous scope is rejected; omission never permits organization-wide execution.",
@@ -9169,7 +9169,10 @@
             "in": "query",
             "name": "benchmark",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 128,
+              "pattern": "^([A-Za-z0-9][A-Za-z0-9_.-]*)?$",
+              "description": "Trimmed benchmark identifier. Empty selects automatic detection; a nonempty value pins the runner invocation and report attribution."
             }
           },
           {
@@ -9254,19 +9257,7 @@
             "description": "Agent cluster binding is unresolved, conflicting or does not match the requested cluster"
           },
           "500": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Scope resolution, persistence or transactional claim/audit failed"
+            "description": "Evidence or audit unavailable; no evidence committed"
           }
         },
         "security": [
@@ -13749,11 +13740,8 @@
     },
     "/api/v1/compliance/bench/run": {
       "post": {
-        "description": " User JWT/PAT manage-policies authorization is unchanged; runtime-agent tokens use separate /agent/compliance routes. Explicit cluster_id must belong to the authenticated organization; foreign and unknown clusters return 404. Malformed and duplicate selectors return 400.",
+        "description": "Requires user JWT/PAT with manage-policies permission. Queues a benchmark request; it does not execute or report completion. Cluster ownership is held through the transaction and configured audit failure rolls back the insert. Query profile/benchmark take precedence over the optional JSON body.",
         "responses": {
-          "200": {
-            "description": "ok"
-          },
           "404": {
             "content": {
               "application/json": {
@@ -13771,9 +13759,113 @@
           },
           "default": {
             "$ref": "#/components/responses/Error"
+          },
+          "202": {
+            "description": "Request persisted and queued; execution is asynchronous",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "request",
+                    "queued",
+                    "message"
+                  ],
+                  "properties": {
+                    "request": {
+                      "type": "object"
+                    },
+                    "queued": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid profile, benchmark or request body"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "manage-policies permission required"
+          },
+          "500": {
+            "description": "Enqueue or audit unavailable; no request committed"
           }
         },
-        "summary": "Create run"
+        "summary": "Create run",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Owned cluster; omitted authoring requests are organization-wide."
+          },
+          {
+            "name": "profile",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "kube-bench",
+                "kubebench",
+                "docker-bench",
+                "docker"
+              ],
+              "default": "kube-bench"
+            }
+          },
+          {
+            "name": "benchmark",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "pattern": "^([A-Za-z0-9][A-Za-z0-9_.-]*)?$",
+              "description": "Trimmed benchmark identifier. Empty selects automatic detection; a nonempty value pins the runner invocation and report attribution."
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "profile": {
+                    "type": "string",
+                    "enum": [
+                      "kube-bench",
+                      "kubebench",
+                      "docker-bench",
+                      "docker"
+                    ],
+                    "default": "kube-bench"
+                  },
+                  "benchmark": {
+                    "type": "string",
+                    "maxLength": 128,
+                    "pattern": "^([A-Za-z0-9][A-Za-z0-9_.-]*)?$",
+                    "description": "Trimmed benchmark identifier. Empty selects automatic detection; a nonempty value pins the runner invocation and report attribution."
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/compliance/checks": {
@@ -14693,7 +14785,7 @@
     },
     "/api/v1/compliance/ingest": {
       "post": {
-        "description": " User JWT/PAT manage-policies authorization is unchanged; runtime-agent tokens use separate /agent/compliance routes. Explicit cluster_id must belong to the authenticated organization; foreign and unknown clusters return 404. Malformed and duplicate selectors return 400.",
+        "description": " User JWT/PAT manage-policies authorization is unchanged; runtime-agent tokens use separate /agent/compliance routes. Explicit cluster_id must belong to the authenticated organization; foreign and unknown clusters return 404. Malformed and duplicate selectors return 400. Evidence and configured audit commit atomically; persistence or audit failure returns 500 without committed evidence. Reports are limited to 16 MiB.",
         "responses": {
           "200": {
             "description": "ok"
@@ -14715,9 +14807,54 @@
           },
           "default": {
             "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "description": "Evidence or audit unavailable; no evidence committed"
           }
         },
-        "summary": "Create ingest"
+        "summary": "Create ingest",
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Owned cluster; omitted authoring requests are organization-wide."
+          },
+          {
+            "name": "profile",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "kube-bench",
+                "kubebench",
+                "docker-bench",
+                "docker"
+              ],
+              "default": "kube-bench"
+            }
+          },
+          {
+            "name": "benchmark",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "pattern": "^([A-Za-z0-9][A-Za-z0-9_.-]*)?$",
+              "description": "Trimmed benchmark identifier. Empty selects automatic detection; a nonempty value pins the runner invocation and report attribution."
+            }
+          },
+          {
+            "name": "node",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       }
     },
     "/api/v1/compliance/kubernetes": {
@@ -18101,7 +18238,7 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard — the target host is never caller-supplied).",
+            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard \u2014 the target host is never caller-supplied).",
             "schema": {
               "type": "string"
             }
@@ -18142,7 +18279,7 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard — the target host is never caller-supplied).",
+            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard \u2014 the target host is never caller-supplied).",
             "schema": {
               "type": "string"
             }
@@ -18183,7 +18320,7 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard — the target host is never caller-supplied).",
+            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard \u2014 the target host is never caller-supplied).",
             "schema": {
               "type": "string"
             }
@@ -18235,7 +18372,7 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard — the target host is never caller-supplied).",
+            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard \u2014 the target host is never caller-supplied).",
             "schema": {
               "type": "string"
             }
@@ -18287,7 +18424,7 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard — the target host is never caller-supplied).",
+            "description": "Federated cluster id (cluster_id of a registered fed member). Must resolve to a known membership row; an unregistered id returns 404 (SSRF guard \u2014 the target host is never caller-supplied).",
             "schema": {
               "type": "string"
             }
@@ -18335,7 +18472,7 @@
     "/api/v1/federation/join": {
       "post": {
         "summary": "Exchange a federation join token for a per-cluster sync secret",
-        "description": "Anonymous exchange endpoint (D1/D2). A joining cluster presents a join token (a signed, master-minted token or the pre-shared fixed GitOps token) plus its cluster id/name and receives a per-cluster signed sync ticket it then presents on every /federation/sync poll. Only the sha256 of the ticket is persisted by the master (like api_tokens). Authenticated by the join token itself, so it carries no bearer security. When per-joint mTLS (D2) is enabled the response also includes a per-joint client certificate, its private key (shown once), and the master CA: the joint presents the client cert on every /sync poll and the master verifies it against the CA, so a leaked bearer ticket alone — without the matching client key — is rejected.",
+        "description": "Anonymous exchange endpoint (D1/D2). A joining cluster presents a join token (a signed, master-minted token or the pre-shared fixed GitOps token) plus its cluster id/name and receives a per-cluster signed sync ticket it then presents on every /federation/sync poll. Only the sha256 of the ticket is persisted by the master (like api_tokens). Authenticated by the join token itself, so it carries no bearer security. When per-joint mTLS (D2) is enabled the response also includes a per-joint client certificate, its private key (shown once), and the master CA: the joint presents the client cert on every /sync poll and the master verifies it against the CA, so a leaked bearer ticket alone \u2014 without the matching client key \u2014 is rejected.",
         "security": [],
         "requestBody": {
           "required": true,
@@ -23151,13 +23288,13 @@
           }
         },
         "summary": "Get exposure",
-        "description": " Workload platform_role is always explicit: core or empty for evaluated unknown, including namespace-scoped IPs and ambiguous same-name workload kinds. Exact pod ownership and actual source cluster determine custom-install roles. Map rows sharing an identity across clusters cannot borrow one cluster’s labels. Sessions, peers, protocols and ports aggregate from observed flows before MAX vulnerability enrichment, so duplicate workload kinds cannot multiply sessions. Up to50 rows per direction; this bounded exposure response has no continuation."
+        "description": " Workload platform_role is always explicit: core or empty for evaluated unknown, including namespace-scoped IPs and ambiguous same-name workload kinds. Exact pod ownership and actual source cluster determine custom-install roles. Map rows sharing an identity across clusters cannot borrow one cluster\u2019s labels. Sessions, peers, protocols and ports aggregate from observed flows before MAX vulnerability enrichment, so duplicate workload kinds cannot multiply sessions. Up to50 rows per direction; this bounded exposure response has no continuation."
       }
     },
     "/api/v1/network/map": {
       "get": {
         "summary": "Cluster-scoped Network Traffic Map workloads and observed flow edges",
-        "description": " Read responses carry platform-role metadata resolved from exact organization/cluster/workload identity. Network map flows and recent entries use src_platform_role/dst_platform_role; threats and captures use platform_role. Unknown or ambiguous identities return an empty role string; older APIs may omit role fields. Classification does not change collection, detection or enforcement. Workload platform_role is always explicit: core or empty for evaluated unknown, including namespace-scoped IPs and ambiguous same-name workload kinds. Exact pod ownership and actual source cluster determine custom-install roles. Map rows sharing an identity across clusters cannot borrow one cluster’s labels."
+        "description": " Read responses carry platform-role metadata resolved from exact organization/cluster/workload identity. Network map flows and recent entries use src_platform_role/dst_platform_role; threats and captures use platform_role. Unknown or ambiguous identities return an empty role string; older APIs may omit role fields. Classification does not change collection, detection or enforcement. Workload platform_role is always explicit: core or empty for evaluated unknown, including namespace-scoped IPs and ambiguous same-name workload kinds. Exact pod ownership and actual source cluster determine custom-install roles. Map rows sharing an identity across clusters cannot borrow one cluster\u2019s labels."
       }
     },
     "/api/v1/network/peers": {
@@ -27959,10 +28096,22 @@
       "post": {
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Merged learned rules under a row lock, preserving authored/federated rules and existing mode/default/direction; mutation and configured audit commit together"
           },
           "default": {
             "$ref": "#/components/responses/Error"
+          },
+          "400": {
+            "description": "Invalid generation input"
+          },
+          "404": {
+            "description": "Cluster not owned by the authenticated organization"
+          },
+          "500": {
+            "description": "Generation or audit persistence unavailable"
+          },
+          "201": {
+            "description": "Created a new monitor-mode policy with its audit record"
           }
         },
         "summary": "Create runtime-policies:apply-generated"
@@ -27976,6 +28125,15 @@
           },
           "default": {
             "$ref": "#/components/responses/Error"
+          },
+          "400": {
+            "description": "Invalid generation input"
+          },
+          "404": {
+            "description": "Cluster not owned by the authenticated organization"
+          },
+          "500": {
+            "description": "Generation or audit persistence unavailable"
           }
         },
         "summary": "Create runtime-policies:generate"
@@ -30644,6 +30802,18 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "protocol",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "2"
+              ]
+            },
+            "description": "Must occur exactly once. Only protocol 2 supports endpoint-bound policy tables."
           }
         ],
         "responses": {
@@ -30660,22 +30830,34 @@
                         "type": "object",
                         "properties": {
                           "id": {
-                            "type": "string"
+                            "type": "string",
+                            "format": "uuid"
                           },
                           "dp_policy_id": {
-                            "type": "integer"
+                            "type": "integer",
+                            "format": "int64",
+                            "minimum": 0,
+                            "maximum": 4294967295
                           },
                           "workload": {
                             "type": "string"
                           },
                           "mode": {
-                            "type": "string"
+                            "type": "string",
+                            "enum": [
+                              "monitor",
+                              "enforce"
+                            ]
                           },
                           "def_action": {
-                            "type": "integer"
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 7
                           },
                           "apply_dir": {
-                            "type": "integer"
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 3
                           },
                           "rules": {
                             "type": "array",
@@ -30684,12 +30866,84 @@
                             }
                           },
                           "version": {
-                            "type": "integer"
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "namespace": {
+                            "type": "string"
+                          },
+                          "binding_status": {
+                            "type": "string",
+                            "enum": [
+                              "resolved",
+                              "unresolved",
+                              "ambiguous"
+                            ]
+                          },
+                          "pod_bindings": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "namespace",
+                                "pod_name",
+                                "pod_uid"
+                              ],
+                              "properties": {
+                                "namespace": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "pod_name": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "pod_uid": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            }
                           }
-                        }
+                        },
+                        "required": [
+                          "id",
+                          "dp_policy_id",
+                          "workload",
+                          "namespace",
+                          "binding_status",
+                          "pod_bindings",
+                          "mode",
+                          "def_action",
+                          "apply_dir",
+                          "rules",
+                          "version"
+                        ]
                       }
+                    },
+                    "protocol_version": {
+                      "type": "integer",
+                      "enum": [
+                        2
+                      ]
+                    },
+                    "cluster_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "source_complete": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
                     }
-                  }
+                  },
+                  "required": [
+                    "protocol_version",
+                    "cluster_id",
+                    "source_complete",
+                    "policies"
+                  ]
                 }
               }
             }
@@ -30699,8 +30953,26 @@
           },
           "404": {
             "description": "cluster not found for the token's org"
+          },
+          "400": {
+            "description": "Invalid cluster selector"
+          },
+          "403": {
+            "description": "Agent cluster scope is unresolved or mismatched"
+          },
+          "426": {
+            "description": "Upgrade required: protocol=2 must occur exactly once"
+          },
+          "500": {
+            "description": "Policy or workload binding source unavailable; no partial bundle is returned"
           }
-        }
+        },
+        "description": "Requires protocol=2 and the runtime-agent token resolved to the exact requested cluster. Legacy requests are rejected to prevent unsafe cluster-wide policy merging. A complete envelope contains exact discovered pod namespace/name/UID bindings; unresolved or ambiguous policies have no bindings. The agent independently matches each binding to current CRI identity and registered endpoint addresses. Roll out the matching agent and restart its dataplane to clear previously programmed legacy tables. Transport submission does not establish packet enforcement.",
+        "security": [
+          {
+            "runtimeAgent": []
+          }
+        ]
       }
     },
     "/api/v1/runtime/process-baselines:bundle": {
