@@ -95,6 +95,24 @@ codes; raw command stderr is not stored or sent as an error response. A missing
 database commit acknowledgement remains uncertain and must be reconciled using
 the same request or attempt identity.
 
-The main development deployment at Helm78/schema178 does not include this
-lifecycle or a benchmark worker. Actual bundled-image execution, host coverage
-and live queue draining require separate qualification before enabling a worker.
+The main development deployment at Helm79/schema179 includes this lifecycle and
+the cluster Benchmarks workspace. Its benchmark worker remains disabled. The
+isolated qualification below does not establish host coverage; actual platform
+configuration and main-cluster execution require qualification before enabling it.
+
+
+## Qualified worker boundary
+
+The `610ad3d` development worker image includes upstream kube-bench v0.10.7,
+its configuration tree and procps for process-based checks. An isolated real API,
+PostgreSQL and worker acceptance run queued and completed two actual source
+checks (one PASS, one FAIL), then recreated all three processes with their owned
+persistent volumes. The original receipt, evidence timestamps and single
+completion audit remained unchanged, without another execution. A separate
+controlled lost-acknowledgement fixture proves replay of the same durable result.
+
+These fixtures expose neither host PID visibility nor host files. They qualify
+the execution protocol and restart persistence; they do not qualify node coverage,
+full platform benchmark configuration, backup recovery of the execution ledger,
+airgapped deployment or a fleet rollout. Evidence:
+`/tmp/constellation-bench-real-e2e/evidence/summary.json`.

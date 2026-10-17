@@ -538,3 +538,52 @@ commit acknowledgements remain explicitly unknown. Full runtime qualification
 passes 826 executions; final focused qualification passes 150, without skips.
 These edge-entity changes and the benchmark lifecycle179 work are not in the
 Helm78 image.
+
+
+## Durable benchmark candidate qualification (schema 179)
+
+Frozen `1cb1045` passes 2,304 combined fresh-database executions, with eight
+explicit gated native/kernel fixture skips. Those fixtures have separate earlier
+proof and are not claimed as executed by this suite. Full frontend validation
+passes 2,336 tests on Node24.21.0, plus typecheck and production build. Exact
+API/runtime image metadata, native libraries, conntrack and BPF-object checks
+pass. A disposable schema178→179 drill preserves existing legacy pending/claimed
+rows and uses the exact source legacy claim SQL to prove v2 queued requests
+remain unavailable to legacy workers. Repeating migration is a no-op.
+
+Exact-image isolated CNPG/RustFS backup and PITR, restored sessions/configuration/
+credentials/audit/fresh login, wrong-key rejection and retained-key recovery pass.
+Database-pod restart recovery takes 196 seconds. This remains a single-node,
+same-host drill. Evidence: `/tmp/constellation-bench-1cb1045/` and restricted
+recovery details `/tmp/constellation-cnpg-test.Utv4zU`.
+
+The separate runner610ad3d image includes the actual kube-bench v0.10.7 executable,
+all 204 configuration files and procps required by upstream process checks.
+The original limited fixture uncovered missing `/bin/ps`; the corrected image
+passes executable and owned-process discovery probes. Its controlled receipt
+loss/restart proof resends the original durable result without executing again.
+A real API+PostgreSQL16.15+worker fixture additionally queues through authenticated
+user HTTP, executes two actual source checks, commits two evidence rows and one
+completion audit, and returns the actual request/attempt receipt. Recreating all
+three processes with owned persistent volumes preserves exact receipts, evidence
+timestamps and audit counts; a deliberately missing executable on the restarted
+worker verifies no rerun. The old signed user session also survives API restart.
+All owned containers/volumes/network are removed. Evidence:
+`/tmp/constellation-bench-real-e2e/evidence/summary.json`.
+
+The report contains one PASS and one FAIL, not an all-clean result. No host PID
+namespace or host filesystem was exposed. This proves limited container checks
+and restart persistence, not host/fleet coverage, backup restoration of the new
+execution ledger or disconnected operation. The benchmark worker remains disabled
+in the main deployment. Authenticated main-site browser smoke is currently limited
+by a stored bootstrap credential returning401; no account reset was attempted.
+
+
+Helm79/schema179 deploys API/runtime-agent/migrate/frontend from frozen1cb1045
+following a completed fresh main-cluster backup. Seven deployments and the
+runtime DaemonSet are ready. Live health/readiness, v2 scoped bundles and exact
+response-queue boundaries pass; the bundle and queue are empty. Process/native
+enforcement and benchmark workers remain disabled. Public login preserves
+Constellation/by AlphaBravo and hides unconfigured SSO. The later procps and
+application-ID source fixes are qualified separately and are not deployed as a
+worker or added to the frozen API artifact.

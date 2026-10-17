@@ -65,16 +65,19 @@ infrastructure continuation after the selected console scope. Off-host recovery
 and deliberate real-node failure remain deferred. The checklist remains **66
 checked / 87 open**; bounded fixes below do not close their parent acceptance gates.
 
-Current main development deployment: **Helm78/schema178**, API/runtime-agent
-source **6c4a1cc**; other roles retain the prior qualified images. All seven
-deployments and the runtime DaemonSet are ready. Process and native dataplane
-enforcement remain disabled. Live v2 queue reads pass; anonymous, foreign-cluster
-and duplicate-node selectors return 401/403/400. The live queue and policy bundle
-are empty, so positive content/enforcement remains separate test evidence. Scoped
-policy bundles require protocol v2; legacy bundle reads return 426. Exact-image
-backup/PITR, restored credentials/audit/login, wrong-key rejection and restored
-pod restart pass (195 seconds). Deployment evidence:
-`/tmp/constellation-scope-6c4a1cc/evidence/deployment-status.json`.
+Current main development deployment: **Helm79/schema179**, API/runtime-agent,
+migration and frontend source **1cb1045**; other roles retain the prior qualified
+images. All seven deployments and the runtime DaemonSet are ready. Process and
+native dataplane enforcement and benchmark workers remain disabled. Live v2 queue
+reads pass; anonymous, foreign-cluster and duplicate-node selectors return
+401/403/400. The live queue and policy bundle are empty, so positive execution
+and enforcement remain separate fixture evidence. Scoped policy bundles require
+protocol v2; legacy bundle reads return 426. Exact-image backup/PITR, restored
+credentials/audit/login, wrong-key rejection and restored pod restart pass
+(196 seconds); a fresh main-cluster backup completed before migration. Public
+login branding/provider visibility pass; the stored bootstrap credential returns
+401, so authenticated main-browser navigation is not claimed. Deployment evidence:
+`/tmp/constellation-bench-1cb1045/evidence/deployment-status.json`.
 
 Frozen candidate source **034f2baf49c1** includes:
 
@@ -332,8 +335,8 @@ reviewed retries capped at three attempts. The worker journals intent/results,
 refuses uncertain reruns and requires persistent private storage. Dedicated
 fresh179 qualification passes 208 race/shuffle executions without skips; scoped
 lint/vet are clean. Independent review fixes configured-cluster assertion before
-claim and post-lock terminal-claim races. The worker remains disabled, with actual
-bundled-image and live queue-drain qualification still separate. See
+claim and post-lock terminal-claim races. The worker remains disabled on main;
+actual bundled-image and isolated API queue-drain proof is recorded below. See
 [benchmark execution](compliance-benchmark-execution.md) and
 `/tmp/bench-v2-reviewed-db/`.
 
@@ -352,9 +355,40 @@ executions resolving the two opt-in DB skips. Evidence:
 `/tmp/quality-runtime-numeric-summary.json`.
 
 These four batches plus prior edge-entity auditing/native tests are combined in
-frozen candidate `1cb1045` at `/tmp/constellation-bench-1cb1045/`. Combined fresh179
-checks and API/runtime/migrate/frontend images are being qualified. Main remains
-Helm78/schema178 until those checks and exact-image recovery pass.
+frozen candidate `1cb1045` at `/tmp/constellation-bench-1cb1045/`. The combined
+fresh179 suite passes 2,304 executions with eight explicit opt-in native/kernel
+fixture skips. Dedicated earlier native/kernel evidence remains separate. All
+four API/runtime/migrate/frontend artifacts are built; startup metadata and
+native dependencies pass. A fresh178→179 upgrade preserves every legacy request
+field and confirms the unchanged legacy claim SQL cannot consume v2 queued work.
+Exact-image CNPG/RustFS backup/PITR, authenticated restoration, wrong-key rejection,
+retained-key recovery and a 196-second database-pod restart pass. The fresh main
+backup completed, followed by a successful Helm79/schema179 rollout. Live health,
+readiness and existing agent route-boundary smoke pass; all workloads are ready.
+
+The actual worker image at `610ad3d` bundles upstream kube-bench v0.10.7 and all
+204 configuration files. A real check exposed missing `/bin/ps`; the canonical
+image now installs procps, with process-discovery probes passing. A controlled
+lost-result-acknowledgement fixture confirms same-attempt replay after both
+processes restart. A separate real API/schema179/PostgreSQL16.15 fixture proves
+user queue→bound agent claim→actual upstream execution→durable receipt, two
+source controls (one PASS/one FAIL), two evidence rows and one completion audit.
+Recreating API, worker and database while retaining only the owned database and
+spool volumes preserves exact receipt/evidence timestamps without another run.
+This is two-check container execution and restart persistence, not host/fleet
+assessment, backup restoration or airgapped acceptance. All owned fixture
+resources are removed. Evidence: `/tmp/constellation-bench-runner-610ad3d/` and
+`/tmp/constellation-bench-real-e2e/evidence/summary.json`.
+
+Commit `e184538` rejects new application IDs outside the actual native uint16
+range before persistence or alerting and removes signed comparison aliases.
+Fresh179 qualification passes 44 race/shuffle executions without skips; vet and
+changed-source lint pass with five G115 findings removed and no new findings.
+Commit `10018b8` removes two obsolete unused policy helpers. These later source
+changes are not in the frozen `1cb1045` deployment candidate. Threat-ID uint32
+storage and historical aggregate repair still require a separate migration.
+Latest hosted quality at `21b7c73` reports 1,548 findings; security and quality
+remain blocking, with no gate waiver or historical secret rewrite.
 
 ## October 12 implementation continuation
 
