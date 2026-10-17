@@ -1279,5 +1279,31 @@ This is source qualification, not real cloud-credential acceptance or deployment
 ECR AuthToken currently has no non-test repository caller; its exported capability
 and the live list/digest credential checks have distinct reachability. Existing
 authentication destinations/redirects and broader provider acceptance are unchanged.
-Raw cloud/IBM error-message disclosure is a separate pending correction. Deployed
-source remains 314afad; integrated artifacts and the next rollout are still due.
+The cloud/IBM error-message correction is qualified in the following section.
+Deployed source remains 314afad; integrated artifacts and rollout are still due.
+
+
+### Cloud registry error redaction qualification
+
+Cloud authentication, IBM registry requests, and Google/Azure catalog failures now
+expose a categorical stage and HTTP status without upstream bodies, URLs or parse
+values. Wrapped causes remain available through errors.Is/As. Successful responses,
+bounds, response closing and cache behavior are unchanged. Real handler tests cover
+connection Test, SyncNow, persisted LastSyncError, owning List/Get, foreign-owner
+isolation and walker audit records, including successful control requests.
+
+Qualification passes 572 registry and 16 fresh-schema180 handler executions with
+race/shuffle/count2 and no skips. Original-code controls produce 22 intended
+assertion failures. Vet passes; configured lint remains 332 with no added or
+removed diagnostics. Root verified all 77 sealed records, seven imported sources,
+unchanged production lineage and absence of all three disposable databases. The
+initial test-only compile failure is preserved; its sole correction renamed a
+fixture response variable. Evidence:
+`/tmp/constellation-registry-errors-376f4b8/evidence/FINAL-SEAL.json`
+(SHA256 `aec15eb17c95fb2d860cd10c0d9e328f4f3be11c3f23ba1a7d5fd0ba6fccd221`).
+
+This prevents new disclosures in those paths; it does not rewrite historical audit
+or log data. DockerHub/GHCR, other catalog connectors, generic V2/Nexus/OpenShift,
+V2 challenge/manifest/tag errors and ECR SDK errors remain separate review work.
+This is source qualification only. Deployed source remains 314afad; combined
+qualification, new images and rollout remain due. No release gate is closed here.

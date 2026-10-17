@@ -31,7 +31,10 @@ import (
 
 const cacheCallerResource = "projects/cache-owner/locations/owned/repositories/owned"
 
+type registryCacheProxyResponder func(stage string, status int, body string) (int, string)
+
 type registryCacheProxy struct {
+	respond     registryCacheProxyResponder
 	t           *testing.T
 	server      *httptest.Server
 	cert        tls.Certificate
@@ -50,11 +53,17 @@ type registryCacheBufferedConn struct {
 
 func (c registryCacheBufferedConn) Read(p []byte) (int, error) { return c.reader.Read(p) }
 
-func newRegistryCacheProxy(t *testing.T) *registryCacheProxy {
+func newRegistryCacheProxy(t *testing.T, responses ...registryCacheProxyResponder) *registryCacheProxy {
 	t.Helper()
 	certificateSource := httptest.NewTLSServer(http.NotFoundHandler())
 	fixture := &registryCacheProxy{t: t, cert: certificateSource.TLS.Certificates[0], connections: make(map[net.Conn]struct{})}
 	certificateSource.Close()
+	if len(responses) > 1 {
+		t.Fatal("at most one owned response hook is supported")
+	}
+	if len(responses) == 1 {
+		fixture.respond = responses[0]
+	}
 	fixture.server = httptest.NewServer(http.HandlerFunc(fixture.serve))
 	t.Cleanup(fixture.close)
 	return fixture
@@ -114,7 +123,9 @@ func (f *registryCacheProxy) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	mint := f.mints.Add(1)
 	w.Header().Set("Content-Type", "application/json")
-	if _, err := fmt.Fprintf(w, `{"access_token":"owned-cache-token-%d","expires_in":3600}`, mint); err != nil {
+	status, responseBody := fixtureRegistryCacheResponse(f, "token", fmt.Sprintf(`{"access_token":"owned-cache-token-%d","expires_in":3600}`, mint))
+	w.WriteHeader(status)
+	if _, err := io.WriteString(w, responseBody); err != nil {
 		f.t.Error("fixture token response write failed")
 	}
 }
@@ -178,12 +189,19 @@ func (f *registryCacheProxy) writeCatalog(conn net.Conn) {
 		return
 	}
 	f.catalog.Add(1)
-	body := `{"dockerImages":[]}`
-	response := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n" +
+	status, body := fixtureRegistryCacheResponse(f, "catalog", `{"dockerImages":[]}`)
+	response := fmt.Sprintf("HTTP/1.1 %d %s\r\nContent-Type: application/json\r\nConnection: close\r\n", status, http.StatusText(status)) +
 		fmt.Sprintf("Content-Length: %d\r\n\r\n", len(body)) + body
 	if _, err := io.WriteString(conn, response); err != nil {
 		f.t.Error("owned proxy catalog response failed")
 	}
+}
+
+func fixtureRegistryCacheResponse(f *registryCacheProxy, stage, body string) (int, string) {
+	if f.respond != nil {
+		return f.respond(stage, http.StatusOK, body)
+	}
+	return http.StatusOK, body
 }
 
 func registryCacheServiceAccount(t *testing.T, email, tokenURI string) string {
@@ -215,9 +233,9 @@ type registryCacheCallerFixture struct {
 	sealed   []byte
 }
 
-func newRegistryCacheCallerFixture(t *testing.T, database *db.DB) *registryCacheCallerFixture {
+func newRegistryCacheCallerFixture(t *testing.T, database *db.DB, responses ...registryCacheProxyResponder) *registryCacheCallerFixture {
 	t.Helper()
-	fixture := &registryCacheCallerFixture{t: t, database: database, proxy: newRegistryCacheProxy(t),
+	fixture := &registryCacheCallerFixture{t: t, database: database, proxy: newRegistryCacheProxy(t, responses...),
 		orgs: [2]uuid.UUID{uuid.New(), uuid.New()}, ids: [3]uuid.UUID{uuid.New(), uuid.New(), uuid.New()}}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), 10*time.Second)

@@ -63,7 +63,7 @@ func (cfg Config) gcpAccessToken(ctx context.Context, client *http.Client) (stri
 	}
 	var sa serviceAccountKey
 	if err := json.Unmarshal([]byte(cfg.ServiceAccountJSON), &sa); err != nil {
-		return "", fmt.Errorf("gcp: parse service_account_json: %w", err)
+		return "", responseFailure("gcp credentials", "invalid service account JSON", 0, err)
 	}
 	if sa.ClientEmail == "" || sa.PrivateKey == "" {
 		return "", errors.New("gcp: service_account_json missing client_email/private_key")
@@ -273,7 +273,7 @@ func acrExchangeRefreshToken(ctx context.Context, client *http.Client, host, ten
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
-	body, err := doReadBody(client, req, "acr exchange")
+	body, status, err := doReadBody(client, req, "acr exchange")
 	if err != nil {
 		return "", err
 	}
@@ -281,10 +281,10 @@ func acrExchangeRefreshToken(ctx context.Context, client *http.Client, host, ten
 		RefreshToken string `json:"refresh_token"`
 	}
 	if err := json.Unmarshal(body, &out); err != nil {
-		return "", fmt.Errorf("acr: decode refresh token: %w", err)
+		return "", responseFailure("acr exchange", "invalid refresh token response", status, err)
 	}
 	if out.RefreshToken == "" {
-		return "", errors.New("acr: exchange returned empty refresh_token")
+		return "", responseFailure("acr exchange", "response missing refresh token", status, nil)
 	}
 	return out.RefreshToken, nil
 }
@@ -323,16 +323,16 @@ type oauthTokenResponse struct {
 // readOAuthToken performs the request and decodes a standard OAuth token response,
 // computing the absolute expiry. label prefixes error messages.
 func readOAuthToken(client *http.Client, req *http.Request, label string) (string, time.Time, error) {
-	body, err := doReadBody(client, req, label+" token")
+	body, status, err := doReadBody(client, req, label+" token")
 	if err != nil {
 		return "", time.Time{}, err
 	}
 	var tok oauthTokenResponse
 	if err := json.Unmarshal(body, &tok); err != nil {
-		return "", time.Time{}, fmt.Errorf("%s: decode token: %w", label, err)
+		return "", time.Time{}, responseFailure(label+" token", "invalid token response", status, err)
 	}
 	if tok.AccessToken == "" {
-		return "", time.Time{}, fmt.Errorf("%s: token response missing access_token", label)
+		return "", time.Time{}, responseFailure(label+" token", "response missing access token", status, nil)
 	}
 	expiry := time.Now().Add(time.Hour) // conservative default when TTL is absent
 	if tok.ExpiresIn > 0 {
@@ -346,22 +346,22 @@ func readOAuthToken(client *http.Client, req *http.Request, label string) (strin
 }
 
 // doReadBody sends req and returns the response body, mapping non-2xx to an error.
-func doReadBody(client *http.Client, req *http.Request, what string) ([]byte, error) {
+func doReadBody(client *http.Client, req *http.Request, what string) ([]byte, int, error) {
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", what, err)
+		return nil, 0, responseFailure(what, "request failed", 0, err)
 	}
 	body, readErr := readRegistryPage(resp, 1<<20)
 	if readErr != nil {
-		return nil, fmt.Errorf("registry: read response: %w", readErr)
+		return nil, resp.StatusCode, responseFailure(what, "response read or close failed", resp.StatusCode, readErr)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("%s: status %d: %s", what, resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, resp.StatusCode, responseFailure(what, "response rejected", resp.StatusCode, nil)
 	}
-	return body, nil
+	return body, resp.StatusCode, nil
 }
 
 // parseRSAPrivateKey decodes a PEM RSA private key in PKCS#8 (GCP's default) or PKCS#1.

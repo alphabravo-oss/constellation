@@ -51,14 +51,14 @@ func (a *ArtifactRegistry) ListImages(ctx context.Context) ([]Image, error) {
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := a.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("artifact-registry: %w", err)
+		return nil, responseFailure("artifact-registry list", "request failed", 0, err)
 	}
 	body, readErr := readRegistryPage(resp, 4<<20)
 	if readErr != nil {
-		return nil, fmt.Errorf("registry: read response: %w", readErr)
+		return nil, responseFailure("artifact-registry list", "response read or close failed", resp.StatusCode, readErr)
 	}
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("artifact-registry: status %d: %s", resp.StatusCode, body)
+		return nil, responseFailure("artifact-registry list", "response rejected", resp.StatusCode, nil)
 	}
 	var doc struct {
 		DockerImages []struct {
@@ -69,7 +69,7 @@ func (a *ArtifactRegistry) ListImages(ctx context.Context) ([]Image, error) {
 		} `json:"dockerImages"`
 	}
 	if err := json.Unmarshal(body, &doc); err != nil {
-		return nil, err
+		return nil, responseFailure("artifact-registry list", "invalid inventory response", resp.StatusCode, err)
 	}
 	out := make([]Image, 0, len(doc.DockerImages))
 	for _, d := range doc.DockerImages {
@@ -123,20 +123,20 @@ func (a *ACR) ListImages(ctx context.Context) ([]Image, error) {
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := a.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("acr: %w", err)
+		return nil, responseFailure("acr list", "request failed", 0, err)
 	}
 	body, readErr := readRegistryPage(resp, 4<<20)
 	if readErr != nil {
-		return nil, fmt.Errorf("registry: read response: %w", readErr)
+		return nil, responseFailure("acr list", "response read or close failed", resp.StatusCode, readErr)
 	}
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("acr: status %d", resp.StatusCode)
+		return nil, responseFailure("acr list", "response rejected", resp.StatusCode, nil)
 	}
 	var doc struct {
 		Repositories []string `json:"repositories"`
 	}
 	if err := json.Unmarshal(body, &doc); err != nil {
-		return nil, err
+		return nil, responseFailure("acr list", "invalid inventory response", resp.StatusCode, err)
 	}
 	out := make([]Image, 0, len(doc.Repositories))
 	for _, r := range doc.Repositories {

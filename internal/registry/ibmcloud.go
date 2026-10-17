@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -69,23 +68,23 @@ func (r *IBMCloud) acquireToken(ctx context.Context) (string, error) {
 	req.Header.Set("Accept", "application/json")
 	resp, err := r.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("ibmcloud: token exchange: %w", err)
+		return "", responseFailure("ibmcloud token exchange", "request failed", 0, err)
 	}
 	body, readErr := readRegistryPage(resp, 1<<20)
 	if readErr != nil {
-		return "", fmt.Errorf("ibmcloud: read token response: %w", readErr)
+		return "", responseFailure("ibmcloud token exchange", "response read or close failed", resp.StatusCode, readErr)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("ibmcloud: token exchange status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return "", responseFailure("ibmcloud token exchange", "response rejected", resp.StatusCode, nil)
 	}
 	var tok struct {
 		AccessToken string `json:"access_token"`
 	}
 	if err := json.Unmarshal(body, &tok); err != nil {
-		return "", fmt.Errorf("ibmcloud: decode token: %w", err)
+		return "", responseFailure("ibmcloud token exchange", "invalid token response", resp.StatusCode, err)
 	}
 	if tok.AccessToken == "" {
-		return "", errors.New("ibmcloud: token exchange returned empty access_token")
+		return "", responseFailure("ibmcloud token exchange", "response missing access token", resp.StatusCode, nil)
 	}
 	return tok.AccessToken, nil
 }
@@ -113,18 +112,18 @@ func (r *IBMCloud) ListImages(ctx context.Context) ([]Image, error) {
 	req.Header.Set("Accept", "application/json")
 	resp, err := r.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("ibmcloud: list images: %w", err)
+		return nil, responseFailure("ibmcloud list images", "request failed", 0, err)
 	}
 	body, readErr := readRegistryPage(resp, 8<<20)
 	if readErr != nil {
-		return nil, fmt.Errorf("registry: read response: %w", readErr)
+		return nil, responseFailure("ibmcloud list images", "response read or close failed", resp.StatusCode, readErr)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("ibmcloud: list images status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, responseFailure("ibmcloud list images", "response rejected", resp.StatusCode, nil)
 	}
 	var images []ibmImage
 	if err := json.Unmarshal(body, &images); err != nil {
-		return nil, fmt.Errorf("ibmcloud: decode images: %w", err)
+		return nil, responseFailure("ibmcloud list images", "invalid image response", resp.StatusCode, err)
 	}
 
 	return collapseIBMImages(images), nil
